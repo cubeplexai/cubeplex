@@ -22,14 +22,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models import Conversation
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.models.provider import Model as DBModel
-from cubebox.models.provider import Provider as DBProvider
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models import Conversation
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model as DBModel
+from cubeplex.models.provider import Provider as DBProvider
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -48,7 +48,7 @@ def _make_test_app() -> Any:
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -193,7 +193,7 @@ async def switching_client(
         ]
     )
 
-    from cubebox.llm import builder as _builder
+    from cubeplex.llm import builder as _builder
 
     real_build_provider = _builder.build_provider
 
@@ -204,7 +204,7 @@ async def switching_client(
             return small
         return real_build_provider(snap, slug, **kw)
 
-    monkeypatch.setattr("cubebox.llm.builder.build_provider", _patched_build_provider)
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", _patched_build_provider)
 
     app = _make_test_app()
     app.state.deployment_mode = "multi_tenant"
@@ -291,7 +291,11 @@ async def test_explicit_preset_label_routes_to_small(
         client,
         ws_id,
         conv_id,
-        {"content": "hi", "model_key": "small", "thinking": "high"},
+        {
+            "content": "hi",
+            "model_key": "small",
+            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
+        },
     )
 
     errors = [e for e in events if e.get("type") == "error"]
@@ -315,7 +319,7 @@ async def test_explicit_preset_label_routes_to_small(
                 )
             ).scalar_one()
             assert row.model_key == "small", row.model_key
-            assert row.thinking == "high", row.thinking
+            assert row.reasoning == {"mode": "on", "effort": "high", "summary": "none"}
     finally:
         await test_engine.dispose()
 
@@ -335,7 +339,11 @@ async def test_unknown_model_key_falls_back_to_default(
         client,
         ws_id,
         conv_id,
-        {"content": "hi", "model_key": "ghost", "thinking": "high"},
+        {
+            "content": "hi",
+            "model_key": "ghost",
+            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
+        },
     )
 
     errors = [e for e in events if e.get("type") == "error"]
@@ -357,6 +365,6 @@ async def test_unknown_model_key_falls_back_to_default(
                 )
             ).scalar_one()
             assert row.model_key is None, row.model_key
-            assert row.thinking == "high", row.thinking
+            assert row.reasoning == {"mode": "on", "effort": "high", "summary": "none"}
     finally:
         await test_engine.dispose()

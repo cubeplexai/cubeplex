@@ -14,6 +14,7 @@ const storeMocks = vi.hoisted(() => ({
   cancelSteer: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
+  markSkipHydrate: vi.fn(),
   hydrate: vi.fn(),
   attachedIds: vi.fn(),
   setWorkspaceId: vi.fn(),
@@ -25,10 +26,11 @@ vi.mock('next/navigation', () => ({
   }),
 }))
 
-vi.mock('@cubebox/core', () => {
+vi.mock('@cubeplex/core', () => {
   const attachmentState = {
     upload: storeMocks.upload,
     clear: storeMocks.clear,
+    markSkipHydrate: storeMocks.markSkipHydrate,
     hydrate: storeMocks.hydrate,
     attachedIds: storeMocks.attachedIds,
     staging: {},
@@ -135,15 +137,27 @@ describe('WorkspaceHomePage', () => {
         '',
         ['file-1'],
         expect.any(Array),
-        // The home page now forwards the composer's model + thinking choice
+        // The home page now forwards the composer's model + reasoning choice
         // on the first send (mirrors InputBar.handleSubmit), so the bug where
         // turn-1 silently shipped a different thinking level than turn-2 (which
         // honored the dropdown) can't recur. `medium` is the store default.
-        { model_key: null, thinking: 'medium' },
+        { model_key: null, reasoning: { mode: 'on', effort: 'medium', summary: 'none' } },
       )
     })
     expect(storeMocks.push).toHaveBeenCalledWith('/w/ws-1/conversations/conv-1')
     // Conversation creation is cached — second call (on submit) does NOT re-create.
     expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads an office task template into the composer', async () => {
+    await act(async () => {
+      renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
+      await Promise.resolve()
+    })
+
+    const input = await screen.findByTestId('chat-input')
+    fireEvent.click(screen.getByRole('button', { name: /Create a document or deck/ }))
+
+    expect(input).toHaveValue(en.home.promptCards.document.prompt)
   })
 })

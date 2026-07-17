@@ -8,8 +8,8 @@
 
 Add an end-to-end test suite that drives the full cubepi-based agent
 (`_run_cubepi_path` in `streams/run_manager.py`) through a real LLM and
-exercises the production cubebox middleware stack
-(`backend/cubebox/middleware/*`). Coverage target: every middleware sees
+exercises the production cubeplex middleware stack
+(`backend/cubeplex/middleware/*`). Coverage target: every middleware sees
 at least one execution under a real provider call, without mocking.
 
 The goal is regression detection for the middleware composition itself —
@@ -34,7 +34,7 @@ single middleware (those belong in unit tests where applicable).
   allocated ports / DB names; `backend/.env` and
   `backend/config.development.local.yaml` must be copied from main if not
   auto-copied by the wrapper.
-- **LLM**: `CUBEBOX_E2E_LLM_*` already configured in `backend/.env`
+- **LLM**: `CUBEPLEX_E2E_LLM_*` already configured in `backend/.env`
   (currently `qwen3.6-flash` via `gateway.chat.sensedeal.vip`).
   `config.test.yaml` wires this provider as `default_model`.
 - **Marker**: `@pytest.mark.real_llm` (same gate as existing
@@ -109,14 +109,14 @@ middleware did not crash the stack." Documented in the docstring.
 ## SSE Helper Use
 
 `collect_sse_events(response_iterator)` already returns a `list[dict]`
-in the cubebox envelope shape (`{"type": ..., "data": {...}}`). The
+in the cubeplex envelope shape (`{"type": ..., "data": {...}}`). The
 tests build small predicates over that list — no new helpers needed.
 If repeated logic emerges (e.g., "find tool_call by name"), inline a
 local helper inside the test module; do not extend `conftest.py`.
 
 ## What "All Middleware" Maps To
 
-Current middleware in `backend/cubebox/middleware/`:
+Current middleware in `backend/cubeplex/middleware/`:
 
 | Middleware | Triggered by | Test coverage |
 |-----------|--------------|---------------|

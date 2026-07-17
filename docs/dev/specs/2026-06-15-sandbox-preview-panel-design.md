@@ -57,7 +57,7 @@ BrowserView.
 
 ### Backend API
 
-New route file: `backend/cubebox/api/routes/v1/ws_sandbox.py`
+New route file: `backend/cubeplex/api/routes/v1/ws_sandbox.py`
 
 Prefix: `/api/v1/ws/{workspace_id}/sandbox`
 

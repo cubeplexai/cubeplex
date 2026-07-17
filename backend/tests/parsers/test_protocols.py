@@ -1,7 +1,7 @@
 """FileParser runtime_checkable Protocol tests."""
 
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import TextOutput
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import TextOutput
 
 
 class _ConformingParser:

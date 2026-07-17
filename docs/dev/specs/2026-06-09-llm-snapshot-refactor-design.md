@@ -3,14 +3,14 @@
 **Status:** Draft
 **Date:** 2026-06-09
 **Branch:** `feat/llm-snapshot-refactor`
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/llm-snapshot-refactor`
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/llm-snapshot-refactor`
 
 ## Context
 
 cubepi 0.9.0 ships `FallbackBoundModel` — an ordered chain of `BoundModel`
 that transparently fails over on `RateLimited / ProviderUnavailable /
-ContextLengthExceeded`. cubebox has carried a TODO at
-`backend/cubebox/streams/run_manager.py:1991` waiting for exactly this
+ContextLengthExceeded`. cubeplex has carried a TODO at
+`backend/cubeplex/streams/run_manager.py:1991` waiting for exactly this
 upstream feature.
 
 This refactor lands fallback support, but does not stop there. The current
@@ -74,7 +74,7 @@ Specs 2 and 3 can be developed in parallel after Spec 1 lands.
 
 ### What works today
 
-- **Seeder** (`cubebox/seeders/provider_seeder.py`) reads `config.llm.providers`
+- **Seeder** (`cubeplex/seeders/provider_seeder.py`) reads `config.llm.providers`
   on startup, upserts `providers` / `models` / `credentials` tables. DB is
   the runtime source of truth for provider/model rows.
 - **OrgSettings overrides** are partially wired: `default_model` and
@@ -127,14 +127,14 @@ Specs 2 and 3 can be developed in parallel after Spec 1 lands.
 cubepi also ships `FauxProvider` (`cubepi/providers/faux.py`) with
 `set_responses([...])` — each step is an `AssistantMessage` or a factory
 that may `raise RateLimited(...)`. The fallback E2E test reuses this
-directly; no cubebox-side stub provider is needed.
+directly; no cubeplex-side stub provider is needed.
 
 ## Design
 
 ### Module layout
 
 ```
-cubebox/llm/
+cubeplex/llm/
   snapshot.py          async — sole DB I/O entry point
   resolver.py          pure sync — operates on LLMSnapshot
   builder.py           pure sync — emits cubepi Provider / BoundModel
@@ -167,7 +167,7 @@ for `load_llm_snapshot` to read the system row.
 ### Data structures
 
 ```python
-# cubebox/llm/snapshot.py
+# cubeplex/llm/snapshot.py
 
 from cubepi.providers.base import ThinkingLevel
 
@@ -254,13 +254,13 @@ single preset (also labeled `"default"`) when no explicit task model is
 configured, or to a synthesized preset per task otherwise. Writing is
 gated on row absence — admin edits never get overwritten on restart.
 
-Runtime code does not import `cubebox.config` for `llm.*` fields. Changing
+Runtime code does not import `cubeplex.config` for `llm.*` fields. Changing
 YAML and not restarting has no effect — consistent with provider rows.
 
 ### Three pure modules
 
 ```python
-# cubebox/llm/snapshot.py
+# cubeplex/llm/snapshot.py
 
 async def load_llm_snapshot(
     session: AsyncSession,
@@ -271,7 +271,7 @@ async def load_llm_snapshot(
 ```
 
 ```python
-# cubebox/llm/resolver.py
+# cubeplex/llm/resolver.py
 
 def resolve_preset(snap: LLMSnapshot, label: str | None) -> LLMPreset:
     """label=None → snap.presets where is_default. Raises LLMConfigError if absent."""
@@ -284,7 +284,7 @@ def parse_model_ref(ref: str) -> tuple[str, str]:
 ```
 
 ```python
-# cubebox/llm/builder.py
+# cubeplex/llm/builder.py
 
 def build_provider(
     snap: LLMSnapshot,
@@ -332,7 +332,7 @@ this_run_model = build_chain_model(
     snap, preset,
     thinking=body.thinking,
     cache_policy_factory=lambda slug:
-        CubeboxCacheMarkerPolicy() if snap.providers[slug].api == "anthropic-messages" else None,
+        CubeplexCacheMarkerPolicy() if snap.providers[slug].api == "anthropic-messages" else None,
     on_failover=_make_failover_publisher(run_id, sse_publisher),
 )
 ```
@@ -390,7 +390,7 @@ class CreateMessageBody(BaseModel):
 ```
 
 `thinking` uses cubepi's `Literal["off", "minimal", "low", "medium", "high", "xhigh"]`
-directly — no cubebox-side enum or mapping.
+directly — no cubeplex-side enum or mapping.
 
 Error semantics:
 
@@ -402,7 +402,7 @@ Error semantics:
 | `thinking` value not in enum                           | 422  | Pydantic                |
 | Provider missing credential                            | 500  | `provider_not_configured` (existing) |
 
-`LLMConfigError` base class lives in `cubebox/errors.py` with subclasses
+`LLMConfigError` base class lives in `cubeplex/errors.py` with subclasses
 per case; a FastAPI exception handler maps each subclass to the right
 status code and payload.
 
@@ -469,7 +469,7 @@ def downgrade():
 The migration covers existing dev-machine OrgSettings rows; the seeder
 covers fresh installs. Both paths converge on the same final shape.
 
-cubebox has not shipped publicly (per `CLAUDE.md`), so backwards-compat
+cubeplex has not shipped publicly (per `CLAUDE.md`), so backwards-compat
 shims are out of scope: the migration runs, old keys are gone, no parallel
 code paths.
 
@@ -477,37 +477,37 @@ code paths.
 
 ### Deleted
 
-- `cubebox/llm/factory.py`
-- `cubebox/services/task_model_resolver.py`
+- `cubeplex/llm/factory.py`
+- `cubeplex/services/task_model_resolver.py`
 
 ### New
 
-- `cubebox/llm/snapshot.py` — dataclasses, pydantic schema, `load_llm_snapshot`
-- `cubebox/llm/resolver.py` — pure resolution functions
-- `cubebox/llm/builder.py` — provider / BoundModel / chain builder
-- `cubebox/llm/errors.py` (or extend `cubebox/errors.py`) — `LLMConfigError`
+- `cubeplex/llm/snapshot.py` — dataclasses, pydantic schema, `load_llm_snapshot`
+- `cubeplex/llm/resolver.py` — pure resolution functions
+- `cubeplex/llm/builder.py` — provider / BoundModel / chain builder
+- `cubeplex/llm/errors.py` (or extend `cubeplex/errors.py`) — `LLMConfigError`
   hierarchy
 - `alembic/versions/<rev>_migrate_orgsettings_to_model_presets.py`
 
 ### Modified
 
-- `cubebox/seeders/provider_seeder.py` — extend to seed
+- `cubeplex/seeders/provider_seeder.py` — extend to seed
   `OrgSettings.model_presets` from `config.llm.{default_model,
   fallback_models, title_model, compaction.summary_model, summarize_model}`.
-- `cubebox/streams/run_manager.py` — all 6 `LLMFactory(...)` sites; delete
+- `cubeplex/streams/run_manager.py` — all 6 `LLMFactory(...)` sites; delete
   fallback try/except; delete manual `_model_max_tokens` / `_temperature`
   computation; wire `_make_failover_publisher`.
-- `cubebox/services/conversation_title.py` — snapshot + resolver + builder.
-- `cubebox/services/provider_service.py` — `LLMFactory().build_cubepi_provider(...)`
+- `cubeplex/services/conversation_title.py` — snapshot + resolver + builder.
+- `cubeplex/services/provider_service.py` — `LLMFactory().build_cubepi_provider(...)`
   → `builder.build_provider(...)`.
-- `cubebox/services/usage.py` — `LLMFactory(...)` → `load_llm_snapshot(...)`.
-- `cubebox/models/org_settings.py` — drop `TASK_MODELS_KEY` and related;
+- `cubeplex/services/usage.py` — `LLMFactory(...)` → `load_llm_snapshot(...)`.
+- `cubeplex/models/org_settings.py` — drop `TASK_MODELS_KEY` and related;
   add `MODEL_PRESETS_KEY = "model_presets"`.
-- `cubebox/llm/config.py` — unchanged shape; comment update noting
+- `cubeplex/llm/config.py` — unchanged shape; comment update noting
   seeder-only role.
-- `cubebox/errors.py` — add `LLMConfigError` and subclasses; FastAPI
+- `cubeplex/errors.py` — add `LLMConfigError` and subclasses; FastAPI
   handler registration in `api/app.py`.
-- `cubebox/api/...` — request body schema gains `preset_label` + `thinking`.
+- `cubeplex/api/...` — request body schema gains `preset_label` + `thinking`.
 
 ### Test changes
 

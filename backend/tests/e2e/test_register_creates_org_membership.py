@@ -1,4 +1,8 @@
-"""E2E: register creates OrganizationMembership(role=owner) in multi_tenant mode."""
+"""E2E: multi_tenant register creates the user ONLY — no org membership yet.
+
+Onboarding (org/workspace bootstrap) is deferred to the /onboarding wizard,
+so a freshly registered multi_tenant user has no OrganizationMembership.
+"""
 
 import secrets
 
@@ -7,14 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Organization, OrganizationMembership, OrgRole, User
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import OrganizationMembership, User
 
 pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
-async def test_register_inserts_org_membership_owner(unauthenticated_memory_client):
+async def test_register_creates_no_org_membership(unauthenticated_memory_client):
     email = f"newuser-{secrets.token_hex(4)}@example.com"
     resp = await unauthenticated_memory_client.post(
         "/api/v1/auth/register",
@@ -27,18 +31,17 @@ async def test_register_inserts_org_membership_owner(unauthenticated_memory_clie
         session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with session_maker() as session:
             user = (await session.execute(select(User).where(User.email == email))).scalar_one()
-            org_member = (
-                await session.execute(
-                    select(OrganizationMembership).where(OrganizationMembership.user_id == user.id)
+            memberships = (
+                (
+                    await session.execute(
+                        select(OrganizationMembership).where(
+                            OrganizationMembership.user_id == user.id
+                        )
+                    )
                 )
-            ).scalar_one()
-            assert OrgRole(org_member.role) is OrgRole.OWNER
-
-            org = (
-                await session.execute(
-                    select(Organization).where(Organization.id == org_member.org_id)
-                )
-            ).scalar_one()
-            assert org.id == org_member.org_id
+                .scalars()
+                .all()
+            )
+            assert memberships == [], "register must not create any org membership"
     finally:
         await engine.dispose()

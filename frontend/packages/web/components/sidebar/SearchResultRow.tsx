@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo } from 'react'
-import type { SearchResult } from '@cubebox/core'
+import type { SearchResult } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 
 interface Props {

@@ -1,4 +1,4 @@
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 
 export function buildPreviewUrl(
   artifact: Artifact,
@@ -15,6 +15,14 @@ export function buildPreviewUrl(
     `/api/v1/ws/${workspaceId}/conversations/${artifact.conversation_id}` +
     `/artifacts/${artifact.id}/preview/v${v}/${filePath}`
   )
+}
+
+export const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+
+export function hasImageExt(filename: string): boolean {
+  const dot = filename.lastIndexOf('.')
+  if (dot < 0) return false
+  return IMAGE_EXTENSIONS.has(filename.slice(dot + 1).toLowerCase())
 }
 
 export function buildDownloadUrl(

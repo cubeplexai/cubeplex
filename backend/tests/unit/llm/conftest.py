@@ -1,4 +1,4 @@
-"""Local fixtures for cubebox.llm unit tests — in-memory SQLite + encryption backend."""
+"""Local fixtures for cubeplex.llm unit tests — in-memory SQLite + encryption backend."""
 
 import pytest
 import pytest_asyncio
@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
+from cubeplex.credentials.encryption import FernetBackend
 
 
 @pytest_asyncio.fixture

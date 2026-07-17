@@ -1,5 +1,5 @@
 # Optional overlay: adds the alibaba OpenSandbox lifecycle server in docker
-# runtime mode. cubebox's backend talks to it for sandbox tool calls.
+# runtime mode. cubeplex's backend talks to it for sandbox tool calls.
 #
 # Activate with:
 #   docker compose \
@@ -53,7 +53,7 @@ services:
     # OpenSandbox server resolves docker-runtime sandbox endpoint URLs
     # through the host_ip / eip set in opensandbox.toml. Default is
     # `host.docker.internal`, which Linux engines do NOT resolve by
-    # default — wire it to the docker bridge gateway so cubebox can
+    # default — wire it to the docker bridge gateway so cubeplex can
     # actually reach the sandbox containers.
     extra_hosts:
       - "host.docker.internal:host-gateway"

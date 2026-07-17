@@ -1,4 +1,4 @@
-"""stream tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
+"""stream tests — cubepi StreamEvent → cubeplex SSE (M1.3)."""
 
 import json
 
@@ -19,7 +19,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.agents.stream import convert_agent_event_to_sse, convert_event_to_sse
+from cubeplex.agents.stream import convert_agent_event_to_sse, convert_event_to_sse
 
 
 def _mk_assistant(text: str = "", tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
@@ -89,8 +89,8 @@ def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
     toolcall_end instead of streaming."""
     from cubepi.agent.types import MessageUpdateEvent
 
-    from cubebox.agents.schemas import ToolCallDeltaEvent
-    from cubebox.streams.run_manager import cubepi_dict_to_agent_event
+    from cubeplex.agents.schemas import ToolCallDeltaEvent
+    from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
 
     partial = _mk_assistant(tool_calls=[ToolCall(id="tc1", name="file_write", arguments={})])
     stream_evt = StreamEvent(
@@ -131,7 +131,7 @@ def test_error_with_missing_message_has_fallback() -> None:
 
 
 def test_silent_events_are_dropped() -> None:
-    """Events with no cubebox SSE equivalent return empty list."""
+    """Events with no cubeplex SSE equivalent return empty list."""
     for t in [
         "text_start",
         "text_end",
@@ -338,6 +338,36 @@ def test_injected_user_message_becomes_injected_message_dict() -> None:
 def test_injected_user_message_without_steer_id_is_dropped() -> None:
     msg = UserMessage(content=[TextContent(text="seed prompt")])
     assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
+
+
+def test_injected_group_chat_message_carries_sender_identity() -> None:
+    # Group-chat steers persist sender_user_id/sender_display_name in metadata;
+    # the SSE event must forward them so live viewers render the SenderBadge.
+    msg = UserMessage(
+        content=[TextContent(text="hi team")],
+        metadata={
+            "steer_id": "s1",
+            "sender_user_id": "user_abc",
+            "sender_display_name": "Alice",
+        },
+    )
+    out = convert_agent_event_to_sse(MessageEndEvent(message=msg))
+    assert out == [
+        {
+            "type": "injected_message",
+            "content": "hi team",
+            "steer_id": "s1",
+            "sender_user_id": "user_abc",
+            "sender_display_name": "Alice",
+        }
+    ]
+
+
+def test_injected_message_omits_sender_identity_when_absent() -> None:
+    # 1:1 chats persist no sender fields; the event stays minimal.
+    msg = UserMessage(content=[TextContent(text="solo steer")], metadata={"steer_id": "s2"})
+    out = convert_agent_event_to_sse(MessageEndEvent(message=msg))
+    assert out == [{"type": "injected_message", "content": "solo steer", "steer_id": "s2"}]
 
 
 # ---------------------------------------------------------------------------

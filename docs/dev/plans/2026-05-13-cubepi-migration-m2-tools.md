@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port cubebox's 5 builtin tools + MCP runtime to cubepi.AgentTool, expose them via a `registry_pi`, and wire them into the cubepi runtime path so a cubepi-backed agent can actually invoke tools. After M2, the cubepi path is callable for tool-using conversations (calculator, datetime, view_images, memory, load_skill, plus MCP tools).
+**Goal:** Port cubeplex's 5 builtin tools + MCP runtime to cubepi.AgentTool, expose them via a `registry_pi`, and wire them into the cubepi runtime path so a cubepi-backed agent can actually invoke tools. After M2, the cubepi path is callable for tool-using conversations (calculator, datetime, view_images, memory, load_skill, plus MCP tools).
 
 **Architecture:** All new code in `*_pi.py` files alongside existing LangChain `*.py` originals. Tool implementations are mostly mechanical conversion: `StructuredTool(func=, args_schema=)` → `cubepi.AgentTool(execute=, parameters=)`. Trickier bits: `memory_pi`/`load_skill_pi` carry DB-dependency injection; MCP loading switches from `langchain-mcp-adapters` to `cubepi.mcp.load_mcp_tools_http`.
 
-**Tech Stack:** cubepi 0.3+, pydantic 2, existing cubebox sandbox/skill catalog/MemoryRepository abstractions.
+**Tech Stack:** cubepi 0.3+, pydantic 2, existing cubeplex sandbox/skill catalog/MemoryRepository abstractions.
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` § M2.
 
@@ -24,22 +24,22 @@
 
 | File | Purpose |
 |---|---|
-| `backend/cubebox/tools/registry_pi.py` | Registry exposing builtin + MCP tools as `cubepi.AgentTool` list |
-| `backend/cubebox/tools/builtin/calculator_pi.py` | Calculator tool ported |
-| `backend/cubebox/tools/builtin/datetime_tool_pi.py` | datetime tool ported |
-| `backend/cubebox/tools/builtin/view_images_pi.py` | view_images tool ported |
-| `backend/cubebox/tools/builtin/memory_pi.py` | memory CRUD tools ported (read/write MemoryItem table) |
-| `backend/cubebox/tools/builtin/load_skill_pi.py` | load_skill tool ported (skeleton; full integration in M3) |
-| `backend/cubebox/mcp/runtime_pi.py` | MCP servers loaded via cubepi.mcp |
-| `backend/cubebox/mcp/discovery_pi.py` | MCP discovery shim |
+| `backend/cubeplex/tools/registry_pi.py` | Registry exposing builtin + MCP tools as `cubepi.AgentTool` list |
+| `backend/cubeplex/tools/builtin/calculator_pi.py` | Calculator tool ported |
+| `backend/cubeplex/tools/builtin/datetime_tool_pi.py` | datetime tool ported |
+| `backend/cubeplex/tools/builtin/view_images_pi.py` | view_images tool ported |
+| `backend/cubeplex/tools/builtin/memory_pi.py` | memory CRUD tools ported (read/write MemoryItem table) |
+| `backend/cubeplex/tools/builtin/load_skill_pi.py` | load_skill tool ported (skeleton; full integration in M3) |
+| `backend/cubeplex/mcp/runtime_pi.py` | MCP servers loaded via cubepi.mcp |
+| `backend/cubeplex/mcp/discovery_pi.py` | MCP discovery shim |
 | Tests for each new module | Mostly unit |
 
 ### Files to modify
 
 | File | What changes |
 |---|---|
-| `backend/cubebox/agents/graph_pi.py` | Accept `tools: list[AgentTool]` and pass through to cubepi.Agent (already does — M1.4) |
-| `backend/cubebox/streams/run_manager.py` | `_run_cubepi_path` builds tool list via `registry_pi.list_tools_for_cubepi(...)` |
+| `backend/cubeplex/agents/graph_pi.py` | Accept `tools: list[AgentTool]` and pass through to cubepi.Agent (already does — M1.4) |
+| `backend/cubeplex/streams/run_manager.py` | `_run_cubepi_path` builds tool list via `registry_pi.list_tools_for_cubepi(...)` |
 
 ### Test plan
 
@@ -72,7 +72,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
-from cubebox.tools.builtin.calculator import calculator as _calculator_impl  # reuse pure logic
+from cubeplex.tools.builtin.calculator import calculator as _calculator_impl  # reuse pure logic
 
 
 class CalculatorInput(BaseModel):
@@ -93,7 +93,7 @@ calculator_tool = AgentTool(
 )
 ```
 
-Pattern: reuse the existing pure Python function from the langchain version (`from cubebox.tools.builtin.calculator import calculator as _impl`), wrap with the cubepi.AgentTool signature shim (Fix-2 signature).
+Pattern: reuse the existing pure Python function from the langchain version (`from cubeplex.tools.builtin.calculator import calculator as _impl`), wrap with the cubepi.AgentTool signature shim (Fix-2 signature).
 
 **Registry stub** (`tools/registry_pi.py`):
 
@@ -106,13 +106,13 @@ tools and dynamic per-conversation tool sets.
 from __future__ import annotations
 from cubepi.agent.types import AgentTool
 
-from cubebox.tools.builtin.calculator_pi import calculator_tool
-from cubebox.tools.builtin.datetime_tool_pi import datetime_tool
-from cubebox.tools.builtin.view_images_pi import view_images_tool
+from cubeplex.tools.builtin.calculator_pi import calculator_tool
+from cubeplex.tools.builtin.datetime_tool_pi import datetime_tool
+from cubeplex.tools.builtin.view_images_pi import view_images_tool
 
 
 def list_builtin_tools_for_cubepi() -> list[AgentTool]:
-    """Return the cubepi-tool list of cubebox builtin tools (M2 subset).
+    """Return the cubepi-tool list of cubeplex builtin tools (M2 subset).
 
     M3 will extend to include memory + load_skill + subagent (middleware-driven).
     """
@@ -160,21 +160,21 @@ async def load_mcp_tools_for_workspace(workspace_id: str, ...) -> list[AgentTool
     # → concatenate results
 ```
 
-Existing `cubebox.mcp.runtime` is 172 lines; mirror its workspace-resolution logic, swap the `langchain-mcp-adapters` invocation for `cubepi.mcp.load_mcp_tools_http`.
+Existing `cubeplex.mcp.runtime` is 172 lines; mirror its workspace-resolution logic, swap the `langchain-mcp-adapters` invocation for `cubepi.mcp.load_mcp_tools_http`.
 
 ### M2.5: Wire tools into run_manager._run_cubepi_path
 
 `run_manager._run_cubepi_path` currently constructs the agent with no tools (`tools=[]`). Update to:
 
 ```python
-from cubebox.tools.registry_pi import list_builtin_tools_for_cubepi
-from cubebox.mcp.runtime_pi import load_mcp_tools_for_workspace
+from cubeplex.tools.registry_pi import list_builtin_tools_for_cubepi
+from cubeplex.mcp.runtime_pi import load_mcp_tools_for_workspace
 
 builtin = list_builtin_tools_for_cubepi()
 mcp_tools = await load_mcp_tools_for_workspace(ctx.workspace_id, ...)
 all_tools = builtin + mcp_tools
 
-agent = create_cubebox_cubepi_agent(..., tools=all_tools, ...)
+agent = create_cubeplex_cubepi_agent(..., tools=all_tools, ...)
 ```
 
 For DB-dependent tools (memory_pi) — wire their repo_factory at construction.

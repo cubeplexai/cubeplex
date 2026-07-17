@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, listMemory, type MemoryItem } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+import { createApiClient, listMemory, type MemoryItem } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ArrowUpRight, Sparkle } from 'lucide-react'
@@ -23,6 +24,7 @@ interface Props {
  */
 export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
   const router = useRouter()
+  const t = useTranslations('chat.memoryChip')
   const count = useMemoryCount(workspaceId, conversationId)
 
   const client = useMemo(() => {
@@ -67,19 +69,20 @@ export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
-          'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted',
+          'group/chip inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
+          'text-muted-foreground hover:text-foreground hover:bg-muted/60',
           'transition-colors',
         )}
-        aria-label={`${count} 条记忆`}
+        aria-label={t('ariaLabel', { n: count })}
       >
-        <Sparkle aria-hidden className="size-3" />
-        <span>{count} 条记忆</span>
+        <Sparkle aria-hidden className="size-3.5" />
+        <span className="font-mono tabular-nums">{count}</span>
+        <span className="hidden group-hover/chip:inline">{t('label')}</span>
       </PopoverTrigger>
 
       <PopoverContent align="start" sideOffset={6} className="w-80 p-0">
         <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
-          <span className="text-xs font-medium text-foreground/70">本对话产生的记忆</span>
+          <span className="text-xs font-medium text-foreground/70">{t('popoverTitle')}</span>
           <button
             type="button"
             onClick={goToMemoryPage}
@@ -88,9 +91,9 @@ export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
               'text-muted-foreground hover:text-foreground hover:bg-muted/60',
               'transition-colors',
             )}
-            aria-label="跳转到记忆页面"
+            aria-label={t('openPageAria')}
           >
-            打开记忆页
+            {t('openPage')}
             <ArrowUpRight className="size-3" />
           </button>
         </div>
@@ -108,7 +111,7 @@ export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
           )}
 
           {!itemsLoading && items && items.length === 0 && (
-            <p className="text-xs text-muted-foreground/60 py-2 text-center">暂无记忆</p>
+            <p className="text-xs text-muted-foreground/60 py-2 text-center">{t('empty')}</p>
           )}
 
           {!itemsLoading &&

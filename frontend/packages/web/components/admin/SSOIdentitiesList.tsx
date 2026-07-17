@@ -14,7 +14,7 @@ import {
   listSsoIdentities,
   unlinkSsoIdentity,
   type ExternalIdentityResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import {

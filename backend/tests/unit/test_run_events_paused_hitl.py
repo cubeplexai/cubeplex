@@ -17,7 +17,7 @@ from __future__ import annotations
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     RunMeta,
     create_run,
     get_active_run,
@@ -85,7 +85,7 @@ async def test_force_claim_stale_protects_paused_hitl(redis):
     the user's pending HITL turn is orphaned.
 
     ``create_run`` signals "couldn't claim" by returning ``None`` (see
-    cubebox/streams/run_events.py: returns ``None`` on both the primary
+    cubeplex/streams/run_events.py: returns ``None`` on both the primary
     and force-claim failure branches).
     """
     prefix = "test_force_claim_paused"

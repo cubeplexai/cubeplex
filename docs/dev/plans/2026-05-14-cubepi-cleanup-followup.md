@@ -33,14 +33,14 @@
 
 ## Phase 1 — Migrate admin/OAuth MCP path off langchain-mcp-adapters
 
-Current state: `cubebox/mcp/runtime.py` and `cubebox/mcp/discovery.py` use `MultiServerMCPClient` + LangChain `BaseTool`. They are called from `services/mcp.py`, `services/mcp_catalog.py`, and `mcp/oauth/callback.py` for admin tool discovery and OAuth-driven refresh. The per-run cubepi runtime path (`cubepi_runtime.py`) already bypasses these — we only need to replace the discovery/refresh helpers.
+Current state: `cubeplex/mcp/runtime.py` and `cubeplex/mcp/discovery.py` use `MultiServerMCPClient` + LangChain `BaseTool`. They are called from `services/mcp.py`, `services/mcp_catalog.py`, and `mcp/oauth/callback.py` for admin tool discovery and OAuth-driven refresh. The per-run cubepi runtime path (`cubepi_runtime.py`) already bypasses these — we only need to replace the discovery/refresh helpers.
 
 The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache` is now **admin-UI-only metadata**: it shows operators which tools a server exposes and tracks `authed` / `last_error` / `last_discovered_at`. We need a pure listing helper, not a BaseTool builder.
 
 ### Task 1.1: Add `cubepi_admin_discovery.discover_tools_metadata`
 
 **Files:**
-- Create: `backend/cubebox/mcp/cubepi_admin_discovery.py`
+- Create: `backend/cubeplex/mcp/cubepi_admin_discovery.py`
 - Test: `backend/tests/unit/test_cubepi_admin_discovery.py`
 
 - [ ] **Step 1: Write the failing test.**
@@ -57,8 +57,8 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
   import pytest
 
-  from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata
-  from cubebox.models import MCPServer
+  from cubeplex.mcp.cubepi_admin_discovery import discover_tools_metadata
+  from cubeplex.models import MCPServer
 
 
   @pytest.fixture
@@ -91,8 +91,8 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
       fake_session.initialize = AsyncMock()
       fake_session.list_tools = AsyncMock(return_value=fake_resp)
 
-      with patch("cubebox.mcp.cubepi_admin_discovery.sse_client") as m_sse, \
-           patch("cubebox.mcp.cubepi_admin_discovery.ClientSession") as m_cs:
+      with patch("cubeplex.mcp.cubepi_admin_discovery.sse_client") as m_sse, \
+           patch("cubeplex.mcp.cubepi_admin_discovery.ClientSession") as m_cs:
           m_sse.return_value.__aenter__.return_value = ("r", "w")
           m_cs.return_value.__aenter__.return_value = fake_session
 
@@ -111,7 +111,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
   @pytest.mark.asyncio
   async def test_returns_error_on_exception(http_server: MCPServer) -> None:
-      with patch("cubebox.mcp.cubepi_admin_discovery.sse_client") as m_sse:
+      with patch("cubeplex.mcp.cubepi_admin_discovery.sse_client") as m_sse:
           m_sse.side_effect = RuntimeError("connection refused")
           ok, tools, err = await discover_tools_metadata(http_server, credential_or_token=None)
 
@@ -128,8 +128,8 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
       fake_session.initialize = AsyncMock()
       fake_session.list_tools = AsyncMock(return_value=fake_resp)
 
-      with patch("cubebox.mcp.cubepi_admin_discovery.sse_client") as m_sse, \
-           patch("cubebox.mcp.cubepi_admin_discovery.ClientSession") as m_cs:
+      with patch("cubeplex.mcp.cubepi_admin_discovery.sse_client") as m_sse, \
+           patch("cubeplex.mcp.cubepi_admin_discovery.ClientSession") as m_cs:
           m_sse.return_value.__aenter__.return_value = ("r", "w")
           m_cs.return_value.__aenter__.return_value = fake_session
 
@@ -143,17 +143,17 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 - [ ] **Step 2: Run test to verify it fails (module does not exist yet).**
 
   Run from `backend/`: `uv run pytest tests/unit/test_cubepi_admin_discovery.py -v`
-  Expected: collection error — `ModuleNotFoundError: No module named 'cubebox.mcp.cubepi_admin_discovery'`.
+  Expected: collection error — `ModuleNotFoundError: No module named 'cubeplex.mcp.cubepi_admin_discovery'`.
 
 - [ ] **Step 3: Create the module.**
 
-  Create `backend/cubebox/mcp/cubepi_admin_discovery.py`:
+  Create `backend/cubeplex/mcp/cubepi_admin_discovery.py`:
 
   ```python
   """Admin-side MCP discovery (list-tools only) for cubepi runtime.
 
   Replaces the langchain-mcp-adapters MultiServerMCPClient path in the old
-  cubebox.mcp.discovery module. Uses the raw `mcp` SDK to call
+  cubeplex.mcp.discovery module. Uses the raw `mcp` SDK to call
   `session.list_tools()` and serialize the result to the same
   ``{name, description, input_schema}`` shape persisted in
   ``MCPServer.tools_cache``.
@@ -171,8 +171,8 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
   from mcp import ClientSession
   from mcp.client.sse import sse_client
 
-  from cubebox.mcp.connection_params import build_connection_params
-  from cubebox.models import MCPServer
+  from cubeplex.mcp.connection_params import build_connection_params
+  from cubeplex.models import MCPServer
 
   _TIMEOUT = 30.0
 
@@ -184,7 +184,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
   ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
       """Connect, list tools, return (success, serialized tools | None, error | None).
 
-      Same return contract as the deprecated ``cubebox.mcp.discovery.discover_tools``.
+      Same return contract as the deprecated ``cubeplex.mcp.discovery.discover_tools``.
       """
       try:
           params = build_connection_params(server, credential_or_token=credential_or_token)
@@ -229,14 +229,14 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/mcp/cubepi_admin_discovery.py backend/tests/unit/test_cubepi_admin_discovery.py
+  git add backend/cubeplex/mcp/cubepi_admin_discovery.py backend/tests/unit/test_cubepi_admin_discovery.py
   git commit -m "feat(mcp): add cubepi_admin_discovery for langchain-free tools listing"
   ```
 
 ### Task 1.2: Add `cubepi_admin_refresh.refresh_tools_for_server_with_token`
 
 **Files:**
-- Create: `backend/cubebox/mcp/cubepi_admin_refresh.py`
+- Create: `backend/cubeplex/mcp/cubepi_admin_refresh.py`
 - Test: `backend/tests/unit/test_cubepi_admin_refresh.py`
 
 - [ ] **Step 1: Write the failing test.**
@@ -253,8 +253,8 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
   import pytest
 
-  from cubebox.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
-  from cubebox.models import MCPServer
+  from cubeplex.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
+  from cubeplex.models import MCPServer
 
 
   @pytest.fixture
@@ -279,7 +279,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
   async def test_success_updates_cache_and_authed(server: MCPServer) -> None:
       tools = [{"name": "t", "description": "", "input_schema": {}}]
       with patch(
-          "cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata",
+          "cubeplex.mcp.cubepi_admin_refresh.discover_tools_metadata",
           AsyncMock(return_value=(True, tools, None)),
       ):
           server_repo = AsyncMock()
@@ -297,7 +297,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
   @pytest.mark.asyncio
   async def test_failure_persists_error(server: MCPServer) -> None:
       with patch(
-          "cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata",
+          "cubeplex.mcp.cubepi_admin_refresh.discover_tools_metadata",
           AsyncMock(return_value=(False, None, "boom")),
       ):
           server_repo = AsyncMock()
@@ -318,7 +318,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
 - [ ] **Step 3: Create the module.**
 
-  Create `backend/cubebox/mcp/cubepi_admin_refresh.py`:
+  Create `backend/cubeplex/mcp/cubepi_admin_refresh.py`:
 
   ```python
   """Persist MCP discovery result back to the DB row (admin/OAuth path)."""
@@ -327,9 +327,9 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
   from datetime import UTC, datetime
 
-  from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata
-  from cubebox.models import MCPServer
-  from cubebox.repositories.mcp import MCPServerRepository
+  from cubeplex.mcp.cubepi_admin_discovery import discover_tools_metadata
+  from cubeplex.models import MCPServer
+  from cubeplex.repositories.mcp import MCPServerRepository
 
 
   async def refresh_tools_for_server_with_token(
@@ -342,7 +342,7 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
       Updates ``authed`` / ``tools_cache`` / ``last_error`` / ``last_discovered_at``
       and commits via the repository. Same contract as the deprecated
-      ``cubebox.mcp.runtime.refresh_tools_for_server_with_token``.
+      ``cubeplex.mcp.runtime.refresh_tools_for_server_with_token``.
       """
       success, tools, error = await discover_tools_metadata(
           server, credential_or_token=credential_or_token
@@ -362,39 +362,39 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/mcp/cubepi_admin_refresh.py backend/tests/unit/test_cubepi_admin_refresh.py
+  git add backend/cubeplex/mcp/cubepi_admin_refresh.py backend/tests/unit/test_cubepi_admin_refresh.py
   git commit -m "feat(mcp): add cubepi_admin_refresh to persist discovery results"
   ```
 
 ### Task 1.3: Switch `services/mcp.py` and `services/mcp_catalog.py` to cubepi helpers
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp.py`
-- Modify: `backend/cubebox/services/mcp_catalog.py`
+- Modify: `backend/cubeplex/services/mcp.py`
+- Modify: `backend/cubeplex/services/mcp_catalog.py`
 - Test: existing tests `backend/tests/unit/test_mcp_service_invariants.py` (will need monkeypatch path updates) and `backend/tests/unit/mcp/test_oauth_callback*.py`.
 
 - [ ] **Step 1: Update `services/mcp.py` imports and call sites.**
 
-  In `backend/cubebox/services/mcp.py`:
+  In `backend/cubeplex/services/mcp.py`:
 
-  - Replace `from cubebox.mcp.discovery import discover_tools` (line 13) with
-    `from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools`.
-  - Replace the deferred `from cubebox.mcp.runtime import refresh_tools_for_server_with_token` (line 692) with
-    `from cubebox.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token`.
+  - Replace `from cubeplex.mcp.discovery import discover_tools` (line 13) with
+    `from cubeplex.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools`.
+  - Replace the deferred `from cubeplex.mcp.runtime import refresh_tools_for_server_with_token` (line 692) with
+    `from cubeplex.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token`.
   - No call-site changes needed: argument and return shapes match.
 
 - [ ] **Step 2: Update `services/mcp_catalog.py`.**
 
-  In `backend/cubebox/services/mcp_catalog.py` (line 34): replace
-  `from cubebox.mcp.discovery import discover_tools` with
-  `from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools`.
+  In `backend/cubeplex/services/mcp_catalog.py` (line 34): replace
+  `from cubeplex.mcp.discovery import discover_tools` with
+  `from cubeplex.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools`.
 
 - [ ] **Step 3: Update monkeypatch paths in `tests/unit/test_mcp_service_invariants.py`.**
 
-  Replace every occurrence of `"cubebox.mcp.runtime.discover_tools"` with
-  `"cubebox.services.mcp.discover_tools"` (we monkeypatch the binding in the consumer module now, because the `as discover_tools` import in `services/mcp.py` creates a fresh local name).
+  Replace every occurrence of `"cubeplex.mcp.runtime.discover_tools"` with
+  `"cubeplex.services.mcp.discover_tools"` (we monkeypatch the binding in the consumer module now, because the `as discover_tools` import in `services/mcp.py` creates a fresh local name).
 
-  Also update the comment at line 86 (`# moved to cubebox.mcp.runtime. Patch both bindings.`) to reflect the new location.
+  Also update the comment at line 86 (`# moved to cubeplex.mcp.runtime. Patch both bindings.`) to reflect the new location.
 
 - [ ] **Step 4: Run affected test suites.**
 
@@ -402,14 +402,14 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
   Expected: PASS.
 
   Run: `uv run pytest tests/unit/mcp/ -v`
-  Expected: PASS (these tests patch `cubebox.mcp.runtime.discover_tools` — we'll fix them in Task 1.4).
+  Expected: PASS (these tests patch `cubeplex.mcp.runtime.discover_tools` — we'll fix them in Task 1.4).
 
   If the mcp/ tests fail, that's expected — they're addressed next.
 
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/services/mcp.py backend/cubebox/services/mcp_catalog.py \
+  git add backend/cubeplex/services/mcp.py backend/cubeplex/services/mcp_catalog.py \
           backend/tests/unit/test_mcp_service_invariants.py
   git commit -m "refactor(mcp): switch services to cubepi_admin_discovery/refresh"
   ```
@@ -417,31 +417,31 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 ### Task 1.4: Update OAuth callback + its tests
 
 **Files:**
-- Modify: `backend/cubebox/mcp/oauth/callback.py:255-257`
+- Modify: `backend/cubeplex/mcp/oauth/callback.py:255-257`
 - Modify: `backend/tests/unit/mcp/test_oauth_callback.py`
 - Modify: `backend/tests/unit/mcp/test_oauth_callback_route.py`
 
 - [ ] **Step 1: Update `oauth/callback.py`.**
 
-  In `backend/cubebox/mcp/oauth/callback.py` around line 257, replace the deferred import:
+  In `backend/cubeplex/mcp/oauth/callback.py` around line 257, replace the deferred import:
 
   ```python
-  from cubebox.mcp.runtime import refresh_tools_for_server_with_token
+  from cubeplex.mcp.runtime import refresh_tools_for_server_with_token
   ```
 
   with:
 
   ```python
-  from cubebox.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
+  from cubeplex.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
   ```
 
-  Also update the comment above it (line 255) from `# Deferred import to break the cubebox.mcp.runtime ↔ oauth.callback` to describe the cubepi module instead.
+  Also update the comment above it (line 255) from `# Deferred import to break the cubeplex.mcp.runtime ↔ oauth.callback` to describe the cubepi module instead.
 
 - [ ] **Step 2: Update test monkeypatch / patch paths.**
 
   In `backend/tests/unit/mcp/test_oauth_callback.py` and `backend/tests/unit/mcp/test_oauth_callback_route.py`:
-  Replace every `patch("cubebox.mcp.runtime.discover_tools", ...)` with
-  `patch("cubebox.mcp.cubepi_admin_discovery.discover_tools_metadata", ...)`.
+  Replace every `patch("cubeplex.mcp.runtime.discover_tools", ...)` with
+  `patch("cubeplex.mcp.cubepi_admin_discovery.discover_tools_metadata", ...)`.
 
   Verify the patched function's return signature: both old and new return `(bool, list[dict] | None, str | None)` — same contract, no test logic changes needed.
 
@@ -453,29 +453,29 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 - [ ] **Step 4: Commit.**
 
   ```bash
-  git add backend/cubebox/mcp/oauth/callback.py backend/tests/unit/mcp/
+  git add backend/cubeplex/mcp/oauth/callback.py backend/tests/unit/mcp/
   git commit -m "refactor(mcp): switch OAuth callback to cubepi_admin_refresh"
   ```
 
 ### Task 1.5: Delete old `mcp/runtime.py`, `mcp/discovery.py`, and their tests
 
 **Files:**
-- Delete: `backend/cubebox/mcp/runtime.py`
-- Delete: `backend/cubebox/mcp/discovery.py`
+- Delete: `backend/cubeplex/mcp/runtime.py`
+- Delete: `backend/cubeplex/mcp/discovery.py`
 - Delete: `backend/tests/unit/test_mcp_runtime.py`
 - Delete: `backend/tests/unit/test_discovery_serialize.py`
 - Delete: `backend/tests/e2e/test_mcp_passthrough_jwt.py`
 
 - [ ] **Step 1: Verify no remaining references.**
 
-  Run: `git grep -nE "from cubebox\.mcp\.(runtime|discovery) import|cubebox\.mcp\.(runtime|discovery)\." backend/`
+  Run: `git grep -nE "from cubeplex\.mcp\.(runtime|discovery) import|cubeplex\.mcp\.(runtime|discovery)\." backend/`
   Expected: only matches inside the two files themselves and the three tests being deleted. If anything else still imports them, fix that consumer first.
 
 - [ ] **Step 2: Delete the files.**
 
   ```bash
-  git rm backend/cubebox/mcp/runtime.py \
-         backend/cubebox/mcp/discovery.py \
+  git rm backend/cubeplex/mcp/runtime.py \
+         backend/cubeplex/mcp/discovery.py \
          backend/tests/unit/test_mcp_runtime.py \
          backend/tests/unit/test_discovery_serialize.py \
          backend/tests/e2e/test_mcp_passthrough_jwt.py
@@ -493,19 +493,19 @@ The cubepi runtime hits the MCP server fresh per run, so `MCPServer.tools_cache`
 
 - [ ] **Step 4: Update backend/CLAUDE.md.**
 
-  In `backend/CLAUDE.md` line 135, remove the sentence `admin/OAuth tool-refresh paths (cubebox/mcp/runtime.py + discovery.py) still use langchain-mcp-adapters (port pending).` — replace with a one-line mention that admin tool discovery is `cubebox.mcp.cubepi_admin_discovery`.
+  In `backend/CLAUDE.md` line 135, remove the sentence `admin/OAuth tool-refresh paths (cubeplex/mcp/runtime.py + discovery.py) still use langchain-mcp-adapters (port pending).` — replace with a one-line mention that admin tool discovery is `cubeplex.mcp.cubepi_admin_discovery`.
 
   Concrete edit: change the bullet to:
   ```
   - MCP integration: per-run discovery via
-    ``cubebox.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi``;
-    admin tool refresh via ``cubebox.mcp.cubepi_admin_refresh``.
+    ``cubeplex.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi``;
+    admin tool refresh via ``cubeplex.mcp.cubepi_admin_refresh``.
   ```
 
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/mcp/ backend/tests/unit/ backend/tests/e2e/ backend/CLAUDE.md
+  git add backend/cubeplex/mcp/ backend/tests/unit/ backend/tests/e2e/ backend/CLAUDE.md
   git commit -m "refactor(mcp): delete langchain-mcp-adapters runtime/discovery (M6.5 closeout)"
   ```
 
@@ -518,7 +518,7 @@ Current state: `compaction/__init__.py` builds a `_to_langchain_messages()` brid
 ### Task 2.1: Rewrite `boundary.py` to operate on cubepi messages
 
 **Files:**
-- Modify: `backend/cubebox/middleware/compaction/boundary.py`
+- Modify: `backend/cubeplex/middleware/compaction/boundary.py`
 - Test: `backend/tests/unit/middleware/compaction/test_boundary.py`
 
 - [ ] **Step 1: Rewrite the test to use cubepi messages.**
@@ -540,7 +540,7 @@ Current state: `compaction/__init__.py` builds a `_to_langchain_messages()` brid
       UserMessage,
   )
 
-  from cubebox.middleware.compaction.boundary import safe_boundary
+  from cubeplex.middleware.compaction.boundary import safe_boundary
 
 
   def _user(text: str) -> UserMessage:
@@ -615,7 +615,7 @@ Current state: `compaction/__init__.py` builds a `_to_langchain_messages()` brid
 
 - [ ] **Step 3: Rewrite `boundary.py`.**
 
-  Replace `backend/cubebox/middleware/compaction/boundary.py` contents:
+  Replace `backend/cubeplex/middleware/compaction/boundary.py` contents:
 
   ```python
   """Boundary selection for compaction — picks a safe split point.
@@ -692,7 +692,7 @@ Current state: `compaction/__init__.py` builds a `_to_langchain_messages()` brid
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/middleware/compaction/boundary.py \
+  git add backend/cubeplex/middleware/compaction/boundary.py \
           backend/tests/unit/middleware/compaction/test_boundary.py
   git commit -m "refactor(compaction): rewrite boundary.py on cubepi message types"
   ```
@@ -702,7 +702,7 @@ Current state: `compaction/__init__.py` builds a `_to_langchain_messages()` brid
 The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already implements the right algorithm. We promote it to `tokens.py` and delete the LC variant.
 
 **Files:**
-- Modify: `backend/cubebox/middleware/compaction/tokens.py`
+- Modify: `backend/cubeplex/middleware/compaction/tokens.py`
 - Test: `backend/tests/unit/middleware/compaction/test_tokens.py`
 
 - [ ] **Step 1: Rewrite the test to use cubepi messages.**
@@ -723,7 +723,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
       UserMessage,
   )
 
-  from cubebox.middleware.compaction.tokens import _CHARS_PER_TOKEN, approx_tokens
+  from cubeplex.middleware.compaction.tokens import _CHARS_PER_TOKEN, approx_tokens
 
 
   def test_empty_returns_zero() -> None:
@@ -767,7 +767,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
 
 - [ ] **Step 3: Rewrite `tokens.py`.**
 
-  Replace `backend/cubebox/middleware/compaction/tokens.py` contents:
+  Replace `backend/cubeplex/middleware/compaction/tokens.py` contents:
 
   ```python
   """Approximate token counting for cubepi messages.
@@ -853,7 +853,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/middleware/compaction/tokens.py \
+  git add backend/cubeplex/middleware/compaction/tokens.py \
           backend/tests/unit/middleware/compaction/test_tokens.py
   git commit -m "refactor(compaction): native cubepi approx_tokens, drop langchain_core dep"
   ```
@@ -861,7 +861,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
 ### Task 2.3: Rewrite `summarizer.py` to use `cubepi.Provider`
 
 **Files:**
-- Modify: `backend/cubebox/middleware/compaction/summarizer.py`
+- Modify: `backend/cubeplex/middleware/compaction/summarizer.py`
 - Test: existing summarizer tests, if any (`backend/tests/unit/middleware/compaction/test_summarizer*.py`); otherwise add a small unit test.
 
 - [ ] **Step 1: Check whether summarizer has its own unit tests.**
@@ -889,7 +889,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
       UserMessage,
   )
 
-  from cubebox.middleware.compaction.summarizer import (
+  from cubeplex.middleware.compaction.summarizer import (
       CompactionSummary,
       summarize,
   )
@@ -964,7 +964,7 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
 
 - [ ] **Step 4: Rewrite `summarizer.py`.**
 
-  Replace `backend/cubebox/middleware/compaction/summarizer.py` contents:
+  Replace `backend/cubeplex/middleware/compaction/summarizer.py` contents:
 
   ```python
   """Summarizer — runs a cheap cubepi Provider to produce / update a CompactionSummary."""
@@ -1094,17 +1094,17 @@ The existing `_cubepi_approx_tokens` in `compaction/__init__.py` already impleme
 - [ ] **Step 6: Commit.**
 
   ```bash
-  git add backend/cubebox/middleware/compaction/summarizer.py \
+  git add backend/cubeplex/middleware/compaction/summarizer.py \
           backend/tests/unit/middleware/compaction/test_summarizer.py
   git commit -m "refactor(compaction): summarizer uses cubepi Provider, drop BaseChatModel"
   ```
 
-### Task 2.4: Add `generate_once` helper for cubepi Provider in cubebox
+### Task 2.4: Add `generate_once` helper for cubepi Provider in cubeplex
 
-If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter in cubebox so the summarizer can call it uniformly.
+If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter in cubeplex so the summarizer can call it uniformly.
 
 **Files:**
-- Create or modify: `backend/cubebox/llm/oneshot.py` (new) OR add helper method on the wrapper used by `LLMFactory.build_cubepi_provider`.
+- Create or modify: `backend/cubeplex/llm/oneshot.py` (new) OR add helper method on the wrapper used by `LLMFactory.build_cubepi_provider`.
 
 - [ ] **Step 1: Check cubepi.Provider's existing single-call surface.**
 
@@ -1113,7 +1113,7 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 
 - [ ] **Step 2: Create the helper that wraps `provider.stream()` into a single string.**
 
-  If cubepi has no built-in one-shot helper, create `backend/cubebox/llm/oneshot.py`:
+  If cubepi has no built-in one-shot helper, create `backend/cubeplex/llm/oneshot.py`:
 
   ```python
   """One-shot text generation adapter over cubepi.Provider.
@@ -1155,10 +1155,10 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 
 - [ ] **Step 3: Wire `generate_once` into the summarizer call path.**
 
-  In `cubebox/middleware/compaction/__init__.py` (handled in Task 2.5), the middleware will pass a small wrapper:
+  In `cubeplex/middleware/compaction/__init__.py` (handled in Task 2.5), the middleware will pass a small wrapper:
 
   ```python
-  from cubebox.llm.oneshot import generate_once as _stream_oneshot
+  from cubeplex.llm.oneshot import generate_once as _stream_oneshot
 
   class _ProviderOneShot:
       def __init__(self, provider): self._p = provider
@@ -1177,25 +1177,25 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 - [ ] **Step 5: Commit.**
 
   ```bash
-  git add backend/cubebox/llm/oneshot.py
+  git add backend/cubeplex/llm/oneshot.py
   git commit -m "feat(llm): add generate_once adapter over cubepi.Provider.stream"
   ```
 
 ### Task 2.5: Rewrite `compaction/__init__.py` — drop LC bridge, switch summarizer LLM type
 
 **Files:**
-- Modify: `backend/cubebox/middleware/compaction/__init__.py`
-- Modify: `backend/cubebox/streams/run_manager.py` (constructor call)
+- Modify: `backend/cubeplex/middleware/compaction/__init__.py`
+- Modify: `backend/cubeplex/streams/run_manager.py` (constructor call)
 - Test: existing `backend/tests/unit/test_compaction.py` (update fixtures) and E2E.
 
 - [ ] **Step 1: Identify the current middleware constructor call site.**
 
-  Run: `grep -nE "CompactionMiddleware\(" backend/cubebox/streams/run_manager.py`
+  Run: `grep -nE "CompactionMiddleware\(" backend/cubeplex/streams/run_manager.py`
   Expected: shows the constructor invocation around line 758-770 with `summary_llm=`.
 
 - [ ] **Step 2: Replace `compaction/__init__.py` to drop LC bridge.**
 
-  Apply these specific edits to `backend/cubebox/middleware/compaction/__init__.py`:
+  Apply these specific edits to `backend/cubeplex/middleware/compaction/__init__.py`:
 
   a) Replace imports (lines 41-44) — delete the three `langchain_core.*` imports.
 
@@ -1225,13 +1225,13 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
   from cubepi.providers.base import Message
   from loguru import logger
 
-  from cubebox.middleware.compaction.boundary import safe_boundary
-  from cubebox.middleware.compaction.summarizer import (
+  from cubeplex.middleware.compaction.boundary import safe_boundary
+  from cubeplex.middleware.compaction.summarizer import (
       CompactionSummary,
       _OneShotProvider,
       summarize,
   )
-  from cubebox.middleware.compaction.tokens import approx_tokens
+  from cubeplex.middleware.compaction.tokens import approx_tokens
   ```
 
   Updated constructor signature:
@@ -1313,7 +1313,7 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 
 - [ ] **Step 3: Update `run_manager.py` to pass a cubepi-based summary LLM.**
 
-  In `backend/cubebox/streams/run_manager.py` around line 755-770 (where the summary LLM is currently built via the langchain factory):
+  In `backend/cubeplex/streams/run_manager.py` around line 755-770 (where the summary LLM is currently built via the langchain factory):
 
   Before:
   ```python
@@ -1327,7 +1327,7 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 
   After:
   ```python
-  from cubebox.llm.oneshot import generate_once
+  from cubeplex.llm.oneshot import generate_once
 
   class _ProviderOneShot:
       def __init__(self, provider: Any) -> None:
@@ -1364,13 +1364,13 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 - [ ] **Step 6: Run the compaction E2E.**
 
   Run: `uv run pytest tests/e2e/ -k compaction -v`
-  Expected: PASS. (If a configured CUBEBOX_E2E_LLM_* is required and not set, document the skip — don't paper over the missing env.)
+  Expected: PASS. (If a configured CUBEPLEX_E2E_LLM_* is required and not set, document the skip — don't paper over the missing env.)
 
 - [ ] **Step 7: Commit.**
 
   ```bash
-  git add backend/cubebox/middleware/compaction/__init__.py \
-          backend/cubebox/streams/run_manager.py \
+  git add backend/cubeplex/middleware/compaction/__init__.py \
+          backend/cubeplex/streams/run_manager.py \
           backend/tests/unit/test_compaction.py
   git commit -m "refactor(compaction): drop LC bridge; summary LLM via cubepi provider"
   ```
@@ -1382,7 +1382,7 @@ If cubepi.Provider doesn't expose a one-shot generate method, add a tiny adapter
 After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFactory.create()` for the (now removed) langchain summarizer path. Delete it.
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py`
+- Modify: `backend/cubeplex/llm/factory.py`
 - Delete: `backend/tests/unit/llm/test_factory_anthropic.py`
 - Modify: `backend/tests/e2e/test_admin_providers_crud.py:177` (if it calls `.create()`)
 
@@ -1390,14 +1390,14 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 
 - [ ] **Step 1: Confirm no production code still calls `LLMFactory.create()` after Phase 2.**
 
-  Run: `git grep -nE "factory\.create\(|LLMFactory\(\)\.create" backend/cubebox/`
+  Run: `git grep -nE "factory\.create\(|LLMFactory\(\)\.create" backend/cubeplex/`
   Expected: empty after Phase 2 commits (run_manager.py no longer calls it).
 
   If anything remains, fix it before proceeding — `create()` is about to die.
 
 - [ ] **Step 2: Delete `LLMFactory.create()` and dependencies.**
 
-  In `backend/cubebox/llm/factory.py`:
+  In `backend/cubeplex/llm/factory.py`:
 
   - Delete `from langchain_openai import ChatOpenAI` (line 22).
   - Delete the entire `def create(self, ...)` method (lines ~354 through ~498 — find the next method definition to know where to stop).
@@ -1426,9 +1426,9 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
   from sqlalchemy import func, select
   from sqlalchemy.ext.asyncio import AsyncSession
 
-  from cubebox.config import config
-  from cubebox.credentials.encryption import EncryptionBackend
-  from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
+  from cubeplex.config import config
+  from cubeplex.credentials.encryption import EncryptionBackend
+  from cubeplex.llm.config import LLMConfig, ModelConfig, ProviderConfig
   ```
 
 - [ ] **Step 3: Delete `tests/unit/llm/test_factory_anthropic.py`.**
@@ -1454,7 +1454,7 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 - [ ] **Step 6: Commit.**
 
   ```bash
-  git add backend/cubebox/llm/factory.py \
+  git add backend/cubeplex/llm/factory.py \
           backend/tests/unit/llm/ \
           backend/tests/e2e/test_admin_providers_crud.py
   git commit -m "refactor(llm): delete LLMFactory.create() langchain path"
@@ -1467,27 +1467,27 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 `services/provider_service.py` uses `ChatOpenAI` / `ChatAnthropic` + `HumanMessage.content="ping"` for the admin "test connection" UI. Replace with a minimal cubepi.Provider call.
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_service.py`
+- Modify: `backend/cubeplex/services/provider_service.py`
 - Test: existing provider tests (`backend/tests/unit/services/test_provider_service*.py` if any) and E2E `backend/tests/e2e/test_admin_providers_crud.py`.
 
 ### Task 4.1: Switch test-connection logic to cubepi
 
 - [ ] **Step 1: Locate exact lines to change.**
 
-  Run: `sed -n '280,360p' backend/cubebox/services/provider_service.py`
+  Run: `sed -n '280,360p' backend/cubeplex/services/provider_service.py`
   Expected: shows the test_connection method body using `ChatOpenAI` / `ChatAnthropic` and `llm.ainvoke([HumanMessage(content="ping")])`.
 
 - [ ] **Step 2: Rewrite using `build_cubepi_provider` + `generate_once`.**
 
-  In `backend/cubebox/services/provider_service.py`:
+  In `backend/cubeplex/services/provider_service.py`:
 
   - Remove imports at lines 7-8: `from langchain_core.messages import HumanMessage` and `from langchain_openai import ChatOpenAI`.
   - Remove the deferred `from langchain_anthropic import ChatAnthropic` at line 324.
   - Replace the entire test-connection LLM construction + ainvoke block with:
 
   ```python
-  from cubebox.llm.factory import LLMFactory
-  from cubebox.llm.oneshot import generate_once
+  from cubeplex.llm.factory import LLMFactory
+  from cubeplex.llm.oneshot import generate_once
   from cubepi.providers.base import TextContent, UserMessage
 
   # Build a transient provider config matching the request inputs.
@@ -1513,7 +1513,7 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
   )
   ```
 
-  Exact field names depend on `TestResultOut` schema — check `backend/cubebox/api/schemas/provider.py` for the actual shape and adapt assignments to match.
+  Exact field names depend on `TestResultOut` schema — check `backend/cubeplex/api/schemas/provider.py` for the actual shape and adapt assignments to match.
 
 - [ ] **Step 3: Run unit + E2E tests for ProviderService.**
 
@@ -1526,7 +1526,7 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 - [ ] **Step 4: Commit.**
 
   ```bash
-  git add backend/cubebox/services/provider_service.py
+  git add backend/cubeplex/services/provider_service.py
   git commit -m "refactor(provider): cubepi-based connection test, drop langchain"
   ```
 
@@ -1535,13 +1535,13 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 ## Phase 5 — Drop final stray langchain reference in `citations/config.py`
 
 **Files:**
-- Modify: `backend/cubebox/middleware/citations/config.py`
+- Modify: `backend/cubeplex/middleware/citations/config.py`
 
 ### Task 5.1: Replace `BaseTool` type annotation
 
 - [ ] **Step 1: Read the file to see context.**
 
-  Run: `sed -n '1,40p' backend/cubebox/middleware/citations/config.py`
+  Run: `sed -n '1,40p' backend/cubeplex/middleware/citations/config.py`
   Expected: shows that line 10's `BaseTool` import is used as a type annotation only (e.g., in a function signature or dataclass field).
 
 - [ ] **Step 2: Replace with cubepi's tool type or drop annotation.**
@@ -1559,7 +1559,7 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 - [ ] **Step 4: Commit.**
 
   ```bash
-  git add backend/cubebox/middleware/citations/config.py
+  git add backend/cubeplex/middleware/citations/config.py
   git commit -m "refactor(citations): drop BaseTool type annotation"
   ```
 
@@ -1570,7 +1570,7 @@ After Phase 2, the only thing keeping LangChain in `llm/factory.py` is `LLMFacto
 User decision: completely delete LangSmith config + env vars. cubepi doesn't use LangSmith; future observability will be wired through a different surface.
 
 **Files:**
-- Modify: `backend/cubebox/config.py`
+- Modify: `backend/cubeplex/config.py`
 - Modify: `backend/config.yaml`
 - Modify: `backend/config.test.yaml`
 - Modify: `backend/.env.example`
@@ -1581,7 +1581,7 @@ User decision: completely delete LangSmith config + env vars. cubepi doesn't use
 
 - [ ] **Step 1: Remove env-var bridge from `config.py`.**
 
-  In `backend/cubebox/config.py` lines 43-45:
+  In `backend/cubeplex/config.py` lines 43-45:
 
   Delete:
   ```python
@@ -1590,7 +1590,7 @@ User decision: completely delete LangSmith config + env vars. cubepi doesn't use
       os.environ["LANGCHAIN_API_KEY"] = config.langsmith.key
   ```
 
-  Also delete the `LangSmithConfig` class definition (search for it: `grep -n "LangSmithConfig\|langsmith" backend/cubebox/config.py`) and remove the `langsmith: LangSmithConfig` field on the root Config class.
+  Also delete the `LangSmithConfig` class definition (search for it: `grep -n "LangSmithConfig\|langsmith" backend/cubeplex/config.py`) and remove the `langsmith: LangSmithConfig` field on the root Config class.
 
 - [ ] **Step 2: Remove the YAML blocks.**
 
@@ -1598,24 +1598,24 @@ User decision: completely delete LangSmith config + env vars. cubepi doesn't use
 
 - [ ] **Step 3: Remove from `.env.example`.**
 
-  In `backend/.env.example`, delete any `CUBEBOX_LANGSMITH__*` lines.
+  In `backend/.env.example`, delete any `CUBEPLEX_LANGSMITH__*` lines.
 
 - [ ] **Step 4: Remove from root `CLAUDE.md`.**
 
-  In `/home/chris/cubebox/CLAUDE.md`, delete the bullet listing `CUBEBOX_LANGSMITH__KEY` under environment variables (around line 36).
+  In `/home/chris/cubeplex/CLAUDE.md`, delete the bullet listing `CUBEPLEX_LANGSMITH__KEY` under environment variables (around line 36).
 
 - [ ] **Step 5: Run full test suite + boot smoke.**
 
   Run from `backend/`: `make check`
   Expected: PASS (config loads without the deleted fields).
 
-  Run: `uv run python -c "from cubebox.config import config; print('ok')"`
+  Run: `uv run python -c "from cubeplex.config import config; print('ok')"`
   Expected: prints `ok`. (If `pydantic` complains about extra fields, ensure the model_config in Config has `extra="ignore"` or the field is properly deleted from defaults.)
 
 - [ ] **Step 6: Commit.**
 
   ```bash
-  git add backend/cubebox/config.py backend/config.yaml backend/config.test.yaml \
+  git add backend/cubeplex/config.py backend/config.yaml backend/config.test.yaml \
           backend/.env.example CLAUDE.md
   git commit -m "chore(config): remove LangSmith plumbing"
   ```
@@ -1630,21 +1630,21 @@ Many production files carry comments like "mirroring the langgraph version" or "
 
 **Files** (apply minimal edit per file — delete only the langgraph/langchain reference; do not reflow surrounding text):
 
-- [ ] `backend/cubebox/tools/__init__.py:3` — the module-docstring sentence about "langgraph ToolRegistry was removed in M6".
-- [ ] `backend/cubebox/tools/builtin/memory.py:4,7` — sentences mentioning "the langchain list" / "kept byte-identical to the langchain originals".
-- [ ] `backend/cubebox/middleware/attachments.py:8` — "mirroring the langgraph version which walks all HumanMessages".
-- [ ] `backend/cubebox/middleware/skills.py:21` — "Format mirrors the langgraph ``SkillsMiddleware``::".
-- [ ] `backend/cubebox/middleware/subagents.py:143` — comment about BaseTool (langgraph) vs AgentTool (cubepi); after Phase 1-3 this should already be all cubepi types, so the comment is misleading — delete.
-- [ ] `backend/cubebox/middleware/citation.py:38` — "the langchain helper of the same name in ``citations/middleware.py``".
-- [ ] `backend/cubebox/middleware/artifacts.py:9,35,57` — "what ``ArtifactMiddleware.awrap_model_call`` does in the langgraph path" and "kept byte-identical to the langgraph version" comments.
-- [ ] `backend/cubebox/middleware/todo.py:37` — "colocated with the langgraph TodoListMiddleware".
-- [ ] `backend/cubebox/middleware/sandbox.py:9,91` — same pattern.
-- [ ] `backend/cubebox/middleware/memory.py:167` — `# "current" in the snapshot XML tag (matches langgraph behaviour).` — KEEP only the part "current in the snapshot XML tag"; drop the langgraph reference.
-- [ ] `backend/cubebox/agents/graph.py:47` — "byte-parity with the langgraph path".
-- [ ] `backend/cubebox/agents/checkpointer.py:8` — `runtime == "langgraph", cubebox/agents/checkpointer.py (the existing` — this is stale module-docstring text; delete the whole branch about the langgraph version since checkpointer.py is now solely the cubepi one.
-- [ ] `backend/cubebox/mcp/cubepi_runtime.py:31` — "Mirrors the langchain runtime.py behavior" — langchain runtime is gone, this comment is misleading. Delete.
-- [ ] `backend/cubebox/mcp/cubepi_discovery.py:55,68,131` — similar "mirrors the langchain runtime" / "langgraph runtime.py" references. Delete the comparative phrasing; keep the substantive explanation of credential mode resolution.
-- [ ] `backend/cubebox/streams/run_manager.py:524,528,533,545,570,621,897` — the cluster of "to match langgraph tool order" / "langgraph default" / "langgraph path" comments.
+- [ ] `backend/cubeplex/tools/__init__.py:3` — the module-docstring sentence about "langgraph ToolRegistry was removed in M6".
+- [ ] `backend/cubeplex/tools/builtin/memory.py:4,7` — sentences mentioning "the langchain list" / "kept byte-identical to the langchain originals".
+- [ ] `backend/cubeplex/middleware/attachments.py:8` — "mirroring the langgraph version which walks all HumanMessages".
+- [ ] `backend/cubeplex/middleware/skills.py:21` — "Format mirrors the langgraph ``SkillsMiddleware``::".
+- [ ] `backend/cubeplex/middleware/subagents.py:143` — comment about BaseTool (langgraph) vs AgentTool (cubepi); after Phase 1-3 this should already be all cubepi types, so the comment is misleading — delete.
+- [ ] `backend/cubeplex/middleware/citation.py:38` — "the langchain helper of the same name in ``citations/middleware.py``".
+- [ ] `backend/cubeplex/middleware/artifacts.py:9,35,57` — "what ``ArtifactMiddleware.awrap_model_call`` does in the langgraph path" and "kept byte-identical to the langgraph version" comments.
+- [ ] `backend/cubeplex/middleware/todo.py:37` — "colocated with the langgraph TodoListMiddleware".
+- [ ] `backend/cubeplex/middleware/sandbox.py:9,91` — same pattern.
+- [ ] `backend/cubeplex/middleware/memory.py:167` — `# "current" in the snapshot XML tag (matches langgraph behaviour).` — KEEP only the part "current in the snapshot XML tag"; drop the langgraph reference.
+- [ ] `backend/cubeplex/agents/graph.py:47` — "byte-parity with the langgraph path".
+- [ ] `backend/cubeplex/agents/checkpointer.py:8` — `runtime == "langgraph", cubeplex/agents/checkpointer.py (the existing` — this is stale module-docstring text; delete the whole branch about the langgraph version since checkpointer.py is now solely the cubepi one.
+- [ ] `backend/cubeplex/mcp/cubepi_runtime.py:31` — "Mirrors the langchain runtime.py behavior" — langchain runtime is gone, this comment is misleading. Delete.
+- [ ] `backend/cubeplex/mcp/cubepi_discovery.py:55,68,131` — similar "mirrors the langchain runtime" / "langgraph runtime.py" references. Delete the comparative phrasing; keep the substantive explanation of credential mode resolution.
+- [ ] `backend/cubeplex/streams/run_manager.py:524,528,533,545,570,621,897` — the cluster of "to match langgraph tool order" / "langgraph default" / "langgraph path" comments.
   - 533 is the PR #84 fallback TODO — KEEP that line; reword to drop "the langgraph path" since the alternative no longer exists. The TODO remains valid.
   - 524, 528: keep the substantive context (`ModelConfig has no temperature`) but drop the langgraph back-reference.
   - 545, 570, 621, 897: tool-order comments — the order is preserved for byte-parity with our own prior cache state, not "langgraph". Reword to that.
@@ -1655,7 +1655,7 @@ Many production files carry comments like "mirroring the langgraph version" or "
 - [ ] **Commit.**
 
   ```bash
-  git add backend/cubebox/
+  git add backend/cubeplex/
   git commit -m "chore: drop stale 'compared to langgraph' archaeology comments"
   ```
 
@@ -1691,7 +1691,7 @@ After Phase 1-7, the codebase imports zero `langchain*` / `langgraph*` / `langsm
 
 - [ ] **Step 1: Final grep.**
 
-  Run: `git grep -nE "(^|[^a-zA-Z_])(langchain|langgraph|langsmith)[a-zA-Z_]*" backend/cubebox/ backend/tests/`
+  Run: `git grep -nE "(^|[^a-zA-Z_])(langchain|langgraph|langsmith)[a-zA-Z_]*" backend/cubeplex/ backend/tests/`
   Expected: empty (no production-code matches). Comments/docstrings may have residual mentions — that's fine for now but ideally also clean.
 
   If anything matches, jump back to the relevant Phase and fix.
@@ -1714,7 +1714,7 @@ After Phase 1-7, the codebase imports zero `langchain*` / `langgraph*` / `langsm
   Run from `backend/`: `make dev-install`
   Expected: clean reinstall, no langchain wheels pulled.
 
-  Run: `uv run python -c "import cubebox; print('ok')"`
+  Run: `uv run python -c "import cubeplex; print('ok')"`
   Expected: `ok`. No `ModuleNotFoundError`.
 
 - [ ] **Step 5: Run full check.**
@@ -1806,7 +1806,7 @@ After Phase 1-7, the codebase imports zero `langchain*` / `langgraph*` / `langsm
   For `docs/superpowers/plans/2026-05-14-cubepi-migration-m6-cleanup.md`, prepend:
 
   ```markdown
-  > **Follow-up:** M6.5 and M6.7 were finished in `docs/superpowers/plans/2026-05-14-cubepi-cleanup-followup.md`. The M6.7 commit in the original plan only dropped the umbrella `langchain` / `langgraph` packages; the sub-packages (`langchain-core`, `langchain-openai`, `langchain-anthropic`, `langchain-mcp-adapters`) were dropped in the follow-up. M6.5 also left `cubebox/mcp/runtime.py` and `discovery.py` in place; the follow-up replaced them with `cubepi_admin_discovery.py` / `cubepi_admin_refresh.py`.
+  > **Follow-up:** M6.5 and M6.7 were finished in `docs/superpowers/plans/2026-05-14-cubepi-cleanup-followup.md`. The M6.7 commit in the original plan only dropped the umbrella `langchain` / `langgraph` packages; the sub-packages (`langchain-core`, `langchain-openai`, `langchain-anthropic`, `langchain-mcp-adapters`) were dropped in the follow-up. M6.5 also left `cubeplex/mcp/runtime.py` and `discovery.py` in place; the follow-up replaced them with `cubepi_admin_discovery.py` / `cubepi_admin_refresh.py`.
   ```
 
 - [ ] **Step 2: Commit.**
@@ -1897,4 +1897,4 @@ Total ≈ 2.5–3 focused days. Each task is a single commit; each phase is a PR
 - The `streams/run_manager.py:533` fallback-chain TODO (PR #84 review). Unrelated feature work; tracked separately.
 - Replacing LangSmith with a new tracing system. Deletion only; observability re-introduction is a future spec.
 - cubepi PyPI release (cubepi remains a path/git dep).
-- Refactoring cubepi-side APIs even if a cleaner interface would simplify the cubebox call site — keep cubepi-side changes in cubepi's own repo.
+- Refactoring cubepi-side APIs even if a cleaner interface would simplify the cubeplex call site — keep cubepi-side changes in cubepi's own repo.

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient } from '@cubebox/core'
-import type { Provider, Model } from '@cubebox/core'
+import { createApiClient } from '@cubeplex/core'
+import type { Provider, Model } from '@cubeplex/core'
 
 import { fetchAdminModelPresets, type AdminModelPresetsResponse } from '@/lib/api/presets'
 

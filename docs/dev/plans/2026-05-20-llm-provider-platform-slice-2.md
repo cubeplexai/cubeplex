@@ -1,4 +1,4 @@
-# LLM Provider Platform — Plan Slice 2 (cubebox M3 + M4 + M6)
+# LLM Provider Platform — Plan Slice 2 (cubeplex M3 + M4 + M6)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -19,7 +19,7 @@ branch in `/home/chris/cubepi`**; this slice depends on the latest
 commit of that branch (e.g. `38bb4e8` at plan-writing time, but use
 whatever's HEAD when the executor starts — see Task 1).
 
-**Goal:** Make cubebox honor `CapabilityDescriptor` end-to-end —
+**Goal:** Make cubeplex honor `CapabilityDescriptor` end-to-end —
 provider rows carry the descriptor JSON, `LLMFactory` plumbs it into
 cubepi at call time, an admin Test endpoint can validate a provider's
 wiring before save, and conversation title generation is routed to a
@@ -27,7 +27,7 @@ dedicated `task_models.title` model so the original 30s incident is
 fixed.
 
 **Architecture:**
-1. Bump cubebox's `cubepi` dependency from `==0.4.0` to a git ref of
+1. Bump cubeplex's `cubepi` dependency from `==0.4.0` to a git ref of
    the feat branch so we don't have to wait for a cubepi PyPI release.
 2. Provider DB row gains `preset_slug`, `capability` (JSON),
    `model_capability_overrides` (JSON), and provider-level
@@ -49,8 +49,8 @@ fixed.
 (git ref); pytest-asyncio.
 
 **Where the executor works:**
-- All code lives in cubebox worktree
-  `/home/chris/cubebox/.worktrees/feat/llm-provider-platform`. Worktree
+- All code lives in cubeplex worktree
+  `/home/chris/cubeplex/.worktrees/feat/llm-provider-platform`. Worktree
   uses ports 8028 (backend) + 3028 (frontend) per `.worktree.env`.
 - Branch `feat/llm-provider-platform` is already current.
 - **No frontend changes** in this slice — UI wizard (M5) is the next
@@ -60,23 +60,23 @@ fixed.
 
 ## Pre-Implementation Review Amendments
 
-A pre-implementation review (verified against the live cubebox tree on
+A pre-implementation review (verified against the live cubeplex tree on
 2026-05-20) found four issues the executor MUST fold in. The task bodies
 below predate these; apply the amendments as you reach each task.
 
 **A1 — `provider_type` enum fan-out (blocks Create/Update after the
 Task 2 migration).** Changing the column value alone is not enough;
 several readers hard-code the OLD enum (`openai_compat` / `anthropic`):
-- `backend/cubebox/services/provider_service.py:284` — rejects anything
+- `backend/cubeplex/services/provider_service.py:284` — rejects anything
   not in `("openai_compat",)`. Update to accept the three wire-api
   literals (`openai-completions` / `anthropic-messages` /
   `openai-responses`).
-- `backend/cubebox/services/provider_service.py:341-348` — branches on
+- `backend/cubeplex/services/provider_service.py:341-348` — branches on
   `provider_type == "anthropic"` / `"openai_compat"`. Rewrite to use the
   value as the wire api directly.
-- `backend/cubebox/api/schemas/provider.py` — three `provider_type`
+- `backend/cubeplex/api/schemas/provider.py` — three `provider_type`
   defaults of `"openai_compat"`; change to `"openai-completions"`.
-- `backend/cubebox/seeders/provider_seeder.py:105-125` — drops the
+- `backend/cubeplex/seeders/provider_seeder.py:105-125` — drops the
   `api_to_provider_type(...)` call; assign `cfg_dict.get("api",
   "openai-completions")` directly.
 - Grep the frontend (`frontend/packages/**`) for `openai_compat` /
@@ -86,7 +86,7 @@ several readers hard-code the OLD enum (`openai_compat` / `anthropic`):
   Task 2; do not consider the migration done until these pass.
 
 **A2 — admin route placement.** Existing routers:
-`backend/cubebox/api/routes/v1/admin_providers.py` (provider rows) +
+`backend/cubeplex/api/routes/v1/admin_providers.py` (provider rows) +
 `admin.py`, `admin_mcp.py`, etc. There is **no** `admin_llm.py` yet.
 - `/admin/llm/presets` → new `admin_llm.py` (catalog is LLM-scoped, not
   a provider row). (Task 4.)
@@ -99,8 +99,8 @@ several readers hard-code the OLD enum (`openai_compat` / `anthropic`):
   `backend/tests/unit/test_llm_factory_cubepi.py` (not
   `tests/test_conversation_title.py` / `tests/test_llm_factory.py`).
 - Task 13: the seed module is
-  `backend/cubebox/seeders/provider_seeder.py` (not
-  `backend/cubebox/db/seeds/system_providers.py`).
+  `backend/cubeplex/seeders/provider_seeder.py` (not
+  `backend/cubeplex/db/seeds/system_providers.py`).
 - Task 1 Step 2: before editing, confirm `mcp` + `postgres` are still
   declared extras in the pinned cubepi commit's `pyproject.toml`.
 
@@ -130,12 +130,12 @@ cubepi legacy path (A-finding 8).
 ## File Structure
 
 ### Created
-- `backend/cubebox/api/routes/v1/admin_llm.py` — **catalog only**:
+- `backend/cubeplex/api/routes/v1/admin_llm.py` — **catalog only**:
   `GET /admin/llm/presets` (per Amendment A2 — catalog is LLM-scoped, not
   a provider row).
 
 ### Extended (existing routers, per Amendment A2)
-- `backend/cubebox/api/routes/v1/admin_providers.py` — the provider-row
+- `backend/cubeplex/api/routes/v1/admin_providers.py` — the provider-row
   endpoints go here, NOT in `admin_llm.py`:
   `POST /admin/providers/liveness` + `/{id}/liveness`,
   `POST /admin/providers/test` (pre-save, one model),
@@ -144,13 +144,13 @@ cubepi legacy path (A-finding 8).
   `GET /admin/providers/{id}` extension (Task 5).
 
 ### Created (cont.)
-- `backend/cubebox/services/provider_probe.py` — `ProbeResult`,
+- `backend/cubeplex/services/provider_probe.py` — `ProbeResult`,
   `ProbeStep`, the two-phase runner: `run_liveness(...)` (phase A,
   provider grain) + `run_model_probe(...)` (phase B, per model) + per-step
   helpers.
-- `backend/cubebox/llm/readiness.py` — pure readiness-derivation helper
+- `backend/cubeplex/llm/readiness.py` — pure readiness-derivation helper
   (§4.1 enum); single source of truth for status the UI renders.
-- `backend/cubebox/services/task_model_resolver.py` — small module
+- `backend/cubeplex/services/task_model_resolver.py` — small module
   with `resolve_task_model(factory, task)` per spec §4.6. Keeps
   `LLMFactory` from growing.
 - `backend/alembic/versions/<rev>_provider_capability_columns.py`
@@ -168,35 +168,35 @@ cubepi legacy path (A-finding 8).
 ### Modified
 - `backend/pyproject.toml` — switch `cubepi` dep to git ref of
   `feat/capability-descriptor`.
-- `backend/cubebox/models/provider.py` — `Provider` gains 6 columns:
+- `backend/cubeplex/models/provider.py` — `Provider` gains 6 columns:
   `preset_slug`, `capability`, `model_capability_overrides`,
   `last_liveness_at`, `last_liveness_status`, `last_liveness_summary`;
   `Model` gains 3 columns: `last_test_at`, `last_test_status`,
   `last_test_summary` (rev-3, spec §4.1).
-- `backend/cubebox/llm/factory.py` — `build_cubepi_provider` reads
+- `backend/cubeplex/llm/factory.py` — `build_cubepi_provider` reads
   capability JSON → typed CapabilityDescriptor; passes through. Replace
   the `_PROVIDER_TYPE_TO_API` mapping (provider_type stored value is
   now the wire api directly; keep the mapping as a one-row migration
   helper that backfills `openai_compat` → `openai-completions`).
-- `backend/cubebox/llm/config.py` — `ProviderConfig` and `ModelConfig`
+- `backend/cubeplex/llm/config.py` — `ProviderConfig` and `ModelConfig`
   gain optional `capability` and `model_capability_overrides` typed
   via cubepi's `CapabilityDescriptor`.
-- `backend/cubebox/services/conversation_title.py` — switch from
+- `backend/cubeplex/services/conversation_title.py` — switch from
   `factory.resolve_default_provider_and_config()` to
   `resolve_task_model(factory, "title")`.
-- `backend/cubebox/models/org_settings.py` — add `task_models` as a
+- `backend/cubeplex/models/org_settings.py` — add `task_models` as a
   recognised key constant (the model itself is generic JSON, but adding
-  the constant is the standard cubebox pattern).
-- `backend/cubebox/config.py` (or wherever LLMConfig lives) — accept
+  the constant is the standard cubeplex pattern).
+- `backend/cubeplex/config.py` (or wherever LLMConfig lives) — accept
   an optional top-level `llm.title_model` for yaml fallback.
 
 ### Reference (read-only)
 - `cubepi` git ref of `feat/capability-descriptor` —
   `cubepi.CapabilityDescriptor`, `cubepi.list_provider_presets()`,
   `cubepi.get_provider_preset(slug)`. Public surface used.
-- `backend/cubebox/api/routes/v1/conversations.py` — title-gen route
+- `backend/cubeplex/api/routes/v1/conversations.py` — title-gen route
   caller; doesn't need to change, the service does.
-- `backend/cubebox/services/conversation_title.py:_generate_title` —
+- `backend/cubeplex/services/conversation_title.py:_generate_title` —
   the LLM call site we're rerouting.
 
 ---
@@ -215,7 +215,7 @@ cd /home/chris/cubepi && git fetch origin feat/capability-descriptor \
 
 Capture the SHA — pin to this exact commit so a force-push on the
 cubepi branch (which is normal during the PR review loop) doesn't
-silently change cubebox behavior.
+silently change cubeplex behavior.
 
 - [ ] **Step 2: Update `backend/pyproject.toml`**
 
@@ -236,7 +236,7 @@ Use `<SHA>` from Step 1 (full 40-char hash for reproducibility).
 - [ ] **Step 3: Re-resolve and install**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend
 uv sync 2>&1 | tail -5
 ```
 
@@ -245,7 +245,7 @@ Expected: `+ cubepi @ git+...` line confirms the new resolution.
 - [ ] **Step 4: Smoke check the new cubepi surface**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   uv run python -c "
 from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
 from cubepi.providers.catalog import list_provider_presets, get_provider_preset
@@ -259,7 +259,7 @@ Expected: `capability OK, 20 presets` + `anthropic`.
 - [ ] **Step 5: Run existing backend tests for regression**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   uv run pytest tests/unit/test_conversation_title_pi.py tests/unit/test_llm_factory_cubepi.py -q 2>&1 | tail -5
 ```
 
@@ -270,7 +270,7 @@ no source changes yet, just dep bump.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform
 git add backend/pyproject.toml backend/uv.lock
 git commit -m "feat(deps): pin cubepi to feat/capability-descriptor commit (slice 2 prereq)"
 ```
@@ -285,12 +285,12 @@ git commit -m "feat(deps): pin cubepi to feat/capability-descriptor commit (slic
 > + do its toggles work?). Do NOT put `last_test_*` on the provider.
 
 **Files:**
-- Modify: `backend/cubebox/models/provider.py`
+- Modify: `backend/cubeplex/models/provider.py`
 - Create: `backend/alembic/versions/<rev>_provider_capability_columns.py`
 
 - [ ] **Step 1a: Add capability + liveness fields to `Provider`**
 
-Edit `backend/cubebox/models/provider.py`. After the existing
+Edit `backend/cubeplex/models/provider.py`. After the existing
 `extra_headers` field on `Provider`, insert:
 
 ```python
@@ -334,7 +334,7 @@ column" decision (that bars per-model capability *input*, not test
 - [ ] **Step 2: Generate the migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   source .venv/bin/activate && \
   alembic revision --autogenerate -m "provider capability + liveness + model test columns"
 ```
@@ -383,7 +383,7 @@ Mirror the inverse in `downgrade()`:
 - [ ] **Step 4: Apply migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   source .venv/bin/activate && alembic upgrade head 2>&1 | tail -3
 ```
 
@@ -392,10 +392,10 @@ Expected: migration runs without errors.
 - [ ] **Step 5: Verify schema**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   uv run python -c "
 from sqlalchemy import inspect
-from cubebox.db import get_engine
+from cubeplex.db import get_engine
 import asyncio
 async def run():
     async with get_engine().connect() as conn:
@@ -423,7 +423,7 @@ this codebase; the goal is just to confirm the columns exist.)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/provider.py backend/alembic/versions/
+git add backend/cubeplex/models/provider.py backend/alembic/versions/
 git commit -m "feat(db): provider capability + liveness + per-model test columns (slice 2 §4.1)"
 ```
 
@@ -432,13 +432,13 @@ git commit -m "feat(db): provider capability + liveness + per-model test columns
 ## Task 3: LLMFactory plumbs capability through to cubepi
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py`
-- Modify: `backend/cubebox/llm/config.py`
+- Modify: `backend/cubeplex/llm/factory.py`
+- Modify: `backend/cubeplex/llm/config.py`
 - Create: `backend/tests/test_provider_capability_factory.py`
 
 - [ ] **Step 1: Extend `ProviderConfig` with capability fields**
 
-Edit `backend/cubebox/llm/config.py`. Add to `ProviderConfig` (or
+Edit `backend/cubeplex/llm/config.py`. Add to `ProviderConfig` (or
 wherever the model-config types live):
 
 ```python
@@ -456,7 +456,7 @@ inside `build_cubepi_provider` to keep the config-layer light.
 
 - [ ] **Step 2: Plumb capability through the DB loader**
 
-In `backend/cubebox/llm/factory.py`'s `_load_db_provider_configs`,
+In `backend/cubeplex/llm/factory.py`'s `_load_db_provider_configs`,
 where the per-provider dict is constructed (current code reads
 `p.base_url`, `p.api_key`, etc.), add:
 
@@ -533,7 +533,7 @@ returning the value unchanged for one release (deprecated) — or
 delete it entirely if no external caller relies on it. Grep first:
 
 ```bash
-grep -rn "_provider_type_to_api\|api_to_provider_type" backend/cubebox backend/tests
+grep -rn "_provider_type_to_api\|api_to_provider_type" backend/cubeplex backend/tests
 ```
 
 If only the factory itself calls them, delete both. If anything else
@@ -549,8 +549,8 @@ Create `backend/tests/test_provider_capability_factory.py`:
 
 import pytest
 
-from cubebox.llm.config import LLMConfig, ProviderConfig, ModelConfig
-from cubebox.llm.factory import LLMFactory
+from cubeplex.llm.config import LLMConfig, ProviderConfig, ModelConfig
+from cubeplex.llm.factory import LLMFactory
 
 
 def _bare_provider_config(api: str = "openai-completions", **kw) -> ProviderConfig:
@@ -628,7 +628,7 @@ def test_build_openai_responses_provider_passes_capability():
 - [ ] **Step 6: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend && \
   uv run pytest tests/test_provider_capability_factory.py -v 2>&1 | tail -10
 ```
 
@@ -646,7 +646,7 @@ providers with empty capability JSON behave identically to today.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/cubebox/llm/config.py \
+git add backend/cubeplex/llm/factory.py backend/cubeplex/llm/config.py \
         backend/tests/test_provider_capability_factory.py
 git commit -m "feat(llm): plumb capability + overrides through factory to cubepi"
 ```
@@ -656,19 +656,19 @@ git commit -m "feat(llm): plumb capability + overrides through factory to cubepi
 ## Task 4: GET /admin/llm/presets endpoint
 
 **Files:**
-- Locate or create: `backend/cubebox/api/routes/v1/admin_llm.py`
+- Locate or create: `backend/cubeplex/api/routes/v1/admin_llm.py`
 - Create: `backend/tests/test_admin_llm_endpoints.py`
 
 - [ ] **Step 1: Locate or create the admin LLM router**
 
 ```bash
-grep -rn "admin/llm\|admin_llm\|llm_admin" backend/cubebox/api/routes 2>&1 | head -5
+grep -rn "admin/llm\|admin_llm\|llm_admin" backend/cubeplex/api/routes 2>&1 | head -5
 ```
 
 If a router file already serves admin LLM concerns, extend it. If
-not, create `backend/cubebox/api/routes/v1/admin_llm.py` with the
+not, create `backend/cubeplex/api/routes/v1/admin_llm.py` with the
 standard FastAPI router pattern used by sibling files in
-`backend/cubebox/api/routes/v1/`.
+`backend/cubeplex/api/routes/v1/`.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -696,7 +696,7 @@ async def test_list_provider_presets_returns_catalog(admin_client: AsyncClient):
     assert anthropic["capability"]["reasoning_level"]["kind"] == "int_budget"
 ```
 
-(Use the existing `admin_client` fixture if cubebox already has one;
+(Use the existing `admin_client` fixture if cubeplex already has one;
 adapt to whatever the established pattern is in
 `backend/tests/conftest.py`.)
 
@@ -726,7 +726,7 @@ async def list_provider_presets(
     return [p.model_dump(mode="json") for p in cubepi.list_provider_presets()]
 ```
 
-Wire the router into `backend/cubebox/api/app.py` (or wherever
+Wire the router into `backend/cubeplex/api/app.py` (or wherever
 routers are registered) if it's a new file.
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -740,8 +740,8 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_llm.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/api/routes/v1/admin_llm.py \
+        backend/cubeplex/api/app.py \
         backend/tests/test_admin_llm_endpoints.py
 git commit -m "feat(admin): GET /admin/llm/presets — serve cubepi catalog"
 ```
@@ -756,14 +756,14 @@ git commit -m "feat(admin): GET /admin/llm/presets — serve cubepi catalog"
 > re-derives readiness — it reads this field.
 
 **Files:**
-- Extend: `backend/cubebox/api/routes/v1/admin_providers.py` (provider-row
+- Extend: `backend/cubeplex/api/routes/v1/admin_providers.py` (provider-row
   endpoint, per Amendment A2 — NOT `admin_llm.py`).
 - Modify: `backend/tests/test_admin_llm_endpoints.py`
 
 - [ ] **Step 1: Locate the existing provider admin endpoint**
 
 ```bash
-grep -rn '"/admin/providers"\|admin/providers/{' backend/cubebox/api/routes 2>&1 | head
+grep -rn '"/admin/providers"\|admin/providers/{' backend/cubeplex/api/routes 2>&1 | head
 ```
 
 If `GET /admin/providers/{id}` exists, extend it to include
@@ -775,7 +775,7 @@ exist, add it.
 
 - [ ] **Step 1b: Add the readiness-derivation helper**
 
-Create `backend/cubebox/llm/readiness.py` with a pure function that maps
+Create `backend/cubeplex/llm/readiness.py` with a pure function that maps
 `(provider.last_liveness_status, model.last_test_status,
 capability_changed_since_test)` → the §4.1 readiness enum
 (`ready` / `degraded` / `provider_error` / `model_error` / `unavailable`
@@ -824,7 +824,7 @@ uv run pytest tests/test_admin_llm_endpoints.py::test_get_provider_includes_capa
 
 - [ ] **Step 4: Extend the provider + model response schemas**
 
-If `backend/cubebox/api/schemas/provider.py` (or equivalent) defines a
+If `backend/cubeplex/api/schemas/provider.py` (or equivalent) defines a
 `ProviderRead` pydantic model, add the capability + `last_liveness_*`
 fields, and add `last_test_*` + `readiness` to the per-model read
 schema. Otherwise update the inline serialization in the handler.
@@ -839,9 +839,9 @@ uv run pytest tests/test_admin_llm_endpoints.py -v 2>&1 | tail -5
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_providers.py \
-        backend/cubebox/api/schemas/provider.py \
-        backend/cubebox/llm/readiness.py \
+git add backend/cubeplex/api/routes/v1/admin_providers.py \
+        backend/cubeplex/api/schemas/provider.py \
+        backend/cubeplex/llm/readiness.py \
         backend/tests/test_admin_llm_endpoints.py
 git commit -m "feat(admin): GET /admin/providers/{id} returns liveness + per-model readiness"
 ```
@@ -864,12 +864,12 @@ git commit -m "feat(admin): GET /admin/providers/{id} returns liveness + per-mod
 > phase A. Phase B's only blocking step is `reasoning`.
 
 **Files:**
-- Create: `backend/cubebox/services/provider_probe.py`
+- Create: `backend/cubeplex/services/provider_probe.py`
 - Create: `backend/tests/test_provider_probe.py`
 
 - [ ] **Step 1: Define the result types**
 
-Create `backend/cubebox/services/provider_probe.py`:
+Create `backend/cubeplex/services/provider_probe.py`:
 
 ```python
 """Provider probe — exercises a candidate provider configuration end-to-end.
@@ -931,7 +931,7 @@ covers the orchestrator's overall-result computation.
 
 import pytest
 
-from cubebox.services.provider_probe import (
+from cubeplex.services.provider_probe import (
     ProbeResult, ProbeStep, ProbeError, _aggregate_overall,
 )
 
@@ -1009,7 +1009,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/provider_probe.py backend/tests/test_provider_probe.py
+git add backend/cubeplex/services/provider_probe.py backend/tests/test_provider_probe.py
 git commit -m "feat(probe): ProbeResult types + overall aggregation"
 ```
 
@@ -1018,7 +1018,7 @@ git commit -m "feat(probe): ProbeResult types + overall aggregation"
 ## Task 7: Probe step — liveness + reasoning
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_probe.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
 - Modify: `backend/tests/test_provider_probe.py`
 
 - [ ] **Step 1: Append failing tests**
@@ -1026,7 +1026,7 @@ git commit -m "feat(probe): ProbeResult types + overall aggregation"
 ```python
 import pytest
 
-from cubebox.services.provider_probe import (
+from cubeplex.services.provider_probe import (
     probe_liveness, probe_reasoning_toggle,
 )
 
@@ -1113,7 +1113,7 @@ Expected: ImportError on `probe_liveness`.
 
 - [ ] **Step 3: Implement**
 
-Append to `backend/cubebox/services/provider_probe.py`:
+Append to `backend/cubeplex/services/provider_probe.py`:
 
 ```python
 import asyncio
@@ -1219,7 +1219,7 @@ Expected: 8 passed (4 from Task 6 + 4 new).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/provider_probe.py backend/tests/test_provider_probe.py
+git add backend/cubeplex/services/provider_probe.py backend/tests/test_provider_probe.py
 git commit -m "feat(probe): liveness + reasoning toggle steps"
 ```
 
@@ -1228,7 +1228,7 @@ git commit -m "feat(probe): liveness + reasoning toggle steps"
 ## Task 8: Probe step — temperature + tools + streaming
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_probe.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
 - Modify: `backend/tests/test_provider_probe.py`
 
 Same TDD pattern as Task 7. Implement three more helpers:
@@ -1270,7 +1270,7 @@ def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeSt
 ## Task 9: Two-phase orchestrators (liveness + per-model probe)
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_probe.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
 - Modify: `backend/tests/test_provider_probe.py`
 
 > **rev-3:** there is no longer one `run_provider_probe`. The endpoint
@@ -1285,7 +1285,7 @@ def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeSt
 async def test_run_liveness_pass_and_fail():
     """Phase A: a good stub provider → ProbeStep(name='liveness', pass);
     a 401 stub → status='fail'."""
-    from cubebox.services.provider_probe import run_liveness
+    from cubeplex.services.provider_probe import run_liveness
     # ok = await run_liveness(provider_factory=<good stub>, model_id="m")
     # assert ok.name == "liveness" and ok.status == "pass"
     # bad = await run_liveness(provider_factory=<401 stub>, model_id="m")
@@ -1294,7 +1294,7 @@ async def test_run_liveness_pass_and_fail():
 @pytest.mark.asyncio
 async def test_run_model_probe_happy_path():
     """Phase B: stub provider with good events → overall=pass, reasoning passes."""
-    from cubebox.services.provider_probe import run_model_probe
+    from cubeplex.services.provider_probe import run_model_probe
     from cubepi.providers.capability import CapabilityDescriptor
 
     result = await run_model_probe(
@@ -1387,7 +1387,7 @@ git commit -m "feat(probe): two-phase orchestrators — run_liveness + run_model
 >   then phase B per model; returns `ProbeResult[]`; persists each.
 
 **Files:**
-- Extend: `backend/cubebox/api/routes/v1/admin_providers.py` (per
+- Extend: `backend/cubeplex/api/routes/v1/admin_providers.py` (per
   Amendment A2 — provider-row endpoints, NOT `admin_llm.py`).
 - Modify: `backend/tests/test_admin_llm_endpoints.py`
 
@@ -1413,7 +1413,7 @@ class ProviderTestRequest(BaseModel):
 @pytest.mark.asyncio
 async def test_probe_dryrun_returns_step_summary(admin_client, monkeypatch):
     # Monkey-patch both phase entry points to deterministic results.
-    from cubebox.services import provider_probe
+    from cubeplex.services import provider_probe
     async def stub_liveness(*a, **k):
         return provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=180)
     async def stub_model(*a, **k):
@@ -1487,7 +1487,7 @@ git commit -m "feat(admin): liveness + pre-save + per-model + all-models test en
 
 **Files:**
 - Modify: the agent LLM call path (where cubepi stream errors surface —
-  locate via `grep -rn "build_cubepi_provider\|except" backend/cubebox/llm`).
+  locate via `grep -rn "build_cubepi_provider\|except" backend/cubeplex/llm`).
 - Modify: `backend/tests/test_provider_runtime_writeback.py` (create).
 
 > Tests are point-in-time; keys get revoked and models retired between
@@ -1524,14 +1524,14 @@ git commit -m "feat(llm): runtime status writeback — 401->liveness fail, model
 ## Task 11: Task model resolver
 
 **Files:**
-- Create: `backend/cubebox/services/task_model_resolver.py`
-- Modify: `backend/cubebox/models/org_settings.py`
-- Modify: `backend/cubebox/llm/config.py` (yaml fallback)
+- Create: `backend/cubeplex/services/task_model_resolver.py`
+- Modify: `backend/cubeplex/models/org_settings.py`
+- Modify: `backend/cubeplex/llm/config.py` (yaml fallback)
 - Create: `backend/tests/test_task_model_resolver.py`
 
 - [ ] **Step 1: Define the OrgSettings key constant**
 
-In `backend/cubebox/models/org_settings.py` (or wherever cubebox keeps
+In `backend/cubeplex/models/org_settings.py` (or wherever cubeplex keeps
 its setting key constants), add:
 
 ```python
@@ -1544,7 +1544,7 @@ TASK_MODELS_KEY = "task_models"
 
 Add an optional `title_model: str | None` (and other task-model keys
 as forward-looking placeholders) to the pydantic `LLMConfig` schema in
-`backend/cubebox/llm/config.py`.
+`backend/cubeplex/llm/config.py`.
 
 - [ ] **Step 3: Write failing tests**
 
@@ -1555,7 +1555,7 @@ Create `backend/tests/test_task_model_resolver.py`:
 
 import pytest
 
-from cubebox.services.task_model_resolver import resolve_task_model
+from cubeplex.services.task_model_resolver import resolve_task_model
 
 
 @pytest.mark.asyncio
@@ -1614,7 +1614,7 @@ async def resolve_task_model(
 
     # 1. OrgSettings
     if factory._session and factory._org_id:
-        from cubebox.models.org_settings import OrgSettings as DBS, TASK_MODELS_KEY
+        from cubeplex.models.org_settings import OrgSettings as DBS, TASK_MODELS_KEY
         stmt = select(DBS).where(
             DBS.org_id == factory._org_id,
             DBS.key == TASK_MODELS_KEY,
@@ -1650,7 +1650,7 @@ git commit -m "feat(llm): resolve_task_model walks orgsettings -> yaml -> defaul
 ## Task 12: Title-gen service uses `resolve_task_model("title")`
 
 **Files:**
-- Modify: `backend/cubebox/services/conversation_title.py`
+- Modify: `backend/cubeplex/services/conversation_title.py`
 - Create: `backend/tests/e2e/test_title_model_routing_e2e.py`
 
 - [ ] **Step 1: Append failing E2E test**
@@ -1678,7 +1678,7 @@ async def test_title_uses_configured_title_model(client, db, ...):
 
 - [ ] **Step 2: Change the title-gen service**
 
-Open `backend/cubebox/services/conversation_title.py`. Find the call:
+Open `backend/cubeplex/services/conversation_title.py`. Find the call:
 
 ```python
 provider_name, model_id, provider_config = await factory.resolve_default_provider_and_config()
@@ -1687,7 +1687,7 @@ provider_name, model_id, provider_config = await factory.resolve_default_provide
 Replace with (drop-in — same 3-tuple, no separate config lookup):
 
 ```python
-from cubebox.services.task_model_resolver import resolve_task_model
+from cubeplex.services.task_model_resolver import resolve_task_model
 
 provider_name, model_id, provider_config = await resolve_task_model(factory, "title")
 ```
@@ -1714,17 +1714,17 @@ git commit -m "feat(title): route conversation_title via resolve_task_model('tit
 
 **Files:**
 - Modify: existing seed module (probably
-  `backend/cubebox/db/seeds/system_providers.py` or similar — locate
+  `backend/cubeplex/db/seeds/system_providers.py` or similar — locate
   via grep first).
 - Or: new alembic data-migration revision.
 
 - [ ] **Step 1: Locate the existing system-provider seed**
 
 ```bash
-grep -rn "system_providers\|seed_providers\|seed.*Provider" backend/cubebox 2>&1 | head -5
+grep -rn "system_providers\|seed_providers\|seed.*Provider" backend/cubeplex 2>&1 | head -5
 ```
 
-The cubebox bootstrap inserts a known set of system providers
+The cubeplex bootstrap inserts a known set of system providers
 (probably alicode/sensedeal/etc. from the yaml). Find that path and
 extend it.
 
@@ -1802,9 +1802,9 @@ def upgrade():
 alembic upgrade head
 uv run python -c "
 import asyncio, json
-from cubebox.db import async_session
+from cubeplex.db import async_session
 from sqlalchemy import select
-from cubebox.models.provider import Provider
+from cubeplex.models.provider import Provider
 
 async def run():
     async with async_session() as s:
@@ -1830,7 +1830,7 @@ git commit -m "feat(seed): backfill provider capability from cubepi catalog"
 - [ ] **Step 1: Full backend test run**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform/backend
 uv run pytest -q --tb=short -x 2>&1 | tail -10
 ```
 
@@ -1844,21 +1844,21 @@ Confirm the worktree env is loaded (the backend should boot on port
 8028, not 8000, per `.worktree.env`):
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform
 ./scripts/worktree-env doctor 2>&1 | tail -3
 ```
 
 - [ ] **Step 3: ruff + mypy if configured**
 
 ```bash
-cd backend && uv run ruff check cubebox tests && \
-  (grep -q "\[tool.mypy\]" pyproject.toml && uv run mypy cubebox || echo "mypy skipped")
+cd backend && uv run ruff check cubeplex tests && \
+  (grep -q "\[tool.mypy\]" pyproject.toml && uv run mypy cubeplex || echo "mypy skipped")
 ```
 
 - [ ] **Step 4: Boot the server, do a smoke admin call**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform
+cd /home/chris/cubeplex/.worktrees/feat/llm-provider-platform
 # (Use the worktree's wrapped backend launcher per docs/worktrees.md.)
 # After it's up, curl /api/v1/admin/llm/presets and confirm 20 entries.
 ```
@@ -1867,11 +1867,11 @@ cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform
 
 ```bash
 git push
-gh pr create --title "feat(cubebox): capability schema + admin probe + task-model routing" \
+gh pr create --title "feat(cubeplex): capability schema + admin probe + task-model routing" \
   --body "$(cat <<'EOF'
 ## Summary
 
-Slice 2 of the LLM Provider Platform spec — cubebox side. Brings
+Slice 2 of the LLM Provider Platform spec — cubeplex side. Brings
 `CapabilityDescriptor` end-to-end: provider rows carry it as JSON, the
 factory plumbs it through to cubepi, an admin Test endpoint validates
 a candidate config before save, and conversation title generation is
@@ -1895,7 +1895,7 @@ M7 (polish) are the next slice.
   backfill in the migration.
 - `LLMFactory.build_cubepi_provider` reads JSON capability + overrides
   → typed pydantic → passes to cubepi.
-- `cubebox/llm/readiness.py` — pure §4.1 readiness-derivation helper.
+- `cubeplex/llm/readiness.py` — pure §4.1 readiness-derivation helper.
 - `GET /api/v1/admin/llm/presets` — serves cubepi's 20-preset catalog.
 - `GET /api/v1/admin/providers/{id}` — includes capability,
   model_capability_overrides, provider last_liveness_*, and per-model

@@ -1,6 +1,6 @@
-# cubebox on docker-compose — Install Guide
+# cubeplex on docker-compose — Install Guide
 
-`docker compose up -d` deploys cubebox (backend + frontend + Postgres +
+`docker compose up -d` deploys cubeplex (backend + frontend + Postgres +
 Redis + rustfs S3 store) on one host. Same container images as the
 kubernetes mode; only the orchestration differs.
 
@@ -59,7 +59,7 @@ Use the kubernetes mode's build script — the images are identical:
 
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
-# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubebox-{backend,frontend}:<git-sha>
+# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:<git-sha>
 ```
 
 Then in `.env` set `BACKEND_TAG` and `FRONTEND_TAG` to that sha.
@@ -102,10 +102,10 @@ Optional (defaults shown):
 ```dotenv
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
-POSTGRES_USER=cubebox
-POSTGRES_DB=cubebox
-RUSTFS_ACCESS_KEY=cubebox
-OBJECTSTORE_BUCKET=cubebox
+POSTGRES_USER=cubeplex
+POSTGRES_DB=cubeplex
+RUSTFS_ACCESS_KEY=cubeplex
+OBJECTSTORE_BUCKET=cubeplex
 ```
 
 ### 4.2 `config.production.local.yaml`
@@ -148,7 +148,7 @@ production:
   redis:
     url: "redis://:<REDIS_PASSWORD>@redis:6379/0"
   objectstore:
-    access_key:    "cubebox"             # same as RUSTFS_ACCESS_KEY
+    access_key:    "cubeplex"             # same as RUSTFS_ACCESS_KEY
     access_secret: "<RUSTFS_SECRET_KEY>"
 ```
 
@@ -169,7 +169,7 @@ production:
   llm:
     default_model: "deepseek/deepseek-v4-flash"
     fallback_models:
-      - "cubebox/qwen3.5-plus-thinking"
+      - "cubeplex/qwen3.5-plus-thinking"
     providers:
       # Mode A — cubepi built-in preset (simplest)
       deepseek:
@@ -177,7 +177,7 @@ production:
         api_key: "sk-..."
 
       # Mode B — fully custom (private gateway, self-host)
-      cubebox:
+      cubeplex:
         base_url: "https://gateway.example.com/v1"
         api_key: "..."
         api: "openai-completions"
@@ -248,7 +248,7 @@ docker compose -f deploy/docker-compose/compose.yaml logs backend --tail=50
 
 | Symptom | Fix |
 |---|---|
-| `CUBEBOX_AUTH__VAULT_KEY is required` | add `auth.vault_key` in `secrets.yaml` |
+| `CUBEPLEX_AUTH__VAULT_KEY is required` | add `auth.vault_key` in `secrets.yaml` |
 | `connection refused on postgres:5432` | postgres still starting; should self-heal — check `docker compose ps` |
 | `Provider 'X' not found` | `default_model: "X/..."` references a provider not in `providers` |
 
@@ -260,7 +260,7 @@ connection is plain HTTP.
 
 ### Frontend → backend fails (CORS / 502)
 
-`compose.yaml` sets `CUBEBOX_API_URL=http://backend:8000` on the frontend
+`compose.yaml` sets `CUBEPLEX_API_URL=http://backend:8000` on the frontend
 container, so Next.js proxies `/api/*` server-side over the docker
 network. If you changed service names, fix that env too.
 

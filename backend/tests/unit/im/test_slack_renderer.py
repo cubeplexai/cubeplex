@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.im.slack.renderer import SlackOpDispatcher
-from cubebox.im.types import RenderState
+from cubeplex.im.slack.renderer import SlackOpDispatcher
+from cubeplex.im.types import RenderState
 
 
 def _make_state(run_id: str = "run-1") -> RenderState:

@@ -1,4 +1,4 @@
-from cubebox.services.conversation_search.rrf import rrf_fuse
+from cubeplex.services.conversation_search.rrf import rrf_fuse
 
 
 def test_same_doc_top_of_both_lists_wins() -> None:

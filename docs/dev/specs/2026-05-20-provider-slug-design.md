@@ -63,7 +63,7 @@ Config/seeded providers need no special case: their `name` is the yaml key, and
 
 ### `slugify` helper
 
-A pure function (e.g. `cubebox/utils/slug.py`): lowercase, replace any run of
+A pure function (e.g. `cubeplex/utils/slug.py`): lowercase, replace any run of
 non-`[a-z0-9]` with a single `-`, trim leading/trailing `-`. Empty result (name
 was all punctuation) falls back to `"provider"`. Used by both the create path
 and the migration backfill. Collision suffixing (`-2`, `-3`) lives in the

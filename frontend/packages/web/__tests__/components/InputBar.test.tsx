@@ -17,7 +17,7 @@ const storeMocks = vi.hoisted(() => ({
   state: { isStreaming: false, streamingConversationId: null as string | null },
 }))
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({
     setWorkspaceId: storeMocks.setWorkspaceId,
   }),
@@ -168,7 +168,7 @@ describe('InputBar', () => {
     expect(screen.getByRole('button', { name: 'Model and thinking effort' })).toBeInTheDocument()
   })
 
-  it('forwards the current model_key and thinking selection on send', async () => {
+  it('forwards the current model_key and reasoning selection on send', async () => {
     getPresetSelectionStore('ws-1').setState({
       modelKey: 'reasoning',
       thinking: 'medium',
@@ -191,7 +191,10 @@ describe('InputBar', () => {
     // send(client, conversationId, text, ids, optimisticAttachments, options)
     expect(callArgs[1]).toBe('conv-1')
     expect(callArgs[2]).toBe('hello')
-    expect(callArgs[5]).toEqual({ model_key: 'reasoning', thinking: 'medium' })
+    expect(callArgs[5]).toEqual({
+      model_key: 'reasoning',
+      reasoning: { mode: 'on', effort: 'medium', summary: 'none' },
+    })
   })
 
   it('blocks send while the conversation model is still syncing', () => {
@@ -216,7 +219,10 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(storeMocks.send).toHaveBeenCalled()
     })
-    expect(storeMocks.send.mock.calls[0][5]).toEqual({ model_key: null, thinking: 'off' })
+    expect(storeMocks.send.mock.calls[0][5]).toEqual({
+      model_key: null,
+      reasoning: { mode: 'off', effort: 'minimal', summary: 'none' },
+    })
   })
 
   it('creates a draft conversation on first file pick when onCreateConversation is provided', async () => {

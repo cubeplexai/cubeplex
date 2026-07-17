@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.auth.users import UserManager
-from cubebox.plugins import get_registry
+from cubeplex.auth.users import UserManager
+from cubeplex.plugins import get_registry
 
 
 @pytest.mark.asyncio

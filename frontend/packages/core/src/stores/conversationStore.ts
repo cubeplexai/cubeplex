@@ -8,6 +8,7 @@ import {
   renameConversation,
   setPinConversation,
   generateConversationTitle,
+  forkConversation,
   inviteToGroup,
   listConversationParticipants,
 } from '../api'
@@ -23,6 +24,11 @@ function sortPinnedFirst(list: Conversation[]): Conversation[] {
 export interface ConversationStore {
   conversations: Conversation[]
   activeId: string | null
+  /** The topic_id of the currently open conversation, or null if it's
+   *  topicless / unknown. Lets the sidebar auto-expand the active
+   *  conversation's topic even when that conversation falls outside the
+   *  limited flat conversation list. */
+  activeTopicId: string | null
   isLoading: boolean
   isFetchingList: boolean
   error: string | null
@@ -31,11 +37,13 @@ export interface ConversationStore {
   conversationParticipants: Record<string, ConversationParticipant[]>
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, title?: string, opts?: { draft?: boolean }): Promise<Conversation>
+  fork(client: ApiClient, sourceId: string, afterRunId: string): Promise<Conversation>
   remove(client: ApiClient, id: string): Promise<void>
   rename(client: ApiClient, id: string, title: string): Promise<void>
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
   generateTitle(client: ApiClient, id: string, content: string): Promise<void>
   setActive(id: string | null): void
+  setActiveTopic(topicId: string | null): void
   inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]): Promise<void>
   fetchConversationParticipants(client: ApiClient, conversationId: string): Promise<void>
 }
@@ -43,6 +51,7 @@ export interface ConversationStore {
 export const useConversationStore = create<ConversationStore>((set, get) => ({
   conversations: [],
   activeId: null,
+  activeTopicId: null,
   isLoading: false,
   isFetchingList: false,
   error: null,
@@ -74,6 +83,17 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  async fork(client: ApiClient, sourceId: string, afterRunId: string) {
+    // Mirrors `create`: hit the API, prepend the new conv into local
+    // state, return it. Without the prepend the sidebar / header /
+    // upgrade-to-topic controls render stale until the next list
+    // fetch — the user lands on a conv that exists on the server but
+    // not in the store. Errors propagate (MessageActions toasts them).
+    const convo = await forkConversation(client, sourceId, afterRunId)
+    set((s) => ({ conversations: sortPinnedFirst([convo, ...s.conversations]) }))
+    return convo
   },
 
   async remove(client: ApiClient, id: string) {
@@ -136,6 +156,10 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   setActive(id: string | null) {
     set({ activeId: id })
+  },
+
+  setActiveTopic(topicId: string | null) {
+    set({ activeTopicId: topicId })
   },
 
   async inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]) {

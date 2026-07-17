@@ -25,7 +25,7 @@ from cubepi.providers.base import (
     Usage,
 )
 
-from cubebox.agents.stream import StreamConverter, unwrap_deferred_in_message_dicts
+from cubeplex.agents.stream import StreamConverter, unwrap_deferred_in_message_dicts
 
 
 def _mk_assistant(tool_calls: list[ToolCall] | None = None) -> AssistantMessage:

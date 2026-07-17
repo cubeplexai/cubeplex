@@ -2,16 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
 // Direct import: useUserEvents is a client-only hook and must NOT be loaded
-// via the @cubebox/core barrel (would force react into server bundles for
+// via the @cubeplex/core barrel (would force react into server bundles for
 // any file importing AUTH_COOKIE_NAME).
-import { useUserEvents } from '@cubebox/core/hooks/useUserEvents'
+import { useUserEvents } from '@cubeplex/core/hooks/useUserEvents'
 import { Menu } from 'lucide-react'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { VerificationBanner } from '@/components/layout/VerificationBanner'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 
 /** Detect routes that mount AppShell — those render their own h-11 header
@@ -34,11 +35,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     useWorkspaceStore.getState().fetchList(client)
   }, [client])
 
-  // M9: pending owners (single_tenant first user before /setup completes) bounce to /setup.
-  const needsOrgSetup = useAuthStore((s) => s.user?.needs_org_setup)
+  // M9: pending owners (single_tenant first user before onboarding completes) bounce to /onboarding.
+  const needsOnboarding = useAuthStore((s) => s.user?.needs_onboarding)
   useEffect(() => {
-    if (needsOrgSetup) router.replace('/setup')
-  }, [needsOrgSetup, router])
+    if (needsOnboarding) router.replace('/onboarding')
+  }, [needsOnboarding, router])
 
   const pathname = usePathname()
   const drawerOpen = useMobileMenu((s) => s.isOpen)
@@ -77,7 +78,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               <Menu className="size-4" />
             </button>
-            <span className="ml-2 text-sm font-semibold tracking-tight">cubebox</span>
+            <CubePlexLogo
+              className="ml-2 gap-1.5"
+              markClassName="size-4"
+              wordmarkClassName="text-sm"
+            />
           </div>
         )}
         {/* Reserve remaining vertical space for the child page so the 44px

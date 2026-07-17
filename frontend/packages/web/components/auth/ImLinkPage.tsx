@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { ApiError, createApiClient, confirmImLink } from '@cubebox/core'
+import { ApiError, createApiClient, confirmImLink } from '@cubeplex/core'
 
 type Status = 'verifying' | 'success' | 'error'
 type ErrorKey = 'invalidToken' | 'emailMismatch' | 'notMember' | 'error'

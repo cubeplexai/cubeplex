@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.sso.attribute_mapping import (
+from cubeplex.sso.attribute_mapping import (
     AttributeMappingError,
     apply_mapping,
 )

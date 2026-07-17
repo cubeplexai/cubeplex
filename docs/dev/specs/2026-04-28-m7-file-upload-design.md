@@ -88,14 +88,14 @@
 
 | 路径 | 职责 |
 |---|---|
-| `cubebox/models/attachment.py` | SQLModel `Attachment` 表 |
-| `cubebox/repositories/attachment.py` | CRUD + 状态机操作 |
-| `cubebox/services/attachments.py` | 上传/校验/缩略图/生命周期 |
-| `cubebox/api/routes/v1/attachments.py` | 5 个 REST 端点 |
-| `cubebox/agents/hydrator.py` | run 启动前 sandbox 同步 |
-| `cubebox/tools/builtin/view_images.py` | vision 懒加载工具 |
-| `cubebox/agents/convert.py` | 扩展处理 `file_attachment` content type |
-| `cubebox/llm/capabilities.py` | LLMCapabilities 薄封装 |
+| `cubeplex/models/attachment.py` | SQLModel `Attachment` 表 |
+| `cubeplex/repositories/attachment.py` | CRUD + 状态机操作 |
+| `cubeplex/services/attachments.py` | 上传/校验/缩略图/生命周期 |
+| `cubeplex/api/routes/v1/attachments.py` | 5 个 REST 端点 |
+| `cubeplex/agents/hydrator.py` | run 启动前 sandbox 同步 |
+| `cubeplex/tools/builtin/view_images.py` | vision 懒加载工具 |
+| `cubeplex/agents/convert.py` | 扩展处理 `file_attachment` content type |
+| `cubeplex/llm/capabilities.py` | LLMCapabilities 薄封装 |
 | `frontend/.../attachmentStore.ts` | zustand staging 状态 |
 | `frontend/.../api/attachments.ts` | API 客户端方法 |
 | `frontend/.../components/chat/AttachmentChips.tsx` | 输入框上方 chip |
@@ -580,7 +580,7 @@ WHERE conversation_id = ? AND status IN ('pending', 'attached')
 
 **Local**：worktree 已拷入 `backend/.env` + `backend/config.development.local.yaml`（gitignored，从主 working tree 复制）。
 - `uv run pytest tests/e2e/test_attachments_*.py -s -v` 直接跑
-- 无需导出 `CUBEBOX_*` 或启 docker compose
+- 无需导出 `CUBEPLEX_*` 或启 docker compose
 - rustfs / postgres / redis 凭据走 `.env`
 
 **CI**：现有 GitHub Actions workflow 在 secrets 注入；M7 不引入新基础设施，无 CI workflow 改动。

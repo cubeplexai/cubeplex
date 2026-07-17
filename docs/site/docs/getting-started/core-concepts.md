@@ -5,11 +5,11 @@ title: Core Concepts
 
 # Core Concepts
 
-This page explains the building blocks of CubeBox. Understanding these will help you get the most out of the platform.
+This page explains the building blocks of CubePlex. Understanding these will help you get the most out of the platform.
 
 ## Organizations and workspaces
 
-CubeBox uses a hierarchical structure:
+CubePlex uses a hierarchical structure:
 
 **Organization** is the top-level account. It owns billing, provider API keys, and org-wide policies. Every user belongs to exactly one organization.
 
@@ -39,17 +39,17 @@ Skills are packaged capabilities you install to extend what the agent can do. Th
 
 **Three sources of skills:**
 
-- **Built-in** — ship with CubeBox.
+- **Built-in** — ship with CubePlex.
 - **Org-uploaded** — your organization creates and shares custom skills.
 - **Remote registries** — community skills hosted on registries like [skills.sh](https://skills.sh).
 
-You discover and install skills from within a conversation or from the workspace settings page. Once installed, the agent can use a skill whenever it is relevant to the conversation.
+You discover and install skills from within a conversation or from the **Skills** page in the workspace sidebar. Once installed, the agent can use a skill whenever it is relevant to the conversation.
 
 See the [Skills guide](../guides/skills/overview.md) for details.
 
 ## Memory
 
-Memory lets the agent remember information across conversations. CubeBox uses a three-tier system:
+Memory lets the agent remember information across conversations. CubePlex uses a three-tier system:
 
 | Tier | Visibility | Example use |
 |---|---|---|
@@ -76,16 +76,16 @@ Model Context Protocol (MCP) connectors let the agent call external APIs — dat
 
 **How the tool lifecycle works:**
 
-1. **Templates** — the catalog of available connectors (e.g., "GitHub", "Slack", "PostgreSQL").
-2. **Installs** — an admin installs a connector template into the workspace, providing credentials.
-3. **Grants** — the admin decides which workspace members can use the installed connector.
-4. **Active** — granted tools are available to the agent during conversations.
+1. **Templates** — the catalog of available connectors (e.g., "GitHub", "Slack", "PostgreSQL"). Templates live in the catalog with visibility scoped globally (all orgs), per-org, or per-workspace.
+2. **Enable** — a workspace admin (or org admin via distribute) enables a template for the workspace, making it available for credentialing.
+3. **Credentials** — the person using the tool connects credentials (org-, workspace-, or user-scoped), depending on the connector's authentication mode.
+4. **Runtime** — credentialed tools are available to the agent during conversations.
 
 **Authentication modes:**
 
-- **API key** — you provide a static key.
+- **Static credential** — you provide a fixed secret (an API key or bearer token), sent as an `Authorization` header, a custom header, or a query parameter depending on the connector.
 - **OAuth** — the connector walks you through an OAuth flow.
-- **Bearer token** — a pre-issued token.
+- **None** — the connector needs no credential.
 
 See the [MCP Tools guide](../guides/mcp/overview.md) for details.
 

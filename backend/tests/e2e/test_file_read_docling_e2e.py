@@ -13,10 +13,10 @@ from typing import cast
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.cache import reset_for_tests, set_redis
-from cubebox.config import config
-from cubebox.models.public_id import generate_public_id
-from cubebox.parsers import (
+from cubeplex.cache import reset_for_tests, set_redis
+from cubeplex.config import config
+from cubeplex.models.public_id import generate_public_id
+from cubeplex.parsers import (
     ParseOptions,
     TextOutput,
     UnchangedOutput,
@@ -62,7 +62,7 @@ async def test_pdf_flows_through_real_docling(
     _bound_registry_and_redis: None,
 ) -> None:
     """Read a small PDF via real docling-serve; assert markdown + parser metadata."""
-    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    monkeypatch.setenv("CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
     config.reload()
 
     reg = get_parser_registry()
@@ -87,7 +87,7 @@ async def test_unchanged_second_read_hits_dedup(
     _bound_registry_and_redis: None,
 ) -> None:
     """Same conversation + same bytes + same options → second read is UnchangedOutput."""
-    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    monkeypatch.setenv("CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
     config.reload()
 
     reg = get_parser_registry()

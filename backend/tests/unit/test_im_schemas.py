@@ -1,6 +1,6 @@
 """ImAccountOut should embed ImRuntimeStatus with the documented fields."""
 
-from cubebox.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
+from cubeplex.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
 
 
 def test_runtime_status_required_fields() -> None:

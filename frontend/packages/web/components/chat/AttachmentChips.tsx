@@ -1,6 +1,6 @@
 'use client'
 
-import { createApiClient, useAttachmentStore } from '@cubebox/core'
+import { createApiClient, useAttachmentStore } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { FileChip } from './FileChip'
 

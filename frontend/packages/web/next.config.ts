@@ -1,5 +1,5 @@
 // Worktree-specific overrides (ports, DB schema, Redis prefix). Loaded before
-// next.config so the rewrite rule below picks up CUBEBOX_API_URL from
+// next.config so the rewrite rule below picks up CUBEPLEX_API_URL from
 // .worktree.env when running inside a worktree. See
 // docs/dev/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
 import dotenv from 'dotenv'
@@ -24,13 +24,20 @@ export const ATTACHMENT_PROXY_BODY_LIMIT = '60mb'
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
 export const nextConfig: NextConfig = {
-  allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111', '192.168.1.150'],
+  allowedDevOrigins: [
+    'localhost',
+    '127.0.0.1',
+    '[::1]',
+    '192.168.1.111',
+    '192.168.1.150',
+    '192.168.1.215',
+  ],
   compress: false,
   // Produce a self-contained Next.js bundle (node_modules + server.js) for
   // container deploys. Gated on an env var so dev / E2E aren't affected —
   // the Dockerfile sets NEXT_OUTPUT=standalone before `next build`.
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
-  transpilePackages: ['katex', '@cubebox/core'],
+  transpilePackages: ['katex', '@cubeplex/core'],
   // Pin the workspace root to the frontend monorepo. Otherwise Next walks up,
   // finds the user's global ~/pnpm-lock.yaml (for global CLI tools), and picks
   // /home/chris as the root — which misroots module resolution (e.g. resolving
@@ -40,8 +47,8 @@ export const nextConfig: NextConfig = {
   // in .worktree.env so each worktree's browser cookies don't collide on
   // localhost (cookies are host-scoped, not port-scoped).
   env: {
-    NEXT_PUBLIC_AUTH_COOKIE_NAME: process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME ?? 'cubebox_auth',
-    NEXT_PUBLIC_CSRF_COOKIE_NAME: process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? 'cubebox_csrf',
+    NEXT_PUBLIC_AUTH_COOKIE_NAME: process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME ?? 'cubeplex_auth',
+    NEXT_PUBLIC_CSRF_COOKIE_NAME: process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? 'cubeplex_csrf',
   },
   experimental: {
     proxyClientMaxBodySize: ATTACHMENT_PROXY_BODY_LIMIT,
@@ -64,7 +71,7 @@ export const nextConfig: NextConfig = {
       fallback: [
         {
           source: '/api/:path*',
-          destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
+          destination: `${process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
         },
       ],
     }

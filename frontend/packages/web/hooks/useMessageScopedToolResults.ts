@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
-import { getSubagentSummary } from '@cubebox/core'
-import type { Message } from '@cubebox/core'
+import { getSubagentSummary } from '@cubeplex/core'
+import type { Message } from '@cubeplex/core'
 
 type ToolResultEntry = {
   content: string

@@ -3,9 +3,9 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: egress-inject
   labels:
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 webhooks:
-  - name: egress-inject.cubebox.io
+  - name: egress-inject.cubeplex.io
     # Scoped to the dedicated sandbox namespace so non-sandbox pods in other
     # namespaces are never intercepted.
     namespaceSelector:

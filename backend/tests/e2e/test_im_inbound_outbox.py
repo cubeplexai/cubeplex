@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.im_connector import (
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMThreadLink,
@@ -130,6 +130,10 @@ async def _seeded_engine_and_account() -> AsyncIterator[
                 )
                 await session.execute(
                     text("DELETE FROM im_thread_links WHERE account_id = :id"),
+                    {"id": _ACCOUNT_ID},
+                )
+                await session.execute(
+                    text("DELETE FROM im_connector_accounts WHERE id = :id"),
                     {"id": _ACCOUNT_ID},
                 )
                 await session.execute(

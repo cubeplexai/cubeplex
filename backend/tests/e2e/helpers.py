@@ -2,7 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from cubebox.agents.schemas import AgentEvent
+from cubeplex.agents.schemas import AgentEvent
 
 
 async def await_until[T](
@@ -86,6 +86,6 @@ def csrf_cookie_name() -> str:
     Handles per-worktree env overrides, so works across both CI (no suffix)
     and worktree environments (slot-specific suffix).
     """
-    from cubebox.config import config as _cubebox_config
+    from cubeplex.config import config as _cubeplex_config
 
-    return str(_cubebox_config.get("auth.csrf_cookie_name", "cubebox_csrf"))
+    return str(_cubeplex_config.get("auth.csrf_cookie_name", "cubeplex_csrf"))

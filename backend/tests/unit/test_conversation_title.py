@@ -1,12 +1,12 @@
 """Unit tests for the pure output-sanitisation helpers in
-``cubebox.services.conversation_title``.
+``cubeplex.services.conversation_title``.
 
 The orchestration around the LLM call is covered by existing conversation
 E2E tests; here we lock down the regex-y string handling that is easy to
 break and hard to spot in a manual smoke test.
 """
 
-from cubebox.services.conversation_title import (
+from cubeplex.services.conversation_title import (
     _clean_title,
     _extract_text,
     _looks_like_echo,

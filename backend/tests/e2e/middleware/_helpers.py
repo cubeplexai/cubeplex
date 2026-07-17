@@ -14,23 +14,23 @@ import httpx
 from tests.e2e.conftest import collect_sse_events
 
 # --- Tool names (verified against middleware source in Task 2) ---------------
-# cubebox/tools/registry.py — built-in tool
+# cubeplex/tools/registry.py — built-in tool
 TOOL_CALCULATOR = "calculator"
-# cubebox/middleware/todo.py:418
+# cubeplex/middleware/todo.py:418
 TOOL_TODO = "write_todos"
 # MemoryMiddleware itself is prompt-injection only (transform_system_prompt /
 # transform_context). The memory *tools* live separately in
-# cubebox/tools/builtin/memory.py and are registered into every cubepi run's
+# cubeplex/tools/builtin/memory.py and are registered into every cubepi run's
 # tool list via run_manager.py (lines 594-600). Three tools are exposed:
 TOOL_MEMORY_SAVE = "memory_save"
 TOOL_MEMORY_SEARCH = "memory_search"
 TOOL_MEMORY_UPDATE = "memory_update"
-# cubebox/middleware/sandbox.py:154 — primary code-execution tool
+# cubeplex/middleware/sandbox.py:154 — primary code-execution tool
 TOOL_SANDBOX = "execute"
-# cubebox/middleware/subagents.py:256
+# cubeplex/middleware/subagents.py:256
 TOOL_SUBAGENT_SPAWN = "subagent"
 
-# --- SSE event types (verified against cubebox/streams/run_manager.py) -------
+# --- SSE event types (verified against cubeplex/streams/run_manager.py) -------
 EVT_TEXT_DELTA = "text_delta"
 EVT_TOOL_CALL = "tool_call"
 EVT_TOOL_RESULT = "tool_result"
@@ -42,7 +42,7 @@ EVT_DONE = "done"
 # Trigger: approx_tokens(compressed_history) >= context_window * threshold_ratio
 # Defaults: fallback_context_window=64000, threshold_ratio=0.7 → ~44800 tokens.
 # Both values are overridable via config keys "compaction.fallback_context_window"
-# and "compaction.threshold_ratio" (cubebox/streams/run_manager.py lines 770-771).
+# and "compaction.threshold_ratio" (cubeplex/streams/run_manager.py lines 770-771).
 COMPACTION_NOTE = (
     "Compact when approx_tokens(compressed_history) >= context_window * 0.7 "
     "(default fallback_context_window=64000, giving ~44800 token threshold)"
@@ -62,7 +62,7 @@ def events_of_type(events: list[dict[str, Any]], type_name: str) -> list[dict[st
 def tool_call_names(events: list[dict[str, Any]]) -> list[str]:
     """Return the tool name from every tool_call event in the stream.
 
-    The cubebox SSE envelope nests tool identity under a 'data' sub-dict:
+    The cubeplex SSE envelope nests tool identity under a 'data' sub-dict:
       {'type': 'tool_call', 'data': {'name': 'calculator', ...}, ...}
     Falls back to top-level 'name' for forward-compatibility.
     """

@@ -1,6 +1,6 @@
 'use client'
 
-import type { MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { getProperties, getRequired, type SchemaNode } from '@/lib/jsonSchemaTypes'

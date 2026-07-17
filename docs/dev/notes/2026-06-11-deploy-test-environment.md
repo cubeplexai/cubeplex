@@ -32,7 +32,7 @@ Ports already bound on the host (so compose mode uses unusual ports):
 | 80 | host nginx (welcome page) |
 | 443 | docker-proxy |
 | 3000, 8000 | other things — both taken |
-| 30019 | ingress-nginx NodePort (cubebox k8s ingress) |
+| 30019 | ingress-nginx NodePort (cubeplex k8s ingress) |
 | 30999 | ingress-nginx NodePort https |
 | 18000 | **compose-mode backend (BACKEND_PORT=18000)** |
 | 13000 | **compose-mode frontend (FRONTEND_PORT=13000)** |
@@ -42,18 +42,18 @@ Ports already bound on the host (so compose mode uses unusual ports):
 
 Single node `node-1`, v1.27.9, Calico CNI, ingress-nginx already
 installed. Default StorageClass `openebs-hostpath` lives on `/var/openebs`
-(root partition) — DO NOT use it; the cubebox chart creates
-`cubebox-work-hostpath` pointing at `/work/cubebox`.
+(root partition) — DO NOT use it; the cubeplex chart creates
+`cubeplex-work-hostpath` pointing at `/work/cubeplex`.
 
 Namespaces touched:
 
 | ns | What |
 |---|---|
-| `cubebox` | helm release `cubebox` from `feat/helm-deploy` (merged to main) |
+| `cubeplex` | helm release `cubeplex` from `feat/helm-deploy` (merged to main) |
 | `opensandbox-system` | k8s OpenSandbox subchart (when bundled-on) |
 | `cubechat` | unrelated sibling product — **do not touch** |
 
-helm value bits worth knowing (lifted from the cubebox release on
+helm value bits worth knowing (lifted from the cubeplex release on
 node-1):
 
 - `image.registry` = `192.168.1.101:8050` (local Harbor)
@@ -67,9 +67,9 @@ node-1):
 - `192.168.1.101:8050`, `admin / Harbor12345`
 - node's docker daemon already has it in `insecure-registries`
 - repos used so far:
-  - `library/cubebox-backend:9ab4005f` and `:latest`
-  - `library/cubebox-backend:f72fafbb-secacc` and `:secacc`
-  - `library/cubebox-frontend:9ab4005f` and `:latest`
+  - `library/cubeplex-backend:9ab4005f` and `:latest`
+  - `library/cubeplex-backend:f72fafbb-secacc` and `:secacc`
+  - `library/cubeplex-frontend:9ab4005f` and `:latest`
 - the user's local box (`192.168.1.150`) does NOT have this registry as
   insecure, and goes through proxy at `127.0.0.1:7892`. To get an image
   from local to remote, `docker save … | ssh root@192.168.1.101 cat > foo.tar`,
@@ -77,7 +77,7 @@ node-1):
 
 ## Compose-mode deploy test (most recent layout)
 
-- working dir on node: **`/work/cubebox-compose/`**
+- working dir on node: **`/work/cubeplex-compose/`**
 - canonical files come from `deploy/docker-compose/` in this repo
 - `.env`, `config/config.production.local.yaml`,
   `config/config.production.secrets.yaml`, `config/opensandbox.toml` are
@@ -90,7 +90,7 @@ node-1):
   - api_key lives in `backend/config.development.local.yaml` (the user's
     own checkout); compose `config.production.secrets.yaml` was filled
     from there
-- Sandbox image used: `hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531`
+- Sandbox image used: `hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531`
 - OpenSandbox server image used:
   `hub.sensedeal.vip/library/opensandbox-server:v0.1.14-pvc-cleanup`
   (loaded via `docker save | ssh load` because docker.io was too slow)
@@ -99,7 +99,7 @@ Bring it back up:
 
 ```bash
 ssh root@192.168.1.101
-cd /work/cubebox-compose
+cd /work/cubeplex-compose
 docker-compose -f compose.yaml -f compose.opensandbox.yaml up -d
 ```
 
@@ -123,7 +123,7 @@ bash /tmp/sb-e2e.sh   # the script the manual e2e ran from; see the
 | `docker pull rustfs/rustfs:latest` runs at ~50 KB/s on the node | docker.io / m.daocloud.io flaky in CN. `docker save … | ssh load` from the local box (which has the image cached). |
 | `docker pull opensandbox/server:latest` ditto | same — load from the local hub.sensedeal mirror tag |
 | backend logs `Sandbox health check timed out … domain=opensandbox-server:8090, use_server_proxy=True` | OpenSandbox v0.1.x drops the port from proxied endpoint URLs (see memory `project_opensandbox_proxy_port_drop`). Fix: set `sandbox.use_server_proxy: false`; backend reaches sandbox via the host-mapped bridge port, which OpenSandbox embeds correctly. |
-| `host.docker.internal` unreachable from cubebox-backend container | Linux Docker engines don't auto-resolve it. The compose.opensandbox.yaml overlay sets `extra_hosts: host.docker.internal:host-gateway` on backend. |
+| `host.docker.internal` unreachable from cubeplex-backend container | Linux Docker engines don't auto-resolve it. The compose.opensandbox.yaml overlay sets `extra_hosts: host.docker.internal:host-gateway` on backend. |
 | `secureAccess is not supported when runtime.type=docker` (HTTP 400) | docker runtime rejects secureAccess. Set `sandbox.secure_access: false` (new in commit `509ebe91`). k8s-mode keeps the default `true`. |
 | `init-pvc` pod on the cluster ErrImagePull-ing `openebs/linux-utils:3.5.0` | preload once: `docker pull openebs/linux-utils:3.5.0` then `kubectl -n openebs rollout restart deploy/openebs-localpv-provisioner` |
 | `helm dependency update` failing on bitnami subcharts | the chart does NOT depend on bitnami — postgres/redis/rustfs are self-rendered. If you see this error you're on a branch from before that refactor. |
@@ -131,9 +131,9 @@ bash /tmp/sb-e2e.sh   # the script the manual e2e ran from; see the
 
 ## How to re-run the docker-runtime OpenSandbox e2e from scratch
 
-1. ssh in, ensure the helm cubebox release is **not** running on the
+1. ssh in, ensure the helm cubeplex release is **not** running on the
    ports compose wants (`ss -tln | grep 18000`).
-2. `cd /work/cubebox-compose && docker-compose -f compose.yaml -f compose.opensandbox.yaml up -d`
+2. `cd /work/cubeplex-compose && docker-compose -f compose.yaml -f compose.opensandbox.yaml up -d`
 3. Wait for `docker-compose ps` to show backend + opensandbox-server `(healthy)`.
 4. Drive the e2e script (paste from `deploy/docker-compose/scripts/e2e.sh`
    adjusted to talk to `localhost:18000`, or use the inline shell
@@ -154,6 +154,6 @@ done
 - Helm chart's egress webhook subsystem against a sandbox pod that
   actually calls the exchange endpoint (chart renders + lints; live
   flow requires bringing up OpenSandbox in k8s mode AND issuing a
-  sandbox creation through cubebox — none of that has been run).
+  sandbox creation through cubeplex — none of that has been run).
 - compose mode with `auth.cookie_secure: true` behind a reverse proxy.
 - Multi-host / production-grade settings (HA postgres, real backups, etc.).

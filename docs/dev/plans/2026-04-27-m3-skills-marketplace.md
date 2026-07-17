@@ -15,17 +15,17 @@
 ## File Structure
 
 ### Backend new
-- `backend/cubebox/skills/__init__.py` — package
-- `backend/cubebox/skills/frontmatter.py` — `SkillFrontmatter` dataclass + `parse_skill_md()`
-- `backend/cubebox/skills/cache.py` — local extraction cache keyed by `skill_version_id`
-- `backend/cubebox/skills/seeder.py` — preinstalled-skills seeder + Redis lock
-- `backend/cubebox/skills/service.py` — `SkillCatalogService` + `SkillPublishService`
-- `backend/cubebox/skills/storage_paths.py` — single source of truth for object-storage layout
-- `backend/cubebox/models/skill.py` — 5 SQLModel classes
-- `backend/cubebox/repositories/skill.py` — repos for the 5 tables
-- `backend/cubebox/api/routes/v1/admin_skills.py`
-- `backend/cubebox/api/routes/v1/ws_skills.py`
-- `backend/cubebox/api/schemas/skill.py` — pydantic response models
+- `backend/cubeplex/skills/__init__.py` — package
+- `backend/cubeplex/skills/frontmatter.py` — `SkillFrontmatter` dataclass + `parse_skill_md()`
+- `backend/cubeplex/skills/cache.py` — local extraction cache keyed by `skill_version_id`
+- `backend/cubeplex/skills/seeder.py` — preinstalled-skills seeder + Redis lock
+- `backend/cubeplex/skills/service.py` — `SkillCatalogService` + `SkillPublishService`
+- `backend/cubeplex/skills/storage_paths.py` — single source of truth for object-storage layout
+- `backend/cubeplex/models/skill.py` — 5 SQLModel classes
+- `backend/cubeplex/repositories/skill.py` — repos for the 5 tables
+- `backend/cubeplex/api/routes/v1/admin_skills.py`
+- `backend/cubeplex/api/routes/v1/ws_skills.py`
+- `backend/cubeplex/api/schemas/skill.py` — pydantic response models
 - `backend/alembic/versions/<rev>_m3_skills_marketplace.py`
 - `backend/scripts/dev/auto_install_preinstalled_for_existing_orgs.py`
 - `backend/tests/e2e/test_skills_marketplace.py`
@@ -34,20 +34,20 @@
 - `backend/tests/fixtures/skill_frontmatter/*.json`
 
 ### Backend modify
-- `backend/cubebox/models/organization.py` — add `slug` column
-- `backend/cubebox/auth/users.py` — `UserManager.on_after_register` slugify
-- `backend/cubebox/middleware/skills.py` — refactor to catalog-driven
-- `backend/cubebox/middleware/artifacts.py` — note `artifact_type="skill"` (Batch 2)
-- `backend/cubebox/tools/builtin/load_skill.py` — refactor to catalog
-- `backend/cubebox/agents/graph.py` — drop `skills` param, inject service
-- `backend/cubebox/sandbox/base.py` — add `has_synced` / `mark_synced` to `Sandbox` ABC
-- `backend/cubebox/sandbox/lazy.py` — sync hook in `_ensure()`
-- `backend/cubebox/sandbox/manager.py` — drop `SkillLoader` call
-- `backend/cubebox/api/app.py` — register seeder + new routers
+- `backend/cubeplex/models/organization.py` — add `slug` column
+- `backend/cubeplex/auth/users.py` — `UserManager.on_after_register` slugify
+- `backend/cubeplex/middleware/skills.py` — refactor to catalog-driven
+- `backend/cubeplex/middleware/artifacts.py` — note `artifact_type="skill"` (Batch 2)
+- `backend/cubeplex/tools/builtin/load_skill.py` — refactor to catalog
+- `backend/cubeplex/agents/graph.py` — drop `skills` param, inject service
+- `backend/cubeplex/sandbox/base.py` — add `has_synced` / `mark_synced` to `Sandbox` ABC
+- `backend/cubeplex/sandbox/lazy.py` — sync hook in `_ensure()`
+- `backend/cubeplex/sandbox/manager.py` — drop `SkillLoader` call
+- `backend/cubeplex/api/app.py` — register seeder + new routers
 - `backend/config.yaml` — drop `sandbox.skills.builtin_dir`
 
 ### Backend delete
-- `backend/cubebox/sandbox/skills.py`
+- `backend/cubeplex/sandbox/skills.py`
 
 ### Backend rename
 - `backend/skills/builtin/` → `backend/skills/preinstalled/` (with SKILL.md path edits)
@@ -97,8 +97,8 @@
 ## Task 0: `Organization.slug` column + bootstrap
 
 **Files:**
-- Modify: `backend/cubebox/models/organization.py`
-- Modify: `backend/cubebox/auth/users.py`
+- Modify: `backend/cubeplex/models/organization.py`
+- Modify: `backend/cubeplex/auth/users.py`
 - Create: `backend/alembic/versions/<rev>_add_org_slug.py`
 - Test: `backend/tests/e2e/test_register_bootstrap.py` (extend existing)
 - Test: `backend/tests/unit/test_org_slugify.py` (new, for the helper)
@@ -112,7 +112,7 @@ Create `backend/tests/unit/test_org_slugify.py`:
 
 import pytest
 
-from cubebox.auth.users import _slugify_org_name
+from cubeplex.auth.users import _slugify_org_name
 
 
 @pytest.mark.parametrize(
@@ -142,11 +142,11 @@ def test_slugify_empty_falls_back() -> None:
 uv run pytest tests/unit/test_org_slugify.py -v
 ```
 
-Expected: FAIL — `ImportError: cannot import name '_slugify_org_name' from 'cubebox.auth.users'`.
+Expected: FAIL — `ImportError: cannot import name '_slugify_org_name' from 'cubeplex.auth.users'`.
 
 - [ ] **Step 3: Add the slug helper to `users.py`**
 
-Open `backend/cubebox/auth/users.py` and add (after the existing imports, before `UserManager`):
+Open `backend/cubeplex/auth/users.py` and add (after the existing imports, before `UserManager`):
 
 ```python
 import re
@@ -181,7 +181,7 @@ Expected: 8 passed.
 
 - [ ] **Step 5: Add `slug` column to Organization model**
 
-Open `backend/cubebox/models/organization.py` and replace the file with:
+Open `backend/cubeplex/models/organization.py` and replace the file with:
 
 ```python
 """Organization model — top-level tenant container."""
@@ -266,7 +266,7 @@ def _slugify(name: str) -> str:
 
 ```bash
 uv run alembic upgrade head
-uv run python -c "from cubebox.db.engine import engine; import asyncio; from sqlalchemy import text; \
+uv run python -c "from cubeplex.db.engine import engine; import asyncio; from sqlalchemy import text; \
   conn=asyncio.run(engine.connect().__aenter__()); \
   print(asyncio.run(conn.execute(text('DESCRIBE organizations'))).fetchall())"
 ```
@@ -277,7 +277,7 @@ Expected: row for `slug` with type `varchar(32)`, NOT NULL.
 
 - [ ] **Step 8: Wire slugify into `UserManager.on_after_register`**
 
-Open `backend/cubebox/auth/users.py`. Locate the `on_after_register` method (where it creates a personal Org). Find the line that constructs `Organization(name=...)`. Replace the org-creation block with:
+Open `backend/cubeplex/auth/users.py`. Locate the `on_after_register` method (where it creates a personal Org). Find the line that constructs `Organization(name=...)`. Replace the org-creation block with:
 
 ```python
 async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
@@ -354,8 +354,8 @@ Expected: all pass.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/cubebox/models/organization.py \
-        backend/cubebox/auth/users.py \
+git add backend/cubeplex/models/organization.py \
+        backend/cubeplex/auth/users.py \
         backend/alembic/versions/*_add_org_slug.py \
         backend/tests/unit/test_org_slugify.py \
         backend/tests/e2e/test_register_bootstrap.py
@@ -367,12 +367,12 @@ git commit -m "feat(m3): add Organization.slug column with auto-slugify on regis
 ## Task 1: Skill data model — 5 SQLModel classes
 
 **Files:**
-- Create: `backend/cubebox/models/skill.py`
-- Modify: `backend/cubebox/models/__init__.py` (export new classes)
+- Create: `backend/cubeplex/models/skill.py`
+- Modify: `backend/cubeplex/models/__init__.py` (export new classes)
 
 - [ ] **Step 1: Write the model file**
 
-Create `backend/cubebox/models/skill.py`:
+Create `backend/cubeplex/models/skill.py`:
 
 ```python
 """Skill catalog models — see docs/superpowers/specs/2026-04-26-skills-marketplace-design.md § 3."""
@@ -384,7 +384,7 @@ from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class Skill(SQLModel, table=True):
@@ -482,10 +482,10 @@ class OrgPreinstalledTombstone(SQLModel, table=True):
 
 - [ ] **Step 2: Re-export from `models/__init__.py`**
 
-Open `backend/cubebox/models/__init__.py` and add to the existing exports:
+Open `backend/cubeplex/models/__init__.py` and add to the existing exports:
 
 ```python
-from cubebox.models.skill import (
+from cubeplex.models.skill import (
     OrgPreinstalledTombstone,
     OrgSkillInstall,
     Skill,
@@ -515,7 +515,7 @@ This creates `backend/alembic/versions/<rev>_m3_skills_marketplace.py`. Open it 
 - [ ] **Step 4: Run mypy + apply migration**
 
 ```bash
-uv run mypy cubebox/models/skill.py
+uv run mypy cubeplex/models/skill.py
 uv run alembic upgrade head
 uv run alembic downgrade -1   # confirm reversibility
 uv run alembic upgrade head
@@ -526,8 +526,8 @@ Expected: mypy clean; alembic upgrade/downgrade clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/skill.py \
-        backend/cubebox/models/__init__.py \
+git add backend/cubeplex/models/skill.py \
+        backend/cubeplex/models/__init__.py \
         backend/alembic/versions/*_m3_skills_marketplace.py
 git commit -m "feat(m3): skill catalog models + Alembic migration"
 ```
@@ -537,8 +537,8 @@ git commit -m "feat(m3): skill catalog models + Alembic migration"
 ## Task 2: Skill repositories
 
 **Files:**
-- Create: `backend/cubebox/repositories/skill.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/skill.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 - Test: `backend/tests/e2e/test_skill_repositories.py`
 
 - [ ] **Step 1: Write the failing E2E test**
@@ -550,8 +550,8 @@ Create `backend/tests/e2e/test_skill_repositories.py`:
 
 import pytest
 
-from cubebox.models import OrgSkillInstall, Skill, SkillVersion
-from cubebox.repositories.skill import (
+from cubeplex.models import OrgSkillInstall, Skill, SkillVersion
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
@@ -645,7 +645,7 @@ Expected: FAIL — `cannot import name 'SkillRepository'`.
 
 - [ ] **Step 3: Implement the repositories**
 
-Create `backend/cubebox/repositories/skill.py`:
+Create `backend/cubeplex/repositories/skill.py`:
 
 ```python
 """Skill catalog repositories — see spec § 3."""
@@ -656,14 +656,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import (
+from cubeplex.models import (
     OrgPreinstalledTombstone,
     OrgSkillInstall,
     Skill,
     SkillVersion,
     WorkspaceSkillBinding,
 )
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.repositories.base import ScopedRepository
 
 
 class SkillRepository:
@@ -943,10 +943,10 @@ class OrgPreinstalledTombstoneRepository:
 
 - [ ] **Step 4: Re-export from `repositories/__init__.py`**
 
-Add to `backend/cubebox/repositories/__init__.py`:
+Add to `backend/cubeplex/repositories/__init__.py`:
 
 ```python
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
     SkillRepository,
@@ -968,8 +968,8 @@ Expected: 3 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/repositories/skill.py \
-        backend/cubebox/repositories/__init__.py \
+git add backend/cubeplex/repositories/skill.py \
+        backend/cubeplex/repositories/__init__.py \
         backend/tests/e2e/test_skill_repositories.py
 git commit -m "feat(m3): skill repositories with E2E tests"
 ```
@@ -979,9 +979,9 @@ git commit -m "feat(m3): skill repositories with E2E tests"
 ## Task 3: Frontmatter parser + storage path helper
 
 **Files:**
-- Create: `backend/cubebox/skills/__init__.py` (empty)
-- Create: `backend/cubebox/skills/frontmatter.py`
-- Create: `backend/cubebox/skills/storage_paths.py`
+- Create: `backend/cubeplex/skills/__init__.py` (empty)
+- Create: `backend/cubeplex/skills/frontmatter.py`
+- Create: `backend/cubeplex/skills/storage_paths.py`
 - Test: `backend/tests/unit/test_skill_frontmatter.py`
 
 - [ ] **Step 1: Write failing unit tests**
@@ -993,7 +993,7 @@ Create `backend/tests/unit/test_skill_frontmatter.py`:
 
 import pytest
 
-from cubebox.skills.frontmatter import (
+from cubeplex.skills.frontmatter import (
     InvalidFrontmatterError,
     SkillFrontmatter,
     parse_skill_md,
@@ -1124,13 +1124,13 @@ version: " 1 0 "
 uv run pytest tests/unit/test_skill_frontmatter.py -v
 ```
 
-Expected: ImportError on `cubebox.skills.frontmatter`.
+Expected: ImportError on `cubeplex.skills.frontmatter`.
 
 - [ ] **Step 3: Implement parser**
 
-Create `backend/cubebox/skills/__init__.py` (empty file).
+Create `backend/cubeplex/skills/__init__.py` (empty file).
 
-Create `backend/cubebox/skills/frontmatter.py`:
+Create `backend/cubeplex/skills/frontmatter.py`:
 
 ```python
 """SKILL.md YAML frontmatter parser. Replaces the regex parser in middleware/skills.py.
@@ -1243,7 +1243,7 @@ Expected: 11 passed.
 
 - [ ] **Step 5: Implement storage paths helper**
 
-Create `backend/cubebox/skills/storage_paths.py`:
+Create `backend/cubeplex/skills/storage_paths.py`:
 
 ```python
 """Single source of truth for object-storage layout used by skill files.
@@ -1273,9 +1273,9 @@ def skill_object_key(prefix: str, rel_path: str) -> str:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/__init__.py \
-        backend/cubebox/skills/frontmatter.py \
-        backend/cubebox/skills/storage_paths.py \
+git add backend/cubeplex/skills/__init__.py \
+        backend/cubeplex/skills/frontmatter.py \
+        backend/cubeplex/skills/storage_paths.py \
         backend/tests/unit/test_skill_frontmatter.py
 git commit -m "feat(m3): YAML frontmatter parser + storage path helper"
 ```
@@ -1285,7 +1285,7 @@ git commit -m "feat(m3): YAML frontmatter parser + storage path helper"
 ## Task 4: Skill cache layer (local extraction cache)
 
 **Files:**
-- Create: `backend/cubebox/skills/cache.py`
+- Create: `backend/cubeplex/skills/cache.py`
 - Test: `backend/tests/e2e/test_skill_cache.py`
 
 - [ ] **Step 1: Write failing E2E test**
@@ -1297,9 +1297,9 @@ Create `backend/tests/e2e/test_skill_cache.py`:
 
 import pytest
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 @pytest.mark.asyncio
@@ -1346,7 +1346,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Implement cache**
 
-Create `backend/cubebox/skills/cache.py`:
+Create `backend/cubeplex/skills/cache.py`:
 
 ```python
 """Local extraction cache for skill files fetched from object storage.
@@ -1364,7 +1364,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.objectstore import get_objectstore_client
 
 
 class SkillCache:
@@ -1438,11 +1438,11 @@ class SkillCache:
 - [ ] **Step 4: Inspect object-store client signatures**
 
 ```bash
-uv run python -c "from cubebox.objectstore import get_objectstore_client; \
+uv run python -c "from cubeplex.objectstore import get_objectstore_client; \
   c=get_objectstore_client(); print(dir(c))"
 ```
 
-If `list_keys` / `put` / `get` aren't the actual method names, adjust the cache implementation to match (likely `list_objects` / `upload_bytes` / `download_bytes`). Examine `backend/cubebox/objectstore/client.py` and tweak the calls in `cache.py`. Also tweak the test seeding calls accordingly.
+If `list_keys` / `put` / `get` aren't the actual method names, adjust the cache implementation to match (likely `list_objects` / `upload_bytes` / `download_bytes`). Examine `backend/cubeplex/objectstore/client.py` and tweak the calls in `cache.py`. Also tweak the test seeding calls accordingly.
 
 - [ ] **Step 5: Run, verify pass**
 
@@ -1455,7 +1455,7 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/cache.py \
+git add backend/cubeplex/skills/cache.py \
         backend/tests/e2e/test_skill_cache.py
 git commit -m "feat(m3): skill cache (object-storage extraction with per-key locks)"
 ```
@@ -1465,7 +1465,7 @@ git commit -m "feat(m3): skill cache (object-storage extraction with per-key loc
 ## Task 5: Preinstalled seeder + Redis lock
 
 **Files:**
-- Create: `backend/cubebox/skills/seeder.py`
+- Create: `backend/cubeplex/skills/seeder.py`
 - Test: `backend/tests/e2e/test_skills_seeder.py`
 - Modify: `backend/skills/builtin/` → rename to `backend/skills/preinstalled/` (later in Task 13; for now just create alongside or reference paths from config)
 
@@ -1483,9 +1483,9 @@ from pathlib import Path
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.config import config as _config
-from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
-from cubebox.skills.seeder import seed_preinstalled_skills
+from cubeplex.config import config as _config
+from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
+from cubeplex.skills.seeder import seed_preinstalled_skills
 
 
 def _write_skill_md(dir_: Path, name: str, version: str, description: str = "x") -> None:
@@ -1570,7 +1570,7 @@ async def test_seed_redis_lock_prevents_concurrent_runs(
     _write_skill_md(src / "x", name="x", version="1.0.0")
 
     # Acquire the lock manually so seeder finds it held
-    holder = redis_client.lock("cubebox:lock:skill_seeder", timeout=10, blocking=False)
+    holder = redis_client.lock("cubeplex:lock:skill_seeder", timeout=10, blocking=False)
     acquired = await holder.acquire()
     assert acquired
 
@@ -1597,7 +1597,7 @@ You may need to add a `redis_client` fixture in `tests/e2e/conftest.py` if it do
 @pytest_asyncio.fixture
 async def redis_client() -> AsyncIterator[Redis]:
     client = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=False,
     )
     try:
@@ -1612,11 +1612,11 @@ async def redis_client() -> AsyncIterator[Redis]:
 uv run pytest tests/e2e/test_skills_seeder.py -v
 ```
 
-Expected: ImportError on `cubebox.skills.seeder`.
+Expected: ImportError on `cubeplex.skills.seeder`.
 
 - [ ] **Step 3: Implement seeder**
 
-Create `backend/cubebox/skills/seeder.py`:
+Create `backend/cubeplex/skills/seeder.py`:
 
 ```python
 """Preinstalled-skills seeder: walks preinstalled/ → upserts global skill rows
@@ -1632,12 +1632,12 @@ from redis.asyncio import Redis
 from redis.exceptions import LockNotOwnedError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
-from cubebox.skills.frontmatter import parse_skill_md
-from cubebox.skills.storage_paths import global_skill_prefix, skill_object_key
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
+from cubeplex.skills.frontmatter import parse_skill_md
+from cubeplex.skills.storage_paths import global_skill_prefix, skill_object_key
 
-LOCK_KEY = "cubebox:lock:skill_seeder"
+LOCK_KEY = "cubeplex:lock:skill_seeder"
 LOCK_TTL_SECONDS = 60
 
 
@@ -1748,7 +1748,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/seeder.py \
+git add backend/cubeplex/skills/seeder.py \
         backend/tests/e2e/test_skills_seeder.py \
         backend/tests/e2e/conftest.py
 git commit -m "feat(m3): preinstalled-skills seeder with Redis named-lock"
@@ -1759,7 +1759,7 @@ git commit -m "feat(m3): preinstalled-skills seeder with Redis named-lock"
 ## Task 6: SkillCatalogService (read path)
 
 **Files:**
-- Create: `backend/cubebox/skills/service.py` (catalog half only; publish half in Task 7)
+- Create: `backend/cubeplex/skills/service.py` (catalog half only; publish half in Task 7)
 - Test: `backend/tests/e2e/test_skills_service_catalog.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1771,16 +1771,16 @@ Create `backend/tests/e2e/test_skills_service_catalog.py`:
 
 import pytest
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import (
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 @pytest.mark.asyncio
@@ -1865,7 +1865,7 @@ uv run pytest tests/e2e/test_skills_service_catalog.py -v
 
 - [ ] **Step 3: Implement catalog service**
 
-Create `backend/cubebox/skills/service.py`:
+Create `backend/cubeplex/skills/service.py`:
 
 ```python
 """Skill marketplace services — read path (catalog) + write path (publish).
@@ -1880,8 +1880,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import OrgSkillInstall, Skill, SkillVersion, WorkspaceSkillBinding
-from cubebox.skills.cache import SkillCache
+from cubeplex.models import OrgSkillInstall, Skill, SkillVersion, WorkspaceSkillBinding
+from cubeplex.skills.cache import SkillCache
 
 
 @dataclass(frozen=True)
@@ -1976,7 +1976,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/service.py \
+git add backend/cubeplex/skills/service.py \
         backend/tests/e2e/test_skills_service_catalog.py
 git commit -m "feat(m3): SkillCatalogService (list_enabled + fetch_skill_md)"
 ```
@@ -1986,7 +1986,7 @@ git commit -m "feat(m3): SkillCatalogService (list_enabled + fetch_skill_md)"
 ## Task 7: SkillPublishService (zip → marketplace)
 
 **Files:**
-- Modify: `backend/cubebox/skills/service.py` (append `SkillPublishService`)
+- Modify: `backend/cubeplex/skills/service.py` (append `SkillPublishService`)
 - Test: `backend/tests/e2e/test_skills_publish_service.py`
 
 - [ ] **Step 1: Write failing E2E test**
@@ -2001,13 +2001,13 @@ import zipfile
 
 import pytest
 
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillPublishService
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillPublishService
 
 
 def _make_zip(files: dict[str, bytes]) -> bytes:
@@ -2054,7 +2054,7 @@ async def test_publish_from_zip_creates_skill_version_and_install(
 
 @pytest.mark.asyncio
 async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
-    from cubebox.skills.service import VersionCollisionError
+    from cubeplex.skills.service import VersionCollisionError
 
     z = _make_zip({"SKILL.md": b"---\nname: x\ndescription: y\nversion: 1.0.0\n---\n"})
     publisher = SkillPublishService(
@@ -2071,7 +2071,7 @@ async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_publish_invalid_frontmatter_raises(tmp_path, db_session) -> None:
-    from cubebox.skills.frontmatter import InvalidFrontmatterError
+    from cubeplex.skills.frontmatter import InvalidFrontmatterError
 
     z = _make_zip({"SKILL.md": b"# no frontmatter\n"})
     publisher = SkillPublishService(
@@ -2085,7 +2085,7 @@ async def test_publish_invalid_frontmatter_raises(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_publish_rejects_name_with_colon(tmp_path, db_session) -> None:
-    from cubebox.skills.service import InvalidSkillNameError
+    from cubeplex.skills.service import InvalidSkillNameError
 
     z = _make_zip(
         {"SKILL.md": b"---\nname: foo:bar\ndescription: y\nversion: 1.0.0\n---\n"}
@@ -2101,7 +2101,7 @@ async def test_publish_rejects_name_with_colon(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_publish_rejects_oversized_file(tmp_path, db_session) -> None:
-    from cubebox.skills.service import FileTooLargeError
+    from cubeplex.skills.service import FileTooLargeError
 
     big = b"x" * (11 * 1024 * 1024)
     z = _make_zip(
@@ -2129,7 +2129,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Implement publish service**
 
-Open `backend/cubebox/skills/service.py` and append:
+Open `backend/cubeplex/skills/service.py` and append:
 
 ```python
 import io
@@ -2137,14 +2137,14 @@ import re
 import zipfile
 from typing import IO
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import (
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
 )
-from cubebox.skills.frontmatter import InvalidFrontmatterError, parse_skill_md
-from cubebox.skills.storage_paths import org_skill_prefix, skill_object_key
+from cubeplex.skills.frontmatter import InvalidFrontmatterError, parse_skill_md
+from cubeplex.skills.storage_paths import org_skill_prefix, skill_object_key
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
@@ -2299,7 +2299,7 @@ Expected: 5 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/service.py \
+git add backend/cubeplex/skills/service.py \
         backend/tests/e2e/test_skills_publish_service.py
 git commit -m "feat(m3): SkillPublishService.publish_from_zip"
 ```
@@ -2309,11 +2309,11 @@ git commit -m "feat(m3): SkillPublishService.publish_from_zip"
 ## Task 8: Pydantic API schemas
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/skill.py`
+- Create: `backend/cubeplex/api/schemas/skill.py`
 
 - [ ] **Step 1: Define schemas**
 
-Create `backend/cubebox/api/schemas/skill.py`:
+Create `backend/cubeplex/api/schemas/skill.py`:
 
 ```python
 """Pydantic response schemas for skill marketplace endpoints."""
@@ -2393,7 +2393,7 @@ class PublishFromArtifactRequest(BaseModel):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/skill.py
+git add backend/cubeplex/api/schemas/skill.py
 git commit -m "feat(m3): pydantic response schemas for skill marketplace"
 ```
 
@@ -2402,14 +2402,14 @@ git commit -m "feat(m3): pydantic response schemas for skill marketplace"
 ## Task 9: Admin HTTP routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_skills.py`
-- Modify: `backend/cubebox/api/app.py` (mount router — wired in Task 15)
+- Create: `backend/cubeplex/api/routes/v1/admin_skills.py`
+- Modify: `backend/cubeplex/api/app.py` (mount router — wired in Task 15)
 
 This task implements the admin endpoints listed in spec § 5.1. Test in Task 16 (the comprehensive E2E suite).
 
 - [ ] **Step 1: Implement admin_skills.py**
 
-Create `backend/cubebox/api/routes/v1/admin_skills.py`:
+Create `backend/cubeplex/api/routes/v1/admin_skills.py`:
 
 ```python
 """Admin-only skill marketplace endpoints. Gated by require_org_admin (M2).
@@ -2424,7 +2424,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.skill import (
+from cubeplex.api.schemas.skill import (
     InstallRequest,
     SkillContentResponse,
     SkillDetail,
@@ -2433,24 +2433,24 @@ from cubebox.api.schemas.skill import (
     SkillVersionDetail,
     WorkspaceBindingsRequest,
 )
-from cubebox.auth.dependencies import RequestContext, get_request_context, require_org_admin
-from cubebox.db.session import get_session
-from cubebox.models import (
+from cubeplex.auth.dependencies import RequestContext, get_request_context, require_org_admin
+from cubeplex.db.session import get_session
+from cubeplex.models import (
     OrgPreinstalledTombstone,
     Organization,
     User,
     Workspace,
 )
-from cubebox.repositories.organization import OrganizationRepository
-from cubebox.repositories.skill import (
+from cubeplex.repositories.organization import OrganizationRepository
+from cubeplex.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import (
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
     SkillCatalogService,
@@ -2458,8 +2458,8 @@ from cubebox.skills.service import (
     SkillPublishService,
     VersionCollisionError,
 )
-from cubebox.skills.frontmatter import InvalidFrontmatterError
-from cubebox.config import config as _config
+from cubeplex.skills.frontmatter import InvalidFrontmatterError
+from cubeplex.config import config as _config
 from pathlib import Path
 
 router = APIRouter(prefix="/admin/skills", tags=["admin-skills"])
@@ -2651,7 +2651,7 @@ async def uninstall_skill(
     if install is not None:
         # Cascade: delete all WorkspaceSkillBinding rows for this install in this org
         from sqlalchemy import select
-        from cubebox.models import WorkspaceSkillBinding
+        from cubeplex.models import WorkspaceSkillBinding
 
         result = await session.execute(
             select(WorkspaceSkillBinding).where(
@@ -2732,7 +2732,7 @@ async def list_workspace_skills(
     for b in enabled:
         install = await session.get(type(enabled[0]).__mro__[0], b.org_skill_install_id)  # placeholder
         # Simpler: load install row
-        from cubebox.models import OrgSkillInstall
+        from cubeplex.models import OrgSkillInstall
 
         install_obj = await session.get(OrgSkillInstall, b.org_skill_install_id)
         if install_obj is None:
@@ -2809,8 +2809,8 @@ NOTE: `RequestContext` and `require_org_admin` dependency injection lookup paths
 - [ ] **Step 2: Type-check + lint**
 
 ```bash
-uv run mypy cubebox/api/routes/v1/admin_skills.py
-uv run ruff check cubebox/api/routes/v1/admin_skills.py
+uv run mypy cubeplex/api/routes/v1/admin_skills.py
+uv run ruff check cubeplex/api/routes/v1/admin_skills.py
 ```
 
 Fix any errors; the duplicated `Simpler: load install row` block is a known cleanup.
@@ -2818,7 +2818,7 @@ Fix any errors; the duplicated `Simpler: load install row` block is a known clea
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_skills.py
+git add backend/cubeplex/api/routes/v1/admin_skills.py
 git commit -m "feat(m3): admin skill marketplace HTTP routes"
 ```
 
@@ -2827,11 +2827,11 @@ git commit -m "feat(m3): admin skill marketplace HTTP routes"
 ## Task 10: Member HTTP routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/ws_skills.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_skills.py`
 
 - [ ] **Step 1: Implement member routes**
 
-Create `backend/cubebox/api/routes/v1/ws_skills.py`:
+Create `backend/cubeplex/api/routes/v1/ws_skills.py`:
 
 ```python
 """Member-callable skill endpoints under /api/v1/ws/{wsId}/skills.
@@ -2847,25 +2847,25 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.skill import (
+from cubeplex.api.schemas.skill import (
     SkillContentResponse,
     SkillFiles,
     SkillSummary,
 )
-from cubebox.auth.dependencies import RequestContext, get_request_context
-from cubebox.config import config as _config
-from cubebox.db.session import get_session
-from cubebox.models import OrgSkillInstall
-from cubebox.repositories.organization import OrganizationRepository
-from cubebox.repositories.skill import (
+from cubeplex.auth.dependencies import RequestContext, get_request_context
+from cubeplex.config import config as _config
+from cubeplex.db.session import get_session
+from cubeplex.models import OrgSkillInstall
+from cubeplex.repositories.organization import OrganizationRepository
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.frontmatter import InvalidFrontmatterError
-from cubebox.skills.service import (
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.frontmatter import InvalidFrontmatterError
+from cubeplex.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
     SkillCatalogService,
@@ -3070,13 +3070,13 @@ NOTE: `RequestContext.user` shape may differ; if `rc.user` doesn't exist, get th
 - [ ] **Step 2: Type-check**
 
 ```bash
-uv run mypy cubebox/api/routes/v1/ws_skills.py
+uv run mypy cubeplex/api/routes/v1/ws_skills.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_skills.py
+git add backend/cubeplex/api/routes/v1/ws_skills.py
 git commit -m "feat(m3): member skill marketplace HTTP routes"
 ```
 
@@ -3085,12 +3085,12 @@ git commit -m "feat(m3): member skill marketplace HTTP routes"
 ## Task 11: SkillsMiddleware refactor (catalog-driven)
 
 **Files:**
-- Modify: `backend/cubebox/middleware/skills.py`
+- Modify: `backend/cubeplex/middleware/skills.py`
 - Test: existing E2E tests must continue to pass; new test added in Task 16
 
 - [ ] **Step 1: Replace the file with catalog-driven version**
 
-Open `backend/cubebox/middleware/skills.py` and replace the entire file with:
+Open `backend/cubeplex/middleware/skills.py` and replace the entire file with:
 
 ```python
 """SkillsMiddleware — injects available skills into system prompt.
@@ -3110,9 +3110,9 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
-from cubebox.skills.service import ResolvedSkill, SkillCatalogService
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.prompts.skills import SKILLS_PROMPT_TEMPLATE
+from cubeplex.skills.service import ResolvedSkill, SkillCatalogService
 
 
 class SkillsMiddleware(AgentMiddleware[Any, Any, Any]):
@@ -3158,7 +3158,7 @@ class SkillsMiddleware(AgentMiddleware[Any, Any, Any]):
 
 - [ ] **Step 2: Update prompt template if needed**
 
-Open `backend/cubebox/prompts/skills.py`. The template uses `{skills_list}` and may include hardcoded path references. Update it to drop any `/.skills/builtin/...` references; the prompt should say "Use `load_skill(name)` to read a skill's instructions." and not reference filesystem paths.
+Open `backend/cubeplex/prompts/skills.py`. The template uses `{skills_list}` and may include hardcoded path references. Update it to drop any `/.skills/builtin/...` references; the prompt should say "Use `load_skill(name)` to read a skill's instructions." and not reference filesystem paths.
 
 ```python
 SKILLS_PROMPT_TEMPLATE = """\
@@ -3175,13 +3175,13 @@ sandbox when you actually use them.
 
 - [ ] **Step 3: Update `agents/graph.py`**
 
-Open `backend/cubebox/agents/graph.py`. Locate the existing `from cubebox.middleware.skills import SkillsMiddleware, SkillSpec` line; remove `SkillSpec`. Find the `skills: list[SkillSpec] | None = None` parameter on `create_cubebox_agent`; remove it. Find the `SkillsMiddleware(skills=_skills)` line and replace with:
+Open `backend/cubeplex/agents/graph.py`. Locate the existing `from cubeplex.middleware.skills import SkillsMiddleware, SkillSpec` line; remove `SkillSpec`. Find the `skills: list[SkillSpec] | None = None` parameter on `create_cubeplex_agent`; remove it. Find the `SkillsMiddleware(skills=_skills)` line and replace with:
 
 ```python
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
 
-# Inside create_cubebox_agent — at the point where SkillsMiddleware is constructed:
+# Inside create_cubeplex_agent — at the point where SkillsMiddleware is constructed:
 skill_cache = SkillCache(cache_root=Path(config.get("skills.cache_root", "skills_cache")))
 skill_catalog = SkillCatalogService(session=session, cache=skill_cache)
 middleware.append(
@@ -3202,9 +3202,9 @@ Expected: all pass (or unchanged from baseline). The middleware no longer pulls 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/middleware/skills.py \
-        backend/cubebox/prompts/skills.py \
-        backend/cubebox/agents/graph.py
+git add backend/cubeplex/middleware/skills.py \
+        backend/cubeplex/prompts/skills.py \
+        backend/cubeplex/agents/graph.py
 git commit -m "feat(m3): SkillsMiddleware catalog-driven (drops filesystem loader)"
 ```
 
@@ -3213,12 +3213,12 @@ git commit -m "feat(m3): SkillsMiddleware catalog-driven (drops filesystem loade
 ## Task 12: `load_skill` tool refactor (catalog-driven, no sandbox)
 
 **Files:**
-- Modify: `backend/cubebox/tools/builtin/load_skill.py`
+- Modify: `backend/cubeplex/tools/builtin/load_skill.py`
 - Test: backend E2E in Task 16 covers this
 
 - [ ] **Step 1: Replace the file**
 
-Open `backend/cubebox/tools/builtin/load_skill.py` and replace with:
+Open `backend/cubeplex/tools/builtin/load_skill.py` and replace with:
 
 ```python
 """load_skill — read a skill's SKILL.md content via the catalog service.
@@ -3233,7 +3233,7 @@ import json
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from cubebox.skills.service import SkillCatalogService
+from cubeplex.skills.service import SkillCatalogService
 
 
 class LoadSkillInput(BaseModel):
@@ -3303,7 +3303,7 @@ def create_load_skill_tool(
 
 - [ ] **Step 2: Update tool registration in graph.py**
 
-Wherever `load_skill` is registered today (likely in `cubebox/tools/__init__.py` or `agents/graph.py`), replace the call to `create_load_skill_tool()` with the new signature, passing `catalog`, `workspace_id`, `org_id`.
+Wherever `load_skill` is registered today (likely in `cubeplex/tools/__init__.py` or `agents/graph.py`), replace the call to `create_load_skill_tool()` with the new signature, passing `catalog`, `workspace_id`, `org_id`.
 
 ```python
 load_skill_tool = create_load_skill_tool(
@@ -3323,9 +3323,9 @@ Expected: pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/tools/builtin/load_skill.py \
-        backend/cubebox/agents/graph.py \
-        backend/cubebox/tools/__init__.py
+git add backend/cubeplex/tools/builtin/load_skill.py \
+        backend/cubeplex/agents/graph.py \
+        backend/cubeplex/tools/__init__.py
 git commit -m "feat(m3): load_skill tool catalog-driven (backend-only, no sandbox wake)"
 ```
 
@@ -3334,8 +3334,8 @@ git commit -m "feat(m3): load_skill tool catalog-driven (backend-only, no sandbo
 ## Task 13: Sandbox.has_synced + LazySandbox sync hook
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/base.py`
-- Modify: `backend/cubebox/sandbox/lazy.py`
+- Modify: `backend/cubeplex/sandbox/base.py`
+- Modify: `backend/cubeplex/sandbox/lazy.py`
 - Test: `backend/tests/e2e/test_lazy_sandbox_skill_sync.py`
 
 - [ ] **Step 1: Write failing E2E test**
@@ -3347,18 +3347,18 @@ Create `backend/tests/e2e/test_lazy_sandbox_skill_sync.py`:
 
 import pytest
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import (
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.sandbox.local import LocalSandbox
-from cubebox.sandbox.lazy import LazySandbox
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.sandbox.local import LocalSandbox
+from cubeplex.sandbox.lazy import LazySandbox
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 @pytest.mark.asyncio
@@ -3439,7 +3439,7 @@ Expected: FAIL — `LazySandbox.__init__() got unexpected keyword argument 'cata
 
 - [ ] **Step 3: Add `has_synced` / `mark_synced` to `Sandbox` ABC**
 
-Open `backend/cubebox/sandbox/base.py` and add to the `Sandbox` class (after existing abstract methods):
+Open `backend/cubeplex/sandbox/base.py` and add to the `Sandbox` class (after existing abstract methods):
 
 ```python
 def has_synced(self, skill_version_id: str) -> bool:
@@ -3459,7 +3459,7 @@ def mark_synced(self, skill_version_id: str) -> None:
 
 - [ ] **Step 4: Wire sync into `LazySandbox._ensure()`**
 
-Open `backend/cubebox/sandbox/lazy.py`. Add `catalog: SkillCatalogService | None = None` (default None for tests / non-skill paths) to `__init__`. Then update `_ensure`:
+Open `backend/cubeplex/sandbox/lazy.py`. Add `catalog: SkillCatalogService | None = None` (default None for tests / non-skill paths) to `__init__`. Then update `_ensure`:
 
 ```python
 # Inside __init__:
@@ -3534,8 +3534,8 @@ The TYPE_CHECKING import block should now include `SkillCatalogService`:
 
 ```python
 if TYPE_CHECKING:
-    from cubebox.sandbox.manager import SandboxManager
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.sandbox.manager import SandboxManager
+    from cubeplex.skills.service import SkillCatalogService
 ```
 
 - [ ] **Step 5: Update `agents/graph.py` to pass `catalog` to LazySandbox**
@@ -3553,9 +3553,9 @@ Expected: pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/base.py \
-        backend/cubebox/sandbox/lazy.py \
-        backend/cubebox/agents/graph.py \
+git add backend/cubeplex/sandbox/base.py \
+        backend/cubeplex/sandbox/lazy.py \
+        backend/cubeplex/agents/graph.py \
         backend/tests/e2e/test_lazy_sandbox_skill_sync.py
 git commit -m "feat(m3): transparent skill sync in LazySandbox._ensure()"
 ```
@@ -3565,8 +3565,8 @@ git commit -m "feat(m3): transparent skill sync in LazySandbox._ensure()"
 ## Task 14: Drop SkillLoader, rename builtin → preinstalled, fix SKILL.md paths
 
 **Files:**
-- Delete: `backend/cubebox/sandbox/skills.py`
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Delete: `backend/cubeplex/sandbox/skills.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 - Modify: `backend/config.yaml`, `backend/config.development.yaml`, `backend/config.production.yaml`, `backend/config.test.yaml`
 - Rename: `backend/skills/builtin/` → `backend/skills/preinstalled/`
 - Edit: `backend/skills/preinstalled/pdf-creator/SKILL.md`, `backend/skills/preinstalled/web-artifacts-builder/SKILL.md` (path references)
@@ -3574,12 +3574,12 @@ git commit -m "feat(m3): transparent skill sync in LazySandbox._ensure()"
 - [ ] **Step 1: Delete `sandbox/skills.py`**
 
 ```bash
-git rm backend/cubebox/sandbox/skills.py
+git rm backend/cubeplex/sandbox/skills.py
 ```
 
 - [ ] **Step 2: Remove SkillLoader from `sandbox/manager.py`**
 
-Open `backend/cubebox/sandbox/manager.py:255-265` (the area that calls `SkillLoader`). Delete the import `from cubebox.sandbox.skills import SkillLoader`, the `skills_dir_str = config.get("sandbox.skills.builtin_dir", ...)` line, and any block that calls `SkillLoader(...).load_builtin()` and uploads the result. The sandbox should now be created without any skill files; sync happens via LazySandbox.
+Open `backend/cubeplex/sandbox/manager.py:255-265` (the area that calls `SkillLoader`). Delete the import `from cubeplex.sandbox.skills import SkillLoader`, the `skills_dir_str = config.get("sandbox.skills.builtin_dir", ...)` line, and any block that calls `SkillLoader(...).load_builtin()` and uploads the result. The sandbox should now be created without any skill files; sync happens via LazySandbox.
 
 - [ ] **Step 3: Rename builtin → preinstalled**
 
@@ -3632,10 +3632,10 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py \
+git add backend/cubeplex/sandbox/manager.py \
         backend/config*.yaml \
         backend/skills/preinstalled/
-git rm backend/cubebox/sandbox/skills.py 2>/dev/null || true
+git rm backend/cubeplex/sandbox/skills.py 2>/dev/null || true
 git commit -m "refactor(m3): drop SkillLoader, rename builtin/ → preinstalled/, update paths"
 ```
 
@@ -3644,15 +3644,15 @@ git commit -m "refactor(m3): drop SkillLoader, rename builtin/ → preinstalled/
 ## Task 15: FastAPI lifespan wiring + router mounts
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Wire seeder into lifespan**
 
-Open `backend/cubebox/api/app.py`. Find the existing `lifespan` async context manager (likely with redis connect, MCP startup, etc). Add the seeder call:
+Open `backend/cubeplex/api/app.py`. Find the existing `lifespan` async context manager (likely with redis connect, MCP startup, etc). Add the seeder call:
 
 ```python
 from pathlib import Path
-from cubebox.skills.seeder import seed_preinstalled_skills
+from cubeplex.skills.seeder import seed_preinstalled_skills
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -3680,7 +3680,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 In the same `app.py`, find where existing routers are included. Add:
 
 ```python
-from cubebox.api.routes.v1 import admin_skills, ws_skills
+from cubeplex.api.routes.v1 import admin_skills, ws_skills
 
 app.include_router(admin_skills.router, prefix="/api/v1")
 app.include_router(admin_skills.bindings_router, prefix="/api/v1")
@@ -3690,7 +3690,7 @@ app.include_router(ws_skills.router, prefix="/api/v1")
 - [ ] **Step 3: Smoke-test app boots**
 
 ```bash
-uv run python -c "from cubebox.api.app import create_app; app = create_app(); print([r.path for r in app.routes if 'skill' in r.path.lower()])"
+uv run python -c "from cubeplex.api.app import create_app; app = create_app(); print([r.path for r in app.routes if 'skill' in r.path.lower()])"
 ```
 
 Expected: prints the new skill routes.
@@ -3706,7 +3706,7 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py
+git add backend/cubeplex/api/app.py
 git commit -m "feat(m3): wire seeder lifespan + mount admin/ws skill routers"
 ```
 
@@ -3994,8 +3994,8 @@ import asyncio
 
 from sqlalchemy import select
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models import (
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import (
     Organization,
     OrgSkillInstall,
     Skill,
@@ -4157,7 +4157,7 @@ Create `frontend/packages/web/hooks/useAdminSkills.ts`:
 
 ```typescript
 import useSWR from "swr";
-import type { SkillFilters, SkillSummary } from "@cubebox/core/types";
+import type { SkillFilters, SkillSummary } from "@cubeplex/core/types";
 import { fetcher } from "@/lib/fetcher";
 
 export function useAdminSkills(filters: SkillFilters = {}) {
@@ -4179,7 +4179,7 @@ Create `frontend/packages/web/hooks/useAdminSkill.ts`:
 
 ```typescript
 import useSWR from "swr";
-import type { SkillDetail } from "@cubebox/core/types";
+import type { SkillDetail } from "@cubeplex/core/types";
 import { fetcher } from "@/lib/fetcher";
 
 export function useAdminSkill(skillId: string | null) {
@@ -4195,7 +4195,7 @@ Create `frontend/packages/web/hooks/useWorkspaceSkills.ts`:
 
 ```typescript
 import useSWR from "swr";
-import type { SkillSummary } from "@cubebox/core/types";
+import type { SkillSummary } from "@cubeplex/core/types";
 import { fetcher } from "@/lib/fetcher";
 
 export function useWorkspaceSkills(wsId: string) {
@@ -4242,7 +4242,7 @@ import { useAdminSkills } from "@/hooks/useAdminSkills";
 import { SkillsToolbar } from "@/components/admin/skills/SkillsToolbar";
 import { SkillsList } from "@/components/admin/skills/SkillsList";
 import { SkillDetailPanel } from "@/components/admin/skills/SkillDetailPanel";
-import type { SkillFilters } from "@cubebox/core/types";
+import type { SkillFilters } from "@cubeplex/core/types";
 
 export default function SkillsPage() {
   const [filters, setFilters] = useState<SkillFilters>({});
@@ -4288,7 +4288,7 @@ import {
 } from "@/components/ui/select";
 import { useState } from "react";
 import { UploadSkillModal } from "./UploadSkillModal";
-import type { SkillFilters } from "@cubebox/core/types";
+import type { SkillFilters } from "@cubeplex/core/types";
 
 export function SkillsToolbar({
   filters,
@@ -4369,7 +4369,7 @@ Create `frontend/packages/web/components/admin/skills/SkillCard.tsx`:
 
 ```tsx
 import { cn } from "@/lib/utils";
-import type { SkillSummary } from "@cubebox/core/types";
+import type { SkillSummary } from "@cubeplex/core/types";
 
 export function SkillCard({
   skill,
@@ -4414,7 +4414,7 @@ export function SkillCard({
 Create `frontend/packages/web/components/admin/skills/SkillsList.tsx`:
 
 ```tsx
-import type { SkillSummary } from "@cubebox/core/types";
+import type { SkillSummary } from "@cubeplex/core/types";
 import { SkillCard } from "./SkillCard";
 
 export function SkillsList({
@@ -4507,7 +4507,7 @@ import { fetcher } from "@/lib/fetcher";
 import { proseClasses } from "@/lib/utils";
 import { OrgInstallActions } from "./OrgInstallActions";
 import { WorkspaceBindingsTable } from "./WorkspaceBindingsTable";
-import type { SkillContent } from "@cubebox/core/types";
+import type { SkillContent } from "@cubeplex/core/types";
 
 export function SkillDetailPanel({
   skillId,
@@ -4589,7 +4589,7 @@ Create `frontend/packages/web/components/admin/skills/OrgInstallActions.tsx`:
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { toast } from "sonner";
-import type { SkillDetail } from "@cubebox/core/types";
+import type { SkillDetail } from "@cubeplex/core/types";
 
 export function OrgInstallActions({
   skill,
@@ -4819,7 +4819,7 @@ export function UploadSkillModal({
         body: fd,
         credentials: "include",
         headers: {
-          "X-CSRF-Token": readCookie("cubebox_csrf") ?? "",
+          "X-CSRF-Token": readCookie("cubeplex_csrf") ?? "",
         },
       });
       if (!resp.ok) {
@@ -4903,7 +4903,7 @@ import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
 import { proseClasses } from "@/lib/utils";
-import type { SkillContent } from "@cubebox/core/types";
+import type { SkillContent } from "@cubeplex/core/types";
 
 interface SkillViewProps {
   workspaceId: string;
@@ -5177,8 +5177,8 @@ git commit -m "feat(m3): skill-creator preinstalled skill (Batch 2)"
 ## Task 25: Publish from artifact (backend)
 
 **Files:**
-- Modify: `backend/cubebox/skills/service.py` (add `publish_from_artifact`)
-- Modify: `backend/cubebox/api/routes/v1/ws_skills.py` (accept `{artifact_id}` JSON)
+- Modify: `backend/cubeplex/skills/service.py` (add `publish_from_artifact`)
+- Modify: `backend/cubeplex/api/routes/v1/ws_skills.py` (accept `{artifact_id}` JSON)
 - Test: `backend/tests/e2e/test_skills_artifact_flow.py`
 
 - [ ] **Step 1: Write failing E2E test**
@@ -5191,9 +5191,9 @@ Create `backend/tests/e2e/test_skills_artifact_flow.py`:
 import httpx
 import pytest
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.artifact import ArtifactRepository
-from cubebox.repositories.skill import SkillRepository
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.artifact import ArtifactRepository
+from cubeplex.repositories.skill import SkillRepository
 
 
 @pytest.mark.asyncio
@@ -5253,10 +5253,10 @@ uv run pytest tests/e2e/test_skills_artifact_flow.py -v
 
 - [ ] **Step 3: Implement `publish_from_artifact`**
 
-In `backend/cubebox/skills/service.py`, add a method on `SkillPublishService`:
+In `backend/cubeplex/skills/service.py`, add a method on `SkillPublishService`:
 
 ```python
-from cubebox.models import Artifact
+from cubeplex.models import Artifact
 
 async def publish_from_artifact(
     self,
@@ -5297,15 +5297,15 @@ async def publish_from_artifact(
     )
 ```
 
-(Add `from cubebox.repositories.artifact import ArtifactRepository` to imports.)
+(Add `from cubeplex.repositories.artifact import ArtifactRepository` to imports.)
 
 - [ ] **Step 4: Update `ws_skills.py` publish endpoint to accept JSON body**
 
-Edit `backend/cubebox/api/routes/v1/ws_skills.py`. Change the publish handler signature to accept either a multipart upload or a JSON body. FastAPI doesn't natively dispatch by content-type; explicit branching:
+Edit `backend/cubeplex/api/routes/v1/ws_skills.py`. Change the publish handler signature to accept either a multipart upload or a JSON body. FastAPI doesn't natively dispatch by content-type; explicit branching:
 
 ```python
 from fastapi import Body, Request
-from cubebox.api.schemas.skill import PublishFromArtifactRequest
+from cubeplex.api.schemas.skill import PublishFromArtifactRequest
 
 @router.post("/publish", status_code=201)
 async def publish_from_ws(
@@ -5371,8 +5371,8 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/service.py \
-        backend/cubebox/api/routes/v1/ws_skills.py \
+git add backend/cubeplex/skills/service.py \
+        backend/cubeplex/api/routes/v1/ws_skills.py \
         backend/tests/e2e/test_skills_artifact_flow.py \
         backend/tests/e2e/conftest.py
 git commit -m "feat(m3): publish skill from artifact_id (Batch 2)"
@@ -5383,12 +5383,12 @@ git commit -m "feat(m3): publish skill from artifact_id (Batch 2)"
 ## Task 26: `save_artifact` skill type docs
 
 **Files:**
-- Modify: `backend/cubebox/middleware/artifacts.py`
-- Modify: `backend/cubebox/prompts/artifacts.py`
+- Modify: `backend/cubeplex/middleware/artifacts.py`
+- Modify: `backend/cubeplex/prompts/artifacts.py`
 
 - [ ] **Step 1: Extend `save_artifact` description**
 
-Open `backend/cubebox/middleware/artifacts.py:155-164`. Update the StructuredTool description string to include skill semantics:
+Open `backend/cubeplex/middleware/artifacts.py:155-164`. Update the StructuredTool description string to include skill semantics:
 
 ```python
 description=(
@@ -5410,7 +5410,7 @@ artifact_type: str = Field(
 
 - [ ] **Step 2: Extend ARTIFACT_PROMPT**
 
-Open `backend/cubebox/prompts/artifacts.py`. Add a paragraph explaining when to use `artifact_type="skill"`:
+Open `backend/cubeplex/prompts/artifacts.py`. Add a paragraph explaining when to use `artifact_type="skill"`:
 
 ```python
 ARTIFACT_PROMPT = """\
@@ -5429,8 +5429,8 @@ ARTIFACT_PROMPT = """\
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/middleware/artifacts.py \
-        backend/cubebox/prompts/artifacts.py
+git add backend/cubeplex/middleware/artifacts.py \
+        backend/cubeplex/prompts/artifacts.py
 git commit -m "feat(m3): document artifact_type='skill' (Batch 2)"
 ```
 
@@ -5506,7 +5506,7 @@ export function SkillArtifactPreview({
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          "X-CSRF-Token": readCookie("cubebox_csrf") ?? "",
+          "X-CSRF-Token": readCookie("cubeplex_csrf") ?? "",
         },
         body: JSON.stringify({ artifact_id: artifact.id }),
       });

@@ -18,12 +18,12 @@
 
 | Path | Status | Purpose |
 | --- | --- | --- |
-| `backend/cubebox/api/schemas/mcp.py` | Modify | Add `tools` and `tool_citations` to `MCPConnectorInstallOut`; add `AdminCreateCustomInstallIn`, `AdminInstallRefreshIn`, `AdminInstallInvokeIn`, `WsInstallInvokeIn`, `PromoteInstallIn`, `TestConnectionIn`, `TestConnectionOut`, `ToolCitationUpsertIn`, `ToolInvokeOut`, `MCPToolEntry`. |
-| `backend/cubebox/services/mcp_discovery.py` | Create | `discover_tools_for_install(install, *, workspace_id, actor_user_id, session, …)` — builds the cubepi MCP client with the right grant, calls `load_mcp_tools_http`, writes `tools_cache` / `discovery_status` / `last_error`. Returns updated install row. |
-| `backend/cubebox/services/mcp_installs.py` | Modify | Add `create_custom_install_for_org(...)`; `promote_workspace_install_to_org(install_id, distribution)`. |
-| `backend/cubebox/api/routes/v1/admin_mcp.py` | Modify | New routes: `POST /installs/{id}/refresh-discovery`, `POST /test-connection`, `POST /installs/{id}/promote-to-org`, `PUT /installs/{id}/tool-citations`, `POST /installs/{id}/tools/{tool_name}/invoke`. Relax `create_admin_install` to accept `template_id=None` via `AdminCreateCustomInstallIn` branch. Modify `_install_to_out` to include `tools` + `tool_citations`. |
-| `backend/cubebox/api/routes/v1/ws_mcp.py` | Modify | New routes: `POST /installs/{id}/refresh-discovery`, `POST /installs/{id}/tools/{tool_name}/invoke`. |
-| `backend/cubebox/mcp/exceptions.py` | Modify | Add `MCPDiscoveryFailed`, `MCPInvokeFailed`, `MCPInvokeRateLimited` exception classes. |
+| `backend/cubeplex/api/schemas/mcp.py` | Modify | Add `tools` and `tool_citations` to `MCPConnectorInstallOut`; add `AdminCreateCustomInstallIn`, `AdminInstallRefreshIn`, `AdminInstallInvokeIn`, `WsInstallInvokeIn`, `PromoteInstallIn`, `TestConnectionIn`, `TestConnectionOut`, `ToolCitationUpsertIn`, `ToolInvokeOut`, `MCPToolEntry`. |
+| `backend/cubeplex/services/mcp_discovery.py` | Create | `discover_tools_for_install(install, *, workspace_id, actor_user_id, session, …)` — builds the cubepi MCP client with the right grant, calls `load_mcp_tools_http`, writes `tools_cache` / `discovery_status` / `last_error`. Returns updated install row. |
+| `backend/cubeplex/services/mcp_installs.py` | Modify | Add `create_custom_install_for_org(...)`; `promote_workspace_install_to_org(install_id, distribution)`. |
+| `backend/cubeplex/api/routes/v1/admin_mcp.py` | Modify | New routes: `POST /installs/{id}/refresh-discovery`, `POST /test-connection`, `POST /installs/{id}/promote-to-org`, `PUT /installs/{id}/tool-citations`, `POST /installs/{id}/tools/{tool_name}/invoke`. Relax `create_admin_install` to accept `template_id=None` via `AdminCreateCustomInstallIn` branch. Modify `_install_to_out` to include `tools` + `tool_citations`. |
+| `backend/cubeplex/api/routes/v1/ws_mcp.py` | Modify | New routes: `POST /installs/{id}/refresh-discovery`, `POST /installs/{id}/tools/{tool_name}/invoke`. |
+| `backend/cubeplex/mcp/exceptions.py` | Modify | Add `MCPDiscoveryFailed`, `MCPInvokeFailed`, `MCPInvokeRateLimited` exception classes. |
 | `backend/tests/e2e/test_mcp_restore_lost_ui.py` | Create | E2E for the seven new endpoints. |
 
 ### Frontend
@@ -58,8 +58,8 @@
 ## Task 1: DTO expansion — expose tools + tool_citations
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (create)
 
 - [ ] **Step 1: Write the failing test**
@@ -110,8 +110,8 @@ async def seeded_static_org_install_with_tools_cache(
     """Org-scope static install pre-populated with two fake tools."""
     org_id, _ws_id, user_id = seed_org_workspace_user
     async with db_session_maker() as session:
-        from cubebox.models.mcp import MCPConnectorInstall
-        from cubebox.mcp._constants import server_url_hash
+        from cubeplex.models.mcp import MCPConnectorInstall
+        from cubeplex.mcp._constants import server_url_hash
         install = MCPConnectorInstall(
             org_id=org_id,
             template_id=None,
@@ -147,7 +147,7 @@ Expected: FAIL — `tools` field missing.
 
 - [ ] **Step 3: Extend the schema**
 
-Edit `backend/cubebox/api/schemas/mcp.py`. Add the entry shape and the two new fields on `MCPConnectorInstallOut`:
+Edit `backend/cubeplex/api/schemas/mcp.py`. Add the entry shape and the two new fields on `MCPConnectorInstallOut`:
 
 ```python
 class MCPToolEntry(BaseModel):
@@ -183,7 +183,7 @@ class MCPConnectorInstallOut(BaseModel):
 
 - [ ] **Step 4: Modify `_install_to_out` to populate both**
 
-Edit `backend/cubebox/api/routes/v1/admin_mcp.py`. The helper currently
+Edit `backend/cubeplex/api/routes/v1/admin_mcp.py`. The helper currently
 returns `tool_count=len(install.tools_cache or [])`. Extend:
 
 ```python
@@ -252,7 +252,7 @@ export type CitationConfigJSON = {
 Run:
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/core type-check
+cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/core type-check
 ```
 
 Expected: PASS.
@@ -260,8 +260,8 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/admin_mcp.py \
+git add backend/cubeplex/api/schemas/mcp.py \
+        backend/cubeplex/api/routes/v1/admin_mcp.py \
         backend/tests/e2e/test_mcp_restore_lost_ui.py \
         frontend/packages/core/src/types/mcp.ts
 git commit -m "feat(mcp/dto): expose tools + tool_citations on install DTO"
@@ -272,8 +272,8 @@ git commit -m "feat(mcp/dto): expose tools + tool_citations on install DTO"
 ## Task 2: Discovery service module
 
 **Files:**
-- Create: `backend/cubebox/services/mcp_discovery.py`
-- Modify: `backend/cubebox/mcp/exceptions.py`
+- Create: `backend/cubeplex/services/mcp_discovery.py`
+- Modify: `backend/cubeplex/mcp/exceptions.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -289,9 +289,9 @@ async def test_discover_tools_for_install_writes_tools_cache(
     """Discovery service should fetch tools via cubepi and persist
     the result into install.tools_cache / .discovery_status."""
     org_id, _ws_id, user_id = seed_org_workspace_user
-    from cubebox.services.mcp_discovery import discover_tools_for_install
-    from cubebox.models.mcp import MCPConnectorInstall
-    from cubebox.mcp._constants import server_url_hash
+    from cubeplex.services.mcp_discovery import discover_tools_for_install
+    from cubeplex.models.mcp import MCPConnectorInstall
+    from cubeplex.mcp._constants import server_url_hash
 
     async with db_session_maker() as session:
         install = MCPConnectorInstall(
@@ -322,12 +322,12 @@ async def test_discover_tools_for_install_writes_tools_cache(
             AgentTool(name="ping", description="say hi", input_schema={"type": "object"}, fn=None),  # type: ignore
             AgentTool(name="pong", description="say bye", input_schema={"type": "object"}, fn=None),  # type: ignore
         ]
-    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery.load_mcp_tools_http", fake_load)
 
     async with db_session_maker() as session:
-        from cubebox.credentials.dependencies import build_credential_service
-        from cubebox.credentials.encryption import get_test_backend
-        from cubebox.mcp.dependencies import build_user_token_signer
+        from cubeplex.credentials.dependencies import build_credential_service
+        from cubeplex.credentials.encryption import get_test_backend
+        from cubeplex.mcp.dependencies import build_user_token_signer
         cred_service = build_credential_service(
             session, get_test_backend(), org_id=org_id, actor_user_id=user_id
         )
@@ -363,7 +363,7 @@ Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement the discovery service**
 
-Create `backend/cubebox/services/mcp_discovery.py`:
+Create `backend/cubeplex/services/mcp_discovery.py`:
 
 ```python
 """MCP tool discovery for the restore-lost-UI Refresh tools flow.
@@ -394,16 +394,16 @@ from cubepi.mcp.types import MCPTransport
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.mcp.exceptions import MCPDiscoveryFailed
-from cubebox.models.mcp import MCPConnectorInstall
-from cubebox.repositories.mcp import (
+from cubeplex.mcp.effective import MCPEffectiveConnectorService
+from cubeplex.mcp.exceptions import MCPDiscoveryFailed
+from cubeplex.models.mcp import MCPConnectorInstall
+from cubeplex.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
     MCPConnectorTemplateRepository,
 )
-from cubebox.services.credential import CredentialService
+from cubeplex.services.credential import CredentialService
 
 _DISCOVERY_TIMEOUT_SECONDS = 30.0
 
@@ -437,7 +437,7 @@ def _build_runtime_spec_for_discovery(install, grant):
       copy `install.oauth_client_config` so silent re-auth has the
       same context as the runtime.
     """
-    from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+    from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
     return MCPRuntimeConnectorSpec(
         install_id=install.id,
         name=install.name,
@@ -525,13 +525,13 @@ async def discover_tools_for_install(
     # would use. Just forwarding install.headers leaves out the
     # Bearer token / static credential / OAuth access token that
     # private MCP servers require. The runtime calls
-    # `cubebox.mcp.cubepi_runtime._resolve_headers_from_spec` for
+    # `cubeplex.mcp.cubepi_runtime._resolve_headers_from_spec` for
     # this; the discovery service must too. Build an
     # MCPRuntimeConnectorSpec from the install + chosen grant and
     # pass it through. The function returns `None` when a credential
     # is required but cannot be resolved (e.g. credential_id missing)
     # — treat that as a usability error.
-    from cubebox.mcp.cubepi_runtime import (
+    from cubeplex.mcp.cubepi_runtime import (
         MCPRuntimeConnectorSpec,
         _resolve_headers_from_spec,
     )
@@ -609,7 +609,7 @@ async def discover_tools_for_install(
 
 - [ ] **Step 4: Add the exception class**
 
-Edit `backend/cubebox/mcp/exceptions.py` — add at the bottom:
+Edit `backend/cubeplex/mcp/exceptions.py` — add at the bottom:
 
 ```python
 class MCPDiscoveryFailed(RuntimeError):
@@ -635,8 +635,8 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_discovery.py \
-        backend/cubebox/mcp/exceptions.py \
+git add backend/cubeplex/services/mcp_discovery.py \
+        backend/cubeplex/mcp/exceptions.py \
         backend/tests/e2e/test_mcp_restore_lost_ui.py
 git commit -m "feat(mcp/discovery): add discover_tools_for_install service"
 ```
@@ -646,9 +646,9 @@ git commit -m "feat(mcp/discovery): add discover_tools_for_install service"
 ## Task 3: Refresh-discovery routes (admin + ws)
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -667,7 +667,7 @@ async def test_admin_refresh_discovery_writes_install(
     from cubepi.agent.types import AgentTool
     async def fake_load(*args, **kwargs):
         return [AgentTool(name="ping", description=None, input_schema=None, fn=None)]  # type: ignore
-    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery.load_mcp_tools_http", fake_load)
 
     # No grant exists yet, but auth_method='none' → usable.
     res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
@@ -703,7 +703,7 @@ Expected: 2 FAIL — route does not exist.
 
 - [ ] **Step 3: Add the schema**
 
-Edit `backend/cubebox/api/schemas/mcp.py`:
+Edit `backend/cubeplex/api/schemas/mcp.py`:
 
 ```python
 class AdminInstallRefreshIn(BaseModel):
@@ -716,7 +716,7 @@ class WsInstallRefreshIn(BaseModel):
 
 - [ ] **Step 4: Add the admin route**
 
-Edit `backend/cubebox/api/routes/v1/admin_mcp.py`. Add:
+Edit `backend/cubeplex/api/routes/v1/admin_mcp.py`. Add:
 
 ```python
 @router.post(
@@ -769,7 +769,7 @@ async def admin_refresh_discovery(
 
 - [ ] **Step 5: Add the workspace route**
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py`:
+Edit `backend/cubeplex/api/routes/v1/ws_mcp.py`:
 
 ```python
 @router.post(
@@ -813,9 +813,9 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/admin_mcp.py \
-        backend/cubebox/api/routes/v1/ws_mcp.py \
+git add backend/cubeplex/api/schemas/mcp.py \
+        backend/cubeplex/api/routes/v1/admin_mcp.py \
+        backend/cubeplex/api/routes/v1/ws_mcp.py \
         backend/tests/e2e/test_mcp_restore_lost_ui.py
 git commit -m "feat(mcp/refresh): wire refresh-discovery on admin + ws routes"
 ```
@@ -825,8 +825,8 @@ git commit -m "feat(mcp/refresh): wire refresh-discovery on admin + ws routes"
 ## Task 4: Test connection route
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -841,7 +841,7 @@ async def test_admin_test_connection_returns_tool_count(
     async def fake_load(*args, **kwargs):
         return [AgentTool(name="a", description=None, input_schema=None, fn=None),  # type: ignore
                 AgentTool(name="b", description=None, input_schema=None, fn=None)]  # type: ignore
-    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
 
     res = await client.post(
         "/api/v1/admin/mcp/test-connection",
@@ -956,9 +956,9 @@ git commit -m "feat(mcp/test-connection): add POST /admin/mcp/test-connection"
 ## Task 5: Custom connector creation
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/services/mcp_installs.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -1069,7 +1069,7 @@ async def create_custom_install_for_org(
     Uniqueness is enforced by the existing partial unique index on
     (org_id, server_url_hash) filtered by install_state='active'.
     """
-    from cubebox.mcp._constants import server_url_hash as _hash
+    from cubeplex.mcp._constants import server_url_hash as _hash
 
     defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
     install = MCPConnectorInstall(
@@ -1147,9 +1147,9 @@ git commit -m "feat(mcp/custom): allow template_id=None custom installs on admin
 ## Task 6: Promote ws → org
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/services/mcp_installs.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -1290,8 +1290,8 @@ git commit -m "feat(mcp/promote): add ws→org promotion endpoint"
 ## Task 7: Citation editor route + audit-only frontend hook
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -1380,9 +1380,9 @@ git commit -m "feat(mcp/citations): add PUT /installs/{id}/tool-citations"
 ## Task 8: Try It routes (admin + ws)
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_restore_lost_ui.py` (extend)
 
 - [ ] **Step 1: Write failing test**
@@ -1399,7 +1399,7 @@ async def test_ws_invoke_tool_returns_result(
     # Stub the cubepi invoke path.
     async def fake_invoke(server_url, tool_name, arguments, *, headers, timeout, transport):
         return {"echo": arguments, "tool": tool_name}
-    monkeypatch.setattr("cubebox.api.routes.v1.ws_mcp._invoke_tool_via_cubepi", fake_invoke)
+    monkeypatch.setattr("cubeplex.api.routes.v1.ws_mcp._invoke_tool_via_cubepi", fake_invoke)
 
     res = await client.post(
         f"/api/v1/ws/{ws_id}/mcp/installs/{install_id}/tools/ping/invoke",
@@ -1446,7 +1446,7 @@ class ToolInvokeOut(BaseModel):
 
 - [ ] **Step 3: Add the helper used by both routes**
 
-In `backend/cubebox/api/routes/v1/ws_mcp.py` (and import from
+In `backend/cubeplex/api/routes/v1/ws_mcp.py` (and import from
 admin_mcp.py):
 
 ```python
@@ -1474,14 +1474,14 @@ shim that constructs the cubepi MCP client + calls `.invoke()`.)
 
 ```python
 from slowapi.util import get_remote_address
-from cubebox.api.middleware.rate_limit import limiter
-from cubebox.auth.dependencies import current_active_user
-from cubebox.models import User
+from cubeplex.api.middleware.rate_limit import limiter
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.models import User
 
 # Limiter key: read the authenticated user id from a context var
 # set by a dependency rather than from req.state.user_id. The
 # request.state.user_id field is populated by UserIdentityMiddleware
-# from the client-controlled X-User-ID header / cubebox_user_id
+# from the client-controlled X-User-ID header / cubeplex_user_id
 # cookie — an authenticated client could rotate either to dodge
 # their per-user bucket. Key on the JWT-verified User row instead.
 from contextvars import ContextVar
@@ -1678,7 +1678,7 @@ Port the deleted `TryItView.tsx`. Replace its old invoke path
 with calls to the new core helpers:
 
 ```ts
-import { adminInvokeTool, wsInvokeTool } from '@cubebox/core'
+import { adminInvokeTool, wsInvokeTool } from '@cubeplex/core'
 // chosen by caller via a prop `surface: 'admin' | 'ws'`
 ```
 
@@ -1894,7 +1894,7 @@ git commit -m "test(web/mcp): E2E for restored UI surfaces"
 
 ```bash
 grep -rn "MCPServer\b\|workspace_mcp_overrides\|MCPCatalogConnector" \
-  backend/cubebox/ frontend/packages/ 2>&1 | grep -v __pycache__
+  backend/cubeplex/ frontend/packages/ 2>&1 | grep -v __pycache__
 ```
 
 Expected: NO matches (the legacy types should be fully gone; if

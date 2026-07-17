@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.schedules.dispatch import (
+from cubeplex.schedules.dispatch import (
     ConversationBusyError,
     ConversationPausedError,
     dispatch_scheduled_run,
@@ -49,8 +49,8 @@ async def test_pending_hitl_message_raises_conversation_paused_error(
     async def _resolve(_task: object) -> str:
         return "c-1"
 
-    monkeypatch.setattr("cubebox.schedules.dispatch._owner_still_member", _owner_member)
-    monkeypatch.setattr("cubebox.schedules.dispatch.resolve_target", _resolve)
+    monkeypatch.setattr("cubeplex.schedules.dispatch._owner_still_member", _owner_member)
+    monkeypatch.setattr("cubeplex.schedules.dispatch.resolve_target", _resolve)
 
     rm = AsyncMock()
     rm.start_run = AsyncMock(
@@ -76,8 +76,8 @@ async def test_already_active_message_still_raises_busy_error(
     async def _resolve(_task: object) -> str:
         return "c-1"
 
-    monkeypatch.setattr("cubebox.schedules.dispatch._owner_still_member", _owner_member)
-    monkeypatch.setattr("cubebox.schedules.dispatch.resolve_target", _resolve)
+    monkeypatch.setattr("cubeplex.schedules.dispatch._owner_still_member", _owner_member)
+    monkeypatch.setattr("cubeplex.schedules.dispatch.resolve_target", _resolve)
 
     rm = AsyncMock()
     rm.start_run = AsyncMock(side_effect=RuntimeError("Conversation c-1 already has an active run"))
@@ -97,8 +97,8 @@ async def test_unrelated_runtime_error_propagates(
     async def _resolve(_task: object) -> str:
         return "c-1"
 
-    monkeypatch.setattr("cubebox.schedules.dispatch._owner_still_member", _owner_member)
-    monkeypatch.setattr("cubebox.schedules.dispatch.resolve_target", _resolve)
+    monkeypatch.setattr("cubeplex.schedules.dispatch._owner_still_member", _owner_member)
+    monkeypatch.setattr("cubeplex.schedules.dispatch.resolve_target", _resolve)
 
     rm = AsyncMock()
     rm.start_run = AsyncMock(side_effect=RuntimeError("provider timed out"))

@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Hash, MessageCircle, MessageSquare } from 'lucide-react'
-import { createApiClient, getTopic } from '@cubebox/core'
-import type { Trigger } from '@cubebox/core'
+import { createApiClient, getTopic } from '@cubeplex/core'
+import type { Trigger } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 
 interface DestinationCellProps {
   /** Workspace for resolving /api/v1/topics → workspace-scoped path. */
@@ -22,10 +23,11 @@ interface DestinationCellProps {
  *   - ``im_channel``     → IM-channel pill showing the channel id
  *
  * Trigger destinations are immutable once created (see ``UpdateTriggerBody``
- * in @cubebox/core); we never have to keep this cell in sync with form edits.
+ * in @cubeplex/core); we never have to keep this cell in sync with form edits.
  */
 export function DestinationCell({ wsId, trigger, className }: DestinationCellProps) {
   const t = useTranslations('triggers')
+  const tTopics = useTranslations('topics')
   const client = useMemo(() => {
     const c = createApiClient('')
     c.setWorkspaceId(wsId)
@@ -62,7 +64,11 @@ export function DestinationCell({ wsId, trigger, className }: DestinationCellPro
           data-testid="trigger-destination-topic"
         >
           <MessageSquare className="size-3 shrink-0" />
-          <span className="max-w-[14ch] truncate">{topicTitle ?? t('destTopicFallback')}</span>
+          <span className="max-w-[14ch] truncate">
+            {topicTitle === null
+              ? t('destTopicFallback')
+              : topicDisplayTitle(topicTitle, tTopics('newGroupChat'))}
+          </span>
         </span>
       )
     }

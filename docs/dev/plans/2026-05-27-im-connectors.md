@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a workspace bind a Slack bot so an `@mention`/DM starts an agent run on a cubebox conversation and the run's streamed output flows back as a live-updating threaded Slack reply — reusing the existing run path, never forking it.
+**Goal:** Let a workspace bind a Slack bot so an `@mention`/DM starts an agent run on a cubeplex conversation and the run's streamed output flows back as a live-updating threaded Slack reply — reusing the existing run path, never forking it.
 
 **Architecture:** Slack POSTs events to one platform-signed, session-unauthenticated ingress (`POST /api/v1/im/slack/events`). The handler verifies the HMAC, resolves the `IMConnectorAccount` by `team_id`, and — in **one DB transaction** — inserts an idempotency receipt keyed by Slack's `event_id`, creates/reuses a `Conversation` + `IMThreadLink`, and enqueues a durable `IMRunQueueItem` row (transactional outbox). A separate in-process async worker polls that queue, claims a row via `SELECT … FOR UPDATE SKIP LOCKED`, and calls `RunManager.start_run(...)`. An outbound tailer reads the run's Redis event stream (`read_run_events_after`, the same tail SSE uses) and renders debounced `chat.update` edits into the originating Slack thread. Config is scope-isolated: workspace routes (`/ws/{ws}/im/...`, `require_member`) and org-admin routes (`/admin/im/...`, `get_admin_request_context`) are separate handlers sharing one `IMConnectorService`. Note: the org-admin routes have **no `{workspace_id}` in their path**, so they cannot use `require_admin` — that dependency is `require_role(Role.ADMIN)`, which checks a `workspace`-typed permission keyed on `ctx.workspace_id` resolved from the path, and there is no such path segment here. Use `get_admin_request_context` (backed by `require_org_admin`), the same dependency the existing `/admin/mcp/...` routes use.
 
 **Tech Stack:** FastAPI, SQLModel + Alembic (Postgres), Redis Streams (existing run-event log), the cubepi run path (`RunManager.start_run`), `CredentialService` (vault `kind="im_bot"`), `httpx` for Slack Web API calls, `hmac`/`hashlib` for signature verification. Tests: `pytest` against real Postgres + Redis (worktree-routed DB) with captured-real Slack payloads; no fake Slack server.
 
-**Scope note — this plan is backend-only.** The spec (§ "Scope-isolated config: separate workspace-scope and org-admin routes/**pages**") asks for frontend config pages too. This plan deliberately ships the backend (models, ingress, worker, routes) as one PR and **defers the Next.js workspace/admin IM config pages to a follow-up PR** (own route + page file per scope, per the scope-isolated-pages rule; `@cubebox/core` API client types + a Playwright/E2E pass). If a single PR is required instead, add those frontend tasks here before implementation. Either way the frontend is not silently dropped — it is an explicit, tracked follow-up.
+**Scope note — this plan is backend-only.** The spec (§ "Scope-isolated config: separate workspace-scope and org-admin routes/**pages**") asks for frontend config pages too. This plan deliberately ships the backend (models, ingress, worker, routes) as one PR and **defers the Next.js workspace/admin IM config pages to a follow-up PR** (own route + page file per scope, per the scope-isolated-pages rule; `@cubeplex/core` API client types + a Playwright/E2E pass). If a single PR is required instead, add those frontend tasks here before implementation. Either way the frontend is not silently dropped — it is an explicit, tracked follow-up.
 
 ---
 
@@ -16,27 +16,27 @@
 
 New files (all paths under `backend/`):
 
-- `cubebox/models/im_connector.py` — `IMConnectorAccount`, `IMThreadLink`, `IMIdentityLink`, `IMWebhookReceipt`, `IMRunQueueItem` SQLModel tables.
-- `cubebox/repositories/im_connector.py` — scoped repos for the IM tables + the queue claim/complete primitives.
-- `cubebox/services/im_connector.py` — `IMConnectorService` (CRUD shared by ws + admin routes).
-- `cubebox/im/__init__.py`, `cubebox/im/types.py` — `InboundEvent`, `OutboundOp`, render-state dataclasses + the `IMConnector` protocol.
-- `cubebox/im/slack/signature.py` — Slack HMAC verification.
-- `cubebox/im/slack/connector.py` — `SlackConnector`: `parse_inbound`, `render_outbound`, `send`, `edit`, `post_placeholder`.
-- `cubebox/im/inbound.py` — `ingest_inbound_event(...)`: the transactional receipt + conversation/thread + enqueue core.
-- `cubebox/im/worker.py` — `IMRunQueueWorker`: drains the queue → `start_run` → spawns the outbound tailer.
-- `cubebox/im/outbound.py` — `OutboundRunTailer`: Redis tail → debounced render → Slack edits.
-- `cubebox/api/routes/v1/im_ingress.py` — `POST /api/v1/im/slack/events` (unauthenticated, platform-signed).
-- `cubebox/api/routes/v1/ws_im.py` — workspace-scope account/identity routes (`require_member`).
-- `cubebox/api/routes/v1/admin_im.py` — org-admin account listing/enable-disable (`get_admin_request_context`).
-- `cubebox/api/schemas/im_connector.py` — request/response pydantic models.
+- `cubeplex/models/im_connector.py` — `IMConnectorAccount`, `IMThreadLink`, `IMIdentityLink`, `IMWebhookReceipt`, `IMRunQueueItem` SQLModel tables.
+- `cubeplex/repositories/im_connector.py` — scoped repos for the IM tables + the queue claim/complete primitives.
+- `cubeplex/services/im_connector.py` — `IMConnectorService` (CRUD shared by ws + admin routes).
+- `cubeplex/im/__init__.py`, `cubeplex/im/types.py` — `InboundEvent`, `OutboundOp`, render-state dataclasses + the `IMConnector` protocol.
+- `cubeplex/im/slack/signature.py` — Slack HMAC verification.
+- `cubeplex/im/slack/connector.py` — `SlackConnector`: `parse_inbound`, `render_outbound`, `send`, `edit`, `post_placeholder`.
+- `cubeplex/im/inbound.py` — `ingest_inbound_event(...)`: the transactional receipt + conversation/thread + enqueue core.
+- `cubeplex/im/worker.py` — `IMRunQueueWorker`: drains the queue → `start_run` → spawns the outbound tailer.
+- `cubeplex/im/outbound.py` — `OutboundRunTailer`: Redis tail → debounced render → Slack edits.
+- `cubeplex/api/routes/v1/im_ingress.py` — `POST /api/v1/im/slack/events` (unauthenticated, platform-signed).
+- `cubeplex/api/routes/v1/ws_im.py` — workspace-scope account/identity routes (`require_member`).
+- `cubeplex/api/routes/v1/admin_im.py` — org-admin account listing/enable-disable (`get_admin_request_context`).
+- `cubeplex/api/schemas/im_connector.py` — request/response pydantic models.
 
-Modified: `cubebox/models/public_id.py` (prefixes are set via `_PREFIX` on each table — no edit needed unless adding shared constants; see Task 2), `cubebox/models/__init__.py` (export new tables so Alembic + `_guard_references` see them), `cubebox/api/app.py` (register the three routers + start the worker on startup), `cubebox/services/credential.py` (`_guard_references`: refuse deleting an `im_bot` credential still referenced by an account).
+Modified: `cubeplex/models/public_id.py` (prefixes are set via `_PREFIX` on each table — no edit needed unless adding shared constants; see Task 2), `cubeplex/models/__init__.py` (export new tables so Alembic + `_guard_references` see them), `cubeplex/api/app.py` (register the three routers + start the worker on startup), `cubeplex/services/credential.py` (`_guard_references`: refuse deleting an `im_bot` credential still referenced by an account).
 
 ---
 
 ## Task 1: Decide & build the durable run queue dependency
 
-The spec's idempotency design requires a durable run queue that a worker drains independently of the request that accepted the webhook. cubebox today starts runs **in-process** via `RunManager.start_run` → `asyncio.create_task` over Redis run state (`backend/cubebox/streams/run_manager.py:482`). There is **no durable queue**: if the process dies after acking Slack but before the run starts, the event is lost (Slack stops retrying after its bounded window).
+The spec's idempotency design requires a durable run queue that a worker drains independently of the request that accepted the webhook. cubeplex today starts runs **in-process** via `RunManager.start_run` → `asyncio.create_task` over Redis run state (`backend/cubeplex/streams/run_manager.py:482`). There is **no durable queue**: if the process dies after acking Slack but before the run starts, the event is lost (Slack stops retrying after its bounded window).
 
 **Decision (recorded here, frozen):** Build a **minimal durable run queue as a Postgres table** (`IMRunQueueItem`), scoped to IM for v1, drained by an in-process async poller. We do **not** build a general cross-process broker, and we do **not** scope v1 to best-effort-with-gap. Rationale:
 
@@ -65,17 +65,17 @@ The queue **table** and **worker** are implemented in Tasks 2 and 6 (table) and 
 ## Task 2: IM data model + public ID prefixes
 
 **Files:**
-- Create: `backend/cubebox/models/im_connector.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/im_connector.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Test: `backend/tests/unit/test_im_models.py`
 
-Public ID prefixes follow the `CubeboxBase._PREFIX` convention (see `Conversation._PREFIX = "conv"`, `MCPCredentialGrant._PREFIX = "mcgrn"`). No edit to `public_id.py` is required — each table sets its own `_PREFIX`. Prefixes: `imac` (account), `imtl` (thread link), `imil` (identity link), `imwr` (webhook receipt), `imrq` (run queue item).
+Public ID prefixes follow the `CubeplexBase._PREFIX` convention (see `Conversation._PREFIX = "conv"`, `MCPCredentialGrant._PREFIX = "mcgrn"`). No edit to `public_id.py` is required — each table sets its own `_PREFIX`. Prefixes: `imac` (account), `imtl` (thread link), `imil` (identity link), `imwr` (webhook receipt), `imrq` (run queue item).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/unit/test_im_models.py
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,
@@ -137,12 +137,12 @@ def test_identity_link_prefix() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_im_models.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.models.im_connector'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.models.im_connector'`
 
 - [ ] **Step 3: Write the models**
 
 ```python
-# backend/cubebox/models/im_connector.py
+# backend/cubeplex/models/im_connector.py
 """IM connector models (Slack first; Feishu reuses the same shape in v1.1)."""
 
 from datetime import UTC, datetime
@@ -151,11 +151,11 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, Column, Index, text
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 
 
-class IMConnectorAccount(CubeboxBase, OrgScopedMixin, table=True):
-    """A bound IM bot account. One external IM account → one cubebox row."""
+class IMConnectorAccount(CubeplexBase, OrgScopedMixin, table=True):
+    """A bound IM bot account. One external IM account → one cubeplex row."""
 
     _PREFIX: ClassVar[str] = "imac"
     __tablename__ = "im_connector_accounts"
@@ -178,8 +178,8 @@ class IMConnectorAccount(CubeboxBase, OrgScopedMixin, table=True):
     config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
-class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
-    """Durable map: (account, channel, thread root) → one cubebox conversation."""
+class IMThreadLink(CubeplexBase, OrgScopedMixin, table=True):
+    """Durable map: (account, channel, thread root) → one cubeplex conversation."""
 
     _PREFIX: ClassVar[str] = "imtl"
     __tablename__ = "im_thread_links"
@@ -201,8 +201,8 @@ class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20, index=True)
 
 
-class IMIdentityLink(CubeboxBase, OrgScopedMixin, table=True):
-    """Map an IM sender to a cubebox user (v1 falls back to account.acting_user_id)."""
+class IMIdentityLink(CubeplexBase, OrgScopedMixin, table=True):
+    """Map an IM sender to a cubeplex user (v1 falls back to account.acting_user_id)."""
 
     _PREFIX: ClassVar[str] = "imil"
     __tablename__ = "im_identity_links"
@@ -215,7 +215,7 @@ class IMIdentityLink(CubeboxBase, OrgScopedMixin, table=True):
     user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
-class IMWebhookReceipt(CubeboxBase, OrgScopedMixin, table=True):
+class IMWebhookReceipt(CubeplexBase, OrgScopedMixin, table=True):
     """Idempotency receipt keyed by platform event id. Inserted in the same
     transaction that enqueues the run (transactional outbox)."""
 
@@ -236,7 +236,7 @@ class IMWebhookReceipt(CubeboxBase, OrgScopedMixin, table=True):
     lease_expires_at: datetime | None = Field(default=None)
 
 
-class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
+class IMRunQueueItem(CubeplexBase, OrgScopedMixin, table=True):
     """Durable outbox row: 'this accepted event will be run'. Drained by the
     IMRunQueueWorker via SELECT ... FOR UPDATE SKIP LOCKED."""
 
@@ -269,10 +269,10 @@ class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 4: Export the tables**
 
-In `backend/cubebox/models/__init__.py`, add after the `Credential` import:
+In `backend/cubeplex/models/__init__.py`, add after the `Credential` import:
 
 ```python
-from cubebox.models.im_connector import (  # noqa: F401
+from cubeplex.models.im_connector import (  # noqa: F401
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,
@@ -299,7 +299,7 @@ Expected: PASS (4 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/im_connector.py backend/cubebox/models/__init__.py backend/tests/unit/test_im_models.py
+git add backend/cubeplex/models/im_connector.py backend/cubeplex/models/__init__.py backend/tests/unit/test_im_models.py
 git commit -m "feat(im): add IM connector data model (accounts, threads, receipts, queue)"
 ```
 
@@ -342,7 +342,7 @@ git commit -m "feat(im): add migration for IM connector tables"
 ## Task 4: Slack signature verification (unit, security-critical)
 
 **Files:**
-- Create: `backend/cubebox/im/__init__.py` (empty), `backend/cubebox/im/slack/__init__.py` (empty), `backend/cubebox/im/slack/signature.py`
+- Create: `backend/cubeplex/im/__init__.py` (empty), `backend/cubeplex/im/slack/__init__.py` (empty), `backend/cubeplex/im/slack/signature.py`
 - Test: `backend/tests/unit/test_slack_signature.py`
 
 Slack signs each request: `v0:<timestamp>:<raw_body>` HMAC-SHA256 with the signing secret, hex-digested, prefixed `v0=`, in header `X-Slack-Signature`; timestamp in `X-Slack-Request-Timestamp`. Reject if the timestamp is older than 5 minutes (replay guard) or the HMAC doesn't match (constant-time compare).
@@ -357,7 +357,7 @@ import time
 
 import pytest
 
-from cubebox.im.slack.signature import SlackSignatureError, verify_slack_signature
+from cubeplex.im.slack.signature import SlackSignatureError, verify_slack_signature
 
 SECRET = "8f742231b10e8888abcd99yyyzzz85a5"
 
@@ -398,12 +398,12 @@ def test_stale_timestamp_rejected() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_slack_signature.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.slack.signature'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.im.slack.signature'`
 
 - [ ] **Step 3: Write the verifier**
 
 ```python
-# backend/cubebox/im/slack/signature.py
+# backend/cubeplex/im/slack/signature.py
 """Slack request-signature verification (HTTP Events API)."""
 
 import hashlib
@@ -445,7 +445,7 @@ def verify_slack_signature(
 Also create the empty package files:
 
 ```bash
-touch backend/cubebox/im/__init__.py backend/cubebox/im/slack/__init__.py
+touch backend/cubeplex/im/__init__.py backend/cubeplex/im/slack/__init__.py
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -456,7 +456,7 @@ Expected: PASS (3 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/__init__.py backend/cubebox/im/slack/__init__.py backend/cubebox/im/slack/signature.py backend/tests/unit/test_slack_signature.py
+git add backend/cubeplex/im/__init__.py backend/cubeplex/im/slack/__init__.py backend/cubeplex/im/slack/signature.py backend/tests/unit/test_slack_signature.py
 git commit -m "feat(im): add Slack request signature verification"
 ```
 
@@ -465,7 +465,7 @@ git commit -m "feat(im): add Slack request signature verification"
 ## Task 5: Inbound types + parse Slack events into a normalized InboundEvent
 
 **Files:**
-- Create: `backend/cubebox/im/types.py`, `backend/cubebox/im/slack/connector.py`
+- Create: `backend/cubeplex/im/types.py`, `backend/cubeplex/im/slack/connector.py`
 - Test: `backend/tests/unit/test_slack_parse_inbound.py`
 
 `parse_inbound` turns a raw Slack `event_callback` body into a platform-agnostic `InboundEvent`. It strips the bot mention from `app_mention` text, derives the thread root (`thread_ts` if present, else the message `ts` for a channel mention, else the `__dm__` sentinel for a DM), and pulls the stable `event_id` and `team_id`. It returns `None` for events we ignore (bot's own messages, non-message subtypes).
@@ -474,7 +474,7 @@ git commit -m "feat(im): add Slack request signature verification"
 
 ```python
 # backend/tests/unit/test_slack_parse_inbound.py
-from cubebox.im.slack.connector import SlackConnector
+from cubeplex.im.slack.connector import SlackConnector
 
 APP_MENTION = {
     "team_id": "T123",
@@ -540,12 +540,12 @@ def test_bot_echo_ignored() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_slack_parse_inbound.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.slack.connector'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.im.slack.connector'`
 
 - [ ] **Step 3: Write the types and the parser half of SlackConnector**
 
 ```python
-# backend/cubebox/im/types.py
+# backend/cubeplex/im/types.py
 """Platform-agnostic IM transport types."""
 
 from dataclasses import dataclass, field
@@ -585,13 +585,13 @@ class RenderState:
 ```
 
 ```python
-# backend/cubebox/im/slack/connector.py
+# backend/cubeplex/im/slack/connector.py
 """Slack connector: inbound parse + outbound render/send (Web API)."""
 
 import re
 from typing import Any
 
-from cubebox.im.types import DM_THREAD_SENTINEL, InboundEvent
+from cubeplex.im.types import DM_THREAD_SENTINEL, InboundEvent
 
 _MENTION_RE = re.compile(r"<@[A-Z0-9]+>")
 
@@ -654,7 +654,7 @@ Expected: PASS (3 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/types.py backend/cubebox/im/slack/connector.py backend/tests/unit/test_slack_parse_inbound.py
+git add backend/cubeplex/im/types.py backend/cubeplex/im/slack/connector.py backend/tests/unit/test_slack_parse_inbound.py
 git commit -m "feat(im): normalize Slack events into InboundEvent"
 ```
 
@@ -663,7 +663,7 @@ git commit -m "feat(im): normalize Slack events into InboundEvent"
 ## Task 6: Repositories + transactional inbound core (receipt + thread + enqueue)
 
 **Files:**
-- Create: `backend/cubebox/repositories/im_connector.py`, `backend/cubebox/im/inbound.py`
+- Create: `backend/cubeplex/repositories/im_connector.py`, `backend/cubeplex/im/inbound.py`
 - Test: `backend/tests/integration/test_im_inbound_outbox.py` (real Postgres, worktree-routed)
 
 This is the heart of idempotency: one transaction inserts the receipt, creates/reuses the `Conversation` + `IMThreadLink`, and enqueues the `IMRunQueueItem`. On a unique-violation of `(account_id, platform_event_id)` it rolls back and reports "duplicate" — no second enqueue.
@@ -675,9 +675,9 @@ This is the heart of idempotency: one transaction inserts the receipt, creates/r
 import pytest
 from sqlalchemy import func, select
 
-from cubebox.im.inbound import IngestResult, ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.im_connector import IMRunQueueItem, IMThreadLink, IMWebhookReceipt
+from cubeplex.im.inbound import IngestResult, ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.im_connector import IMRunQueueItem, IMThreadLink, IMWebhookReceipt
 
 pytestmark = pytest.mark.asyncio
 
@@ -723,9 +723,9 @@ Add fixtures to `backend/tests/integration/conftest.py` (or a local conftest):
 ```python
 import pytest_asyncio
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models import Credential  # real FK target for credential_id
-from cubebox.models.im_connector import IMConnectorAccount
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import Credential  # real FK target for credential_id
+from cubeplex.models.im_connector import IMConnectorAccount
 
 
 @pytest_asyncio.fixture
@@ -763,7 +763,7 @@ async def im_account(seeded_org_workspace_user):
 > / `tests/e2e/conftest.py` for the actual org/workspace/user seeding fixture and
 > use its real name and return shape. (2) `Credential(...)` must match the real
 > model's required fields and the encrypted-value column type (read
-> `cubebox/models/credential.py`); a real `im_bot` row is required because of the
+> `cubeplex/models/credential.py`); a real `im_bot` row is required because of the
 > FK. (3) `member_client` and similar e2e client fixtures yield **tuples**
 > `(client, workspace_id)` in this repo — unpack them, do not treat them as an
 > object with `.workspace_id`, and don't assume a bare `workspace_id` fixture
@@ -776,12 +776,12 @@ async def im_account(seeded_org_workspace_user):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/integration/test_im_inbound_outbox.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.inbound'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.im.inbound'`
 
 - [ ] **Step 3: Write the repositories**
 
 ```python
-# backend/cubebox/repositories/im_connector.py
+# backend/cubeplex/repositories/im_connector.py
 """Scoped repositories + queue claim primitives for IM connectors."""
 
 from datetime import UTC, datetime, timedelta
@@ -789,7 +789,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMThreadLink,
@@ -904,21 +904,21 @@ later poll re-claims the same row once its lease expires.
 - [ ] **Step 4: Write the transactional inbound core**
 
 ```python
-# backend/cubebox/im/inbound.py
+# backend/cubeplex/im/inbound.py
 """Transactional inbound core: receipt + thread link + run enqueue in one tx."""
 
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 
-from cubebox.im.types import InboundEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.im_connector import (
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubebox.repositories.im_connector import get_or_create_thread_link
+from cubeplex.repositories.im_connector import get_or_create_thread_link
 
 
 @dataclass(slots=True)
@@ -1039,7 +1039,7 @@ Expected: PASS (3 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/repositories/im_connector.py backend/cubebox/im/inbound.py backend/tests/integration/test_im_inbound_outbox.py backend/tests/integration/conftest.py
+git add backend/cubeplex/repositories/im_connector.py backend/cubeplex/im/inbound.py backend/tests/integration/test_im_inbound_outbox.py backend/tests/integration/conftest.py
 git commit -m "feat(im): transactional inbound core (receipt + thread + run enqueue)"
 ```
 
@@ -1048,7 +1048,7 @@ git commit -m "feat(im): transactional inbound core (receipt + thread + run enqu
 ## Task 7: Queue worker — drain → start_run
 
 **Files:**
-- Create: `backend/cubebox/im/worker.py`
+- Create: `backend/cubeplex/im/worker.py`
 - Test: `backend/tests/integration/test_im_worker.py`
 
 The worker claims a `pending` queue row (`SELECT … FOR UPDATE SKIP LOCKED`), calls `RunManager.start_run` with a `RunContext(user_id=account.acting_user_id, org_id, workspace_id)`, flips the receipt to `completed`, then hands the `run_id` + channel/thread to the outbound tailer (Task 8). The test fakes `start_run` to assert the contract without a real LLM.
@@ -1060,10 +1060,10 @@ The worker claims a `pending` queue row (`SELECT … FOR UPDATE SKIP LOCKED`), c
 import pytest
 from sqlalchemy import select
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.im.worker import process_one_queue_item
-from cubebox.models.im_connector import IMRunQueueItem, IMWebhookReceipt
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.im.worker import process_one_queue_item
+from cubeplex.models.im_connector import IMRunQueueItem, IMWebhookReceipt
 
 pytestmark = pytest.mark.asyncio
 
@@ -1116,12 +1116,12 @@ async def test_worker_returns_false_when_queue_empty(session_maker):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/integration/test_im_worker.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.worker'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.im.worker'`
 
 - [ ] **Step 3: Write the worker**
 
 ```python
-# backend/cubebox/im/worker.py
+# backend/cubeplex/im/worker.py
 """Durable IM run-queue worker: claim pending rows and start runs."""
 
 import asyncio
@@ -1130,9 +1130,9 @@ from typing import Any, Awaitable, Callable, Protocol
 from loguru import logger
 from sqlalchemy import select
 
-from cubebox.models.im_connector import IMRunQueueItem, IMWebhookReceipt
-from cubebox.repositories.im_connector import claim_pending_queue_item
-from cubebox.streams.run_manager import RunContext
+from cubeplex.models.im_connector import IMRunQueueItem, IMWebhookReceipt
+from cubeplex.repositories.im_connector import claim_pending_queue_item
+from cubeplex.streams.run_manager import RunContext
 
 
 class _RunStarter(Protocol):
@@ -1157,7 +1157,7 @@ async def process_one_queue_item(
         if item is None:
             return False
         # Re-load the account for acting_user_id within this session.
-        from cubebox.models.im_connector import IMConnectorAccount
+        from cubeplex.models.im_connector import IMConnectorAccount
 
         account = (
             await session.execute(
@@ -1261,7 +1261,7 @@ Expected: PASS (2 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/worker.py backend/tests/integration/test_im_worker.py
+git add backend/cubeplex/im/worker.py backend/tests/integration/test_im_worker.py
 git commit -m "feat(im): durable run-queue worker (claim -> start_run -> complete receipt)"
 ```
 
@@ -1270,7 +1270,7 @@ git commit -m "feat(im): durable run-queue worker (claim -> start_run -> complet
 ## Task 8: Outbound rendering decisions (unit) + Redis tailer
 
 **Files:**
-- Create: `backend/cubebox/im/outbound.py`; extend `backend/cubebox/im/slack/connector.py` with `render_outbound`
+- Create: `backend/cubeplex/im/outbound.py`; extend `backend/cubeplex/im/slack/connector.py` with `render_outbound`
 - Test: `backend/tests/unit/test_im_outbound_render.py`
 
 `render_outbound(run_event, state)` is a pure function: it folds a run event into `RenderState` and returns an `OutboundOp` describing the Slack call (`post_placeholder` on first text, `edit` for streaming text debounced ≥500ms, a finalize `edit` on `done`, an error `edit` on `error`). Tool activity is coalesced into a compact italic line, not streamed token-by-token.
@@ -1279,8 +1279,8 @@ git commit -m "feat(im): durable run-queue worker (claim -> start_run -> complet
 
 ```python
 # backend/tests/unit/test_im_outbound_render.py
-from cubebox.im.outbound import OutboundOp, fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import OutboundOp, fold_event
+from cubeplex.im.types import RenderState
 
 
 def test_first_text_posts_placeholder() -> None:
@@ -1326,19 +1326,19 @@ def test_error_replaces_with_notice() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_im_outbound_render.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.outbound'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.im.outbound'`
 
 - [ ] **Step 3: Write the render fold + tailer**
 
 ```python
-# backend/cubebox/im/outbound.py
+# backend/cubeplex/im/outbound.py
 """Outbound rendering: fold run events into debounced Slack ops, tail Redis."""
 
 from dataclasses import dataclass
 from typing import Any
 
-from cubebox.im.types import RenderState
-from cubebox.streams.run_events import read_run_events_after
+from cubeplex.im.types import RenderState
+from cubeplex.streams.run_events import read_run_events_after
 
 _EDIT_DEBOUNCE_SECONDS = 0.5
 
@@ -1442,7 +1442,7 @@ Expected: PASS (5 passed)
 
 - [ ] **Step 5: Add the Slack Web API send/edit methods to SlackConnector**
 
-Append to `backend/cubebox/im/slack/connector.py`:
+Append to `backend/cubeplex/im/slack/connector.py`:
 
 ```python
     async def post_placeholder(self, text: str) -> str:
@@ -1507,7 +1507,7 @@ Expected: PASS (8 passed)
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/cubebox/im/slack/connector.py backend/tests/unit/test_im_outbound_render.py
+git add backend/cubeplex/im/outbound.py backend/cubeplex/im/slack/connector.py backend/tests/unit/test_im_outbound_render.py
 git commit -m "feat(im): outbound render fold + Redis tailer + Slack chat.update edits"
 ```
 
@@ -1516,11 +1516,11 @@ git commit -m "feat(im): outbound render fold + Redis tailer + Slack chat.update
 ## Task 9: Platform-signed ingress route (E2E, real Postgres + Redis)
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/im_ingress.py`
-- Modify: `backend/cubebox/api/app.py` (register router)
+- Create: `backend/cubeplex/api/routes/v1/im_ingress.py`
+- Modify: `backend/cubeplex/api/app.py` (register router)
 - Test: `backend/tests/e2e/test_im_slack_ingress.py`
 
-The ingress is **unauthenticated by cubebox session** — verified by Slack's HMAC. It handles the `url_verification` challenge inline, looks up the account by `team_id`, drops unknown accounts with a 200 ack (no error leak), and on a real `event_callback` calls `ingest_inbound_event`. The E2E feeds a captured-real Slack payload with a valid signature into the route against the real run path's DB.
+The ingress is **unauthenticated by cubeplex session** — verified by Slack's HMAC. It handles the `url_verification` challenge inline, looks up the account by `team_id`, drops unknown accounts with a 200 ack (no error leak), and on a real `event_callback` calls `ingest_inbound_event`. The E2E feeds a captured-real Slack payload with a valid signature into the route against the real run path's DB.
 
 - [ ] **Step 1: Write the failing E2E test**
 
@@ -1534,7 +1534,7 @@ import time
 import pytest
 from sqlalchemy import func, select
 
-from cubebox.models.im_connector import IMRunQueueItem
+from cubeplex.models.im_connector import IMRunQueueItem
 
 pytestmark = pytest.mark.asyncio
 
@@ -1600,22 +1600,22 @@ Expected: FAIL with 404 (route not registered)
 - [ ] **Step 3: Write the ingress route**
 
 ```python
-# backend/cubebox/api/routes/v1/im_ingress.py
-"""Platform-signed IM ingress. Unauthenticated by cubebox session."""
+# backend/cubeplex/api/routes/v1/im_ingress.py
+"""Platform-signed IM ingress. Unauthenticated by cubeplex session."""
 
 import json
 
 from fastapi import APIRouter, Request, Response, status
 from loguru import logger
 
-from cubebox.credentials.dependencies import get_encryption_backend_app
-from cubebox.db.engine import async_session_maker
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.slack.connector import SlackConnector
-from cubebox.im.slack.signature import SlackSignatureError, verify_slack_signature
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
-from cubebox.services.credential import CredentialService
+from cubeplex.credentials.dependencies import get_encryption_backend_app
+from cubeplex.db.engine import async_session_maker
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.slack.connector import SlackConnector
+from cubeplex.im.slack.signature import SlackSignatureError, verify_slack_signature
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.im_connector import get_account_by_external_id_unscoped
+from cubeplex.services.credential import CredentialService
 
 router = APIRouter(prefix="/im", tags=["im-ingress"])
 
@@ -1676,14 +1676,14 @@ async def slack_events(request: Request) -> Response:
     return Response(status_code=status.HTTP_200_OK)
 ```
 
-> If `get_encryption_backend_app` does not exist as a plain (non-Depends) accessor, read `cubebox/credentials/dependencies.py` and use the same `request.app.state.encryption_backend` the run path uses (`run_manager.py` reads `self._app.state.encryption_backend`). Replace the import + call accordingly — this is a known, available attribute.
+> If `get_encryption_backend_app` does not exist as a plain (non-Depends) accessor, read `cubeplex/credentials/dependencies.py` and use the same `request.app.state.encryption_backend` the run path uses (`run_manager.py` reads `self._app.state.encryption_backend`). Replace the import + call accordingly — this is a known, available attribute.
 
 - [ ] **Step 4: Register the router**
 
-In `backend/cubebox/api/app.py`, near the other `include_router` calls (after `conversations_router`):
+In `backend/cubeplex/api/app.py`, near the other `include_router` calls (after `conversations_router`):
 
 ```python
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     app.include_router(im_ingress.router, prefix="/api/v1")
 ```
@@ -1696,7 +1696,7 @@ Expected: PASS (4 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/im_ingress.py backend/cubebox/api/app.py backend/tests/e2e/test_im_slack_ingress.py
+git add backend/cubeplex/api/routes/v1/im_ingress.py backend/cubeplex/api/app.py backend/tests/e2e/test_im_slack_ingress.py
 git commit -m "feat(im): Slack signed ingress route (challenge, verify, ack-and-drop, enqueue)"
 ```
 
@@ -1705,7 +1705,7 @@ git commit -m "feat(im): Slack signed ingress route (challenge, verify, ack-and-
 ## Task 10: Wire the worker into app startup + outbound tailer dispatch
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Test: `backend/tests/e2e/test_im_worker_startup.py`
 
 On app startup, build an `IMRunQueueWorker` bound to `app.state.run_manager` and `async_session_maker`, with an `on_run_started` callback that decrypts the account's bot token and spawns an `OutboundRunTailer.run()` as a background task. Stop it on shutdown alongside the run manager drain.
@@ -1734,23 +1734,23 @@ Expected: FAIL with `AttributeError: ... has no attribute 'im_run_queue_worker'`
 
 - [ ] **Step 3: Wire startup/shutdown**
 
-In `backend/cubebox/api/app.py`, inside the lifespan/startup block where `app.state.run_manager` is created, after it exists add:
+In `backend/cubeplex/api/app.py`, inside the lifespan/startup block where `app.state.run_manager` is created, after it exists add:
 
 ```python
-    from cubebox.db.engine import async_session_maker as _im_session_maker
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.slack.connector import SlackConnector
-    from cubebox.im.worker import IMRunQueueWorker
-    from cubebox.repositories.credential import CredentialRepository
-    from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
-    from cubebox.services.credential import CredentialService
+    from cubeplex.db.engine import async_session_maker as _im_session_maker
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.slack.connector import SlackConnector
+    from cubeplex.im.worker import IMRunQueueWorker
+    from cubeplex.repositories.credential import CredentialRepository
+    from cubeplex.repositories.im_connector import get_account_by_external_id_unscoped
+    from cubeplex.services.credential import CredentialService
 
     async def _on_im_run_started(run_id, item) -> None:
         # Decrypt this account's bot token and tail the run stream into Slack.
         async with _im_session_maker() as s:
             from sqlalchemy import select
 
-            from cubebox.models.im_connector import IMConnectorAccount
+            from cubeplex.models.im_connector import IMConnectorAccount
 
             account = (
                 await s.execute(
@@ -1812,7 +1812,7 @@ Expected: PASS (1 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py backend/tests/e2e/test_im_worker_startup.py
+git add backend/cubeplex/api/app.py backend/tests/e2e/test_im_worker_startup.py
 git commit -m "feat(im): start run-queue worker + outbound tailer dispatch on app boot"
 ```
 
@@ -1823,7 +1823,7 @@ git commit -m "feat(im): start run-queue worker + outbound tailer dispatch on ap
 **Files:**
 - Test: `backend/tests/e2e/test_im_end_to_end.py`
 
-This is the spec's "real internal E2E (the bulk)": a captured-real signed Slack payload hits the ingress, a run actually starts on the real run path, and the outbound tailer consumes the run's **real Redis event stream**. The only thing faked is the outermost Slack HTTP call (genuinely unsimulatable per the "no fake E2E for unsimulatable third-party" rule) — captured via a recording connector — so we assert the inbound→run→stream chain end-to-end without mocking cubebox internals.
+This is the spec's "real internal E2E (the bulk)": a captured-real signed Slack payload hits the ingress, a run actually starts on the real run path, and the outbound tailer consumes the run's **real Redis event stream**. The only thing faked is the outermost Slack HTTP call (genuinely unsimulatable per the "no fake E2E for unsimulatable third-party" rule) — captured via a recording connector — so we assert the inbound→run→stream chain end-to-end without mocking cubeplex internals.
 
 - [ ] **Step 1: Write the E2E test**
 
@@ -1838,8 +1838,8 @@ import time
 import pytest
 from sqlalchemy import select
 
-from cubebox.im.outbound import OutboundRunTailer
-from cubebox.models.im_connector import IMRunQueueItem, IMWebhookReceipt
+from cubeplex.im.outbound import OutboundRunTailer
+from cubeplex.models.im_connector import IMRunQueueItem, IMWebhookReceipt
 
 pytestmark = pytest.mark.asyncio
 
@@ -1894,7 +1894,7 @@ async def test_inbound_starts_run_and_outbound_tails_real_stream(
     # Tail the real run stream with a recording connector; assert the run
     # produced events that rendered into a Slack post + final edit.
     # (The active run id for the conversation comes from Redis run meta.)
-    from cubebox.streams.run_events import get_active_run, get_latest_event_id  # noqa: F401
+    from cubeplex.streams.run_events import get_active_run, get_latest_event_id  # noqa: F401
 
     # Find the run for this conversation; the worker already started it.
     # In single-process E2E the run is in-flight or just finished.
@@ -1923,7 +1923,7 @@ async def test_inbound_starts_run_and_outbound_tails_real_stream(
 - [ ] **Step 2: Run the test**
 
 Run: `cd backend && uv run pytest tests/e2e/test_im_end_to_end.py -v`
-Expected: PASS (1 passed). If the live LLM is not configured in the E2E env, mark this test to skip when `CUBEBOX_LLM__*` is absent (reuse the existing run-path E2E's skip guard — grep `tests/e2e` for the existing run E2E skip marker).
+Expected: PASS (1 passed). If the live LLM is not configured in the E2E env, mark this test to skip when `CUBEPLEX_LLM__*` is absent (reuse the existing run-path E2E's skip guard — grep `tests/e2e` for the existing run E2E skip marker).
 
 - [ ] **Step 3: Commit**
 
@@ -1937,8 +1937,8 @@ git commit -m "test(im): end-to-end signed inbound -> run -> durable receipt cha
 ## Task 12: Scope-isolated config — workspace IM account routes
 
 **Files:**
-- Create: `backend/cubebox/services/im_connector.py`, `backend/cubebox/api/schemas/im_connector.py`, `backend/cubebox/api/routes/v1/ws_im.py`
-- Modify: `backend/cubebox/api/app.py` (register `ws_im.router`); `backend/cubebox/services/credential.py` (`_guard_references` adds IM account check)
+- Create: `backend/cubeplex/services/im_connector.py`, `backend/cubeplex/api/schemas/im_connector.py`, `backend/cubeplex/api/routes/v1/ws_im.py`
+- Modify: `backend/cubeplex/api/app.py` (register `ws_im.router`); `backend/cubeplex/services/credential.py` (`_guard_references` adds IM account check)
 - Test: `backend/tests/e2e/test_ws_im_routes.py`
 
 Workspace members connect/list/disconnect their workspace's own bots. The route stores the bot secrets in the vault (`kind="im_bot"`) and creates the account row, all via the shared `IMConnectorService`. Guarded by `require_member`.
@@ -1988,7 +1988,7 @@ Expected: FAIL with 404 (route not registered)
 - [ ] **Step 3: Write the schemas**
 
 ```python
-# backend/cubebox/api/schemas/im_connector.py
+# backend/cubeplex/api/schemas/im_connector.py
 from pydantic import BaseModel
 
 
@@ -2017,7 +2017,7 @@ class IMAccountListOut(BaseModel):
 - [ ] **Step 4: Write the shared service**
 
 ```python
-# backend/cubebox/services/im_connector.py
+# backend/cubeplex/services/im_connector.py
 """Shared IM connector service used by both ws and admin routes."""
 
 import json
@@ -2025,8 +2025,8 @@ import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.services.credential import CredentialService
+from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.services.credential import CredentialService
 
 
 class IMConnectorService:
@@ -2117,7 +2117,7 @@ class IMConnectorService:
 - [ ] **Step 5: Write the workspace routes**
 
 ```python
-# backend/cubebox/api/routes/v1/ws_im.py
+# backend/cubeplex/api/routes/v1/ws_im.py
 """Workspace-scope IM connector routes."""
 
 from typing import Annotated
@@ -2125,19 +2125,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.im_connector import (
+from cubeplex.api.schemas.im_connector import (
     ConnectSlackAccountIn,
     IMAccountListOut,
     IMAccountOut,
 )
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.credentials.dependencies import get_encryption_backend
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.db.session import get_session
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.im_connector import IMConnectorService
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.credentials.dependencies import get_encryption_backend
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.db.session import get_session
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.im_connector import IMConnectorService
 
 router = APIRouter(prefix="/ws/{workspace_id}/im", tags=["ws-im"])
 
@@ -2206,10 +2206,10 @@ async def delete_account(
 
 - [ ] **Step 6: Guard credential deletion against live IM accounts**
 
-In `backend/cubebox/services/credential.py`, inside `_guard_references`, after the `SandboxEnvVar` block add:
+In `backend/cubeplex/services/credential.py`, inside `_guard_references`, after the `SandboxEnvVar` block add:
 
 ```python
-        from cubebox.models import IMConnectorAccount
+        from cubeplex.models import IMConnectorAccount
 
         im_refs = (
             (
@@ -2233,10 +2233,10 @@ In `backend/cubebox/services/credential.py`, inside `_guard_references`, after t
 
 - [ ] **Step 7: Register the router**
 
-In `backend/cubebox/api/app.py`, near the other `ws_*` includes:
+In `backend/cubeplex/api/app.py`, near the other `ws_*` includes:
 
 ```python
-    from cubebox.api.routes.v1 import ws_im
+    from cubeplex.api.routes.v1 import ws_im
 
     app.include_router(ws_im.router, prefix="/api/v1")
 ```
@@ -2249,7 +2249,7 @@ Expected: PASS (1 passed)
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/services/im_connector.py backend/cubebox/api/schemas/im_connector.py backend/cubebox/api/routes/v1/ws_im.py backend/cubebox/services/credential.py backend/cubebox/api/app.py backend/tests/e2e/test_ws_im_routes.py
+git add backend/cubeplex/services/im_connector.py backend/cubeplex/api/schemas/im_connector.py backend/cubeplex/api/routes/v1/ws_im.py backend/cubeplex/services/credential.py backend/cubeplex/api/app.py backend/tests/e2e/test_ws_im_routes.py
 git commit -m "feat(im): workspace-scope IM account routes (connect/list/delete)"
 ```
 
@@ -2258,8 +2258,8 @@ git commit -m "feat(im): workspace-scope IM account routes (connect/list/delete)
 ## Task 13: Scope-isolated config — org-admin IM account routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_im.py`
-- Modify: `backend/cubebox/api/app.py` (register `admin_im.router`)
+- Create: `backend/cubeplex/api/routes/v1/admin_im.py`
+- Modify: `backend/cubeplex/api/app.py` (register `admin_im.router`)
 - Test: `backend/tests/e2e/test_admin_im_routes.py`
 
 A **separate handler** (not a `?scope=` flag): an org admin lists every IM account across the org's workspaces and can enable/disable them. Reuse goes through `IMConnectorService.list_for_org` / `set_enabled` — never the route layer. Guarded by `get_admin_request_context` (NOT `require_admin`: these routes have no `{workspace_id}` path segment, so the workspace-scoped `require_admin`/`require_role` cannot resolve a workspace permission — use the org-admin context dependency the `/admin/mcp` routes use).
@@ -2308,7 +2308,7 @@ Expected: FAIL with 404
 - [ ] **Step 3: Write the admin routes**
 
 ```python
-# backend/cubebox/api/routes/v1/admin_im.py
+# backend/cubeplex/api/routes/v1/admin_im.py
 """Org-admin-scope IM connector governance routes (separate handler)."""
 
 from typing import Annotated
@@ -2316,15 +2316,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut
-from cubebox.auth.context import RequestContext
-from cubebox.credentials.dependencies import get_encryption_backend
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.db.session import get_session
-from cubebox.mcp.dependencies import get_admin_request_context
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.im_connector import IMConnectorService
+from cubeplex.api.schemas.im_connector import IMAccountListOut, IMAccountOut
+from cubeplex.auth.context import RequestContext
+from cubeplex.credentials.dependencies import get_encryption_backend
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.db.session import get_session
+from cubeplex.mcp.dependencies import get_admin_request_context
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.im_connector import IMConnectorService
 
 router = APIRouter(prefix="/admin/im", tags=["admin-im"])
 
@@ -2391,10 +2391,10 @@ async def enable_account(
 
 - [ ] **Step 4: Register the router**
 
-In `backend/cubebox/api/app.py`, near the other `admin_*` includes:
+In `backend/cubeplex/api/app.py`, near the other `admin_*` includes:
 
 ```python
-    from cubebox.api.routes.v1 import admin_im
+    from cubeplex.api.routes.v1 import admin_im
 
     app.include_router(admin_im.router, prefix="/api/v1")
 ```
@@ -2407,7 +2407,7 @@ Expected: PASS (2 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_im.py backend/cubebox/api/app.py backend/tests/e2e/test_admin_im_routes.py
+git add backend/cubeplex/api/routes/v1/admin_im.py backend/cubeplex/api/app.py backend/tests/e2e/test_admin_im_routes.py
 git commit -m "feat(im): org-admin IM account governance routes (separate handler)"
 ```
 
@@ -2429,10 +2429,10 @@ import json
 import pytest
 from sqlalchemy import select
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
 
 pytestmark = pytest.mark.asyncio
 
@@ -2543,7 +2543,7 @@ Expected: all pass (LLM-gated E2E may skip if no LLM configured — that is acce
 
 - [ ] **Step 2: Type check + lint**
 
-Run: `cd backend && uv run mypy cubebox/im cubebox/models/im_connector.py cubebox/repositories/im_connector.py cubebox/services/im_connector.py cubebox/api/routes/v1/im_ingress.py cubebox/api/routes/v1/ws_im.py cubebox/api/routes/v1/admin_im.py && uv run ruff check cubebox/im cubebox/api/routes/v1/im_ingress.py cubebox/api/routes/v1/ws_im.py cubebox/api/routes/v1/admin_im.py`
+Run: `cd backend && uv run mypy cubeplex/im cubeplex/models/im_connector.py cubeplex/repositories/im_connector.py cubeplex/services/im_connector.py cubeplex/api/routes/v1/im_ingress.py cubeplex/api/routes/v1/ws_im.py cubeplex/api/routes/v1/admin_im.py && uv run ruff check cubeplex/im cubeplex/api/routes/v1/im_ingress.py cubeplex/api/routes/v1/ws_im.py cubeplex/api/routes/v1/admin_im.py`
 Expected: no errors. Fix any (line length 100, type annotations everywhere).
 
 - [ ] **Step 3: Commit any fixes from the sweep**
@@ -2557,6 +2557,6 @@ git commit -m "chore(im): fix types/lint from pre-PR sweep"
 
 ## Self-Review Notes (for the implementer)
 
-- **Feishu is v1.1, out of scope here.** The `platform` column, the `IMConnector` protocol naming, and the connector package layout (`cubebox/im/slack/`) leave room for `cubebox/im/feishu/` without schema changes. Do not build Feishu in this plan.
+- **Feishu is v1.1, out of scope here.** The `platform` column, the `IMConnector` protocol naming, and the connector package layout (`cubeplex/im/slack/`) leave room for `cubeplex/im/feishu/` without schema changes. Do not build Feishu in this plan.
 - **Open Questions resolved for v1 in this plan:** DM = one rolling conversation (sentinel thread root, no per-day reset); concurrent message on a live run = the second event enqueues and `start_run` raises 409 inside the worker, which logs and leaves the receipt for re-claim (acceptable v1 behavior — a follow-up turn, not a steer); identity = binding-level acting user, no `IMIdentityLink` lookup wired yet (table exists for v1.1); delivery = HTTP webhook only; streaming = debounced `chat.update` (not native `chat.startStream`); rate-limit = latest-wins via debounce. These are documented choices, not gaps.
 - **Single-process affinity** (spec Open Question) is the one real limitation carried forward: the worker, run, and tailer all live in the same API process in v1. Recorded in Task 1's design note.

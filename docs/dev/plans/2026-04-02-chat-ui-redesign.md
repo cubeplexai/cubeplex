@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Redesign the cubebox chat interface to a split-screen agent UI with professional tool call display, task progress bar, enhanced SubAgent cards, and a right-side tool detail panel.
+**Goal:** Redesign the cubeplex chat interface to a split-screen agent UI with professional tool call display, task progress bar, enhanced SubAgent cards, and a right-side tool detail panel.
 
 **Architecture:** Three-column adaptive layout (Sidebar | ChatPanel | ToolDetailPanel) using shadcn/ui ResizablePanelGroup. New Zustand stores for tool detail panel state and todo tracking. Two small backend changes (add TodoListMiddleware + add `tool_call_id` to `tool_result` events). All new components are small, focused files under `components/chat/` and `components/panel/`.
 
@@ -34,8 +34,8 @@
 
 | File | Changes |
 |------|---------|
-| `backend/cubebox/agents/graph.py` | Add `TodoListMiddleware()` to middleware stack |
-| `backend/cubebox/agents/stream.py` | Add `tool_call_id` to tool_result events |
+| `backend/cubeplex/agents/graph.py` | Add `TodoListMiddleware()` to middleware stack |
+| `backend/cubeplex/agents/stream.py` | Add `tool_call_id` to tool_result events |
 | `frontend/packages/core/src/types/events.ts` | Add `TodoItem`, `PanelContentType`, extend `ToolResultEvent` with `tool_call_id` |
 | `frontend/packages/core/src/stores/messageStore.ts` | Add `todos[]`, `toolResultMap`, process `write_todos`, store results by `tool_call_id` |
 | `frontend/packages/core/src/stores/index.ts` | Export `toolDetailStore` |
@@ -58,11 +58,11 @@
 ## Task 1: Backend — Add `tool_call_id` to `tool_result` events
 
 **Files:**
-- Modify: `backend/cubebox/agents/stream.py:73-86`
+- Modify: `backend/cubeplex/agents/stream.py:73-86`
 
 - [ ] **Step 1: Add `tool_call_id` extraction to tool_result event**
 
-In `backend/cubebox/agents/stream.py`, find the tool result section (around line 73) and add `tool_call_id` extraction:
+In `backend/cubeplex/agents/stream.py`, find the tool result section (around line 73) and add `tool_call_id` extraction:
 
 ```python
     # Tool result (ToolMessage: has name and content)
@@ -116,7 +116,7 @@ Expected: All format, lint, type-check, and tests pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/agents/stream.py
+git add backend/cubeplex/agents/stream.py
 git commit -m "feat: add tool_call_id to tool_result SSE events"
 ```
 
@@ -125,17 +125,17 @@ git commit -m "feat: add tool_call_id to tool_result SSE events"
 ## Task 2: Backend — Add TodoListMiddleware
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py:40-50`
+- Modify: `backend/cubeplex/agents/graph.py:40-50`
 
 - [ ] **Step 1: Add TodoListMiddleware import and registration**
 
-In `backend/cubebox/agents/graph.py`, add the import at the top with the other middleware imports:
+In `backend/cubeplex/agents/graph.py`, add the import at the top with the other middleware imports:
 
 ```python
 from langchain.agents.middleware.todo import TodoListMiddleware
 ```
 
-Then in `create_cubebox_agent()`, add it to the middleware stack after `SkillsMiddleware` and before `SubAgentMiddleware`:
+Then in `create_cubeplex_agent()`, add it to the middleware stack after `SkillsMiddleware` and before `SubAgentMiddleware`:
 
 ```python
     _skills = skills or []
@@ -164,7 +164,7 @@ cd backend && python -c "import langchain.agents.middleware; print(dir(langchain
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/agents/graph.py
+git add backend/cubeplex/agents/graph.py
 git commit -m "feat: add TodoListMiddleware for agent task planning"
 ```
 
@@ -639,7 +639,7 @@ Replace `frontend/packages/web/hooks/useMessages.ts`:
 ```typescript
 'use client'
 
-import { useMessageStore } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
 
 export function useMessages(conversationId: string) {
   const messagesMap = useMessageStore((s) => s.messages) ?? {}
@@ -677,7 +677,7 @@ Create `frontend/packages/web/hooks/useToolDetail.ts`:
 ```typescript
 'use client'
 
-import { useToolDetailStore } from '@cubebox/core'
+import { useToolDetailStore } from '@cubeplex/core'
 
 export function useToolDetail() {
   const isOpen = useToolDetailStore((s) => s.isOpen)
@@ -962,7 +962,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
-import { useToolDetailStore } from '@cubebox/core'
+import { useToolDetailStore } from '@cubeplex/core'
 
 interface ToolCallItemProps {
   name: string
@@ -1160,7 +1160,7 @@ Create `frontend/packages/web/components/chat/ToolCallGroup.tsx`:
 ```tsx
 'use client'
 
-import type { ContentBlock } from '@cubebox/core'
+import type { ContentBlock } from '@cubeplex/core'
 import { ToolCallItem } from './ToolCallItem'
 
 interface ToolCallGroupProps {
@@ -1236,7 +1236,7 @@ import {
   ChevronUp,
   ChevronDown,
 } from 'lucide-react'
-import type { TodoItem } from '@cubebox/core'
+import type { TodoItem } from '@cubeplex/core'
 
 interface TaskProgressBarProps {
   todos: TodoItem[]
@@ -1913,7 +1913,7 @@ import { useEffect } from 'react'
 import {
   useConversationStore,
   createApiClient,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { InputBar } from '@/components/layout/InputBar'
@@ -1979,8 +1979,8 @@ In `frontend/packages/web/components/chat/MessageList.tsx`, update the component
 'use client'
 
 import { useEffect, useMemo } from 'react'
-import { useMessageStore, createApiClient } from '@cubebox/core'
-import type { Message, SubagentSummary } from '@cubebox/core'
+import { useMessageStore, createApiClient } from '@cubeplex/core'
+import type { Message, SubagentSummary } from '@cubeplex/core'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -2091,7 +2091,7 @@ import type {
   ContentBlock,
   SubagentSummary,
   AgentStream,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import {
   Collapsible,
@@ -2514,7 +2514,7 @@ import {
   Bot,
   CheckCircle2,
 } from 'lucide-react'
-import type { AgentStream } from '@cubebox/core'
+import type { AgentStream } from '@cubeplex/core'
 import {
   Collapsible,
   CollapsibleContent,

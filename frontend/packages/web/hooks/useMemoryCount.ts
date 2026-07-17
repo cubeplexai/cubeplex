@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createApiClient, getMemoryCount, useMemoryEventStore } from '@cubebox/core'
+import { createApiClient, getMemoryCount, useMemoryEventStore } from '@cubeplex/core'
 
 /**
  * Per-conversation memory count, refresh-safe.

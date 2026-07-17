@@ -1,7 +1,7 @@
 ---
 name: "jupyter-notebook"
 description: "Use when the user asks to create, scaffold, or edit Jupyter notebooks (`.ipynb`) for experiments, explorations, or tutorials; prefer the bundled templates and run the helper script `new_notebook.py` to generate a clean starting notebook."
-version: 1.0.0-cubebox.1
+version: 1.0.0-cubeplex.1
 keywords:
   - office
   - notebook
@@ -34,10 +34,10 @@ Prefer the bundled templates and the helper script for consistent structure and 
 ## Skill path
 
 ```bash
-export JUPYTER_NOTEBOOK_CLI="/.skills/jupyter-notebook/1.0.0-cubebox.1/scripts/new_notebook.py"
+export JUPYTER_NOTEBOOK_CLI="/.skills/jupyter-notebook/1.0.0-cubeplex.1/scripts/new_notebook.py"
 ```
 
-Cubebox syncs enabled skill files into `/.skills/<name>/<version>/` inside the sandbox.
+Cubeplex syncs enabled skill files into `/.skills/<name>/<version>/` inside the sandbox.
 
 ## Workflow
 1. Lock the intent.
@@ -95,7 +95,7 @@ Script path:
 ## Dependencies (install only when needed)
 Prefer `uv` for dependency management.
 
-Optional Python packages for local notebook execution are included in the Cubebox sandbox image:
+Optional Python packages for local notebook execution are included in the Cubeplex sandbox image:
 
 ```bash
 uv pip install jupyterlab ipykernel

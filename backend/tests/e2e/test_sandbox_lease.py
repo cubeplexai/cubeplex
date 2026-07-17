@@ -19,11 +19,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 _ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
 
@@ -46,9 +46,9 @@ async def scope(
     from fastapi_users.db import SQLAlchemyUserDatabase
     from fastapi_users.schemas import BaseUserCreate
 
-    from cubebox.auth.users import UserManager, _slugify_org_name
-    from cubebox.models import Role, User
-    from cubebox.repositories import (
+    from cubeplex.auth.users import UserManager, _slugify_org_name
+    from cubeplex.models import Role, User
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -81,6 +81,8 @@ async def _seed_idle_running(
     )
     row = UserSandbox(
         user_id=scope["user_id"],
+        scope_type="user",
+        scope_id=scope["user_id"],
         sandbox_id=f"sbx_{secrets.token_hex(6)}",
         image="img:latest",
         status="running",

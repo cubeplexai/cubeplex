@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
-from cubebox.repositories.billing import BillingRepository
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.repositories.billing import BillingRepository
 
 
 @pytest.fixture()

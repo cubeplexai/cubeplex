@@ -19,8 +19,8 @@ from typing import Any
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-from cubebox.agents.convert import wire_input_to_cubepi_user_message
-from cubebox.middleware.memory import (
+from cubeplex.agents.convert import wire_input_to_cubepi_user_message
+from cubeplex.middleware.memory import (
     MemoryMiddleware,
     _prepend_snapshot_to_user_msg,
     _render_block,
@@ -28,7 +28,7 @@ from cubebox.middleware.memory import (
     _render_snapshot_text,
     compute_relevance_snapshot,
 )
-from cubebox.models.memory import MemoryItem, MemoryScope, MemoryStatus, MemoryType
+from cubeplex.models.memory import MemoryItem, MemoryScope, MemoryStatus, MemoryType
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -241,7 +241,7 @@ async def test_transform_system_prompt_appends_authoring_when_repo_empty() -> No
 @pytest.mark.asyncio
 async def test_transform_system_prompt_authoring_only_with_empty_prompt() -> None:
     """Empty system prompt → just the authoring block."""
-    from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
+    from cubeplex.prompts.memory import MEMORY_AUTHORING_BLOCK
 
     mw = _make_middleware([])
     result = await mw.transform_system_prompt("", ctx=object())

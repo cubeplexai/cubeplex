@@ -16,7 +16,7 @@ Breaking them quietly inflates token bills. The cache E2E test
 The byte stream sent before the cache breakpoint must be **byte-identical
 across turns of the same conversation.** The stable prefix consists of:
 
-1. Cubebox base system prompt.
+1. Cubeplex base system prompt.
 2. Tool definitions in deterministic order. (Toggling MCP tools mid-
    conversation is treated as a new conversation.)
 3. Pinned memory (`preference` + `correction` items), sorted by
@@ -61,8 +61,8 @@ exactly across subsequent requests.
 ## Provider Adapters Own Cache Markers
 
 cubepi's provider adapters know about provider-specific cache mechanics;
-cubebox supplies a `CacheMarkerPolicy` via
-`cubebox/llm/cache_markers.py::CubeboxCacheMarkerPolicy`.
+cubeplex supplies a `CacheMarkerPolicy` via
+`cubeplex/llm/cache_markers.py::CubeplexCacheMarkerPolicy`.
 
 - **Anthropic adapter** (`cubepi.providers.anthropic`): insert
   `cache_control: ephemeral` on the system-prompt boundary and on the

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.services.schedule_target_spec import (
+from cubeplex.services.schedule_target_spec import (
     ScheduleTargetError,
     ScheduleTargetSpec,
 )

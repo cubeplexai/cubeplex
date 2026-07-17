@@ -51,7 +51,7 @@ before implementing any of them.
 
 ### Backend
 
-New module `backend/cubebox/services/email.py`:
+New module `backend/cubeplex/services/email.py`:
 
 ```
 class EmailService:
@@ -66,9 +66,9 @@ Pluggable backend via config `email.backend`:
 | `log` (default) | Logs the email body to stdout; for dev and single-tenant deployments that don't need email |
 | `resend` | Resend API; configured via `email.resend_api_key` |
 
-`email.from_address` — defaults to `noreply@cubebox.local`.
+`email.from_address` — defaults to `noreply@cubeplex.local`.
 
-Templates live in `backend/cubebox/templates/email/` as plain Jinja2
+Templates live in `backend/cubeplex/templates/email/` as plain Jinja2
 (`.html` + `.txt` pairs). Initial templates:
 
 - `password_reset.{html,txt}` — reset link with token
@@ -92,7 +92,7 @@ email:
   smtp_port: 587
   smtp_tls: true
   smtp_user: apikey
-  smtp_password: ${CUBEBOX_EMAIL_SMTP_PASSWORD}
+  smtp_password: ${CUBEPLEX_EMAIL_SMTP_PASSWORD}
 ```
 
 ---
@@ -228,7 +228,7 @@ tab:
 - On error (expired, already used, invalid) → shows appropriate error
   message.
 
-**API client** — add to `@cubebox/core`:
+**API client** — add to `@cubeplex/core`:
 
 ```typescript
 listInvites(client, wsId): Promise<InviteToken[]>

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import type { AvailableMember } from '@cubebox/core'
+import type { AvailableMember } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {

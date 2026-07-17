@@ -1,10 +1,10 @@
 // frontend/packages/core/src/types/message.ts
 //
 // Messages mirror cubepi's wire shape (cubepi/providers/base.py:Message). The
-// backend returns `m.model_dump(mode="json")` directly; no cubebox-specific
+// backend returns `m.model_dump(mode="json")` directly; no cubeplex-specific
 // conversion layer.
 //
-// cubebox-specific data (attachments, memory snapshots, citations, subagent
+// cubeplex-specific data (attachments, memory snapshots, citations, subagent
 // payloads) lives inside `metadata` — cubepi treats metadata as opaque and
 // round-trips it through the checkpointer unchanged.
 import type { CitationData } from './citation'
@@ -56,7 +56,19 @@ export interface MessageUsage {
 interface MessageBase {
   // Synthesized client-side for React keys; never sent to the backend.
   id: string
+  // Server-side cubepi_messages.seq for this row. Stable across reloads and
+  // tail/backscroll pagination — drives the ``#msg-<seq>`` DOM anchor that
+  // conversation-search deep-links into. Absent on in-memory messages that
+  // have not yet been persisted (e.g. the optimistic user bubble before the
+  // run claims it).
+  seq?: number
   timestamp?: number | null // epoch seconds (cubepi convention)
+  // Identifies the agent run this message belongs to. User + assistant
+  // messages produced within the same turn share a run_id. Null on
+  // very-old rows (pre-cubepi v3) and on framework-injected synthetic
+  // messages that never enter a run. The forkConversation API uses this
+  // as ``after_run_id``.
+  run_id?: string | null
   metadata?: Record<string, unknown> & {
     attachments?: MessageAttachment[]
     memory_snapshot?: unknown
@@ -69,8 +81,9 @@ interface MessageBase {
     // Never rendered as a user bubble; synthetic_source is trace-only.
     synthetic?: boolean
     synthetic_source?: string
-    // Set on user messages sent into a group-chat conversation (is_group_chat=True).
-    // Frontend uses presence of `sender_display_name` to render the SenderBadge.
+    // Stamped on every user message (1:1 included) so a 1:1→group conversion
+    // can attribute past messages. The SenderBadge is gated on the conversation
+    // being a group chat (is_group_chat), not on the mere presence of these.
     sender_user_id?: string
     sender_display_name?: string
   }
@@ -119,10 +132,10 @@ export function getTextContent(msg: Message): string {
  * Content to feed tool-result previews (SearchResultView / WebFetchView, citation
  * popovers). CitationMiddleware rewrites a tool result's `.content` to 【N-M】-marked
  * chunk text for the LLM and stashes the raw, parseable output in
- * `details.original_content` (see backend cubebox/middleware/citation.py). Previews
+ * `details.original_content` (see backend cubeplex/middleware/citation.py). Previews
  * need that raw output — falling back to `.content` would feed them the citation
  * markup, which they can't parse. The live SSE path already prefers original_content
- * (cubebox/agents/stream.py `_stringify_tool_result`); this keeps reload consistent.
+ * (cubeplex/agents/stream.py `_stringify_tool_result`); this keeps reload consistent.
  */
 export function getToolResultPreviewContent(msg: ToolResultMessage): string {
   const details = msg.details as { original_content?: unknown } | null | undefined

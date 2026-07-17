@@ -7,9 +7,9 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.schedules.poller import ScheduledTaskPoller
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.schedules.poller import ScheduledTaskPoller
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
@@ -176,7 +176,7 @@ async def test_busy_postponed_row_skipped_by_stale_sweep(
     """
     from datetime import timedelta as _td
 
-    from cubebox.repositories.scheduled_task import claim_stale_runs
+    from cubeplex.repositories.scheduled_task import claim_stale_runs
 
     tid = await _create_due_once(async_client)
     # Seed a busy-postponed row: state='claimed', run_id IS NULL,
@@ -216,7 +216,7 @@ async def test_stale_pre_stamped_row_is_reclaimed(
     """
     from datetime import timedelta as _td
 
-    from cubebox.repositories.scheduled_task import claim_stale_runs
+    from cubeplex.repositories.scheduled_task import claim_stale_runs
 
     tid = await _create_due_once(async_client)
     async with async_session_maker() as s:
@@ -249,7 +249,7 @@ async def test_completion_hook_recovers_claimed_row_race(
     'started'. The hook must still find the row by ``run_id`` (pre-stamped
     on the row while state was 'claimed') and mark it terminal.
     """
-    from cubebox.schedules.completion_hook import (
+    from cubeplex.schedules.completion_hook import (
         record_scheduled_run_terminal_state,
     )
 
@@ -349,7 +349,7 @@ async def test_busy_postponed_query_honors_above_default_retry_cap(
     """
     from datetime import timedelta as _td
 
-    from cubebox.repositories.scheduled_task import claim_busy_postponed_runs
+    from cubeplex.repositories.scheduled_task import claim_busy_postponed_runs
 
     tid = await _create_due_once(async_client)
     async with async_session_maker() as s:

@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useMessageStore } from '@cubebox/core'
-import type { ToolCallRef } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
+import type { ToolCallRef } from '@cubeplex/core'
 import { proseClasses } from '@/lib/utils'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { parseWriteFileArgs, resolveLiveWriteFile } from '@/lib/writeFilePreview'

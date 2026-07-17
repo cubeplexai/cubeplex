@@ -5,8 +5,8 @@ instead of parsing the Python-repr ``details`` fallback. The envelope
 must include the field exactly when (and only when) the subclass set it.
 """
 
-from cubebox.api.exceptions import APIException, ModelInUseByPresetError
-from cubebox.llm.errors import BrokenPresetError
+from cubeplex.api.exceptions import APIException, ModelInUseByPresetError
+from cubeplex.llm.errors import BrokenPresetError
 
 
 def test_to_response_omits_data_when_not_set() -> None:

@@ -21,11 +21,22 @@ logs
 node_modules/
 .next/
 
-# Claude Code
-# .agents/ is tracked — it holds installed skill content (managed by
-# `npx skills`); .claude/skills/<name> symlinks point into it. The
-# linguist-vendored marker in .gitattributes keeps it out of language
-# stats.
+# Agent skills — see CONTRIBUTING.md "Agent skills".
+# Native (hand-authored) skills are committed; everything else (vendored skills
+# from skills-lock.json) is restored with `make skills-restore`, so its content
+# AND generated .claude/skills symlinks stay out of git. Ignore all, keep only
+# native — so adjusting the lock never touches this file; only a NEW native
+# skill adds two `!` lines. .gitattributes marks .agents as linguist-vendored.
+.agents/skills/*
+!.agents/skills/cubeplex-tdd/
+!.agents/skills/debug-cubeplex/
+!.agents/skills/feature-workflow/
+!.agents/skills/pr-codex-review-loop/
+.claude/skills/*
+!.claude/skills/cubeplex-tdd
+!.claude/skills/debug-cubeplex
+!.claude/skills/feature-workflow
+!.claude/skills/pr-codex-review-loop
 .superpowers/
 settings.local.json
 .claude/scheduled_tasks.lock

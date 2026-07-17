@@ -19,11 +19,19 @@ development:
   sandbox:
     enabled: true
     domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260616c"
+    image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260616c"
 
   # Auth (development overrides)
   auth:
     cookie_secure: false
+    password_policy: "high"
+    email_verification:
+      enabled: "auto"
+      code_length: 6
+      code_ttl_seconds: 600
+      max_attempts: 5
+      resend_cooldown_seconds: 60
+      rate_limit_per_hour: 10
 
   # File parsers: local docling-serve (developer runs `docker compose up docling-serve`)
   parsers:

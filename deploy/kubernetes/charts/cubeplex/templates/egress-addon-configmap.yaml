@@ -1,0 +1,19 @@
+{{- if .Values.egress.enabled -}}
+# inject.py mitmproxy addon, embedded as a ConfigMap.
+#
+# The webhook's pod-patch (deploy/kubernetes/egress-bundle/webhook/patch.py)
+# hardcodes both the ConfigMap name `egress-inject-addon` and the mount
+# path `/etc/egress-inject/inject.py` — that's why this CM lives in the
+# sandbox namespace with the fixed name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "egress-inject-addon"
+  namespace: {{ .Values.egress.sandboxNamespace | quote }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: egress-addon
+data:
+  inject.py: |
+{{ .Files.Get "files/egress/inject.py" | indent 4 }}
+{{- end -}}

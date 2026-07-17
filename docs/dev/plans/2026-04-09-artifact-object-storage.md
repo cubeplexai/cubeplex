@@ -8,7 +8,7 @@
 
 **Tech Stack:** aioboto3, SQLModel, Alembic, FastAPI, React, Zustand, shadcn/ui Popover
 
-**Note:** The user's `.env` has a typo: `CUBEBOX_OBJECTSOTRE__ACCESS_SECRET` (missing an `R` in STORE). The config should use the correct spelling `objectstore.access_secret` and the user will need to fix the env var name.
+**Note:** The user's `.env` has a typo: `CUBEPLEX_OBJECTSOTRE__ACCESS_SECRET` (missing an `R` in STORE). The config should use the correct spelling `objectstore.access_secret` and the user will need to fix the env var name.
 
 ---
 
@@ -29,7 +29,7 @@ In `backend/pyproject.toml`, add `aioboto3` to the `dependencies` list:
 
 - [ ] **Step 2: Install dependencies**
 
-Run: `cd /home/chris/cubebox/backend && uv sync --all-extras`
+Run: `cd /home/chris/cubeplex/backend && uv sync --all-extras`
 
 - [ ] **Step 3: Commit**
 
@@ -54,7 +54,7 @@ Add after the `database:` section at the end of `backend/config.yaml`:
   objectstore:
     provider: "oss"  # "oss" or "s3"
     endpoint: "https://oss-cn-zhangjiakou.aliyuncs.com"
-    bucket: "cubebox-dev"
+    bucket: "cubeplex-dev"
     region: "cn-zhangjiakou"
     access_key: ""
     access_secret: ""
@@ -72,15 +72,15 @@ git commit -m "config: add objectstore section for S3/OSS"
 ### Task 3: Create Object Storage Client
 
 **Files:**
-- Create: `backend/cubebox/objectstore/__init__.py`
-- Create: `backend/cubebox/objectstore/client.py`
+- Create: `backend/cubeplex/objectstore/__init__.py`
+- Create: `backend/cubeplex/objectstore/client.py`
 
 - [ ] **Step 1: Create `__init__.py`**
 
 ```python
 """Object storage client for S3-compatible services (S3, OSS)."""
 
-from cubebox.objectstore.client import ObjectStoreClient, get_objectstore_client
+from cubeplex.objectstore.client import ObjectStoreClient, get_objectstore_client
 
 __all__ = ["ObjectStoreClient", "get_objectstore_client"]
 ```
@@ -96,7 +96,7 @@ from typing import TYPE_CHECKING
 import aioboto3
 from loguru import logger
 
-from cubebox.config import config
+from cubeplex.config import config
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
@@ -210,7 +210,7 @@ class ObjectStoreClient:
 
         Returns list of uploaded keys.
         """
-        from cubebox.sandbox.base import Sandbox
+        from cubeplex.sandbox.base import Sandbox
 
         assert isinstance(sandbox, Sandbox)
 
@@ -284,13 +284,13 @@ def get_objectstore_client() -> ObjectStoreClient:
 
 - [ ] **Step 3: Run type check**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/objectstore/`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/objectstore/`
 Expected: pass (or only minor issues from unresolvable TYPE_CHECKING imports)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/objectstore/
+git add backend/cubeplex/objectstore/
 git commit -m "feat: add async object storage client for S3/OSS"
 ```
 
@@ -299,13 +299,13 @@ git commit -m "feat: add async object storage client for S3/OSS"
 ### Task 4: Create ArtifactVersion Model and Migration
 
 **Files:**
-- Create: `backend/cubebox/models/artifact_version.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/artifact_version.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Create: `backend/alembic/versions/d8e9f0a1b2c3_create_artifact_versions_table.py`
 
 - [ ] **Step 1: Create ArtifactVersion model**
 
-Create `backend/cubebox/models/artifact_version.py`:
+Create `backend/cubeplex/models/artifact_version.py`:
 
 ```python
 """ArtifactVersion model — tracks version history for artifacts."""
@@ -348,15 +348,15 @@ class ArtifactVersion(SQLModel, table=True):
 
 - [ ] **Step 2: Update models `__init__.py`**
 
-In `backend/cubebox/models/__init__.py`:
+In `backend/cubeplex/models/__init__.py`:
 
 ```python
 """Data models."""
 
-from cubebox.models.artifact import Artifact
-from cubebox.models.artifact_version import ArtifactVersion
-from cubebox.models.conversation import Conversation
-from cubebox.models.user_sandbox import UserSandbox
+from cubeplex.models.artifact import Artifact
+from cubeplex.models.artifact_version import ArtifactVersion
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.user_sandbox import UserSandbox
 
 __all__ = ["Artifact", "ArtifactVersion", "Conversation", "UserSandbox"]
 ```
@@ -418,12 +418,12 @@ def downgrade() -> None:
 
 - [ ] **Step 4: Run migration**
 
-Run: `cd /home/chris/cubebox/backend && uv run alembic upgrade head`
+Run: `cd /home/chris/cubeplex/backend && uv run alembic upgrade head`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/artifact_version.py backend/cubebox/models/__init__.py backend/alembic/versions/d8e9f0a1b2c3_create_artifact_versions_table.py
+git add backend/cubeplex/models/artifact_version.py backend/cubeplex/models/__init__.py backend/alembic/versions/d8e9f0a1b2c3_create_artifact_versions_table.py
 git commit -m "feat: add artifact_versions table for version history"
 ```
 
@@ -432,15 +432,15 @@ git commit -m "feat: add artifact_versions table for version history"
 ### Task 5: Add ArtifactVersion Repository
 
 **Files:**
-- Modify: `backend/cubebox/repositories/artifact.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Modify: `backend/cubeplex/repositories/artifact.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Add ArtifactVersionRepository to artifact.py**
 
-Append to `backend/cubebox/repositories/artifact.py` after the `ArtifactRepository` class:
+Append to `backend/cubeplex/repositories/artifact.py` after the `ArtifactRepository` class:
 
 ```python
-from cubebox.models.artifact_version import ArtifactVersion
+from cubeplex.models.artifact_version import ArtifactVersion
 
 
 class ArtifactVersionRepository:
@@ -500,9 +500,9 @@ class ArtifactVersionRepository:
 ```python
 """Repository layer."""
 
-from cubebox.repositories.artifact import ArtifactRepository, ArtifactVersionRepository
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.repositories.artifact import ArtifactRepository, ArtifactVersionRepository
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 __all__ = [
     "ArtifactRepository",
@@ -514,13 +514,13 @@ __all__ = [
 
 - [ ] **Step 3: Run type check**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/repositories/artifact.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/repositories/artifact.py`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/repositories/artifact.py backend/cubebox/repositories/__init__.py
+git add backend/cubeplex/repositories/artifact.py backend/cubeplex/repositories/__init__.py
 git commit -m "feat: add ArtifactVersionRepository"
 ```
 
@@ -529,11 +529,11 @@ git commit -m "feat: add ArtifactVersionRepository"
 ### Task 6: Modify ArtifactMiddleware to Upload to Object Storage
 
 **Files:**
-- Modify: `backend/cubebox/middleware/artifacts.py`
+- Modify: `backend/cubeplex/middleware/artifacts.py`
 
 - [ ] **Step 1: Update the `_save_artifact` inner function**
 
-Replace the `_save_artifact` inner function in `_create_save_artifact_tool` (lines 55-111 of `backend/cubebox/middleware/artifacts.py`) with:
+Replace the `_save_artifact` inner function in `_create_save_artifact_tool` (lines 55-111 of `backend/cubeplex/middleware/artifacts.py`) with:
 
 ```python
     async def _save_artifact(
@@ -553,8 +553,8 @@ Replace the `_save_artifact` inner function in `_create_save_artifact_tool` (lin
         mime_type = _guess_mime_type(path, entry_file)
 
         # 3. Write to DB using independent session
-        from cubebox.db.engine import async_session_maker
-        from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories import ArtifactRepository, ArtifactVersionRepository
 
         async with async_session_maker() as session:
             repo = ArtifactRepository(session)
@@ -598,7 +598,7 @@ Replace the `_save_artifact` inner function in `_create_save_artifact_tool` (lin
 
         # 5. Upload to object storage
         try:
-            from cubebox.objectstore import get_objectstore_client
+            from cubeplex.objectstore import get_objectstore_client
 
             store = get_objectstore_client()
             key_prefix = (
@@ -624,13 +624,13 @@ Replace the `_save_artifact` inner function in `_create_save_artifact_tool` (lin
 
 - [ ] **Step 2: Run type check**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/middleware/artifacts.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/middleware/artifacts.py`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/middleware/artifacts.py
+git add backend/cubeplex/middleware/artifacts.py
 git commit -m "feat: upload artifacts to object storage during save_artifact"
 ```
 
@@ -639,11 +639,11 @@ git commit -m "feat: upload artifacts to object storage during save_artifact"
 ### Task 7: Modify API Routes to Serve from Object Storage
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py`
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py`
 
 - [ ] **Step 1: Rewrite the artifacts routes file**
 
-Replace the full contents of `backend/cubebox/api/routes/v1/artifacts.py` with:
+Replace the full contents of `backend/cubeplex/api/routes/v1/artifacts.py` with:
 
 ```python
 """Artifacts API routes."""
@@ -656,9 +656,9 @@ from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db import get_session
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
+from cubeplex.db import get_session
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories import ArtifactRepository, ArtifactVersionRepository
 
 router = APIRouter(prefix="/conversations/{conversation_id}/artifacts", tags=["artifacts"])
 
@@ -848,13 +848,13 @@ Note: Preview responses use `Cache-Control: public, max-age=31536000, immutable`
 
 - [ ] **Step 2: Run type check**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/api/routes/v1/artifacts.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/api/routes/v1/artifacts.py`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/artifacts.py
+git add backend/cubeplex/api/routes/v1/artifacts.py
 git commit -m "feat: serve artifact preview/download from object storage, add versions endpoint"
 ```
 
@@ -918,7 +918,7 @@ import type { Artifact, ArtifactVersion, Conversation, Message } from '../types'
 
 - [ ] **Step 4: Build core and type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -1064,7 +1064,7 @@ Ensure `ArtifactStore` types are exported from `frontend/packages/core/src/index
 
 - [ ] **Step 3: Build core and type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
@@ -1090,8 +1090,8 @@ Replace the full contents of `frontend/packages/web/components/panel/artifact/Ar
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { useArtifactStore, usePanelStore } from '@cubebox/core'
-import type { Artifact, ArtifactVersion } from '@cubebox/core'
+import { useArtifactStore, usePanelStore } from '@cubeplex/core'
+import type { Artifact, ArtifactVersion } from '@cubeplex/core'
 import { X, Download, ChevronDown } from 'lucide-react'
 import { getArtifactIcon } from './artifactIcons'
 import { PreviewLoading } from './PreviewLoading'
@@ -1319,7 +1319,7 @@ Note: This assumes `useApiClient` hook exists at `@/hooks/useApiClient` and `Pop
 
 - [ ] **Step 2: Type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
@@ -1351,7 +1351,7 @@ Create a small helper function. Add to the top of each preview component, or bet
 Create `frontend/packages/web/components/panel/artifact/previewUtils.ts`:
 
 ```typescript
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 
 export function buildPreviewUrl(
   artifact: Artifact,
@@ -1419,7 +1419,7 @@ const downloadUrl =
 
 - [ ] **Step 9: Type check and build**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 10: Commit**
@@ -1437,28 +1437,28 @@ git commit -m "feat: pass version to all preview components, append ?version=N t
 
 - [ ] **Step 1: Run backend format and lint**
 
-Run: `cd /home/chris/cubebox/backend && make format && make lint`
+Run: `cd /home/chris/cubeplex/backend && make format && make lint`
 Expected: PASS
 
 - [ ] **Step 2: Run backend type check**
 
-Run: `cd /home/chris/cubebox/backend && make type-check`
+Run: `cd /home/chris/cubeplex/backend && make type-check`
 Expected: PASS
 
 - [ ] **Step 3: Run frontend type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 4: Run frontend build**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm build`
+Run: `cd /home/chris/cubeplex/frontend && pnpm build`
 Expected: PASS
 
 - [ ] **Step 5: Manual smoke test**
 
-1. Start backend: `cd /home/chris/cubebox/backend && python main.py`
-2. Start frontend: `cd /home/chris/cubebox/frontend && pnpm dev`
+1. Start backend: `cd /home/chris/cubeplex/backend && python main.py`
+2. Start frontend: `cd /home/chris/cubeplex/frontend && pnpm dev`
 3. Create an artifact in chat (ask agent to create an HTML page)
 4. Verify artifact preview loads from object storage
 5. Update the artifact (ask agent to modify it)

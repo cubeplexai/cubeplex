@@ -56,7 +56,7 @@ and IM messages become *event sources* that feed the same pipeline; managed agen
   defines the seam they emit into.
 - No schedule executor here — #150 owns the timer substrate; this spec defines how a
   fired schedule becomes an event.
-- No outbound webhooks / event *emission* from cubebox. Inbound only.
+- No outbound webhooks / event *emission* from cubeplex. Inbound only.
 - No managed-agent definition object — #153 owns that; we only define how a target
   *reference* resolves to a run.
 - No general-purpose filter scripting language. v1 filters are declarative field
@@ -70,15 +70,15 @@ This spec deliberately ships **only the ingest layer**. There are two layers of
 work; both belong to event triggers as a product, but they ship separately.
 
 - **Layer 1 — generic webhook ingest (this spec, v1).** A workspace creates a
-  trigger, cubebox returns a per-trigger ingest URL plus an HMAC secret, and the
-  user pastes both into the source provider's webhook settings by hand. cubebox
+  trigger, cubeplex returns a per-trigger ingest URL plus an HMAC secret, and the
+  user pastes both into the source provider's webhook settings by hand. cubeplex
   treats every inbound request as an opaque JSON event: verify signature,
   dedup, filter, dispatch to a run, audit. The pipeline doesn't know "this came
   from GitHub" — it only knows "this came over the generic webhook source for
   trigger `trig-...`."
 - **Layer 2 — connectors (deferred, v1.x).** A connector wraps a specific
   provider so the user gets a one-click "Connect GitHub" / "Connect Stripe"
-  flow: cubebox installs as e.g. a GitHub App per repo (or per org), subscribes
+  flow: cubeplex installs as e.g. a GitHub App per repo (or per org), subscribes
   to the right events automatically, and routes inbound payloads to the right
   trigger without the user copying URLs or secrets. Each connector is its own
   spec and its own PR; the anticipated first one is a GitHub App. Connectors
@@ -94,11 +94,11 @@ Conceptually they sit on the same seam, but neither is in scope here.
 Until the layer-2 connectors ship, the v1 UX for "issues/PRs/comments trigger
 an agent" is:
 
-1. Create a generic-webhook trigger in cubebox; copy the ingest URL + HMAC
+1. Create a generic-webhook trigger in cubeplex; copy the ingest URL + HMAC
    secret from the trigger detail page.
 2. Open the source repo's GitHub settings → webhooks → add webhook; paste the
    URL, paste the secret, pick the events to deliver.
-3. Pick `application/json` content type so the body cubebox sees matches what
+3. Pick `application/json` content type so the body cubeplex sees matches what
    was signed.
 
 This is acceptable for early users and removes the need to ship any
@@ -109,11 +109,11 @@ improvement, scheduled after #152 v1 lands.
 
 ### How a run starts (the only path today)
 
-`backend/cubebox/api/routes/v1/conversations.py` → `send_message` (line ~509):
+`backend/cubeplex/api/routes/v1/conversations.py` → `send_message` (line ~509):
 
 1. Loads the conversation, validates content/attachments, marks it active.
 2. Builds `RunContext(user_id, org_id, workspace_id)`
-   (`backend/cubebox/streams/run_manager.py`, `RunContext` at line ~30).
+   (`backend/cubeplex/streams/run_manager.py`, `RunContext` at line ~30).
 3. Calls `run_manager.start_run(conversation_id=..., content=..., attachments=...,
    ctx=...)` (`run_manager.py` line ~482), which claims an active-run key in Redis,
    spawns a background `asyncio.Task` running `_execute_run`, and returns a `run_id`.
@@ -133,20 +133,20 @@ Key facts the trigger pipeline must respect:
 
 ### Existing inbound endpoints (precedent)
 
-- **MCP OAuth callback** — `backend/cubebox/api/routes/v1/mcp_oauth.py`. A public
+- **MCP OAuth callback** — `backend/cubeplex/api/routes/v1/mcp_oauth.py`. A public
   `GET /api/v1/oauth/mcp/callback` that takes an opaque `state` query param, **decodes an
   HMAC-signed state token** to recover identity/tenant, then acts. This is the closest
   precedent for "unauthenticated network path, authenticated by a signed token, mapped
   back to a tenant." The webhook design reuses this shape.
-- **System setup** — `backend/cubebox/api/routes/v1/system.py` `POST /api/v1/system/setup`.
+- **System setup** — `backend/cubeplex/api/routes/v1/system.py` `POST /api/v1/system/setup`.
 - HMAC signing infra already exists in the app (`mcp_user_token_signer` built in
-  `backend/cubebox/api/app.py` `_build_mcp_user_token_signer`); we follow the same
+  `backend/cubeplex/api/app.py` `_build_mcp_user_token_signer`); we follow the same
   "signer object on `app.state`" pattern for webhook secrets.
 
 ### Scope & data conventions
 
-- All business tables use `CubeboxBase` + `OrgScopedMixin`
-  (`backend/cubebox/models/mixins.py`): public-id PK via `generate_public_id(_PREFIX)`,
+- All business tables use `CubeplexBase` + `OrgScopedMixin`
+  (`backend/cubeplex/models/mixins.py`): public-id PK via `generate_public_id(_PREFIX)`,
   `(org_id, workspace_id)` FKs, composite index `ix_<table>_org_ws`.
 - Public-id prefixes are declared per-model as `_PREFIX` (e.g. `conv`, `cred`, `agt`).
 - Workspace routes are mounted under `/api/v1/ws/{workspace_id}/...` and read identity
@@ -292,7 +292,7 @@ loses membership, the trigger is auto-disabled and logged.
 
 ### Data model
 
-New tables, all `CubeboxBase + OrgScopedMixin` (public-id PK, org/workspace FKs,
+New tables, all `CubeplexBase + OrgScopedMixin` (public-id PK, org/workspace FKs,
 `ix_<t>_org_ws`). New prefixes added to model `_PREFIX` declarations:
 
 **`triggers`** — `_PREFIX = "trig"`
@@ -698,8 +698,8 @@ a concrete task in `docs/dev/plans/2026-05-27-event-triggers.md`.
 - [Temporal: retry policies](https://docs.temporal.io/encyclopedia/retry-policies)
 - [Temporal: reliable data processing — queues and workflows](https://temporal.io/blog/reliable-data-processing-queues-workflows)
 - [Queue-based exponential backoff retry pattern](https://dev.to/andreparis/queue-based-exponential-backoff-a-resilient-retry-pattern-for-distributed-systems-37f3)
-- Internal: `backend/cubebox/api/routes/v1/conversations.py` (`send_message`),
-  `backend/cubebox/streams/run_manager.py` (`RunManager.start_run`, `RunContext`),
-  `backend/cubebox/api/routes/v1/mcp_oauth.py` (signed-token tenant mapping),
-  `backend/cubebox/models/mixins.py` (`CubeboxBase`, `OrgScopedMixin`).
+- Internal: `backend/cubeplex/api/routes/v1/conversations.py` (`send_message`),
+  `backend/cubeplex/streams/run_manager.py` (`RunManager.start_run`, `RunContext`),
+  `backend/cubeplex/api/routes/v1/mcp_oauth.py` (signed-token tenant mapping),
+  `backend/cubeplex/models/mixins.py` (`CubeplexBase`, `OrgScopedMixin`).
 - Sibling issues: #150 (scheduled tasks), #149 (IM connectors), #153 (managed agents).

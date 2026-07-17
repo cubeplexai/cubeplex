@@ -24,7 +24,7 @@ Two problems discovered from production run history:
 
 ### Backend
 
-`_validate_cron` in `backend/cubebox/api/schemas/ws_scheduled_tasks.py` currently
+`_validate_cron` in `backend/cubeplex/api/schemas/ws_scheduled_tasks.py` currently
 only calls `croniter.is_valid(expr)`, which accepts any field count.
 
 Add a field-count check:

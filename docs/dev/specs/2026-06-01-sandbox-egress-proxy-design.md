@@ -2,10 +2,10 @@
 
 - **Date:** 2026-06-01
 - **Status:** Design, pending review.
-- **Area:** admin sandbox policy (`cubebox/models/sandbox_policy.py`,
-  `cubebox/api/.../sandbox_policy`), egress addon
+- **Area:** admin sandbox policy (`cubeplex/models/sandbox_policy.py`,
+  `cubeplex/api/.../sandbox_policy`), egress addon
   (`deploy/egress-bundle/addon/inject.py`), internal egress API
-  (`cubebox/api/routes/internal_egress.py`), admin sandbox policy page (frontend).
+  (`cubeplex/api/routes/internal_egress.py`), admin sandbox policy page (frontend).
 - **Background:** [docs/dev/notes/2026-06-01-egress-tls-fingerprint-vs-mitm.md](../notes/2026-06-01-egress-tls-fingerprint-vs-mitm.md)
 
 ## Background & motivation
@@ -120,7 +120,7 @@ admin sets proxy URL in the sandbox policy page → SandboxPolicy.egress_proxy (
 
 first sandbox HTTPS flow → mitmproxy request hook
   → if proxy not yet resolved: mTLS GET /internal/egress/proxy-config
-       → cubebox: cert → sandbox_id → UserSandbox → org_id → org-default policy → proxy
+       → cubeplex: cert → sandbox_id → UserSandbox → org_id → org-default policy → proxy
   → cache (scheme,(host,port)) or None; on failure: this flow direct, retry next flow
 
 every sandbox outbound 443 → nft redirect → mitmproxy
@@ -130,7 +130,7 @@ every sandbox outbound 443 → nft redirect → mitmproxy
 
 ### Error handling
 
-- **Fetch fails** (network / mTLS / cubebox down) → that flow goes **direct**
+- **Fetch fails** (network / mTLS / cubeplex down) → that flow goes **direct**
   (fail-open), and the config stays *unresolved* so the **next** flow retries —
   a transient control-plane outage never becomes a permanent direct-only
   sandbox. Rationale: the proxy is an *availability* feature, not a security

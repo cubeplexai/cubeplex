@@ -1,6 +1,6 @@
 # Frontend Quick Reference
 
-Reference content for the cubebox frontend monorepo. For workflow
+Reference content for the cubeplex frontend monorepo. For workflow
 discipline, hard rules, and skill triggers, see the root
 [AGENTS.md](../../AGENTS.md). For auth, CSRF, SSE, and deployment-mode
 behavior, see [auth-and-sse.md](auth-and-sse.md).
@@ -10,7 +10,7 @@ behavior, see [auth-and-sse.md](auth-and-sse.md).
 ```
 frontend/
 ├── packages/
-│   ├── core/             # @cubebox/core — shared TS library
+│   ├── core/             # @cubeplex/core — shared TS library
 │   │   ├── src/
 │   │   │   ├── api/      # API client abstractions
 │   │   │   ├── stores/   # Zustand stores
@@ -49,16 +49,16 @@ Single-package commands:
 ```bash
 pnpm -w -r run build               # Build all packages (including core)
 pnpm --filter web dev              # Web only
-pnpm --filter @cubebox/core type-check
+pnpm --filter @cubeplex/core type-check
 ```
 
 ## Package Structure
 
-- `@cubebox/core` — TypeScript library exporting:
+- `@cubeplex/core` — TypeScript library exporting:
   - `./api` — API client.
   - `./stores` — Zustand stores.
   - `./types` — Shared types.
-- `web` — Next.js app, consumes `@cubebox/core`.
+- `web` — Next.js app, consumes `@cubeplex/core`.
 
 **Data flow:** components → Zustand stores (in core) → API client (in core)
 → backend.
@@ -66,7 +66,7 @@ pnpm --filter @cubebox/core type-check
 ## Development Workflow
 
 1. **Shared code** lives in `packages/core/src/`.
-2. **Build core** with `pnpm --filter @cubebox/core build` — compiles
+2. **Build core** with `pnpm --filter @cubeplex/core build` — compiles
    TypeScript to `dist/`. **Must build before web sees API/type changes.**
 3. **Add components** with `npx shadcn-ui@latest add <component>`, run
    from `packages/web/`.

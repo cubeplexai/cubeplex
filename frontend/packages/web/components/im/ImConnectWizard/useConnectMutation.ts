@@ -8,7 +8,7 @@ import {
   wsConnectImAccount,
   type ConnectImAccountIn,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 // ``ApiClient`` is not re-exported from core's package index — using
 // ``ReturnType<typeof createApiClient>`` keeps the type in sync with

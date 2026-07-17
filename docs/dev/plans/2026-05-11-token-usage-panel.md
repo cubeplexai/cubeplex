@@ -8,41 +8,41 @@
 
 **Tech Stack:** Python/FastAPI (backend), TypeScript/React/Zustand/Tailwind (frontend), SQLAlchemy for session aggregation query.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/token-usage-panel` (ports 8031/3031)
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/token-usage-panel` (ports 8031/3031)
 
 ---
 
-### Task 1: Attach `_cubebox_context_window` to LLM instances
+### Task 1: Attach `_cubeplex_context_window` to LLM instances
 
 Add context window size to the metadata already attached to LLM instances by `LLMFactory.create()`, so downstream code (RunManager) can read it without re-resolving model config.
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py:481-483` (openai-completions path) and `:528-530` (anthropic path)
+- Modify: `backend/cubeplex/llm/factory.py:481-483` (openai-completions path) and `:528-530` (anthropic path)
 
-- [ ] **Step 1: Add `_cubebox_context_window` after existing metadata lines**
+- [ ] **Step 1: Add `_cubeplex_context_window` after existing metadata lines**
 
-In `backend/cubebox/llm/factory.py`, after line 483 (`llm._cubebox_model_cost = ...`), add:
+In `backend/cubeplex/llm/factory.py`, after line 483 (`llm._cubeplex_model_cost = ...`), add:
 
 ```python
-llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
+llm._cubeplex_context_window = model_config.context_window  # type: ignore[attr-defined]
 ```
 
-And after line 530 (`anthropic_llm._cubebox_model_cost = ...`), add:
+And after line 530 (`anthropic_llm._cubeplex_model_cost = ...`), add:
 
 ```python
-anthropic_llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
+anthropic_llm._cubeplex_context_window = model_config.context_window  # type: ignore[attr-defined]
 ```
 
 - [ ] **Step 2: Verify type-check passes**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend && uv run mypy cubebox/llm/factory.py`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend && uv run mypy cubeplex/llm/factory.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/llm/factory.py
-git commit -m "feat(llm): attach _cubebox_context_window to LLM instances"
+git add cubeplex/llm/factory.py
+git commit -m "feat(llm): attach _cubeplex_context_window to LLM instances"
 ```
 
 ---
@@ -52,7 +52,7 @@ git commit -m "feat(llm): attach _cubebox_context_window to LLM instances"
 Intercept `UsageEvent`s during streaming to build a turn-level accumulator, then attach the summary (turn + session + context_window) to the `DoneEvent`.
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:487-503` (`publish_stream_event`) and `:845-861` (done event emission)
+- Modify: `backend/cubeplex/streams/run_manager.py:487-503` (`publish_stream_event`) and `:845-861` (done event emission)
 - Test: `backend/tests/unit/streams/test_done_usage.py` (create)
 
 - [ ] **Step 1: Write test for done event usage payload**
@@ -62,7 +62,7 @@ Create `backend/tests/unit/streams/__init__.py` (empty) and `backend/tests/unit/
 ```python
 """DoneEvent carries accumulated turn usage."""
 
-from cubebox.agents.schemas import DoneEvent, UsageEvent
+from cubeplex.agents.schemas import DoneEvent, UsageEvent
 
 
 def test_done_event_accepts_usage_payload() -> None:
@@ -131,12 +131,12 @@ def test_usage_event_accumulation() -> None:
 
 - [ ] **Step 2: Run test to verify it passes** (these are schema/logic tests, no impl change needed)
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend && uv run pytest tests/unit/streams/test_done_usage.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend && uv run pytest tests/unit/streams/test_done_usage.py -v`
 Expected: PASS (DoneEvent already accepts arbitrary `data` dicts)
 
 - [ ] **Step 3: Add turn usage accumulator and context_window extraction in `_execute_run`**
 
-In `backend/cubebox/streams/run_manager.py`, add a turn accumulator dict and context_window variable at the top of the `try` block inside `_execute_run` (right after `tool_delta_context` on line 447):
+In `backend/cubeplex/streams/run_manager.py`, add a turn accumulator dict and context_window variable at the top of the `try` block inside `_execute_run` (right after `tool_delta_context` on line 447):
 
 ```python
         turn_usage: dict[str, int] = {
@@ -162,14 +162,14 @@ In `publish_stream_event`, before the final `await publish_event(sse_event)` lin
 Then extract context_window from the LLM after it's created. After line 578 (`llm = await LLMFactory(...).create_default()`), add:
 
 ```python
-            context_window: int = getattr(llm, "_cubebox_context_window", 0)
+            context_window: int = getattr(llm, "_cubeplex_context_window", 0)
 ```
 
-Note: `create_default()` may return a `RunnableWithFallbacks` wrapper. The `_cubebox_context_window` attribute is on the inner model. Handle this:
+Note: `create_default()` may return a `RunnableWithFallbacks` wrapper. The `_cubeplex_context_window` attribute is on the inner model. Handle this:
 
 ```python
             _inner = getattr(llm, "runnable", llm)
-            context_window: int = getattr(_inner, "_cubebox_context_window", 0)
+            context_window: int = getattr(_inner, "_cubeplex_context_window", 0)
 ```
 
 - [ ] **Step 4: Query session totals and build enriched DoneEvent**
@@ -183,8 +183,8 @@ Replace the DoneEvent emission block (lines 857-861) with:
                 from sqlalchemy import func as sa_func
                 from sqlalchemy import select as sa_select
 
-                from cubebox.db.engine import async_session_maker
-                from cubebox.models.billing import BillingEvent, LlmBillingEvent
+                from cubeplex.db.engine import async_session_maker
+                from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
                 async with async_session_maker() as billing_session:
                     row = (
@@ -227,13 +227,13 @@ Replace the DoneEvent emission block (lines 857-861) with:
 
 - [ ] **Step 5: Run existing tests to verify nothing breaks**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend && uv run pytest tests/unit/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend && uv run pytest tests/unit/ -v`
 Expected: All PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/streams/run_manager.py cubebox/llm/factory.py tests/unit/streams/
+git add cubeplex/streams/run_manager.py cubeplex/llm/factory.py tests/unit/streams/
 git commit -m "feat(stream): accumulate turn usage and enrich DoneEvent with usage summary"
 ```
 
@@ -244,11 +244,11 @@ git commit -m "feat(stream): accumulate turn usage and enrich DoneEvent with usa
 Return session-level token totals and context_window in the bootstrap response so the frontend can show stats after a page refresh.
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py:588-648`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py:588-648`
 
 - [ ] **Step 1: Add session usage query to bootstrap handler**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, inside `get_conversation_bootstrap`, before the `return` statement (line 643), add:
+In `backend/cubeplex/api/routes/v1/conversations.py`, inside `get_conversation_bootstrap`, before the `return` statement (line 643), add:
 
 ```python
     # --- Session-level token usage for the usage panel ---
@@ -260,7 +260,7 @@ In `backend/cubebox/api/routes/v1/conversations.py`, inside `get_conversation_bo
         from sqlalchemy import func as sa_func
         from sqlalchemy import select as sa_select
 
-        from cubebox.models.billing import BillingEvent, LlmBillingEvent
+        from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
         row = (
             await session.execute(
@@ -281,8 +281,8 @@ In `backend/cubebox/api/routes/v1/conversations.py`, inside `get_conversation_bo
         }
 
         # Resolve context_window from the default model config
-        from cubebox.llm.config import LLMConfig
-        from cubebox.llm.factory import LLMFactory
+        from cubeplex.llm.config import LLMConfig
+        from cubeplex.llm.factory import LLMFactory
 
         factory = LLMFactory(session=session, org_id=ctx.org_id)
         provider_name, model_id = await factory.get_default_model()
@@ -306,13 +306,13 @@ Then add `"usage_summary": usage_summary` to the return dict (line 643):
 
 - [ ] **Step 2: Run type-check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend && uv run mypy cubebox/api/routes/v1/conversations.py`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend && uv run mypy cubeplex/api/routes/v1/conversations.py`
 Expected: `Success`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py
+git add cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(api): add usage_summary to conversation bootstrap response"
 ```
 
@@ -392,13 +392,13 @@ Check `frontend/packages/core/src/index.ts` and ensure `TurnUsage`, `SessionUsag
 
 - [ ] **Step 4: Build core and type-check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: No type errors
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend
 git add packages/core/src/types/events.ts packages/core/src/api/runStreams.ts
 git commit -m "feat(core): add token usage types and extend DoneEvent/bootstrap"
 ```
@@ -543,13 +543,13 @@ In `send()`, inside the initial `set()` call (line 724), add:
 
 - [ ] **Step 7: Build and type-check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: No type errors
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend
 git add packages/core/src/stores/messageStore.ts
 git commit -m "feat(store): handle token usage from done event and bootstrap"
 ```
@@ -632,7 +632,7 @@ Create `frontend/packages/web/components/chat/TokenUsageBar.tsx`:
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronDown, ChevronRight, BarChart3 } from 'lucide-react'
-import type { TurnUsage, SessionUsage } from '@cubebox/core'
+import type { TurnUsage, SessionUsage } from '@cubeplex/core'
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -810,13 +810,13 @@ This renders the bar only when streaming is done, there is usage data, **and** a
 
 - [ ] **Step 5: Build and type-check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: No type errors
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend
 git add packages/web/components/chat/TokenUsageBar.tsx \
        packages/web/components/chat/MessageList.tsx \
        packages/web/hooks/useMessages.ts \
@@ -836,7 +836,7 @@ Start both servers in the worktree, send a message, and verify the token usage p
 - [ ] **Step 1: Start backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend
 python main.py
 ```
 
@@ -845,7 +845,7 @@ Confirm it starts on port 8031 (from `.worktree.env`).
 - [ ] **Step 2: Start frontend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend
 pnpm dev
 ```
 
@@ -866,8 +866,8 @@ Open `http://localhost:3031`. Send a message in a conversation. After the AI res
 - [ ] **Step 4: Run full type-check and lint**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/backend && make check
-cd /home/chris/cubebox/.worktrees/feat/token-usage-panel/frontend && pnpm type-check
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/backend && make check
+cd /home/chris/cubeplex/.worktrees/feat/token-usage-panel/frontend && pnpm type-check
 ```
 
 - [ ] **Step 5: Final commit if any polish needed**

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an agent-facing `file_read` tool that reads files from the sandbox and returns LLM-ready content (markdown / structured cells / unsupported sentinel / unchanged sentinel / error). Parser implementations live in a backend-side `cubebox.parsers` plugin registry; the default Docling parser delegates to an external `docling-serve` HTTP service so heavy ML deps stay out of backend.
+**Goal:** Add an agent-facing `file_read` tool that reads files from the sandbox and returns LLM-ready content (markdown / structured cells / unsupported sentinel / unchanged sentinel / error). Parser implementations live in a backend-side `cubeplex.parsers` plugin registry; the default Docling parser delegates to an external `docling-serve` HTTP service so heavy ML deps stay out of backend.
 
-**Architecture:** New `cubebox.parsers` package owns the `FileParser` Protocol + entry_points-based plugin registry + 3 default plugins (`TextParser`, `NotebookParser`, `DoclingParser`). `Sandbox` abstract base class gains a non-abstract `file_read(path, options)` method that downloads bytes + dispatches via the parser registry + applies conversation-scoped SHA-256 dedup. `SandboxMiddleware` registers a new `file_read` agent tool that calls `sandbox.file_read(...)`.
+**Architecture:** New `cubeplex.parsers` package owns the `FileParser` Protocol + entry_points-based plugin registry + 3 default plugins (`TextParser`, `NotebookParser`, `DoclingParser`). `Sandbox` abstract base class gains a non-abstract `file_read(path, options)` method that downloads bytes + dispatches via the parser registry + applies conversation-scoped SHA-256 dedup. `SandboxMiddleware` registers a new `file_read` agent tool that calls `sandbox.file_read(...)`.
 
 **Tech Stack:** Python 3.12, FastAPI, httpx (for docling-serve client), python-magic (libmagic wrapper), filetype (libmagic-free fallback), structlog, Pydantic, pytest, pytest-asyncio.
 
@@ -17,7 +17,7 @@
 ### Create
 
 ```
-backend/cubebox/parsers/
+backend/cubeplex/parsers/
 ├─ __init__.py                  # Re-exports
 ├─ schema.py                    # FileReadOutput union + ParseOptions (page_range + line_range)
 ├─ protocols.py                 # FileParser Protocol
@@ -30,7 +30,7 @@ backend/cubebox/parsers/
    ├─ notebook.py               # NotebookParser (Jupyter cells)
    └─ docling.py                # DoclingParser (HTTP to docling-serve)
 
-backend/cubebox/cache/
+backend/cubeplex/cache/
 ├─ __init__.py                  # exposes get_redis()
 └─ redis.py                     # async Redis client factory (skip if exists)
 
@@ -50,9 +50,9 @@ backend/tests/parsers/
 ### Modify
 
 ```
-backend/cubebox/sandbox/base.py            # Add Sandbox.file_read non-abstract method
-backend/cubebox/middleware/sandbox.py      # Register file_read tool with description
-backend/cubebox/config.py                  # Add parsers.docling_serve + redis.url schemas
+backend/cubeplex/sandbox/base.py            # Add Sandbox.file_read non-abstract method
+backend/cubeplex/middleware/sandbox.py      # Register file_read tool with description
+backend/cubeplex/config.py                  # Add parsers.docling_serve + redis.url schemas
 backend/config.yaml                        # Add parsers: + redis: sections
 backend/config.development.yaml            # Add parsers: + redis: sections
 backend/config.test.yaml                   # Add parsers: + redis: sections
@@ -64,26 +64,26 @@ docker-compose.yml                         # Add docling-serve service (redis al
 
 ## Tasks
 
-### Task 1: Create `cubebox.parsers` package skeleton
+### Task 1: Create `cubeplex.parsers` package skeleton
 
 **Files:**
-- Create: `backend/cubebox/parsers/__init__.py`
-- Create: `backend/cubebox/parsers/plugins/__init__.py`
+- Create: `backend/cubeplex/parsers/__init__.py`
+- Create: `backend/cubeplex/parsers/plugins/__init__.py`
 - Create: `backend/tests/parsers/__init__.py`
 
 - [ ] **Step 1: Create directories + empty __init__.py files**
 
 ```bash
-mkdir -p backend/cubebox/parsers/plugins
+mkdir -p backend/cubeplex/parsers/plugins
 mkdir -p backend/tests/parsers
-touch backend/cubebox/parsers/plugins/__init__.py
+touch backend/cubeplex/parsers/plugins/__init__.py
 touch backend/tests/parsers/__init__.py
 ```
 
 - [ ] **Step 2: Write package docstring**
 
 ```python
-# backend/cubebox/parsers/__init__.py
+# backend/cubeplex/parsers/__init__.py
 """File parser plugin registry shared by file_read tool and future filebox.
 
 See docs/superpowers/specs/2026-04-22-file-read-tool-design.md.
@@ -92,13 +92,13 @@ See docs/superpowers/specs/2026-04-22-file-read-tool-design.md.
 
 - [ ] **Step 3: Verify import**
 
-Run: `cd backend && uv run python -c "import cubebox.parsers"`
+Run: `cd backend && uv run python -c "import cubeplex.parsers"`
 Expected: no error.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/parsers/ backend/tests/parsers/
+git add backend/cubeplex/parsers/ backend/tests/parsers/
 git commit -m "chore(parsers): create package skeleton for M6 file_read"
 ```
 
@@ -107,7 +107,7 @@ git commit -m "chore(parsers): create package skeleton for M6 file_read"
 ### Task 2: Define `FileReadOutput` discriminated union + supporting types
 
 **Files:**
-- Create: `backend/cubebox/parsers/schema.py`
+- Create: `backend/cubeplex/parsers/schema.py`
 - Create: `backend/tests/parsers/test_schema.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -119,7 +119,7 @@ git commit -m "chore(parsers): create package skeleton for M6 file_read"
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from cubebox.parsers.schema import (
+from cubeplex.parsers.schema import (
     ErrorOutput,
     FileReadOutput,
     NotebookCell,
@@ -214,7 +214,7 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement schema.py**
 
 ```python
-# backend/cubebox/parsers/schema.py
+# backend/cubeplex/parsers/schema.py
 """Discriminated union of FileReadOutput kinds returned by file_read."""
 
 from __future__ import annotations
@@ -288,7 +288,7 @@ Expected: PASS (9 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/parsers/schema.py backend/tests/parsers/test_schema.py
+git add backend/cubeplex/parsers/schema.py backend/tests/parsers/test_schema.py
 git commit -m "feat(parsers): FileReadOutput discriminated union + ParseOptions"
 ```
 
@@ -297,15 +297,15 @@ git commit -m "feat(parsers): FileReadOutput discriminated union + ParseOptions"
 ### Task 3: Define `FileParser` Protocol
 
 **Files:**
-- Create: `backend/cubebox/parsers/protocols.py`
+- Create: `backend/cubeplex/parsers/protocols.py`
 - Create: `backend/tests/parsers/test_protocols.py`
 
 - [ ] **Step 1: Write failing test**
 
 ```python
 # backend/tests/parsers/test_protocols.py
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import ParseOptions, TextOutput
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import ParseOptions, TextOutput
 
 
 class _ConformingParser:
@@ -339,14 +339,14 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement protocols.py**
 
 ```python
-# backend/cubebox/parsers/protocols.py
+# backend/cubeplex/parsers/protocols.py
 """FileParser plugin Protocol."""
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from cubebox.parsers.schema import FileReadOutput, ParseOptions
+from cubeplex.parsers.schema import FileReadOutput, ParseOptions
 
 
 @runtime_checkable
@@ -379,7 +379,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/parsers/protocols.py backend/tests/parsers/test_protocols.py
+git add backend/cubeplex/parsers/protocols.py backend/tests/parsers/test_protocols.py
 git commit -m "feat(parsers): FileParser runtime_checkable Protocol"
 ```
 
@@ -388,7 +388,7 @@ git commit -m "feat(parsers): FileParser runtime_checkable Protocol"
 ### Task 4: MIME sniff (no REJECT lists — see D22)
 
 **Files:**
-- Create: `backend/cubebox/parsers/mime.py`
+- Create: `backend/cubeplex/parsers/mime.py`
 - Create: `backend/tests/parsers/test_mime.py`
 - Modify: `backend/pyproject.toml` (add `python-magic` + `filetype` deps)
 
@@ -404,7 +404,7 @@ NOTE: `python-magic` requires libmagic shared library on the system. macOS: `bre
 
 ```python
 # backend/tests/parsers/test_mime.py
-from cubebox.parsers.mime import sniff_mime, sniff_mime_async
+from cubeplex.parsers.mime import sniff_mime, sniff_mime_async
 
 
 def test_sniff_mime_detects_pdf_from_bytes() -> None:
@@ -444,7 +444,7 @@ Expected: FAIL.
 - [ ] **Step 4: Implement mime.py**
 
 ```python
-# backend/cubebox/parsers/mime.py
+# backend/cubeplex/parsers/mime.py
 """MIME sniffing helpers for file_read.
 
 Note: there is intentionally NO hardcoded REJECT list. "Unsupported"
@@ -496,7 +496,7 @@ Expected: PASS (4 tests). If a test fails because libmagic isn't installed, inst
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/parsers/mime.py backend/tests/parsers/test_mime.py backend/pyproject.toml backend/uv.lock
+git add backend/cubeplex/parsers/mime.py backend/tests/parsers/test_mime.py backend/pyproject.toml backend/uv.lock
 git commit -m "feat(parsers): MIME sniffing helpers (libmagic + filetype + ext fallback)"
 ```
 
@@ -505,26 +505,26 @@ git commit -m "feat(parsers): MIME sniffing helpers (libmagic + filetype + ext f
 ### Task 5: Redis-backed dedup cache + async client setup
 
 **Files:**
-- Create: `backend/cubebox/cache/__init__.py`
-- Create: `backend/cubebox/cache/redis.py` (skip if `cubebox.cache` already exists; reuse existing client)
-- Create: `backend/cubebox/parsers/dedup.py`
+- Create: `backend/cubeplex/cache/__init__.py`
+- Create: `backend/cubeplex/cache/redis.py` (skip if `cubeplex.cache` already exists; reuse existing client)
+- Create: `backend/cubeplex/parsers/dedup.py`
 - Create: `backend/tests/parsers/test_dedup.py`
 - Modify: `backend/pyproject.toml` (add `redis>=5.0`)
 
-**Note on prior art**: cubebox already has Redis fully wired up (introduced by the recent streaming/resumable-runs feature):
+**Note on prior art**: cubeplex already has Redis fully wired up (introduced by the recent streaming/resumable-runs feature):
 - `redis>=5.2.0` is a direct dep in `backend/pyproject.toml` ✓
-- `Redis.from_url(...)` is constructed in `backend/cubebox/api/app.py:48-77` lifespan
+- `Redis.from_url(...)` is constructed in `backend/cubeplex/api/app.py:48-77` lifespan
 - Stored in `_app.state.redis`; routes access via `raw_request.app.state.redis`
 - Config: `streaming.redis_url` and `streaming.redis_key_prefix` in `config.yaml:191-194`
-- `backend/cubebox/streams/run_events.py` is the primary consumer
+- `backend/cubeplex/streams/run_events.py` is the primary consumer
 
-What's MISSING: a way for non-route code (like `dedup.py`, called from `Sandbox.file_read` deep in the parser dispatch) to reach the Redis client without dragging app context through. We add a tiny `cubebox.cache` module with `get_redis()` / `set_redis()` that the lifespan registers after constructing the client. Dedup imports `from cubebox.cache import get_redis`. Streaming code keeps using `app.state.redis` (don't touch).
+What's MISSING: a way for non-route code (like `dedup.py`, called from `Sandbox.file_read` deep in the parser dispatch) to reach the Redis client without dragging app context through. We add a tiny `cubeplex.cache` module with `get_redis()` / `set_redis()` that the lifespan registers after constructing the client. Dedup imports `from cubeplex.cache import get_redis`. Streaming code keeps using `app.state.redis` (don't touch).
 
 Verify before starting:
 ```bash
 grep -E '"redis>=' backend/pyproject.toml          # should print redis dep
 grep -n 'streaming.redis_url' backend/config.yaml   # should print line ~192
-grep -n 'app.state.redis' backend/cubebox/api/app.py # should print lines around 64
+grep -n 'app.state.redis' backend/cubeplex/api/app.py # should print lines around 64
 ```
 
 - [ ] **Step 1: Add fakeredis dev dep (only new dep needed)**
@@ -535,13 +535,13 @@ cd backend && uv add --dev fakeredis
 
 (`redis>=5.2.0` is already installed; do NOT re-add.)
 
-- [ ] **Step 2: Create `cubebox.cache` thin accessor module**
+- [ ] **Step 2: Create `cubeplex.cache` thin accessor module**
 
 ```python
-# backend/cubebox/cache/__init__.py
+# backend/cubeplex/cache/__init__.py
 """Module-level accessor for the shared async Redis client.
 
-cubebox already constructs a single async Redis client in app lifespan
+cubeplex already constructs a single async Redis client in app lifespan
 (see api/app.py for the streaming feature). This module exposes that
 SAME client to non-route code (parsers/dedup, future filebox indexer)
 that doesn't have a Request handle.
@@ -570,7 +570,7 @@ def get_redis() -> redis_asyncio.Redis:
     """
     if _client is None:
         raise RuntimeError(
-            "cubebox.cache.get_redis() called before lifespan set the client. "
+            "cubeplex.cache.get_redis() called before lifespan set the client. "
             "Either app startup is incomplete or test fixture didn't inject one."
         )
     return _client
@@ -587,10 +587,10 @@ __all__ = ["get_redis", "reset_for_tests", "set_redis"]
 
 - [ ] **Step 3: Wire lifespan to register the shared client**
 
-In `backend/cubebox/api/app.py`, find the line `_app.state.redis = redis_client` (around line 64). Immediately after it, add:
+In `backend/cubeplex/api/app.py`, find the line `_app.state.redis = redis_client` (around line 64). Immediately after it, add:
 
 ```python
-        from cubebox.cache import set_redis as _set_shared_redis
+        from cubeplex.cache import set_redis as _set_shared_redis
         _set_shared_redis(redis_client)
 ```
 
@@ -599,7 +599,7 @@ This shares the SAME client object via the module-level accessor. No second conn
 - [ ] **Step 4: Smoke test**
 
 ```bash
-cd backend && uv run python -c "from cubebox.cache import get_redis, set_redis; print('cache module imports OK')"
+cd backend && uv run python -c "from cubeplex.cache import get_redis, set_redis; print('cache module imports OK')"
 ```
 Expected: `cache module imports OK`.
 
@@ -612,14 +612,14 @@ from uuid import uuid4
 import fakeredis.aioredis
 import pytest
 
-from cubebox.parsers.dedup import check, hash_bytes, update
-from cubebox.parsers.schema import ParseOptions
+from cubeplex.parsers.dedup import check, hash_bytes, update
+from cubeplex.parsers.schema import ParseOptions
 
 
 @pytest.fixture
 async def fake_redis():
-    """Inject a fakeredis instance via cubebox.cache.set_redis."""
-    from cubebox.cache import reset_for_tests, set_redis
+    """Inject a fakeredis instance via cubeplex.cache.set_redis."""
+    from cubeplex.cache import reset_for_tests, set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
     yield fake
@@ -699,7 +699,7 @@ Expected: FAIL with ImportError.
 - [ ] **Step 6: Implement dedup.py**
 
 ```python
-# backend/cubebox/parsers/dedup.py
+# backend/cubeplex/parsers/dedup.py
 """Redis-backed conversation-scoped SHA-256 file_state dedup cache.
 
 Cache key: (conversation_id, path, options-signature). The options-signature
@@ -707,7 +707,7 @@ includes page_range + line_range so different range-slices land in different
 cache slots and don't incorrectly return UnchangedOutput.
 
 TTL: 6 hours of inactivity → auto-expire (Redis-managed; conversation has
-no explicit "end" event in cubebox).
+no explicit "end" event in cubeplex).
 """
 
 from __future__ import annotations
@@ -717,8 +717,8 @@ import hashlib
 import json
 from uuid import UUID
 
-from cubebox.cache import get_redis
-from cubebox.parsers.schema import ParseOptions
+from cubeplex.cache import get_redis
+from cubeplex.parsers.schema import ParseOptions
 
 DEDUP_TTL_SECONDS = 6 * 3600
 KEY_PREFIX = "parsers:dedup:v1:"
@@ -777,7 +777,7 @@ Expected: PASS (8 tests).
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/cache/ backend/cubebox/parsers/dedup.py backend/tests/parsers/test_dedup.py backend/pyproject.toml backend/uv.lock backend/config*.yaml
+git add backend/cubeplex/cache/ backend/cubeplex/parsers/dedup.py backend/tests/parsers/test_dedup.py backend/pyproject.toml backend/uv.lock backend/config*.yaml
 git commit -m "feat(parsers): Redis-backed dedup cache with ParseOptions signature key"
 ```
 
@@ -786,7 +786,7 @@ git commit -m "feat(parsers): Redis-backed dedup cache with ParseOptions signatu
 ### Task 6: `TextParser` plugin
 
 **Files:**
-- Create: `backend/cubebox/parsers/plugins/text.py`
+- Create: `backend/cubeplex/parsers/plugins/text.py`
 - Create: `backend/tests/parsers/test_text_parser.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -795,9 +795,9 @@ git commit -m "feat(parsers): Redis-backed dedup cache with ParseOptions signatu
 # backend/tests/parsers/test_text_parser.py
 import pytest
 
-from cubebox.parsers.plugins.text import TextParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import ParseOptions, TextOutput
+from cubeplex.parsers.plugins.text import TextParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import ParseOptions, TextOutput
 
 
 def test_satisfies_protocol() -> None:
@@ -928,12 +928,12 @@ Expected: FAIL.
 - [ ] **Step 3: Implement TextParser**
 
 ```python
-# backend/cubebox/parsers/plugins/text.py
+# backend/cubeplex/parsers/plugins/text.py
 """TextParser: UTF-8 decode for code/config/text files."""
 
 from __future__ import annotations
 
-from cubebox.parsers.schema import ParseOptions, TextOutput
+from cubeplex.parsers.schema import ParseOptions, TextOutput
 
 MAX_CONTENT_CHARS = 20_000
 
@@ -1066,7 +1066,7 @@ Expected: PASS (11 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/parsers/plugins/text.py backend/tests/parsers/test_text_parser.py
+git add backend/cubeplex/parsers/plugins/text.py backend/tests/parsers/test_text_parser.py
 git commit -m "feat(parsers): TextParser with full line_range syntax + next_line_to_read on truncation"
 ```
 
@@ -1075,7 +1075,7 @@ git commit -m "feat(parsers): TextParser with full line_range syntax + next_line
 ### Task 7: `NotebookParser` plugin
 
 **Files:**
-- Create: `backend/cubebox/parsers/plugins/notebook.py`
+- Create: `backend/cubeplex/parsers/plugins/notebook.py`
 - Create: `backend/tests/parsers/test_notebook_parser.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -1086,9 +1086,9 @@ import json
 
 import pytest
 
-from cubebox.parsers.plugins.notebook import NotebookParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import NotebookOutput, ParseOptions
+from cubeplex.parsers.plugins.notebook import NotebookParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import NotebookOutput, ParseOptions
 
 
 def test_satisfies_protocol() -> None:
@@ -1151,7 +1151,7 @@ Expected: FAIL.
 - [ ] **Step 3: Implement NotebookParser**
 
 ```python
-# backend/cubebox/parsers/plugins/notebook.py
+# backend/cubeplex/parsers/plugins/notebook.py
 """NotebookParser: parse Jupyter .ipynb into structured cells."""
 
 from __future__ import annotations
@@ -1159,7 +1159,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cubebox.parsers.schema import NotebookCell, NotebookOutput, ParseOptions
+from cubeplex.parsers.schema import NotebookCell, NotebookOutput, ParseOptions
 
 MAX_CONTENT_CHARS = 20_000
 
@@ -1241,7 +1241,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/parsers/plugins/notebook.py backend/tests/parsers/test_notebook_parser.py
+git add backend/cubeplex/parsers/plugins/notebook.py backend/tests/parsers/test_notebook_parser.py
 git commit -m "feat(parsers): NotebookParser preserves Jupyter cell structure"
 ```
 
@@ -1250,7 +1250,7 @@ git commit -m "feat(parsers): NotebookParser preserves Jupyter cell structure"
 ### Task 8: `DoclingParser` — sync path + http client
 
 **Files:**
-- Create: `backend/cubebox/parsers/plugins/docling.py`
+- Create: `backend/cubeplex/parsers/plugins/docling.py`
 - Create: `backend/tests/parsers/test_docling_parser.py`
 
 - [ ] **Step 1: Write failing test for sync path with httpx mock**
@@ -1264,9 +1264,9 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from cubebox.parsers.plugins.docling import DoclingParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import ErrorOutput, ParseOptions, TextOutput
+from cubeplex.parsers.plugins.docling import DoclingParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import ErrorOutput, ParseOptions, TextOutput
 
 
 def test_satisfies_protocol() -> None:
@@ -1393,7 +1393,7 @@ Expected: FAIL with ImportError.
 - [ ] **Step 4: Implement DoclingParser sync path**
 
 ```python
-# backend/cubebox/parsers/plugins/docling.py
+# backend/cubeplex/parsers/plugins/docling.py
 """DoclingParser: HTTP client to docling-serve."""
 
 from __future__ import annotations
@@ -1404,7 +1404,7 @@ from pathlib import Path
 
 import httpx
 
-from cubebox.parsers.schema import ErrorOutput, FileReadOutput, ParseOptions, TextOutput
+from cubeplex.parsers.schema import ErrorOutput, FileReadOutput, ParseOptions, TextOutput
 
 MAX_CONTENT_CHARS = 20_000
 
@@ -1598,7 +1598,7 @@ Expected: 3 tests PASS, async-path tests not yet present.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/parsers/plugins/docling.py backend/tests/parsers/test_docling_parser.py
+git add backend/cubeplex/parsers/plugins/docling.py backend/tests/parsers/test_docling_parser.py
 git commit -m "feat(parsers): DoclingParser sync HTTP path + httpx mock tests"
 ```
 
@@ -1607,7 +1607,7 @@ git commit -m "feat(parsers): DoclingParser sync HTTP path + httpx mock tests"
 ### Task 9: `DoclingParser` async path + polling
 
 **Files:**
-- Modify: `backend/cubebox/parsers/plugins/docling.py`
+- Modify: `backend/cubeplex/parsers/plugins/docling.py`
 - Modify: `backend/tests/parsers/test_docling_parser.py`
 
 - [ ] **Step 1: Append failing async-path tests**
@@ -1777,7 +1777,7 @@ Expected: PASS (5 tests total).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/parsers/plugins/docling.py backend/tests/parsers/test_docling_parser.py
+git add backend/cubeplex/parsers/plugins/docling.py backend/tests/parsers/test_docling_parser.py
 git commit -m "feat(parsers): DoclingParser async submit + poll path with COMPLETED/FAILED handling"
 ```
 
@@ -1786,8 +1786,8 @@ git commit -m "feat(parsers): DoclingParser async submit + poll path with COMPLE
 ### Task 10: `ParserRegistry` (discover + dispatch + REJECT precheck)
 
 **Files:**
-- Create: `backend/cubebox/parsers/registry.py`
-- Modify: `backend/cubebox/parsers/__init__.py`
+- Create: `backend/cubeplex/parsers/registry.py`
+- Modify: `backend/cubeplex/parsers/__init__.py`
 - Create: `backend/tests/parsers/test_registry.py`
 - Modify: `backend/pyproject.toml` (add entry_points group)
 
@@ -1800,8 +1800,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.parsers.registry import ParserRegistry, get_parser_registry, reset_parser_registry_for_tests
-from cubebox.parsers.schema import (
+from cubeplex.parsers.registry import ParserRegistry, get_parser_registry, reset_parser_registry_for_tests
+from cubeplex.parsers.schema import (
     ErrorOutput,
     NotebookOutput,
     ParseOptions,
@@ -1849,7 +1849,7 @@ async def test_resolve_picks_notebook_for_ipynb() -> None:
 async def test_dispatch_unsupported_when_no_plugin_matches() -> None:
     """No plugin claims video/* → returns unsupported with format-aware hint."""
     import fakeredis.aioredis
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -1875,7 +1875,7 @@ async def test_dispatch_unsupported_when_no_plugin_matches() -> None:
 async def test_dispatch_unsupported_archive_hint() -> None:
     """Archives suggest extract-then-read flow."""
     import fakeredis.aioredis
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -1914,7 +1914,7 @@ async def test_dispatch_rejects_oversize() -> None:
 async def test_dispatch_returns_unchanged_on_second_read() -> None:
     """Same content + same options + same conv → second call returns UnchangedOutput."""
     import fakeredis.aioredis
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -1939,7 +1939,7 @@ async def test_dispatch_returns_unchanged_on_second_read() -> None:
 async def test_dispatch_different_line_range_does_not_unchanged() -> None:
     """Different line_range = different cache key = re-parses."""
     import fakeredis.aioredis
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -2021,7 +2021,7 @@ async def test_dispatch_marks_transient_errors_retryable() -> None:
 async def test_dispatch_does_not_cache_unsupported_so_retry_works() -> None:
     """Unsupported result must NOT update dedup; user can install a plugin and retry."""
     import fakeredis.aioredis
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -2060,7 +2060,7 @@ async def test_dispatch_does_not_cache_error_so_retry_works() -> None:
     """ErrorOutput must NOT update dedup; transient failures should be retryable end-to-end."""
     import fakeredis.aioredis
     import httpx
-    from cubebox.cache import set_redis
+    from cubeplex.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)
 
@@ -2109,16 +2109,16 @@ Expected: FAIL with ImportError.
 Edit `backend/pyproject.toml` to add (under `[project.entry-points]` section, create if absent):
 
 ```toml
-[project.entry-points."cubebox.parsers"]
-text = "cubebox.parsers.plugins.text:TextParser"
-notebook = "cubebox.parsers.plugins.notebook:NotebookParser"
-docling = "cubebox.parsers.plugins.docling:DoclingParser"
+[project.entry-points."cubeplex.parsers"]
+text = "cubeplex.parsers.plugins.text:TextParser"
+notebook = "cubeplex.parsers.plugins.notebook:NotebookParser"
+docling = "cubeplex.parsers.plugins.docling:DoclingParser"
 ```
 
 - [ ] **Step 4: Implement registry.py**
 
 ```python
-# backend/cubebox/parsers/registry.py
+# backend/cubeplex/parsers/registry.py
 """ParserRegistry: discover plugins via entry_points + dispatch by MIME."""
 
 from __future__ import annotations
@@ -2132,10 +2132,10 @@ from uuid import UUID
 
 import httpx
 
-from cubebox.parsers import dedup
-from cubebox.parsers.mime import sniff_mime_async
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import (
+from cubeplex.parsers import dedup
+from cubeplex.parsers.mime import sniff_mime_async
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import (
     ErrorOutput,
     FileReadOutput,
     ParseOptions,
@@ -2145,7 +2145,7 @@ from cubebox.parsers.schema import (
 
 logger = logging.getLogger(__name__)
 
-GROUP = "cubebox.parsers"
+GROUP = "cubeplex.parsers"
 MAX_FILE_BYTES = 100 * 1024 * 1024
 
 
@@ -2182,8 +2182,8 @@ class ParserRegistry:
 
         # DoclingParser may need config-injected base_url etc.
         # If a DoclingParser was loaded with default args, swap in a config-bound one.
-        from cubebox.config import config  # lazy import to avoid cycles
-        from cubebox.parsers.plugins.docling import DoclingParser
+        from cubeplex.config import config  # lazy import to avoid cycles
+        from cubeplex.parsers.plugins.docling import DoclingParser
 
         for i, p in enumerate(self._parsers):
             if isinstance(p, DoclingParser):
@@ -2333,18 +2333,18 @@ def reset_parser_registry_for_tests() -> None:
 
 - [ ] **Step 5: Re-export from `__init__.py`**
 
-Replace `backend/cubebox/parsers/__init__.py`:
+Replace `backend/cubeplex/parsers/__init__.py`:
 
 ```python
 """File parser plugin registry shared by file_read tool and future filebox."""
 
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.registry import (
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.registry import (
     ParserRegistry,
     get_parser_registry,
     reset_parser_registry_for_tests,
 )
-from cubebox.parsers.schema import (
+from cubeplex.parsers.schema import (
     ErrorOutput,
     FileReadOutput,
     NotebookCell,
@@ -2379,7 +2379,7 @@ Expected: All parser tests PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/parsers/registry.py backend/cubebox/parsers/__init__.py backend/tests/parsers/test_registry.py backend/pyproject.toml backend/uv.lock
+git add backend/cubeplex/parsers/registry.py backend/cubeplex/parsers/__init__.py backend/tests/parsers/test_registry.py backend/pyproject.toml backend/uv.lock
 git commit -m "feat(parsers): ParserRegistry discover + dispatch with REJECT/dedup precheck"
 ```
 
@@ -2388,7 +2388,7 @@ git commit -m "feat(parsers): ParserRegistry discover + dispatch with REJECT/ded
 ### Task 11: `Sandbox.file_read` non-abstract method
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/base.py`
+- Modify: `backend/cubeplex/sandbox/base.py`
 - Create: `backend/tests/parsers/test_sandbox_file_read.py`
 
 - [ ] **Step 1: Write failing integration test**
@@ -2400,8 +2400,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.parsers.schema import ParseOptions, TextOutput
-from cubebox.sandbox.base import Sandbox
+from cubeplex.parsers.schema import ParseOptions, TextOutput
+from cubeplex.sandbox.base import Sandbox
 
 
 class _FakeSandbox(Sandbox):
@@ -2453,7 +2453,7 @@ Expected: FAIL with `AttributeError: ... has no attribute 'file_read'`.
 
 - [ ] **Step 3: Add `Sandbox.file_read` non-abstract default**
 
-Edit `backend/cubebox/sandbox/base.py`. After existing class methods:
+Edit `backend/cubeplex/sandbox/base.py`. After existing class methods:
 
 ```python
     async def file_read(
@@ -2466,10 +2466,10 @@ Edit `backend/cubebox/sandbox/base.py`. After existing class methods:
         """Read and parse a file at <path> inside the sandbox.
 
         Default impl: download bytes via self.download + dispatch via
-        cubebox.parsers registry. Subclasses may override (future Sandbox
+        cubeplex.parsers registry. Subclasses may override (future Sandbox
         implementations with native parsing may call their own API).
         """
-        from cubebox.parsers import ParseOptions, get_parser_registry
+        from cubeplex.parsers import ParseOptions, get_parser_registry
 
         return await get_parser_registry().dispatch(
             sandbox=self,
@@ -2486,7 +2486,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uuid import UUID
-    from cubebox.parsers import FileReadOutput, ParseOptions
+    from cubeplex.parsers import FileReadOutput, ParseOptions
 ```
 
 NOTE: registry must be `discover()`-ed before `file_read` is called. App startup will do this in Task 14.
@@ -2498,7 +2498,7 @@ Add to `backend/tests/parsers/conftest.py` (create if missing):
 ```python
 import pytest
 
-from cubebox.parsers import get_parser_registry, reset_parser_registry_for_tests
+from cubeplex.parsers import get_parser_registry, reset_parser_registry_for_tests
 
 
 @pytest.fixture(autouse=True)
@@ -2518,7 +2518,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/base.py backend/tests/parsers/test_sandbox_file_read.py backend/tests/parsers/conftest.py
+git add backend/cubeplex/sandbox/base.py backend/tests/parsers/test_sandbox_file_read.py backend/tests/parsers/conftest.py
 git commit -m "feat(sandbox): add Sandbox.file_read non-abstract method dispatching to parser registry"
 ```
 
@@ -2527,7 +2527,7 @@ git commit -m "feat(sandbox): add Sandbox.file_read non-abstract method dispatch
 ### Task 12: Register `file_read` agent tool in SandboxMiddleware
 
 **Files:**
-- Modify: `backend/cubebox/middleware/sandbox.py`
+- Modify: `backend/cubeplex/middleware/sandbox.py`
 - Create: `backend/tests/middleware/test_sandbox_file_read_tool.py`
 
 - [ ] **Step 1: Write failing test**
@@ -2539,8 +2539,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.middleware.sandbox import _create_file_read_tool
-from cubebox.parsers.schema import TextOutput
+from cubeplex.middleware.sandbox import _create_file_read_tool
+from cubeplex.parsers.schema import TextOutput
 
 
 @pytest.mark.asyncio
@@ -2574,12 +2574,12 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement `_create_file_read_tool` in `middleware/sandbox.py`**
 
-Append to `backend/cubebox/middleware/sandbox.py`:
+Append to `backend/cubeplex/middleware/sandbox.py`:
 
 ```python
 from uuid import UUID
 
-from cubebox.parsers import ParseOptions
+from cubeplex.parsers import ParseOptions
 from pydantic import BaseModel, Field as PField
 
 
@@ -2707,7 +2707,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/middleware/sandbox.py backend/tests/middleware/test_sandbox_file_read_tool.py
+git add backend/cubeplex/middleware/sandbox.py backend/tests/middleware/test_sandbox_file_read_tool.py
 git commit -m "feat(sandbox): register file_read agent tool in SandboxMiddleware"
 ```
 
@@ -2720,7 +2720,7 @@ git commit -m "feat(sandbox): register file_read agent tool in SandboxMiddleware
 - Modify: `backend/config.development.yaml`
 - Modify: `backend/config.test.yaml`
 
-**Note**: cubebox uses **dynaconf**, not pydantic Settings (see `backend/cubebox/config.py`). There is no top-level `Settings` class; configuration is accessed via `config.get("parsers.docling_serve.base_url", default)`. No schema class needs to be added to `config.py` — YAML alone is the source of truth for defaults; env vars (`CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL`) override at runtime.
+**Note**: cubeplex uses **dynaconf**, not pydantic Settings (see `backend/cubeplex/config.py`). There is no top-level `Settings` class; configuration is accessed via `config.get("parsers.docling_serve.base_url", default)`. No schema class needs to be added to `config.py` — YAML alone is the source of truth for defaults; env vars (`CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL`) override at runtime.
 
 - [ ] **Step 1: Append to YAML configs**
 
@@ -2752,7 +2752,7 @@ parsers:
 - [ ] **Step 2: Verify config loads**
 
 ```bash
-cd backend && uv run python -c "from cubebox.config import config; print(config.get('parsers.docling_serve.base_url'))"
+cd backend && uv run python -c "from cubeplex.config import config; print(config.get('parsers.docling_serve.base_url'))"
 ```
 
 Expected: prints `http://docling-serve:5001` (or the development.yaml override).
@@ -2769,15 +2769,15 @@ git commit -m "feat(parsers): add parsers.docling_serve YAML config (dynaconf-dr
 ### Task 14: App startup parser registry discover + docling-serve in docker-compose
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Modify: `docker-compose.yml`
 
 - [ ] **Step 1: Wire registry discover in lifespan**
 
-In `backend/cubebox/api/app.py` lifespan async context manager, add:
+In `backend/cubeplex/api/app.py` lifespan async context manager, add:
 
 ```python
-from cubebox.parsers import get_parser_registry
+from cubeplex.parsers import get_parser_registry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -2816,12 +2816,12 @@ curl -s http://localhost:8000/health || true
 kill %1
 ```
 
-Expected: server starts without exception. `cubebox.parsers` log line shows 3 plugins registered.
+Expected: server starts without exception. `cubeplex.parsers` log line shows 3 plugins registered.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py docker-compose.yml
+git add backend/cubeplex/api/app.py docker-compose.yml
 git commit -m "feat(api): discover parser plugins at app startup; add docling-serve compose service"
 ```
 
@@ -2871,8 +2871,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.config import config
-from cubebox.parsers import ParseOptions, TextOutput, get_parser_registry
+from cubeplex.config import config
+from cubeplex.parsers import ParseOptions, TextOutput, get_parser_registry
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hello.pdf"  # small (<100 KB) fixture PDF
 
@@ -2881,10 +2881,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "hello.pdf"  # small (<100 KB) fi
 @pytest.mark.e2e
 async def test_pdf_flows_through_real_docling(docling_url: str, monkeypatch) -> None:
     """Read a small PDF via the real docling-serve endpoint; assert markdown + parser metadata."""
-    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    monkeypatch.setenv("CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
     config.reload()
 
-    from cubebox.parsers.registry import reset_parser_registry_for_tests
+    from cubeplex.parsers.registry import reset_parser_registry_for_tests
     reset_parser_registry_for_tests()
     reg = get_parser_registry()
     await reg.discover()
@@ -2909,12 +2909,12 @@ async def test_pdf_flows_through_real_docling(docling_url: str, monkeypatch) -> 
 @pytest.mark.e2e
 async def test_unchanged_second_read_hits_dedup(docling_url: str, monkeypatch) -> None:
     """Same conversation + same bytes + same ParseOptions → second read returns UnchangedOutput."""
-    from cubebox.parsers import UnchangedOutput
+    from cubeplex.parsers import UnchangedOutput
 
-    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    monkeypatch.setenv("CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
     config.reload()
 
-    from cubebox.parsers.registry import reset_parser_registry_for_tests
+    from cubeplex.parsers.registry import reset_parser_registry_for_tests
     reset_parser_registry_for_tests()
     reg = get_parser_registry()
     await reg.discover()
@@ -3005,4 +3005,4 @@ Expected: clean. M6 implementation complete.
 - ✅ All limit numbers consistent (20K chars, 100MB file, 3MB async threshold, 30s sync, 10min async)
 - ✅ async-safe hashing via `asyncio.to_thread` in dedup.py
 - ⚠ Docling-serve API request shape (`FileSourceRequest`, exact field names) is best-effort per public docs; implementer should verify against running docling-serve `/docs` page and adjust if needed.
-- ⚠ Pytest-asyncio test event loop pattern in `conftest.py` may need adjustment depending on `pyproject.toml` asyncio_mode setting; current cubebox uses pytest-asyncio — confirm style matches existing tests.
+- ⚠ Pytest-asyncio test event loop pattern in `conftest.py` may need adjustment depending on `pyproject.toml` asyncio_mode setting; current cubeplex uses pytest-asyncio — confirm style matches existing tests.

@@ -8,18 +8,18 @@
 
 **Tech Stack:** FastAPI, SQLModel, SQLAlchemy async, Next.js 14, Zustand, SWR, shadcn/ui, react-markdown, zod (none new).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/skillssh-source` (port 8043/3043)
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/skillssh-source` (port 8043/3043)
 
 ---
 
 ## File Map
 
 **Backend — modify:**
-- `backend/cubebox/skills/sources/local.py` — support `workspace_id=None` (show org install state)
-- `backend/cubebox/skills/sources/registry.py` — `build()` workspace_id optional
-- `backend/cubebox/skills/discovery.py` — `SkillInstallService` workspace_id optional; add `install_to_org_catalog()` path
-- `backend/cubebox/api/routes/v1/admin_skills.py` — add 3 new endpoints
-- `backend/cubebox/api/schemas/skill_discovery.py` — add `AdminInstallCandidateRequest`
+- `backend/cubeplex/skills/sources/local.py` — support `workspace_id=None` (show org install state)
+- `backend/cubeplex/skills/sources/registry.py` — `build()` workspace_id optional
+- `backend/cubeplex/skills/discovery.py` — `SkillInstallService` workspace_id optional; add `install_to_org_catalog()` path
+- `backend/cubeplex/api/routes/v1/admin_skills.py` — add 3 new endpoints
+- `backend/cubeplex/api/schemas/skill_discovery.py` — add `AdminInstallCandidateRequest`
 
 **Frontend — create:**
 - `frontend/packages/core/src/api/adminSkills.ts` — `adminDiscoverSkills`, `adminPreviewCandidate`, `adminInstallCandidate`
@@ -39,8 +39,8 @@
 ## Task 1: Backend — `LocalCatalogAdapter` org-mode + `SkillsAdapterManager` optional workspace
 
 **Files:**
-- Modify: `backend/cubebox/skills/sources/local.py`
-- Modify: `backend/cubebox/skills/sources/registry.py`
+- Modify: `backend/cubeplex/skills/sources/local.py`
+- Modify: `backend/cubeplex/skills/sources/registry.py`
 - Test: `backend/tests/unit/test_local_catalog_adapter.py` (create)
 
 - [ ] **Step 1: Write failing test**
@@ -50,7 +50,7 @@
 """LocalCatalogAdapter in org-mode (workspace_id=None) shows org install state."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from cubebox.skills.sources.local import LocalCatalogAdapter
+from cubeplex.skills.sources.local import LocalCatalogAdapter
 
 
 @pytest.mark.asyncio
@@ -71,14 +71,14 @@ async def test_local_adapter_accepts_none_workspace_id():
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skillssh-source/backend
+cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/backend
 uv run pytest tests/unit/test_local_catalog_adapter.py -v
 ```
 Expected: FAIL — `workspace_id=None` causes a type error.
 
 - [ ] **Step 3: Update `LocalCatalogAdapter` to accept `workspace_id=None`**
 
-In `backend/cubebox/skills/sources/local.py`, change the `__init__` signature and `search` method:
+In `backend/cubeplex/skills/sources/local.py`, change the `__init__` signature and `search` method:
 
 ```python
 class LocalCatalogAdapter:
@@ -114,7 +114,7 @@ class LocalCatalogAdapter:
             install_state_fn = lambda s: "enabled" if s.name in enabled_names else "in_catalog"
         else:
             # Org mode (admin): show org-level install state
-            from cubebox.repositories.skill import OrgSkillInstallRepository
+            from cubeplex.repositories.skill import OrgSkillInstallRepository
             installs = await OrgSkillInstallRepository(self._session).list_for_org(self._org_id)
             installed_ids = {i.skill_id for i in installs}
             install_state_fn = lambda s: "in_catalog" if s.id in installed_ids else "available"
@@ -144,7 +144,7 @@ class LocalCatalogAdapter:
 
 - [ ] **Step 4: Update `SkillsAdapterManager.build()` — make workspace_id optional**
 
-In `backend/cubebox/skills/sources/registry.py`:
+In `backend/cubeplex/skills/sources/registry.py`:
 
 ```python
 @classmethod
@@ -173,15 +173,15 @@ async def build(
 ```bash
 cd backend
 uv run pytest tests/unit/test_local_catalog_adapter.py -v
-uv run mypy cubebox/
+uv run mypy cubeplex/
 ```
 Expected: test PASS, mypy 0 errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/local.py \
-        backend/cubebox/skills/sources/registry.py \
+git add backend/cubeplex/skills/sources/local.py \
+        backend/cubeplex/skills/sources/registry.py \
         backend/tests/unit/test_local_catalog_adapter.py
 git commit -m "feat(skills): LocalCatalogAdapter supports org-mode (workspace_id=None)"
 ```
@@ -191,13 +191,13 @@ git commit -m "feat(skills): LocalCatalogAdapter supports org-mode (workspace_id
 ## Task 2: Backend — `SkillInstallService` org-catalog install path
 
 **Files:**
-- Modify: `backend/cubebox/skills/discovery.py`
+- Modify: `backend/cubeplex/skills/discovery.py`
 
 The key change: `workspace_id` becomes `str | None`. When `None`, use `upsert()` (org-wide) instead of `create_for_workspace()`.
 
 - [ ] **Step 1: Update `SkillInstallService.__init__` signature**
 
-In `backend/cubebox/skills/discovery.py`, change:
+In `backend/cubeplex/skills/discovery.py`, change:
 
 ```python
 class SkillInstallService:
@@ -273,14 +273,14 @@ Apply the same pattern in the VersionCollisionError branch (where `existing` is 
 - [ ] **Step 4: Run mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 Expected: 0 errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/discovery.py
+git add backend/cubeplex/skills/discovery.py
 git commit -m "feat(skills): SkillInstallService workspace_id=None installs to org catalog"
 ```
 
@@ -289,8 +289,8 @@ git commit -m "feat(skills): SkillInstallService workspace_id=None installs to o
 ## Task 3: Backend — three new admin endpoints
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_skills.py`
-- Modify: `backend/cubebox/api/schemas/skill_discovery.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_skills.py`
+- Modify: `backend/cubeplex/api/schemas/skill_discovery.py`
 
 Add to `skill_discovery.py`:
 
@@ -302,17 +302,17 @@ class AdminInstallCandidateRequest(BaseModel):
 Add to `admin_skills.py` (after existing imports, add the discovery imports):
 
 ```python
-from cubebox.api.schemas.skill_discovery import (
+from cubeplex.api.schemas.skill_discovery import (
     AdminInstallCandidateRequest,
     CandidatePreviewResponse,
     InstallCandidateResponse,
     SkillCandidateResponse,
 )
-from cubebox.repositories.skill_registry import SkillRegistryRepository
-from cubebox.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
-from cubebox.skills.service import SkillPublishService
-from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
-from cubebox.skills.sources.registry import SkillsAdapterManager
+from cubeplex.repositories.skill_registry import SkillRegistryRepository
+from cubeplex.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
+from cubeplex.skills.service import SkillPublishService
+from cubeplex.skills.sources.base import CandidateIdError, decode_candidate_id
+from cubeplex.skills.sources.registry import SkillsAdapterManager
 ```
 
 - [ ] **Step 1: Add `/admin/skills/discover` endpoint**
@@ -401,7 +401,7 @@ async def admin_preview_candidate(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"FETCH_FAILED: {e}") from e
     skill_md = files.get("SKILL.md", b"").decode("utf-8", errors="replace")
-    from cubebox.skills.frontmatter import peek_skill_name
+    from cubeplex.skills.frontmatter import peek_skill_name
     name = peek_skill_name(skill_md) or source_ref.rsplit("/", 1)[-1]
     return CandidatePreviewResponse(
         candidate_id=candidate_id,
@@ -457,15 +457,15 @@ async def admin_install_candidate(
 - [ ] **Step 4: Run mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 Expected: 0 errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_skills.py \
-        backend/cubebox/api/schemas/skill_discovery.py
+git add backend/cubeplex/api/routes/v1/admin_skills.py \
+        backend/cubeplex/api/schemas/skill_discovery.py
 git commit -m "feat(admin/skills): add discover, preview, and install-candidate endpoints"
 ```
 
@@ -593,7 +593,7 @@ export type { AdminSkillsState } from './stores/adminSkillsStore'
 - [ ] **Step 4: Run lint + typecheck**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skillssh-source/frontend
+cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/frontend
 pnpm -r run lint
 pnpm -r run typecheck
 ```
@@ -628,7 +628,7 @@ import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FileText, ShieldCheck, ShieldAlert, ShieldOff } from 'lucide-react'
-import { useAdminSkillsStore, type SkillCandidateOut } from '@cubebox/core'
+import { useAdminSkillsStore, type SkillCandidateOut } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -781,7 +781,7 @@ export function AdminCandidateDetailPanel({ candidate, onInstalled }: AdminCandi
 - [ ] **Step 2: Run lint**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skillssh-source/frontend
+cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/frontend
 pnpm -r run lint
 ```
 Expected: 0 errors.
@@ -837,7 +837,7 @@ Add `externalOnly` mode and `onExternalSearch` prop:
 import { useRef } from 'react'
 import { Search, Upload } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { SkillFilters, SkillSource } from '@cubebox/core'
+import type { SkillFilters, SkillSource } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -945,7 +945,7 @@ export function SkillsToolbar({ filters, onFiltersChange, onUploadClick, onExter
 }
 ```
 
-- [ ] **Step 3: Update `SkillFilters` type in `@cubebox/core`**
+- [ ] **Step 3: Update `SkillFilters` type in `@cubeplex/core`**
 
 In `frontend/packages/core/src/types/skills.ts`, add `externalOnly` to `SkillFilters`:
 
@@ -966,7 +966,7 @@ export interface SkillFilters {
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { SkillCandidateOut, SkillSummary } from '@cubebox/core'
+import type { SkillCandidateOut, SkillSummary } from '@cubeplex/core'
 import { SkillCard } from './SkillCard'
 import { CandidateCard } from '@/components/skills/CandidateCard'
 
@@ -1107,8 +1107,8 @@ export function SkillsList({
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import type { SkillFilters } from '@cubebox/core'
-import { useAdminSkillsStore } from '@cubebox/core'
+import type { SkillFilters } from '@cubeplex/core'
+import { useAdminSkillsStore } from '@cubeplex/core'
 import { SkillsToolbar } from '@/components/admin/skills/SkillsToolbar'
 import { SkillsList } from '@/components/admin/skills/SkillsList'
 import { SkillDetailPanel } from '@/components/admin/skills/SkillDetailPanel'
@@ -1214,12 +1214,12 @@ export default function SkillsPage() {
 - [ ] **Step 6: Run lint + full pre-commit check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skillssh-source/frontend
+cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/frontend
 pnpm -r run lint
 cd ..
 git add -A
 # run pre-commit manually:
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 Expected: 0 errors in both.
 

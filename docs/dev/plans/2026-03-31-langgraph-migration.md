@@ -15,20 +15,20 @@
 ## File Map
 
 ### Backend — Create
-- `backend/cubebox/sandbox/base.py` — `Sandbox` ABC with `execute`, `upload`, `download`, `close`
-- `backend/cubebox/sandbox/local.py` — `LocalSandbox` using `asyncio.create_subprocess_shell`
-- `backend/cubebox/prompts/__init__.py` — empty
-- `backend/cubebox/prompts/system.py` — `BASE_SYSTEM_PROMPT`
-- `backend/cubebox/prompts/sandbox.py` — `SANDBOX_PROMPT`
-- `backend/cubebox/prompts/subagents.py` — `SUBAGENT_PROMPT`
-- `backend/cubebox/prompts/skills.py` — `SKILLS_PROMPT`
-- `backend/cubebox/middleware/__init__.py` — empty
-- `backend/cubebox/middleware/_utils.py` — `append_to_system_message` helper
-- `backend/cubebox/middleware/sandbox.py` — `SandboxMiddleware`
-- `backend/cubebox/middleware/subagents.py` — `SubAgentMiddleware`, `SubAgent` TypedDict
-- `backend/cubebox/middleware/skills.py` — `SkillsMiddleware`
-- `backend/cubebox/agents/graph.py` — `create_cubebox_agent()`
-- `backend/cubebox/agents/convert.py` — `convert_to_api_messages()`
+- `backend/cubeplex/sandbox/base.py` — `Sandbox` ABC with `execute`, `upload`, `download`, `close`
+- `backend/cubeplex/sandbox/local.py` — `LocalSandbox` using `asyncio.create_subprocess_shell`
+- `backend/cubeplex/prompts/__init__.py` — empty
+- `backend/cubeplex/prompts/system.py` — `BASE_SYSTEM_PROMPT`
+- `backend/cubeplex/prompts/sandbox.py` — `SANDBOX_PROMPT`
+- `backend/cubeplex/prompts/subagents.py` — `SUBAGENT_PROMPT`
+- `backend/cubeplex/prompts/skills.py` — `SKILLS_PROMPT`
+- `backend/cubeplex/middleware/__init__.py` — empty
+- `backend/cubeplex/middleware/_utils.py` — `append_to_system_message` helper
+- `backend/cubeplex/middleware/sandbox.py` — `SandboxMiddleware`
+- `backend/cubeplex/middleware/subagents.py` — `SubAgentMiddleware`, `SubAgent` TypedDict
+- `backend/cubeplex/middleware/skills.py` — `SkillsMiddleware`
+- `backend/cubeplex/agents/graph.py` — `create_cubeplex_agent()`
+- `backend/cubeplex/agents/convert.py` — `convert_to_api_messages()`
 - `backend/tests/unit/test_sandbox_local.py`
 - `backend/tests/unit/test_convert_messages.py`
 - `backend/tests/unit/test_middleware_sandbox.py`
@@ -38,19 +38,19 @@
 - `backend/tests/e2e/test_thread_state.py`
 
 ### Backend — Modify
-- `backend/cubebox/sandbox/opensandbox.py` — rewrite to inherit new `Sandbox` base, keep only `execute`/`upload`/`download`
-- `backend/cubebox/sandbox/manager.py` — use `Sandbox` base type instead of `OpenSandbox` directly
-- `backend/cubebox/agents/schemas.py` — add `agent_id`/`agent_name` fields, remove `ChainStartEvent`
-- `backend/cubebox/api/app.py` — add `checkpointer_factory`/`sandbox_factory` params to `create_app()`
-- `backend/cubebox/api/routes/v1/conversations.py` — rewrite `send_message` and `list_messages`
-- `backend/cubebox/models/__init__.py` — remove `Message` export
-- `backend/cubebox/repositories/__init__.py` — remove `MessageRepository` export
+- `backend/cubeplex/sandbox/opensandbox.py` — rewrite to inherit new `Sandbox` base, keep only `execute`/`upload`/`download`
+- `backend/cubeplex/sandbox/manager.py` — use `Sandbox` base type instead of `OpenSandbox` directly
+- `backend/cubeplex/agents/schemas.py` — add `agent_id`/`agent_name` fields, remove `ChainStartEvent`
+- `backend/cubeplex/api/app.py` — add `checkpointer_factory`/`sandbox_factory` params to `create_app()`
+- `backend/cubeplex/api/routes/v1/conversations.py` — rewrite `send_message` and `list_messages`
+- `backend/cubeplex/models/__init__.py` — remove `Message` export
+- `backend/cubeplex/repositories/__init__.py` — remove `MessageRepository` export
 - `backend/pyproject.toml` — remove `deepagents`, `nest-asyncio`, `asyncer`
 
 ### Backend — Delete
-- `backend/cubebox/agents/executor.py`
-- `backend/cubebox/models/message.py`
-- `backend/cubebox/repositories/message.py`
+- `backend/cubeplex/agents/executor.py`
+- `backend/cubeplex/models/message.py`
+- `backend/cubeplex/repositories/message.py`
 
 ### Frontend — Modify
 - `frontend/packages/core/src/types/message.ts` — add `tool` role, `tool_calls`, `reasoning`, `name`
@@ -72,8 +72,8 @@
 ## Task 1: Sandbox Base Class + LocalSandbox
 
 **Files:**
-- Create: `backend/cubebox/sandbox/base.py`
-- Create: `backend/cubebox/sandbox/local.py`
+- Create: `backend/cubeplex/sandbox/base.py`
+- Create: `backend/cubeplex/sandbox/local.py`
 - Create: `backend/tests/unit/test_sandbox_local.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -82,7 +82,7 @@
 # backend/tests/unit/test_sandbox_local.py
 import asyncio
 import pytest
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 
 @pytest.mark.asyncio
@@ -134,12 +134,12 @@ def test_sandbox_id_is_stable():
 ```bash
 cd backend && uv run pytest tests/unit/test_sandbox_local.py -v 2>&1 | head -20
 ```
-Expected: `ModuleNotFoundError: No module named 'cubebox.sandbox.base'`
+Expected: `ModuleNotFoundError: No module named 'cubeplex.sandbox.base'`
 
 - [ ] **Step 3: Create the sandbox base class**
 
 ```python
-# backend/cubebox/sandbox/base.py
+# backend/cubeplex/sandbox/base.py
 """Sandbox base class — async-first interface for code execution environments."""
 
 from abc import ABC, abstractmethod
@@ -194,7 +194,7 @@ class Sandbox(ABC):
 - [ ] **Step 4: Create LocalSandbox**
 
 ```python
-# backend/cubebox/sandbox/local.py
+# backend/cubeplex/sandbox/local.py
 """Local sandbox using asyncio subprocesses — for dev/debug only."""
 
 import asyncio
@@ -202,7 +202,7 @@ import os
 import uuid
 from pathlib import Path
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubeplex.sandbox.base import ExecuteResult, Sandbox
 
 
 class LocalSandbox(Sandbox):
@@ -268,7 +268,7 @@ Expected: `5 passed`
 - [ ] **Step 6: Commit**
 
 ```bash
-cd backend && git add cubebox/sandbox/base.py cubebox/sandbox/local.py tests/unit/test_sandbox_local.py
+cd backend && git add cubeplex/sandbox/base.py cubeplex/sandbox/local.py tests/unit/test_sandbox_local.py
 git commit -m "feat: add Sandbox base class and LocalSandbox implementation"
 ```
 
@@ -277,20 +277,20 @@ git commit -m "feat: add Sandbox base class and LocalSandbox implementation"
 ## Task 2: Update OpenSandbox to Inherit New Base
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/opensandbox.py`
+- Modify: `backend/cubeplex/sandbox/opensandbox.py`
 
 - [ ] **Step 1: Rewrite opensandbox.py**
 
 Replace the entire file content. Keep only `execute`, `upload`, `download`, `close`. The existing `aexecute` logic becomes `execute`. Remove all other methods.
 
 ```python
-# backend/cubebox/sandbox/opensandbox.py
+# backend/cubeplex/sandbox/opensandbox.py
 """OpenSandbox implementation of the Sandbox base class."""
 
 import opensandbox
 from loguru import logger
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubeplex.sandbox.base import ExecuteResult, Sandbox
 
 
 class OpenSandbox(Sandbox):
@@ -342,14 +342,14 @@ class OpenSandbox(Sandbox):
 
 - [ ] **Step 2: Update SandboxManager to use Sandbox base type**
 
-In `backend/cubebox/sandbox/manager.py`, change the import and type annotation:
+In `backend/cubeplex/sandbox/manager.py`, change the import and type annotation:
 
 ```python
 # Change this import:
-from cubebox.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.opensandbox import OpenSandbox
 # to:
-from cubebox.sandbox.base import Sandbox
-from cubebox.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.base import Sandbox
+from cubeplex.sandbox.opensandbox import OpenSandbox
 ```
 
 And update the return type of `get_or_create()`:
@@ -371,14 +371,14 @@ await sandbox.upload(skill_files)
 - [ ] **Step 3: Run type check**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/
+cd backend && uv run mypy cubeplex/sandbox/
 ```
 Expected: no errors
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd backend && git add cubebox/sandbox/opensandbox.py cubebox/sandbox/manager.py
+cd backend && git add cubeplex/sandbox/opensandbox.py cubeplex/sandbox/manager.py
 git commit -m "feat: update OpenSandbox to inherit Sandbox base, simplify to execute/upload/download"
 ```
 
@@ -387,21 +387,21 @@ git commit -m "feat: update OpenSandbox to inherit Sandbox base, simplify to exe
 ## Task 3: Prompts Directory
 
 **Files:**
-- Create: `backend/cubebox/prompts/__init__.py`
-- Create: `backend/cubebox/prompts/system.py`
-- Create: `backend/cubebox/prompts/sandbox.py`
-- Create: `backend/cubebox/prompts/subagents.py`
-- Create: `backend/cubebox/prompts/skills.py`
+- Create: `backend/cubeplex/prompts/__init__.py`
+- Create: `backend/cubeplex/prompts/system.py`
+- Create: `backend/cubeplex/prompts/sandbox.py`
+- Create: `backend/cubeplex/prompts/subagents.py`
+- Create: `backend/cubeplex/prompts/skills.py`
 - Create: `backend/tests/unit/test_prompts.py`
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 # backend/tests/unit/test_prompts.py
-from cubebox.prompts.system import BASE_SYSTEM_PROMPT
-from cubebox.prompts.sandbox import SANDBOX_PROMPT
-from cubebox.prompts.subagents import SUBAGENT_PROMPT
-from cubebox.prompts.skills import SKILLS_PROMPT
+from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
+from cubeplex.prompts.sandbox import SANDBOX_PROMPT
+from cubeplex.prompts.subagents import SUBAGENT_PROMPT
+from cubeplex.prompts.skills import SKILLS_PROMPT
 
 
 def test_all_prompts_are_non_empty_strings():
@@ -430,17 +430,17 @@ def test_sandbox_prompt_mentions_execute():
 ```bash
 cd backend && uv run pytest tests/unit/test_prompts.py -v 2>&1 | head -10
 ```
-Expected: `ModuleNotFoundError: No module named 'cubebox.prompts'`
+Expected: `ModuleNotFoundError: No module named 'cubeplex.prompts'`
 
 - [ ] **Step 3: Create prompt files**
 
 ```python
-# backend/cubebox/prompts/__init__.py
+# backend/cubeplex/prompts/__init__.py
 ```
 
 ```python
-# backend/cubebox/prompts/system.py
-"""Base system prompt for the cubebox agent."""
+# backend/cubeplex/prompts/system.py
+"""Base system prompt for the cubeplex agent."""
 
 BASE_SYSTEM_PROMPT = """You are an AI assistant that helps users accomplish tasks using tools. You respond with text and tool calls.
 
@@ -474,7 +474,7 @@ Keep working until the task is fully complete. Don't stop partway and explain wh
 ```
 
 ```python
-# backend/cubebox/prompts/sandbox.py
+# backend/cubeplex/prompts/sandbox.py
 """Sandbox execution prompt — injected when a sandbox is available."""
 
 SANDBOX_PROMPT = """## Shell Execution
@@ -501,7 +501,7 @@ You have access to the `execute` tool to run shell commands in a sandbox environ
 ```
 
 ```python
-# backend/cubebox/prompts/subagents.py
+# backend/cubeplex/prompts/subagents.py
 """Subagent delegation prompt — injected when subagents are configured."""
 
 SUBAGENT_PROMPT = """## Delegating Tasks to Subagents
@@ -524,7 +524,7 @@ You can delegate work to specialized subagents using the `task` tool. Each subag
 ```
 
 ```python
-# backend/cubebox/prompts/skills.py
+# backend/cubeplex/prompts/skills.py
 """Skills system prompt template — injected by SkillsMiddleware."""
 
 # This is a template — formatted by SkillsMiddleware with discovered skills
@@ -547,7 +547,7 @@ Expected: `4 passed`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd backend && git add cubebox/prompts/ tests/unit/test_prompts.py
+cd backend && git add cubeplex/prompts/ tests/unit/test_prompts.py
 git commit -m "feat: add prompts directory with system, sandbox, subagents, skills prompts"
 ```
 
@@ -556,9 +556,9 @@ git commit -m "feat: add prompts directory with system, sandbox, subagents, skil
 ## Task 4: Middleware Utils + SandboxMiddleware
 
 **Files:**
-- Create: `backend/cubebox/middleware/__init__.py`
-- Create: `backend/cubebox/middleware/_utils.py`
-- Create: `backend/cubebox/middleware/sandbox.py`
+- Create: `backend/cubeplex/middleware/__init__.py`
+- Create: `backend/cubeplex/middleware/_utils.py`
+- Create: `backend/cubeplex/middleware/sandbox.py`
 - Create: `backend/tests/unit/test_middleware_sandbox.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -569,8 +569,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import SystemMessage
 
-from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.sandbox.local import LocalSandbox
 
 
 def test_sandbox_middleware_registers_execute_tool():
@@ -626,16 +626,16 @@ def test_sandbox_middleware_injects_prompt_in_wrap_model_call():
 ```bash
 cd backend && uv run pytest tests/unit/test_middleware_sandbox.py -v 2>&1 | head -15
 ```
-Expected: `ModuleNotFoundError: No module named 'cubebox.middleware'`
+Expected: `ModuleNotFoundError: No module named 'cubeplex.middleware'`
 
 - [ ] **Step 3: Create middleware utils**
 
 ```python
-# backend/cubebox/middleware/__init__.py
+# backend/cubeplex/middleware/__init__.py
 ```
 
 ```python
-# backend/cubebox/middleware/_utils.py
+# backend/cubeplex/middleware/_utils.py
 """Shared utilities for middleware implementations."""
 
 from langchain_core.messages import SystemMessage
@@ -662,7 +662,7 @@ def append_to_system_message(
 - [ ] **Step 4: Create SandboxMiddleware**
 
 ```python
-# backend/cubebox/middleware/sandbox.py
+# backend/cubeplex/middleware/sandbox.py
 """SandboxMiddleware — registers the execute tool and injects sandbox context."""
 
 from collections.abc import Callable
@@ -677,9 +677,9 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.tools import BaseTool, tool
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.sandbox import SANDBOX_PROMPT
-from cubebox.sandbox.base import Sandbox
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.prompts.sandbox import SANDBOX_PROMPT
+from cubeplex.sandbox.base import Sandbox
 
 
 def _create_execute_tool(sandbox: Sandbox) -> BaseTool:
@@ -729,7 +729,7 @@ Expected: `4 passed`
 - [ ] **Step 6: Commit**
 
 ```bash
-cd backend && git add cubebox/middleware/ tests/unit/test_middleware_sandbox.py
+cd backend && git add cubeplex/middleware/ tests/unit/test_middleware_sandbox.py
 git commit -m "feat: add SandboxMiddleware with execute tool and prompt injection"
 ```
 
@@ -738,7 +738,7 @@ git commit -m "feat: add SandboxMiddleware with execute tool and prompt injectio
 ## Task 5: SubAgentMiddleware
 
 **Files:**
-- Create: `backend/cubebox/middleware/subagents.py`
+- Create: `backend/cubeplex/middleware/subagents.py`
 - Create: `backend/tests/unit/test_middleware_subagents.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -746,7 +746,7 @@ git commit -m "feat: add SandboxMiddleware with execute tool and prompt injectio
 ```python
 # backend/tests/unit/test_middleware_subagents.py
 import pytest
-from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
+from cubeplex.middleware.subagents import SubAgent, SubAgentMiddleware
 
 
 def test_subagent_middleware_registers_task_tool():
@@ -795,12 +795,12 @@ def test_subagent_middleware_injects_prompt():
 ```bash
 cd backend && uv run pytest tests/unit/test_middleware_subagents.py -v 2>&1 | head -10
 ```
-Expected: `ModuleNotFoundError: No module named 'cubebox.middleware.subagents'`
+Expected: `ModuleNotFoundError: No module named 'cubeplex.middleware.subagents'`
 
 - [ ] **Step 3: Create SubAgentMiddleware**
 
 ```python
-# backend/cubebox/middleware/subagents.py
+# backend/cubeplex/middleware/subagents.py
 """SubAgentMiddleware — delegates tasks to ephemeral subagents."""
 
 from collections.abc import Callable
@@ -820,8 +820,8 @@ from langchain_core.tools import BaseTool, StructuredTool
 from loguru import logger
 from pydantic import BaseModel
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.subagents import SUBAGENT_PROMPT
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.prompts.subagents import SUBAGENT_PROMPT
 
 
 class SubAgent(dict):
@@ -934,7 +934,7 @@ Expected: `4 passed`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd backend && git add cubebox/middleware/subagents.py tests/unit/test_middleware_subagents.py
+cd backend && git add cubeplex/middleware/subagents.py tests/unit/test_middleware_subagents.py
 git commit -m "feat: add SubAgentMiddleware with task tool for ephemeral subagent delegation"
 ```
 
@@ -943,7 +943,7 @@ git commit -m "feat: add SubAgentMiddleware with task tool for ephemeral subagen
 ## Task 6: SkillsMiddleware
 
 **Files:**
-- Create: `backend/cubebox/middleware/skills.py`
+- Create: `backend/cubeplex/middleware/skills.py`
 - Create: `backend/tests/unit/test_middleware_skills.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -952,7 +952,7 @@ git commit -m "feat: add SubAgentMiddleware with task tool for ephemeral subagen
 # backend/tests/unit/test_middleware_skills.py
 import pytest
 from unittest.mock import MagicMock
-from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
+from cubeplex.middleware.skills import SkillsMiddleware, SkillSpec
 
 
 def test_skills_middleware_has_no_tools():
@@ -1011,7 +1011,7 @@ cd backend && uv run pytest tests/unit/test_middleware_skills.py -v 2>&1 | head 
 - [ ] **Step 3: Create SkillsMiddleware**
 
 ```python
-# backend/cubebox/middleware/skills.py
+# backend/cubeplex/middleware/skills.py
 """SkillsMiddleware — injects available skills into system prompt."""
 
 from collections.abc import Callable
@@ -1027,8 +1027,8 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.tools import BaseTool
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.prompts.skills import SKILLS_PROMPT_TEMPLATE
 
 
 @dataclass
@@ -1089,7 +1089,7 @@ Expected: `4 passed`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd backend && git add cubebox/middleware/skills.py tests/unit/test_middleware_skills.py
+cd backend && git add cubeplex/middleware/skills.py tests/unit/test_middleware_skills.py
 git commit -m "feat: add SkillsMiddleware for skill discovery via system prompt injection"
 ```
 
@@ -1098,7 +1098,7 @@ git commit -m "feat: add SkillsMiddleware for skill discovery via system prompt 
 ## Task 7: Agent Graph Factory
 
 **Files:**
-- Create: `backend/cubebox/agents/graph.py`
+- Create: `backend/cubeplex/agents/graph.py`
 - Create: `backend/tests/unit/test_graph.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -1110,8 +1110,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-from cubebox.agents.graph import create_cubebox_agent
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.agents.graph import create_cubeplex_agent
+from cubeplex.sandbox.local import LocalSandbox
 
 
 def _make_mock_llm(response_text: str = "hello") -> MagicMock:
@@ -1128,21 +1128,21 @@ def test_create_agent_returns_compiled_graph():
     from langgraph.graph.state import CompiledStateGraph
 
     llm = _make_mock_llm()
-    agent = create_cubebox_agent(llm=llm, tools=[])
+    agent = create_cubeplex_agent(llm=llm, tools=[])
     assert isinstance(agent, CompiledStateGraph)
 
 
 def test_create_agent_with_sandbox():
     sandbox = LocalSandbox()
     llm = _make_mock_llm()
-    agent = create_cubebox_agent(llm=llm, tools=[], sandbox=sandbox)
+    agent = create_cubeplex_agent(llm=llm, tools=[], sandbox=sandbox)
     assert agent is not None
 
 
 def test_create_agent_with_checkpointer():
     llm = _make_mock_llm()
     checkpointer = MemorySaver()
-    agent = create_cubebox_agent(llm=llm, tools=[], checkpointer=checkpointer)
+    agent = create_cubeplex_agent(llm=llm, tools=[], checkpointer=checkpointer)
     assert agent is not None
 
 
@@ -1150,7 +1150,7 @@ def test_create_agent_with_checkpointer():
 async def test_agent_responds_to_message():
     llm = _make_mock_llm("I can help with that.")
     checkpointer = MemorySaver()
-    agent = create_cubebox_agent(llm=llm, tools=[], checkpointer=checkpointer)
+    agent = create_cubeplex_agent(llm=llm, tools=[], checkpointer=checkpointer)
 
     config = {"configurable": {"thread_id": "test-thread"}}
     result = await agent.ainvoke(
@@ -1165,7 +1165,7 @@ async def test_agent_responds_to_message():
 async def test_agent_persists_across_invocations():
     llm = _make_mock_llm("Remembered.")
     checkpointer = MemorySaver()
-    agent = create_cubebox_agent(llm=llm, tools=[], checkpointer=checkpointer)
+    agent = create_cubeplex_agent(llm=llm, tools=[], checkpointer=checkpointer)
 
     config = {"configurable": {"thread_id": "persist-thread"}}
     await agent.ainvoke({"messages": [HumanMessage(content="First")]}, config=config)
@@ -1184,8 +1184,8 @@ cd backend && uv run pytest tests/unit/test_graph.py -v 2>&1 | head -15
 - [ ] **Step 3: Create agent graph factory**
 
 ```python
-# backend/cubebox/agents/graph.py
-"""Agent graph factory — builds the cubebox agent using create_agent() + middleware."""
+# backend/cubeplex/agents/graph.py
+"""Agent graph factory — builds the cubeplex agent using create_agent() + middleware."""
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
@@ -1194,14 +1194,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 from loguru import logger
 
-from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.middleware.skills import SkillSpec, SkillsMiddleware
-from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
-from cubebox.prompts.system import BASE_SYSTEM_PROMPT
-from cubebox.sandbox.base import Sandbox
+from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.skills import SkillSpec, SkillsMiddleware
+from cubeplex.middleware.subagents import SubAgent, SubAgentMiddleware
+from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
+from cubeplex.sandbox.base import Sandbox
 
 
-def create_cubebox_agent(
+def create_cubeplex_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
     *,
@@ -1210,7 +1210,7 @@ def create_cubebox_agent(
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
 ) -> CompiledStateGraph:
-    """Build the cubebox agent with the configured middleware stack.
+    """Build the cubeplex agent with the configured middleware stack.
 
     Returns a CompiledStateGraph (LangGraph) that supports .astream(),
     .ainvoke(), and checkpointer-based thread persistence.
@@ -1233,7 +1233,7 @@ def create_cubebox_agent(
     middleware.append(SubAgentMiddleware(subagents=subagents or [], default_model=llm))
 
     logger.info(
-        "Creating cubebox agent: {} tools, {} middleware",
+        "Creating cubeplex agent: {} tools, {} middleware",
         len(tools),
         len(middleware),
     )
@@ -1257,8 +1257,8 @@ Expected: `5 passed`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd backend && git add cubebox/agents/graph.py tests/unit/test_graph.py
-git commit -m "feat: add create_cubebox_agent() factory with middleware stack"
+cd backend && git add cubeplex/agents/graph.py tests/unit/test_graph.py
+git commit -m "feat: add create_cubeplex_agent() factory with middleware stack"
 ```
 
 ---
@@ -1266,8 +1266,8 @@ git commit -m "feat: add create_cubebox_agent() factory with middleware stack"
 ## Task 8: Message Conversion + Updated SSE Schemas
 
 **Files:**
-- Create: `backend/cubebox/agents/convert.py`
-- Modify: `backend/cubebox/agents/schemas.py`
+- Create: `backend/cubeplex/agents/convert.py`
+- Modify: `backend/cubeplex/agents/schemas.py`
 - Create: `backend/tests/unit/test_convert_messages.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -1276,7 +1276,7 @@ git commit -m "feat: add create_cubebox_agent() factory with middleware stack"
 # backend/tests/unit/test_convert_messages.py
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from cubebox.agents.convert import convert_to_api_messages
+from cubeplex.agents.convert import convert_to_api_messages
 
 
 def test_convert_human_message():
@@ -1342,7 +1342,7 @@ cd backend && uv run pytest tests/unit/test_convert_messages.py -v 2>&1 | head -
 - [ ] **Step 3: Create convert.py**
 
 ```python
-# backend/cubebox/agents/convert.py
+# backend/cubeplex/agents/convert.py
 """Convert LangChain message types to the API wire format."""
 
 from datetime import UTC, datetime
@@ -1431,10 +1431,10 @@ def _get_timestamp(msg: BaseMessage) -> str:
 
 - [ ] **Step 4: Update schemas.py — add agent_id/agent_name, remove ChainStartEvent**
 
-Replace the content of `backend/cubebox/agents/schemas.py`:
+Replace the content of `backend/cubeplex/agents/schemas.py`:
 
 ```python
-# backend/cubebox/agents/schemas.py
+# backend/cubeplex/agents/schemas.py
 """SSE event schemas for agent execution streaming."""
 
 from typing import Any, Literal
@@ -1493,7 +1493,7 @@ Expected: `7 passed`
 - [ ] **Step 6: Commit**
 
 ```bash
-cd backend && git add cubebox/agents/convert.py cubebox/agents/schemas.py tests/unit/test_convert_messages.py
+cd backend && git add cubeplex/agents/convert.py cubeplex/agents/schemas.py tests/unit/test_convert_messages.py
 git commit -m "feat: add message conversion and update event schemas with agent_id/agent_name"
 ```
 
@@ -1502,15 +1502,15 @@ git commit -m "feat: add message conversion and update event schemas with agent_
 ## Task 9: Update App Factory + Conversations API
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/app.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 
 - [ ] **Step 1: Update create_app() with dependency injection**
 
-In `backend/cubebox/api/app.py`, update the `create_app` signature and lifespan:
+In `backend/cubeplex/api/app.py`, update the `create_app` signature and lifespan:
 
 ```python
-# backend/cubebox/api/app.py
+# backend/cubeplex/api/app.py
 """FastAPI application factory."""
 
 import asyncio
@@ -1521,10 +1521,10 @@ from typing import Any
 from fastapi import FastAPI
 from loguru import logger
 
-from cubebox.api.exceptions import register_exception_handlers
-from cubebox.api.routes.v1 import conversations as conversations_router_module
-from cubebox.api.middleware.cancellation import CancellationMiddleware
-from cubebox.api.middleware.user_identity import UserIdentityMiddleware
+from cubeplex.api.exceptions import register_exception_handlers
+from cubeplex.api.routes.v1 import conversations as conversations_router_module
+from cubeplex.api.middleware.cancellation import CancellationMiddleware
+from cubeplex.api.middleware.user_identity import UserIdentityMiddleware
 
 
 @asynccontextmanager
@@ -1534,7 +1534,7 @@ async def _lifespan(
     sandbox_factory: Callable[[], Any] | None,
 ) -> AsyncIterator[None]:
     """Application lifespan — startup and shutdown."""
-    from cubebox.agents.checkpointer import create_checkpointer
+    from cubeplex.agents.checkpointer import create_checkpointer
 
     # Initialize LangGraph checkpointer tables
     checkpointer = await (checkpointer_factory() if checkpointer_factory else create_checkpointer())
@@ -1553,15 +1553,15 @@ async def _lifespan(
     app.state.sandbox_factory = sandbox_factory
 
     # Initialize SandboxManager if sandbox enabled
-    from cubebox.config import config
+    from cubeplex.config import config
     cleanup_task = None
     if config.get("sandbox.enabled", False):
-        from cubebox.sandbox.manager import init_sandbox_manager
+        from cubeplex.sandbox.manager import init_sandbox_manager
         await init_sandbox_manager()
         logger.info("SandboxManager initialized")
 
         async def _cleanup_loop() -> None:
-            from cubebox.sandbox.manager import get_sandbox_manager
+            from cubeplex.sandbox.manager import get_sandbox_manager
             while True:
                 await asyncio.sleep(60)
                 try:
@@ -1572,7 +1572,7 @@ async def _lifespan(
 
         cleanup_task = asyncio.create_task(_cleanup_loop())
 
-    logger.info("cubebox started")
+    logger.info("cubeplex started")
     yield
 
     if cleanup_task:
@@ -1581,7 +1581,7 @@ async def _lifespan(
             await cleanup_task
         except asyncio.CancelledError:
             pass
-    logger.info("cubebox shutdown complete")
+    logger.info("cubeplex shutdown complete")
 
 
 def create_app(
@@ -1606,7 +1606,7 @@ def create_app(
     )
 
     app = FastAPI(
-        title="cubebox",
+        title="cubeplex",
         lifespan=lifespan,
     )
 
@@ -1615,7 +1615,7 @@ def create_app(
 
     register_exception_handlers(app)
 
-    from cubebox.api.routes.v1.conversations import router as conversations_router
+    from cubeplex.api.routes.v1.conversations import router as conversations_router
     app.include_router(conversations_router, prefix="/api/v1")
 
     return app
@@ -1623,7 +1623,7 @@ def create_app(
 
 - [ ] **Step 2: Rewrite conversations.py — send_message and list_messages**
 
-Replace only the `send_message` and `list_messages` endpoints in `backend/cubebox/api/routes/v1/conversations.py`. Keep all conversation CRUD endpoints unchanged.
+Replace only the `send_message` and `list_messages` endpoints in `backend/cubeplex/api/routes/v1/conversations.py`. Keep all conversation CRUD endpoints unchanged.
 
 Replace everything from line 124 (`class SendMessageRequest`) to the end of the file:
 
@@ -1649,7 +1649,7 @@ def _convert_stream_chunk(chunk: Any, ns: tuple = ()) -> list[AgentEvent]:
     """
     from datetime import UTC, datetime
 
-    from cubebox.agents.schemas import (
+    from cubeplex.agents.schemas import (
         DoneEvent,
         ReasoningEvent,
         TextDeltaEvent,
@@ -1753,11 +1753,11 @@ async def send_message(
 
         from langchain_core.messages import HumanMessage
 
-        from cubebox.agents.checkpointer import create_checkpointer
-        from cubebox.agents.graph import create_cubebox_agent
-        from cubebox.agents.schemas import DoneEvent, ErrorEvent
-        from cubebox.api.exceptions import ExecutionError, InternalError
-        from cubebox.llm.factory import LLMFactory
+        from cubeplex.agents.checkpointer import create_checkpointer
+        from cubeplex.agents.graph import create_cubeplex_agent
+        from cubeplex.agents.schemas import DoneEvent, ErrorEvent
+        from cubeplex.api.exceptions import ExecutionError, InternalError
+        from cubeplex.llm.factory import LLMFactory
 
         checkpointer = None
         sandbox = None
@@ -1766,11 +1766,11 @@ async def send_message(
         try:
             checkpointer = await create_checkpointer()
 
-            from cubebox.config import config
+            from cubeplex.config import config
             sandbox_enabled = config.get("sandbox.enabled", False)
             if sandbox_enabled:
                 try:
-                    from cubebox.sandbox.manager import get_sandbox_manager
+                    from cubeplex.sandbox.manager import get_sandbox_manager
                     sandbox_manager = get_sandbox_manager()
                     sandbox = await sandbox_manager.get_or_create(user_id)
                 except Exception as e:
@@ -1782,10 +1782,10 @@ async def send_message(
                 model_id=factory.list_models(providers[0])[0],
                 provider_name=providers[0],
             )
-            from cubebox.tools import get_registry
+            from cubeplex.tools import get_registry
             tools = get_registry().list_tools()
 
-            agent = create_cubebox_agent(
+            agent = create_cubeplex_agent(
                 llm=llm,
                 tools=tools,
                 sandbox=sandbox,
@@ -1836,7 +1836,7 @@ async def send_message(
             # Update conversation timestamp
             from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy.pool import NullPool
-            from cubebox.db.engine import _build_database_url
+            from cubeplex.db.engine import _build_database_url
             save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
             try:
                 async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
@@ -1869,8 +1869,8 @@ async def list_messages(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    from cubebox.agents.checkpointer import create_checkpointer
-    from cubebox.agents.convert import convert_to_api_messages
+    from cubeplex.agents.checkpointer import create_checkpointer
+    from cubeplex.agents.convert import convert_to_api_messages
 
     checkpointer = await create_checkpointer()
     if checkpointer is None:
@@ -1894,9 +1894,9 @@ Also update the imports at the top of conversations.py — remove `MessageReposi
 
 ```python
 # Remove this import line:
-# from cubebox.repositories import ConversationRepository, MessageRepository
+# from cubeplex.repositories import ConversationRepository, MessageRepository
 # Replace with:
-from cubebox.repositories import ConversationRepository
+from cubeplex.repositories import ConversationRepository
 
 # Add to existing imports:
 from typing import Any
@@ -1905,14 +1905,14 @@ from typing import Any
 - [ ] **Step 3: Run type check**
 
 ```bash
-cd backend && uv run mypy cubebox/api/ --ignore-missing-imports 2>&1 | head -30
+cd backend && uv run mypy cubeplex/api/ --ignore-missing-imports 2>&1 | head -30
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd backend && git add cubebox/api/app.py cubebox/api/routes/v1/conversations.py
-git commit -m "feat: update conversations API to use create_cubebox_agent and read messages from checkpointer"
+cd backend && git add cubeplex/api/app.py cubeplex/api/routes/v1/conversations.py
+git commit -m "feat: update conversations API to use create_cubeplex_agent and read messages from checkpointer"
 ```
 
 ---
@@ -1920,25 +1920,25 @@ git commit -m "feat: update conversations API to use create_cubebox_agent and re
 ## Task 10: Delete Old Files + Update Dependencies
 
 **Files:**
-- Delete: `backend/cubebox/agents/executor.py`
-- Delete: `backend/cubebox/models/message.py`
-- Delete: `backend/cubebox/repositories/message.py`
-- Modify: `backend/cubebox/models/__init__.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Delete: `backend/cubeplex/agents/executor.py`
+- Delete: `backend/cubeplex/models/message.py`
+- Delete: `backend/cubeplex/repositories/message.py`
+- Modify: `backend/cubeplex/models/__init__.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 - Modify: `backend/pyproject.toml`
 
 - [ ] **Step 1: Remove old files**
 
 ```bash
-cd backend && rm cubebox/agents/executor.py cubebox/models/message.py cubebox/repositories/message.py
+cd backend && rm cubeplex/agents/executor.py cubeplex/models/message.py cubeplex/repositories/message.py
 ```
 
 - [ ] **Step 2: Update models/__init__.py**
 
 ```python
-# backend/cubebox/models/__init__.py
-from cubebox.models.conversation import Conversation
-from cubebox.models.user_sandbox import UserSandbox
+# backend/cubeplex/models/__init__.py
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.user_sandbox import UserSandbox
 
 __all__ = ["Conversation", "UserSandbox"]
 ```
@@ -1946,9 +1946,9 @@ __all__ = ["Conversation", "UserSandbox"]
 - [ ] **Step 3: Update repositories/__init__.py**
 
 ```python
-# backend/cubebox/repositories/__init__.py
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+# backend/cubeplex/repositories/__init__.py
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 __all__ = ["ConversationRepository", "UserSandboxRepository"]
 ```
@@ -1975,7 +1975,7 @@ Expected: uv resolves without `deepagents`, `nest-asyncio`, `asyncer`
 - [ ] **Step 6: Run full type check**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 Expected: no errors (or only pre-existing ones)
 
@@ -2051,7 +2051,7 @@ Expected: all tests pass. If any fail, fix before proceeding.
 - [ ] **Step 2: Run type check**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: no errors
@@ -2075,8 +2075,8 @@ import pytest
 from httpx import AsyncClient
 from langgraph.checkpoint.memory import MemorySaver
 
-from cubebox.api.app import create_app
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.api.app import create_app
+from cubeplex.sandbox.local import LocalSandbox
 
 
 @pytest.fixture
@@ -2589,8 +2589,8 @@ git commit -m "feat: update types and rewrite messageStore with flat state and p
 
 ```typescript
 // frontend/packages/web/hooks/useMessages.ts
-import { useMessageStore } from '@cubebox/core/stores'
-import type { AgentStream } from '@cubebox/core/stores'
+import { useMessageStore } from '@cubeplex/core/stores'
+import type { AgentStream } from '@cubeplex/core/stores'
 
 export function useMessages() {
   const messages = useMessageStore((s) => s.messages)
@@ -2612,8 +2612,8 @@ export function useMessages() {
 
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Bot } from 'lucide-react'
-import type { AgentStream } from '@cubebox/core/stores'
-import type { ToolCallEvent } from '@cubebox/core/types'
+import type { AgentStream } from '@cubeplex/core/stores'
+import type { ToolCallEvent } from '@cubeplex/core/types'
 
 interface Props {
   agentId: string
@@ -2680,8 +2680,8 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { Message } from '@cubebox/core/types'
-import type { AgentStream } from '@cubebox/core/stores'
+import type { Message } from '@cubeplex/core/types'
+import type { AgentStream } from '@cubeplex/core/stores'
 
 interface HistoryProps {
   message: Message
@@ -2771,8 +2771,8 @@ export function AssistantMessage({ message, stream, isStreaming }: Props) {
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { createApiClient } from '@cubebox/core/api'
-import { useMessageStore } from '@cubebox/core/stores'
+import { createApiClient } from '@cubeplex/core/api'
+import { useMessageStore } from '@cubeplex/core/stores'
 import { useMessages } from '../../hooks/useMessages'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
@@ -2829,7 +2829,7 @@ export function MessageList({ conversationId }: Props) {
 - [ ] **Step 5: Build core package and check types**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build && pnpm type-check
+cd frontend && pnpm --filter @cubeplex/core build && pnpm type-check
 ```
 
 Expected: no type errors
@@ -2890,7 +2890,7 @@ In `frontend/packages/web/package.json`, add to scripts:
 // frontend/packages/web/__tests__/hooks/useMessages.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from '@testing-library/react'
-import { useMessageStore } from '@cubebox/core/stores'
+import { useMessageStore } from '@cubeplex/core/stores'
 
 function mockSSEResponse(events: object[]) {
   const lines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')

@@ -63,19 +63,19 @@ Two related gaps in how sandboxes are owned and governed:
 
 ### Ownership model
 
-- `backend/cubebox/models/user_sandbox.py` — `UserSandbox(CubeboxBase,
+- `backend/cubeplex/models/user_sandbox.py` — `UserSandbox(CubeplexBase,
   OrgScopedMixin)`. Carries `user_id`, `workspace_id` (via mixin), `org_id`,
   `sandbox_id` (provider id, `unique=True`), `status`, `image`, `ttl_seconds`,
   `last_activity_at`. Two non-unique indexes:
   `ix_user_sandboxes_user_ws_status` and `ix_user_sandboxes_org_ws`. There is
   **no** uniqueness on `(org_id, workspace_id, user_id, status='running')`, so
   two concurrent `get_or_create` calls could both create a running row.
-- `backend/cubebox/repositories/user_sandbox.py` —
+- `backend/cubeplex/repositories/user_sandbox.py` —
   `UserSandboxRepository(ScopedRepository[UserSandbox])`. `get_active_by_user`
   is already workspace-scoped (the repo is constructed with `workspace_id`), and
   returns the newest `status='running'` row. The "newest wins" `order_by` is a
   symptom of the missing unique constraint.
-- `backend/cubebox/sandbox/manager.py` — `get_or_create(user_id, *, org_id,
+- `backend/cubeplex/sandbox/manager.py` — `get_or_create(user_id, *, org_id,
   workspace_id)` looks up the active row for that `(user, workspace)`, health-
   checks it, reuses or recreates. Create persists via `repo.create(...)` and
   sets `image=self._image`.
@@ -86,20 +86,20 @@ for any pre-existing single-key rows, not a structural redesign.
 
 ### Exec path
 
-- `backend/cubebox/middleware/sandbox.py` — `SandboxMiddleware` exposes
+- `backend/cubeplex/middleware/sandbox.py` — `SandboxMiddleware` exposes
   `execute`, `write_file`, `edit_file`, `file_read` as cubepi `AgentTool`s.
   `_make_execute_tool._execute` calls `sandbox.execute(args.command)` directly,
   with no inspection of the command string. The only existing hook is an
   audit ring buffer (`_record_executed`) gated behind `enable_audit()` for tests.
   **This `_execute` closure is the natural enforcement point for command rules.**
-- `backend/cubebox/sandbox/opensandbox.py` — `OpenSandbox.execute` runs the
+- `backend/cubeplex/sandbox/opensandbox.py` — `OpenSandbox.execute` runs the
   command via the provider; `set_run_env` injects run-level env.
 
 ### Admin config today
 
 - Sandbox image: global config only (`sandbox.image` in
-  `backend/cubebox/sandbox/manager.py:__init__`). Not org-configurable.
-- Network policy: built by `backend/cubebox/sandbox_env/injector.py`
+  `backend/cubeplex/sandbox/manager.py:__init__`). Not org-configurable.
+- Network policy: built by `backend/cubeplex/sandbox_env/injector.py`
   (`SandboxEnvInjector.build`) as `NetworkPolicy(defaultAction="deny",
   egress=[allow <secret hosts> + exchange_host])`. It is a side effect of the
   secret env vault, set once at `Sandbox.create` (manager.py ~line 267). There is
@@ -107,7 +107,7 @@ for any pre-existing single-key rows, not a structural redesign.
 - Command rules: none. The system prompt (`SANDBOX_PROMPT_TEMPLATE`) is the only
   influence on what the agent runs, and it is not enforcement.
 - Existing scope-isolated admin/ws split to mirror:
-  `backend/cubebox/api/routes/v1/admin_sandbox_env.py` (uses
+  `backend/cubeplex/api/routes/v1/admin_sandbox_env.py` (uses
   `get_admin_request_context`) vs `ws_sandbox_env.py` (uses `require_admin` /
   `require_member`), both delegating to `services/sandbox_env.py`.
 
@@ -273,7 +273,7 @@ command rules ride on the same row as JSONB columns rather than separate
 `network_rule` / `command_rule` tables, because they are authored as a single
 admin PUT and have no independent lifecycle.
 
-A pure-function policy module (`backend/cubebox/sandbox_policy/`, e.g.
+A pure-function policy module (`backend/cubeplex/sandbox_policy/`, e.g.
 `rules.py`) holds the matchers and is the single reuse boundary shared by the
 admin route, the manager, and the exec middleware — never the route layer.
 
@@ -332,7 +332,7 @@ until v2 lights it up.
 
 **Delivery to exec + enforcement point (command rules).** Command rules are
 enforced in `_make_execute_tool._execute` in
-`backend/cubebox/middleware/sandbox.py` — the last cubebox-owned point before
+`backend/cubeplex/middleware/sandbox.py` — the last cubeplex-owned point before
 the command reaches the provider. `SandboxMiddleware.__init__` gains the
 resolved `command_rules`. For each `execute` call:
 
@@ -354,17 +354,17 @@ resolved `command_rules`. For each `execute` call:
    what it cares about) → run as today.
 
 > **External follow-up — cubepi HITL (OQ-1/OQ-2).** Real "pause and prompt
-> for approval" is not a cubebox-only concern: the agent loop, the SSE event
+> for approval" is not a cubeplex-only concern: the agent loop, the SSE event
 > stream, and the resume hook all live in cubepi (the self-developed
 > runtime). The right place to add it is **upstream in cubepi**, not as a
-> bespoke cubebox hack. Concretely: file a cubepi issue for an
+> bespoke cubeplex hack. Concretely: file a cubepi issue for an
 > `elicit`/`approve` event channel (a `tool_confirmation_required` SSE event
-> + an approve-or-reject hook). Acceptance criteria from cubebox's side:
+> + an approve-or-reject hook). Acceptance criteria from cubeplex's side:
 > confirmation blocks **only the tool call**, not the whole run (the agent
 > loop holds at the pending tool, other middleware keeps responding); the
 > approval timeout is **180 seconds**, after which the call is treated as
 > `deny` and an audit row is written; the sandbox TTL clock is not paused
-> while waiting for approval. Once cubepi ships this channel, cubebox flips
+> while waiting for approval. Once cubepi ships this channel, cubeplex flips
 > the `confirm` branch above from deny-with-message to a real pause-and-
 > resume flow (no schema change, the data already carries `confirm`).
 
@@ -387,7 +387,7 @@ required `workspace_id` column (see "Where stored" above for why). A nullable
 `scope_workspace_id` is reserved for v2 overrides:
 
 ```
-SandboxPolicy(CubeboxBase, table=True)   # NOT OrgScopedMixin
+SandboxPolicy(CubeplexBase, table=True)   # NOT OrgScopedMixin
   _PREFIX = PREFIX_SANDBOX_POLICY  # "sbxp"
   __tablename__ = "sandbox_policies"
   org_id: str = Field(foreign_key="organizations.id", index=True)
@@ -406,7 +406,7 @@ SandboxPolicy(CubeboxBase, table=True)   # NOT OrgScopedMixin
   )
 ```
 
-Add `PREFIX_SANDBOX_POLICY = "sbxp"` to `backend/cubebox/models/public_id.py`.
+Add `PREFIX_SANDBOX_POLICY = "sbxp"` to `backend/cubeplex/models/public_id.py`.
 
 **One** Alembic migration, generated with `alembic revision --autogenerate`
 (do not hand-edit; autogen captures both schema changes in a single run since
@@ -561,9 +561,9 @@ resolution diverges from the originally-sketched answer.
   (data is preserved; admin can save `confirm`). Real HITL is an **external
   follow-up in cubepi** — cubepi is the self-developed runtime and owns the
   agent loop, the SSE event channel, and the resume hook, so the right fix
-  is upstream, not a cubebox hack. File a cubepi issue for an
+  is upstream, not a cubeplex hack. File a cubepi issue for an
   `elicit`/`approve` event channel (`tool_confirmation_required` SSE event
-  + approve/reject hook). Once shipped, cubebox switches the `confirm`
+  + approve/reject hook). Once shipped, cubeplex switches the `confirm`
   branch from deny-with-message to a real pause-and-resume flow (no schema
   change).
 - **OQ-2 — Does confirmation block the whole run or just the tool call?
@@ -572,7 +572,7 @@ resolution diverges from the originally-sketched answer.
   loop holds at the pending tool; other middleware keeps responding). The
   approval **timeout is 180 seconds**; timed-out is treated as `deny` with
   an audit row. The sandbox TTL clock does not pause while waiting. These
-  are cubebox-side acceptance criteria for the upstream cubepi issue.
+  are cubeplex-side acceptance criteria for the upstream cubepi issue.
 - **OQ-3 — Per-workspace / per-user policy overrides (v2).**
   **Resolved 2026-05-28:** add the `scope_workspace_id: str | None` column
   to `SandboxPolicy` **now** (nullable, default NULL). v1 only writes NULL
@@ -648,14 +648,14 @@ resolution diverges from the originally-sketched answer.
 
 ## References
 
-- Code: `backend/cubebox/models/user_sandbox.py`,
-  `backend/cubebox/repositories/user_sandbox.py`,
-  `backend/cubebox/sandbox/manager.py`, `backend/cubebox/sandbox/opensandbox.py`,
-  `backend/cubebox/middleware/sandbox.py`,
-  `backend/cubebox/sandbox_env/injector.py`,
-  `backend/cubebox/api/routes/v1/admin_sandbox_env.py`,
-  `backend/cubebox/api/routes/v1/ws_sandbox_env.py`,
-  `backend/cubebox/services/sandbox_env.py`, `backend/cubebox/models/public_id.py`.
+- Code: `backend/cubeplex/models/user_sandbox.py`,
+  `backend/cubeplex/repositories/user_sandbox.py`,
+  `backend/cubeplex/sandbox/manager.py`, `backend/cubeplex/sandbox/opensandbox.py`,
+  `backend/cubeplex/middleware/sandbox.py`,
+  `backend/cubeplex/sandbox_env/injector.py`,
+  `backend/cubeplex/api/routes/v1/admin_sandbox_env.py`,
+  `backend/cubeplex/api/routes/v1/ws_sandbox_env.py`,
+  `backend/cubeplex/services/sandbox_env.py`, `backend/cubeplex/models/public_id.py`.
 - Docs: `backend/docs/auth.md`, `CLAUDE.md` (scope-isolation rules),
   `docs/dev/specs/2026-05-20-sandbox-browser-takeover-design.md`,
   `docs/dev/plans/2026-05-25-sandbox-env-vault.md`.

@@ -1,9 +1,10 @@
 {
   "auth": {
     "signIn": "Sign in",
-    "signInTitle": "Sign in to cubebox",
+    "signInTitle": "Welcome back",
+    "signInSubtitle": "Open your workspace and continue the runs already in motion.",
     "signUp": "Create account",
-    "signUpTitle": "Create your cubebox account",
+    "signUpTitle": "Create your CubePlex account",
     "email": "Email",
     "password": "Password",
     "signingIn": "Signing in…",
@@ -45,7 +46,29 @@
     "notAMember": "Not a member?",
     "ssoError": "SSO Login Failed",
     "backToLogin": "Back to login",
-    "loggingIn": "Logging you in…"
+    "loggingIn": "Logging you in…",
+    "verifyOtpTitle": "Enter verification code",
+    "verifyOtpSubtitle": "We sent a 6-digit code to {email}",
+    "verifying": "Verifying…",
+    "verify": "Verify",
+    "resendCode": "Resend code",
+    "resendIn": "Resend in {seconds}s",
+    "passwordTooWeak": "Password doesn't meet the strength requirements.",
+    "verifyEmailNow": "Verify email now",
+    "surfaceEyebrow": "Agent workspace",
+    "surfaceTitle": "Run agents with memory, tools, and approvals in one place.",
+    "surfaceSubtitle": "CubePlex keeps long-running agent work inside the same workspace as your models, connectors, artifacts, and team controls.",
+    "surfacePanelTitle": "Built for controlled autonomy",
+    "surfacePanelDescription": "Sign in to inspect active runs, review tool access, and resume work with full workspace context.",
+    "surfaceFeatureMemoryTitle": "Memory",
+    "surfaceFeatureMemoryDescription": "Keep useful context available without rebuilding every prompt.",
+    "surfaceFeatureToolsTitle": "Tools",
+    "surfaceFeatureToolsDescription": "Connect MCP services, sandbox work, and internal systems.",
+    "surfaceFeatureControlTitle": "Control",
+    "surfaceFeatureControlDescription": "Use approvals, scopes, and audit trails before work leaves the box.",
+    "surfaceSignalRuns": "Streaming runs stay attached to their workspace.",
+    "surfaceSignalScopes": "Org and workspace scopes stay separate.",
+    "surfaceSignalAudit": "Artifacts, citations, and decisions stay reviewable."
   },
   "sidebar": {
     "newChat": "New Chat",
@@ -169,7 +192,7 @@
     "new": "New workspace"
   },
   "input": {
-    "placeholder": "Describe a task…",
+    "placeholder": "Tell CubePlex what you want to get done…",
     "hint": "Enter to send / Shift+Enter for newline",
     "pendingHitlLock": "Answer the pending question above first."
   },
@@ -280,6 +303,8 @@
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
+    "loadEarlier": "Load earlier messages",
+    "loadingEarlier": "Loading earlier messages…",
     "thinking": "Thinking...",
     "thinkingProcess": "Thinking",
     "sandboxPreparing": "Preparing sandbox environment...",
@@ -307,12 +332,36 @@
     "thinkingLevelLow": "Low",
     "thinkingLevelMedium": "Medium",
     "thinkingLevelHigh": "High",
-    "thinkingLevelXhigh": "Extra High",
+    "thinkingLevelMax": "Max",
     "modelPickerAria": "Model and thinking effort",
     "modelSectionLabel": "Model",
     "effortLabel": "Effort",
     "effortFaster": "Faster",
-    "effortSmarter": "Smarter"
+    "effortSmarter": "Smarter",
+    "forkConversation": "Fork conversation",
+    "forkSuccess": "Forked to a new conversation",
+    "forkError": "Couldn't fork this conversation",
+    "forkDisabled": {
+      "noRun": "Cannot fork from this message",
+      "runStreaming": "Wait for the response to finish",
+      "groupChat": "Fork is not available in group chats"
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{n}m ago",
+      "hoursAgo": "{n}h ago",
+      "daysAgo": "{n}d ago"
+    },
+    "memoryChip": {
+      "label": "memories",
+      "ariaLabel": "{n} memories",
+      "popoverTitle": "Memories from this conversation",
+      "openPage": "Open memory",
+      "openPageAria": "Go to memory page",
+      "empty": "No memories yet"
+    }
   },
   "subagent": {
     "cluster": "Agent cluster",
@@ -320,22 +369,22 @@
     "allDone": "{count} tasks completed"
   },
   "home": {
-    "subtitle": "AI Agent System",
+    "subtitle": "Agents do the work. Teams stay in control.",
     "promptCards": {
-      "analyze": {
-        "title": "Analyze a data file",
-        "description": "Upload CSV/Excel — clean, summarize, visualize.",
-        "prompt": "Analyze this dataset and summarize the key trends, anomalies, and a few visualizations I should share with the team.\n\n[attach your CSV or Excel file]"
+      "document": {
+        "title": "Create a document or deck",
+        "description": "Turn source material into a Word document or presentation.",
+        "prompt": "Create a polished [Word document / presentation] from the topic and source material below. First organize the structure for the intended audience, then produce an editable file.\n\nOutput format:\nAudience:\nTopic and source material:"
       },
-      "research": {
-        "title": "Research a topic",
-        "description": "Multi-source search with citations.",
-        "prompt": "Research the topic below across multiple credible sources, cross-check key facts, and produce a concise report with inline citations.\n\nTopic: "
+      "analyze": {
+        "title": "Analyze a spreadsheet",
+        "description": "Clean Excel or CSV data, find patterns, and create charts.",
+        "prompt": "Analyze the attached spreadsheet. Clean the data, identify key trends and anomalies, and create clear charts with a concise summary the team can act on.\n\n[Attach an Excel or CSV file]"
       },
       "automate": {
-        "title": "Automate a workflow",
-        "description": "Write a script, schedule, or webhook.",
-        "prompt": "Help me automate the following workflow. Walk through the design, write the code/script, and suggest how to schedule or trigger it.\n\nWorkflow: "
+        "title": "Automate recurring work",
+        "description": "Connect systems and run repeatable work with approvals.",
+        "prompt": "Help me automate the recurring workflow below. First confirm which systems and data you need to access, what actions are allowed, and which steps require my approval. Then propose the workflow and proceed within those boundaries.\n\nWorkflow:"
       }
     }
   },
@@ -393,6 +442,19 @@
     "title": "Members",
     "subtitle": "Manage organization members and their roles.",
     "addMember": "Add member",
+    "inviteMember": "Invite member",
+    "inviteDialog": {
+      "title": "Invite to organization",
+      "roleLabel": "Role",
+      "description": "Generate a single-use invite link. The recipient joins the organization at this role, then creates their own workspace.",
+      "create": "Create invite link",
+      "creating": "Creating…",
+      "linkReady": "Invite link ready. Share it with the person you're inviting.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "done": "Done",
+      "expiresNote": "The link expires in 24 hours and works once."
+    },
     "email": "Email",
     "role": "Role",
     "joined": "Joined",
@@ -811,7 +873,7 @@
       },
       "attributeMapping": {
         "section": "Attribute mapping",
-        "help": "How fields from your IdP map to cubebox accounts.",
+        "help": "How fields from your IdP map to CubePlex accounts.",
         "idKey": "External ID",
         "emailKey": "Email",
         "nameKey": "Display name",
@@ -903,6 +965,7 @@
     "available": {
       "title": "Available",
       "connect": "Connect",
+      "orgCredentialAvailable": "Org credential available",
       "empty": "No connectors available to add."
     },
     "scopeBadge": {
@@ -1046,7 +1109,40 @@
       "emptyMatch": "No tools match \"{query}\"."
     },
     "wsTitle": "MCP Connectors",
-    "wsSubtitle": "Connect external tools and data sources to this workspace."
+    "wsSubtitle": "Connect external tools and data sources to this workspace.",
+    "filterEnabled": "Enabled",
+    "filterDisabled": "Disabled",
+    "filterAll": "All",
+    "searchPlaceholder": "Search connectors…",
+    "searchAriaLabel": "Search MCP connectors",
+    "filterByStatus": "Filter by status",
+    "sourceAll": "All sources",
+    "sourceGlobal": "Official catalog",
+    "sourceOrg": "Org custom",
+    "sourceWorkspace": "Workspace",
+    "loading": "Loading…",
+    "noConnectors": "No connectors",
+    "noConnectorsHint": "Adjust the filter or add a custom connector.",
+    "selectConnector": "Select a connector to view details",
+    "disabledBadge": "Disabled",
+    "reasonTemplateDisabled": "Disabled by org",
+    "registerCustomTemplate": "Add custom connector",
+    "promoteTemplateAction": "Promote to org template",
+    "disableAction": "Disable",
+    "enableAction": "Enable",
+    "purgeAction": "Purge all usage",
+    "purgeConfirmBody": "This will remove all workspace enablements, delete all credentials, and clear the connector config. The template stays in the catalog.",
+    "distributeTitle": "Enable for workspaces",
+    "distributeExisting": "Enable for {count} workspaces not yet configured",
+    "distributeAutoEnroll": "Auto-enable for new workspaces",
+    "toastDisabledInOrg": "This connector is disabled by the org admin.",
+    "toastNotVisible": "This connector is no longer visible. Refreshing…",
+    "toastUrlTaken": "This server URL is already in use by \"{other}\" in this org. Delete or point one of them elsewhere.",
+    "toastUrlTakenFallbackName": "another template",
+    "toastTemplateInUseEdit": "This template has an active connector. Ask an org admin to Purge it before changing the URL or transport.",
+    "toastTemplateInUseDelete": "This template has an active connector. Ask an org admin to Purge it before deleting.",
+    "toastAdded": "Added {name}",
+    "filterBySource": "Filter by source"
   },
   "mcpOAuthReturn": {
     "successTitle": "Connector connected",
@@ -1196,6 +1292,7 @@
     "navIm": "IM",
     "navMemory": "Memory",
     "navSandboxEnv": "Sandbox Env",
+    "navSandboxes": "Sandboxes",
     "memory": {
       "title": "Memory",
       "description": "Memories your AI assistant has built up over time in this workspace.",
@@ -1322,7 +1419,8 @@
     "goHome": "Go to homepage",
     "joined": "You're in!",
     "joinedDescription": "You've joined the workspace \"{workspace}\".",
-    "openWorkspace": "Open workspace"
+    "openWorkspace": "Open workspace",
+    "joinedOrg": "You've joined the organization!"
   },
   "panel": {
     "header": {
@@ -1342,7 +1440,9 @@
       "loading": "Loading…",
       "loadFailed": "Failed to load: {message}",
       "tooLarge": "File is too large for inline preview ({size} MB). Please download to view.",
-      "empty": "Empty"
+      "empty": "Empty",
+      "previewFailed": "Preview unavailable",
+      "retry": "Retry"
     },
     "fileRead": {
       "untitled": "(untitled)",
@@ -1735,6 +1835,16 @@
     "installs": "Connector installs",
     "workspaceState": "Workspace state",
     "credentialPolicy": "Credential policy",
+    "policyOrg": "Organization",
+    "policyOrgDescription": "Use the organization credential managed by admins.",
+    "policyWorkspace": "Workspace",
+    "policyWorkspaceDescription": "Store one credential for this workspace.",
+    "policyUser": "User",
+    "policyUserDescription": "Each user connects their own account.",
+    "policyNone": "None",
+    "policyNoneDescription": "Only available for no-auth connectors.",
+    "policyCredentialAvailableLabel": "{scope} credential available",
+    "orgCredentialAvailable": "Org credential available",
     "orgGrant": "Org grant",
     "workspaceGrant": "Workspace grant",
     "myGrant": "My grant",
@@ -1742,7 +1852,7 @@
     "ready": "Ready",
     "statusPendingOAuth": "Pending OAuth",
     "statusWorkspaceDisabled": "Workspace disabled",
-    "statusUninstalled": "Uninstalled",
+    "statusUninstalled": "Not installed",
     "statusAvailable": "Available",
     "scopeOrg": "Org-wide install",
     "scopeWorkspace": "Workspace install",
@@ -1750,17 +1860,17 @@
     "authMethodStatic": "API token",
     "authMethodNone": "No auth",
     "authMethodLabel": "Auth method",
-    "installButton": "Install",
+    "installButton": "Add to organization",
     "uninstallButton": "Uninstall",
     "confirmUninstallLabel": "Uninstall?",
-    "templateInstallTitle": "Install connector template",
-    "templateInstallError": "Install failed",
-    "templateInstallNotice": "Installs the connector at the organization level. Each workspace can be enabled separately afterwards.",
+    "templateInstallTitle": "Add connector to organization",
+    "templateInstallError": "Add failed",
+    "templateInstallNotice": "Adds the connector identity at the organization level. Existing workspace credentials stay in place, and each workspace can still choose organization, workspace, or user credentials.",
     "distributionLabel": "Workspace rollout",
     "distributionNone": "Each workspace enables manually",
     "distributionAll": "Enable for all workspaces",
-    "distributionNoneHint": "Install at org level only. Workspaces will see this connector but it stays disabled until each workspace enables it.",
-    "distributionAllHint": "Install and enable for every existing workspace, and auto-enable for new workspaces created later.",
+    "distributionNoneHint": "Add at org level only. Workspaces will see this connector but it stays disabled until each workspace enables it.",
+    "distributionAllHint": "Add and enable for every existing workspace, and auto-enable for new workspaces created later. Existing workspace credential choices are preserved.",
     "installAuthSummary": "Auth {auth} · auth {authStatus} · discovery {discoveryStatus}",
     "authStatus": "Auth status",
     "discoveryStatus": "Discovery status",
@@ -1769,6 +1879,8 @@
     "workspaceStateSummary": "{enabled} of {total} workspaces enabled",
     "customCreateTitle": "Add custom MCP server",
     "customCreateSubtitle": "Register a custom MCP server for the entire organization. You can enable it per workspace afterwards.",
+    "customCreateWorkspaceTitle": "Add custom MCP server",
+    "customCreateWorkspaceSubtitle": "Register a custom MCP server for this workspace.",
     "customSectionServer": "Server",
     "customSectionCredential": "Credential",
     "customFieldName": "Name",
@@ -1786,11 +1898,68 @@
     "customFieldCredNamePlaceholder": "Label shown in the credential vault",
     "customFieldCredPlaintext": "Credential",
     "customSubmit": "Create server",
+    "customEditTitle": "Edit custom MCP server",
+    "customEditSubtitle": "Update the server details. Auth method cannot be changed here — delete and re-create to switch mechanisms.",
+    "customEditSubmit": "Save changes",
+    "customEditCancel": "Cancel",
+    "customEditLockedHint": "This server has an active connector. Purge it first to change the URL or transport.",
+    "editTemplateAction": "Edit",
+    "errorNameConflict": "A template with this name already exists in this org — pick a different name.",
+    "errorUrlTaken": "This server URL is already in use by \"{other}\" in this org. Pick a different URL or remove the other template first.",
+    "errorUrlTakenFallbackName": "another template",
     "customTestConnection": "Test connection",
     "customTestOk": "Connected · {count} tool(s)",
+    "customTestOkOAuth": "OAuth metadata reachable · authorize to list tools",
     "customTestFailed": "Connection failed",
-    "addCustomConnector": "+ Add custom connector",
-    "promoteToOrg": "Promote to org-wide"
+    "addCustomConnector": "Add custom connector",
+    "workspaceAddCustomConnector": "Add custom connector",
+    "promoteToOrg": "Promote to org-wide",
+    "templateScopeGlobal": "Official catalog",
+    "templateScopeOrg": "Org custom",
+    "templateScopeWorkspace": "Workspace",
+    "filterInUse": "In use",
+    "filterNeedsAttention": "Needs attention",
+    "filterOrgCredential": "Org credential",
+    "filterUnused": "Unused",
+    "filterAllSources": "All sources",
+    "sourceFilterAll": "All",
+    "sourceFilterGlobal": "Global",
+    "sourceFilterOrg": "Org",
+    "sourceFilterWorkspace": "Workspace",
+    "catalogSearchPlaceholder": "Search connectors…",
+    "catalogSearchAriaLabel": "Search MCP connectors",
+    "catalogFilterAriaLabel": "Filter by status",
+    "catalogSourceAriaLabel": "Filter by source",
+    "disabledBadge": "Disabled",
+    "needsAttentionBadge": "Needs attention",
+    "notInstalledBadge": "Not installed",
+    "orgGrantValid": "Org credential valid",
+    "orgGrantExpired": "Org credential expired",
+    "orgGrantDotAriaValid": "Org credential valid",
+    "orgGrantDotAriaExpired": "Org credential expired",
+    "workspaceRatio": "{enabled}/{eligible} workspaces",
+    "catalogNoConnectors": "No connectors",
+    "catalogNoConnectorsHint": "Adjust filters or add a custom connector.",
+    "catalogLoading": "Loading…",
+    "distributeAction": "Distribute",
+    "disableOrgAction": "Disable",
+    "enableOrgAction": "Enable",
+    "purgeTitle": "Purge",
+    "purgeConfirmText": "This will remove all workspace enablements, delete all credentials, and clear connector config",
+    "deleteTemplateAction": "Delete template",
+    "confirmDeleteText": "Confirm delete this template?",
+    "distributeDialogTitle": "Distribute connector",
+    "distributeDialogDesc": "Configure how {name} is rolled out to workspaces.",
+    "distributeDialogClose": "Close",
+    "distributeEnableExisting": "Enable for existing workspaces",
+    "distributeEnableExistingDesc": "Enable this connector across all current workspaces.",
+    "distributeAutoEnroll": "Auto-enroll new workspaces",
+    "distributeAutoEnrollDesc": "Newly created workspaces will automatically have this connector enabled.",
+    "distributeCancel": "Cancel",
+    "distributeConfirm": "Distribute",
+    "distributeError": "Distribution failed",
+    "noConnectorInstalled": "This template has no connector installed. Click Distribute to enable in workspaces.",
+    "overviewSource": "Source"
   },
   "skillSearch": {
     "noDescription": "No description available",
@@ -1868,7 +2037,10 @@
     "targetFixedHint": "Runs always append to one existing conversation you own.",
     "targetImChannel": "IM channel",
     "targetImChannelHint": "Posts to a chat in your linked IM platform.",
-    "targetImChannelDisabledHint": "Created from IM only — use a slash command in your chat.",
+    "targetImChannelDisabledHint": "Create from IM, or edit an existing task bound to an IM conversation/topic.",
+    "targetImChannelRetargetHint": "Uses the IM binding of this task's conversation or topic. Fails if none is found.",
+    "targetImChannelRetargetNote": "No channel picker — the server resolves the binding from the task's conversation or topic. If there is no IMThreadLink, save will fail.",
+    "targetImChannelCreateOnlyFromIm": "IM channel destination can only be chosen when editing a task that has an IM-bound conversation or topic.",
     "targetLockedAfterCreate": "Destination can't be changed after the task is created.",
     "targetTopic": "Topic",
     "targetTopicEmpty": "No topic — standalone conversation",
@@ -1958,7 +2130,7 @@
     "sharedBy": "Shared by {name}",
     "notFound": "Share not found",
     "notFoundBody": "This share link may have been revoked or does not exist.",
-    "poweredBy": "Powered by cubebox"
+    "poweredBy": "Powered by CubePlex"
   },
   "profile": {
     "title": "Profile",
@@ -2043,8 +2215,9 @@
   },
   "verificationBanner": {
     "message": "Please verify your email address.",
-    "resend": "Resend verification email",
-    "sent": "Verification email sent."
+    "resend": "Resend code",
+    "resendIn": "Resend in {seconds}s",
+    "enterCode": "Enter code"
   },
   "im": {
     "back": "Back",
@@ -2058,8 +2231,8 @@
     },
     "empty": {
       "workspace": {
-        "headline": "Connect your team's IM to cubebox",
-        "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubebox user by email.",
+        "headline": "Connect your team's IM to CubePlex",
+        "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right CubePlex user by email.",
         "cta": "Connect a {platform} bot",
         "comingNote": "",
         "guideLink": "Setup guide"
@@ -2186,18 +2359,32 @@
         },
         "field": {
           "appKey": "AppKey",
-          "appSecret": "AppSecret"
+          "appSecret": "AppSecret",
+          "botName": "Bot name (as shown in DingTalk)",
+          "selectApp": "Select app"
         },
+        "loadingApps": "Loading app list…",
+        "selectAppPlaceholder": "Pick your DingTalk app…",
+        "autoDetected": "Detected app: {name}",
         "openConsole": "Open DingTalk developer console"
-      }
+      },
+      "credentials": {
+        "placeholderSelect": "Select…"
+      },
+      "verifyBody": {
+        "verifying": "Verifying credentials for <code>{appId}</code>…",
+        "ready": "Ready to connect <strong>{platform}</strong> bot <code>{appId}</code>.",
+        "pressConnect": "Press <strong>Connect</strong> to hydrate the bot identity and open the connection."
+      },
+      "openExternalConsole": "Open external console"
     },
     "error": {
       "field": {
         "appIdFormat": "App ID must start with cli_",
-        "appSecretBad": "Bad credentials. Re-copy from the Feishu console."
+        "appSecretBad": "Bad credentials. Re-copy from the developer console."
       },
       "banner": {
-        "duplicateApp": "This Feishu app is already connected.",
+        "duplicateApp": "This app is already connected.",
         "duplicateAppGoTo": "Go to existing",
         "hydrationFailed": "Could not verify the bot identity. Make sure the app version is published and the bot is enabled in the Feishu console.",
         "retry": "Retry",
@@ -2223,24 +2410,156 @@
         "rejected": "{count} rejected"
       }
     },
+    "botSettings": {
+      "section": {
+        "identity": "Identity",
+        "behavior": "Behavior",
+        "identityGate": "Identity gate (24h)"
+      },
+      "field": {
+        "actingAs": "Acting as",
+        "botOpenId": "Bot open_id",
+        "mode": "Mode",
+        "routing": "Group chat routing",
+        "topicMode": "Topic grouping",
+        "sandbox": "Sandbox"
+      },
+      "routing": {
+        "isolated": "Isolated (per person)",
+        "shared": "Shared (whole group)",
+        "sharedNotSupportedSuffix": " — not supported",
+        "platformOnlyPerPerson": "This platform only supports per-person routing."
+      },
+      "topic": {
+        "topic": "Group under a topic",
+        "flat": "Don't group (flat)"
+      },
+      "sandboxMode": {
+        "dedicated": "Dedicated sandbox",
+        "creator": "Bot owner's sandbox"
+      },
+      "help": {
+        "infoAria": "More info",
+        "routing": {
+          "body": "Only affects group chats — DMs are always one-on-one. In a group, should the bot keep each person's chat separate, or treat the whole group as one shared conversation?",
+          "isolated": "Each member talks to the bot privately. In the CubePlex web UI, you only see your own thread; nobody else in the channel can see what you asked.",
+          "shared": "The whole channel shares one CubePlex conversation. Everyone in the group can see what others ask the bot and build on each other's questions."
+        },
+        "sandbox": {
+          "body": "Only matters for shared (group) conversations — choose whose sandbox the bot uses to run code, edit files, and keep state. In DMs the bot always uses the DM user's own sandbox.",
+          "dedicated": "This group conversation gets a brand-new sandbox of its own, isolated from any other work.",
+          "creator": "Reuses the personal sandbox of the CubePlex user who set up this IM bot (not the IM channel's creator). Useful when you want this group chat to share files and state with that user's other CubePlex work."
+        },
+        "topic": {
+          "body": "A topic is a CubePlex container that groups multiple conversations together — think of it as a folder in the chat sidebar. This setting decides what happens when you /new with the bot in IM.",
+          "topic": "Every /new opens a new conversation, but they all stay folded under one topic in the sidebar.",
+          "flat": "Each /new becomes its own standalone item in the chat history, listed flat."
+        }
+      },
+      "summary": {
+        "heading": "What people will see",
+        "group": {
+          "label": "In group chats",
+          "routing": {
+            "isolated": "Each IM user talks to the bot privately — in CubePlex, each member sees only their own exchanges with the bot, not other members'.",
+            "shared": "Everyone in the channel shares one conversation — anyone in the group can see what others ask the bot and build on it."
+          },
+          "topic": {
+            "isolatedTopic": "In CubePlex, each IM user's conversations are folded under their own topic folder — visible only to that user.",
+            "sharedTopic": "In CubePlex, the channel's conversations are folded under one shared topic folder — visible to everyone in the group.",
+            "flat": "In CubePlex's chat history, conversations appear flat — no topic folder."
+          },
+          "sandbox": {
+            "isolated": "The bot runs code and edits files in each IM user's own CubePlex sandbox — sandboxes are isolated between users.",
+            "dedicated": "The bot runs code and edits files in a dedicated sandbox owned by this group conversation, isolated from any other work.",
+            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other CubePlex work."
+          }
+        },
+        "dm": {
+          "label": "In DMs (one-on-one)",
+          "base": "The bot talks to each IM user privately and runs code in that user's own personal sandbox.",
+          "topic": {
+            "topic": "In CubePlex, each user's DM conversations are folded under their own topic folder named “{botName}” — visible only to that user.",
+            "flat": "In CubePlex's chat history, DM conversations appear flat — no topic folder."
+          }
+        }
+      },
+      "action": {
+        "save": "Save",
+        "saving": "Saving…"
+      },
+      "loading": "Loading…",
+      "saveError": "Failed to save settings"
+    },
     "identityLinks": {
       "title": "Linked users",
       "empty": "No users linked yet. IM users can run /link to bind their account."
     },
     "deleteDialog": {
       "title": "Delete this bot connection?",
-      "body": "This removes the credential and stops any active long-connection. The Feishu app itself is untouched.",
+      "body": "This removes the credential and stops any active connection. The {platform} app itself is untouched.",
       "confirmGate": "Type {botName} to confirm"
     },
     "link": {
       "title": "Link IM Account",
       "verifying": "Verifying your identity link...",
-      "success": "Your {platform} account has been linked to cubebox successfully.",
+      "success": "Your {platform} account has been linked to CubePlex successfully.",
       "invalidToken": "This link is invalid or has expired. Please run /link again in your IM.",
       "emailMismatch": "Please log in with the email specified in the /link command.",
       "notMember": "You are not a member of this workspace. Ask the workspace admin to add you.",
       "error": "Linking failed. Please try again.",
-      "goToApp": "Go to cubebox"
+      "goToApp": "Go to CubePlex"
     }
+  },
+  "wsSandboxes": {
+    "title": "Sandboxes",
+    "subtitle": "Your isolated sandbox environments in this workspace.",
+    "empty": "No sandboxes yet",
+    "emptyHint": "Sandboxes appear here once you start a conversation in this workspace.",
+    "intro": "Each sandbox is an isolated environment tied to a conversation or topic. Restarting keeps your files; deleting clears everything (operator reclaims storage).",
+    "lastActive": "Last active {time}",
+    "lastActiveNever": "Never used",
+    "restart": "Restart",
+    "delete": "Delete",
+    "restartConfirmTitle": "Restart sandbox?",
+    "restartConfirmBody": "The container will be stopped and a fresh one starts on next use. Your files are kept.",
+    "restartConfirm": "Restart",
+    "restarting": "Restarting…",
+    "deleteConfirmTitle": "Delete sandbox?",
+    "deleteConfirmBody": "Permanently deletes this sandbox and its container. Stored files are left for your operator to reclaim. This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "deleting": "Deleting…",
+    "cancel": "Cancel",
+    "restartSuccess": "Sandbox restarting",
+    "deleteSuccess": "Sandbox deleted",
+    "restartFailed": "Failed to restart sandbox",
+    "deleteFailed": "Failed to delete sandbox",
+    "scope": {
+      "user": "Your workspace sandbox",
+      "conversation": "Group chat: {title}",
+      "topic": "Topic: {title}",
+      "deleted": "(deleted)",
+      "unknown": "Sandbox ({type})"
+    },
+    "statusRunning": "Running",
+    "statusPaused": "Paused",
+    "statusPausing": "Pausing",
+    "statusResuming": "Resuming",
+    "statusStarting": "Starting",
+    "statusOff": "Off",
+    "statusFailed": "Failed",
+    "statusStopping": "Stopping",
+    "statusUnknown": "Unknown"
+  },
+  "onboarding": {
+    "onboardingTitle": "Set up your workspace",
+    "orgName": "Organization name",
+    "orgSlug": "Organization identifier",
+    "workspaceName": "Workspace name",
+    "workspaceNamePlaceholder": "e.g. My Workspace",
+    "defaultWorkspaceName": "{name}'s Workspace",
+    "createWorkspace": "Create workspace",
+    "createOrgAndWorkspace": "Create organization and workspace",
+    "creating": "Creating…"
   }
 }

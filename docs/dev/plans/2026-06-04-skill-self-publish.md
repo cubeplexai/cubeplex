@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, Pydantic v2, SQLAlchemy async, cubepi `AgentTool`, pytest-asyncio.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/skill-self-publish/backend`
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/skill-self-publish/backend`
 
 ---
 
@@ -16,7 +16,7 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Modify | `backend/cubebox/agents/actions/capabilities/skills.py` | Add `PublishArtifactInput`, `_handle_publish_artifact_impl`, new `AgentOperation` in factory |
+| Modify | `backend/cubeplex/agents/actions/capabilities/skills.py` | Add `PublishArtifactInput`, `_handle_publish_artifact_impl`, new `AgentOperation` in factory |
 | Modify | `backend/tests/unit/test_skills_capability.py` | Add 3 tests covering success + error cases |
 
 ---
@@ -24,7 +24,7 @@
 ### Task 1: `publish_artifact` operation — TDD
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/skills.py`
+- Modify: `backend/cubeplex/agents/actions/capabilities/skills.py`
 - Modify: `backend/tests/unit/test_skills_capability.py`
 
 #### What the handler must do
@@ -34,7 +34,7 @@
 3. On success: look up `skill = await _SkillRepository(session).get(sv.skill_id)` and return `{"published": True, "canonical_name": skill.name, "version": sv.version}`.
 4. On `(InvalidFrontmatterError, InvalidSkillNameError, SkillMdMissingError, VersionCollisionError)` → raise `ActionInvalidInput(str(exc))`.
 
-`InvalidFrontmatterError` lives in `cubebox.skills.frontmatter`. The others (`InvalidSkillNameError`, `SkillMdMissingError`, `VersionCollisionError`) live in `cubebox.skills.service`. All four are already importable; `SkillMdMissingError` and `VersionCollisionError` need to be added to the existing `from cubebox.skills.service import` line.
+`InvalidFrontmatterError` lives in `cubeplex.skills.frontmatter`. The others (`InvalidSkillNameError`, `SkillMdMissingError`, `VersionCollisionError`) live in `cubeplex.skills.service`. All four are already importable; `SkillMdMissingError` and `VersionCollisionError` need to be added to the existing `from cubeplex.skills.service import` line.
 
 `_SkillRepository` and `_SkillPublishService` module-level aliases already exist in `skills.py` — reuse them.
 
@@ -45,11 +45,11 @@ Append to `backend/tests/unit/test_skills_capability.py`:
 ```python
 # --- publish_artifact tests ---
 
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     PublishArtifactInput,
     _handle_publish_artifact_impl,
 )
-from cubebox.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
+from cubeplex.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -130,7 +130,7 @@ async def test_publish_artifact_version_exists_raises_invalid_input(
 - [ ] **Step 2: Run the tests to confirm they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skill-self-publish/backend
+cd /home/chris/cubeplex/.worktrees/feat/skill-self-publish/backend
 uv run pytest tests/unit/test_skills_capability.py -k "publish_artifact" -v --no-header 2>&1 | tail -10
 ```
 
@@ -138,12 +138,12 @@ Expected: 3 tests FAIL with `ImportError` or `AttributeError` (symbols not defin
 
 - [ ] **Step 3: Implement `PublishArtifactInput` and `_handle_publish_artifact_impl`**
 
-In `backend/cubebox/agents/actions/capabilities/skills.py`:
+In `backend/cubeplex/agents/actions/capabilities/skills.py`:
 
-**3a.** Add the missing error imports to the existing `from cubebox.skills.service import` line (line ~36):
+**3a.** Add the missing error imports to the existing `from cubeplex.skills.service import` line (line ~36):
 
 ```python
-from cubebox.skills.service import (
+from cubeplex.skills.service import (
     InvalidSkillNameError,
     SkillCatalogService,
     SkillMdMissingError,
@@ -152,10 +152,10 @@ from cubebox.skills.service import (
 )
 ```
 
-**3b.** Add `InvalidFrontmatterError` import after the existing `from cubebox.skills.frontmatter import` line:
+**3b.** Add `InvalidFrontmatterError` import after the existing `from cubeplex.skills.frontmatter import` line:
 
 ```python
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md, InvalidFrontmatterError
+from cubeplex.skills.frontmatter import extract_env_vars, parse_skill_md, InvalidFrontmatterError
 ```
 
 **3c.** Add `PublishArtifactInput` after `InstallInput` (around line 99):
@@ -233,7 +233,7 @@ Then append to the `operations=[...]` list:
 - [ ] **Step 4: Run the tests to confirm they pass**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skill-self-publish/backend
+cd /home/chris/cubeplex/.worktrees/feat/skill-self-publish/backend
 uv run pytest tests/unit/test_skills_capability.py -v --no-header 2>&1 | tail -15
 ```
 
@@ -242,7 +242,7 @@ Expected: all 11 tests PASS (8 existing + 3 new).
 - [ ] **Step 5: Run mypy**
 
 ```bash
-uv run mypy cubebox/agents/actions/capabilities/skills.py
+uv run mypy cubeplex/agents/actions/capabilities/skills.py
 ```
 
 Expected: `Success: no issues found`
@@ -258,7 +258,7 @@ Expected: PASS. (The existing gate test checks `install` is mutating and `find`/
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/agents/actions/capabilities/skills.py tests/unit/test_skills_capability.py
+git add cubeplex/agents/actions/capabilities/skills.py tests/unit/test_skills_capability.py
 git commit -m "feat(skills): add publish_artifact operation — agent can self-update skills"
 ```
 
@@ -271,8 +271,8 @@ git commit -m "feat(skills): add publish_artifact operation — agent can self-u
 - [ ] **Step 1: Full mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/skill-self-publish/backend
-uv run mypy cubebox/ 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/skill-self-publish/backend
+uv run mypy cubeplex/ 2>&1 | tail -3
 ```
 
 Expected: `Success: no issues found`

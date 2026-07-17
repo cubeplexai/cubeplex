@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.config import config as _cubebox_config
-from cubebox.services.artifact_share import (
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.services.artifact_share import (
     SHARE_TTL_SECONDS,
     mint_share_token,
     resolve_share_token,
@@ -34,7 +34,7 @@ _ART_ID = "art-arts1"
 @pytest_asyncio.fixture
 async def _redis() -> AsyncIterator[Redis]:
     client: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=False,
     )
     try:
@@ -75,8 +75,10 @@ async def _seeded_artifact() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
             await session.execute(
                 text(
                     "INSERT INTO conversations (id, org_id, workspace_id, creator_user_id,"
-                    " title, created_at, updated_at)"
-                    " VALUES (:id, :org, :ws, :uid, 'share-test', NOW(), NOW())"
+                    " title, has_messages, is_group_chat, reasoning, attributes,"
+                    " created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :uid, 'share-test', true, false,"
+                    " '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
                     " ON CONFLICT (id) DO NOTHING"
                 ),
                 {"id": _CONV_ID, "org": _ORG_ID, "ws": _WS_ID, "uid": _USER_ID},

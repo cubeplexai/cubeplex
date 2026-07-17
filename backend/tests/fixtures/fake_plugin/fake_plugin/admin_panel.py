@@ -1,4 +1,4 @@
-from cubebox.plugins import AdminNavItem
+from cubeplex.plugins import AdminNavItem
 
 
 class FakeAdminPanelExtension:

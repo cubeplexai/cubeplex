@@ -136,7 +136,7 @@ export function StepPrereqs({ descriptor, form, onChange }: WizardStepProps): Re
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline"
-                    aria-label="Open in Feishu console"
+                    aria-label={t('im.wizard.openExternalConsole')}
                   >
                     <ExternalLink className="size-3" />
                   </a>

@@ -45,10 +45,15 @@ async def test_admin_me_picks_own_org_when_added_to_older_foreign_workspace(
     from fastapi_users.schemas import BaseUserCreate
     from sqlalchemy import select
 
-    from cubebox.auth.users import UserManager
-    from cubebox.models import Role, User, Workspace
-    from cubebox.models.organization_membership import OrgRole
-    from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
+    from cubeplex.auth.users import UserManager
+    from cubeplex.models import Role, User, Workspace
+    from cubeplex.models.organization_membership import OrgRole
+    from cubeplex.repositories import (
+        MembershipRepository,
+        OrganizationMembershipRepository,
+        OrganizationRepository,
+        WorkspaceRepository,
+    )
 
     client, ws_a = admin_client
     me_a = (await client.get("/api/v1/auth/me")).json()
@@ -65,10 +70,21 @@ async def test_admin_me_picks_own_org_when_added_to_older_foreign_workspace(
         b = await manager.create(BaseUserCreate(email=email_b, password="test12345"), safe=False)
         b_id = b.id
 
-        # B is added to A's org (and A's workspace) by A. B was registered LATER
-        # so the bootstrap might or might not have created an own org; we don't
-        # care for this test — what matters is the foreign membership comes
-        # first by created_at-of-workspace.
+        # Give B an owned org and workspace, then add B to A's older foreign
+        # workspace. UserManager.create only creates the user row, so the test
+        # must model the post-onboarding ownership explicitly.
+        org_b = await OrganizationRepository(session).create(
+            name=f"B Org {email_b}", slug=f"b-org-{secrets.token_hex(4)}"
+        )
+        org_b_id = org_b.id
+        await OrganizationMembershipRepository(session).grant(
+            user_id=b_id, org_id=org_b_id, role=OrgRole.OWNER
+        )
+        ws_b = await WorkspaceRepository(session).create(org_id=org_b_id, name="B Workspace")
+        await MembershipRepository(session).grant(
+            user_id=b_id, workspace_id=ws_b.id, role=Role.ADMIN
+        )
+
         await OrganizationMembershipRepository(session).grant(
             user_id=b_id, org_id=org_a, role=OrgRole.MEMBER
         )
@@ -86,7 +102,7 @@ async def test_admin_me_picks_own_org_when_added_to_older_foreign_workspace(
     assert me_resp.status_code == 200, me_resp.text
     body = me_resp.json()
     # B is owner of their own org, not A's — even though A's workspace is older.
-    assert body["org_id"] != org_a, body
+    assert body["org_id"] == org_b_id, body
     assert body["is_admin"] is True, body
     # cleanup: avoid touching A's user assertions in this client
     assert a_user_id != b_id
@@ -97,9 +113,9 @@ async def test_admin_me_uses_org_membership_not_workspace_admin(member_client, s
     client, workspace_id = member_client
     from sqlalchemy import select
 
-    from cubebox.models import Membership, Role, User, Workspace
-    from cubebox.models.organization_membership import OrgRole
-    from cubebox.repositories import (
+    from cubeplex.models import Membership, Role, User, Workspace
+    from cubeplex.models.organization_membership import OrgRole
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         WorkspaceRepository,

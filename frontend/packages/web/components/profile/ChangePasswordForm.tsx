@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, changePassword, ApiError } from '@cubebox/core'
+import { createApiClient, changePassword, ApiError } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 
 export function ChangePasswordForm() {
@@ -45,29 +45,41 @@ export function ChangePasswordForm() {
       <form onSubmit={onSubmit} className="space-y-3 max-w-sm">
         <input
           type="password"
+          name="change-password-current"
           required
           placeholder={t('currentPassword')}
-          autoComplete="current-password"
+          autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={current}
           onChange={(e) => setCurrent(e.target.value)}
         />
         <input
           type="password"
+          name="change-password-new"
           required
           minLength={8}
           placeholder={t('newPassword')}
           autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={newPw}
           onChange={(e) => setNewPw(e.target.value)}
         />
         <input
           type="password"
+          name="change-password-confirm"
           required
           minLength={8}
           placeholder={t('confirmPassword')}
           autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

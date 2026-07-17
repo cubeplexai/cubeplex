@@ -17,7 +17,7 @@ import {
   type ModelUpdate,
   type Provider,
   type ProviderUpdate,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

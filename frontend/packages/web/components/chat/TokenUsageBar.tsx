@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ChevronDown, ChevronRight, BarChart3 } from 'lucide-react'
-import type { TurnUsage, SessionUsage } from '@cubebox/core'
+import { BarChart3 } from 'lucide-react'
+import type { TurnUsage, SessionUsage } from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 
@@ -24,6 +24,11 @@ interface TokenUsageBarProps {
   sessionUsage: SessionUsage | null
   contextWindow: number | null
   contextTokens: number | null
+  // When false, the popover only shows this turn's stats (session totals
+  // and context-window bar are hidden). Non-last turns pass false so the
+  // chip describes that turn alone; the last turn passes true to surface
+  // conversation totals.
+  showSessionView?: boolean
 }
 
 export function TokenUsageBar({
@@ -31,11 +36,13 @@ export function TokenUsageBar({
   sessionUsage,
   contextWindow,
   contextTokens,
+  showSessionView = true,
 }: TokenUsageBarProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
+  const showSession = showSessionView && sessionUsage !== null
 
-  if (!turnUsage && !sessionUsage) return null
+  if (!turnUsage && !showSession) return null
 
   // Cache hit rate is cached / (uncached input + cached). input_tokens is the
   // UNCACHED portion, so dividing by it alone overcounts and can exceed 100%
@@ -67,17 +74,13 @@ export function TokenUsageBar({
         render={
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs
-              bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted
+            aria-label={t('tokenUsage')}
+            className="group/chip inline-flex items-center gap-1.5 rounded-md px-2 py-1
+              text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60
               transition-colors"
           >
-            <BarChart3 aria-hidden className="size-3" />
-            <span>{t('tokenUsage')}</span>
-            {isExpanded ? (
-              <ChevronDown className="size-3 opacity-60" />
-            ) : (
-              <ChevronRight className="size-3 opacity-60" />
-            )}
+            <BarChart3 aria-hidden className="size-3.5" />
+            <span className="hidden group-hover/chip:inline">{t('tokenUsage')}</span>
           </button>
         }
       />
@@ -107,7 +110,7 @@ export function TokenUsageBar({
           </div>
         )}
 
-        {sessionUsage && (
+        {showSession && sessionUsage && (
           <div>
             <div className="font-medium text-foreground/70 mb-1">{t('sessionLabel')}</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">

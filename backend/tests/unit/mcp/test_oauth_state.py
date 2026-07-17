@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.state."""
+"""Unit tests for cubeplex.mcp.oauth.state."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 import fakeredis.aioredis
 import pytest
 
-from cubebox.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
-from cubebox.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
+from cubeplex.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
+from cubeplex.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
 
 SECRET = b"unit-test-secret-key-32bytes!!!!"
 
@@ -26,12 +26,12 @@ async def test_issue_then_consume_round_trip(
     fake_redis: fakeredis.aioredis.FakeRedis,
 ) -> None:
     store = OAuthStateStore(redis=fake_redis, secret_key=SECRET, ttl_seconds=300)
-    state = await store.issue(install_id="ins-1", actor_user_id="usr-7")
+    state = await store.issue(connector_id="ins-1", actor_user_id="usr-7")
 
     payload = await store.consume(state)
 
     assert isinstance(payload, OAuthStatePayload)
-    assert payload.install_id == "ins-1"
+    assert payload.connector_id == "ins-1"
     assert payload.actor_user_id == "usr-7"
     assert payload.issued_at.tzinfo is not None  # UTC
 
@@ -40,7 +40,7 @@ async def test_consume_twice_raises_expired(
     fake_redis: fakeredis.aioredis.FakeRedis,
 ) -> None:
     store = OAuthStateStore(redis=fake_redis, secret_key=SECRET, ttl_seconds=300)
-    state = await store.issue(install_id="ins-1", actor_user_id="usr-7")
+    state = await store.issue(connector_id="ins-1", actor_user_id="usr-7")
     await store.consume(state)
 
     with pytest.raises(OAuthStateExpired):
@@ -51,7 +51,7 @@ async def test_tampered_state_raises_invalid(
     fake_redis: fakeredis.aioredis.FakeRedis,
 ) -> None:
     store = OAuthStateStore(redis=fake_redis, secret_key=SECRET, ttl_seconds=300)
-    state = await store.issue(install_id="ins-1", actor_user_id="usr-7")
+    state = await store.issue(connector_id="ins-1", actor_user_id="usr-7")
 
     # Flip a byte after the dot (the HMAC signature half).
     payload_b64, sig_b64 = state.split(".", 1)
@@ -76,7 +76,7 @@ async def test_ttl_expiry_raises_expired(
 ) -> None:
     """If the redis key has been evicted (TTL elapsed), consume raises Expired."""
     store = OAuthStateStore(redis=fake_redis, secret_key=SECRET, ttl_seconds=300)
-    state = await store.issue(install_id="ins-1", actor_user_id="usr-7")
+    state = await store.issue(connector_id="ins-1", actor_user_id="usr-7")
 
     # Simulate TTL elapsed by deleting the underlying key directly.
     deleted = await fake_redis.delete(f"mcp_oauth_state:{state}")
@@ -91,7 +91,7 @@ async def test_hmac_uses_caller_provided_secret(
 ) -> None:
     """A token issued under one secret must not validate under another."""
     issuer_store = OAuthStateStore(redis=fake_redis, secret_key=SECRET, ttl_seconds=300)
-    state = await issuer_store.issue(install_id="ins-1", actor_user_id="usr-7")
+    state = await issuer_store.issue(connector_id="ins-1", actor_user_id="usr-7")
 
     other_store = OAuthStateStore(
         redis=fake_redis,

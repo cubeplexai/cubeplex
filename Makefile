@@ -1,8 +1,9 @@
-.PHONY: help install backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-contracts backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci test-ui-unit test-ui-e2e test-ui test-all clean
+.PHONY: help install skills-restore backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-contracts backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci test-ui-unit test-ui-e2e test-ui test-all clean
 
 help:
 	@echo "Available commands:"
 	@echo "  make install                    - Install backend and frontend dependencies"
+	@echo "  make skills-restore             - Restore vendored skills (skills-lock.json) + wire symlinks"
 	@echo "  make backend-install            - Install backend development dependencies"
 	@echo "  make frontend-install           - Install frontend dependencies"
 	@echo "  make backend-check-ci           - Run backend CI checks"
@@ -13,7 +14,7 @@ help:
 	@echo "  make backend-test-contracts     - Run plugin contract tests (EE compat)"
 	@echo "  make backend-start              - Start backend server"
 	@echo "  make backend-cleanup-sandboxes  - Cleanup leftover test sandboxes"
-	@echo "  make frontend-build-core        - Build @cubebox/core"
+	@echo "  make frontend-build-core        - Build @cubeplex/core"
 	@echo "  make frontend-install-browsers  - Install Playwright Chromium browser"
 	@echo "  make frontend-test-e2e          - Run frontend Playwright tests"
 	@echo "  make frontend-test-e2e-ci       - Run frontend Playwright tests with CI output"
@@ -24,6 +25,16 @@ help:
 	@echo "  make clean                      - Clean backend cache and build files"
 
 install: backend-install frontend-install
+
+# Restore vendored skills (content from skills-lock.json) and wire the
+# .claude/skills symlinks. `experimental_install` only restores .agents/skills
+# content — in a single-agent repo it copies without symlinking — so we create
+# any missing symlinks ourselves. Native skills are committed and untouched.
+skills-restore:
+	npx skills experimental_install
+	@mkdir -p .claude/skills
+	@for d in .agents/skills/*/; do n=$$(basename "$$d"); [ -e ".claude/skills/$$n" ] || ln -s "../../.agents/skills/$$n" ".claude/skills/$$n"; done
+	@echo "Skills restored: .agents/skills content + .claude/skills symlinks."
 
 backend-install:
 	$(MAKE) -C backend dev-install

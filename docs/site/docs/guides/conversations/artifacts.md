@@ -5,18 +5,24 @@ title: Artifacts
 
 # Artifacts
 
-Artifacts are deliverables the agent produces during a conversation -- files, websites, images, code, data, and more. Unlike plain-text responses, artifacts are versioned, previewable, and downloadable.
+Artifacts are deliverables the agent produces during a conversation — files, websites, images, code, data, and more. Unlike plain-text responses, artifacts are versioned, previewable, and downloadable.
 
 ## How artifacts are created
 
-You do not create artifacts directly. The agent creates them by calling the `save_artifact` tool after producing a file or set of files. This happens naturally when you ask the agent to build something concrete:
+You do not create artifacts directly. The agent creates them by calling one of two tools:
+
+- **`save_artifact`** — registers a file or set of files the agent wrote (a website, document, code project, data file, or skill bundle) as an artifact.
+- **`generate_image`** — produces an image artifact directly from a prompt.
+
+This happens naturally when you ask the agent to build something concrete:
 
 - "Build me a landing page"
 - "Generate a bar chart from this CSV"
 - "Write a Python script that processes these logs"
 - "Create a project proposal document"
+- "Draw an illustration of a mountain at sunset"
 
-The agent writes the files (using code execution in the sandbox), then registers them as an artifact so they appear in your conversation.
+For `save_artifact`, the agent writes the files (using code execution in the sandbox), then registers them as an artifact so they appear in your conversation.
 
 ## Artifact types
 
@@ -39,7 +45,12 @@ When the agent creates an artifact, an **artifact card** appears inline in the c
 - A version badge (for artifacts with multiple versions).
 - **Preview** (eye icon) and **Download** buttons.
 
-Clicking the card (or the preview button) opens the **artifact panel** on the right side of the screen. The panel renders a live preview based on the artifact type -- websites run in a sandboxed iframe, images display at full resolution, code gets syntax highlighting, and so on.
+Clicking the card (or the preview button) opens the **artifact panel** on the right side of the screen. The panel renders a live preview based on the artifact type — websites run in a sandboxed iframe, images display at full resolution, code gets syntax highlighting, and so on.
+
+:::info 📸 Screenshot placeholder
+**Capture:** An artifact card inline in the chat with the artifact panel open on the right, showing a live website preview and the version badge expanded into the version dropdown.
+**Asset:** `/img/conversations/artifact-panel.png`
+:::
 
 ### Artifact gallery
 
@@ -62,7 +73,7 @@ For multi-file artifacts (like a website with HTML, CSS, and JS files), the down
 
 ## Skill artifacts
 
-When the agent creates a skill (via the skill-creator workflow), the artifact type is **skill**. Skill artifacts have a special action: **Add to Workspace**. Clicking this publishes the skill to your workspace so it becomes available in future conversations.
+When the agent creates a skill (via the skill-creator workflow), the artifact type is **skill**. Skill artifacts have a special action: **Add to workspace**. Clicking this publishes the skill to your workspace so it becomes available in future conversations (the agent can load it via `load_skill`). The version comes from the `version` field in the skill's `SKILL.md` frontmatter; to update a published skill, bump that version and add it again.
 
 ## Tips
 

@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.cli import main as cli_main
-from cubebox.cli.seed_mcp_templates import _run as _run_seed_mcp_templates
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp.template_seed import CATALOG
-from cubebox.models import Credential, MCPConnectorTemplate
+from cubeplex.cli import main as cli_main
+from cubeplex.cli.seed_mcp_templates import _run as _run_seed_mcp_templates
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.mcp.template_seed import CATALOG
+from cubeplex.models import Credential, MCPConnectorTemplate
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ async def test_seed_cli_dry_run_exits_zero(
     capsys: pytest.CaptureFixture[str],
     in_memory_session_factory: tuple[async_sessionmaker[AsyncSession], FernetBackend],
 ) -> None:
-    """``cubebox seed-mcp-templates --dry-run`` returns 0 + prints a summary.
+    """``cubeplex seed-mcp-templates --dry-run`` returns 0 + prints a summary.
 
     The CLI does its imports lazily inside ``seed_mcp_templates._run``, so
     we patch the source modules whose names get resolved at execution
@@ -49,15 +49,15 @@ async def test_seed_cli_dry_run_exits_zero(
     # local imports inside ``_run_seed_mcp_templates`` see the test
     # session factory and a deterministic backend.
     #
-    # NOTE: ``import cubebox.db.engine as m`` resolves ``m`` to the
+    # NOTE: ``import cubeplex.db.engine as m`` resolves ``m`` to the
     # ``engine`` attribute defined inside the module (Python's
     # attribute lookup wins over module-as-attribute here), so we
     # reach for ``sys.modules`` to get the actual module object.
     import sys
 
-    import cubebox.api.app as app_module
+    import cubeplex.api.app as app_module
 
-    db_engine_module = sys.modules["cubebox.db.engine"]
+    db_engine_module = sys.modules["cubeplex.db.engine"]
 
     monkeypatch.setattr(app_module, "_build_encryption_backend", lambda: backend)
     monkeypatch.setattr(db_engine_module, "async_session_maker", maker)
@@ -110,9 +110,9 @@ async def test_seed_cli_dry_run_does_not_persist(
 
     import sys
 
-    import cubebox.api.app as app_module
+    import cubeplex.api.app as app_module
 
-    db_engine_module = sys.modules["cubebox.db.engine"]
+    db_engine_module = sys.modules["cubeplex.db.engine"]
 
     monkeypatch.setattr(app_module, "_build_encryption_backend", lambda: backend)
     monkeypatch.setattr(db_engine_module, "async_session_maker", maker)

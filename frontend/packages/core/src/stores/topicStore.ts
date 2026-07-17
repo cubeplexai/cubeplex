@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Topic, TopicParticipant } from '../types'
+import type { Conversation, Topic, TopicParticipant } from '../types'
 import type { ApiClient } from '../api'
 import {
   listTopics,
@@ -22,6 +22,11 @@ export interface TopicWithParticipants {
 export interface TopicStore {
   topics: Topic[]
   topicParticipants: Record<string, TopicParticipant[]>
+  // Full per-topic conversation lists from the topic-detail endpoint
+  // (``GET /topics/{id}`` → ``list_by_topic``, no limit). The sidebar uses
+  // these to render a topic's conversations independent of the limited flat
+  // conversation list, so old conversations under a topic aren't truncated.
+  topicConversations: Record<string, Conversation[]>
   isLoading: boolean
   error: string | null
   fetchList(client: ApiClient): Promise<void>
@@ -52,9 +57,16 @@ export interface TopicStore {
   ): Promise<{ conversationId: string }>
 }
 
+// In-flight fetchDetail requests keyed by topicId, so concurrent callers
+// (sidebar TopicNode, chat-header badge, member panel, StrictMode double
+// effects) coalesce onto a single GET instead of each firing their own. Only
+// dedups overlapping requests — a later refetch still hits the network.
+const _detailInFlight = new Map<string, Promise<TopicWithParticipants | null>>()
+
 export const useTopicStore = create<TopicStore>((set) => ({
   topics: [],
   topicParticipants: {},
+  topicConversations: {},
   isLoading: false,
   error: null,
 
@@ -80,18 +92,30 @@ export const useTopicStore = create<TopicStore>((set) => ({
   },
 
   async fetchDetail(client: ApiClient, topicId: string) {
-    try {
-      const data = await getTopic(client, topicId)
-      set((s) => ({
-        topicParticipants: {
-          ...s.topicParticipants,
-          [topicId]: data.participants,
-        },
-      }))
-      return { topic: data.topic, participants: data.participants }
-    } catch {
-      return null
-    }
+    const existing = _detailInFlight.get(topicId)
+    if (existing) return existing
+    const request = (async (): Promise<TopicWithParticipants | null> => {
+      try {
+        const data = await getTopic(client, topicId)
+        set((s) => ({
+          topicParticipants: {
+            ...s.topicParticipants,
+            [topicId]: data.participants,
+          },
+          topicConversations: {
+            ...s.topicConversations,
+            [topicId]: data.conversations,
+          },
+        }))
+        return { topic: data.topic, participants: data.participants }
+      } catch {
+        return null
+      } finally {
+        _detailInFlight.delete(topicId)
+      }
+    })()
+    _detailInFlight.set(topicId, request)
+    return request
   },
 
   async create(client, body) {
@@ -136,9 +160,12 @@ export const useTopicStore = create<TopicStore>((set) => ({
       // just became inaccessible (_scoped_select joins is_archived).
       const nextParticipants = { ...s.topicParticipants }
       delete nextParticipants[topicId]
+      const nextConversations = { ...s.topicConversations }
+      delete nextConversations[topicId]
       return {
         topics: s.topics.filter((t) => t.id !== topicId),
         topicParticipants: nextParticipants,
+        topicConversations: nextConversations,
       }
     })
   },

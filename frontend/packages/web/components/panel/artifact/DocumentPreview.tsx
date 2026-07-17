@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { proseClasses } from '@/lib/utils'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { PreviewLoading } from './PreviewLoading'

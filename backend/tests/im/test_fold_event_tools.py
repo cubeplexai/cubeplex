@@ -8,12 +8,12 @@ Field names follow the Task 0 audit:
 
 import json
 
-from cubebox.im.outbound import fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubebox", run_id="run_1")
+    s = RenderState(bot_name="cubeplex", run_id="run_1")
     s.card_id = "AAQA"
     # Park last_patch_monotonic far in the past so tests that don't care about
     # throttle behavior see patch_card emitted on the first event without
@@ -190,7 +190,7 @@ def test_tool_result_after_edits_disabled_suppresses_patch() -> None:
 
 
 def test_tool_call_before_card_emits_card_create() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     # state.card_id is None — no card yet
     op = fold_event(
         {

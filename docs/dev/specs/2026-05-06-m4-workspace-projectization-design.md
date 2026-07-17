@@ -6,7 +6,7 @@
 
 ## Overview
 
-Turn each cubebox Workspace into a self-contained, configured agent context. Every workspace carries its own system prompt, skill set, and MCP connector set. All conversations in a workspace share that configuration automatically — no per-conversation setup required.
+Turn each cubeplex Workspace into a self-contained, configured agent context. Every workspace carries its own system prompt, skill set, and MCP connector set. All conversations in a workspace share that configuration automatically — no per-conversation setup required.
 
 Knowledge base is explicitly out of scope for M4 (depends on M7 knowledge-base milestone).
 
@@ -57,9 +57,9 @@ Col 2 lists connectors in two sections — "组织共享" (org-wide servers with
 
 ### Gap 1: Persona Not Wired to Runtime
 
-**Current state:** `run_manager.py` calls `create_cubebox_agent(system_prompt=BASE_SYSTEM_PROMPT)`. `AgentConfig.system_prompt` is never read.
+**Current state:** `run_manager.py` calls `create_cubeplex_agent(system_prompt=BASE_SYSTEM_PROMPT)`. `AgentConfig.system_prompt` is never read.
 
-**Fix:** In `run_manager.py`, before calling `create_cubebox_agent`, load the workspace's `AgentConfig` and build the effective system prompt:
+**Fix:** In `run_manager.py`, before calling `create_cubeplex_agent`, load the workspace's `AgentConfig` and build the effective system prompt:
 
 ```
 effective_prompt = BASE_SYSTEM_PROMPT
@@ -141,7 +141,7 @@ The settings shell is a new page at `app/(app)/w/[wsId]/settings/page.tsx`. It r
 
 ### Core Package Changes
 
-New API methods in `@cubebox/core`:
+New API methods in `@cubeplex/core`:
 - `getAgentConfig(wsId)` / `updateAgentConfig(wsId, patch)` — persona read/write
 - `listWorkspaceSkills(wsId)` / `toggleWorkspaceSkill(wsId, skillId, enabled)` / `createWorkspaceSkill(wsId, payload)` / `deleteWorkspaceSkill(wsId, skillId)`
 - `listWorkspaceMCP(wsId)` / `toggleWorkspaceMCP(wsId, serverId, enabled)`

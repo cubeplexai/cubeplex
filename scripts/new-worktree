@@ -1,16 +1,49 @@
 #!/usr/bin/env bash
-# Create a new worktree branched from latest origin/main and run `worktree-env init`.
+# Create a new worktree branched from latest <remote>/main and run `worktree-env init`.
 #
-# Usage:  scripts/new-worktree <branch-name> [extra git worktree add args...]
+# Usage:  scripts/new-worktree [--remote <remote>] <branch-name> [extra git worktree add args...]
 # Example: scripts/new-worktree feat/some-thing
+# Example: scripts/new-worktree --remote upstream feat/some-thing
 #
-# The branch is created from latest origin/main. Worktree path is
-# .worktrees/<branch-name>. Extra args are passed to `git worktree add`.
+# The branch is created from latest <remote>/main and pushed back to that remote.
+# Worktree path is .worktrees/<branch-name>. Extra args are passed to
+# `git worktree add`.
 
 set -euo pipefail
 
+usage() {
+  echo "Usage: $0 [--remote <remote>] <branch-name> [extra git worktree add args...]" >&2
+}
+
+PUSH_REMOTE="origin"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --remote)
+      if [[ $# -lt 2 ]]; then
+        echo "--remote requires a remote name." >&2
+        usage
+        exit 2
+      fi
+      PUSH_REMOTE="$2"
+      shift 2
+      ;;
+    --remote=*)
+      PUSH_REMOTE="${1#--remote=}"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <branch-name> [extra git worktree add args...]" >&2
+  usage
   exit 2
 fi
 
@@ -19,6 +52,7 @@ shift || true
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_PATH=".worktrees/${BRANCH}"
+BASE_REF="${PUSH_REMOTE}/main"
 
 if [[ -e "${REPO_ROOT}/${WORKTREE_PATH}" ]]; then
   echo "Path ${REPO_ROOT}/${WORKTREE_PATH} already exists." >&2
@@ -27,15 +61,18 @@ fi
 
 cd "${REPO_ROOT}"
 
-echo "→ fetching origin/main..."
-git fetch origin main
+echo "→ fetching ${BASE_REF}..."
+git fetch "${PUSH_REMOTE}" main
 
-echo "→ creating worktree at ${WORKTREE_PATH} from origin/main..."
-git worktree add "${WORKTREE_PATH}" -b "${BRANCH}" origin/main "$@"
+echo "→ creating worktree at ${WORKTREE_PATH} from ${BASE_REF}..."
+git worktree add "${WORKTREE_PATH}" -b "${BRANCH}" "${BASE_REF}" "$@"
 
 echo "→ running worktree-env init..."
 cd "${WORKTREE_PATH}"
 "${REPO_ROOT}/scripts/worktree-env" init
+
+echo "→ pushing ${BRANCH} to ${PUSH_REMOTE} with --no-verify..."
+git push --no-verify -u "${PUSH_REMOTE}" "${BRANCH}"
 
 echo
 echo "✓ worktree ready at ${REPO_ROOT}/${WORKTREE_PATH}"

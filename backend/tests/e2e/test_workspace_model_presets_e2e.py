@@ -15,8 +15,8 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 pytestmark = pytest.mark.e2e  # belt + suspenders alongside conftest auto-mark
 

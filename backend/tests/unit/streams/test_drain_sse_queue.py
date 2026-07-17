@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.streams.run_manager import _drain_cubepi_sse_queue
+from cubeplex.streams.run_manager import _drain_cubepi_sse_queue
 
 
 @pytest.mark.asyncio

@@ -16,9 +16,9 @@
 
 ```
 backend/
-├── cubebox/
+├── cubeplex/
 │   ├── agents/
-│   │   └── state.py                       (NEW) CompactionSummary dataclass + CubeboxState TypedDict
+│   │   └── state.py                       (NEW) CompactionSummary dataclass + CubeplexState TypedDict
 │   ├── middleware/
 │   │   └── compaction/
 │   │       ├── __init__.py                (NEW)
@@ -49,15 +49,15 @@ Decomposition rationale:
 ## Task 1: Create state module with CompactionSummary
 
 **Files:**
-- Create: `backend/cubebox/agents/state.py`
+- Create: `backend/cubeplex/agents/state.py`
 - Test: (deferred — covered in Task 5 middleware tests)
 
 - [ ] **Step 1: Create state module**
 
-Create `backend/cubebox/agents/state.py`:
+Create `backend/cubeplex/agents/state.py`:
 
 ```python
-"""Cubebox-specific extensions to the langchain agent state schema."""
+"""Cubeplex-specific extensions to the langchain agent state schema."""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ class CompactionSummary:
     last_summarized_message_id: str | None = None
 
 
-class CubeboxState(AgentState[Any]):
+class CubeplexState(AgentState[Any]):
     """Agent state with compaction fields.
 
     Extends AgentState (TypedDict) with two optional keys:
@@ -96,8 +96,8 @@ class CubeboxState(AgentState[Any]):
 - [ ] **Step 2: Sanity check imports**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c \
-  "from cubebox.agents.state import CubeboxState, CompactionSummary; \
+cd /home/chris/cubeplex/backend && uv run python -c \
+  "from cubeplex.agents.state import CubeplexState, CompactionSummary; \
    s = CompactionSummary(summary='x'); print(s)"
 ```
 
@@ -106,8 +106,8 @@ Expected: `CompactionSummary(summary='x', summarized_message_ids=[], last_summar
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/agents/state.py
-git commit -m "feat(compaction): add CompactionSummary dataclass and CubeboxState"
+git add backend/cubeplex/agents/state.py
+git commit -m "feat(compaction): add CompactionSummary dataclass and CubeplexState"
 ```
 
 ---
@@ -115,8 +115,8 @@ git commit -m "feat(compaction): add CompactionSummary dataclass and CubeboxStat
 ## Task 2: Token approximation helper
 
 **Files:**
-- Create: `backend/cubebox/middleware/compaction/__init__.py`
-- Create: `backend/cubebox/middleware/compaction/tokens.py`
+- Create: `backend/cubeplex/middleware/compaction/__init__.py`
+- Create: `backend/cubeplex/middleware/compaction/tokens.py`
 - Test: `backend/tests/unit/middleware/compaction/test_tokens.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -128,7 +128,7 @@ Create `backend/tests/unit/middleware/compaction/test_tokens.py`:
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from cubebox.middleware.compaction.tokens import approx_tokens
+from cubeplex.middleware.compaction.tokens import approx_tokens
 
 
 def test_empty_messages_zero():
@@ -159,14 +159,14 @@ def test_handles_list_content_blocks():
 - [ ] **Step 2: Run test, verify it fails**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/test_tokens.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/test_tokens.py -v
 ```
 
-Expected: `ModuleNotFoundError: No module named 'cubebox.middleware.compaction'`.
+Expected: `ModuleNotFoundError: No module named 'cubeplex.middleware.compaction'`.
 
 - [ ] **Step 3: Create package init**
 
-Create `backend/cubebox/middleware/compaction/__init__.py`:
+Create `backend/cubeplex/middleware/compaction/__init__.py`:
 
 ```python
 """Conversation compaction middleware package."""
@@ -174,7 +174,7 @@ Create `backend/cubebox/middleware/compaction/__init__.py`:
 
 - [ ] **Step 4: Implement `tokens.py`**
 
-Create `backend/cubebox/middleware/compaction/tokens.py`:
+Create `backend/cubeplex/middleware/compaction/tokens.py`:
 
 ```python
 """Approximate token counting for messages.
@@ -223,7 +223,7 @@ def approx_tokens(messages: list[AnyMessage]) -> int:
 - [ ] **Step 5: Run test, verify it passes**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/test_tokens.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/test_tokens.py -v
 ```
 
 Expected: 5 passed.
@@ -231,7 +231,7 @@ Expected: 5 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/middleware/compaction/ backend/tests/unit/middleware/compaction/test_tokens.py
+git add backend/cubeplex/middleware/compaction/ backend/tests/unit/middleware/compaction/test_tokens.py
 git commit -m "feat(compaction): add approx_tokens helper"
 ```
 
@@ -240,7 +240,7 @@ git commit -m "feat(compaction): add approx_tokens helper"
 ## Task 3: Safe boundary algorithm
 
 **Files:**
-- Create: `backend/cubebox/middleware/compaction/boundary.py`
+- Create: `backend/cubeplex/middleware/compaction/boundary.py`
 - Test: `backend/tests/unit/middleware/compaction/test_boundary.py`
 
 The algorithm picks `boundary` such that `messages[:boundary]` is the to-summarize prefix
@@ -259,7 +259,7 @@ Create `backend/tests/unit/middleware/compaction/test_boundary.py`:
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from cubebox.middleware.compaction.boundary import safe_boundary
+from cubeplex.middleware.compaction.boundary import safe_boundary
 
 
 def _h(text: str) -> HumanMessage:
@@ -344,14 +344,14 @@ def test_min_compact_size_too_small_returns_none():
 - [ ] **Step 2: Run tests, verify they fail**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/test_boundary.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/test_boundary.py -v
 ```
 
 Expected: ModuleNotFoundError on `boundary`.
 
 - [ ] **Step 3: Implement `boundary.py`**
 
-Create `backend/cubebox/middleware/compaction/boundary.py`:
+Create `backend/cubeplex/middleware/compaction/boundary.py`:
 
 ```python
 """Boundary selection for compaction — picks a safe split point."""
@@ -415,7 +415,7 @@ def _suffix_is_self_contained(suffix: list[AnyMessage]) -> bool:
 - [ ] **Step 4: Run tests, verify they pass**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/test_boundary.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/test_boundary.py -v
 ```
 
 Expected: 8 passed.
@@ -423,7 +423,7 @@ Expected: 8 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/middleware/compaction/boundary.py \
+git add backend/cubeplex/middleware/compaction/boundary.py \
         backend/tests/unit/middleware/compaction/test_boundary.py
 git commit -m "feat(compaction): add safe_boundary algorithm with tool-pair safety"
 ```
@@ -433,12 +433,12 @@ git commit -m "feat(compaction): add safe_boundary algorithm with tool-pair safe
 ## Task 4: Summarizer
 
 **Files:**
-- Create: `backend/cubebox/middleware/compaction/summarizer.py`
+- Create: `backend/cubeplex/middleware/compaction/summarizer.py`
 - Test: covered indirectly via middleware test in Task 5; pure-function part is small enough to skip.
 
 - [ ] **Step 1: Implement `summarizer.py`**
 
-Create `backend/cubebox/middleware/compaction/summarizer.py`:
+Create `backend/cubeplex/middleware/compaction/summarizer.py`:
 
 ```python
 """Summarizer — runs a cheap LLM to produce / update a CompactionSummary."""
@@ -448,7 +448,7 @@ from __future__ import annotations
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
-from cubebox.agents.state import CompactionSummary
+from cubeplex.agents.state import CompactionSummary
 
 
 SUMMARIZER_SYSTEM_PROMPT = """\
@@ -517,8 +517,8 @@ async def summarize(
 - [ ] **Step 2: Sanity check imports**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c \
-  "from cubebox.middleware.compaction.summarizer import summarize, SUMMARIZER_SYSTEM_PROMPT; print('ok')"
+cd /home/chris/cubeplex/backend && uv run python -c \
+  "from cubeplex.middleware.compaction.summarizer import summarize, SUMMARIZER_SYSTEM_PROMPT; print('ok')"
 ```
 
 Expected: `ok`.
@@ -526,7 +526,7 @@ Expected: `ok`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/middleware/compaction/summarizer.py
+git add backend/cubeplex/middleware/compaction/summarizer.py
 git commit -m "feat(compaction): add summarizer with citation-marker-preservation prompt"
 ```
 
@@ -535,8 +535,8 @@ git commit -m "feat(compaction): add summarizer with citation-marker-preservatio
 ## Task 5: CompactionMiddleware
 
 **Files:**
-- Create: `backend/cubebox/middleware/compaction/middleware.py`
-- Modify: `backend/cubebox/middleware/compaction/__init__.py`
+- Create: `backend/cubeplex/middleware/compaction/middleware.py`
+- Modify: `backend/cubeplex/middleware/compaction/__init__.py`
 - Test: `backend/tests/unit/middleware/compaction/test_middleware.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -554,7 +554,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from cubebox.middleware.compaction.middleware import CompactionMiddleware
+from cubeplex.middleware.compaction.middleware import CompactionMiddleware
 
 
 def _make_state(msgs: list[Any], compaction=None, until=None) -> dict[str, Any]:
@@ -582,8 +582,8 @@ async def test_below_threshold_no_action():
 
 @pytest.mark.asyncio
 async def test_triggers_when_over_threshold(monkeypatch):
-    from cubebox.agents.state import CompactionSummary
-    from cubebox.middleware.compaction import middleware as mw_mod
+    from cubeplex.agents.state import CompactionSummary
+    from cubeplex.middleware.compaction import middleware as mw_mod
 
     fake = CompactionSummary(
         summary="user asked about X; agent answered Y",
@@ -617,8 +617,8 @@ async def test_does_not_recompact_when_compressed_view_fits(monkeypatch):
     threshold must NOT trigger another summarize call, even if raw
     state.messages keeps growing.
     """
-    from cubebox.agents.state import CompactionSummary
-    from cubebox.middleware.compaction import middleware as mw_mod
+    from cubeplex.agents.state import CompactionSummary
+    from cubeplex.middleware.compaction import middleware as mw_mod
 
     summarize_mock = AsyncMock()
     monkeypatch.setattr(mw_mod, "summarize", summarize_mock)
@@ -650,7 +650,7 @@ async def test_does_not_recompact_when_compressed_view_fits(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_skips_when_no_safe_boundary(monkeypatch):
-    from cubebox.middleware.compaction import middleware as mw_mod
+    from cubeplex.middleware.compaction import middleware as mw_mod
     summarize_mock = AsyncMock()
     monkeypatch.setattr(mw_mod, "summarize", summarize_mock)
 
@@ -667,7 +667,7 @@ async def test_skips_when_no_safe_boundary(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_skips_when_summarizer_fails(monkeypatch):
-    from cubebox.middleware.compaction import middleware as mw_mod
+    from cubeplex.middleware.compaction import middleware as mw_mod
     summarize_mock = AsyncMock(side_effect=RuntimeError("llm down"))
     monkeypatch.setattr(mw_mod, "summarize", summarize_mock)
 
@@ -688,7 +688,7 @@ async def test_skips_when_summarizer_fails(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_awrap_projects_compressed_view():
-    from cubebox.agents.state import CompactionSummary
+    from cubeplex.agents.state import CompactionSummary
 
     captured: dict[str, Any] = {}
 
@@ -758,14 +758,14 @@ async def test_awrap_passes_through_when_no_compaction():
 - [ ] **Step 2: Run tests, verify they fail**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/test_middleware.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/test_middleware.py -v
 ```
 
 Expected: ModuleNotFoundError on middleware.
 
 - [ ] **Step 3: Implement `middleware.py`**
 
-Create `backend/cubebox/middleware/compaction/middleware.py`:
+Create `backend/cubeplex/middleware/compaction/middleware.py`:
 
 ```python
 """CompactionMiddleware — persist summary in state, project compressed view per call."""
@@ -780,10 +780,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage
 from loguru import logger
 
-from cubebox.agents.state import CompactionSummary
-from cubebox.middleware.compaction.boundary import safe_boundary
-from cubebox.middleware.compaction.summarizer import summarize
-from cubebox.middleware.compaction.tokens import approx_tokens
+from cubeplex.agents.state import CompactionSummary
+from cubeplex.middleware.compaction.boundary import safe_boundary
+from cubeplex.middleware.compaction.summarizer import summarize
+from cubeplex.middleware.compaction.tokens import approx_tokens
 
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"
@@ -894,12 +894,12 @@ class CompactionMiddleware(AgentMiddleware[Any, Any, Any]):
 
 - [ ] **Step 4: Wire `__init__.py`**
 
-Update `backend/cubebox/middleware/compaction/__init__.py`:
+Update `backend/cubeplex/middleware/compaction/__init__.py`:
 
 ```python
 """Conversation compaction middleware package."""
 
-from cubebox.middleware.compaction.middleware import CompactionMiddleware
+from cubeplex.middleware.compaction.middleware import CompactionMiddleware
 
 __all__ = ["CompactionMiddleware"]
 ```
@@ -907,7 +907,7 @@ __all__ = ["CompactionMiddleware"]
 - [ ] **Step 5: Run tests, verify they pass**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/middleware/compaction/ -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/middleware/compaction/ -v
 ```
 
 Expected: 6 passed (this file) + earlier 8 + 5 = 19 total in compaction unit suite.
@@ -915,8 +915,8 @@ Expected: 6 passed (this file) + earlier 8 + 5 = 19 total in compaction unit sui
 - [ ] **Step 6: Run lint + type check**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run ruff check cubebox/middleware/compaction/ tests/unit/middleware/compaction/
-cd /home/chris/cubebox/backend && uv run mypy cubebox/middleware/compaction/
+cd /home/chris/cubeplex/backend && uv run ruff check cubeplex/middleware/compaction/ tests/unit/middleware/compaction/
+cd /home/chris/cubeplex/backend && uv run mypy cubeplex/middleware/compaction/
 ```
 
 Expected: no errors.
@@ -924,7 +924,7 @@ Expected: no errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/middleware/compaction/ backend/tests/unit/middleware/compaction/test_middleware.py
+git add backend/cubeplex/middleware/compaction/ backend/tests/unit/middleware/compaction/test_middleware.py
 git commit -m "feat(compaction): add CompactionMiddleware with abefore_model + awrap_model_call"
 ```
 
@@ -955,8 +955,8 @@ compaction:
 - [ ] **Step 2: Verify config loads**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c \
-  "from cubebox.config import config; print(config.get('compaction.enabled'), config.get('compaction.summary_model'))"
+cd /home/chris/cubeplex/backend && uv run python -c \
+  "from cubeplex.config import config; print(config.get('compaction.enabled'), config.get('compaction.summary_model'))"
 ```
 
 Expected: `False claude-haiku-4-5`.
@@ -970,24 +970,24 @@ git commit -m "feat(compaction): add compaction config keys (default off)"
 
 ---
 
-## Task 7: Wire CompactionMiddleware into `create_cubebox_agent`
+## Task 7: Wire CompactionMiddleware into `create_cubeplex_agent`
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py`
+- Modify: `backend/cubeplex/agents/graph.py`
 
 - [ ] **Step 1: Read the current insertion site**
 
 Run:
 
 ```bash
-sed -n '170,200p' /home/chris/cubebox/backend/cubebox/agents/graph.py
+sed -n '170,200p' /home/chris/cubeplex/backend/cubeplex/agents/graph.py
 ```
 
 Verify the `TodoListMiddleware` and `SubAgentMiddleware` lines are around 177–185 — Task 7 inserts between them.
 
 - [ ] **Step 2: Add CompactionMiddleware wiring**
 
-Edit `backend/cubebox/agents/graph.py`. Locate the block:
+Edit `backend/cubeplex/agents/graph.py`. Locate the block:
 
 ```python
     middleware.append(TodoListMiddleware())
@@ -1001,8 +1001,8 @@ Replace with (the new block sits BETWEEN TodoListMiddleware and SubAgentMiddlewa
     middleware.append(TodoListMiddleware())
 
     if _config.get("compaction.enabled", False):
-        from cubebox.llm.factory import LLMFactory
-        from cubebox.middleware.compaction import CompactionMiddleware
+        from cubeplex.llm.factory import LLMFactory
+        from cubeplex.middleware.compaction import CompactionMiddleware
 
         try:
             summary_llm = LLMFactory().create(
@@ -1046,8 +1046,8 @@ Replace with (the new block sits BETWEEN TodoListMiddleware and SubAgentMiddlewa
 - [ ] **Step 3: Sanity check — agent still imports**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c \
-  "from cubebox.agents.graph import create_cubebox_agent; print('ok')"
+cd /home/chris/cubeplex/backend && uv run python -c \
+  "from cubeplex.agents.graph import create_cubeplex_agent; print('ok')"
 ```
 
 Expected: `ok`.
@@ -1055,7 +1055,7 @@ Expected: `ok`.
 - [ ] **Step 4: Run unit tests to verify no regressions**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/ -v -x
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/ -v -x
 ```
 
 Expected: all pass.
@@ -1063,8 +1063,8 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/agents/graph.py
-git commit -m "feat(compaction): wire CompactionMiddleware in create_cubebox_agent (gated by config)"
+git add backend/cubeplex/agents/graph.py
+git commit -m "feat(compaction): wire CompactionMiddleware in create_cubeplex_agent (gated by config)"
 ```
 
 ---
@@ -1102,13 +1102,13 @@ async def test_long_conversation_triggers_compaction(
 ):
     """Send enough turns to push past the threshold; verify compaction state lands.
 
-    Uses the existing E2E LLM (CUBEBOX_E2E_LLM_*) for both the main agent and the
+    Uses the existing E2E LLM (CUBEPLEX_E2E_LLM_*) for both the main agent and the
     summarizer; sets a deliberately tiny threshold so we don't need huge inputs.
     """
-    monkeypatch.setenv("CUBEBOX_COMPACTION__ENABLED", "true")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__THRESHOLD_RATIO", "0.001")  # trigger fast
-    monkeypatch.setenv("CUBEBOX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__ENABLED", "true")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__THRESHOLD_RATIO", "0.001")  # trigger fast
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
 
     client, ws_id = authed_workspace_client
     convo = await _create_conversation(client, ws_id)
@@ -1166,7 +1166,7 @@ async def _get_thread_state(client, ws_id, cid):
 - [ ] **Step 2: Check whether `/conversations/{cid}/state` exists**
 
 ```bash
-grep -rn "conversations.*state\|thread.*state\|aget_state" backend/cubebox/api/ --include="*.py"
+grep -rn "conversations.*state\|thread.*state\|aget_state" backend/cubeplex/api/ --include="*.py"
 ```
 
 If no such endpoint exists, replace `_get_thread_state` with a direct checkpointer
@@ -1186,7 +1186,7 @@ dataclass instance or a deserialized dict:
 async def _get_thread_state(client, ws_id, cid):
     from dataclasses import asdict, is_dataclass
     from langchain_core.runnables import RunnableConfig
-    from cubebox.agents.checkpointer import get_checkpointer  # adjust to actual path
+    from cubeplex.agents.checkpointer import get_checkpointer  # adjust to actual path
 
     saver = await get_checkpointer()
     cfg = RunnableConfig(configurable={"thread_id": cid})
@@ -1199,12 +1199,12 @@ async def _get_thread_state(client, ws_id, cid):
 ```
 
 (Reviewer: if `get_checkpointer` is not the correct accessor, swap for the
-project's actual API — see `backend/cubebox/agents/checkpointer.py`.)
+project's actual API — see `backend/cubeplex/agents/checkpointer.py`.)
 
 - [ ] **Step 3: Run the test**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_long_conversation_triggers_compaction -v -s
+cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_long_conversation_triggers_compaction -v -s
 ```
 
 Expected: PASS. If it fails because of fixture name (`authed_workspace_client`),
@@ -1235,10 +1235,10 @@ async def test_summary_persists_across_turns(authed_workspace_client, monkeypatc
     """Once compaction lands, a follow-up turn whose new content is small must NOT
     re-summarize (compaction_until_msg_index should advance only when needed).
     """
-    monkeypatch.setenv("CUBEBOX_COMPACTION__ENABLED", "true")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__THRESHOLD_RATIO", "0.001")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__ENABLED", "true")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__THRESHOLD_RATIO", "0.001")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
 
     client, ws_id = authed_workspace_client
     convo = await _create_conversation(client, ws_id)
@@ -1268,7 +1268,7 @@ async def test_summary_persists_across_turns(authed_workspace_client, monkeypatc
 - [ ] **Step 2: Run it**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_summary_persists_across_turns -v -s
+cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_summary_persists_across_turns -v -s
 ```
 
 Expected: PASS.
@@ -1301,10 +1301,10 @@ async def test_compaction_preserves_citation_markers_and_tool_pairs(
       2. saved state has no orphan ToolMessage in the kept window
       3. the messages API still surfaces all original citations[] arrays
     """
-    monkeypatch.setenv("CUBEBOX_COMPACTION__ENABLED", "true")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__THRESHOLD_RATIO", "0.001")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
-    monkeypatch.setenv("CUBEBOX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__ENABLED", "true")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__THRESHOLD_RATIO", "0.001")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__KEEP_RECENT_MESSAGES", "2")
+    monkeypatch.setenv("CUBEPLEX_COMPACTION__MIN_COMPACT_MESSAGES", "2")
 
     client, ws_id = authed_workspace_client
     convo = await _create_conversation(client, ws_id)
@@ -1335,7 +1335,7 @@ async def test_compaction_preserves_citation_markers_and_tool_pairs(
 - [ ] **Step 2: Run it**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_compaction_preserves_citation_markers_and_tool_pairs -v -s
+cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_conversation_compaction.py::test_compaction_preserves_citation_markers_and_tool_pairs -v -s
 ```
 
 Expected: PASS. If the marker assertion fails, the summarizer prompt may need
@@ -1344,9 +1344,9 @@ tightening — strengthen the language in `summarizer.py` and rerun.
 - [ ] **Step 3: Run the full compaction E2E suite + lint + type-check**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_conversation_compaction.py -v
-cd /home/chris/cubebox/backend && uv run ruff check cubebox/middleware/compaction/ cubebox/agents/state.py
-cd /home/chris/cubebox/backend && uv run mypy cubebox/middleware/compaction/ cubebox/agents/state.py
+cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_conversation_compaction.py -v
+cd /home/chris/cubeplex/backend && uv run ruff check cubeplex/middleware/compaction/ cubeplex/agents/state.py
+cd /home/chris/cubeplex/backend && uv run mypy cubeplex/middleware/compaction/ cubeplex/agents/state.py
 ```
 
 Expected: 3 e2e passed; ruff and mypy clean.
@@ -1368,7 +1368,7 @@ git commit -m "test(compaction): e2e — citation markers preserved in summary, 
 - [ ] **Step 1: Run full backend check**
 
 ```bash
-cd /home/chris/cubebox/backend && make check
+cd /home/chris/cubeplex/backend && make check
 ```
 
 Expected: format, lint, type-check, tests all pass.
@@ -1376,8 +1376,8 @@ Expected: format, lint, type-check, tests all pass.
 - [ ] **Step 2: Confirm default-off behavior**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c \
-  "from cubebox.config import config; assert config.get('compaction.enabled') is False, 'must default off'; print('default-off ok')"
+cd /home/chris/cubeplex/backend && uv run python -c \
+  "from cubeplex.config import config; assert config.get('compaction.enabled') is False, 'must default off'; print('default-off ok')"
 ```
 
 Expected: `default-off ok`.
@@ -1429,7 +1429,7 @@ Expected: PR URL printed.
 |---|---|
 | §2 Architecture (two-layer decoupling) | Task 5 (middleware), Task 8 (E2E proof) |
 | §3 Scope decisions (middleware not graph node, in-repo CompactionSummary) | Task 1, Task 5 |
-| §4 State model (CubeboxState extension) | Task 1 |
+| §4 State model (CubeplexState extension) | Task 1 |
 | §5.1 Threshold trigger | Task 5 (`abefore_model`) |
 | §5.2 Safe boundary algorithm | Task 3 |
 | §5.3 Summary generation + marker preservation prompt | Task 4, Task 10 (assertion) |

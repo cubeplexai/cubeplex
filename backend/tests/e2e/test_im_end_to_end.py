@@ -24,11 +24,11 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from cubebox.config import config as _cubebox_config
-from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
-from cubebox.im.outbound import OutboundRunTailer
-from cubebox.im.types import RenderState
-from cubebox.streams.run_events import append_run_event
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.im.feishu.op_dispatcher import FeishuOpDispatcher
+from cubeplex.im.outbound import OutboundRunTailer
+from cubeplex.im.types import RenderState
+from cubeplex.streams.run_events import append_run_event
 
 pytestmark = pytest.mark.asyncio
 
@@ -102,10 +102,10 @@ class _RecordingCardKit:
 
 @pytest_asyncio.fixture
 async def _redis() -> AsyncIterator[Redis]:
-    # Production app sets decode_responses=True (cubebox/api/app.py); match it
+    # Production app sets decode_responses=True (cubeplex/api/app.py); match it
     # so the Lua-written 'payload' string field comes back as a str key on xread.
     client: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
     )
     try:
@@ -127,7 +127,7 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
 
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
-    state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_e2e")
+    state = RenderState(bot_name="cubeplex", run_id=run_id, inbound_message_id="om_inbound_e2e")
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,
@@ -192,7 +192,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
 
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
-    state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_err")
+    state = RenderState(bot_name="cubeplex", run_id=run_id, inbound_message_id="om_inbound_err")
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,

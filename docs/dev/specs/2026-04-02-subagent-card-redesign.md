@@ -110,9 +110,9 @@ Update `SubagentSummary` to include `role` and `task` fields for historical rend
 ## Files to modify
 
 **Backend:**
-1. `backend/cubebox/middleware/subagents.py` — add `role`, `task` to `_SubAgentSchema`
-2. `backend/cubebox/prompts/subagents.py` — update prompt with field guidelines
-3. `backend/cubebox/agents/convert.py` — include `role`, `task` in SubagentSummary
+1. `backend/cubeplex/middleware/subagents.py` — add `role`, `task` to `_SubAgentSchema`
+2. `backend/cubeplex/prompts/subagents.py` — update prompt with field guidelines
+3. `backend/cubeplex/agents/convert.py` — include `role`, `task` in SubagentSummary
 
 **Frontend:**
 4. `frontend/packages/web/package.json` — add @dicebear/core, @dicebear/collection

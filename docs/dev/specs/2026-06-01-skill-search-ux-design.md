@@ -59,7 +59,7 @@ and remote candidates.
 
 ### `preview_skill` tool
 
-**File:** `backend/cubebox/tools/builtin/preview_skill.py`
+**File:** `backend/cubeplex/tools/builtin/preview_skill.py`
 
 ```
 Input:  candidate_id: str
@@ -81,7 +81,7 @@ captures both at run-start; the inner `_execute` closure never opens its own ses
 
 ### `install_skill` tool
 
-**File:** `backend/cubebox/tools/builtin/install_skill.py`
+**File:** `backend/cubeplex/tools/builtin/install_skill.py`
 
 ```
 Input:  candidate_id: str

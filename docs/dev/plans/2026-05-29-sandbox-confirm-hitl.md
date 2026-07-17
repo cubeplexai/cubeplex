@@ -14,10 +14,10 @@
 
 ## Pre-flight (read before Task 1)
 
-- **Worktree:** `/home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl`, branch
+- **Worktree:** `/home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl`, branch
   `feat/sandbox-confirm-hitl`. First command in any session:
   `cat .worktree.env` (ports: backend **8090**, frontend **3090**; DB
-  `cubebox_feat_sandbox_confirm_hitl`). Never assume 8000/3000.
+  `cubeplex_feat_sandbox_confirm_hitl`). Never assume 8000/3000.
 - **Run backend commands from** `.../feat/sandbox-confirm-hitl/backend` with
   `uv run ...`. Tests auto-route to the per-slot test DB (conftest); plain
   `uv run pytest` is safe.
@@ -71,7 +71,7 @@ that documents what the pin points at, to say it includes the HITL channel.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv lock --upgrade-package cubepi
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv lock --upgrade-package cubepi
 ```
 Expected: `uv.lock` updates the cubepi `git ...?rev=<CUBEPI_REV>` entry; exit 0.
 
@@ -79,7 +79,7 @@ Expected: `uv.lock` updates the cubepi `git ...?rev=<CUBEPI_REV>` entry; exit 0.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv sync
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv sync
 ```
 Expected: cubepi reinstalled at the new rev; exit 0.
 
@@ -87,7 +87,7 @@ Expected: cubepi reinstalled at the new rev; exit 0.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION; from cubepi.hitl import InMemoryChannel, ApproveAnswer, HitlTimedOut, HitlCancelled; from cubepi.agent.types import HitlRequestEvent, HitlAnswerEvent, BeforeToolCallResult; print('schema', EXPECTED_SCHEMA_VERSION)"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "from cubepi.checkpointer.postgres.models import EXPECTED_SCHEMA_VERSION; from cubepi.hitl import InMemoryChannel, ApproveAnswer, HitlTimedOut, HitlCancelled; from cubepi.agent.types import HitlRequestEvent, HitlAnswerEvent, BeforeToolCallResult; print('schema', EXPECTED_SCHEMA_VERSION)"
 ```
 Expected: prints `schema 2` and no ImportError. If schema is still 1, the rev
 chosen does not include the HITL work — go back to Step 1.
@@ -96,7 +96,7 @@ chosen does not include the HITL work — go back to Step 1.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic revision --autogenerate -m "cubepi v1 to v2 pending_request"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic revision --autogenerate -m "cubepi v1 to v2 pending_request"
 ```
 Expected: a new file under `backend/alembic/versions/` whose `upgrade()`
 contains `op.add_column('cubepi_threads', sa.Column('pending_request', ...JSONB...))`
@@ -130,7 +130,7 @@ At the END of `downgrade()`, append:
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic heads
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic heads
 ```
 Expected: a single head (the new revision). If there are two heads, set the new
 file's `down_revision` to `28c4c57516f6` and re-run until there is exactly one.
@@ -139,7 +139,7 @@ file's `down_revision` to `28c4c57516f6` and re-run until there is exactly one.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic upgrade head
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic upgrade head
 ```
 Expected: applies cleanly; exit 0.
 
@@ -147,9 +147,9 @@ Expected: applies cleanly; exit 0.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "
 import asyncio, asyncpg
-from cubebox.config import config as c
+from cubeplex.config import config as c
 async def main():
     conn = await asyncpg.connect(host=c.get('database.host','localhost'), port=c.get('database.port',5432), user=c.get('database.user','postgres'), password=c.get('database.password',''), database=c.get('database.name'))
     col = await conn.fetchval(\"SELECT data_type FROM information_schema.columns WHERE table_name='cubepi_threads' AND column_name='pending_request'\")
@@ -165,14 +165,14 @@ Expected: `col jsonb ver 2`.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic downgrade -1 && uv run alembic upgrade head
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run alembic downgrade -1 && uv run alembic upgrade head
 ```
 Expected: both succeed; exit 0. (Confirms downgrade SQL is valid.)
 
 - [ ] **Step 13: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/pyproject.toml backend/uv.lock backend/alembic/versions/ && git commit -m "feat(sandbox): bump cubepi to HITL pin + cubepi v1->v2 migration"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/pyproject.toml backend/uv.lock backend/alembic/versions/ && git commit -m "feat(sandbox): bump cubepi to HITL pin + cubepi v1->v2 migration"
 ```
 
 ---
@@ -180,7 +180,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/p
 ## Task 2: Move the policy gate into `SandboxMiddleware.before_tool_call`
 
 **Files:**
-- Modify: `backend/cubebox/middleware/sandbox.py`
+- Modify: `backend/cubeplex/middleware/sandbox.py`
 - Test: `backend/tests/unit/test_sandbox_confirm_gate.py` (create)
 
 The `execute` tool body currently evaluates rules and degrades `confirm` to
@@ -197,7 +197,7 @@ from __future__ import annotations
 import pytest
 from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
-from cubebox.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.sandbox import SandboxMiddleware
 
 
 class _ToolCall:
@@ -334,14 +334,14 @@ async def test_no_channel_means_no_gate():
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_sandbox_confirm_gate.py -q
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_sandbox_confirm_gate.py -q
 ```
 Expected: FAIL — `SandboxMiddleware.__init__` rejects `channel=` (unexpected
 kwarg) and/or `before_tool_call` does not exist.
 
 - [ ] **Step 3: Strip the gate out of the execute tool body**
 
-In `backend/cubebox/middleware/sandbox.py`, in `_make_execute_tool`, delete the
+In `backend/cubeplex/middleware/sandbox.py`, in `_make_execute_tool`, delete the
 `command_rules` parameter usage and the entire `action, pattern = evaluate_command(...)`
 + `if action == "deny"` + `if action == "confirm"` block inside `_execute`.
 After the edit, `_execute` starts directly at:
@@ -370,7 +370,7 @@ longer needs rules). Keep `workspace_id` / `conversation_id`.
 - [ ] **Step 4: Add the imports the hook needs**
 
 At the top of `sandbox.py`, alongside the existing
-`from cubebox.sandbox_policy.rules import evaluate_command`, add:
+`from cubeplex.sandbox_policy.rules import evaluate_command`, add:
 ```python
 from cubepi.agent.types import BeforeToolCallResult
 from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlChannel, HitlTimedOut
@@ -473,7 +473,7 @@ Add this method to `SandboxMiddleware` (e.g. just above `transform_system_prompt
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_sandbox_confirm_gate.py -q
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_sandbox_confirm_gate.py -q
 ```
 Expected: all PASS.
 
@@ -481,7 +481,7 @@ Expected: all PASS.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit -k sandbox -q && uv run mypy cubebox/middleware/sandbox.py
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit -k sandbox -q && uv run mypy cubeplex/middleware/sandbox.py
 ```
 Expected: PASS / `Success: no issues found`. If an existing unit test asserted
 the old "confirm degrades to deny in the tool body", update it to drive the new
@@ -490,7 +490,7 @@ the old "confirm degrades to deny in the tool body", update it to drive the new
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/middleware/sandbox.py backend/tests/unit/test_sandbox_confirm_gate.py && git commit -m "feat(sandbox): move command-policy gate to before_tool_call HITL hook"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubeplex/middleware/sandbox.py backend/tests/unit/test_sandbox_confirm_gate.py && git commit -m "feat(sandbox): move command-policy gate to before_tool_call HITL hook"
 ```
 
 ---
@@ -498,19 +498,19 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 ## Task 3: Wire a per-run channel in `run_manager` + agent factory
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py` (add `channel` kwarg)
-- Modify: `backend/cubebox/streams/run_manager.py` (create channel, pass it, register/teardown)
+- Modify: `backend/cubeplex/agents/graph.py` (add `channel` kwarg)
+- Modify: `backend/cubeplex/streams/run_manager.py` (create channel, pass it, register/teardown)
 
 **Note on `run_manager.py`:** locate insertion points by the named landmarks
 below (not absolute line numbers).
 
 - [ ] **Step 1: Add `channel` to the agent factory**
 
-In `backend/cubebox/agents/graph.py`, add the import and parameter:
+In `backend/cubeplex/agents/graph.py`, add the import and parameter:
 ```python
 from cubepi.hitl import HitlChannel
 ```
-Add `channel: HitlChannel | None = None,` to `create_cubebox_agent`'s keyword
+Add `channel: HitlChannel | None = None,` to `create_cubeplex_agent`'s keyword
 args (next to `thinking`), and pass `channel=channel` into the `Agent(...)`
 constructor call (alongside `checkpointer=checkpointer`).
 
@@ -541,7 +541,7 @@ defined before the block so later references are safe:
 
 - [ ] **Step 4: Pass the channel into the agent factory**
 
-Find the `create_cubebox_agent(` call in `_run_cubepi_path` and add
+Find the `create_cubeplex_agent(` call in `_run_cubepi_path` and add
 `channel=sandbox_hitl_channel,` to its kwargs.
 
 - [ ] **Step 5: Register the channel next to the agent**
@@ -565,14 +565,14 @@ Match the surrounding indentation at each site.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubebox/agents/graph.py cubebox/streams/run_manager.py && uv run python -c "import cubebox.streams.run_manager, cubebox.agents.graph; print('ok')"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubeplex/agents/graph.py cubeplex/streams/run_manager.py && uv run python -c "import cubeplex.streams.run_manager, cubeplex.agents.graph; print('ok')"
 ```
 Expected: `Success: no issues found` and `ok`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/agents/graph.py backend/cubebox/streams/run_manager.py && git commit -m "feat(sandbox): per-run InMemoryChannel wired into agent + sandbox middleware"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubeplex/agents/graph.py backend/cubeplex/streams/run_manager.py && git commit -m "feat(sandbox): per-run InMemoryChannel wired into agent + sandbox middleware"
 ```
 
 ---
@@ -580,7 +580,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 ## Task 4: Accept the human answer (in-process fast path + cross-worker control)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: `backend/tests/unit/test_run_manager_hitl_answer.py` (create)
 
 **Real code shape (confirmed):** `_handle_control(self, data: dict[str, Any])`
@@ -663,7 +663,7 @@ existing run_manager unit test's construction if one exists.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_run_manager_hitl_answer.py -q
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_run_manager_hitl_answer.py -q
 ```
 Expected: FAIL — `dispatch_hitl_answer` does not exist and `_handle_control` has
 no `hitl_answer` branch.
@@ -750,14 +750,14 @@ new branch after it:
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_run_manager_hitl_answer.py -q && uv run mypy cubebox/streams/run_manager.py
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_run_manager_hitl_answer.py -q && uv run mypy cubeplex/streams/run_manager.py
 ```
 Expected: PASS / `Success: no issues found`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/streams/run_manager.py backend/tests/unit/ && git commit -m "feat(sandbox): deliver hitl answers in-process + cross-worker control"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubeplex/streams/run_manager.py backend/tests/unit/ && git commit -m "feat(sandbox): deliver hitl answers in-process + cross-worker control"
 ```
 
 ---
@@ -765,17 +765,17 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 ## Task 5: HTTP endpoint to submit a confirm answer
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 - Test: covered by the Task 7 E2E (endpoint is thin glue over Task 4)
 
 The endpoint is workspace-scoped and mirrors the existing cancel/steer handler
 in the same file (auth dependencies + `RunManager` access). Active-run
 resolution uses the same `get_active_run(...)` helper run_manager imports
-(`cubebox.streams.run_manager:20`).
+(`cubeplex.streams.run_manager:20`).
 
 - [ ] **Step 1: Read the existing cancel/steer endpoint as the template**
 
-Open `backend/cubebox/api/routes/v1/conversations.py` and locate the handler(s)
+Open `backend/cubeplex/api/routes/v1/conversations.py` and locate the handler(s)
 that call `RunManager.dispatch_cancel` / `dispatch_steer`. Note verbatim: the
 route decorator + method, the auth/dependency params (workspace membership,
 current user, the `RunManager` accessor dependency), and how it obtains the
@@ -813,7 +813,7 @@ async def submit_sandbox_confirm(
     run_id = await get_active_run(...)  # resolve EXACTLY as the cancel handler
                                         # does (same args: redis/key_prefix +
                                         # conversation_id). Import get_active_run
-                                        # from cubebox.streams.<active-run module>
+                                        # from cubeplex.streams.<active-run module>
                                         # — the same module run_manager imports
                                         # it from (run_manager.py:20).
     if not run_id:
@@ -834,8 +834,8 @@ router prefix; do NOT add a `?scope=` switch (scope-isolation rule).
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubebox/api/routes/v1/conversations.py && uv run python -c "
-from cubebox.api.app import build_app  # use the real factory; grep app/__init__ or main.py if unsure
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubeplex/api/routes/v1/conversations.py && uv run python -c "
+from cubeplex.api.app import build_app  # use the real factory; grep app/__init__ or main.py if unsure
 app = build_app()
 paths = [getattr(r, 'path', '') for r in app.routes]
 assert any('sandbox-confirm' in p for p in paths), [p for p in paths if 'conversations' in p]
@@ -843,12 +843,12 @@ print('route registered')
 "
 ```
 Expected: `Success: no issues found` and `route registered`. (Confirm the app
-factory's real name from `cubebox/api/app.py`; adjust the import if needed.)
+factory's real name from `cubeplex/api/app.py`; adjust the import if needed.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/api/routes/v1/conversations.py && git commit -m "feat(sandbox): POST sandbox-confirm endpoint for HITL answers"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubeplex/api/routes/v1/conversations.py && git commit -m "feat(sandbox): POST sandbox-confirm endpoint for HITL answers"
 ```
 
 ---
@@ -856,7 +856,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 ## Task 6: Translate HITL events into SSE
 
 **Files:**
-- Modify: `backend/cubebox/agents/stream.py`
+- Modify: `backend/cubeplex/agents/stream.py`
 - Test: `backend/tests/unit/test_stream_hitl_events.py` (create)
 
 `convert_agent_event_to_sse(evt)` returns `list[dict]` and drops unknown event
@@ -866,14 +866,14 @@ types. Add two cases, gated to approve-kind HITL on the `execute` tool.
 
 Create `backend/tests/unit/test_stream_hitl_events.py`:
 ```python
-"""HITL AgentEvents → cubebox SSE dicts."""
+"""HITL AgentEvents → cubeplex SSE dicts."""
 from __future__ import annotations
 
 from cubepi.agent.types import HitlAnswerEvent, HitlRequestEvent
 from cubepi.hitl import ApproveAnswer
 from cubepi.hitl.types import ApproveRequest, HitlRequest
 
-from cubebox.agents.stream import convert_agent_event_to_sse
+from cubeplex.agents.stream import convert_agent_event_to_sse
 
 
 def _approve_request(tool_call_id="call_1", command="rm -rf /tmp/x", pattern="rm *"):
@@ -938,7 +938,7 @@ def test_answer_event_cancelled():
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run python -c "
 from cubepi.agent.types import HitlRequestEvent, HitlAnswerEvent
 from cubepi.hitl.types import HitlRequest, ApproveRequest
 from cubepi.hitl import ApproveAnswer
@@ -957,13 +957,13 @@ the real names before proceeding.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_stream_hitl_events.py -q
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_stream_hitl_events.py -q
 ```
 Expected: FAIL — events are currently dropped (empty list returned).
 
 - [ ] **Step 4: Add the import and the two cases**
 
-In `backend/cubebox/agents/stream.py`, add to the cubepi event imports:
+In `backend/cubeplex/agents/stream.py`, add to the cubepi event imports:
 ```python
 from cubepi.agent.types import HitlAnswerEvent, HitlRequestEvent
 ```
@@ -1012,14 +1012,14 @@ return, add:
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_stream_hitl_events.py -q && uv run mypy cubebox/agents/stream.py
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_stream_hitl_events.py -q && uv run mypy cubeplex/agents/stream.py
 ```
 Expected: PASS / `Success: no issues found`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/agents/stream.py backend/tests/unit/test_stream_hitl_events.py && git commit -m "feat(sandbox): translate HITL request/answer events to SSE"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubeplex/agents/stream.py backend/tests/unit/test_stream_hitl_events.py && git commit -m "feat(sandbox): translate HITL request/answer events to SSE"
 ```
 
 ---
@@ -1036,7 +1036,7 @@ four outcomes. Replaces the old confirm-as-deny E2E from the #152 batch.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && ls tests/e2e | grep -i sandbox
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && ls tests/e2e | grep -i sandbox
 ```
 Expected: at least the command-deny E2E from #152 (e.g.
 `test_*command_deny*` / ownership-isolation tests). Open the deny one — it shows
@@ -1079,7 +1079,7 @@ to the client).
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/e2e/test_sandbox_confirm_hitl.py -q
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/e2e/test_sandbox_confirm_hitl.py -q
 ```
 Expected: all four cases PASS. (Needs the worktree's `.env` +
 `config.development.local.yaml`; if a sandbox provider/rustfs prerequisite is
@@ -1092,14 +1092,14 @@ If a prior E2E asserts the old "requires confirmation; not yet supported"
 message, delete that assertion/test (its behavior is gone). Confirm nothing else
 references that string:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && grep -rn "not yet supported in this deployment" tests cubebox || echo "clean"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && grep -rn "not yet supported in this deployment" tests cubeplex || echo "clean"
 ```
 Expected: `clean`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/tests/e2e/ && git commit -m "test(sandbox): E2E for confirm HITL approve/deny/timeout"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add backend/tests/e2e/ && git commit -m "test(sandbox): E2E for confirm HITL approve/deny/timeout"
 ```
 
 ---
@@ -1109,14 +1109,14 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/t
 **Files:**
 - Modify: `frontend/packages/core/src/types/sse-events.ts`
 
-**Note:** frontend uses **pnpm**; `@cubebox/core` must build before web sees the
+**Note:** frontend uses **pnpm**; `@cubeplex/core` must build before web sees the
 new types.
 
 - [ ] **Step 1: Find the existing SSE event type union**
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -n "type\b" packages/core/src/types/sse-events.ts | head -40
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -n "type\b" packages/core/src/types/sse-events.ts | head -40
 ```
 Identify the discriminated union of SSE event types (each has a `type` literal)
 and how existing events (e.g. tool-call events) are shaped.
@@ -1147,14 +1147,14 @@ Add both to the SSE event union type (wherever the other events are unioned).
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/core build
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/core build
 ```
 Expected: builds clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/core/src/types/sse-events.ts && git commit -m "feat(sandbox-ui): SSE event types for confirm request/resolved"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/core/src/types/sse-events.ts && git commit -m "feat(sandbox-ui): SSE event types for confirm request/resolved"
 ```
 
 ---
@@ -1168,7 +1168,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -rln "conversations/" packages/web/src/lib/api | head
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -rln "conversations/" packages/web/src/lib/api | head
 ```
 Open one (e.g. the cancel/steer client) to copy the fetch wrapper, base-URL
 handling, CSRF header, and error convention.
@@ -1199,7 +1199,7 @@ re-implement).
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/web typecheck
 ```
 Expected: no type errors. (If the script name differs, use the one in
 `packages/web/package.json`.)
@@ -1207,7 +1207,7 @@ Expected: no type errors. (If the script name differs, use the one in
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/lib/api/sandbox-confirm.ts && git commit -m "feat(sandbox-ui): API client for submitting confirm answers"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/lib/api/sandbox-confirm.ts && git commit -m "feat(sandbox-ui): API client for submitting confirm answers"
 ```
 
 ---
@@ -1225,7 +1225,7 @@ tool-call card design language (per project frontend-design discipline).
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && ls packages/web/src/components/chat
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && ls packages/web/src/components/chat
 ```
 Open the tool-call/message card component(s) to reuse the card shell, spacing,
 mono font for commands, and shadcn primitives already in use (Button, etc.).
@@ -1262,14 +1262,14 @@ system.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/web typecheck && pnpm --filter @cubebox/web lint
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/web typecheck && pnpm --filter @cubeplex/web lint
 ```
 Expected: clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/components/chat/SandboxConfirmCard.tsx && git commit -m "feat(sandbox-ui): SandboxConfirmCard inline approve/deny card"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/components/chat/SandboxConfirmCard.tsx && git commit -m "feat(sandbox-ui): SandboxConfirmCard inline approve/deny card"
 ```
 
 ---
@@ -1284,7 +1284,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -rln "tool_call\|event.type\|sse" packages/web/src/components/chat packages/web/src/hooks 2>/dev/null | head
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && grep -rln "tool_call\|event.type\|sse" packages/web/src/components/chat packages/web/src/hooks 2>/dev/null | head
 ```
 Identify the reducer/handler that maps incoming SSE events to rendered timeline
 items (where tool-call events become cards).
@@ -1308,14 +1308,14 @@ reconnect), ignore.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/web typecheck && pnpm --filter @cubebox/web build
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/web typecheck && pnpm --filter @cubeplex/web build
 ```
 Expected: clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/ && git commit -m "feat(sandbox-ui): render confirm card from SSE in chat stream"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add frontend/packages/web/src/ && git commit -m "feat(sandbox-ui): render confirm card from SSE in chat stream"
 ```
 
 ---
@@ -1330,7 +1330,7 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && ls packages/web/e2e 2>/dev/null || ls packages/web/tests 2>/dev/null
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && ls packages/web/e2e 2>/dev/null || ls packages/web/tests 2>/dev/null
 ```
 Open a chat-flow spec to copy login/setup, how it starts a conversation, and how
 it waits on streamed UI.
@@ -1347,7 +1347,7 @@ second flow click **Deny** and assert "Denied". (Use the worktree URL
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/web exec playwright test sandbox-confirm
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/web exec playwright test sandbox-confirm
 ```
 Expected: PASS (backend must be running on 8090; start it per quick-reference if
 needed). If browsers aren't installed: `npx playwright install` first.
@@ -1356,7 +1356,7 @@ needed). If browsers aren't installed: `npx playwright install` first.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest -q && uv run mypy cubebox/
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest -q && uv run mypy cubeplex/
 ```
 Expected: all pass / `Success`.
 
@@ -1364,14 +1364,14 @@ Expected: all pass / `Success`.
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web typecheck && pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/web build
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl/frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web typecheck && pnpm --filter @cubeplex/web lint && pnpm --filter @cubeplex/web build
 ```
 Expected: all clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add frontend/ && git commit -m "test(sandbox-ui): E2E for confirm card approve/deny"
+cd /home/chris/cubeplex/.worktrees/feat/sandbox-confirm-hitl && git add frontend/ && git commit -m "test(sandbox-ui): E2E for confirm card approve/deny"
 ```
 
 ---

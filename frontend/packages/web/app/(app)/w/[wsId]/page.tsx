@@ -8,9 +8,11 @@ import {
   useAttachmentStore,
   useConversationStore,
   useMessageStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { PromptCards } from '@/components/chat/PromptCards'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
+import { reasoningFromThinking } from '@/lib/reasoning-control'
 import {
   getPresetSelectionStore,
   markConversationLocallyCreated,
@@ -80,6 +82,7 @@ export default function WorkspaceHomePage({
       }
 
       useAttachmentStore.getState().clear(convId)
+      useAttachmentStore.getState().markSkipHydrate(convId)
       // Mirror InputBar.handleSubmit: the composer's preset + thinking choice
       // is a per-message field, so the home page's first-send path must read
       // and forward it too. Without this, the first message after opening a
@@ -90,7 +93,7 @@ export default function WorkspaceHomePage({
       const selection = getPresetSelectionStore(wsId).getState()
       const sendOptions = {
         model_key: validatedModelKey(selection),
-        thinking: selection.thinking,
+        reasoning: reasoningFromThinking(selection.thinking),
       }
       send(client, convId, content, attachedIds, optimisticAttachments, sendOptions).catch(
         (err) => {
@@ -110,10 +113,7 @@ export default function WorkspaceHomePage({
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-8 pb-12">
       <div className="text-center">
-        <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border-strong bg-gradient-to-br from-card to-raised mb-5 font-mono text-xs text-muted-foreground">
-          cx
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1">cubebox</h1>
+        <CubePlexLogo className="mb-3" markClassName="size-11" wordmarkClassName="text-2xl" />
         <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
       </div>
       <div className="w-full max-w-2xl px-4">

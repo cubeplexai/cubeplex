@@ -6,7 +6,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Membership, Organization, OrganizationMembership, User
+from cubeplex.models import Membership, Organization, OrganizationMembership, User
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -41,7 +41,7 @@ async def test_first_register_pending_owner(
 
     me = await fresh_db_unauth_client_single_tenant.get("/api/v1/auth/me")
     assert me.status_code == 200, me.text
-    assert me.json()["needs_org_setup"] is True
+    assert me.json()["needs_onboarding"] is True
 
     async with session_factory() as session:
         user = (await session.execute(select(User).where(User.email == email))).scalar_one()

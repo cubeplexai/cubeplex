@@ -20,7 +20,7 @@ let artifactState: {
 
 const openArtifact = vi.fn()
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   useArtifactStore: (
     selector: typeof artifactState extends infer T ? (state: T) => unknown : never,
   ) => selector(artifactState),

@@ -24,7 +24,7 @@
 - **Vault**：内部凭证服务，对称 authenticated 加密 + 可插拔 backend；v1 仅 MCP 单一消费者，schema 多消费者就位。
 - **MCP**：DB-backed 替换 config-driven；admin 控制台真实 UI 替换 ComingSoonCard；workspace member 自助入口；4 种凭证粒度（org / workspace / user / none-passthrough）× 3 种获取方式（static / oauth / none）；workspace-private 与 org-wide 双重可见性。
 - **Runtime**：`RunManager` 在每个 run 构建 agent 前按 `(workspace, user)` 装配该 ws + user
-  适用的 DB MCP tools，再把这些 tools 传给现有 `create_cubebox_agent()`。
+  适用的 DB MCP tools，再把这些 tools 传给现有 `create_cubeplex_agent()`。
 - **Legacy 共存**：`config.yaml` 的 `mcp.webtools` 保留，等 admin 控制台 Web tools tab 接管后再下线。
 
 ### 1.3 非目标
@@ -66,7 +66,7 @@
 | D18 | server-side 失败软隔离（解密/签名/discovery 失败仅跳该 server，agent 继续） | 整 agent run 报错 | 单 server 故障不该阻塞其他 tools 可用 |
 | D19 | 不声明 DB FK；service 层守不变量 | DB FK + ON DELETE | 沿用 M3 D19；批量/soft-delete/分库更稳 |
 | D20 | EncryptionBackend Protocol 用 async（即使 Fernet 同步实现） | sync Protocol | 留 KMS 网络后端位；async 包同步实现零成本 |
-| D21 | JWT signer HS256 共享 `CUBEBOX_AUTH__JWT_SECRET`；MCPUserTokenSigner Protocol | RS256 + JWKS endpoint | v1 最简；Protocol 留切换；follow-up spec 升 RS256 |
+| D21 | JWT signer HS256 共享 `CUBEPLEX_AUTH__JWT_SECRET`；MCPUserTokenSigner Protocol | RS256 + JWKS endpoint | v1 最简；Protocol 留切换；follow-up spec 升 RS256 |
 | D22 | JWT TTL 5 min，每次工具调用现签 | session token / 长 TTL | 短 TTL 限泄露窗；现签简化（无续期） |
 | D23 | passthrough JWT claims = `{sub, org, ws, mcp, exp, iss}` | 仅 sub / 全 user model snapshot | 充分定位 + 最小 PII；非破坏性追加 |
 | D24 | 测试以 E2E 为主 + 关键算法/不变量单测兜底 | 纯 E2E / 纯单测 | 沿用 CLAUDE.md "Focus on E2E"；纯算法（轮换 / 不变量分支）单测更聚焦 |
@@ -80,7 +80,7 @@
 ### 3.1 表定义
 
 ```python
-# cubebox/credentials/models.py ----
+# cubeplex/credentials/models.py ----
 
 class Credential(SQLModel, table=True):
     """Vault 多消费者通用 — v1 只有 mcp_server kind."""
@@ -99,7 +99,7 @@ class Credential(SQLModel, table=True):
     updated_at: datetime
 
 
-# cubebox/mcp/models.py ----
+# cubeplex/mcp/models.py ----
 
 class MCPServer(SQLModel, table=True):
     __tablename__ = "mcp_servers"
@@ -249,7 +249,7 @@ alembic upgrade head
 ### 4.1 模块布局
 
 ```
-backend/cubebox/credentials/
+backend/cubeplex/credentials/
 ├─ __init__.py
 ├─ encryption.py    # EncryptionBackend Protocol + FernetBackend
 ├─ models.py        # Credential SQLModel
@@ -282,14 +282,14 @@ class FernetBackend:
 
 ### 4.3 Master Key 管理
 
-- 唯一来源 `CUBEBOX_AUTH__VAULT_KEY`（逗号分隔 url-safe base64 Fernet key 列表，第一把加密，全部尝试解密）
+- 唯一来源 `CUBEPLEX_AUTH__VAULT_KEY`（逗号分隔 url-safe base64 Fernet key 列表，第一把加密，全部尝试解密）
 - 启动时缺失 / invalid → fail-fast（不静默生成）
 - Dev：`backend/.env.example` 给固定占位 key + README 强调 production 必须换
 - Production rotation 流程：
   1. 生成新 key：`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-  2. 部署 `CUBEBOX_AUTH__VAULT_KEY=<new>,<old1>` （new 在前 = 加密用）
-  3. 跑 `python -m cubebox.credentials.rotate_keys`（幂等遍历密文用 `MultiFernet.rotate()` 重新封装）
-  4. 验证后部署 `CUBEBOX_AUTH__VAULT_KEY=<new>`
+  2. 部署 `CUBEPLEX_AUTH__VAULT_KEY=<new>,<old1>` （new 在前 = 加密用）
+  3. 跑 `python -m cubeplex.credentials.rotate_keys`（幂等遍历密文用 `MultiFernet.rotate()` 重新封装）
+  4. 验证后部署 `CUBEPLEX_AUTH__VAULT_KEY=<new>`
 
 ### 4.4 CredentialService API
 
@@ -340,7 +340,7 @@ class CredentialService:
 ### 5.1 模块布局
 
 ```
-backend/cubebox/mcp/
+backend/cubeplex/mcp/
 ├─ __init__.py
 ├─ client.py         # MCPManager（重构）
 ├─ models.py         # MCPServer / WorkspaceMCPCredential / UserMCPCredential / WorkspaceMCPBinding
@@ -422,7 +422,7 @@ class MCPUserTokenSigner(Protocol):
     ) -> str: ...
 
 class HS256Signer:
-    """v1 CE — 用 CUBEBOX_AUTH__JWT_SECRET 直签 HS256."""
+    """v1 CE — 用 CUBEPLEX_AUTH__JWT_SECRET 直签 HS256."""
     def __init__(self, secret: str) -> None:
         self._secret = secret
 
@@ -434,7 +434,7 @@ class HS256Signer:
             "ws": workspace_id,
             "mcp": mcp_server_id,
             "exp": int((now + ttl).timestamp()),
-            "iss": "cubebox",
+            "iss": "cubeplex",
         }
         return jwt.encode(claims, self._secret, algorithm="HS256")
 ```
@@ -589,7 +589,7 @@ frontend/packages/web/
 │  ├─ MCPScopeBadge.tsx            # org / workspace / user / none 视觉徽章
 │  ├─ MCPCredentialPanel.tsx       # scope dispatch 渲染
 │  └─ MCPPromoteDialog.tsx
-└─ stores/                          # in @cubebox/core
+└─ stores/                          # in @cubeplex/core
    ├─ mcpStore.ts                   # admin
    └─ workspaceMcpStore.ts          # member
 ```
@@ -610,8 +610,8 @@ frontend/packages/web/
      本 workspace 一份 key，本 ws 内所有人共用
    ○ Per user
      每用户填自己的 key
-   ○ Cubebox identity passthrough
-     不存 key — 由 MCP server 凭你的 cubebox 身份自鉴权
+   ○ Cubeplex identity passthrough
+     不存 key — 由 MCP server 凭你的 cubeplex 身份自鉴权
    ○ OAuth (灰显, "Coming soon")    [v1 不可选]
 
 [Card] 自定义请求头 (advanced, collapsed)
@@ -689,7 +689,7 @@ frontend/packages/web/
 - `org` → 显示 "由 organization admin 管理凭证"（无 cred 操作）
 - `workspace` → MCPCredentialPanel 渲染 "Workspace 共享凭证" 卡片，本 ws 任意 member 可填/改/清
 - `user` → MCPCredentialPanel 渲染 "我的凭证" 卡片，仅当前 user 可填/改/清
-- `none` → 显示 "使用 cubebox 身份认证" 提示
+- `none` → 显示 "使用 cubeplex 身份认证" 提示
 
 ### 6.7 Promote dialog
 
@@ -729,7 +729,7 @@ npx shadcn-ui@latest add radio-group switch accordion alert
 ### 6.10 Stores
 
 ```ts
-// @cubebox/core/stores/mcpStore.ts (admin)
+// @cubeplex/core/stores/mcpStore.ts (admin)
 useMcpStore: {
   servers: MCPServer[]
   loading; error
@@ -743,7 +743,7 @@ useMcpStore: {
   saveBindings(client, serverId, bindings): void
 }
 
-// @cubebox/core/stores/workspaceMcpStore.ts (member)
+// @cubeplex/core/stores/workspaceMcpStore.ts (member)
 useWorkspaceMcpStore: {
   servers: { owned: MCPServer[]; viaBinding: MCPServer[] }
   // CRUD on owned；my-cred / workspace-cred PUT/DELETE；promote
@@ -759,7 +759,7 @@ useWorkspaceMcpStore: {
 ### 7.1 RunManager 装配点
 
 ```python
-# backend/cubebox/streams/run_manager.py
+# backend/cubeplex/streams/run_manager.py
 
 async with async_session_maker() as mcp_session:
     cred_service = build_credential_service(
@@ -779,7 +779,7 @@ async with async_session_maker() as mcp_session:
     )
 
 tools = [*get_registry().list_tools(), *db_mcp_tools]
-agent = create_cubebox_agent(
+agent = create_cubeplex_agent(
     llm=llm,
     tools=tools,
     sandbox=sandbox,
@@ -794,15 +794,15 @@ agent = create_cubebox_agent(
 )
 ```
 
-`create_cubebox_agent()` 保持同步函数和现有签名，继续只负责 LangGraph middleware
+`create_cubeplex_agent()` 保持同步函数和现有签名，继续只负责 LangGraph middleware
 装配。DB MCP 是 request/run scoped tool list，不应该把数据库 session、vault service 或 signer
 塞进 agent factory。
 
 ### 7.2 调用点修改
 
-`backend/cubebox/api/routes/v1/conversations.py` 不直接创建 agent。它只把
+`backend/cubeplex/api/routes/v1/conversations.py` 不直接创建 agent。它只把
 `RunContext(user_id, org_id, workspace_id)` 交给 `RunManager.start_run()`。实际 agent
-创建发生在 `backend/cubebox/streams/run_manager.py`，因此 runtime MCP wiring 只改
+创建发生在 `backend/cubeplex/streams/run_manager.py`，因此 runtime MCP wiring 只改
 `RunManager`。
 
 ### 7.3 失败隔离矩阵
@@ -840,7 +840,7 @@ run 生效。无主动 invalidation 机制。
 
 - 支持 streamable_http / sse / stdio
 - 注册若干 echo tools + 1 个 bearer-required tool
-- auth 模式可配：`none` / `bearer-static` / `bearer-jwt-verify`（最后一种验证 cubebox 签的 JWT，断言 claims）
+- auth 模式可配：`none` / `bearer-static` / `bearer-jwt-verify`（最后一种验证 cubeplex 签的 JWT，断言 claims）
 - subprocess 起，端口随机分配（兼容 worktree 并发），fixture teardown 杀进程
 - M3 也能复用此 fixture
 
@@ -935,7 +935,7 @@ run 生效。无主动 invalidation 机制。
 - 加新 transport：`_build_connection_params` 加分支；schema 不动
 - 加新 `auth_method`（实装 oauth）：service 拆掉 `OAuthNotImplementedError` 分支 + 实装 oauth flow；schema 已就位
 - 切 KMS backend：注册 KMSBackend 实现 `EncryptionBackend`，`CredentialService` 调用面零改动
-- RS256 + JWKS：实现 `RS256Signer` + 暴露 `/.well-known/cubebox-jwks.json`；`MCPUserTokenSigner` Protocol 不动
+- RS256 + JWKS：实现 `RS256Signer` + 暴露 `/.well-known/cubeplex-jwks.json`；`MCPUserTokenSigner` Protocol 不动
 - 第二个 vault 消费者（如 skill env）：调 `cred_service.create(kind="skill_env", ...)` 即可；UI 单独追加 admin/credentials 管理 tab 是非破坏性追加
 
 ### 11.2 破坏性变更需谨慎
@@ -949,7 +949,7 @@ run 生效。无主动 invalidation 机制。
 
 ## 12. 未决事项
 
-- [ ] `cubebox-ee` 是否在 v1 之内提供 KMS Backend 参考实现（默认否）
+- [ ] `cubeplex-ee` 是否在 v1 之内提供 KMS Backend 参考实现（默认否）
 - [ ] OAuth 实装 spec 时机（独立 follow-up `m2-mcp-oauth-design.md`）
 - [ ] Audit log sink 真实实装路径（M1-E5 spec 范围）
 - [ ] Web tools admin tab 替换 legacy `mcp.webtools` 的具体时点（独立 spec）

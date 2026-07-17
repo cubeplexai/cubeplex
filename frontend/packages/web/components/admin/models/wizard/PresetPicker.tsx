@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Search } from 'lucide-react'
-import { listPresets, type ApiClient, type VendorPreset } from '@cubebox/core'
+import { listPresets, type ApiClient, type VendorPreset } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'

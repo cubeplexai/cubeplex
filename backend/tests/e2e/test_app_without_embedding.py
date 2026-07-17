@@ -19,7 +19,7 @@ from sqlalchemy import text
 @pytest.mark.asyncio
 async def test_app_boots_without_embedding_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-    monkeypatch.delenv("CUBEBOX_TEST_LOCAL_EMBED", raising=False)
+    monkeypatch.delenv("CUBEPLEX_TEST_LOCAL_EMBED", raising=False)
 
     # Use the same builder as the rest of the e2e suite so the test runs
     # against the per-slot test DB and a NullPool engine.
@@ -49,14 +49,14 @@ async def test_search_route_returns_lexical_results_without_provider(
     """End-to-end lexical-only path: seed → worker writes NULL embeddings →
     search route returns lexical hits with vector_count=0."""
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-    monkeypatch.delenv("CUBEBOX_TEST_LOCAL_EMBED", raising=False)
+    monkeypatch.delenv("CUBEPLEX_TEST_LOCAL_EMBED", raising=False)
 
     from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories.embedding_job import EmbeddingJobRepository
-    from cubebox.services.conversation_search.worker import EmbeddingWorker
+    from cubeplex.agents.checkpointer import init_checkpointer
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+    from cubeplex.services.conversation_search.worker import EmbeddingWorker
     from tests.e2e.conftest import (
         DEFAULT_ORG_ID,
         DEFAULT_TEST_EMAIL,

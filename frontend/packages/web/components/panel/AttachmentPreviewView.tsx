@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Download } from 'lucide-react'
-import type { AttachmentPanelInfo } from '@cubebox/core'
-import { usePanelStore } from '@cubebox/core'
-import { useTranslations } from 'next-intl'
+import { Download, RefreshCw } from 'lucide-react'
+import type { AttachmentPanelInfo } from '@cubeplex/core'
+import { createApiClient, requestAttachmentPreviewToken, usePanelStore } from '@cubeplex/core'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
@@ -23,6 +23,10 @@ const PdfPreview = dynamic(
 )
 
 const TEXT_MAX_BYTES = 5 * 1024 * 1024
+const TEXT_FAMILIES = new Set(['markdown', 'text', 'code', 'json', 'csv'])
+const OFFICE_FAMILIES = new Set(['word', 'excel', 'ppt'])
+const LOAD_TIMEOUT_MS = 15_000
+const REDIRECT_DETECT_MS = 1_500
 
 interface Props {
   info: AttachmentPanelInfo
@@ -71,6 +75,7 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
 
 function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): React.ReactElement {
   const t = useTranslations('panel.attachment')
+  const visual = getFileVisual({ filename: info.filename, mime_type: info.mimeType })
   if (family === 'pdf') {
     return (
       <div className="flex-1 min-h-0">
@@ -89,6 +94,34 @@ function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): 
     return (
       <div className="flex-1 grid place-items-center p-8">
         <audio src={info.downloadUrl} controls />
+      </div>
+    )
+  }
+  if (OFFICE_FAMILIES.has(family) && info.conversationId && info.attachmentId) {
+    return (
+      <OfficeAttachmentPreview info={info} visual={visual} conversationId={info.conversationId} />
+    )
+  }
+  if (!TEXT_FAMILIES.has(family)) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 p-8 text-center">
+        <div className={cn('size-16 grid place-items-center rounded-xl', visual.bg)}>
+          <visual.Icon className={cn('size-8', visual.fg)} />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground">{info.filename}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {visual.label} · {humanSize(info.sizeBytes)}
+          </p>
+        </div>
+        <a
+          href={info.downloadUrl}
+          download
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          <Download className="size-4" />
+          {t('download')}
+        </a>
       </div>
     )
   }
@@ -201,6 +234,129 @@ function CsvTable({ text }: { text: string }): React.ReactElement {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+type ViewerState = 'loading' | 'ready' | 'error'
+
+function OfficeAttachmentPreview({
+  info,
+  visual,
+  conversationId,
+}: {
+  info: AttachmentPanelInfo
+  visual: ReturnType<typeof getFileVisual>
+  conversationId: string
+}): React.ReactElement {
+  const t = useTranslations('panel.attachment')
+  const locale = useLocale()
+  const msLocale = locale === 'zh' ? 'zh-CN' : 'en-US'
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null)
+  const [state, setState] = useState<ViewerState>('loading')
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadCountRef = useRef(0)
+  const fetchedKeyRef = useRef<string | null>(null)
+
+  const fetchToken = useCallback(async () => {
+    setState('loading')
+    setViewerUrl(null)
+    loadCountRef.current = 0
+    try {
+      const client = createApiClient('')
+      if (info.workspaceId) client.setWorkspaceId(info.workspaceId)
+      const res = await requestAttachmentPreviewToken(client, conversationId, info.attachmentId)
+      setViewerUrl(`${res.viewer_url}&ui=${msLocale}`)
+    } catch {
+      setState('error')
+    }
+  }, [conversationId, info.attachmentId, info.workspaceId, msLocale])
+
+  useEffect(() => {
+    // StrictMode double-invokes effects; key-guard so one open mints one
+    // token (each mint triggers a Microsoft fetch of the document).
+    const key = `${conversationId}:${info.attachmentId}`
+    if (fetchedKeyRef.current === key) return
+    fetchedKeyRef.current = key
+    void fetchToken()
+  }, [conversationId, info.attachmentId, fetchToken])
+
+  useEffect(() => {
+    if (!viewerUrl) return
+    timerRef.current = setTimeout(() => {
+      setState((prev) => (prev === 'loading' ? 'error' : prev))
+    }, LOAD_TIMEOUT_MS)
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [viewerUrl])
+
+  const handleLoad = () => {
+    loadCountRef.current += 1
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (loadCountRef.current > 1) {
+      setState('error')
+      return
+    }
+    timerRef.current = setTimeout(() => {
+      setState('ready')
+    }, REDIRECT_DETECT_MS)
+  }
+
+  const handleError = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setState('error')
+  }
+
+  if (state === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 p-8 text-center">
+        <div className={cn('size-16 grid place-items-center rounded-xl', visual.bg)}>
+          <visual.Icon className={cn('size-8', visual.fg)} />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-foreground">{info.filename}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{t('previewFailed')}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void fetchToken()}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <RefreshCw className="size-4" />
+            {t('retry')}
+          </button>
+          <a
+            href={info.downloadUrl}
+            download
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <Download className="size-4" />
+            {t('download')}
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative w-full flex-1">
+      {state === 'loading' && !viewerUrl && (
+        <div className="absolute inset-0 z-10">
+          <PreviewLoading />
+        </div>
+      )}
+      {viewerUrl && (
+        <iframe
+          ref={iframeRef}
+          src={viewerUrl}
+          className="w-full h-full border-0"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          onLoad={handleLoad}
+          onError={handleError}
+        />
+      )}
     </div>
   )
 }

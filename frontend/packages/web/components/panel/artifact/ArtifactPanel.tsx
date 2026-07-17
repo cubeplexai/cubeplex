@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
-import type { Artifact, ArtifactVersion } from '@cubebox/core'
+import { useArtifactStore, usePanelStore, createApiClient } from '@cubeplex/core'
+import type { Artifact, ArtifactVersion } from '@cubeplex/core'
 import { Download, ChevronDown } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 

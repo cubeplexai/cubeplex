@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useModelsStore, useProvidersStore } from '@cubebox/core'
+import { createApiClient, useModelsStore, useProvidersStore } from '@cubeplex/core'
 import { ModelsToolbar, type ProviderKind } from '@/components/admin/models/ModelsToolbar'
 import { ProviderList } from '@/components/admin/models/ProviderList'
 import { ProviderDetail } from '@/components/admin/models/ProviderDetail'

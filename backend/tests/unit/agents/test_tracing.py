@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.agents import tracing as tracing_mod
+from cubeplex.agents import tracing as tracing_mod
 
 
 def _fake_config(values: dict[str, object]):

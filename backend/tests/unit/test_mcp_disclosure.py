@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.disclosure — config, threshold gate, deferred groups."""
+"""Unit tests for cubeplex.mcp.disclosure — config, threshold gate, deferred groups."""
 
 from __future__ import annotations
 
@@ -7,19 +7,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cubebox.mcp.disclosure import (
+from cubeplex.mcp.disclosure import (
     DisclosureSettings,
     _compute_namespaced_tool_names,
     _spec_description,
     build_deferred_groups,
     disclosure_active,
 )
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _make_spec(
     *,
-    install_id: str = "inst-001",
+    connector_id: str = "inst-001",
     name: str = "GitHub",
     server_url: str = "https://mcp.example.com/github",
     transport: str = "streamable_http",
@@ -29,7 +29,7 @@ def _make_spec(
     tool_citations: dict[str, dict[str, Any]] | None = None,
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id=install_id,
+        connector_id=connector_id,
         name=name,
         server_url=server_url,
         transport=transport,
@@ -170,12 +170,12 @@ class TestComputeNamespacedToolNames:
 
     def test_slug_collision_appends_suffix(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-aaaa",
+            connector_id="inst-aaaa",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-bbbb",
+            connector_id="inst-bbbb",
             name="GitHub",
             tools_cache=[{"name": "list_repos"}],
         )
@@ -204,7 +204,7 @@ class TestLoadToolsForSpecs:
     async def test_returns_namespaced_tools_and_citations(self) -> None:
         from cubepi.agent.types import AgentTool
 
-        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
 
         fake_tool = AgentTool(
             name="create_issue",
@@ -228,12 +228,12 @@ class TestLoadToolsForSpecs:
 
         with (
             patch(
-                "cubebox.mcp.cubepi_runtime._resolve_auth_from_spec",
+                "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
                 new_callable=AsyncMock,
                 return_value=({}, spec.server_url),
             ),
             patch(
-                "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+                "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
                 new_callable=AsyncMock,
                 return_value=discovery,
             ),
@@ -256,11 +256,11 @@ class TestLoadToolsForSpecs:
 
     @pytest.mark.asyncio
     async def test_handles_auth_failure_gracefully(self) -> None:
-        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
 
         spec = _make_spec(name="BadServer")
         with patch(
-            "cubebox.mcp.cubepi_runtime._resolve_auth_from_spec",
+            "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
@@ -320,12 +320,12 @@ class TestBuildDeferredGroups:
 
     def test_multiple_specs_produce_multiple_groups(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-a",
+            connector_id="inst-a",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-b",
+            connector_id="inst-b",
             name="Slack",
             tools_cache=[{"name": "post_message"}],
         )
@@ -340,12 +340,12 @@ class TestBuildDeferredGroups:
 
     def test_slug_collision_disambiguates_group_id(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-aaaa",
+            connector_id="inst-aaaa",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-bbbb",
+            connector_id="inst-bbbb",
             name="GitHub",
             tools_cache=[{"name": "list_repos"}],
         )
@@ -380,7 +380,7 @@ class TestBuildDeferredGroups:
         )
 
         with patch(
-            "cubebox.mcp.disclosure._load_tools_for_specs_deferred",
+            "cubeplex.mcp.disclosure._load_tools_for_specs_deferred",
             new_callable=AsyncMock,
             return_value=([fake_tool], {"GitHub__create_issue": object()}),
         ) as mock_load:

@@ -10,21 +10,21 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Membership, Role, User
-from cubebox.models.credential import Credential
-from cubebox.models.trigger import Trigger, TriggerEvent
-from cubebox.repositories import (
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Membership, Role, User
+from cubeplex.models.credential import Credential
+from cubeplex.models.trigger import Trigger, TriggerEvent
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationRepository,
     TriggerEventRepository,
     TriggerRepository,
     WorkspaceRepository,
 )
-from cubebox.triggers.events import NormalizedEvent
-from cubebox.triggers.pipeline import TriggerPipeline
+from cubeplex.triggers.events import NormalizedEvent
+from cubeplex.triggers.pipeline import TriggerPipeline
 
 pytestmark = pytest.mark.e2e
 
@@ -38,11 +38,11 @@ def _make_app() -> tuple[FastAPI, async_sessionmaker[AsyncSession]]:
     url = _build_database_url()
     test_engine = create_async_engine(url, poolclass=NullPool)
     session_maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-    _cubebox_db.async_session_maker = session_maker
+    _cubeplex_db.async_session_maker = session_maker
 
     from collections.abc import AsyncIterator
 
-    from cubebox.db.session import get_session
+    from cubeplex.db.session import get_session
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with session_maker() as session:
@@ -198,7 +198,7 @@ async def test_happy_path_inline_new_each_time(pipeline_app):  # type: ignore[no
         assert updated.resulting_conversation_id is not None
 
         # Conversation must exist.
-        from cubebox.models import Conversation
+        from cubeplex.models import Conversation
 
         conv = await session.get(Conversation, updated.resulting_conversation_id)
         assert conv is not None

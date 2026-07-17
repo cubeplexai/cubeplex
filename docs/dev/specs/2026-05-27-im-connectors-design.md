@@ -4,9 +4,9 @@ Status: draft · Issue: #149 · Synergizes with: triggers (#152)
 
 ## Problem & motivation
 
-Today a workspace's agent is only reachable through the cubebox web UI. People live in
+Today a workspace's agent is only reachable through the cubeplex web UI. People live in
 Slack and Feishu. They want to @-mention an agent in a channel or DM it, get a threaded
-reply, and watch it work — without opening cubebox. This is the same pattern OpenClaw
+reply, and watch it work — without opening cubeplex. This is the same pattern OpenClaw
 ships: an IM message becomes an agent run, and the run's output streams back into the
 originating IM thread.
 
@@ -17,17 +17,17 @@ We want this to be bidirectional and faithful to how the web UI already works:
 - Outbound: the run's streamed text and tool activity flow back as a threaded IM reply
   that updates live as the agent works.
 
-This must respect cubebox's multi-tenant isolation: an IM account maps to exactly one
+This must respect cubeplex's multi-tenant isolation: an IM account maps to exactly one
 org/workspace, never leaks across tenants, and bot credentials live in the credential
 vault like every other secret.
 
 ## Goals
 
 - Let a workspace bind one or more IM bot accounts (Slack workspace, Feishu app).
-- Inbound IM message → agent run on a cubebox conversation, scoped to that workspace.
+- Inbound IM message → agent run on a cubeplex conversation, scoped to that workspace.
 - Outbound run events → a live-updating threaded reply in the source IM thread.
-- Map each IM thread to one cubebox conversation, deterministically and durably.
-- Map each IM sender to a cubebox user (or a per-account service identity).
+- Map each IM thread to one cubeplex conversation, deterministically and durably.
+- Map each IM sender to a cubeplex user (or a per-account service identity).
 - Store bot/signing credentials in the existing credential vault; never inline.
 - Scope-isolated config: separate workspace-scope and org-admin routes/pages.
 - Multi-tenant isolation enforced structurally, not by ACL bolted on.
@@ -46,19 +46,19 @@ vault like every other secret.
 
 The bridge sits on top of the existing run path; it does not invent a parallel one.
 
-- **Conversation model** — `backend/cubebox/models/conversation.py`. A `Conversation`
+- **Conversation model** — `backend/cubeplex/models/conversation.py`. A `Conversation`
   is `OrgScopedMixin` (carries `org_id` + `workspace_id`) plus `creator_user_id` and a
   `title`. Public ID prefix `conv`. An IM thread maps to one of these rows.
 - **Start a run** — `RunManager.start_run(conversation_id, content, attachments, ctx)`
-  in `backend/cubebox/streams/run_manager.py` (line ~482). It claims an active-run slot
+  in `backend/cubeplex/streams/run_manager.py` (line ~482). It claims an active-run slot
   in Redis (one active run per conversation), spawns `_execute_run` as a background
   task, and returns a `run_id`. `ctx` is a `RunContext(user_id, org_id, workspace_id)`.
 - **Run events** — `_execute_run` appends typed events (`text_delta`, `tool_call`,
   `tool_result`, `reasoning`, `artifact`, `done`, `error`) to a Redis stream via
-  `append_run_event` (`backend/cubebox/streams/run_events.py`). This is the same stream
+  `append_run_event` (`backend/cubeplex/streams/run_events.py`). This is the same stream
   the web SSE endpoint tails.
 - **SSE consumption** — `_build_run_streaming_response` in
-  `backend/cubebox/api/routes/v1/conversations.py` (line ~301) replays the Redis backlog
+  `backend/cubeplex/api/routes/v1/conversations.py` (line ~301) replays the Redis backlog
   then live-tails. The IM outbound side is a *second consumer* of this same stream — it
   reads the same events and renders them into an IM message instead of an SSE frame.
 - **History** — message history lives in the cubepi `PostgresCheckpointer`, read via
@@ -68,14 +68,14 @@ The bridge sits on top of the existing run path; it does not invent a parallel o
   `/api/v1/ws/{workspace_id}/...` guarded by `require_member` (`RequestContext`). Repos
   enforce `(org_id, workspace_id)` via `OrgScopedMixin` + `ScopedRepository`. Two
   deployment modes (`single_tenant`, `multi_tenant`) — see `backend/docs/auth.md`.
-- **Credential vault** — `backend/cubebox/models/credential.py` +
-  `backend/cubebox/services/credential.py`. One row per secret, `kind` discriminator,
+- **Credential vault** — `backend/cubeplex/models/credential.py` +
+  `backend/cubeplex/services/credential.py`. One row per secret, `kind` discriminator,
   `value_encrypted`. System creds use `org_id=NULL` + partial unique index
   `uq_credential_system_kind_name`; org-scoped creds set `org_id` +
   `uq_credential_org_kind_name`. We add a new `kind` for IM bot secrets and reuse the
   service as-is.
 - **Scope-tiered config precedent** — `MCPCredentialGrant`
-  (`backend/cubebox/models/mcp.py` ~219) is the model to mirror: one table, nullable
+  (`backend/cubeplex/models/mcp.py` ~219) is the model to mirror: one table, nullable
   `workspace_id`/`user_id`, a CHECK constraint pinning legal scope combinations, and
   partial unique indexes per scope. The sandbox-env vault
   (`docs/dev/plans/2026-05-25-sandbox-env-vault.md`) follows the same shape.
@@ -176,7 +176,7 @@ account.
 ### Inbound: webhook routing & verification
 
 - One ingress per platform: `POST /api/v1/im/slack/events`, `POST /api/v1/im/feishu/events`.
-  These are **unauthenticated by cubebox session** (no `require_member`) — they are
+  These are **unauthenticated by cubeplex session** (no `require_member`) — they are
   verified by the *platform's* signature (Slack signing secret; Feishu encrypt key +
   verification token). Signature check is mandatory before any work.
 - The payload identifies the IM account (Slack `team_id` / app id; Feishu `app_id`). We
@@ -184,7 +184,7 @@ account.
   `workspace_id`. An unknown account → 200 ack + drop (never error-leak).
 - Slack URL-verification challenge and Feishu `url_verification` are handled inline.
 - These IM ingress routes are deliberately **not** under `/ws/{workspace_id}/...` because
-  the caller is the platform, not a cubebox member; the workspace is *derived* from the
+  the caller is the platform, not a cubeplex member; the workspace is *derived* from the
   account, not asserted by the URL. Management routes (below) stay scope-isolated.
 
 ### Inbound idempotency (dedupe before any run)
@@ -234,7 +234,7 @@ in-process timing or the lease to avoid dropping an unstarted event.
   source of truth for "have we acted on this event"; the thread link only maps thread →
   conversation; the run queue is the source of truth for "this will be executed".
 - **Dependency:** this requires a durable run queue / outbox that a worker drains
-  independently of the web process. cubebox today starts runs in-process
+  independently of the web process. cubeplex today starts runs in-process
   (`RunManager.start_run` → `asyncio.create_task` over Redis run state), so this durable
   queue does not exist yet — see Open Questions. Until it lands, the lease-based receipt is
   the fallback, but it is explicitly a *narrowed*, not closed, window.
@@ -250,7 +250,7 @@ rather than duplicated per connector (see "Relationship to triggers").
 
 A new `IMThreadLink` table is the durable map. The uniqueness key is
 `(account_id, channel_id, scope_key)`. **`scope_key` is a non-null opaque
-string the connector owns** — cubebox guarantees uniqueness on it but does
+string the connector owns** — cubeplex guarantees uniqueness on it but does
 not interpret it. Each platform encodes its natural session boundary into
 the string. A separate `scope_kind` column records what the connector chose
 (`'dm' | 'participant' | 'thread' | 'thread_participant' | ...`); it is for
@@ -293,20 +293,20 @@ hermes-agent's validated UX.
 
 ### Identity mapping (IM user/channel → workspace/user)
 
-- An `IMIdentityLink` table maps `(account_id, im_user_id)` → cubebox `user_id`.
+- An `IMIdentityLink` table maps `(account_id, im_user_id)` → cubeplex `user_id`.
 - **Provisioning v1:** binding-level default. Each `IMConnectorAccount` names a single
-  cubebox user as the "acting user" for runs from that account (a service identity is
+  cubeplex user as the "acting user" for runs from that account (a service identity is
   acceptable). All runs from that account are attributed to that user. This is the
   simplest correct thing and is enough for a workspace-scoped bot.
 - **Optional verified linking (later):** a `/link` flow where an IM user proves they own
-  a cubebox account (e.g. enters a short code from the web UI), creating an
+  a cubeplex account (e.g. enters a short code from the web UI), creating an
   `IMIdentityLink`. Until then, falls back to the binding's acting user.
 - Attribution always lands inside the bound workspace's `(org_id, workspace_id)`, so
   multi-tenant isolation holds regardless of identity resolution: a Slack user with no
   link still cannot reach another tenant's data, because the *account* is what selects the
   workspace.
 - **`sender_ref` for `scope_key` is a separate facet from RunContext attribution.**
-  The cubebox `RunContext.user_id` is the binding's acting user (above); the inbound
+  The cubeplex `RunContext.user_id` is the binding's acting user (above); the inbound
   message's `sender_ref` (Feishu: union_id) is independently used to compose the
   group scope_key. These two must not be conflated — a per-user IMIdentityLink would
   upgrade attribution without changing scope, and vice versa.
@@ -321,7 +321,7 @@ exposes three ids per user:
   across DMs and groups for the same person.
 - `user_id` (`u_xxx`) — tenant-scoped; requires `contact:user.employee_id:readonly`.
 
-cubebox prefers `union_id` for `IMIdentityLink.im_user_id` AND as the `sender_ref`
+cubeplex prefers `union_id` for `IMIdentityLink.im_user_id` AND as the `sender_ref`
 that composes `scope_key` (groups), with `open_id` as a fallback. `open_id` is used
 exclusively for the group mention gate (mentioned_open_id == bot_open_id).
 
@@ -339,14 +339,14 @@ exclusively for the group mention gate (mentioned_open_id == bot_open_id).
 ### Data model (new tables)
 
 Public ID prefixes follow the per-model `_PREFIX` convention (no edit to
-`backend/cubebox/models/public_id.py` needed): `imac` (account), `imtl` (thread
+`backend/cubeplex/models/public_id.py` needed): `imac` (account), `imtl` (thread
 link), `imil` (identity link), `imwr` (webhook receipt), `imrq` (run queue item).
 
 - **`IMConnectorAccount`** (`OrgScopedMixin`): `platform` (`slack`|`feishu`),
   `external_account_id` (Slack team/app id, Feishu app id), `workspace_id` (the bound
   workspace), `acting_user_id` (default attribution), `credential_id` (FK to vault),
   `delivery_mode` (`webhook` v1), `enabled`, config JSON. Partial unique index on
-  `(platform, external_account_id)` so an external IM account binds to at most one cubebox
+  `(platform, external_account_id)` so an external IM account binds to at most one cubeplex
   account row.
 - **`IMThreadLink`** (`OrgScopedMixin`): `account_id` (FK), `channel_id`,
   **`scope_key`** (non-null, opaque connector-owned string), **`scope_kind`** (label
@@ -486,7 +486,7 @@ Slack server and call it E2E.
   conversation is created/reused, (b) a run starts with the correct `RunContext`, (c) the
   outbound core consumes the run's real Redis event stream. The agent run itself is the
   existing E2E run path (already covered), so this exercises the full inbound→run→stream
-  chain without mocking cubebox internals.
+  chain without mocking cubeplex internals.
 - **Signature verification** as focused unit tests with real platform fixtures (valid +
   tampered Slack HMAC; valid + bad Feishu encrypt/token) — security-critical, cheap.
 - **Outbound rendering** as unit tests: given a sequence of run events, assert the
@@ -514,12 +514,12 @@ Slack server and call it E2E.
 - **Rate-limit backpressure.** When a run emits faster than the platform allows edits,
   do we drop intermediate frames (latest-wins) or risk lag? Latest-wins is assumed.
 - **Tool activity verbosity.** How much tool detail belongs in IM vs a "view full run in
-  cubebox" deep link? Default: compact summary + deep link.
+  cubeplex" deep link? Default: compact summary + deep link.
 - **Attachments / files.** Inbound IM file uploads and outbound artifacts — in scope for
   v1 or deferred? (Web already has an attachment path to reuse.)
 - **Durable run queue / outbox (dependency).** The idempotency design commits the receipt
   and the run enqueue in one transaction, then a worker drains the queue and calls
-  `start_run`. cubebox today starts runs in-process (`asyncio.create_task` over Redis run
+  `start_run`. cubeplex today starts runs in-process (`asyncio.create_task` over Redis run
   state) with no durable queue, so this table + drainer must be built (or adopted from
   whatever #152 triggers introduce) before the crash window is truly closed. Open: does the
   outbox row live in the same DB so it joins the receipt transaction, with a poller flipping
@@ -556,9 +556,9 @@ Slack server and call it E2E.
 - Bridging patterns — [OpenClaw Slack](https://docs.openclaw.ai/channels/slack),
   [OpenClaw Feishu](https://docs.openclaw.ai/channels/feishu),
   [OpenClaw multi-agent routing](https://docs.openclaw.ai/concepts/multi-agent)
-- Internal — `backend/cubebox/streams/run_manager.py` (`start_run`),
-  `backend/cubebox/streams/run_events.py` (`append_run_event`, run stream tail),
-  `backend/cubebox/api/routes/v1/conversations.py` (SSE consumption pattern),
-  `backend/cubebox/models/conversation.py`, `backend/cubebox/models/credential.py`,
-  `backend/cubebox/models/mcp.py` (`MCPCredentialGrant` scope pattern),
+- Internal — `backend/cubeplex/streams/run_manager.py` (`start_run`),
+  `backend/cubeplex/streams/run_events.py` (`append_run_event`, run stream tail),
+  `backend/cubeplex/api/routes/v1/conversations.py` (SSE consumption pattern),
+  `backend/cubeplex/models/conversation.py`, `backend/cubeplex/models/credential.py`,
+  `backend/cubeplex/models/mcp.py` (`MCPCredentialGrant` scope pattern),
   `docs/dev/plans/2026-05-25-sandbox-env-vault.md`, `backend/docs/auth.md`.

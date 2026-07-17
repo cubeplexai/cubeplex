@@ -126,8 +126,8 @@ async def test_upload_filename_path_traversal_is_sanitized(
     """Multipart filename like ../../etc/passwd must NOT escape the upload prefix."""
     from sqlalchemy import select as sa_select
 
-    from cubebox.db.engine import async_session_maker
-    from cubebox.models import Attachment
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.models import Attachment
 
     client, ws_id = member_client_org_a
     conv_id = await _make_conversation(client, ws_id)

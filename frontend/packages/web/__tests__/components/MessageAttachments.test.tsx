@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MessageAttachments, type MessageAttachmentDto } from '@/components/chat/MessageAttachments'
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({
     workspaceId: null,
     setWorkspaceId: vi.fn(),

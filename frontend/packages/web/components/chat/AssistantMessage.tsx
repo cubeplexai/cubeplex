@@ -6,19 +6,25 @@ import type {
   AssistantMessage as AssistantMessageType,
   ContentBlock,
   PendingConfirm,
+  SessionUsage,
   SubagentSummary,
   TodoItem,
-} from '@cubebox/core'
-import type { AgentStream } from '@cubebox/core'
-import { useArtifactStore } from '@cubebox/core'
+  TurnUsage,
+} from '@cubeplex/core'
+import type { AgentStream } from '@cubeplex/core'
+import { useArtifactStore } from '@cubeplex/core'
 import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
 import { ArtifactCard } from './ArtifactCard'
-import { ImageGenerationCard } from './ImageGenerationCard'
+import { ImageArtifactCard } from './ImageArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
+import { MessageActions } from './MessageActions'
+import { CopyButton, TimeChip } from './MessageMeta'
+import { TokenUsageBar } from './TokenUsageBar'
+import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
 import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
@@ -145,6 +151,36 @@ interface HistoryProps {
   subagentDataMap?: Record<string, SubagentSummary>
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   conversationId?: string
+  workspaceId?: string | null
+  isGroupChat?: boolean
+  // Whether a turn is streaming somewhere in this conversation. If
+  // ``activeRunId === message.run_id`` the fork action greys out for
+  // this bubble (mid-turn fork is rejected by the backend with
+  // run_not_completed).
+  activeRunId?: string | null
+  isStreamingTurn?: boolean
+  // Whether to render the per-turn action row (token chip, fork button,
+  // memory chip if last run) for this bubble. Set by MessageList for the
+  // *last* assistant message of each completed run, so the row anchors
+  // 1:1 to cubepi's run-granular ``cp.fork(after_run_id=...)`` —
+  // intermediate tool-use bubbles in a multi-step turn would all collapse
+  // to the same fork point.
+  showForkAction?: boolean
+  // Per-run token usage summed from this run's assistant messages. Drives
+  // the per-turn TokenUsageBar; null hides the chip.
+  turnUsage?: TurnUsage | null
+  // The run's text output joined across every assistant message sharing
+  // its run_id (thinking + tool_call blocks filtered out). Powers the
+  // copy button so a multi-step turn copies as one block.
+  turnCopyText?: string
+  // True when this anchor is the latest completed run in the conversation.
+  // Gates the session/context view inside TokenUsageBar and the
+  // MemoryUpdateChip — both are conversation-level signals that only make
+  // sense at the tail.
+  isLastRun?: boolean
+  sessionUsage?: SessionUsage | null
+  contextWindow?: number | null
+  contextTokens?: number | null
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -159,6 +195,17 @@ interface StreamingProps {
   subagentDataMap?: never
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   conversationId?: string
+  workspaceId?: string | null
+  isGroupChat?: boolean
+  activeRunId?: string | null
+  isStreamingTurn?: boolean
+  showForkAction?: never
+  turnUsage?: never
+  turnCopyText?: never
+  isLastRun?: never
+  sessionUsage?: never
+  contextWindow?: never
+  contextTokens?: never
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -311,6 +358,9 @@ function ContentBlockRenderer({
       }
     }
     if (artifact) {
+      if (artifact.artifact_type === 'image') {
+        return <ImageArtifactCard caption={artifact.name} artifact={artifact} />
+      }
       return <ArtifactCard artifact={artifact} />
     }
     if (isStreaming || !toolResult) {
@@ -341,7 +391,7 @@ function ContentBlockRenderer({
         /* ignore */
       }
     }
-    return <ImageGenerationCard prompt={args.prompt ?? ''} artifact={artifact} />
+    return <ImageArtifactCard caption={args.prompt ?? ''} artifact={artifact} />
   }
   if (block.type === 'tool_call' && isSkillsFindCall(block)) {
     const toolResult = toolResultMap[block.id]
@@ -416,7 +466,7 @@ function ContentBlockRenderer({
   }
   if (block.type === 'tool_call_streaming' && block.name === 'generate_image') {
     const prompt = extractJsonStringPrefix(block.args_text, 'prompt')
-    return <ImageGenerationCard prompt={prompt} artifact={null} />
+    return <ImageArtifactCard caption={prompt} artifact={null} />
   }
   if (block.type === 'tool_call_streaming') {
     const supportsPreview = block.name === 'write_file'
@@ -525,6 +575,17 @@ export function AssistantMessage({
   toolResultMap,
   todos,
   conversationId,
+  workspaceId,
+  isGroupChat,
+  activeRunId,
+  isStreamingTurn,
+  showForkAction,
+  turnUsage,
+  turnCopyText,
+  isLastRun,
+  sessionUsage,
+  contextWindow,
+  contextTokens,
   pendingConfirmMap,
   onSandboxConfirm,
 }: AssistantMessageProps) {
@@ -600,7 +661,7 @@ export function AssistantMessage({
   }
 
   return (
-    <div data-role="assistant" className="space-y-2">
+    <div data-role="assistant" className="group space-y-2">
       {(grouped.length > 0 || totalSubagents >= 2 || showErrorBubble) && (
         <div className="flex justify-start gap-2.5">
           <div
@@ -633,6 +694,35 @@ export function AssistantMessage({
                     {errorMessage}
                   </pre>
                 </div>
+              </div>
+            )}
+            {message && conversationId && showForkAction && (
+              <div
+                className="flex flex-wrap items-center gap-1 opacity-0
+                  transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+              >
+                <CopyButton content={turnCopyText ?? ''} />
+                {turnUsage && (
+                  <TokenUsageBar
+                    turnUsage={turnUsage}
+                    sessionUsage={isLastRun ? (sessionUsage ?? null) : null}
+                    contextWindow={isLastRun ? (contextWindow ?? null) : null}
+                    contextTokens={isLastRun ? (contextTokens ?? null) : null}
+                    showSessionView={isLastRun ?? false}
+                  />
+                )}
+                {isLastRun && workspaceId && (
+                  <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
+                )}
+                <MessageActions
+                  conversationId={conversationId}
+                  workspaceId={workspaceId ?? null}
+                  runId={message.run_id}
+                  isGroupChat={isGroupChat ?? false}
+                  activeRunId={activeRunId ?? null}
+                  isStreaming={isStreamingTurn ?? false}
+                />
+                <TimeChip timestamp={message.timestamp ?? null} />
               </div>
             )}
           </div>

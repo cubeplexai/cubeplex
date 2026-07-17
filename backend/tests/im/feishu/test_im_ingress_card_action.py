@@ -14,7 +14,7 @@ class _FakeRunManager:
 
 @pytest.mark.asyncio
 async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     resume_calls: list[dict[str, Any]] = []
 
@@ -25,7 +25,7 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
     redis_state: dict[str, str] = {
-        "cubebox-dev:run:run_1:awaiting_responder": "ou_user_1",
+        "cubeplex-dev:run:run_1:awaiting_responder": "ou_user_1",
     }
 
     async def fake_get(key: str) -> str | None:
@@ -58,7 +58,7 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
     }
     rm = _FakeRunManager()
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=rm, redis_key_prefix="cubebox-dev"
+        event, run_manager=rm, redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast is None
@@ -79,7 +79,7 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
 async def test_card_action_token_replay_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     resume_calls: list[Any] = []
 
@@ -89,7 +89,7 @@ async def test_card_action_token_replay_idempotent(
 
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
-    redis_state: dict[str, str] = {"cubebox-dev:run:run_1:awaiting_responder": "ou_user_1"}
+    redis_state: dict[str, str] = {"cubeplex-dev:run:run_1:awaiting_responder": "ou_user_1"}
 
     async def fake_get(k: str) -> str | None:
         return redis_state.get(k)
@@ -112,8 +112,8 @@ async def test_card_action_token_replay_idempotent(
         },
     }
     rm = _FakeRunManager()
-    await im_ingress._handle_card_action(event, run_manager=rm, redis_key_prefix="cubebox-dev")
-    await im_ingress._handle_card_action(event, run_manager=rm, redis_key_prefix="cubebox-dev")
+    await im_ingress._handle_card_action(event, run_manager=rm, redis_key_prefix="cubeplex-dev")
+    await im_ingress._handle_card_action(event, run_manager=rm, redis_key_prefix="cubeplex-dev")
     assert len(resume_calls) == 1  # second call no-op'd by token replay guard
 
 
@@ -121,14 +121,14 @@ async def test_card_action_token_replay_idempotent(
 async def test_card_action_responder_mismatch_returns_toast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     async def fake_resume(**_: Any) -> bool:
         raise AssertionError("must not call resume on mismatch")
 
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
-    redis_state = {"cubebox-dev:run:run_1:awaiting_responder": "ou_user_1"}
+    redis_state = {"cubeplex-dev:run:run_1:awaiting_responder": "ou_user_1"}
 
     async def fake_get(k: str) -> str | None:
         return redis_state.get(k)
@@ -148,7 +148,7 @@ async def test_card_action_responder_mismatch_returns_toast(
         },
     }
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=_FakeRunManager(), redis_key_prefix="cubebox-dev"
+        event, run_manager=_FakeRunManager(), redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast == "这不是发给你的"
@@ -158,14 +158,14 @@ async def test_card_action_responder_mismatch_returns_toast(
 async def test_card_action_resume_exception_returns_friendly_toast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     async def fake_resume(**_: Any) -> bool:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
-    redis_state = {"cubebox-dev:run:run_1:awaiting_responder": "ou_user_1"}
+    redis_state = {"cubeplex-dev:run:run_1:awaiting_responder": "ou_user_1"}
 
     async def fake_get(k: str) -> str | None:
         return redis_state.get(k)
@@ -185,7 +185,7 @@ async def test_card_action_resume_exception_returns_friendly_toast(
         },
     }
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=_FakeRunManager(), redis_key_prefix="cubebox-dev"
+        event, run_manager=_FakeRunManager(), redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast == "暂时无法响应"
@@ -197,14 +197,14 @@ async def test_card_action_resume_returns_false_surfaces_ended_toast(
 ) -> None:
     """When resume_paused_run returns False (run no longer pending) the
     user sees the "会话已结束" toast rather than a generic error."""
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     async def fake_resume(**_: Any) -> bool:
         return False
 
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
-    redis_state = {"cubebox-dev:run:run_1:awaiting_responder": "ou_user_1"}
+    redis_state = {"cubeplex-dev:run:run_1:awaiting_responder": "ou_user_1"}
 
     async def fake_get(k: str) -> str | None:
         return redis_state.get(k)
@@ -224,7 +224,7 @@ async def test_card_action_resume_returns_false_surfaces_ended_toast(
         },
     }
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=_FakeRunManager(), redis_key_prefix="cubebox-dev"
+        event, run_manager=_FakeRunManager(), redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast == "会话已结束"
@@ -234,7 +234,7 @@ async def test_card_action_resume_returns_false_surfaces_ended_toast(
 async def test_card_action_invalid_payload_returns_toast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     async def fake_setnx(*_: Any, **__: Any) -> bool:
         return True
@@ -250,7 +250,7 @@ async def test_card_action_invalid_payload_returns_toast(
         },
     }
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=_FakeRunManager(), redis_key_prefix="cubebox-dev"
+        event, run_manager=_FakeRunManager(), redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast == "未知操作"
@@ -258,7 +258,7 @@ async def test_card_action_invalid_payload_returns_toast(
 
 @pytest.mark.asyncio
 async def test_card_action_missing_token_returns_toast() -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     event = {
         "header": {"event_type": "card.action.trigger"},
@@ -268,7 +268,7 @@ async def test_card_action_missing_token_returns_toast() -> None:
         },
     }
     handled, toast = await im_ingress._handle_card_action(
-        event, run_manager=_FakeRunManager(), redis_key_prefix="cubebox-dev"
+        event, run_manager=_FakeRunManager(), redis_key_prefix="cubeplex-dev"
     )
     assert handled is True
     assert toast == "缺少 token"

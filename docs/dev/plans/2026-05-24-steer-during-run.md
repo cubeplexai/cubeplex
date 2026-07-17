@@ -4,9 +4,9 @@
 
 **Goal:** Let a user type and send a message *while* an agent run is streaming; the message is injected into the live run as a steering message (the model picks it up at the next safe point) rather than starting a new turn.
 
-**Architecture:** cubepi's `Agent` exposes `steer(message)`, and the loop drains steering messages at loop start and after each tool batch *when more tool calls remain*. That last condition leaves a gap: a steer that arrives while the model is finishing a turn with **no** further tool calls (a final text answer, or a tool-less run) is never drained and is silently dropped. So **cubepi needs one small upstream change** (Task 0) to also drain steering at the turn boundary and continue. The rest is plumbing: cubebox holds no handle to the live `Agent`, so `RunManager` gains a `run_id → Agent` registry (mirroring how it tracks `run_id → asyncio.Task` for cancel). A new `POST /conversations/{id}/steer` endpoint finds the active run's agent and calls `agent.steer(...)`. The frontend enables the textarea during streaming and, when it has text, turns the Stop button into a Send button that calls a new `steer()` store action which optimistically appends the user message and hits the endpoint.
+**Architecture:** cubepi's `Agent` exposes `steer(message)`, and the loop drains steering messages at loop start and after each tool batch *when more tool calls remain*. That last condition leaves a gap: a steer that arrives while the model is finishing a turn with **no** further tool calls (a final text answer, or a tool-less run) is never drained and is silently dropped. So **cubepi needs one small upstream change** (Task 0) to also drain steering at the turn boundary and continue. The rest is plumbing: cubeplex holds no handle to the live `Agent`, so `RunManager` gains a `run_id → Agent` registry (mirroring how it tracks `run_id → asyncio.Task` for cancel). A new `POST /conversations/{id}/steer` endpoint finds the active run's agent and calls `agent.steer(...)`. The frontend enables the textarea during streaming and, when it has text, turns the Stop button into a Send button that calls a new `steer()` store action which optimistically appends the user message and hits the endpoint.
 
-**Cross-repo ordering:** Task 0 ships in `~/cubepi` as its own PR (codex loop), then cubebox bumps the `cubepi` pin in `backend/pyproject.toml` to the merged SHA (Task 0b) before the cubebox feature can rely on tail-steer. The cubebox endpoint/registry (Tasks 1-2) work against today's cubepi too — they just won't honor tail steers until the bump lands.
+**Cross-repo ordering:** Task 0 ships in `~/cubepi` as its own PR (codex loop), then cubeplex bumps the `cubepi` pin in `backend/pyproject.toml` to the merged SHA (Task 0b) before the cubeplex feature can rely on tail-steer. The cubeplex endpoint/registry (Tasks 1-2) work against today's cubepi too — they just won't honor tail steers until the bump lands.
 
 **Tech Stack:** FastAPI + cubepi runtime (backend), Zustand + React 19 + Next.js (frontend), pytest + vitest.
 
@@ -22,10 +22,10 @@
 - Modify `cubepi/agent/loop.py` — drain steering at the turn boundary (not only when more tool calls remain).
 - Test `tests/agent/test_steering.py` (or existing steering test) — a steer drained at the tail re-invokes the model.
 
-**Backend (cubebox)**
+**Backend (cubeplex)**
 - Modify `backend/pyproject.toml` — bump `cubepi` pin to the merged Task 0 SHA.
-- Modify `backend/cubebox/streams/run_manager.py` — add `self._agents: dict[str, Any]` registry; register the live `Agent` in `_run_cubepi_path`; add `RunManager.steer_run(run_id, content)`.
-- Modify `backend/cubebox/api/routes/v1/conversations.py` — add `SteerMessageRequest` model + `POST /{conversation_id}/steer` handler (mirrors `cancel_active_run`).
+- Modify `backend/cubeplex/streams/run_manager.py` — add `self._agents: dict[str, Any]` registry; register the live `Agent` in `_run_cubepi_path`; add `RunManager.steer_run(run_id, content)`.
+- Modify `backend/cubeplex/api/routes/v1/conversations.py` — add `SteerMessageRequest` model + `POST /{conversation_id}/steer` handler (mirrors `cancel_active_run`).
 - Test `backend/tests/unit/test_run_manager_steer.py` — registry + `steer_run` against a fake agent.
 - Test `backend/tests/e2e/test_steer_endpoint.py` — endpoint finds active run and steers (real run, blocking tool).
 
@@ -39,7 +39,7 @@
 
 ## Task 0: cubepi — drain steering at the turn boundary
 
-**Repo:** `~/cubepi` (NOT the cubebox worktree). Branch off `origin/main`:
+**Repo:** `~/cubepi` (NOT the cubeplex worktree). Branch off `origin/main`:
 `cd ~/cubepi && git fetch origin && git checkout -b fix/steer-at-turn-boundary origin/main`
 
 **Files:**
@@ -141,7 +141,7 @@ Then run `/pr-codex-review-loop` for the cubepi PR until clean, and merge. **Rec
 
 ---
 
-## Task 0b: cubebox — bump cubepi pin to the Task 0 SHA
+## Task 0b: cubeplex — bump cubepi pin to the Task 0 SHA
 
 **Files:**
 - Modify: `backend/pyproject.toml`, `backend/uv.lock`
@@ -172,7 +172,7 @@ git commit -m "chore(deps): bump cubepi pin for turn-boundary steer fix"
 ## Task 1: Backend — RunManager agent registry + `steer_run`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: `backend/tests/unit/test_run_manager_steer.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -184,7 +184,7 @@ Create `backend/tests/unit/test_run_manager_steer.py`:
 
 import pytest
 
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 class _FakeAgent:
@@ -231,7 +231,7 @@ Expected: FAIL — `AttributeError: 'RunManager' object has no attribute '_agent
 
 - [ ] **Step 3: Add the registry field in `RunManager.__init__`**
 
-In `backend/cubebox/streams/run_manager.py`, inside `RunManager.__init__` (right after `self._tasks: dict[str, asyncio.Task[None]] = {}`), add:
+In `backend/cubeplex/streams/run_manager.py`, inside `RunManager.__init__` (right after `self._tasks: dict[str, asyncio.Task[None]] = {}`), add:
 
 ```python
         self._agents: dict[str, Any] = {}
@@ -262,7 +262,7 @@ In `RunManager`, add this method next to `cancel_run`:
 
 - [ ] **Step 5: Register / unregister the live agent in `_run_cubepi_path`**
 
-In `_run_cubepi_path`, the agent is created via `create_cubebox_agent(...)` and then `agent.subscribe(_on_event)`. Immediately after `agent.subscribe(_on_event)` register it; wrap the prompt/teardown so it's always removed.
+In `_run_cubepi_path`, the agent is created via `create_cubeplex_agent(...)` and then `agent.subscribe(_on_event)`. Immediately after `agent.subscribe(_on_event)` register it; wrap the prompt/teardown so it's always removed.
 
 Find this block:
 
@@ -301,13 +301,13 @@ Then locate the existing `finally:` that drains the sse_queue (the one containin
 
 - [ ] **Step 7: Run tests + typecheck**
 
-Run: `cd backend && uv run pytest tests/unit/test_run_manager_steer.py -v && uv run mypy cubebox/streams/run_manager.py`
+Run: `cd backend && uv run pytest tests/unit/test_run_manager_steer.py -v && uv run mypy cubeplex/streams/run_manager.py`
 Expected: 2 passed; mypy `Success`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_steer.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_steer.py
 git commit -m "feat(runs): add live-agent registry + steer_run to RunManager"
 ```
 
@@ -316,12 +316,12 @@ git commit -m "feat(runs): add live-agent registry + steer_run to RunManager"
 ## Task 2: Backend — steer endpoint
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 - Test: `backend/tests/e2e/test_steer_endpoint.py`
 
 - [ ] **Step 1: Add the request model + handler**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, add a request model near `SendMessageRequest`:
+In `backend/cubeplex/api/routes/v1/conversations.py`, add a request model near `SendMessageRequest`:
 
 ```python
 class SteerMessageRequest(BaseModel):
@@ -453,7 +453,7 @@ async def test_steer_injects_user_message_into_active_run(member_client) -> None
 
 - [ ] **Step 3: Verify the endpoint with the unit-level run + lint/type**
 
-Run: `cd backend && uv run ruff check cubebox/api/routes/v1/conversations.py && uv run mypy cubebox/api/routes/v1/conversations.py`
+Run: `cd backend && uv run ruff check cubeplex/api/routes/v1/conversations.py && uv run mypy cubeplex/api/routes/v1/conversations.py`
 Expected: All checks pass; mypy `Success`.
 
 (The E2E in Step 2 needs a real LLM + sandbox; run it in the worktree once `.env` and `config.development.local.yaml` are copied in — see Task 6.)
@@ -461,7 +461,7 @@ Expected: All checks pass; mypy `Success`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/conversations.py backend/tests/e2e/test_steer_endpoint.py
+git add backend/cubeplex/api/routes/v1/conversations.py backend/tests/e2e/test_steer_endpoint.py
 git commit -m "feat(api): add POST /conversations/{id}/steer endpoint"
 ```
 
@@ -499,7 +499,7 @@ export async function steerRun(
 
 - [ ] **Step 2: Build core to typecheck**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: `tsc` exits cleanly.
 
 - [ ] **Step 3: Commit**
@@ -588,7 +588,7 @@ describe('messageStore.steer', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- messageStoreSteer`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- messageStoreSteer`
 Expected: FAIL — `steer is not a function`.
 
 - [ ] **Step 3: Add `steer` to the `MessageStore` interface**
@@ -669,12 +669,12 @@ In the store object, add the action next to `cancelStream`:
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- messageStoreSteer`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- messageStoreSteer`
 Expected: 4 passed.
 
 - [ ] **Step 7: Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: `tsc` clean.
 
 - [ ] **Step 8: Commit**
@@ -738,7 +738,7 @@ describe('trimHistoryForActiveRun with steers', () => {
 
 `trimHistoryForActiveRun` is currently a module-private function. Add `export` to its declaration so the test can import it. Then:
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- messageStoreTrim`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- messageStoreTrim`
 Expected: FAIL — first test finds a `pending-run-1` duplicate.
 
 - [ ] **Step 3: Fix the scan to find the original, not just the last user turn**
@@ -775,12 +775,12 @@ export function trimHistoryForActiveRun(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- messageStoreTrim`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- messageStoreTrim`
 Expected: 2 passed.
 
 - [ ] **Step 5: Run the full core suite (guard the no-steer path)**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all green — confirms the existing single-user-turn trim behavior is unchanged.
 
 > **Known v1 limitation:** when the original is found, history is trimmed through it and the SSE replay reconstructs the rest — but checkpointed steer turns (which are NOT in the Redis event stream) are sliced away, so a steer entered before a mid-run reload won't show until the run completes and history is re-read clean. Acceptable for v1; no data loss.
@@ -931,7 +931,7 @@ Run backend + frontend in the worktree (ports from `.worktree.env`: API 8001, we
 
 ```bash
 # terminal 1
-cd backend && CUBEBOX_API__HOST=0.0.0.0 uv run python main.py
+cd backend && CUBEPLEX_API__HOST=0.0.0.0 uv run python main.py
 # terminal 2
 cd frontend && pnpm dev   # wrapped script picks up PORT=3001 from .worktree.env
 ```
@@ -947,7 +947,7 @@ Report what you observed (golden path + the empty-box Stop fallback). If you can
 
 - [ ] **Step 5: Lint + build web**
 
-Run: `cd frontend && pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/web lint && pnpm --filter @cubeplex/core build`
 Expected: clean.
 
 - [ ] **Step 6: Commit**
@@ -968,8 +968,8 @@ git commit -m "feat(input): steer the live run when typing during a stream"
 The worktree needs `backend/.env` and `backend/config.development.local.yaml` (both gitignored) copied from the main checkout before E2E can hit a real LLM + sandbox:
 
 ```bash
-cp /home/chris/cubebox/backend/.env backend/.env
-cp /home/chris/cubebox/backend/config.development.local.yaml backend/config.development.local.yaml
+cp /home/chris/cubeplex/backend/.env backend/.env
+cp /home/chris/cubeplex/backend/config.development.local.yaml backend/config.development.local.yaml
 ```
 
 - [ ] **Step 2: Backend changed-module tests**
@@ -983,12 +983,12 @@ Expected: PASS — the `STEER_MARKER_42` user turn appears in history.
 
 - [ ] **Step 3: Frontend tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all green (incl. `messageStoreSteer`).
 
 - [ ] **Step 4: Pre-PR full sweep + hooks**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/steer-during-run && make check-ci`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/steer-during-run && make check-ci`
 Expected: backend ruff + mypy + unit pass; frontend build + lint + format + type-check + vitest pass.
 
 - [ ] **Step 5: Commit any fixups, then hand off to the PR + codex review loop**

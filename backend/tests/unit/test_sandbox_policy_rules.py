@@ -1,4 +1,4 @@
-from cubebox.sandbox_policy.rules import (
+from cubeplex.sandbox_policy.rules import (
     build_network_policy,
     evaluate_command,
     split_shell_command,

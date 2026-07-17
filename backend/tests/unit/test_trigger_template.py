@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.triggers.template import render
+from cubeplex.triggers.template import render
 
 
 class TestRender:

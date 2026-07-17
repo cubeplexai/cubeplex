@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.asyncio
@@ -49,8 +49,9 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                     text(
                         "INSERT INTO conversations (id, org_id, workspace_id,"
                         " creator_user_id, title, has_messages, is_group_chat,"
-                        " created_at, updated_at)"
-                        " VALUES (:id, :org, :ws, :uid, 'seed', true, false, NOW(), NOW())"
+                        " reasoning, attributes, created_at, updated_at)"
+                        " VALUES (:id, :org, :ws, :uid, 'seed', true, false,"
+                        " '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
                         " ON CONFLICT (id) DO NOTHING"
                     ),
                     {"id": conv_id, "org": DEFAULT_ORG_ID, "ws": DEFAULT_WS_ID, "uid": uid},

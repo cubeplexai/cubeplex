@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import type { Provider, ProviderCreate, ProviderUpdate } from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { ProviderConfigForm } from './ProviderConfigForm'
 

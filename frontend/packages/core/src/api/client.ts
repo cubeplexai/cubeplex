@@ -9,7 +9,7 @@
  *     Paths starting with /api/v1/auth/ or /api/v1/workspaces are left alone
  *     (workspace-neutral).
  *   - X-CSRF-Token is injected on non-GET methods, read from document.cookie
- *     (CSRF_COOKIE_NAME — defaults to "cubebox_csrf"; per-worktree override via
+ *     (CSRF_COOKIE_NAME — defaults to "cubeplex_csrf"; per-worktree override via
  *     NEXT_PUBLIC_CSRF_COOKIE_NAME).
  *
  * 401 observable: any response with status 401 fires all registered
@@ -65,7 +65,7 @@ function injectWorkspace(path: string, wsId: string): string {
   return `${SCOPED_ROOT}ws/${wsId}/${path.slice(SCOPED_ROOT.length)}`
 }
 
-function readCookie(name: string): string {
+export function readCookie(name: string): string {
   if (typeof document === 'undefined') return ''
   const match = document.cookie.split('; ').find((c) => c.startsWith(`${name}=`))
   return match ? decodeURIComponent(match.slice(name.length + 1)) : ''
@@ -148,10 +148,11 @@ export function createApiClient(baseUrl: string): ApiClient {
       })
     },
     put(path, body) {
+      const isFormData = body instanceof FormData
       return doFetch(path, {
         method: 'PUT',
-        headers: buildHeaders('PUT', { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
+        headers: buildHeaders('PUT', isFormData ? {} : { 'Content-Type': 'application/json' }),
+        body: isFormData ? body : JSON.stringify(body),
       })
     },
     patch(path, body) {

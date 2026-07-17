@@ -9,6 +9,7 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
+@pytest.mark.real_llm
 async def test_send_message_returns_sse_stream(memory_client: httpx.AsyncClient) -> None:
     # Create conversation first
     resp = await memory_client.post(
@@ -27,6 +28,7 @@ async def test_send_message_returns_sse_stream(memory_client: httpx.AsyncClient)
 
 
 @pytest.mark.asyncio
+@pytest.mark.real_llm
 async def test_stream_contains_text_delta(memory_client: httpx.AsyncClient) -> None:
     resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}
@@ -45,6 +47,7 @@ async def test_stream_contains_text_delta(memory_client: httpx.AsyncClient) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.real_llm
 async def test_list_messages_returns_history_after_send(memory_client: httpx.AsyncClient) -> None:
     resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}

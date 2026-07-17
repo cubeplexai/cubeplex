@@ -1,6 +1,6 @@
 'use client'
 
-import type { MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubeplex/core'
 import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 

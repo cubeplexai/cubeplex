@@ -17,7 +17,7 @@
 ## File Structure
 
 ```
-backend/cubebox/
+backend/cubeplex/
 ├── models/
 │   ├── provider.py              # CREATE: Provider, Model SQLModel
 │   ├── org_settings.py          # CREATE: OrgSettings SQLModel
@@ -93,7 +93,7 @@ frontend/packages/web/
 - [ ] **Step 1: Check existing backend deps**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/backend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/backend
 grep -E "uuid-utils|cryptography|pyjwt" pyproject.toml
 ```
 
@@ -102,14 +102,14 @@ Expected: `uuid-utils` and `cryptography` already present. PyJWT present (from f
 - [ ] **Step 2: Install shadcn components for frontend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/frontend/packages/web
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/frontend/packages/web
 npx shadcn-ui@latest add radio-group switch combobox accordion
 ```
 
 - [ ] **Step 3: Verify imports**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/backend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/backend
 uv run python -c "from uuid_utils import uuid7; from sqlmodel import SQLModel, Field; from sqlalchemy import Column, JSON; print('ok')"
 ```
 
@@ -120,13 +120,13 @@ Expected: `ok`
 ### Task 2: Provider + Model SQLModel tables
 
 **Files:**
-- Create: `backend/cubebox/models/provider.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/provider.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Create provider.py model file**
 
 ```python
-# backend/cubebox/models/provider.py
+# backend/cubeplex/models/provider.py
 """Provider and Model — LLM provider/model configuration tables."""
 
 from datetime import UTC, datetime
@@ -194,8 +194,8 @@ class Model(SQLModel, table=True):
 - [ ] **Step 2: Register in models `__init__.py`**
 
 ```python
-# backend/cubebox/models/__init__.py — add after the Organization import line:
-from cubebox.models.provider import Model, Provider
+# backend/cubeplex/models/__init__.py — add after the Organization import line:
+from cubeplex.models.provider import Model, Provider
 
 # add to __all__ list:
     "Model",
@@ -205,7 +205,7 @@ from cubebox.models.provider import Model, Provider
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/models/provider.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/provider.py backend/cubeplex/models/__init__.py
 git commit -m "feat(models): add Provider and Model SQLModel tables"
 ```
 
@@ -214,14 +214,14 @@ git commit -m "feat(models): add Provider and Model SQLModel tables"
 ### Task 3: OrgSettings + OrgProviderOverride SQLModel tables
 
 **Files:**
-- Create: `backend/cubebox/models/org_settings.py`
-- Create: `backend/cubebox/models/org_provider_override.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/org_settings.py`
+- Create: `backend/cubeplex/models/org_provider_override.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Create org_settings.py**
 
 ```python
-# backend/cubebox/models/org_settings.py
+# backend/cubeplex/models/org_settings.py
 """OrgSettings — per-org key-value settings for LLM defaults."""
 
 from datetime import UTC, datetime
@@ -247,7 +247,7 @@ class OrgSettings(SQLModel, table=True):
 - [ ] **Step 2: Create org_provider_override.py**
 
 ```python
-# backend/cubebox/models/org_provider_override.py
+# backend/cubeplex/models/org_provider_override.py
 """OrgProviderOverride — sparse per-org enabled/disabled for system providers."""
 
 from datetime import UTC, datetime
@@ -275,8 +275,8 @@ class OrgProviderOverride(SQLModel, table=True):
 
 ```python
 # Add imports:
-from cubebox.models.org_provider_override import OrgProviderOverride
-from cubebox.models.org_settings import OrgSettings
+from cubeplex.models.org_provider_override import OrgProviderOverride
+from cubeplex.models.org_settings import OrgSettings
 
 # Add to __all__:
     "OrgProviderOverride",
@@ -286,9 +286,9 @@ from cubebox.models.org_settings import OrgSettings
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/models/org_settings.py \
-        backend/cubebox/models/org_provider_override.py \
-        backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/org_settings.py \
+        backend/cubeplex/models/org_provider_override.py \
+        backend/cubeplex/models/__init__.py
 git commit -m "feat(models): add OrgSettings and OrgProviderOverride tables"
 ```
 
@@ -302,7 +302,7 @@ git commit -m "feat(models): add OrgSettings and OrgProviderOverride tables"
 - [ ] **Step 1: Generate migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/backend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/backend
 uv run alembic revision --autogenerate -m "add provider model management tables"
 ```
 
@@ -343,10 +343,10 @@ uv run alembic upgrade head
 Verify:
 
 ```bash
-psql -d cubebox_feat_m2_model_management -c "\dt providers"
-psql -d cubebox_feat_m2_model_management -c "\dt models"
-psql -d cubebox_feat_m2_model_management -c "\dt org_settings"
-psql -d cubebox_feat_m2_model_management -c "\dt org_provider_overrides"
+psql -d cubeplex_feat_m2_model_management -c "\dt providers"
+psql -d cubeplex_feat_m2_model_management -c "\dt models"
+psql -d cubeplex_feat_m2_model_management -c "\dt org_settings"
+psql -d cubeplex_feat_m2_model_management -c "\dt org_provider_overrides"
 ```
 
 - [ ] **Step 5: Commit**
@@ -361,19 +361,19 @@ git commit -m "feat(db): add provider/model/org-settings migration"
 ### Task 5: ProviderRepository
 
 **Files:**
-- Create: `backend/cubebox/repositories/provider.py`
+- Create: `backend/cubeplex/repositories/provider.py`
 
 - [ ] **Step 1: Implement ProviderRepository**
 
 ```python
-# backend/cubebox/repositories/provider.py
+# backend/cubeplex/repositories/provider.py
 """Provider repository — queries visible providers for an org."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from cubebox.models.provider import Model, Provider
+from cubeplex.models.provider import Model, Provider
 
 
 class ProviderRepository:
@@ -385,7 +385,7 @@ class ProviderRepository:
         """Return system providers (not disabled by this org) + this org's own."""
         from sqlalchemy import func
 
-        from cubebox.models.org_provider_override import OrgProviderOverride
+        from cubeplex.models.org_provider_override import OrgProviderOverride
 
         stmt = (
             select(Provider)
@@ -446,7 +446,7 @@ class ProviderRepository:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/repositories/provider.py
+git add backend/cubeplex/repositories/provider.py
 git commit -m "feat(repo): add ProviderRepository"
 ```
 
@@ -455,20 +455,20 @@ git commit -m "feat(repo): add ProviderRepository"
 ### Task 6: ModelRepository, OrgSettingsRepository, OrgProviderOverrideRepository
 
 **Files:**
-- Create: `backend/cubebox/repositories/model.py`
-- Create: `backend/cubebox/repositories/org_settings.py`
-- Create: `backend/cubebox/repositories/org_provider_override.py`
+- Create: `backend/cubeplex/repositories/model.py`
+- Create: `backend/cubeplex/repositories/org_settings.py`
+- Create: `backend/cubeplex/repositories/org_provider_override.py`
 
 - [ ] **Step 1: ModelRepository**
 
 ```python
-# backend/cubebox/repositories/model.py
+# backend/cubeplex/repositories/model.py
 """Model repository."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.provider import Model
+from cubeplex.models.provider import Model
 
 
 class ModelRepository:
@@ -527,13 +527,13 @@ class ModelRepository:
 - [ ] **Step 2: OrgSettingsRepository**
 
 ```python
-# backend/cubebox/repositories/org_settings.py
+# backend/cubeplex/repositories/org_settings.py
 """OrgSettings repository."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.org_settings import OrgSettings
+from cubeplex.models.org_settings import OrgSettings
 
 
 class OrgSettingsRepository:
@@ -565,13 +565,13 @@ class OrgSettingsRepository:
 - [ ] **Step 3: OrgProviderOverrideRepository**
 
 ```python
-# backend/cubebox/repositories/org_provider_override.py
+# backend/cubeplex/repositories/org_provider_override.py
 """OrgProviderOverride repository."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.org_provider_override import OrgProviderOverride
+from cubeplex.models.org_provider_override import OrgProviderOverride
 
 
 class OrgProviderOverrideRepository:
@@ -612,9 +612,9 @@ class OrgProviderOverrideRepository:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/repositories/model.py \
-        backend/cubebox/repositories/org_settings.py \
-        backend/cubebox/repositories/org_provider_override.py
+git add backend/cubeplex/repositories/model.py \
+        backend/cubeplex/repositories/org_settings.py \
+        backend/cubeplex/repositories/org_provider_override.py
 git commit -m "feat(repo): add Model, OrgSettings, OrgProviderOverride repositories"
 ```
 
@@ -623,12 +623,12 @@ git commit -m "feat(repo): add Model, OrgSettings, OrgProviderOverride repositor
 ### Task 7: Pydantic schemas for provider API
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/provider.py`
+- Create: `backend/cubeplex/api/schemas/provider.py`
 
 - [ ] **Step 1: Create schema file**
 
 ```python
-# backend/cubebox/api/schemas/provider.py
+# backend/cubeplex/api/schemas/provider.py
 """Request/response schemas for provider & model admin API."""
 
 from __future__ import annotations
@@ -766,7 +766,7 @@ class OrgLLMSettingsUpdate(BaseModel):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/provider.py
+git add backend/cubeplex/api/schemas/provider.py
 git commit -m "feat(schema): add provider/model API request/response schemas"
 ```
 
@@ -775,7 +775,7 @@ git commit -m "feat(schema): add provider/model API request/response schemas"
 ### Task 8: ProviderService
 
 **Files:**
-- Create: `backend/cubebox/services/provider_service.py`
+- Create: `backend/cubeplex/services/provider_service.py`
 - Create: `backend/tests/unit/test_provider_service_invariants.py`
 
 - [ ] **Step 1: Write failing unit test**
@@ -787,8 +787,8 @@ git commit -m "feat(schema): add provider/model API request/response schemas"
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.provider import ProviderCreate
-from cubebox.services.provider_service import (
+from cubeplex.api.schemas.provider import ProviderCreate
+from cubeplex.services.provider_service import (
     ProviderNameConflictError,
     ProviderOAuthNotImplementedError,
     ProviderSystemReadonlyError,
@@ -798,10 +798,10 @@ from cubebox.services.provider_service import (
 
 async def test_oauth_auth_type_rejected(db_session: AsyncSession) -> None:
     """auth_type=oauth v1 must raise ProviderOAuthNotImplementedError."""
-    from cubebox.repositories.provider import ProviderRepository
-    from cubebox.repositories.model import ModelRepository
-    from cubebox.repositories.org_settings import OrgSettingsRepository
-    from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
+    from cubeplex.repositories.provider import ProviderRepository
+    from cubeplex.repositories.model import ModelRepository
+    from cubeplex.repositories.org_settings import OrgSettingsRepository
+    from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
 
     svc = ProviderService(
         provider_repo=ProviderRepository(db_session, org_id="org-1"),
@@ -823,10 +823,10 @@ async def test_oauth_auth_type_rejected(db_session: AsyncSession) -> None:
 
 async def test_create_org_provider_sets_org_id(db_session: AsyncSession) -> None:
     """Org-level provider must have org_id set."""
-    from cubebox.repositories.provider import ProviderRepository
-    from cubebox.repositories.model import ModelRepository
-    from cubebox.repositories.org_settings import OrgSettingsRepository
-    from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
+    from cubeplex.repositories.provider import ProviderRepository
+    from cubeplex.repositories.model import ModelRepository
+    from cubeplex.repositories.org_settings import OrgSettingsRepository
+    from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
 
     svc = ProviderService(
         provider_repo=ProviderRepository(db_session, org_id="org-1"),
@@ -852,16 +852,16 @@ async def test_create_org_provider_sets_org_id(db_session: AsyncSession) -> None
 - [ ] **Step 2: Run, expect fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/backend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/backend
 uv run pytest tests/unit/test_provider_service_invariants.py -v
 ```
 
-Expected: FAIL `ModuleNotFoundError: cubebox.services.provider_service`
+Expected: FAIL `ModuleNotFoundError: cubeplex.services.provider_service`
 
 - [ ] **Step 3: Implement ProviderService**
 
 ```python
-# backend/cubebox/services/provider_service.py
+# backend/cubeplex/services/provider_service.py
 """ProviderService — CRUD, invariants, test connection, seed."""
 
 from __future__ import annotations
@@ -874,7 +874,7 @@ from langchain_core.messages import HumanMessage
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.provider import (
+from cubeplex.api.schemas.provider import (
     ModelCreate,
     ModelUpdate,
     OrgLLMSettingsOut,
@@ -884,14 +884,14 @@ from cubebox.api.schemas.provider import (
     ProviderUpdate,
     TestResultOut,
 )
-from cubebox.llm.openai_compatible import ChatOpenAICompatible
-from cubebox.models.org_provider_override import OrgProviderOverride
-from cubebox.models.org_settings import OrgSettings
-from cubebox.models.provider import Model, Provider
-from cubebox.repositories.model import ModelRepository
-from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.org_settings import OrgSettingsRepository
-from cubebox.repositories.provider import ProviderRepository
+from cubeplex.llm.openai_compatible import ChatOpenAICompatible
+from cubeplex.models.org_provider_override import OrgProviderOverride
+from cubeplex.models.org_settings import OrgSettings
+from cubeplex.models.provider import Model, Provider
+from cubeplex.repositories.model import ModelRepository
+from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
+from cubeplex.repositories.org_settings import OrgSettingsRepository
+from cubeplex.repositories.provider import ProviderRepository
 
 
 class ProviderOAuthNotImplementedError(Exception):
@@ -1186,7 +1186,7 @@ Expected: 2 tests PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/provider_service.py \
+git add backend/cubeplex/services/provider_service.py \
         backend/tests/unit/test_provider_service_invariants.py
 git commit -m "feat(service): add ProviderService with invariants and test connection"
 ```
@@ -1196,13 +1196,13 @@ git commit -m "feat(service): add ProviderService with invariants and test conne
 ### Task 9: Admin provider routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_providers.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/admin_providers.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Write the routes module**
 
 ```python
-# backend/cubebox/api/routes/v1/admin_providers.py
+# backend/cubeplex/api/routes/v1/admin_providers.py
 """Admin provider/model management endpoints. Gated by require_org_admin."""
 
 from __future__ import annotations
@@ -1213,7 +1213,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.provider import (
+from cubeplex.api.schemas.provider import (
     ModelCreate,
     ModelOut,
     ModelUpdate,
@@ -1227,15 +1227,15 @@ from cubebox.api.schemas.provider import (
     ProviderUpdate,
     TestResultOut,
 )
-from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.models import User
-from cubebox.models.provider import Model, Provider
-from cubebox.repositories.model import ModelRepository
-from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.org_settings import OrgSettingsRepository
-from cubebox.repositories.provider import ProviderRepository
-from cubebox.services.provider_service import (
+from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.models import User
+from cubeplex.models.provider import Model, Provider
+from cubeplex.repositories.model import ModelRepository
+from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
+from cubeplex.repositories.org_settings import OrgSettingsRepository
+from cubeplex.repositories.provider import ProviderRepository
+from cubeplex.services.provider_service import (
     ModelNotFoundError,
     ProviderNameConflictError,
     ProviderNotFoundError,
@@ -1526,10 +1526,10 @@ async def update_org_llm_settings(
 
 - [ ] **Step 2: Register router in app.py**
 
-In `backend/cubebox/api/app.py`, in the imports section (around line 321-328):
+In `backend/cubeplex/api/app.py`, in the imports section (around line 321-328):
 
 ```python
-from cubebox.api.routes.v1 import admin_providers
+from cubeplex.api.routes.v1 import admin_providers
 ```
 
 In the `include_router` section (after line 337):
@@ -1541,7 +1541,7 @@ app.include_router(admin_providers.router, prefix="/api/v1")
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_providers.py backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/admin_providers.py backend/cubeplex/api/app.py
 git commit -m "feat(api): add admin provider/model CRUD routes"
 ```
 
@@ -1550,8 +1550,8 @@ git commit -m "feat(api): add admin provider/model CRUD routes"
 ### Task 10: Seed system providers from config
 
 **Files:**
-- Create: `backend/cubebox/services/seed.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/services/seed.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Create: `backend/tests/unit/test_seed_idempotent.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1564,8 +1564,8 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.provider import Provider, Model
-from cubebox.services.seed import seed_system_providers_from_config
+from cubeplex.models.provider import Provider, Model
+from cubeplex.services.seed import seed_system_providers_from_config
 
 
 @pytest.fixture
@@ -1603,20 +1603,20 @@ async def test_seed_is_idempotent(clean_db: AsyncSession) -> None:
 uv run pytest tests/unit/test_seed_idempotent.py -v
 ```
 
-Expected: FAIL `ModuleNotFoundError: cubebox.services.seed`
+Expected: FAIL `ModuleNotFoundError: cubeplex.services.seed`
 
 - [ ] **Step 3: Implement seed**
 
 ```python
-# backend/cubebox/services/seed.py
+# backend/cubeplex/services/seed.py
 """Seed system providers and models from config.yaml into DB (idempotent)."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
-from cubebox.config import config as settings
-from cubebox.models.provider import Model, Provider
+from cubeplex.config import config as settings
+from cubeplex.models.provider import Model, Provider
 
 
 async def seed_system_providers_from_config(session: AsyncSession) -> None:
@@ -1720,12 +1720,12 @@ Expected: 1 test PASS (seed is idempotent)
 
 - [ ] **Step 5: Wire seed into lifespan**
 
-In `backend/cubebox/api/app.py`, inside the `lifespan` startup section (after the existing imports and after `log.init()`), add:
+In `backend/cubeplex/api/app.py`, inside the `lifespan` startup section (after the existing imports and after `log.init()`), add:
 
 ```python
     # Seed system providers from config.yaml (idempotent)
-    from cubebox.db import async_session_maker
-    from cubebox.services.seed import seed_system_providers_from_config
+    from cubeplex.db import async_session_maker
+    from cubeplex.services.seed import seed_system_providers_from_config
 
     async with async_session_maker() as seed_session:
         await seed_system_providers_from_config(seed_session)
@@ -1734,8 +1734,8 @@ In `backend/cubebox/api/app.py`, inside the `lifespan` startup section (after th
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/seed.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/services/seed.py \
+        backend/cubeplex/api/app.py \
         backend/tests/unit/test_seed_idempotent.py
 git commit -m "feat(seed): add idempotent config-to-DB system provider seed"
 ```
@@ -1745,7 +1745,7 @@ git commit -m "feat(seed): add idempotent config-to-DB system provider seed"
 ### Task 11: LLMFactory DB-first refactor
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py`
+- Modify: `backend/cubeplex/llm/factory.py`
 
 - [ ] **Step 1: Modify LLMFactory to support DB-first loading**
 
@@ -1756,9 +1756,9 @@ Add a new class method and modify the constructor to accept optional async sessi
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from cubebox.models.provider import Model as DBModel, Provider as DBProvider
-from cubebox.models.org_provider_override import OrgProviderOverride as DBOverride
-from cubebox.models.org_settings import OrgSettings as DBSettings
+from cubeplex.models.provider import Model as DBModel, Provider as DBProvider
+from cubeplex.models.org_provider_override import OrgProviderOverride as DBOverride
+from cubeplex.models.org_settings import OrgSettings as DBSettings
 
 
 class LLMFactory:
@@ -1944,14 +1944,14 @@ Replace `create_default`:
 - [ ] **Step 2: Run mypy to check type consistency**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/backend
-uv run mypy cubebox/llm/factory.py
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/backend
+uv run mypy cubeplex/llm/factory.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py
+git add backend/cubeplex/llm/factory.py
 git commit -m "feat(llm): refactor LLMFactory to DB-first with config fallback"
 ```
 
@@ -1960,7 +1960,7 @@ git commit -m "feat(llm): refactor LLMFactory to DB-first with config fallback"
 ### Task 12: Update RunManager to pass session + org_id
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Update the LLM creation call**
 
@@ -1985,10 +1985,10 @@ Actually, checking the code more carefully, the LLM factory should use its OWN s
 Find the `async with async_session_maker() as mcp_session:` block (used for MCP). The LLM creation happens after that. We can use a similar approach or reuse the same session. Let's use the same approach:
 
 ```python
-            from cubebox.agents.graph import create_cubebox_agent
-            from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig, load_citation_configs
-            from cubebox.tools import get_registry
+            from cubeplex.agents.graph import create_cubeplex_agent
+            from cubeplex.llm.factory import LLMFactory
+            from cubeplex.middleware.citations import CitationConfig, load_citation_configs
+            from cubeplex.tools import get_registry
 
             factory = LLMFactory(
                 session=mcp_session if 'mcp_session' in dir() else None,
@@ -2003,13 +2003,13 @@ Actually, to keep it simple and avoid potential issues with the plan being too p
 
 - [ ] **Step 1 (revised): Update RunManager LLM creation**
 
-In `backend/cubebox/streams/run_manager.py`, locate the section where `create_cubebox_agent` is called (~line 552-557). Change from:
+In `backend/cubeplex/streams/run_manager.py`, locate the section where `create_cubeplex_agent` is called (~line 552-557). Change from:
 
 ```python
-            from cubebox.agents.graph import create_cubebox_agent
-            from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig, load_citation_configs
-            from cubebox.tools import get_registry
+            from cubeplex.agents.graph import create_cubeplex_agent
+            from cubeplex.llm.factory import LLMFactory
+            from cubeplex.middleware.citations import CitationConfig, load_citation_configs
+            from cubeplex.tools import get_registry
 
             llm = LLMFactory().create_default()
 ```
@@ -2017,13 +2017,13 @@ In `backend/cubebox/streams/run_manager.py`, locate the section where `create_cu
 To:
 
 ```python
-            from cubebox.agents.graph import create_cubebox_agent
-            from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig, load_citation_configs
-            from cubebox.tools import get_registry
+            from cubeplex.agents.graph import create_cubeplex_agent
+            from cubeplex.llm.factory import LLMFactory
+            from cubeplex.middleware.citations import CitationConfig, load_citation_configs
+            from cubeplex.tools import get_registry
 
             # Create a DB session for LLMFactory to read provider/model config
-            from cubebox.db import async_session_maker as _llm_session_maker
+            from cubeplex.db import async_session_maker as _llm_session_maker
             async with _llm_session_maker() as _llm_session:
                 factory = LLMFactory(session=_llm_session, org_id=ctx.org_id)
                 llm = await factory.create_default()
@@ -2032,13 +2032,13 @@ To:
 - [ ] **Step 2: Verify type check**
 
 ```bash
-uv run mypy cubebox/streams/run_manager.py
+uv run mypy cubeplex/streams/run_manager.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(runtime): pass session+org_id to LLMFactory in RunManager"
 ```
 
@@ -2060,7 +2060,7 @@ git commit -m "feat(runtime): pass session+org_id to LLMFactory in RunManager"
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from cubebox.api.app import build_app
+from cubeplex.api.app import build_app
 
 
 @pytest.mark.e2e
@@ -2189,18 +2189,18 @@ async def test_org_settings_default_model(admin_client: AsyncClient) -> None:
 
     # Set default model
     res = await admin_client.put("/api/v1/admin/settings/llm", json={
-        "default_model": "cubebox/test-model",
-        "fallback_models": ["cubebox/fallback-1"],
+        "default_model": "cubeplex/test-model",
+        "fallback_models": ["cubeplex/fallback-1"],
     })
     assert res.status_code == 200
-    assert res.json()["default_model"] == "cubebox/test-model"
-    assert res.json()["fallback_models"] == ["cubebox/fallback-1"]
+    assert res.json()["default_model"] == "cubeplex/test-model"
+    assert res.json()["fallback_models"] == ["cubeplex/fallback-1"]
 
 
 @pytest.mark.e2e
 async def test_config_fallback_when_db_empty(admin_client: AsyncClient) -> None:
     """LLMFactory.create_default() works from config.yaml when DB has no providers."""
-    from cubebox.llm.factory import LLMFactory
+    from cubeplex.llm.factory import LLMFactory
 
     # LLMFactory with no DB session must still work via config fallback
     factory = LLMFactory()
@@ -2344,8 +2344,8 @@ In the `createApiClient` factory, add the `put` implementation after `patch`:
 - [ ] **Step 2: Verify types**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/frontend
-pnpm --filter @cubebox/core type-check
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/frontend
+pnpm --filter @cubeplex/core type-check
 ```
 
 - [ ] **Step 3: Commit**
@@ -2870,9 +2870,9 @@ export { useOrgModelSettingsStore } from './stores/orgModelSettingsStore'
 - [ ] **Step 5: Type check + build**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/frontend
-pnpm --filter @cubebox/core type-check
-pnpm --filter @cubebox/core build
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/frontend
+pnpm --filter @cubeplex/core type-check
+pnpm --filter @cubeplex/core build
 ```
 
 - [ ] **Step 6: Commit**
@@ -2996,7 +2996,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import type { ProviderCreate, ProviderUpdate, Provider } from '@cubebox/core'
+import type { ProviderCreate, ProviderUpdate, Provider } from '@cubeplex/core'
 import { TestConnectionResult } from './TestConnectionResult'
 
 type AuthType = 'api_key' | 'oauth' | 'bearer_token' | 'none'
@@ -3230,7 +3230,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import type { ModelCreate, Model } from '@cubebox/core'
+import type { ModelCreate, Model } from '@cubeplex/core'
 
 interface Props {
   open: boolean
@@ -3426,7 +3426,7 @@ import {
   useModelsStore,
   useOrgModelSettingsStore,
   createApiClient,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { ProviderList } from '@/components/admin/models/ProviderList'
 import { ProviderDetail } from '@/components/admin/models/ProviderDetail'
 
@@ -3516,7 +3516,7 @@ export default function ModelsPage() {
 - [ ] **Step 6: Build and verify type check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/frontend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/frontend
 pnpm type-check
 ```
 
@@ -3603,7 +3603,7 @@ test.describe('M2 Model Management', () => {
 - [ ] **Step 2: Run E2E**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m2-model-management/frontend
+cd /home/chris/cubeplex/.worktrees/feat/m2-model-management/frontend
 pnpm test:e2e -- m2-models.spec.ts
 ```
 
@@ -3622,7 +3622,7 @@ Before marking the plan complete, verify:
 
 1. `uv run pytest tests/unit/ -v` — unit tests pass
 2. `uv run pytest tests/e2e/test_admin_providers_crud.py tests/e2e/test_provider_oauth_reject.py -v` — backend E2E pass
-3. `uv run mypy cubebox/` — type check passes
+3. `uv run mypy cubeplex/` — type check passes
 4. `pnpm type-check` — frontend type check passes
 5. `pnpm test:e2e -- m2-models.spec.ts` — Playwright E2E passes
 6. `alembic upgrade head` — migration applied cleanly

@@ -1,4 +1,4 @@
-import type { VendorPreset } from '@cubebox/core'
+import type { VendorPreset } from '@cubeplex/core'
 
 export function makeVendor(over: Partial<VendorPreset> = {}): VendorPreset {
   return {

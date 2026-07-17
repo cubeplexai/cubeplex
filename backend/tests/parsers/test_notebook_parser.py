@@ -2,9 +2,9 @@
 
 import json
 
-from cubebox.parsers.plugins.notebook import NotebookParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import NotebookOutput, ParseOptions
+from cubeplex.parsers.plugins.notebook import NotebookParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import NotebookOutput, ParseOptions
 
 
 def test_satisfies_protocol() -> None:

@@ -17,19 +17,18 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, text
 
-import cubebox.db as _db
-from cubebox.models import IMConnectorAccount, Workspace
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.im_connector import (
+import cubeplex.db as _db
+from cubeplex.models import IMConnectorAccount, Workspace
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.models.im_connector import (
     IMRunQueueItem,
     IMThreadLink,
     IMWebhookReceipt,
 )
-from cubebox.models.public_id import generate_public_id
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.schedules.dispatch import dispatch_scheduled_run
+from cubeplex.models.public_id import generate_public_id
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.schedules.dispatch import dispatch_scheduled_run
 
 pytestmark = pytest.mark.e2e
 
@@ -108,32 +107,19 @@ async def _seed_im_account(
         return account.id
 
 
-async def _seed_binding(
-    *,
-    org_id: str,
-    ws_id: str,
-    account_id: str,
-    channel_id: str,
-    mode: str = "isolated",
-    topic_id: str | None = None,
-    channel_name: str = "test-channel",
-    sandbox_mode: str | None = None,
-) -> str:
+async def _set_routing_mode(*, account_id: str, mode: str = "isolated") -> None:
+    """Set the bot's account-level routing mode (replaces per-channel binding)."""
+    from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
+
     async with _db.async_session_maker() as session:
-        binding = IMChannelBinding(
-            org_id=org_id,
-            workspace_id=ws_id,
-            account_id=account_id,
-            channel_id=channel_id,
-            channel_name=channel_name,
-            mode=mode,
-            sandbox_mode=sandbox_mode,
-            topic_id=topic_id,
+        account = await session.get(IMConnectorAccount, account_id)
+        assert account is not None
+        account.config = store_bot_settings(
+            account.config,
+            IMBotSettings(routing_mode=mode),  # type: ignore[arg-type]
         )
-        session.add(binding)
+        session.add(account)
         await session.commit()
-        await session.refresh(binding)
-        return binding.id
 
 
 async def _seed_existing_link(
@@ -308,11 +294,6 @@ async def cleanup_destinations(
         await session.execute(
             delete(IMThreadLink).where(
                 IMThreadLink.workspace_id == ws_id  # type: ignore[arg-type]
-            )
-        )
-        await session.execute(
-            delete(IMChannelBinding).where(
-                IMChannelBinding.workspace_id == ws_id  # type: ignore[arg-type]
             )
         )
         await session.execute(
@@ -635,18 +616,7 @@ async def test_im_channel_shared_mode_inherits_binding_topic(
     channel_id = "C-shared"
     scope_key = "ch"
     scope_kind = "channel"
-
-    # Pre-create the shared topic so we can assert binding.topic_id reuse.
-    topic_id = await _create_topic(client, ws_id, "shared-topic")
-    await _seed_binding(
-        org_id=org_id,
-        ws_id=ws_id,
-        account_id=account_id,
-        channel_id=channel_id,
-        mode="shared",
-        topic_id=topic_id,
-        channel_name="shared-binding",
-    )
+    await _set_routing_mode(account_id=account_id, mode="shared")
 
     task_id = await _create_schedule_row(
         org_id=org_id,
@@ -672,7 +642,7 @@ async def test_im_channel_shared_mode_inherits_binding_topic(
         assert run.state == "succeeded"
         conv = await session.get(Conversation, run.conversation_id)
         assert conv is not None
-        assert conv.topic_id == topic_id
+        assert conv.topic_id is not None  # landed under the channel's topic, not root
         assert conv.is_group_chat is True
 
         # Owner participant was inserted by the resolver.
@@ -1071,8 +1041,8 @@ async def _seed_topic_in_other_workspace(*, org_id: str, creator_user_id: str) -
     to ``users.id``. We reuse the test's logged-in user id since users are
     org-scoped only via memberships, not by workspace.
     """
-    from cubebox.models import Workspace as WorkspaceModel
-    from cubebox.models.topic import Topic
+    from cubeplex.models import Workspace as WorkspaceModel
+    from cubeplex.models.topic import Topic
 
     async with _db.async_session_maker() as session:
         other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
@@ -1098,7 +1068,7 @@ async def _seed_im_account_in_other_workspace(
 
     Returns ``(other_workspace_id, im_account_id)``.
     """
-    from cubebox.models import Workspace as WorkspaceModel
+    from cubeplex.models import Workspace as WorkspaceModel
 
     cred_id = generate_public_id("cred")
     async with _db.async_session_maker() as session:
@@ -1201,10 +1171,10 @@ async def test_update_rejects_destination_field_changes(
     destination fields, letting an agent path mutate target_mode after the
     HTTP layer's lock — would either skew dispatch or trip the DB CHECK
     constraint and 500."""
-    from cubebox.agents.actions.context import ScopeContext
-    from cubebox.agents.actions.types import ActionInvalidInput
-    from cubebox.models import Role
-    from cubebox.services.scheduled_task import ScheduledTaskService
+    from cubeplex.agents.actions.context import ScopeContext
+    from cubeplex.agents.actions.types import ActionInvalidInput
+    from cubeplex.models import Role
+    from cubeplex.services.scheduled_task import ScheduledTaskService
 
     client, ws_id = cleanup_destinations
     org_id = await _resolve_org_id(ws_id)
@@ -1245,10 +1215,10 @@ async def test_update_rejects_topic_id_from_other_workspace(
     """Bug it catches: service.update lets the caller patch topic_id with a
     topic that lives in another workspace; the FK passes but dispatch
     routes new conversations under a foreign workspace's topic."""
-    from cubebox.agents.actions.context import ScopeContext
-    from cubebox.agents.actions.types import ActionInvalidInput
-    from cubebox.models import Role
-    from cubebox.services.scheduled_task import ScheduledTaskService
+    from cubeplex.agents.actions.context import ScopeContext
+    from cubeplex.agents.actions.types import ActionInvalidInput
+    from cubeplex.models import Role
+    from cubeplex.services.scheduled_task import ScheduledTaskService
 
     client, ws_id = cleanup_destinations
     org_id = await _resolve_org_id(ws_id)

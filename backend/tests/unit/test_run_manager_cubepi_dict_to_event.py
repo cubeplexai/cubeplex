@@ -9,7 +9,7 @@ of a normal SSE error event).
 
 from __future__ import annotations
 
-from cubebox.agents.schemas import (
+from cubeplex.agents.schemas import (
     ArtifactEvent,
     ErrorEvent,
     ReasoningEvent,
@@ -19,7 +19,7 @@ from cubebox.agents.schemas import (
     ToolResultEvent,
     UsageEvent,
 )
-from cubebox.streams.run_manager import cubepi_dict_to_agent_event
+from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
 
 TS = "2026-05-14T00:00:00+00:00"
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useConversationStore } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
 
 export function useConversations() {
   const conversations = useConversationStore((s) => s.conversations)

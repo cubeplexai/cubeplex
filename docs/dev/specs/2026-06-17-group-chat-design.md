@@ -1,6 +1,6 @@
 # Group Chat — Topics & Multi-User Conversations
 
-Native multi-user conversations on the cubebox platform. Multiple workspace
+Native multi-user conversations on the cubeplex platform. Multiple workspace
 members share one AI agent conversation in real time, with full message
 attribution, shared HITL, and configurable sandbox ownership.
 
@@ -99,7 +99,7 @@ Index:
 
 ### Public ID prefixes
 
-Add to `backend/cubebox/models/public_id.py`:
+Add to `backend/cubeplex/models/public_id.py`:
 
 - `PREFIX_TOP = "top"` — topics
 - `PREFIX_TPM = "tpm"` — topic participants

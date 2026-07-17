@@ -36,7 +36,7 @@ async def test_subagent_dispatch_real_llm(member_client: tuple) -> None:  # type
         client,
         ws_id,
         conv_id,
-        "请用 subagent 工具派一个子代理去帮我总结一句话：'cubebox 是什么'，"
+        "请用 subagent 工具派一个子代理去帮我总结一句话：'cubeplex 是什么'，"
         "你只负责派单和汇总，不要自己回答。",
     )
 
@@ -47,11 +47,11 @@ async def test_subagent_dispatch_real_llm(member_client: tuple) -> None:  # type
 
     results = tool_result_contents(events)
     assert any(r.strip() for r in results), f"all tool_result contents empty: {results!r}"
-    assert any("cubebox" in r.lower() for r in results), (
-        f"expected 'cubebox' in some tool_result; got: {results!r}"
+    assert any("cubeplex" in r.lower() for r in results), (
+        f"expected 'cubeplex' in some tool_result; got: {results!r}"
     )
     outer_text = assistant_text(events)
     assert outer_text.strip() != "", "outer agent produced no text reply"
-    assert "cubebox" in outer_text.lower(), (
-        f"expected 'cubebox' in outer reply; got: {outer_text!r}"
+    assert "cubeplex" in outer_text.lower(), (
+        f"expected 'cubeplex' in outer reply; got: {outer_text!r}"
     )

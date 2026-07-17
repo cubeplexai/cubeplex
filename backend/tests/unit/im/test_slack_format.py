@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cubebox.im.slack.format import markdown_to_slack_mrkdwn
+from cubeplex.im.slack.format import markdown_to_slack_mrkdwn
 
 
 class TestMarkdownToSlackMrkdwn:

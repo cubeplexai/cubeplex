@@ -23,11 +23,11 @@ interface OAuthReturnMessage {
   kind: 'mcp.oauth.return'
   status: 'ok' | 'cancelled' | 'error'
   state: string
-  install_id: string
+  connector_id: string
   reason?: string
 }
 
-const CHANNEL_NAME = 'cubebox-mcp-oauth'
+const CHANNEL_NAME = 'cubeplex-mcp-oauth'
 const TIMEOUT_MS = 90_000
 const POLL_INTERVAL_MS = 1_000
 

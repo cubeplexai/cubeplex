@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.services.artifact_registration import register_artifact_from_sandbox
+from cubeplex.services.artifact_registration import register_artifact_from_sandbox
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -20,9 +20,9 @@ from cubebox.services.artifact_registration import register_artifact_from_sandbo
 
 @pytest.fixture()
 async def db_session() -> AsyncIterator[AsyncSession]:
-    """In-memory SQLite session with all cubebox tables."""
+    """In-memory SQLite session with all cubeplex tables."""
     # Import all models so SQLModel.metadata is fully populated.
-    import cubebox.models  # noqa: F401
+    import cubeplex.models  # noqa: F401
 
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -69,7 +69,7 @@ def _patch_session_maker(session: AsyncSession):  # type: ignore[return]
     async def _fake_maker() -> AsyncIterator[AsyncSession]:
         yield session
 
-    return patch("cubebox.db.engine.async_session_maker", return_value=_fake_maker())
+    return patch("cubeplex.db.engine.async_session_maker", return_value=_fake_maker())
 
 
 def _patch_objectstore() -> patch:  # type: ignore[return]
@@ -77,7 +77,7 @@ def _patch_objectstore() -> patch:  # type: ignore[return]
     mock_store = AsyncMock()
     mock_store.upload_from_sandbox = AsyncMock()
     return patch(
-        "cubebox.objectstore.get_objectstore_client",
+        "cubeplex.objectstore.get_objectstore_client",
         return_value=mock_store,
     )
 

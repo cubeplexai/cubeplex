@@ -1,0 +1,212 @@
+# cubeplex umbrella chart — DEFAULTS ONLY.
+# Real secrets, model api_keys, OSS keys, and the operator-specific sandbox
+# image / domain live in `values.local.yaml` (gitignored).
+#
+# Apply with: helm upgrade --install cubeplex ./deploy/charts/cubeplex \
+#               -n cubeplex --create-namespace \
+#               -f values.yaml -f values.local.yaml
+
+global:
+  imageRegistry: "192.168.1.101:8050"
+  imagePullSecrets: []
+
+image:
+  registry: "192.168.1.101:8050"
+  repository: library
+  pullPolicy: IfNotPresent
+  # Tags must come from values.local.yaml (set by build-and-push.sh).
+  backend:
+    name: cubeplex-backend
+    tag: ""
+  frontend:
+    name: cubeplex-frontend
+    tag: ""
+
+backend:
+  replicaCount: 1
+  service:
+    port: 8000
+  # Sandbox runtime flags (independent of whether the OpenSandbox subchart
+  # is deployed). Leave `enabled` unset to follow opensandbox.enabled; set
+  # to true to point at an external sandbox (backend.secrets.sandbox.domain).
+  sandbox: {}
+    # enabled: true
+    # use_server_proxy: false
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+  env:
+    ENV_FOR_DYNACONF: production
+  # Anything here is rendered into the ConfigMap as YAML overrides applied
+  # AFTER config.production.yaml. Use for non-secret deployment-specific
+  # tuning. Secrets live under `backend.secrets` below.
+  configOverrides:
+    api:
+      host: "0.0.0.0"
+      port: 8000
+      public_url: "http://cubeplex.local"
+    deployment:
+      mode: single_tenant
+    public_base_url: "http://cubeplex.local"
+    frontend_base_url: "http://cubeplex.local"
+  # ALL secret fields go into a k8s Secret. Operator fills these in
+  # values.local.yaml; the chart fails the install if jwt_secret/csrf_secret
+  # are still empty.
+  secrets:
+    auth:
+      jwt_secret: ""
+      csrf_secret: ""
+      vault_key: ""
+    llm:
+      providers: {}
+    sandbox:
+      api_key: ""
+
+frontend:
+  replicaCount: 1
+  service:
+    port: 3000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "cubeplex.local"
+  tls:
+    enabled: false
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "60m"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+# Storage class for cubeplex's PVCs. Points at /work (1.8 T) on node-1 so
+# we don't fill the 51 G root partition where the default openebs SC lives.
+storageClass:
+  create: true
+  name: cubeplex-work-hostpath
+  basePath: /work/cubeplex
+
+# ── Bundled infrastructure (single-node defaults) ───────────────────────
+postgres:
+  enabled: true
+  # Custom image: postgres:18 + PGroonga (CJK full-text) + pgvector (HNSW
+  # vector search). Required by conversation-search; plain postgres won't
+  # pass the alembic migration that does `CREATE EXTENSION pgroonga / vector`.
+  image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
+  auth:
+    username: cubeplex
+    database: cubeplex
+    password: ""      # required in values.local.yaml
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 8Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  auth:
+    password: ""      # required in values.local.yaml
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+rustfs:
+  enabled: true
+  image: rustfs/rustfs:1.0.0-beta.4
+  mcImage: minio/mc:RELEASE.2025-04-08T15-39-49Z
+  auth:
+    accessKey: cubeplex
+    secretKey: ""  # required in values.local.yaml
+  defaultBucket: cubeplex
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+# ── Egress secret-injection (MITM webhook + backend mTLS exchange) ───────
+# Default off. Turning on:
+#   - deploys the mutating admission webhook in this (cubeplex) namespace
+#   - copies the addon ConfigMap + MITM CA Secret into `sandboxNamespace`
+#   - enables the backend's mTLS egress_exchange listener on :8443
+#   - mounts a backend server cert + trust CA signed by a chart-generated
+#     CA (long-lived, never rotated automatically — kept across upgrades)
+#
+# Sandbox pods get patched at admission to:
+#   - mount the per-sandbox client cert minted by the webhook
+#   - load the inject.py mitmproxy addon
+#   - call the backend's :8443 exchange to swap cbxref_<id> placeholders
+#     for real secret values, just-in-time, per outbound request.
+egress:
+  enabled: false
+  # Namespace where sandbox pods live (where the MutatingWebhookConfiguration
+  # matches and where the addon ConfigMap + MITM CA Secret are mirrored).
+  # When using the bundled opensandbox subchart, that's "opensandbox-system".
+  sandboxNamespace: "opensandbox-system"
+  webhook:
+    replicaCount: 1
+    image:
+      registry: ""                     # falls back to .Values.image.registry
+      repository: ""                   # falls back to .Values.image.repository
+      name: cubeplex-egress-webhook
+      tag: ""                          # build-and-push.sh fills this
+      pullPolicy: ""                   # falls back to .Values.image.pullPolicy
+    # MUST match the OpenSandbox server's configured egress.image exactly
+    # (the webhook narrow-matches sandbox pods by ownerReference + egress
+    # container image).
+    egressImage: ""
+    # Exchange URL injected into each sandbox sidecar; default points at
+    # this release's backend Service on :8443. Override only if the
+    # backend is reachable at a non-cluster-internal address.
+    exchangeURL: ""
+    # Per-sandbox client cert TTL (minutes). Must exceed max sandbox lifetime.
+    clientCertTTLMinutes: 720
+    # Override the MutatingWebhookConfiguration's namespaceSelector when
+    # the simple `kubernetes.io/metadata.name = sandboxNamespace` rule
+    # isn't enough (e.g. sandbox pods spread across many namespaces).
+    namespaceSelector: {}
+    resources:
+      requests: { cpu: "50m",  memory: "64Mi" }
+      limits:   { cpu: "200m", memory: "256Mi" }
+
+# ── OpenSandbox umbrella subchart (alibaba) ──────────────────────────────
+opensandbox:
+  enabled: true
+  # Inherits defaults from the upstream chart; only override surface knobs
+  # we care about for the smoke test deployment.
+  opensandbox-server:
+    server:
+      replicaCount: 1
+  opensandbox-controller:
+    controller:
+      replicaCount: 1

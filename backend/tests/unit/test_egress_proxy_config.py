@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cubebox.api.routes.internal_egress import _resolve_proxy_for_sandbox
+from cubeplex.api.routes.internal_egress import _resolve_proxy_for_sandbox
 
 
 @pytest.mark.asyncio
@@ -16,12 +16,12 @@ async def test_resolve_proxy_returns_configured_proxy():
     session = AsyncMock()
     with (
         patch(
-            "cubebox.api.routes.internal_egress._lookup_org_id_by_sandbox",
+            "cubeplex.api.routes.internal_egress._lookup_org_id_by_sandbox",
             new_callable=AsyncMock,
             return_value="org_123",
         ),
         patch(
-            "cubebox.api.routes.internal_egress._resolve_egress_proxy_for_org",
+            "cubeplex.api.routes.internal_egress._resolve_egress_proxy_for_org",
             new_callable=AsyncMock,
             return_value="http://192.168.1.150:7892",
         ),
@@ -35,12 +35,12 @@ async def test_resolve_proxy_returns_none_when_no_policy():
     session = AsyncMock()
     with (
         patch(
-            "cubebox.api.routes.internal_egress._lookup_org_id_by_sandbox",
+            "cubeplex.api.routes.internal_egress._lookup_org_id_by_sandbox",
             new_callable=AsyncMock,
             return_value="org_123",
         ),
         patch(
-            "cubebox.api.routes.internal_egress._resolve_egress_proxy_for_org",
+            "cubeplex.api.routes.internal_egress._resolve_egress_proxy_for_org",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -53,7 +53,7 @@ async def test_resolve_proxy_returns_none_when_no_policy():
 async def test_resolve_proxy_returns_none_when_sandbox_unknown():
     session = AsyncMock()
     with patch(
-        "cubebox.api.routes.internal_egress._lookup_org_id_by_sandbox",
+        "cubeplex.api.routes.internal_egress._lookup_org_id_by_sandbox",
         new_callable=AsyncMock,
         return_value=None,
     ):

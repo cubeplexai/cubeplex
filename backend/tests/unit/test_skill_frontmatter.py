@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.skills.frontmatter import (
+from cubeplex.skills.frontmatter import (
     InvalidFrontmatterError,
     extract_env_vars,
     parse_skill_md,
@@ -52,12 +52,12 @@ keywords: foo, bar, baz
     assert fm.keywords == ["foo", "bar", "baz"]
 
 
-def test_cubebox_alias_merged_into_raw_metadata() -> None:
+def test_cubeplex_alias_merged_into_raw_metadata() -> None:
     text = """---
 name: x
 description: y
 version: 0.1
-cubebox:
+cubeplex:
   requires:
     env: [MY_KEY]
 ---

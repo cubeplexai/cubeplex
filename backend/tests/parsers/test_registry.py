@@ -7,11 +7,11 @@ from uuid import uuid4
 import fakeredis.aioredis
 import pytest
 
-from cubebox.parsers.registry import (
+from cubeplex.parsers.registry import (
     ParserRegistry,
     reset_parser_registry_for_tests,
 )
-from cubebox.parsers.schema import (
+from cubeplex.parsers.schema import (
     ErrorOutput,
     ParseOptions,
     TextOutput,
@@ -30,7 +30,7 @@ def fresh_registry() -> Iterator[None]:
 @pytest.fixture
 def fake_redis() -> Iterator[fakeredis.aioredis.FakeRedis]:
     """Register a fakeredis as the shared cache for dedup tests."""
-    from cubebox.cache import reset_for_tests, set_redis
+    from cubeplex.cache import reset_for_tests, set_redis
 
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)

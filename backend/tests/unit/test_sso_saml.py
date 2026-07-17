@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.sso.saml."""
+"""Unit tests for cubeplex.sso.saml."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from cubebox.models.sso_connection import SSOConnection
-from cubebox.sso.saml import (
+from cubeplex.models.sso_connection import SSOConnection
+from cubeplex.sso.saml import (
     build_authn_request_url,
     generate_sp_metadata,
     parse_idp_metadata_xml,

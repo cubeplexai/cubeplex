@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from opensandbox.exceptions import SandboxApiException
 
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.sandbox.manager import SandboxManager
 
 
 def _make_session_factory() -> tuple[MagicMock, MagicMock]:
@@ -97,8 +97,8 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused(
     raw.close = AsyncMock()
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -140,8 +140,8 @@ async def test_reconcile_pausing_with_provider_running_reverts_to_running(
     raw.get_info = AsyncMock(return_value=_info("Running"))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -190,8 +190,8 @@ async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting(
     raw.get_info = AsyncMock(return_value=_info("Running"))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
@@ -227,8 +227,8 @@ async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at(
     raw.get_info = AsyncMock(return_value=_info("Running"))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -260,8 +260,8 @@ async def test_reconcile_provider_failed_marks_failed(mock_encryption_backend: A
     raw.get_info = AsyncMock(return_value=_info("Failed"))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -307,8 +307,8 @@ async def test_reconcile_provider_terminal_kills_record(
     raw.close = AsyncMock()
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
@@ -345,8 +345,8 @@ async def test_reconcile_transient_or_unknown_is_noop_except_touch(
     raw.get_info = AsyncMock(return_value=_info(state))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -379,8 +379,8 @@ async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backe
     raw.get_info = AsyncMock(side_effect=RuntimeError("nope"))
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
@@ -419,8 +419,8 @@ async def test_reconcile_provider_404_kills_record(
     )
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
@@ -448,8 +448,8 @@ async def test_reconcile_forwards_claim_timeout_to_repo_query(mock_encryption_ba
     mgr._exchange_host = ""
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubebox.sandbox.manager.opensandbox"),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.opensandbox"),
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[])
 

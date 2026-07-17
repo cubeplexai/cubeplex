@@ -1,4 +1,4 @@
-import type { ConnectImAccountIn } from '@cubebox/core'
+import type { ConnectImAccountIn } from '@cubeplex/core'
 import type { FC } from 'react'
 
 export type FormState = Record<string, string>
@@ -11,6 +11,7 @@ export type FieldDef = {
   showIf?: (form: FormState) => boolean
   options?: { value: string; labelKey: string }[]
   placeholder?: string
+  default?: string
 }
 
 export type PrereqItem = {
@@ -29,6 +30,7 @@ export type WizardStepProps = {
   form: FormState
   onChange: (patch: Partial<FormState>) => void
   onNext: () => void
+  wsId?: string
 }
 
 export type WizardStepDef = {

@@ -1,8 +1,8 @@
 """builder.build_chain_model — chain length 1 returns BoundModel; >1 wraps FallbackBoundModel."""
 
-from cubebox.llm.builder import build_chain_model
-from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.llm.builder import build_chain_model
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 
 
 def _snap() -> LLMSnapshot:

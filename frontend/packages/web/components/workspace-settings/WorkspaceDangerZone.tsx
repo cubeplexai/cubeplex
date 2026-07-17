@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
-import { createApiClient, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useWorkspaceStore } from '@cubeplex/core'
 
 import { DangerZone } from '@/components/management/DangerZone'
 import { Button } from '@/components/ui/button'

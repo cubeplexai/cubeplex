@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.user_event_bus import UserEventBus, UserEventDTO
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.user_event_bus import UserEventBus, UserEventDTO
 
 
 @pytest.mark.asyncio

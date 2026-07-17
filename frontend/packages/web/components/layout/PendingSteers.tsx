@@ -1,6 +1,6 @@
 'use client'
 
-import { useMessageStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { X } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 

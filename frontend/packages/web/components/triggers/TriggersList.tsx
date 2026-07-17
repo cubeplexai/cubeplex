@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { MoreHorizontal, Plus, Trash2, Webhook } from 'lucide-react'
-import { type Trigger } from '@cubebox/core'
+import { type Trigger } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/EmptyState'

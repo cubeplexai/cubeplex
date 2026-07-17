@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, Search } from 'lucide-react'
-import type { SkillSource } from '@cubebox/core'
+import type { SkillSource } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { Button } from '@/components/ui/button'

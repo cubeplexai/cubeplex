@@ -17,8 +17,8 @@ export default function ProfilePage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader title={t('title')} description={t('subtitle')} />
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto flex max-w-xl flex-col gap-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6">
+        <div className="mx-auto flex max-w-xl flex-col gap-8 pb-10">
           <ProfileForm />
           <hr className="border-border" />
           <ChangePasswordForm />

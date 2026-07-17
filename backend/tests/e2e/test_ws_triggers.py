@@ -12,7 +12,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from cubebox.models import Role
+from cubeplex.models import Role
 from tests.e2e.conftest import _lifespan_context, _make_isolated_user
 
 # ---------------------------------------------------------------------------
@@ -406,20 +406,20 @@ async def test_replay_non_dead_lettered_event(
     trig_id = r_create.json()["id"]
 
     # Insert a TriggerEvent with status="accepted" directly via DB
-    from cubebox.models import TriggerEvent
+    from cubeplex.models import TriggerEvent
 
     # We need the org_id for the trigger — get from the detail
     r_detail = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
     assert r_detail.status_code == 200
 
     # Use async_session_maker to insert a trigger_event row
-    import cubebox.db as _db
+    import cubeplex.db as _db
 
     async with _db.async_session_maker() as session:
         # Get org_id for this workspace
         from sqlalchemy import select
 
-        from cubebox.models import Workspace
+        from cubeplex.models import Workspace
 
         ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
         ws_obj = ws_row.scalar_one()
@@ -477,8 +477,8 @@ async def test_events_list(authenticated_client: tuple[httpx.AsyncClient, str]) 
     # Insert an event
     from sqlalchemy import select
 
-    import cubebox.db as _db
-    from cubebox.models import TriggerEvent, Workspace
+    import cubeplex.db as _db
+    from cubeplex.models import TriggerEvent, Workspace
 
     async with _db.async_session_maker() as session:
         ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
@@ -546,8 +546,8 @@ async def test_status_filter_pages_across_unmatched_rows(
 
     from sqlalchemy import select
 
-    import cubebox.db as _db
-    from cubebox.models import TriggerEvent, Workspace
+    import cubeplex.db as _db
+    from cubeplex.models import TriggerEvent, Workspace
 
     async with _db.async_session_maker() as session:
         ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
@@ -707,9 +707,9 @@ async def _seed_im_account(
 
     from sqlalchemy import select, text
 
-    import cubebox.db as _db
-    from cubebox.models import IMConnectorAccount, Workspace
-    from cubebox.models.public_id import generate_public_id
+    import cubeplex.db as _db
+    from cubeplex.models import IMConnectorAccount, Workspace
+    from cubeplex.models.public_id import generate_public_id
 
     if external_account_id is None:
         external_account_id = f"ext-{secrets.token_hex(8)}"

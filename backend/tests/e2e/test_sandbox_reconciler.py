@@ -18,9 +18,9 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -42,9 +42,9 @@ async def scope(
     from fastapi_users.db import SQLAlchemyUserDatabase
     from fastapi_users.schemas import BaseUserCreate
 
-    from cubebox.auth.users import UserManager, _slugify_org_name
-    from cubebox.models import Role, User
-    from cubebox.repositories import (
+    from cubeplex.auth.users import UserManager, _slugify_org_name
+    from cubeplex.models import Role, User
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -75,6 +75,8 @@ async def _mk(
 ) -> UserSandbox:
     row = UserSandbox(
         user_id=scope["user_id"],
+        scope_type="conversation",
+        scope_id=f"conv-{secrets.token_hex(6)}",
         sandbox_id=f"sbx_{secrets.token_hex(6)}",
         image="img:latest",
         status=status,

@@ -11,7 +11,7 @@ import {
   adminListImAccounts,
   createApiClient,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { ImAccountDetailPanel } from '@/components/im/ImAccountDetailPanel'
 import { ImAccountListItem } from '@/components/im/ImAccountListItem'

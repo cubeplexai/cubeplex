@@ -1,4 +1,4 @@
-"""CubeboxCacheMarkerPolicy tests (M1.1)."""
+"""CubeplexCacheMarkerPolicy tests (M1.1)."""
 
 from cubepi.providers.base import (
     AssistantMessage,
@@ -10,7 +10,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
+from cubeplex.llm.cache_markers import CubeplexCacheMarkerPolicy
 
 
 def _user(text: str) -> UserMessage:
@@ -33,33 +33,33 @@ def _tool_result(tool_call_id: str, text: str) -> ToolResultMessage:
 
 
 def test_policy_marks_system_and_tools() -> None:
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     assert p.mark_system() is True
     assert p.mark_last_tool() is True
 
 
 def test_indices_empty_list() -> None:
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     assert p.message_breakpoint_indices([]) == []
 
 
 def test_indices_only_user_message_no_assistant_yet() -> None:
     """First turn before any model response: no AssistantMessage → no breakpoint."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [_user("hi")]
     assert p.message_breakpoint_indices(msgs) == []
 
 
 def test_indices_picks_last_assistant() -> None:
     """[user, assistant, user] → mark index 1 (the assistant)."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [_user("a"), _assistant("b"), _user("c")]
     assert p.message_breakpoint_indices(msgs) == [1]
 
 
 def test_indices_picks_most_recent_assistant() -> None:
     """[user, assistant, user, assistant, user] → mark index 3."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [
         _user("a"),
         _assistant("b"),
@@ -72,7 +72,7 @@ def test_indices_picks_most_recent_assistant() -> None:
 
 def test_indices_skips_user_and_tool_result() -> None:
     """[user, assistant(tool_call), tool_result, assistant, user] → mark index 3."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     tc = ToolCall(id="tc1", name="t", arguments={})
     msgs: list[Message] = [
         _user("a"),

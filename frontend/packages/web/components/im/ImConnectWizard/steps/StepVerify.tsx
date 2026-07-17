@@ -22,24 +22,30 @@ export function StepVerify({
   form,
   busy,
 }: WizardStepProps & StepVerifyExtraProps): React.ReactElement {
-  const t = useTranslations() as unknown as DynamicT
+  const t = useTranslations()
+  const tDyn = t as unknown as DynamicT
+  const code = (chunks: React.ReactNode) => <code>{chunks}</code>
+  const strong = (chunks: React.ReactNode) => <strong>{chunks}</strong>
   if (busy) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <Loader2 className="size-4 animate-spin" />
-        <p>
-          Verifying credentials for <code>{form.app_id}</code>…
-        </p>
+        <p>{t.rich('im.wizard.verifyBody.verifying', { appId: form.app_id, code })}</p>
       </div>
     )
   }
   return (
     <div className="space-y-2 text-sm">
       <p>
-        Ready to connect <strong>{t(descriptor.labelKey)}</strong> bot <code>{form.app_id}</code>.
+        {t.rich('im.wizard.verifyBody.ready', {
+          platform: tDyn(descriptor.labelKey),
+          appId: form.app_id,
+          strong,
+          code,
+        })}
       </p>
       <p className="text-xs text-muted-foreground">
-        Press <strong>Connect</strong> to hydrate the bot identity and open the connection.
+        {t.rich('im.wizard.verifyBody.pressConnect', { strong })}
       </p>
     </div>
   )

@@ -18,7 +18,7 @@ the reactions lifecycle, and multi-turn conversation continuity.
 
 1. Reset worktree dev DB; `alembic upgrade head` (final migration
    `9ccd63170399 — im connectors tables`).
-2. Start backend with `CUBEBOX_API__RELOAD=false uv run python main.py`
+2. Start backend with `CUBEPLEX_API__RELOAD=false uv run python main.py`
    on `127.0.0.1:8076`. Reload had to be off — `uvicorn --reload`
    restarts every time we save a Python file, which tears down the
    WebSocket mid-session.

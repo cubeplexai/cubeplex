@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { useAdminSkillsStore, type SkillFilters } from '@cubebox/core'
+import { useAdminSkillsStore, type SkillFilters } from '@cubeplex/core'
 import { SkillsToolbar } from '@/components/admin/skills/SkillsToolbar'
 import { SkillsList } from '@/components/admin/skills/SkillsList'
 import { SkillDetailPanel } from '@/components/admin/skills/SkillDetailPanel'

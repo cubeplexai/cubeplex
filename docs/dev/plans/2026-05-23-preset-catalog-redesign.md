@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move the LLM provider preset catalog from cubepi into cubebox, restructure it from a flat `(slug, api, base_url)` list into `vendor → region×protocol×plan endpoints → models-with-pricing`, compose `base_url` from parts, and let `config.yaml` reference catalog entries by `preset:` instead of restating base_url/models/pricing.
+**Goal:** Move the LLM provider preset catalog from cubepi into cubeplex, restructure it from a flat `(slug, api, base_url)` list into `vendor → region×protocol×plan endpoints → models-with-pricing`, compose `base_url` from parts, and let `config.yaml` reference catalog entries by `preset:` instead of restating base_url/models/pricing.
 
-**Architecture:** A new `cubebox/llm/catalog/` package owns the data (`vendors.yaml`, `capabilities.yaml`) and a validating loader. The loader flattens vendors into endpoint presets keyed by `preset_key = vendor/region/protocol[/plan]`, composes `base_url = (endpoint.host || region.host) + path`, and resolves named capability profiles into cubepi `CapabilityDescriptor` objects. Three existing consumers (admin presets endpoint, logo lookup, seeder) repoint to it; the seeder gains preset-reference resolution with field-precedence rules. The wizard becomes two-step (vendor → endpoint). Finally cubepi's catalog package is deleted.
+**Architecture:** A new `cubeplex/llm/catalog/` package owns the data (`vendors.yaml`, `capabilities.yaml`) and a validating loader. The loader flattens vendors into endpoint presets keyed by `preset_key = vendor/region/protocol[/plan]`, composes `base_url = (endpoint.host || region.host) + path`, and resolves named capability profiles into cubepi `CapabilityDescriptor` objects. Three existing consumers (admin presets endpoint, logo lookup, seeder) repoint to it; the seeder gains preset-reference resolution with field-precedence rules. The wizard becomes two-step (vendor → endpoint). Finally cubepi's catalog package is deleted.
 
 **Tech Stack:** Python 3.13 / FastAPI / Pydantic v2 / SQLModel / Alembic (backend); pytest; Next.js 15 / React 19 / TypeScript / Vitest (frontend); `uv` (backend deps), `pnpm` (frontend deps).
 
 **Spec:** `docs/dev/specs/2026-05-22-preset-catalog-redesign-design.md` (read it first — every `§` reference below points there).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/preset-catalog-redesign` (branch `feat/preset-catalog-redesign`, slot 82 — backend `:8082`, frontend `:3082`, DB `cubebox_feat_preset_catalog_redesign`). Run `cat .worktree.env` before starting; backend tests run from `backend/`, frontend from `frontend/`.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/preset-catalog-redesign` (branch `feat/preset-catalog-redesign`, slot 82 — backend `:8082`, frontend `:3082`, DB `cubeplex_feat_preset_catalog_redesign`). Run `cat .worktree.env` before starting; backend tests run from `backend/`, frontend from `frontend/`.
 
 **Conventions (from CLAUDE.md):** type annotations everywhere (mypy strict), 100-char lines, `uv add` for deps, `alembic revision --autogenerate` for migrations (none expected here — no schema change), `utc_isoformat()` for DB datetimes. Stay on this branch; never switch to main. Commit after every green step.
 
@@ -18,20 +18,20 @@
 
 ## File Structure
 
-**New (cubebox backend):**
-- `cubebox/llm/catalog/__init__.py` — public API: `load_catalog()`, `get_catalog()` (cached), re-exports.
-- `cubebox/llm/catalog/types.py` — Pydantic models: `Pricing`, `ModelPreset`, `Endpoint`, `Region`, `Vendor`, and the resolved/derived `ResolvedEndpoint`, `Catalog`.
-- `cubebox/llm/catalog/loader.py` — YAML load + all validations (§4.2/§4.3/§4.4) + `compose_base_url` + `preset_key_for` + capability resolution + flattening.
-- `cubebox/llm/catalog/data/vendors.yaml` — ported nested catalog data.
-- `cubebox/llm/catalog/data/capabilities.yaml` — named capability profiles.
+**New (cubeplex backend):**
+- `cubeplex/llm/catalog/__init__.py` — public API: `load_catalog()`, `get_catalog()` (cached), re-exports.
+- `cubeplex/llm/catalog/types.py` — Pydantic models: `Pricing`, `ModelPreset`, `Endpoint`, `Region`, `Vendor`, and the resolved/derived `ResolvedEndpoint`, `Catalog`.
+- `cubeplex/llm/catalog/loader.py` — YAML load + all validations (§4.2/§4.3/§4.4) + `compose_base_url` + `preset_key_for` + capability resolution + flattening.
+- `cubeplex/llm/catalog/data/vendors.yaml` — ported nested catalog data.
+- `cubeplex/llm/catalog/data/capabilities.yaml` — named capability profiles.
 - `tests/unit/llm/catalog/test_loader.py` — loader unit tests.
 - `tests/unit/llm/catalog/test_composition.py` — base_url composition + parity test.
 - `tests/unit/llm/catalog/data/flat_providers_snapshot.yaml` — frozen copy of today's cubepi `providers.yaml` (parity fixture).
 
-**Modified (cubebox backend):**
-- `cubebox/api/routes/v1/admin_llm.py` — return nested vendor list (§5.1).
-- `cubebox/api/routes/v1/admin_providers.py` — `_resolve_logo` resolves via catalog vendor.
-- `cubebox/seeders/provider_seeder.py` — `preset:` resolution + precedence (§6.2) + validation (§6.3).
+**Modified (cubeplex backend):**
+- `cubeplex/api/routes/v1/admin_llm.py` — return nested vendor list (§5.1).
+- `cubeplex/api/routes/v1/admin_providers.py` — `_resolve_logo` resolves via catalog vendor.
+- `cubeplex/seeders/provider_seeder.py` — `preset:` resolution + precedence (§6.2) + validation (§6.3).
 - `config.development.local.yaml` (+ `config.yaml` if present) — exhaustive rewrite to `preset:` form (§6.1/§6.4).
 
 **Modified (frontend):**
@@ -44,7 +44,7 @@
 **Deleted (cubepi, Phase G):**
 - `cubepi/providers/catalog/` (loader, types, `data/providers.yaml`, tests) — via a cubepi release + dependency bump.
 
-**Decoupling decision:** cubebox's catalog `types.py` declares its **own** `WireApi` literal (the 3 protocol strings) and imports only `CapabilityDescriptor` from `cubepi.providers.capability` (a stable, non-catalog module). This removes any cubebox→cubepi-catalog import so Phases A–F do not depend on the cubepi release; Phase G only deletes cubepi's now-unused catalog.
+**Decoupling decision:** cubeplex's catalog `types.py` declares its **own** `WireApi` literal (the 3 protocol strings) and imports only `CapabilityDescriptor` from `cubepi.providers.capability` (a stable, non-catalog module). This removes any cubeplex→cubepi-catalog import so Phases A–F do not depend on the cubepi release; Phase G only deletes cubepi's now-unused catalog.
 
 ---
 
@@ -55,8 +55,8 @@ No real data yet — tests use small inline fixtures so logic is verified in iso
 ### Task A1: Pydantic source-schema types
 
 **Files:**
-- Create: `cubebox/llm/catalog/__init__.py` (empty for now)
-- Create: `cubebox/llm/catalog/types.py`
+- Create: `cubeplex/llm/catalog/__init__.py` (empty for now)
+- Create: `cubeplex/llm/catalog/types.py`
 - Test: `tests/unit/llm/catalog/test_loader.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -64,7 +64,7 @@ No real data yet — tests use small inline fixtures so logic is verified in iso
 Create `tests/unit/llm/catalog/__init__.py` (empty) and `tests/unit/llm/catalog/test_loader.py`:
 
 ```python
-from cubebox.llm.catalog.types import Endpoint, ModelPreset, Pricing, Region, Vendor
+from cubeplex.llm.catalog.types import Endpoint, ModelPreset, Pricing, Region, Vendor
 
 
 def test_vendor_parses_minimal():
@@ -103,11 +103,11 @@ def test_vendor_parses_minimal():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/llm/catalog/test_loader.py::test_vendor_parses_minimal -v`
-Expected: FAIL — `ModuleNotFoundError: cubebox.llm.catalog.types`.
+Expected: FAIL — `ModuleNotFoundError: cubeplex.llm.catalog.types`.
 
 - [ ] **Step 3: Write the types**
 
-`cubebox/llm/catalog/types.py`:
+`cubeplex/llm/catalog/types.py`:
 
 ```python
 """Catalog source-schema + resolved/derived types. Spec §4."""
@@ -119,7 +119,7 @@ from typing import Literal
 from cubepi.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
-# The protocols cubebox offers in its catalog. Mirrors cubepi's WireApi but
+# The protocols cubeplex offers in its catalog. Mirrors cubepi's WireApi but
 # declared locally so the catalog does not import cubepi's (to-be-deleted)
 # catalog package. See plan "Decoupling decision".
 WireApi = Literal["anthropic-messages", "openai-completions", "openai-responses"]
@@ -200,14 +200,14 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/llm/catalog/__init__.py cubebox/llm/catalog/types.py tests/unit/llm/catalog/
+git add cubeplex/llm/catalog/__init__.py cubeplex/llm/catalog/types.py tests/unit/llm/catalog/
 git commit -m "feat(catalog): source-schema + resolved types for nested preset catalog"
 ```
 
 ### Task A2: `compose_base_url` (§4.1)
 
 **Files:**
-- Create: `cubebox/llm/catalog/loader.py`
+- Create: `cubeplex/llm/catalog/loader.py`
 - Test: `tests/unit/llm/catalog/test_composition.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -217,8 +217,8 @@ git commit -m "feat(catalog): source-schema + resolved types for nested preset c
 ```python
 import pytest
 
-from cubebox.llm.catalog.loader import compose_base_url
-from cubebox.llm.catalog.types import Endpoint, Region
+from cubeplex.llm.catalog.loader import compose_base_url
+from cubeplex.llm.catalog.types import Endpoint, Region
 
 
 @pytest.mark.parametrize(
@@ -257,18 +257,18 @@ def test_compose_base_url_unknown_region_raises():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/llm/catalog/test_composition.py -v`
-Expected: FAIL — `ModuleNotFoundError: cubebox.llm.catalog.loader`.
+Expected: FAIL — `ModuleNotFoundError: cubeplex.llm.catalog.loader`.
 
 - [ ] **Step 3: Implement `compose_base_url`**
 
-Create `cubebox/llm/catalog/loader.py`:
+Create `cubeplex/llm/catalog/loader.py`:
 
 ```python
 """Catalog loader: YAML → validated, flattened catalog. Spec §4."""
 
 from __future__ import annotations
 
-from cubebox.llm.catalog.types import Endpoint, Region
+from cubeplex.llm.catalog.types import Endpoint, Region
 
 
 def compose_base_url(regions: dict[str, Region], endpoint: Endpoint) -> str:
@@ -295,20 +295,20 @@ Expected: PASS (5 cases).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/llm/catalog/loader.py tests/unit/llm/catalog/test_composition.py
+git add cubeplex/llm/catalog/loader.py tests/unit/llm/catalog/test_composition.py
 git commit -m "feat(catalog): compose_base_url with host/path/full-override (§4.1)"
 ```
 
 ### Task A3: `preset_key_for` (§4.4)
 
 **Files:**
-- Modify: `cubebox/llm/catalog/loader.py`
+- Modify: `cubeplex/llm/catalog/loader.py`
 - Test: `tests/unit/llm/catalog/test_loader.py`
 
 - [ ] **Step 1: Write the failing test** (append to `test_loader.py`)
 
 ```python
-from cubebox.llm.catalog.loader import preset_key_for
+from cubeplex.llm.catalog.loader import preset_key_for
 
 
 def test_preset_key_without_plan():
@@ -326,7 +326,7 @@ def test_preset_key_override_wins():
     assert preset_key_for("zhipu", ep) == "pretty-key"
 ```
 
-(Add `from cubebox.llm.catalog.types import Endpoint` to the imports if not present.)
+(Add `from cubeplex.llm.catalog.types import Endpoint` to the imports if not present.)
 
 - [ ] **Step 2: Run** `uv run pytest tests/unit/llm/catalog/test_loader.py -k preset_key -v` → FAIL (`preset_key_for` undefined).
 
@@ -348,14 +348,14 @@ def preset_key_for(vendor: str, endpoint: Endpoint) -> str:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/llm/catalog/loader.py tests/unit/llm/catalog/test_loader.py
+git add cubeplex/llm/catalog/loader.py tests/unit/llm/catalog/test_loader.py
 git commit -m "feat(catalog): preset_key_for vendor/region/protocol[/plan] (§4.4)"
 ```
 
 ### Task A4: capability profile resolution (§4.3)
 
 **Files:**
-- Modify: `cubebox/llm/catalog/loader.py`
+- Modify: `cubeplex/llm/catalog/loader.py`
 - Test: `tests/unit/llm/catalog/test_loader.py`
 
 - [ ] **Step 1: Write the failing test** (append)
@@ -363,7 +363,7 @@ git commit -m "feat(catalog): preset_key_for vendor/region/protocol[/plan] (§4.
 ```python
 import pytest
 
-from cubebox.llm.catalog.loader import resolve_capability
+from cubeplex.llm.catalog.loader import resolve_capability
 
 
 def test_resolve_capability_named():
@@ -386,7 +386,7 @@ def test_resolve_capability_unknown_name_fails_loudly():
 
 - [ ] **Step 2: Run** `uv run pytest tests/unit/llm/catalog/test_loader.py -k resolve_capability -v` → FAIL.
 
-- [ ] **Step 3: Implement** (append to `loader.py`; add `from cubebox.llm.catalog.types import CapabilityDescriptor` — re-export it from types, or import from cubepi directly):
+- [ ] **Step 3: Implement** (append to `loader.py`; add `from cubeplex.llm.catalog.types import CapabilityDescriptor` — re-export it from types, or import from cubepi directly):
 
 ```python
 from cubepi.providers.capability import CapabilityDescriptor
@@ -411,20 +411,20 @@ def resolve_capability(
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/llm/catalog/loader.py tests/unit/llm/catalog/test_loader.py
+git add cubeplex/llm/catalog/loader.py tests/unit/llm/catalog/test_loader.py
 git commit -m "feat(catalog): capability profile resolution, loud-fail on unknown (§4.3)"
 ```
 
 ### Task A5: membership + plan validations (§4.2) and full `load_catalog`
 
 **Files:**
-- Modify: `cubebox/llm/catalog/loader.py`, `cubebox/llm/catalog/__init__.py`
+- Modify: `cubeplex/llm/catalog/loader.py`, `cubeplex/llm/catalog/__init__.py`
 - Test: `tests/unit/llm/catalog/test_loader.py`
 
 - [ ] **Step 1: Write the failing tests** (append). These cover: untagged-serves-all, tiered membership by plan intersection, all-or-nothing mixing rejected, dangling endpoint rejected, unreachable model rejected, duplicate preset_key rejected.
 
 ```python
-from cubebox.llm.catalog.loader import build_catalog
+from cubeplex.llm.catalog.loader import build_catalog
 
 PROFILES = {"x": {}}
 
@@ -535,7 +535,7 @@ class Catalog(BaseModel):
 Append to `loader.py`:
 
 ```python
-from cubebox.llm.catalog.types import Catalog, ResolvedEndpoint, Vendor
+from cubeplex.llm.catalog.types import Catalog, ResolvedEndpoint, Vendor
 
 
 def _validate_plan_consistency(v: Vendor) -> None:
@@ -612,11 +612,11 @@ def load_catalog() -> Catalog:
     return build_catalog(vendors_raw, profiles or {})
 ```
 
-`cubebox/llm/catalog/__init__.py`:
+`cubeplex/llm/catalog/__init__.py`:
 
 ```python
-from cubebox.llm.catalog.loader import build_catalog, compose_base_url, load_catalog, preset_key_for
-from cubebox.llm.catalog.types import (
+from cubeplex.llm.catalog.loader import build_catalog, compose_base_url, load_catalog, preset_key_for
+from cubeplex.llm.catalog.types import (
     Catalog, Endpoint, ModelPreset, Pricing, Region, ResolvedEndpoint, Vendor, WireApi,
 )
 
@@ -629,7 +629,7 @@ __all__ = [
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/llm/catalog/ tests/unit/llm/catalog/test_loader.py
+git add cubeplex/llm/catalog/ tests/unit/llm/catalog/test_loader.py
 git commit -m "feat(catalog): build_catalog with plan/membership validations + load_catalog (§4.2)"
 ```
 
@@ -642,7 +642,7 @@ git commit -m "feat(catalog): build_catalog with plan/membership validations + l
 **Files:**
 - Create: `tests/unit/llm/catalog/data/flat_providers_snapshot.yaml`
 
-- [ ] **Step 1: Copy the published flat catalog** (the file cubebox currently resolves at runtime):
+- [ ] **Step 1: Copy the published flat catalog** (the file cubeplex currently resolves at runtime):
 
 ```bash
 cp backend/.venv/lib/python3.13/site-packages/cubepi/providers/catalog/data/providers.yaml \
@@ -659,8 +659,8 @@ git commit -m "test(catalog): freeze current flat providers.yaml as parity fixtu
 ### Task B2: Author `vendors.yaml` + `capabilities.yaml`
 
 **Files:**
-- Create: `cubebox/llm/catalog/data/vendors.yaml`
-- Create: `cubebox/llm/catalog/data/capabilities.yaml`
+- Create: `cubeplex/llm/catalog/data/vendors.yaml`
+- Create: `cubeplex/llm/catalog/data/capabilities.yaml`
 
 This is data entry, not logic — but it must reproduce every flat entry. Work vendor-by-vendor from `flat_providers_snapshot.yaml`. The snapshot's flat entries group into these vendors (regions/plans/protocols noted):
 
@@ -704,13 +704,13 @@ anthropic-native:
 
 - [ ] **Step 3: Sanity-load** to catch validation errors early:
 
-Run: `cd backend && uv run python -c "from cubebox.llm.catalog import load_catalog; c=load_catalog(); print(len(c.vendors), 'vendors', len(c.endpoints), 'endpoints')"`
+Run: `cd backend && uv run python -c "from cubeplex.llm.catalog import load_catalog; c=load_catalog(); print(len(c.vendors), 'vendors', len(c.endpoints), 'endpoints')"`
 Expected: prints counts, no exception. Fix any validation error it raises.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/llm/catalog/data/vendors.yaml cubebox/llm/catalog/data/capabilities.yaml
+git add cubeplex/llm/catalog/data/vendors.yaml cubeplex/llm/catalog/data/capabilities.yaml
 git commit -m "feat(catalog): port flat providers.yaml to nested vendors + capability profiles"
 ```
 
@@ -727,7 +727,7 @@ from pathlib import Path
 
 import yaml
 
-from cubebox.llm.catalog import load_catalog
+from cubeplex.llm.catalog import load_catalog
 
 _SNAPSHOT = Path(__file__).parent / "data" / "flat_providers_snapshot.yaml"
 
@@ -764,7 +764,7 @@ Expected: FAIL initially if any vendor entry is missing/mismatched — the failu
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/unit/llm/catalog/test_composition.py cubebox/llm/catalog/data/vendors.yaml
+git add tests/unit/llm/catalog/test_composition.py cubeplex/llm/catalog/data/vendors.yaml
 git commit -m "test(catalog): byte-parity of composed base_url vs frozen flat catalog (§4.1)"
 ```
 
@@ -775,15 +775,15 @@ git commit -m "test(catalog): byte-parity of composed base_url vs frozen flat ca
 ### Task C1: `admin_llm.py` returns the nested vendor list (§5.1)
 
 **Files:**
-- Modify: `cubebox/api/routes/v1/admin_llm.py`
-- Modify: `cubebox/llm/catalog/loader.py` (add `to_api()` serializer)
+- Modify: `cubeplex/api/routes/v1/admin_llm.py`
+- Modify: `cubeplex/llm/catalog/loader.py` (add `to_api()` serializer)
 - Test: `tests/unit/llm/catalog/test_loader.py`, `tests/e2e` (existing presets endpoint test if any)
 
 - [ ] **Step 1: Write the failing test** (append to `test_loader.py`) for the API shape:
 
 ```python
 def test_catalog_to_api_shape():
-    from cubebox.llm.catalog import load_catalog
+    from cubeplex.llm.catalog import load_catalog
 
     api = load_catalog().to_api()
     assert isinstance(api, list)
@@ -825,7 +825,7 @@ def to_api(self) -> list[dict]:
     return out
 ```
 
-- [ ] **Step 4: Rewrite the endpoint** `cubebox/api/routes/v1/admin_llm.py`:
+- [ ] **Step 4: Rewrite the endpoint** `cubeplex/api/routes/v1/admin_llm.py`:
 
 ```python
 @router.get("/presets")
@@ -833,8 +833,8 @@ async def list_provider_presets(
     *,
     user: Annotated[User, Depends(require_org_admin)],
 ) -> list[dict[str, Any]]:
-    """Return cubebox's provider-preset catalog as a nested vendor list (spec §5.1)."""
-    from cubebox.llm.catalog import load_catalog
+    """Return cubeplex's provider-preset catalog as a nested vendor list (spec §5.1)."""
+    from cubeplex.llm.catalog import load_catalog
 
     return load_catalog().to_api()
 ```
@@ -844,14 +844,14 @@ async def list_provider_presets(
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/admin_llm.py cubebox/llm/catalog/ tests/unit/llm/catalog/test_loader.py
+git add cubeplex/api/routes/v1/admin_llm.py cubeplex/llm/catalog/ tests/unit/llm/catalog/test_loader.py
 git commit -m "feat(catalog): /admin/llm/presets returns nested vendor list (§5.1)"
 ```
 
 ### Task C2: `admin_providers.py` logo via catalog
 
 **Files:**
-- Modify: `cubebox/api/routes/v1/admin_providers.py:148-156`
+- Modify: `cubeplex/api/routes/v1/admin_providers.py:148-156`
 - Test: `tests/unit` (add a focused test for `_resolve_logo`)
 
 `_resolve_logo` currently calls `get_provider_preset(preset_slug).logo`. The new `preset_slug` is a `preset_key` (`vendor/region/protocol[/plan]`); logo lives on the **vendor**.
@@ -859,7 +859,7 @@ git commit -m "feat(catalog): /admin/llm/presets returns nested vendor list (§5
 - [ ] **Step 1: Write the failing test** `tests/unit/test_resolve_logo.py`:
 
 ```python
-from cubebox.api.routes.v1.admin_providers import _resolve_logo
+from cubeplex.api.routes.v1.admin_providers import _resolve_logo
 
 
 def test_resolve_logo_by_preset_key():
@@ -870,9 +870,9 @@ def test_resolve_logo_by_key_override(monkeypatch):
     # A `key:`-overridden preset_key does NOT start with the vendor, so a split("/")
     # approach would fail. Inject a catalog whose endpoint key is "pretty-id" and
     # assert the logo still resolves via the vendor — a real regression guard.
-    from cubebox.llm.catalog import build_catalog
-    import cubebox.api.routes.v1.admin_providers as mod
-    import cubebox.llm.catalog as catmod  # _resolve_logo does `from cubebox.llm.catalog import load_catalog`
+    from cubeplex.llm.catalog import build_catalog
+    import cubeplex.api.routes.v1.admin_providers as mod
+    import cubeplex.llm.catalog as catmod  # _resolve_logo does `from cubeplex.llm.catalog import load_catalog`
 
     catalog = build_catalog(
         [{
@@ -906,7 +906,7 @@ def _resolve_logo(preset_slug: str | None) -> str | None:
     if not preset_slug:
         return None
     try:
-        from cubebox.llm.catalog import load_catalog
+        from cubeplex.llm.catalog import load_catalog
 
         catalog = load_catalog()
         ep = catalog.resolve(preset_slug)  # works for composed keys AND key: overrides
@@ -923,11 +923,11 @@ def _resolve_logo(preset_slug: str | None) -> str | None:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/admin_providers.py tests/unit/test_resolve_logo.py
+git add cubeplex/api/routes/v1/admin_providers.py tests/unit/test_resolve_logo.py
 git commit -m "feat(catalog): resolve provider logo via catalog vendor (preset_key)"
 ```
 
-### Task C3: `@cubebox/core` nested preset types + `listPresets`
+### Task C3: `@cubeplex/core` nested preset types + `listPresets`
 
 **Files:**
 - Modify: `frontend/packages/core/src/types/provider.ts:17-37`
@@ -984,7 +984,7 @@ Update the `import` and any barrel re-export (`frontend/packages/core/src/index.
 
 - [ ] **Step 3: Build core** (web depends on the built package):
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: builds; TypeScript errors elsewhere (PresetPicker/ConfigureStep) are expected and fixed in Phase F.
 
 - [ ] **Step 4: Commit**
@@ -1001,13 +1001,13 @@ git commit -m "feat(core): nested VendorPreset/EndpointPreset types for catalog 
 ### Task D1: cost deep-merge helper (§6.2.3)
 
 **Files:**
-- Modify: `cubebox/seeders/provider_seeder.py`
+- Modify: `cubeplex/seeders/provider_seeder.py`
 - Test: `tests/unit/test_provider_seeder_resolve.py`
 
 - [ ] **Step 1: Write the failing test** `tests/unit/test_provider_seeder_resolve.py`:
 
 ```python
-from cubebox.seeders.provider_seeder import _merge_cost
+from cubeplex.seeders.provider_seeder import _merge_cost
 
 
 def test_merge_cost_partial_override_inherits_other_legs():
@@ -1043,14 +1043,14 @@ def _merge_cost(catalog_cost: dict[str, float], override: dict[str, Any] | None)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/seeders/provider_seeder.py tests/unit/test_provider_seeder_resolve.py
+git add cubeplex/seeders/provider_seeder.py tests/unit/test_provider_seeder_resolve.py
 git commit -m "feat(seeder): per-leg cost deep-merge for preset overrides (§6.2.3)"
 ```
 
 ### Task D2: preset resolution + precedence + validation in the seed loop
 
 **Files:**
-- Modify: `cubebox/seeders/provider_seeder.py`
+- Modify: `cubeplex/seeders/provider_seeder.py`
 - Test: `tests/unit/test_provider_seeder_resolve.py` (a focused resolver test)
 
 The seed loop (`seed_system_providers_from_config`) reads each `config_providers[name]` dict. Add: if `preset:` is present, resolve it and inherit. This means restructuring how `base_url`, `provider_type`, the model list, and `capability` are derived.
@@ -1060,7 +1060,7 @@ The seed loop (`seed_system_providers_from_config`) reads each `config_providers
 ```python
 import pytest
 
-from cubebox.seeders.provider_seeder import resolve_provider_config
+from cubeplex.seeders.provider_seeder import resolve_provider_config
 
 
 def test_resolve_with_preset_inherits_base_url_models_capability():
@@ -1139,7 +1139,7 @@ NOTE: these tests require the deepseek vendor/endpoint to exist in `vendors.yaml
 ```python
 from dataclasses import dataclass
 
-from cubebox.llm.catalog import load_catalog
+from cubeplex.llm.catalog import load_catalog
 
 
 @dataclass
@@ -1231,7 +1231,7 @@ def resolve_provider_config(name: str, cfg: dict[str, Any]) -> ResolvedProviderC
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/seeders/provider_seeder.py tests/unit/test_provider_seeder_resolve.py cubebox/llm/catalog/data/vendors.yaml
+git add cubeplex/seeders/provider_seeder.py tests/unit/test_provider_seeder_resolve.py cubeplex/llm/catalog/data/vendors.yaml
 git commit -m "feat(seeder): resolve config preset: into base_url/api/capability/model-pool (§6.2/§6.3)"
 ```
 
@@ -1244,7 +1244,7 @@ git commit -m "feat(seeder): resolve config preset: into base_url/api/capability
 **Files:**
 - Modify: `backend/config.development.local.yaml` (the `llm.providers` block)
 - Modify: any other seed config that declares `llm.providers` (see Step 0)
-- Modify: `cubebox/llm/catalog/data/vendors.yaml` (add any seeded model/endpoint not yet present)
+- Modify: `cubeplex/llm/catalog/data/vendors.yaml` (add any seeded model/endpoint not yet present)
 
 - [ ] **Step 0: Enumerate every seed config (codex P1 — §6.4 is exhaustive, not illustrative).** The inventory below covers `config.development.local.yaml` only; before rewriting, list **all** files that carry an `llm.providers` block and inventory each:
 
@@ -1314,14 +1314,14 @@ The seeded providers in `config.development.local.yaml` and their mapping (§6.4
 
 - [ ] **Step 3: Boot the seeder** against the worktree DB to confirm it resolves:
 
-Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run python -c "import asyncio; from cubebox.db import ...; ..."` — or simpler, run the app's seed entrypoint / the seed test that exercises real config. Confirm no `ValueError` and that previously-seeded providers still produce models.
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run python -c "import asyncio; from cubeplex.db import ...; ..."` — or simpler, run the app's seed entrypoint / the seed test that exercises real config. Confirm no `ValueError` and that previously-seeded providers still produce models.
 Expected: seed completes; `deepseek/minimax/arkcode/alicode/volengine/openrouter` get their models from the catalog.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 # stage EVERY seed file Step 0 enumerated, not just the local one
-git add backend/config.development.local.yaml cubebox/llm/catalog/data/vendors.yaml
+git add backend/config.development.local.yaml cubeplex/llm/catalog/data/vendors.yaml
 # + any other seed config Step 0 found (e.g. backend/config.yaml / config.development.yaml)
 git commit -m "feat(config): rewrite seed providers to preset: refs; add seeded models to catalog (§6.4)"
 ```
@@ -1341,8 +1341,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cubebox.config import config as settings
-from cubebox.seeders.provider_seeder import resolve_provider_config
+from cubeplex.config import config as settings
+from cubeplex.seeders.provider_seeder import resolve_provider_config
 
 _SNAPSHOT = (
     Path(__file__).parent / "llm" / "catalog" / "data" / "flat_providers_snapshot.yaml"
@@ -1430,7 +1430,7 @@ git commit -m "test(seeder): backfill-parity guard for preset-mapped providers (
 ```typescript
 import { describe, expect, it } from 'vitest'
 import { canAdvance, initialWizardState, wizardReducer } from '../wizardMachine'
-import type { VendorPreset } from '@cubebox/core'
+import type { VendorPreset } from '@cubeplex/core'
 
 const vendor = {
   vendor: 'zhipu', display_name: 'Zhipu', short_name: 'Zhipu', logo: 'zhipu',
@@ -1455,7 +1455,7 @@ it('records the endpoint selected in step 2', () => {
 })
 ```
 
-- [ ] **Step 2: Run** `cd frontend && pnpm --filter @cubebox/web test wizardMachine` → FAIL.
+- [ ] **Step 2: Run** `cd frontend && pnpm --filter @cubeplex/web test wizardMachine` → FAIL.
 
 - [ ] **Step 3: Implement** — update `wizardMachine.ts`: replace `preset: ProviderPreset | null` with `vendor: VendorPreset | null` and `selectedPresetKey: string | null`; actions `pickVendor` / `selectEndpoint`; `canAdvance` **step 1 → `vendor !== null`** (endpoint not required here); the step-2 create action in ConfigureStep is what requires `selectedPresetKey` (F3).
 
@@ -1476,7 +1476,7 @@ git commit -m "feat(wizard): vendor + endpoint selection state (two-step)"
 
 - [ ] **Step 1:** Change `presets`/`ProviderPreset[]` to `vendors`/`VendorPreset[]`; `onPick(preset)` → `onPickVendor(vendor)`. Filter/search over `vendor.display_name`/`vendor.vendor`. Card renders `vendor.logo`, `display_name`, `description`, a count badge (`${vendor.endpoints.length} endpoints`). Drop the reasoning-shape badge (it read `preset.capability`, which no longer exists at vendor level). `selectedSlug` → `selectedVendor: string | null` compared to `vendor.vendor`.
 
-- [ ] **Step 2: Verify build + existing test** `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web test PresetPicker` (update the test fixture to `VendorPreset`). Expected: PASS.
+- [ ] **Step 2: Verify build + existing test** `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web test PresetPicker` (update the test fixture to `VendorPreset`). Expected: PASS.
 
 - [ ] **Step 3: Commit**
 
@@ -1498,14 +1498,14 @@ git commit -m "feat(wizard): PresetPicker lists vendors (step 1)"
 
 - [ ] **Step 3: Build + typecheck + tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web type-check && pnpm --filter @cubebox/web test`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web type-check && pnpm --filter @cubeplex/web test`
 Expected: PASS (update `ConfigureStep.test.tsx` fixtures to the nested shape).
 
 - [ ] **Step 4: Manual E2E (golden path)** — per CLAUDE.md, exercise the UI. Start backend + frontend on slot-82 ports (bind `0.0.0.0` — user is remote):
 
 ```bash
 # backend
-cd backend && set -a && source ../.worktree.env && set +a && CUBEBOX_API__HOST=0.0.0.0 uv run python main.py
+cd backend && set -a && source ../.worktree.env && set +a && CUBEPLEX_API__HOST=0.0.0.0 uv run python main.py
 # frontend (separate shell) — uses the with-worktree-env wrapper so PORT=3082
 cd frontend && HOSTNAME=0.0.0.0 pnpm dev
 ```
@@ -1523,30 +1523,30 @@ git commit -m "feat(wizard): endpoint selectors drive composed base_url + filter
 
 ## Phase G — Delete cubepi catalog + bump dependency
 
-This phase requires a **cubepi release** because cubebox consumes cubepi from PyPI. Do it last, after Phases A–F prove cubebox no longer imports cubepi's catalog.
+This phase requires a **cubepi release** because cubeplex consumes cubepi from PyPI. Do it last, after Phases A–F prove cubeplex no longer imports cubepi's catalog.
 
-### Task G1: Confirm cubebox has zero cubepi-catalog imports
+### Task G1: Confirm cubeplex has zero cubepi-catalog imports
 
 - [ ] **Step 1: Grep**
 
-Run: `cd backend && git grep -n "cubepi.providers.catalog" cubebox/ tests/`
+Run: `cd backend && git grep -n "cubepi.providers.catalog" cubeplex/ tests/`
 Expected: **no matches** (Phases C/D removed them). If any remain, fix before proceeding.
 
 - [ ] **Step 2:** also confirm nothing imports the old flat `ProviderPreset`/`get_provider_preset`/`list_provider_presets` from cubepi:
 
 Run: `git grep -n "get_provider_preset\|list_provider_presets\|from cubepi.providers.catalog" backend/`
-Expected: no matches in `cubebox/` (the snapshot fixture under `tests/` is local YAML, not an import — OK).
+Expected: no matches in `cubeplex/` (the snapshot fixture under `tests/` is local YAML, not an import — OK).
 
 ### Task G2: cubepi PR — delete catalog package
 
 **Repo:** `/home/chris/cubepi` (separate worktree per cubepi's own workflow).
 
-- [ ] **Step 1:** In cubepi, confirm `WireApi` (in `cubepi/providers/catalog/types.py`) is only referenced by the catalog package: `git grep -n WireApi` in cubepi. If referenced elsewhere, relocate `WireApi` to a non-catalog module (e.g. `cubepi/providers/wire.py`) and update imports. (cubebox does NOT depend on this — it declares its own; see Decoupling decision.)
+- [ ] **Step 1:** In cubepi, confirm `WireApi` (in `cubepi/providers/catalog/types.py`) is only referenced by the catalog package: `git grep -n WireApi` in cubepi. If referenced elsewhere, relocate `WireApi` to a non-catalog module (e.g. `cubepi/providers/wire.py`) and update imports. (cubeplex does NOT depend on this — it declares its own; see Decoupling decision.)
 - [ ] **Step 2:** Delete `cubepi/providers/catalog/` (loader, types, `data/providers.yaml`, tests). Remove any `__init__` re-exports of catalog symbols.
 - [ ] **Step 3:** Run cubepi's test suite + lint. Fix fallout (likely just removing catalog tests + dead re-exports).
 - [ ] **Step 4:** Open the cubepi PR; run its codex review loop; merge; cut a release (per cubepi's release process — likely a version bump + publish).
 
-### Task G3: cubebox — bump cubepi dependency
+### Task G3: cubeplex — bump cubepi dependency
 
 **Files:**
 - Modify: `backend/pyproject.toml` (cubepi version), `backend/uv.lock`
@@ -1557,22 +1557,22 @@ Run: `cd backend && uv add 'cubepi==<new-version>'` (do NOT hand-edit pyproject 
 
 - [ ] **Step 2: Full backend sweep**
 
-Run: `cd backend && uv run pytest tests/unit tests/integration -q && uv run mypy cubebox/`
-Expected: PASS — cubebox uses only `cubepi.providers.capability` now.
+Run: `cd backend && uv run pytest tests/unit tests/integration -q && uv run mypy cubeplex/`
+Expected: PASS — cubeplex uses only `cubepi.providers.capability` now.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add backend/pyproject.toml backend/uv.lock
-git commit -m "chore(deps): bump cubepi to <new-version> (catalog moved to cubebox)"
+git commit -m "chore(deps): bump cubepi to <new-version> (catalog moved to cubeplex)"
 ```
 
 ---
 
 ## Pre-PR sweep (after all phases)
 
-- [ ] Backend: `cd backend && uv run pytest -q && uv run mypy cubebox/ && uv run ruff check cubebox/`
-- [ ] Frontend: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/web type-check && pnpm --filter @cubebox/web test`
+- [ ] Backend: `cd backend && uv run pytest -q && uv run mypy cubeplex/ && uv run ruff check cubeplex/`
+- [ ] Frontend: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web lint && pnpm --filter @cubeplex/web type-check && pnpm --filter @cubeplex/web test`
 - [ ] Confirm the wizard golden path (F3 step 4) once more end-to-end.
 - [ ] Open PR; run the `pr-codex-review-loop` skill until clean.
 

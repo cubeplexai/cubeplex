@@ -1,8 +1,8 @@
 import pytest
 
-from cubebox.sandbox_env.injector import InjectionResult, SandboxEnvInjector
-from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE
-from cubebox.services.sandbox_env import ResolvedEnv
+from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
+from cubeplex.sandbox_env.placeholder import PLACEHOLDER_RE
+from cubeplex.services.sandbox_env import ResolvedEnv
 
 
 def test_secret_becomes_placeholder_env_value_passes_through():

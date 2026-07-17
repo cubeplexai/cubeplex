@@ -10,7 +10,7 @@ const outDir = `${root}.superpowers/screens/${stage}/`
 const stateFile = `${root}.superpowers/screens/.auth-state.json`
 mkdirSync(outDir, { recursive: true })
 
-const EMAIL = 'screens@cubebox.dev'
+const EMAIL = 'screens@cubeplex.dev'
 const PASSWORD = 'Screens-Harness-2026'
 
 const browser = await chromium.launch()

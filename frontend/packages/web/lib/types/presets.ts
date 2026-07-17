@@ -1,4 +1,4 @@
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
 export type ModelTier = 'lite' | 'flash' | 'pro' | 'max'
 export type TaskKey = 'title' | 'summarize' | 'compaction'
 export const MODEL_TIERS: ModelTier[] = ['lite', 'flash', 'pro', 'max']

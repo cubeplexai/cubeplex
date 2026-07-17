@@ -73,10 +73,10 @@ async def test_installed_skill_resolves_via_find_enabled_by_name(
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
 
-    from cubebox.db.engine import _build_database_url
-    from cubebox.repositories.workspace import WorkspaceRepository
-    from cubebox.skills.cache import SkillCache
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.db.engine import _build_database_url
+    from cubeplex.repositories.workspace import WorkspaceRepository
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
@@ -120,13 +120,13 @@ async def test_tombstoned_preinstalled_cannot_be_reinstalled_via_discovery(
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
 
-    from cubebox.db.engine import _build_database_url
-    from cubebox.repositories.skill import (
+    from cubeplex.db.engine import _build_database_url
+    from cubeplex.repositories.skill import (
         OrgPreinstalledTombstoneRepository,
         SkillRepository,
     )
-    from cubebox.repositories.workspace import WorkspaceRepository
-    from cubebox.skills.sources.base import decode_candidate_id
+    from cubeplex.repositories.workspace import WorkspaceRepository
+    from cubeplex.skills.sources.base import decode_candidate_id
 
     _, _, skill_id = decode_candidate_id(stale_candidate_id)
 

@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ApiError, createApiClient, getGoogleAuthorizeUrl } from '@cubebox/core'
+import { ApiError, createApiClient, getGoogleAuthorizeUrl } from '@cubeplex/core'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
 export function GoogleLoginButton() {
   const t = useTranslations('auth')
@@ -27,14 +29,16 @@ export function GoogleLoginButton() {
   }
 
   return (
-    <div className="space-y-2">
-      <button
+    <div className="flex flex-col gap-2">
+      <Button
         type="button"
+        variant="outline"
+        size="lg"
         onClick={onClick}
         disabled={loading}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50 flex items-center justify-center gap-2"
+        className="w-full"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+        <svg data-icon="inline-start" viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
             fill="#4285F4"
@@ -53,8 +57,12 @@ export function GoogleLoginButton() {
           />
         </svg>
         <span>{loading ? t('redirecting') : t('loginWithGoogle')}</span>
-      </button>
-      {error && <div className="text-sm text-destructive">{error}</div>}
+      </Button>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }

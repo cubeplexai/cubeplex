@@ -13,11 +13,11 @@
 ### Task 1: Backend — Add StatusEvent schema
 
 **Files:**
-- Modify: `backend/cubebox/agents/schemas.py`
+- Modify: `backend/cubeplex/agents/schemas.py`
 
 - [ ] **Step 1: Add StatusEvent class**
 
-Add after the existing `DoneEvent` class at the end of `backend/cubebox/agents/schemas.py`:
+Add after the existing `DoneEvent` class at the end of `backend/cubeplex/agents/schemas.py`:
 
 ```python
 class StatusEvent(AgentEvent):
@@ -32,13 +32,13 @@ class StatusEvent(AgentEvent):
 
 - [ ] **Step 2: Verify no type errors**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/agents/schemas.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/agents/schemas.py`
 Expected: Success, no errors
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/agents/schemas.py
+git add backend/cubeplex/agents/schemas.py
 git commit -m "feat: add StatusEvent schema for sandbox init phases"
 ```
 
@@ -47,21 +47,21 @@ git commit -m "feat: add StatusEvent schema for sandbox init phases"
 ### Task 2: Backend — Emit status events in event_generator
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py:16` (import)
-- Modify: `backend/cubebox/api/routes/v1/conversations.py:298-313` (sandbox init block)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py:16` (import)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py:298-313` (sandbox init block)
 
 - [ ] **Step 1: Add StatusEvent to imports**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, change line 16 from:
+In `backend/cubeplex/api/routes/v1/conversations.py`, change line 16 from:
 
 ```python
-from cubebox.agents.schemas import AgentEvent, DoneEvent
+from cubeplex.agents.schemas import AgentEvent, DoneEvent
 ```
 
 to:
 
 ```python
-from cubebox.agents.schemas import AgentEvent, DoneEvent, StatusEvent
+from cubeplex.agents.schemas import AgentEvent, DoneEvent, StatusEvent
 ```
 
 - [ ] **Step 2: Add helper to create status SSE line**
@@ -87,12 +87,12 @@ Replace the sandbox init block (lines 298-313) from:
             if sandbox_factory:
                 sandbox = sandbox_factory()
             else:
-                from cubebox.config import config
+                from cubeplex.config import config
 
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
-                        from cubebox.sandbox.manager import get_sandbox_manager
+                        from cubeplex.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
                         sandbox = await sandbox_manager.get_or_create(user_id)
@@ -108,12 +108,12 @@ with:
             if sandbox_factory:
                 sandbox = sandbox_factory()
             else:
-                from cubebox.config import config
+                from cubeplex.config import config
 
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
-                        from cubebox.sandbox.manager import get_sandbox_manager
+                        from cubeplex.sandbox.manager import get_sandbox_manager
 
                         yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
@@ -125,13 +125,13 @@ with:
 
 - [ ] **Step 4: Verify no type errors**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/api/routes/v1/conversations.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/api/routes/v1/conversations.py`
 Expected: Success, no errors
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/conversations.py
+git add backend/cubeplex/api/routes/v1/conversations.py
 git commit -m "feat: emit sandbox status events in SSE stream"
 ```
 
@@ -235,7 +235,7 @@ Add this test at the end of the `describe('messageStore.send', ...)` block in `f
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter web test`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter web test`
 Expected: FAIL — `statusPhase` is not a property on the store
 
 - [ ] **Step 3: Add statusPhase to store and handle status events**
@@ -360,7 +360,7 @@ beforeEach(() => {
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter web test`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter web test`
 Expected: All 5 tests PASS
 
 - [ ] **Step 7: Commit**
@@ -457,7 +457,7 @@ with:
 
 - [ ] **Step 3: Run type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: No type errors
 
 - [ ] **Step 4: Commit**
@@ -475,10 +475,10 @@ git commit -m "feat: display sandbox status phase in chat UI"
 
 - [ ] **Step 1: Run all frontend unit tests**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter web test`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter web test`
 Expected: All 5 tests PASS
 
 - [ ] **Step 2: Run backend type check**
 
-Run: `cd /home/chris/cubebox/backend && uv run mypy cubebox/agents/schemas.py cubebox/api/routes/v1/conversations.py`
+Run: `cd /home/chris/cubeplex/backend && uv run mypy cubeplex/agents/schemas.py cubeplex/api/routes/v1/conversations.py`
 Expected: Success

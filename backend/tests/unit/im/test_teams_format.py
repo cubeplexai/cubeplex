@@ -1,4 +1,4 @@
-from cubebox.im.teams.format import normalize_for_teams, strip_mention_tags
+from cubeplex.im.teams.format import normalize_for_teams, strip_mention_tags
 
 
 def test_strikethrough_stripped() -> None:

@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.metadata."""
+"""Unit tests for cubeplex.mcp.oauth.metadata."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cubebox.mcp.exceptions import OAuthMetadataFetchError, OAuthMetadataNotFound
-from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
+from cubeplex.mcp.exceptions import OAuthMetadataFetchError, OAuthMetadataNotFound
+from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -50,6 +50,26 @@ async def test_fetch_protected_resource_happy_path() -> None:
         pr = await discovery.fetch_protected_resource("https://mcp.example.com")
     assert pr.resource == "https://mcp.example.com/"
     assert pr.authorization_servers == ["https://auth.example.com"]
+
+
+async def test_fetch_protected_resource_preserves_supported_scopes() -> None:
+    handler = _CountingHandler(
+        {
+            "https://mcp.example.com/.well-known/oauth-protected-resource": httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/",
+                    "authorization_servers": ["https://auth.example.com"],
+                    "scopes_supported": ["read:me", "search:confluence"],
+                },
+            ),
+        }
+    )
+    async with _client_with(handler) as http:
+        discovery = OAuthMetadataDiscovery(http, cache_ttl_seconds=3600)
+        pr = await discovery.fetch_protected_resource("https://mcp.example.com")
+
+    assert pr.scopes_supported == ["read:me", "search:confluence"]
 
 
 async def test_fetch_protected_resource_missing_field_raises_not_found() -> None:
@@ -142,6 +162,22 @@ async def test_fetch_authorization_server_minimal_payload() -> None:
     assert meta.code_challenge_methods_supported == []
     assert meta.grant_types_supported == []
     assert meta.response_types_supported == []
+
+
+async def test_fetch_authorization_server_metadata_url_uses_exact_url() -> None:
+    body = {
+        "issuer": "https://mcp.intercom.com",
+        "authorization_endpoint": "https://app.intercom.com/oauth",
+        "token_endpoint": "https://api.intercom.io/auth/eagle/token",
+    }
+    metadata_url = "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+    handler = _CountingHandler({metadata_url: httpx.Response(200, json=body)})
+    async with _client_with(handler) as http:
+        discovery = OAuthMetadataDiscovery(http)
+        meta = await discovery.fetch_authorization_server_metadata_url(metadata_url)
+    assert meta.issuer == "https://mcp.intercom.com"
+    assert meta.authorization_endpoint == "https://app.intercom.com/oauth"
+    assert handler.calls == [metadata_url]
 
 
 async def test_fetch_authorization_server_missing_required_raises_not_found() -> None:

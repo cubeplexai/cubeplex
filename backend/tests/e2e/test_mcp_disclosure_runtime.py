@@ -15,12 +15,12 @@ from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel
 
-from cubebox.mcp.disclosure import (
+from cubeplex.mcp.disclosure import (
     DisclosureSettings,
     build_deferred_groups,
     disclosure_active,
 )
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,14 +44,14 @@ async def _noop_execute(
 def _make_spec(
     name: str,
     *,
-    install_id: str = "",
+    connector_id: str = "",
     tools_cache: list[dict[str, Any]] | None = None,
     auth_method: str = "none",
     server_url: str = "",
     discovery_metadata: dict[str, Any] | None = None,
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id=install_id or f"inst-{name.lower()}",
+        connector_id=connector_id or f"inst-{name.lower()}",
         name=name,
         server_url=server_url or f"https://{name.lower()}.example.com/mcp",
         transport="streamable_http",
@@ -178,7 +178,7 @@ class TestDeferredGroupBuilding:
         )
 
         with patch(
-            "cubebox.mcp.disclosure._load_tools_for_specs_deferred",
+            "cubeplex.mcp.disclosure._load_tools_for_specs_deferred",
             new_callable=AsyncMock,
             return_value=([fake_tool], {"GitHub__create_issue": object()}),
         ):
@@ -191,7 +191,7 @@ class TestDeferredGroupBuilding:
 
 @pytest.mark.e2e
 class TestMiddlewareIntegration:
-    """DeferredToolsMiddleware integration with cubebox-produced groups."""
+    """DeferredToolsMiddleware integration with cubeplex-produced groups."""
 
     async def test_catalog_in_system_prompt(self) -> None:
         """When groups are deferred, catalog appears in system prompt."""
@@ -326,11 +326,11 @@ class TestDeferredLoaderSessionLifecycle:
         mock_signer.sign = AsyncMock(return_value="fake-jwt-token")
 
         with patch(
-            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
             new_callable=AsyncMock,
             return_value=fake_discovery,
         ):
-            from cubebox.mcp.cubepi_runtime import _load_tools_for_specs_deferred
+            from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs_deferred
 
             tools, citations = await _load_tools_for_specs_deferred(
                 specs=[spec],

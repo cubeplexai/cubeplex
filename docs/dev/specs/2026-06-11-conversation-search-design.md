@@ -82,7 +82,7 @@ GET /api/v1/ws/{ws}/conversations/search?q=…
               top-K results
 ```
 
-* All search state lives in **cubebox's Postgres database**. `cubepi` and its
+* All search state lives in **cubeplex's Postgres database**. `cubepi` and its
   `cubepi_messages` table are read but never modified. cubepi's contract
   stays "checkpointer for serialized agent state" — search is a product
   concern, not a framework concern.
@@ -136,7 +136,7 @@ scope here) eventually deletes both.
 
 ### 5.2 `embedding_jobs`
 
-A Postgres-table-backed work queue. Reason: cubebox already has Redis but
+A Postgres-table-backed work queue. Reason: cubeplex already has Redis but
 Postgres-only jobs are easier to reason about across restarts and worktrees;
 the throughput here is not Redis-stream-class. One small consumer process
 (or background task in the existing FastAPI app) drains it.
@@ -178,7 +178,7 @@ class LexicalSearchBackend(Protocol):
         """Escape / quote user input for this backend's query language."""
 ```
 
-Concrete implementations live under `cubebox/search/lexical/`:
+Concrete implementations live under `cubeplex/search/lexical/`:
 
 * `PgroongaBackend` (default in self-hosted)
   * DDL: `CREATE INDEX … USING pgroonga (text)`
@@ -206,7 +206,7 @@ deployment.**
 
 The abstraction touches:
 
-* `cubebox/search/lexical/` (~150 lines total across base + 2 backends)
+* `cubeplex/search/lexical/` (~150 lines total across base + 2 backends)
 * one branch inside the alembic migration that creates the chunks table
 * one `Depends`/factory in the search service
 
@@ -380,7 +380,7 @@ added by the search service (chunks carry `creator_user_id` denormalised
 from `Conversation` so the search query is one join shorter). There is no
 admin override; if an admin wants to search a member's conversations, that's
 a separate (out-of-scope) admin route, not a parameter on this one — per
-cubebox's scope-isolated APIs rule.
+cubeplex's scope-isolated APIs rule.
 
 ## 10. Frontend
 
@@ -535,11 +535,11 @@ Three concrete reasons to keep this out of cubepi:
    one. Different cubepi users would want different embedders.
 2. **Lexical extension choice is a deployment decision** (managed vs
    self-hosted PG). Pushing it into cubepi exports that decision upstream.
-3. **cubebox already has the hooks** (run-done) and the DB scope columns
+3. **cubeplex already has the hooks** (run-done) and the DB scope columns
    needed to index without cubepi modifications.
 
 The one upstream change worth considering later is a small `on_messages_
-appended(thread_id, seq_range)` callback on the checkpointer so cubebox
+appended(thread_id, seq_range)` callback on the checkpointer so cubeplex
 doesn't have to compute the new seq range from run boundaries. That's an
 optimisation; this design works without it.
 

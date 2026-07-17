@@ -3,50 +3,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
-  adminDeleteInstall,
-  adminListConnectors,
-  adminListTemplates,
+  adminListCatalog,
   createApiClient,
   useWorkspaceStore,
-  type AdminOrgConnector,
-  type MCPConnectorFilter,
-  type MCPConnectorTemplate,
-} from '@cubebox/core'
+  type AdminCatalogFilter,
+  type AdminCatalogRow,
+  type MCPTemplateScope,
+} from '@cubeplex/core'
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
-import { MCPConnectorList } from '@/components/mcp/MCPConnectorList'
+import { MCPCatalogList } from '@/components/mcp/MCPCatalogList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
+import { MCPTemplateCreateForm } from '@/components/mcp/MCPTemplateCreateForm'
 import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 
 export default function AdminMcpPage() {
   const t = useTranslations('mcpAdmin')
   const client = useMemo(() => createApiClient(''), [])
 
-  const [connectors, setConnectors] = useState<AdminOrgConnector[]>([])
-  const [templates, setTemplates] = useState<MCPConnectorTemplate[]>([])
+  const [rows, setRows] = useState<AdminCatalogRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<MCPConnectorFilter>('all')
-  const [mode, setMode] = useState<'detail' | 'install_template' | 'custom_install' | null>(null)
-  const [installTemplate, setInstallTemplate] = useState<MCPConnectorTemplate | null>(null)
+  const [filter, setFilter] = useState<AdminCatalogFilter>('all')
+  const [source, setSource] = useState<MCPTemplateScope | 'all'>('all')
+  const [mode, setMode] = useState<'detail' | 'custom_create' | null>(null)
 
-  // The admin layout doesn't populate the workspace store; the detail
-  // panel's Try It workspace picker (for workspace/user policy installs)
-  // reads from useWorkspaceStore, so without this fetch the picker is
-  // empty and Run stays disabled. Page no longer uses workspace ids for
-  // its own list (no lens), but downstream consumers still do.
   const workspaces = useWorkspaceStore((s) => s.workspaces)
   const fetchWorkspaceList = useWorkspaceStore((s) => s.fetchList)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [conn, tpl] = await Promise.all([
-        adminListConnectors(client),
-        adminListTemplates(client),
-      ])
-      setConnectors(conn.items)
-      setTemplates(tpl.items)
+      const catalog = await adminListCatalog(client)
+      setRows(catalog.items)
     } finally {
       setLoading(false)
     }
@@ -59,13 +48,34 @@ export default function AdminMcpPage() {
   }, [load, client, workspaces.length, fetchWorkspaceList])
 
   const selected = useMemo(
-    () => connectors.find((c) => c.install.install_id === selectedId) ?? null,
-    [connectors, selectedId],
+    () => rows.find((r) => r.template.template_id === selectedTemplateId) ?? null,
+    [rows, selectedTemplateId],
   )
 
-  function handleSelect(id: string): void {
-    setSelectedId(id)
-    setInstallTemplate(null)
+  // Client-side filter as per spec.
+  const visible = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (search && !r.template.name.toLowerCase().includes(search.toLowerCase())) return false
+        if (source !== 'all' && r.template.scope !== source) return false
+        switch (filter) {
+          case 'in_use':
+            return r.in_use
+          case 'needs_attention':
+            return r.needs_attention
+          case 'org_credential':
+            return r.org_grant_status !== null
+          case 'unused':
+            return !r.in_use
+          default:
+            return true
+        }
+      }),
+    [rows, search, filter, source],
+  )
+
+  function handleSelect(templateId: string): void {
+    setSelectedTemplateId(templateId)
     setMode('detail')
   }
 
@@ -73,34 +83,11 @@ export default function AdminMcpPage() {
     await load()
   }
 
-  async function handleDelete(installId: string): Promise<void> {
-    await adminDeleteInstall(client, installId)
-    await load()
-    setSelectedId(null)
+  function handleDeleted(): void {
+    setSelectedTemplateId(null)
     setMode(null)
-  }
-
-  function handleInstalled(installId: string): void {
-    setInstallTemplate(null)
-    setSelectedId(installId)
-    setMode('detail')
     void load()
   }
-
-  const availableTemplates = useMemo(() => {
-    // Only ACTIVE installs mask their template from the install dialog —
-    // tombstoned (uninstalled) rows are kept around so a reinstall can
-    // re-attach the same shape (see ``MCPConnectorInstallService.uninstall``),
-    // but they must NOT block the admin from re-launching the install
-    // flow for the same template.
-    const installedTemplateIds = new Set(
-      connectors
-        .filter((c) => c.install.install_state === 'active')
-        .map((c) => c.template?.template_id ?? c.install.template_id)
-        .filter((v): v is string => Boolean(v)),
-    )
-    return templates.filter((tpl) => !installedTemplateIds.has(tpl.template_id))
-  }, [templates, connectors])
 
   return (
     <div className="flex h-full flex-col">
@@ -119,83 +106,53 @@ export default function AdminMcpPage() {
         onSearchChange={setSearch}
         filter={filter}
         onFilterChange={setFilter}
+        source={source}
+        onSourceChange={setSource}
+        onAddCustom={() => {
+          setSelectedTemplateId(null)
+          setMode('custom_create')
+        }}
+        addCustomActive={mode === 'custom_create'}
       />
 
       <ListDetailLayout
-        selected={selectedId !== null || mode === 'custom_install' || mode === 'install_template'}
+        selected={selectedTemplateId !== null || mode === 'custom_create'}
         onBack={() => {
-          setSelectedId(null)
+          setSelectedTemplateId(null)
           setMode(null)
-          setInstallTemplate(null)
         }}
         backLabel={t('back')}
         placeholder={null}
         railClassName="bg-card/20 px-0 py-0"
         list={
-          <div aria-label="connector-list">
-            <div className="border-b border-border/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('installs')}
-            </div>
-            <MCPConnectorList
-              connectors={connectors}
+          <div aria-label="catalog-list">
+            <MCPCatalogList
+              rows={visible}
               loading={loading}
-              search={search}
-              filter={filter}
-              selectedId={selectedId}
+              selectedTemplateId={selectedTemplateId}
               onSelect={handleSelect}
             />
-            <div className="border-t border-border/60">
-              <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {t('templates')}
-              </div>
-              <div className="flex flex-col gap-1.5 p-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedId(null)
-                    setInstallTemplate(null)
-                    setMode('custom_install')
-                  }}
-                  data-testid="mcp-add-custom-connector"
-                  className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 p-3 text-left text-sm font-medium hover:border-border hover:bg-accent/40"
-                >
-                  <span aria-hidden>+</span>
-                  {t('addCustomConnector')}
-                </button>
-                {availableTemplates.map((tpl) => (
-                  <button
-                    key={tpl.template_id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(null)
-                      setInstallTemplate(tpl)
-                      setMode('install_template')
-                    }}
-                    data-testid={`template-row-${tpl.slug}`}
-                    className="flex w-full flex-col gap-0.5 rounded-lg border border-border/70 bg-card/40 p-3 text-left hover:border-border hover:bg-accent/40"
-                  >
-                    <span className="truncate text-sm font-semibold">{tpl.name}</span>
-                    {tpl.description && (
-                      <span className="line-clamp-1 text-xs text-muted-foreground">
-                        {tpl.description}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         }
         detail={
-          <MCPAdminDetailPanel
-            connector={selected}
-            mode={mode}
-            installTemplate={installTemplate}
-            client={client}
-            onRefresh={handleRefresh}
-            onDelete={handleDelete}
-            onInstalled={handleInstalled}
-          />
+          mode === 'custom_create' ? (
+            <MCPTemplateCreateForm
+              client={client}
+              onCreated={(template) => {
+                void load()
+                setSelectedTemplateId(template.template_id)
+                setMode('detail')
+              }}
+            />
+          ) : (
+            <MCPAdminDetailPanel
+              row={selected}
+              mode={mode}
+              client={client}
+              onRefresh={handleRefresh}
+              onDeleted={handleDeleted}
+            />
+          )
         }
       />
     </div>

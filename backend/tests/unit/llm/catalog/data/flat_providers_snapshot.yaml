@@ -474,7 +474,7 @@
 
 # ────────────────────────────────────────────────────────────────────────
 # Coding plans (subscription tier — separate endpoints / auth from token API).
-# Placeholders for the cubebox UX; OAuth flow + cross-vendor model lists land
+# Placeholders for the cubeplex UX; OAuth flow + cross-vendor model lists land
 # in a follow-up PR. All `default_models: []` until that work lands.
 # ────────────────────────────────────────────────────────────────────────
 
@@ -486,7 +486,7 @@
   description: Claude Code via Claude Pro/Max subscription. OAuth (no API key billing).
   api: anthropic-messages
   # Wire endpoint same as token API; auth flow is OAuth via `claude setup-token`.
-  # OAuth refresh URL is restricted to Anthropic-owned hosts. cubebox needs to
+  # OAuth refresh URL is restricted to Anthropic-owned hosts. cubeplex needs to
   # implement the device-code login flow before this preset is usable.
   base_url: https://api.anthropic.com
   auth: { mode: oauth, header_name: Authorization, header_prefix: "Bearer " }
@@ -511,7 +511,7 @@
   description: Codex CLI via ChatGPT Plus/Pro/Business subscription. OAuth login.
   api: openai-responses
   # OAuth via `codex login` (browser flow) or `codex login --device-auth`.
-  # Tokens exchanged to ChatGPT backend; cubebox needs OAuth flow before use.
+  # Tokens exchanged to ChatGPT backend; cubeplex needs OAuth flow before use.
   base_url: https://chatgpt.com/backend-api/codex
   auth: { mode: oauth, header_name: Authorization, header_prefix: "Bearer " }
   capability:

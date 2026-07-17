@@ -1,7 +1,7 @@
 // frontend/packages/core/src/stores/messageStore.ts
 //
 // All persisted Message values mirror cubepi's pydantic dump shape — content is
-// always a list of typed blocks (text / thinking / tool_call), and cubebox-
+// always a list of typed blocks (text / thinking / tool_call), and cubeplex-
 // specific extras (attachments, memory snapshots, citations, subagent_events)
 // ride inside `metadata`. The store builds the same shape on the streaming
 // path so the in-memory view matches what bootstrap returns.
@@ -16,7 +16,7 @@ import type {
   Message,
   ReasoningEvent,
   TextDeltaEvent,
-  ThinkingLevel,
+  ReasoningControl,
   TodoItem,
   ToolCallDeltaEvent,
   ToolCallEvent,
@@ -27,17 +27,29 @@ import type {
 import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
 import {
+  ApiError,
   cancelActiveRun,
   cancelSteer,
   getConversationBootstrap,
+  getHistoryWindow,
   steerRun,
   streamMessages,
   streamRun,
 } from '../api'
+import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
 
 const YIELD_EVERY = 200
+
+// Payload carried by the `injected_message` SSE event. `sender_*` are present
+// only for group-chat messages and drive the live SenderBadge.
+type InjectedMessageData = {
+  content: string
+  steer_id: string
+  sender_user_id?: string
+  sender_display_name?: string
+}
 
 function yieldToEventLoop(): Promise<void> {
   const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
@@ -113,15 +125,38 @@ export interface MessageStore {
    * cleared with the rest of the in-flight stream state on send / cancel.
    */
   failoverEvents: Record<string, FailoverEvent[]>
+  /** Per-conversation cursor into ``cubepi_messages.seq`` of the oldest message
+   *  currently held in ``messages[conversationId]``. Pass as ``before_seq`` when
+   *  the user scrolls up. ``null`` means the conversation is empty. */
+  oldestSeqByConv: Record<string, number | null>
+  /** Per-conversation flag: is there anything older than ``oldestSeqByConv``? */
+  hasMoreByConv: Record<string, boolean>
+  /** Backscroll-in-flight guard so a click-spam on "Load earlier" only fires once. */
+  loadingOlderByConv: Record<string, boolean>
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
+  /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
+   *  cursor and prepend it to ``messages[conversationId]``. Noop when already
+   *  in flight, when ``hasMore`` is false, or when no cursor is set yet. */
+  loadOlderMessages(client: ApiClient, conversationId: string): Promise<void>
+  /** Repeatedly fetch older windows until ``oldestSeqByConv[conversationId]``
+   *  reaches ``targetSeq`` or there is no more history. Used by the search
+   *  deep-link path to make ``#msg-<seq>`` anchors reachable even when the
+   *  requested message lives below the bootstrap tail. Pass ``signal`` to
+   *  stop the loop when the user navigates away mid-walk. */
+  loadOlderUntilSeq(
+    client: ApiClient,
+    conversationId: string,
+    targetSeq: number,
+    signal?: AbortSignal,
+  ): Promise<void>
   send(
     client: ApiClient,
     conversationId: string,
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; thinking?: ThinkingLevel },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl },
   ): Promise<void>
   /**
    * Append a ``model_failover`` event to the conversation's banner list.
@@ -132,7 +167,7 @@ export interface MessageStore {
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
-  __commitTurnAndInject(conversationId: string, data: { content: string; steer_id: string }): void
+  __commitTurnAndInject(conversationId: string, data: InjectedMessageData): void
   clearStream(): void
   clearLastRunStatus(): void
   /** Test hook: apply a single AgentEvent synchronously */
@@ -140,6 +175,16 @@ export interface MessageStore {
 }
 
 let activeStreamController: AbortController | null = null
+
+/** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
+ *  effect both fire on mount, but we only want one bootstrap fetch per open. */
+const loadMessagesInFlight = new Map<string, Promise<void>>()
+
+/** Dedup map for ``loadOlderMessages``: a user click on "Load earlier" and the
+ *  ``loadOlderUntilSeq`` deep-link loop may both fire concurrently. Sharing
+ *  the in-flight promise lets the loop ``await`` the click's fetch instead
+ *  of short-circuiting without progress. */
+const loadOlderInFlight = new Map<string, Promise<void>>()
 
 const MAIN_AGENT_KEY = 'main'
 
@@ -318,6 +363,7 @@ function buildPendingUserMessage(runId: string, content: string): UserMessageTyp
     role: 'user',
     content: [{ type: 'text', text: content }],
     timestamp: Date.now() / 1000,
+    run_id: runId,
     metadata: {},
   }
 }
@@ -355,24 +401,11 @@ export function trimHistoryForActiveRun(
   return [...messages, buildPendingUserMessage(runId, content)]
 }
 
-function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role !== 'assistant') continue
-    for (const block of msg.content) {
-      if (block.type === 'tool_call' && block.name === 'write_todos') {
-        return parseTodosFromToolCall(block.arguments)
-      }
-    }
-  }
-  return []
-}
-
 function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
   for (const msg of messages) {
     if (msg.role !== 'tool_result') continue
     // CitationMiddleware persists citations on ToolResultMessage.details
-    // (cubebox/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
+    // (cubeplex/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
     // metadata.citations only exists for in-memory finalized messages.
     const details = msg.details as
       | { citations?: import('../types').CitationData[] }
@@ -438,6 +471,10 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
     return {
       ...base,
+      // Model output supersedes any build-phase hint (preparing /
+      // loading_tools / starting / sandbox_creating) — clear so the
+      // indicator falls back to the plain streaming dots.
+      statusPhase: null,
       streamAgents: {
         ...state.streamAgents,
         [agentKey]: {
@@ -715,6 +752,8 @@ function buildTurnMessages(
   toolResultMap: MessageStore['toolResultMap'],
   turnUsage: import('../types').TurnUsage | null,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
+  runId: string | null = null,
+  errorMessage: string | null = null,
 ): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
   if (!mainStream) return { assistantMessage: null, toolMessages: [] }
@@ -738,8 +777,10 @@ function buildTurnMessages(
         }
       : null,
     timestamp: Date.now() / 1000,
+    run_id: runId,
     metadata: {},
   }
+  if (errorMessage !== null) assistantMessage.error_message = errorMessage
 
   const toolMessages: ToolResultMessageType[] = []
 
@@ -768,6 +809,7 @@ function buildTurnMessages(
       tool_call_id: tcId,
       tool_name: tr.data.tool_name ?? '',
       timestamp: receivedAtMs / 1000,
+      run_id: runId,
       metadata: {},
     })
   }
@@ -783,6 +825,7 @@ function buildTurnMessages(
       tool_call_id: toolCallId,
       tool_name: 'subagent',
       timestamp: Date.now() / 1000,
+      run_id: runId,
       metadata: {
         subagent_events: {
           text: agentStream.text,
@@ -816,6 +859,48 @@ function buildTurnMessages(
   return { assistantMessage, toolMessages }
 }
 
+function errorMessageForAssistant(data: ErrorEventData): string {
+  return typeof data.details === 'string' && data.details.trim() ? data.details : data.message
+}
+
+function buildErrorAssistantMessage(
+  data: ErrorEventData,
+  runId: string | null,
+): AssistantMessageType {
+  return {
+    id: nextMessageId('assistant-error'),
+    role: 'assistant',
+    content: [],
+    stop_reason: 'error',
+    error_message: errorMessageForAssistant(data),
+    usage: null,
+    timestamp: Date.now() / 1000,
+    run_id: runId,
+    metadata: {},
+  }
+}
+
+function appendErroredAssistantTurn(
+  state: MessageStore,
+  conversationId: string,
+  data: ErrorEventData,
+): Message[] {
+  const runId = state.currentRunId
+  const { assistantMessage, toolMessages } = buildTurnMessages(
+    state.streamAgents,
+    state.toolResultMap,
+    state.turnUsage[conversationId] ?? null,
+    'error',
+    runId,
+    errorMessageForAssistant(data),
+  )
+  return [
+    ...(state.messages[conversationId] ?? []),
+    assistantMessage ?? buildErrorAssistantMessage(data, runId),
+    ...toolMessages,
+  ]
+}
+
 async function finalizeCompletedStream(
   get: () => MessageStore,
   set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
@@ -827,6 +912,7 @@ async function finalizeCompletedStream(
     get().toolResultMap,
     get().turnUsage[conversationId] ?? null,
     stopReason,
+    get().currentRunId,
   )
 
   if (!assistantMessage) {
@@ -896,6 +982,7 @@ async function finalizePausedStream(
     state0.toolResultMap,
     state0.turnUsage[conversationId] ?? null,
     'stop',
+    state0.currentRunId,
   )
 
   if (!assistantMessage) {
@@ -975,11 +1062,19 @@ async function consumeRunStream(
         continue
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
+        flush()
         set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+          },
           errors: {
             ...s.errors,
             [conversationId]: { runId: s.currentRunId ?? '', data: errData },
           },
+          streamAgents: {},
+          toolStartedMap: {},
+          toolResultMap: {},
           isStreaming: false,
           pendingConfirmMap: {},
           pendingAsk: null,
@@ -1027,7 +1122,7 @@ async function consumeRunStream(
         }
         break
       } else if (event.type === 'injected_message') {
-        const d = event.data as { content: string; steer_id: string }
+        const d = event.data as InjectedMessageData
         // Flush batched stream mutations so the commit reads fully-applied
         // streamAgents, not a stale snapshot.
         flush()
@@ -1088,6 +1183,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   sessionUsage: {},
   contextWindow: {},
   contextTokens: {},
+  oldestSeqByConv: {},
+  hasMoreByConv: {},
+  loadingOlderByConv: {},
 
   appendFailoverEvent(conversationId, event) {
     set((s) => ({
@@ -1101,223 +1199,332 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   async loadMessages(client: ApiClient, conversationId: string) {
     const state = get()
     if (state.isStreaming && state.streamingConversationId === conversationId) return
+    // The page-level effect and <MessageList>'s own effect both fire on mount
+    // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
+    if (loadMessagesInFlight.has(conversationId)) return loadMessagesInFlight.get(conversationId)
+    const promise = (async () => {
+      try {
+        const bootstrap = await getConversationBootstrap(client, conversationId)
+        const current = get()
+        if (current.isStreaming && current.streamingConversationId === conversationId) return
 
-    try {
-      const bootstrap = await getConversationBootstrap(client, conversationId)
-      const current = get()
-      if (current.isStreaming && current.streamingConversationId === conversationId) return
-
-      let messages = normalizeMessages(bootstrap.messages ?? [])
-      if (bootstrap.active_run?.user_message) {
-        messages = trimHistoryForActiveRun(
-          messages,
-          bootstrap.active_run.run_id,
-          bootstrap.active_run.user_message,
-          bootstrap.active_run.started_at ?? null,
-        )
-      }
-
-      const restoredTodos = restoreTodosFromHistory(messages)
-      hydrateCitationsFromHistory(conversationId, messages)
-      const usageSummary = bootstrap.usage_summary
-      const newTurnUsage = {
-        ...get().turnUsage,
-        [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
-      }
-      const newSessionUsage = {
-        ...get().sessionUsage,
-        [conversationId]: (usageSummary?.session ?? null) as import('../types').SessionUsage | null,
-      }
-      const newContextWindow = {
-        ...get().contextWindow,
-        [conversationId]: usageSummary?.context_window ?? null,
-      }
-      const newContextTokens = {
-        ...get().contextTokens,
-        [conversationId]: usageSummary?.context_tokens ?? null,
-      }
-      const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
-        ? { [MAIN_AGENT_KEY]: emptyStream() }
-        : {}
-
-      // Cold-start fallback: when the Redis event log has aged out, the
-      // backend returns the unresolved HITL request inline. Seed the same
-      // pendingAsk / pendingConfirmMap slots the live SSE path populates so
-      // the card re-renders on refresh without replaying events.
-      //
-      // Post-answer race: when the user just submitted an answer, the
-      // optimistic clear set pendingAsk = null, but the bootstrap that
-      // follows can race the backend's `save_pending_request(None)` —
-      // the DB pending row is still there, so this code would re-seed
-      // the form for the same run_id and the user would see a momentary
-      // re-flash of the question they already answered. Skip the seed
-      // when the store is already tracking this exact run; the SSE
-      // reattach (which starts strictly after the paused-done event)
-      // will land the ask_user_resolved any moment now anyway.
-      const pending = bootstrap.pending_hitl ?? null
-      const currentState = get()
-      // If the user just answered this exact question, the backend's
-      // `save_pending_request(None)` may not have committed yet when
-      // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
-      // so the form doesn't flash back. SSE delivers
-      // `ask_user_resolved` shortly after either way.
-      const alreadyAnsweredThisQuestion =
-        pending !== null && pending.question_id === currentState.lastAnsweredAskQuestionId
-      const alreadyResolvedThisConfirm =
-        pending !== null &&
-        pending.kind === 'sandbox_confirm' &&
-        pending.question_id === currentState.lastResolvedSandboxQuestionId
-      const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
-      let seedPendingAsk: PendingAsk | null = null
-      let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
-      if (pending && pending.kind === 'ask_user' && !skipSeed) {
-        const requestedAt = Date.parse(pending.requested_at)
-        seedPendingAsk = {
-          question_id: pending.question_id,
-          questions: pending.questions,
-          timeout_seconds: null,
-          requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
-          run_id: pending.run_id,
+        let messages = normalizeMessages(bootstrap.messages ?? [])
+        if (bootstrap.active_run?.user_message) {
+          messages = trimHistoryForActiveRun(
+            messages,
+            bootstrap.active_run.run_id,
+            bootstrap.active_run.user_message,
+            bootstrap.active_run.started_at ?? null,
+          )
         }
-      } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
-        const requestedAt = Date.parse(pending.requested_at)
-        seedPendingConfirmMap = {
-          [pending.tool_call_id]: {
+
+        // Backend walks the full history (not just the tail) to pick the
+        // latest ``write_todos`` state — see ``find_latest_todos`` in
+        // services/history_window.py. ``null`` means no todos were ever
+        // written for this thread.
+        const restoredTodos = bootstrap.todos ?? []
+        hydrateCitationsFromHistory(conversationId, messages)
+        const usageSummary = bootstrap.usage_summary
+        const newTurnUsage = {
+          ...get().turnUsage,
+          [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
+        }
+        const newSessionUsage = {
+          ...get().sessionUsage,
+          [conversationId]: (usageSummary?.session ?? null) as
+            | import('../types').SessionUsage
+            | null,
+        }
+        const newContextWindow = {
+          ...get().contextWindow,
+          [conversationId]: usageSummary?.context_window ?? null,
+        }
+        const newContextTokens = {
+          ...get().contextTokens,
+          [conversationId]: usageSummary?.context_tokens ?? null,
+        }
+        const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
+          ? { [MAIN_AGENT_KEY]: emptyStream() }
+          : {}
+
+        // Cold-start fallback: when the Redis event log has aged out, the
+        // backend returns the unresolved HITL request inline. Seed the same
+        // pendingAsk / pendingConfirmMap slots the live SSE path populates so
+        // the card re-renders on refresh without replaying events.
+        //
+        // Post-answer race: when the user just submitted an answer, the
+        // optimistic clear set pendingAsk = null, but the bootstrap that
+        // follows can race the backend's `save_pending_request(None)` —
+        // the DB pending row is still there, so this code would re-seed
+        // the form for the same run_id and the user would see a momentary
+        // re-flash of the question they already answered. Skip the seed
+        // when the store is already tracking this exact run; the SSE
+        // reattach (which starts strictly after the paused-done event)
+        // will land the ask_user_resolved any moment now anyway.
+        const pending = bootstrap.pending_hitl ?? null
+        const currentState = get()
+        // If the user just answered this exact question, the backend's
+        // `save_pending_request(None)` may not have committed yet when
+        // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
+        // so the form doesn't flash back. SSE delivers
+        // `ask_user_resolved` shortly after either way.
+        const alreadyAnsweredThisQuestion =
+          pending !== null && pending.question_id === currentState.lastAnsweredAskQuestionId
+        const alreadyResolvedThisConfirm =
+          pending !== null &&
+          pending.kind === 'sandbox_confirm' &&
+          pending.question_id === currentState.lastResolvedSandboxQuestionId
+        const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
+        let seedPendingAsk: PendingAsk | null = null
+        let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
+        if (pending && pending.kind === 'ask_user' && !skipSeed) {
+          const requestedAt = Date.parse(pending.requested_at)
+          seedPendingAsk = {
             question_id: pending.question_id,
-            command: pending.command,
-            matched_pattern: pending.matched_pattern,
+            questions: pending.questions,
             timeout_seconds: null,
             requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
             run_id: pending.run_id,
-          },
+          }
+        } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
+          const requestedAt = Date.parse(pending.requested_at)
+          seedPendingConfirmMap = {
+            [pending.tool_call_id]: {
+              question_id: pending.question_id,
+              command: pending.command,
+              matched_pattern: pending.matched_pattern,
+              timeout_seconds: null,
+              requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
+              run_id: pending.run_id,
+            },
+          }
         }
-      }
 
-      // pending_hitl fallback: when the Redis active-run key has aged out
-      // during a long pause, bootstrap.active_run is null but the DB
-      // pending + run_id ARE still recoverable (via pending_hitl). Treat
-      // the pending_hitl payload as "this conversation is paused on
-      // run_id, the card must render, and we should tail the run stream
-      // so a resume turn from any worker reaches this tab".
-      //
-      // MessageList gates AskUserCard on `streamingConversationId ===
-      // conversationId`; without this, an ask_user paused beyond Redis
-      // TTL has its pendingAsk seeded but the card stays hidden.
-      const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
-      const hasPendingHitl = pendingHitlRunId !== null
-      const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
-      const streamingActive = !!bootstrap.active_run || hasPendingHitl
-      // Paused HITL: SSE is attached but the worker has detached. Don't
-      // light up "is streaming" indicators (typing dots etc.); the
-      // <AskUserCard> / composer lock already convey state. `pendingAsk`
-      // and `pendingConfirmMap` are the truth signals here. We keep
-      // `streamingConversationId` set so MessageList's `pendingAsk &&
-      // streamingConversationId === conversationId` gate still fires.
-      const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
-      const isStreamingActive = streamingActive && !isPaused
-      // `bootstrap.messages` already includes everything up to the latest
-      // event in the Redis stream at fetch time. The SSE reattach should
-      // pick up STRICTLY-NEW events from here; without this cursor the
-      // post-answer reattach replays the paused turn (doubling the
-      // assistant message into streamAgents) and hits the paused `done`
-      // event mid-replay, breaking out of consumeRunStream before any
-      // resume-turn events can be read. Seed both the XREAD cursor and
-      // the in-store dedupe guard from `active_run.last_event_id`.
-      const streamCursor = bootstrap.active_run?.last_event_id ?? null
+        // pending_hitl fallback: when the Redis active-run key has aged out
+        // during a long pause, bootstrap.active_run is null but the DB
+        // pending + run_id ARE still recoverable (via pending_hitl). Treat
+        // the pending_hitl payload as "this conversation is paused on
+        // run_id, the card must render, and we should tail the run stream
+        // so a resume turn from any worker reaches this tab".
+        //
+        // MessageList gates AskUserCard on `streamingConversationId ===
+        // conversationId`; without this, an ask_user paused beyond Redis
+        // TTL has its pendingAsk seeded but the card stays hidden.
+        const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
+        const hasPendingHitl = pendingHitlRunId !== null
+        const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
+        const streamingActive = !!bootstrap.active_run || hasPendingHitl
+        // Paused HITL: SSE is attached but the worker has detached. Don't
+        // light up "is streaming" indicators (typing dots etc.); the
+        // <AskUserCard> / composer lock already convey state. `pendingAsk`
+        // and `pendingConfirmMap` are the truth signals here. We keep
+        // `streamingConversationId` set so MessageList's `pendingAsk &&
+        // streamingConversationId === conversationId` gate still fires.
+        const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
+        const isStreamingActive = streamingActive && !isPaused
+        // `bootstrap.messages` already includes everything up to the latest
+        // event in the Redis stream at fetch time. The SSE reattach should
+        // pick up STRICTLY-NEW events from here; without this cursor the
+        // post-answer reattach replays the paused turn (doubling the
+        // assistant message into streamAgents) and hits the paused `done`
+        // event mid-replay, breaking out of consumeRunStream before any
+        // resume-turn events can be read. Seed both the XREAD cursor and
+        // the in-store dedupe guard from `active_run.last_event_id`.
+        const streamCursor = bootstrap.active_run?.last_event_id ?? null
 
-      // Hydrate per-conversation error from bootstrap if the last run ended
-      // with a classified error (e.g. context_length_exceeded). This lets the
-      // bubble reappear on page reload without waiting for an SSE event.
-      //
-      // Priority: active_run.error_code > last_run_error > leave existing state.
-      // The active-run pointer is cleared when the run reaches a terminal status,
-      // so after a failed run completes the active slot is gone but last_run_error
-      // persists independently (separate Redis key, same TTL).
-      let seedError: { runId: string; data: ErrorEventData } | null | undefined
-      if (bootstrap.active_run?.error_code) {
-        seedError = {
-          runId: bootstrap.active_run.run_id,
-          data: {
-            error_code: bootstrap.active_run.error_code,
-            params: bootstrap.active_run.error_params ?? undefined,
-            message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
-          },
+        // Hydrate per-conversation error from bootstrap if the last run ended
+        // with a classified error (e.g. context_length_exceeded). This lets the
+        // bubble reappear on page reload without waiting for an SSE event.
+        //
+        // Priority: active_run.error_code > last_run_error > leave existing state.
+        // The active-run pointer is cleared when the run reaches a terminal status,
+        // so after a failed run completes the active slot is gone but last_run_error
+        // persists independently (separate Redis key, same TTL).
+        let seedError: { runId: string; data: ErrorEventData } | null | undefined
+        if (bootstrap.active_run?.error_code) {
+          seedError = {
+            runId: bootstrap.active_run.run_id,
+            data: {
+              error_code: bootstrap.active_run.error_code,
+              params: bootstrap.active_run.error_params ?? undefined,
+              message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
+            },
+          }
+        } else if (bootstrap.last_run_error) {
+          seedError = {
+            runId: bootstrap.last_run_error.run_id,
+            data: {
+              error_code: bootstrap.last_run_error.error_code,
+              params: (bootstrap.last_run_error.error_params ?? undefined) as
+                | Record<string, unknown>
+                | undefined,
+              message: bootstrap.last_run_error.error_message,
+            },
+          }
         }
-      } else if (bootstrap.last_run_error) {
-        seedError = {
-          runId: bootstrap.last_run_error.run_id,
-          data: {
-            error_code: bootstrap.last_run_error.error_code,
-            params: (bootstrap.last_run_error.error_params ?? undefined) as
-              | Record<string, unknown>
-              | undefined,
-            message: bootstrap.last_run_error.error_message,
-          },
-        }
-      }
-      set((s) => ({
-        messages: { ...s.messages, [conversationId]: messages },
-        todos: restoredTodos,
-        // When neither active_run nor last_run_error carries error info, clear the
-        // conversation's stale error so a successful retry does not keep showing the
-        // previous failure bubble. seedError is null means server reports no error.
-        errors: { ...s.errors, [conversationId]: seedError ?? null },
-        lastRunStatus: bootstrap.last_run_status ?? null,
-        streamAgents: nextStreamAgents,
-        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-        toolStartedMap: {},
-        toolResultMap: {},
-        // When `skipSeed` fired (we just answered/cancelled this exact
-        // question), preserve the current pendingAsk / pendingConfirmMap
-        // instead of clearing them. The form stays mounted in its
-        // submitting/cancelling state until the SSE `ask_user_resolved`
-        // event arrives, which avoids the visible blank gap that
-        // optimistic-clear used to produce.
-        pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
-        pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
-        isStreaming: isStreamingActive,
-        streamingConversationId: streamingActive ? conversationId : null,
-        currentRunId: streamRunId,
-        lastAppliedEventId: streamCursor,
-        statusPhase: null,
-        turnUsage: newTurnUsage,
-        sessionUsage: newSessionUsage,
-        contextWindow: newContextWindow,
-        contextTokens: newContextTokens,
-      }))
+        const hasPersistedAssistant = messages.some((msg) => msg.role === 'assistant')
+        const currentError = get().errors[conversationId]
+        const nextError =
+          seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
 
-      if (streamRunId !== null) {
-        activeStreamController?.abort()
-        const controller = new AbortController()
-        activeStreamController = controller
-        const runId = streamRunId
-        const lastEventId = streamCursor ?? undefined
-        queueMicrotask(() => {
-          void consumeRunStream(
-            client,
-            conversationId,
-            runId,
-            lastEventId,
-            set,
-            get,
-            controller.signal,
-          ).finally(() => {
-            if (activeStreamController === controller) {
-              activeStreamController = null
-            }
+        set((s) => ({
+          messages: { ...s.messages, [conversationId]: messages },
+          oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
+          hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
+          todos: restoredTodos,
+          // Clear only when bootstrap has authoritative error state or persisted
+          // assistant history; otherwise keep a live error visible through the
+          // bootstrap race.
+          errors: { ...s.errors, [conversationId]: nextError },
+          lastRunStatus: bootstrap.last_run_status ?? null,
+          streamAgents: nextStreamAgents,
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          toolStartedMap: {},
+          toolResultMap: {},
+          // When `skipSeed` fired (we just answered/cancelled this exact
+          // question), preserve the current pendingAsk / pendingConfirmMap
+          // instead of clearing them. The form stays mounted in its
+          // submitting/cancelling state until the SSE `ask_user_resolved`
+          // event arrives, which avoids the visible blank gap that
+          // optimistic-clear used to produce.
+          pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
+          pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
+          isStreaming: isStreamingActive,
+          streamingConversationId: streamingActive ? conversationId : null,
+          currentRunId: streamRunId,
+          lastAppliedEventId: streamCursor,
+          statusPhase: null,
+          turnUsage: newTurnUsage,
+          sessionUsage: newSessionUsage,
+          contextWindow: newContextWindow,
+          contextTokens: newContextTokens,
+        }))
+
+        if (streamRunId !== null) {
+          activeStreamController?.abort()
+          const controller = new AbortController()
+          activeStreamController = controller
+          const runId = streamRunId
+          const lastEventId = streamCursor ?? undefined
+          queueMicrotask(() => {
+            void consumeRunStream(
+              client,
+              conversationId,
+              runId,
+              lastEventId,
+              set,
+              get,
+              controller.signal,
+            ).finally(() => {
+              if (activeStreamController === controller) {
+                activeStreamController = null
+              }
+            })
           })
-        })
-      }
-    } catch (err) {
-      set((s) => ({
-        errors: {
-          ...s.errors,
-          [conversationId]: {
-            runId: s.currentRunId ?? '',
-            data: { error_code: 'internal_error', message: (err as Error).message },
+        }
+      } catch (err) {
+        // 404/403 just mean the conversation was deleted or the user lost
+        // access — the page-level effect renders ErrorState for those, so we
+        // don't want to *also* seed an internal_error bubble that flashes on
+        // the next navigation. Surface anything else (network, 5xx, …) as
+        // before so the user sees the failure.
+        if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return
+        set((s) => ({
+          errors: {
+            ...s.errors,
+            [conversationId]: {
+              runId: s.currentRunId ?? '',
+              data: { error_code: 'internal_error', message: (err as Error).message },
+            },
           },
-        },
-      }))
+        }))
+      }
+    })()
+    loadMessagesInFlight.set(conversationId, promise)
+    try {
+      await promise
+    } finally {
+      loadMessagesInFlight.delete(conversationId)
+    }
+  },
+
+  async loadOlderMessages(client: ApiClient, conversationId: string) {
+    const state = get()
+    if (!state.hasMoreByConv[conversationId]) return
+    const cursor = state.oldestSeqByConv[conversationId]
+    if (cursor == null) return
+    // Click-spam + deep-link loop share one fetch — see ``loadOlderInFlight``.
+    const existing = loadOlderInFlight.get(conversationId)
+    if (existing) return existing
+
+    set((s) => ({
+      loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: true },
+    }))
+    const promise = (async () => {
+      try {
+        const page = await getHistoryWindow(client, conversationId, { beforeSeq: cursor })
+        const older = normalizeMessages(page.messages)
+        hydrateCitationsFromHistory(conversationId, older)
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: [...older, ...(s.messages[conversationId] ?? [])],
+          },
+          oldestSeqByConv: {
+            ...s.oldestSeqByConv,
+            [conversationId]: page.oldest_seq ?? s.oldestSeqByConv[conversationId],
+          },
+          hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: page.has_more },
+        }))
+      } catch (err) {
+        // Surface the failure through the same per-conversation errors slice
+        // ``loadMessages`` uses, so a failed backscroll renders the existing
+        // RunErrorBubble instead of silently re-enabling the button.
+        set((s) => ({
+          errors: {
+            ...s.errors,
+            [conversationId]: {
+              runId: s.currentRunId ?? '',
+              data: { error_code: 'internal_error', message: (err as Error).message },
+            },
+          },
+        }))
+      } finally {
+        set((s) => ({
+          loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: false },
+        }))
+      }
+    })()
+    loadOlderInFlight.set(conversationId, promise)
+    try {
+      await promise
+    } finally {
+      loadOlderInFlight.delete(conversationId)
+    }
+  },
+
+  async loadOlderUntilSeq(
+    client: ApiClient,
+    conversationId: string,
+    targetSeq: number,
+    signal?: AbortSignal,
+  ) {
+    // Bounded by the dataset (each iteration either advances ``oldestSeq``
+    // toward ``targetSeq`` or trips ``hasMore=false``); ``loadOlderMessages``
+    // self-dedups so concurrent triggers don't double-fire.
+    while (true) {
+      if (signal?.aborted) return
+      const s = get()
+      const oldest = s.oldestSeqByConv[conversationId]
+      if (oldest != null && oldest <= targetSeq) return
+      if (!s.hasMoreByConv[conversationId]) return
+      await get().loadOlderMessages(client, conversationId)
+      // Stall guard: only ``oldestSeq`` retreating signals a real prepend.
+      // A length / dedup-skip / fetch-failure leaves ``oldestSeq`` pinned,
+      // so we abandon instead of looping forever — but a concurrent click
+      // on "Load earlier" that also moves the cursor counts as progress.
+      const next = get().oldestSeqByConv[conversationId]
+      if (next == null || next === oldest) return
     }
   },
 
@@ -1327,19 +1534,29 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; thinking?: ThinkingLevel },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl },
   ) {
     const isFirstTurn = (get().messages[conversationId] ?? []).length === 0
     if (isFirstTurn && content.trim()) {
       void useConversationStore.getState().generateTitle(client, conversationId, content)
     }
 
+    // Stamp the local sender's identity onto every optimistic bubble (1:1
+    // included) so a later 1:1→group conversion can attribute the message and
+    // the badge shows live in group chats. The UI gates display on is_group_chat.
+    const me = useAuthStore.getState().user
+    const senderMeta =
+      me != null ? { sender_user_id: me.id, sender_display_name: me.display_name ?? me.email } : {}
+
     const userMessage: UserMessageType = {
       id: nextMessageId('user-temp'),
       role: 'user',
       content: [{ type: 'text', text: content }],
       timestamp: Date.now() / 1000,
-      metadata: attachments && attachments.length > 0 ? { attachments } : {},
+      metadata: {
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...senderMeta,
+      },
     }
 
     set((state) => ({
@@ -1373,6 +1590,28 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const controller = new AbortController()
     activeStreamController = controller
 
+    // onRunId is fired by streamMessages the moment the POST returns a
+    // run id (the JSON-then-tail path, which is the production path
+    // through the Next.js SSE proxy). We use it to:
+    //   - set `currentRunId` so `finalizeCompletedStream` can stamp
+    //     `run_id` onto the optimistic assistant / tool messages — without
+    //     this, "fork from this message" is disabled for a just-finished
+    //     turn until the next bootstrap/reload.
+    //   - backfill `run_id` on the optimistic user message we appended
+    //     above, so the user message is forkable too.
+    const handleRunId = (runId: string) => {
+      set((s) => ({
+        currentRunId: runId,
+        messages: {
+          ...s.messages,
+          [conversationId]: (s.messages[conversationId] ?? []).map((m) =>
+            m.id === userMessage.id ? { ...m, run_id: runId } : m,
+          ),
+        },
+      }))
+    }
+    const streamOptions = { ...(options ?? {}), onRunId: handleRunId }
+
     let retried = false
     let streamSource = streamMessages(
       client,
@@ -1380,7 +1619,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       content,
       attachmentIds,
       controller.signal,
-      options,
+      streamOptions,
     )
 
     let processed = 0
@@ -1417,15 +1656,23 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 content,
                 attachmentIds,
                 controller.signal,
-                options,
+                streamOptions,
               )
               continue outer
             }
+            flush()
             set((s) => ({
+              messages: {
+                ...s.messages,
+                [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+              },
               errors: {
                 ...s.errors,
                 [conversationId]: { runId: s.currentRunId ?? '', data: errData },
               },
+              streamAgents: {},
+              toolStartedMap: {},
+              toolResultMap: {},
               isStreaming: false,
               pendingConfirmMap: {},
               pendingAsk: null,
@@ -1470,7 +1717,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             }
             break outer
           } else if (event.type === 'injected_message') {
-            const d = event.data as { content: string; steer_id: string }
+            const d = event.data as InjectedMessageData
             // Flush batched stream mutations so the commit reads fully-applied
             // streamAgents, not a stale snapshot.
             flush()
@@ -1605,7 +1852,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       role: 'user',
       content: [{ type: 'text', text: data.content }],
       timestamp: Date.now() / 1000,
-      metadata: { steer_id: data.steer_id },
+      metadata: {
+        steer_id: data.steer_id,
+        // Group-chat sender identity (present only for group chats) so the
+        // SenderBadge renders live, matching what history returns on refresh.
+        ...(data.sender_user_id && data.sender_display_name
+          ? {
+              sender_user_id: data.sender_user_id,
+              sender_display_name: data.sender_display_name,
+            }
+          : {}),
+      },
     }
 
     set((s) => ({

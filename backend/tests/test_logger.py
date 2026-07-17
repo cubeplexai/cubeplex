@@ -4,7 +4,7 @@ import logging
 import tempfile
 from pathlib import Path
 
-from cubebox.utils.logger import (
+from cubeplex.utils.logger import (
     init_logging,
     log_agent_creation,
     log_error,

@@ -4,7 +4,7 @@ import json
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 def _mgr(redis) -> RunManager:

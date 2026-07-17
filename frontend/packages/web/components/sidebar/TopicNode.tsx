@@ -1,18 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 import {
   type Conversation,
   type Topic,
-  type TopicParticipant,
   createApiClient,
   useConversationStore,
   useTopicStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +32,8 @@ import {
   UserPlus,
 } from 'lucide-react'
 import { MemberPanel } from '@/components/chat/MemberPanel'
+import { AvatarStack } from '@/components/ui/avatar-stack'
+import { PlatformLogo } from '@/components/im/PlatformLogo'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -39,43 +41,6 @@ function buildClient(currentWsId: string | null): ApiClient {
   const client = createApiClient('')
   if (currentWsId) client.setWorkspaceId(currentWsId)
   return client
-}
-
-function ParticipantAvatars({
-  participants,
-  max = 5,
-}: {
-  participants: TopicParticipant[]
-  max?: number
-}): React.ReactElement {
-  const shown = participants.slice(0, max)
-  const overflow = participants.length - shown.length
-  return (
-    <div className="flex -space-x-1.5 shrink-0">
-      {shown.map((p) => (
-        <div
-          key={p.id}
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-          title={p.display_name || p.email || p.user_id}
-        >
-          {(p.display_name || p.email || p.user_id).slice(0, 1).toUpperCase()}
-        </div>
-      ))}
-      {overflow > 0 && (
-        <div
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-        >
-          +{overflow}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function TopicNode({
@@ -93,13 +58,43 @@ export function TopicNode({
 }): React.ReactElement {
   const tTopics = useTranslations('topics')
   const tSidebar = useTranslations('sidebar')
+  const activeTopicId = useConversationStore((s) => s.activeTopicId)
   const [expanded, setExpanded] = useState<boolean>(
-    conversations.some((c) => c.id === activeConvId),
+    conversations.some((c) => c.id === activeConvId) || topic.id === activeTopicId,
   )
   const router = useRouter()
-  const { topicParticipants, fetchDetail, remove, createConversation, setPin } = useTopicStore()
+  const { topicParticipants, topicConversations, fetchDetail, remove, createConversation, setPin } =
+    useTopicStore()
   const fetchConversations = useConversationStore((s) => s.fetchList)
   const participants = topicParticipants[topic.id] ?? []
+
+  // Load the topic's full conversation list once (the detail endpoint has no
+  // limit, unlike the flat list). Idempotent: gated on whether we've fetched.
+  const ensureDetailLoaded = useCallback((): void => {
+    if (!currentWsId) return
+    if (topicConversations[topic.id] !== undefined) return
+    void fetchDetail(buildClient(currentWsId), topic.id).catch((err) =>
+      console.error('Failed to load topic detail:', err),
+    )
+  }, [currentWsId, topicConversations, topic.id, fetchDetail])
+
+  // When this topic becomes the active conversation's topic (e.g. a deep link
+  // to an old conversation outside the flat list), auto-expand it. Tracked via
+  // the previous activeTopicId so it fires once per switch and doesn't override
+  // a later manual collapse. Adjusted during render (the React-recommended
+  // alternative to setState-in-effect).
+  const [prevActiveTopicId, setPrevActiveTopicId] = useState(activeTopicId)
+  if (activeTopicId !== prevActiveTopicId) {
+    setPrevActiveTopicId(activeTopicId)
+    if (activeTopicId === topic.id) setExpanded(true)
+  }
+
+  // Load the active topic's conversations when it auto-expands. The fetch is a
+  // side effect (and calls a store action, not React setState), so it lives in
+  // an effect rather than the render-time block above.
+  useEffect(() => {
+    if (topic.id === activeTopicId) ensureDetailLoaded()
+  }, [activeTopicId, topic.id, ensureDetailLoaded])
   const [creating, setCreating] = useState<boolean>(false)
   const [memberDialogOpen, setMemberDialogOpen] = useState<boolean>(false)
 
@@ -131,11 +126,7 @@ export function TopicNode({
   const toggle = (): void => {
     const next = !expanded
     setExpanded(next)
-    if (next && participants.length === 0) {
-      void fetchDetail(buildClient(currentWsId), topic.id).catch((err) =>
-        console.error('Failed to load topic detail:', err),
-      )
-    }
+    if (next) ensureDetailLoaded()
   }
 
   return (
@@ -163,14 +154,24 @@ export function TopicNode({
         )}
         {topic.is_pinned ? (
           <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />
+        ) : topic.im_platform ? (
+          <PlatformLogo platform={topic.im_platform} className="size-3 shrink-0" />
         ) : (
           <Layers className="size-3 shrink-0 text-primary/70" />
         )}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
-          {topic.title || tTopics('newGroupChat')}
+          {topicDisplayTitle(topic.title, tTopics('newGroupChat'))}
         </div>
         {participants.length > 0 ? (
-          <ParticipantAvatars participants={participants} />
+          <AvatarStack
+            items={participants.map((p) => ({
+              src: p.avatar_url,
+              seed: p.avatar_seed ?? p.user_id,
+              name: p.display_name,
+              userId: p.user_id,
+            }))}
+            size={16}
+          />
         ) : (
           <span className="text-[10px] text-faint shrink-0">
             {tTopics('members', { count: topic.participant_count ?? 0 })}

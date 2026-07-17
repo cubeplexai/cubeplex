@@ -1,7 +1,7 @@
 'use client'
 
 import { Plus, Trash2 } from 'lucide-react'
-import type { SandboxNetworkRule } from '@cubebox/core'
+import type { SandboxNetworkRule } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {

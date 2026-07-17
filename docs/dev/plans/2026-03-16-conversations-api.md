@@ -21,22 +21,22 @@
 ### 新增文件
 
 **数据库层：**
-- `cubebox/db/__init__.py` - 导出 engine, get_session
-- `cubebox/db/engine.py` - async engine + session factory
-- `cubebox/db/session.py` - FastAPI 依赖注入
+- `cubeplex/db/__init__.py` - 导出 engine, get_session
+- `cubeplex/db/engine.py` - async engine + session factory
+- `cubeplex/db/session.py` - FastAPI 依赖注入
 
 **模型层：**
-- `cubebox/models/__init__.py` - 导出所有模型
-- `cubebox/models/conversation.py` - Conversation SQLModel
-- `cubebox/models/message.py` - Message SQLModel
+- `cubeplex/models/__init__.py` - 导出所有模型
+- `cubeplex/models/conversation.py` - Conversation SQLModel
+- `cubeplex/models/message.py` - Message SQLModel
 
 **Repository 层：**
-- `cubebox/repositories/__init__.py` - 导出所有 repo
-- `cubebox/repositories/conversation.py` - Conversation CRUD
-- `cubebox/repositories/message.py` - Message CRUD
+- `cubeplex/repositories/__init__.py` - 导出所有 repo
+- `cubeplex/repositories/conversation.py` - Conversation CRUD
+- `cubeplex/repositories/message.py` - Message CRUD
 
 **API 层：**
-- `cubebox/api/routes/v1/conversations.py` - 7 个端点
+- `cubeplex/api/routes/v1/conversations.py` - 7 个端点
 
 **迁移：**
 - `alembic.ini` - Alembic 配置
@@ -49,10 +49,10 @@
 
 ### 修改文件
 
-- `cubebox/config.py` - 添加 database 配置项
-- `cubebox/api/app.py` - 添加 lifespan 初始化 LangGraph checkpoint
-- `cubebox/api/routes/v1/__init__.py` - 注册 conversations router
-- `cubebox/agents/executor.py` - 添加 thread_id + checkpointer 参数
+- `cubeplex/config.py` - 添加 database 配置项
+- `cubeplex/api/app.py` - 添加 lifespan 初始化 LangGraph checkpoint
+- `cubeplex/api/routes/v1/__init__.py` - 注册 conversations router
+- `cubeplex/agents/executor.py` - 添加 thread_id + checkpointer 参数
 - `pyproject.toml` - 添加依赖
 
 ---
@@ -99,7 +99,7 @@ database:
   port: 3306
   user: "root"
   password: ""
-  name: "cubebox"
+  name: "cubeplex"
   pool_size: 10
   max_overflow: 20
   echo: false
@@ -109,29 +109,29 @@ database:
 
 ```
 # Database Configuration
-CUBEBOX_DATABASE__HOST=localhost
-CUBEBOX_DATABASE__PORT=3306
-CUBEBOX_DATABASE__USER=root
-CUBEBOX_DATABASE__PASSWORD=yourpassword
-CUBEBOX_DATABASE__NAME=cubebox
+CUBEPLEX_DATABASE__HOST=localhost
+CUBEPLEX_DATABASE__PORT=3306
+CUBEPLEX_DATABASE__USER=root
+CUBEPLEX_DATABASE__PASSWORD=yourpassword
+CUBEPLEX_DATABASE__NAME=cubeplex
 ```
 
 - [ ] **Step 3: 在 .env 添加测试环境实际值**
 
 ```
 # Database Configuration
-CUBEBOX_DATABASE__HOST=192.168.1.211
-CUBEBOX_DATABASE__PORT=6603
-CUBEBOX_DATABASE__USER=root
-CUBEBOX_DATABASE__PASSWORD=Sdai@20219876dss
-CUBEBOX_DATABASE__NAME=cubebox
+CUBEPLEX_DATABASE__HOST=192.168.1.211
+CUBEPLEX_DATABASE__PORT=6603
+CUBEPLEX_DATABASE__USER=root
+CUBEPLEX_DATABASE__PASSWORD=Sdai@20219876dss
+CUBEPLEX_DATABASE__NAME=cubeplex
 ```
 
 - [ ] **Step 4: 验证配置可读取**
 
 ```bash
 cd backend
-uv run python -c "from cubebox.config import config; print(config.get('database.host'), config.get('database.port'))"
+uv run python -c "from cubeplex.config import config; print(config.get('database.host'), config.get('database.port'))"
 ```
 
 Expected: 输出 `.env` 中配置的 host 和 port
@@ -152,8 +152,8 @@ git commit -m "config: add database connection settings"
 ### Task 3: 创建数据库引擎
 
 **Files:**
-- Create: `backend/cubebox/db/__init__.py`
-- Create: `backend/cubebox/db/engine.py`
+- Create: `backend/cubeplex/db/__init__.py`
+- Create: `backend/cubeplex/db/engine.py`
 
 - [ ] **Step 1: 创建 db/engine.py**
 
@@ -163,7 +163,7 @@ git commit -m "config: add database connection settings"
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.config import config
+from cubeplex.config import config
 
 
 def _build_database_url() -> str:
@@ -172,7 +172,7 @@ def _build_database_url() -> str:
     port = config.get("database.port", 3306)
     user = config.get("database.user", "root")
     password = config.get("database.password", "")
-    name = config.get("database.name", "cubebox")
+    name = config.get("database.name", "cubeplex")
     return f"mysql+aiomysql://{user}:{password}@{host}:{port}/{name}"
 
 
@@ -206,7 +206,7 @@ async def init_db() -> None:
 ```python
 """Database module."""
 
-from cubebox.db.engine import async_session_maker, engine, init_db
+from cubeplex.db.engine import async_session_maker, engine, init_db
 
 __all__ = ["engine", "async_session_maker", "init_db"]
 ```
@@ -215,7 +215,7 @@ __all__ = ["engine", "async_session_maker", "init_db"]
 
 ```bash
 cd backend
-uv run python -c "from cubebox.db import engine; print(engine)"
+uv run python -c "from cubeplex.db import engine; print(engine)"
 ```
 
 Expected: 输出 Engine 对象
@@ -223,7 +223,7 @@ Expected: 输出 Engine 对象
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/db/
+git add cubeplex/db/
 git commit -m "feat(db): add async database engine and session factory"
 ```
 
@@ -232,8 +232,8 @@ git commit -m "feat(db): add async database engine and session factory"
 ### Task 4: 创建 FastAPI 依赖注入
 
 **Files:**
-- Create: `backend/cubebox/db/session.py`
-- Modify: `backend/cubebox/db/__init__.py`
+- Create: `backend/cubeplex/db/session.py`
+- Modify: `backend/cubeplex/db/__init__.py`
 
 - [ ] **Step 1: 创建 db/session.py**
 
@@ -244,7 +244,7 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db.engine import async_session_maker
+from cubeplex.db.engine import async_session_maker
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -264,8 +264,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 ```python
 """Database module."""
 
-from cubebox.db.engine import async_session_maker, engine, init_db
-from cubebox.db.session import get_session
+from cubeplex.db.engine import async_session_maker, engine, init_db
+from cubeplex.db.session import get_session
 
 __all__ = ["engine", "async_session_maker", "init_db", "get_session"]
 ```
@@ -273,7 +273,7 @@ __all__ = ["engine", "async_session_maker", "init_db", "get_session"]
 - [ ] **Step 3: 提交**
 
 ```bash
-git add cubebox/db/
+git add cubeplex/db/
 git commit -m "feat(db): add FastAPI session dependency injection"
 ```
 
@@ -284,8 +284,8 @@ git commit -m "feat(db): add FastAPI session dependency injection"
 ### Task 5: 创建 Conversation 模型
 
 **Files:**
-- Create: `backend/cubebox/models/__init__.py`
-- Create: `backend/cubebox/models/conversation.py`
+- Create: `backend/cubeplex/models/__init__.py`
+- Create: `backend/cubeplex/models/conversation.py`
 
 - [ ] **Step 1: 创建 models/conversation.py**
 
@@ -314,7 +314,7 @@ class Conversation(SQLModel, table=True):
 ```python
 """Data models."""
 
-from cubebox.models.conversation import Conversation
+from cubeplex.models.conversation import Conversation
 
 __all__ = ["Conversation"]
 ```
@@ -323,7 +323,7 @@ __all__ = ["Conversation"]
 
 ```bash
 cd backend
-uv run python -c "from cubebox.models import Conversation; print(Conversation.__tablename__)"
+uv run python -c "from cubeplex.models import Conversation; print(Conversation.__tablename__)"
 ```
 
 Expected: 输出 `conversations`
@@ -331,7 +331,7 @@ Expected: 输出 `conversations`
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/models/
+git add cubeplex/models/
 git commit -m "feat(models): add Conversation model"
 ```
 
@@ -340,8 +340,8 @@ git commit -m "feat(models): add Conversation model"
 ### Task 6: 创建 Message 模型
 
 **Files:**
-- Create: `backend/cubebox/models/message.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/message.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: 创建 models/message.py**
 
@@ -374,8 +374,8 @@ class Message(SQLModel, table=True):
 ```python
 """Data models."""
 
-from cubebox.models.conversation import Conversation
-from cubebox.models.message import Message
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.message import Message
 
 __all__ = ["Conversation", "Message"]
 ```
@@ -384,7 +384,7 @@ __all__ = ["Conversation", "Message"]
 
 ```bash
 cd backend
-uv run python -c "from cubebox.models import Message; print(Message.__tablename__)"
+uv run python -c "from cubeplex.models import Message; print(Message.__tablename__)"
 ```
 
 Expected: 输出 `messages`
@@ -392,7 +392,7 @@ Expected: 输出 `messages`
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/models/
+git add cubeplex/models/
 git commit -m "feat(models): add Message model"
 ```
 
@@ -431,8 +431,8 @@ Expected: 创建 alembic/ 目录和 alembic.ini
 在 `env.py` 顶部添加：
 
 ```python
-from cubebox.config import config as app_config
-from cubebox.models import Conversation, Message  # noqa: F401
+from cubeplex.config import config as app_config
+from cubeplex.models import Conversation, Message  # noqa: F401
 from sqlmodel import SQLModel
 
 # 使用 SQLModel metadata
@@ -444,7 +444,7 @@ def get_url():
     port = app_config.get("database.port", 3306)
     user = app_config.get("database.user", "root")
     password = app_config.get("database.password", "")
-    name = app_config.get("database.name", "cubebox")
+    name = app_config.get("database.name", "cubeplex")
     return f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}"
 
 config.set_main_option("sqlalchemy.url", get_url())
@@ -503,7 +503,7 @@ Expected: 输出 `Running upgrade -> xxx, create_conversations_messages`
 ```bash
 uv run python -c "
 import asyncio
-from cubebox.db import engine
+from cubeplex.db import engine
 from sqlalchemy import text
 
 async def check():
@@ -534,8 +534,8 @@ git commit -m "feat(db): add initial migration for conversations and messages"
 ### Task 9: 创建 Conversation Repository
 
 **Files:**
-- Create: `backend/cubebox/repositories/__init__.py`
-- Create: `backend/cubebox/repositories/conversation.py`
+- Create: `backend/cubeplex/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/conversation.py`
 
 - [ ] **Step 1: 创建 repositories/conversation.py**
 
@@ -546,7 +546,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import desc
 
-from cubebox.models import Conversation
+from cubeplex.models import Conversation
 
 
 class ConversationRepository:
@@ -638,7 +638,7 @@ from sqlalchemy import func, select
 ```python
 """Repository layer."""
 
-from cubebox.repositories.conversation import ConversationRepository
+from cubeplex.repositories.conversation import ConversationRepository
 
 __all__ = ["ConversationRepository"]
 ```
@@ -646,7 +646,7 @@ __all__ = ["ConversationRepository"]
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/repositories/
+git add cubeplex/repositories/
 git commit -m "feat(repositories): add ConversationRepository"
 ```
 
@@ -655,8 +655,8 @@ git commit -m "feat(repositories): add ConversationRepository"
 ### Task 10: 创建 Message Repository
 
 **Files:**
-- Create: `backend/cubebox/repositories/message.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/message.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: 创建 repositories/message.py**
 
@@ -668,7 +668,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Message
+from cubeplex.models import Message
 
 
 class MessageRepository:
@@ -711,8 +711,8 @@ class MessageRepository:
 ```python
 """Repository layer."""
 
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.message import MessageRepository
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.message import MessageRepository
 
 __all__ = ["ConversationRepository", "MessageRepository"]
 ```
@@ -720,7 +720,7 @@ __all__ = ["ConversationRepository", "MessageRepository"]
 - [ ] **Step 3: 提交**
 
 ```bash
-git add cubebox/repositories/
+git add cubeplex/repositories/
 git commit -m "feat(repositories): add MessageRepository"
 ```
 
@@ -732,8 +732,8 @@ git commit -m "feat(repositories): add MessageRepository"
 ### Task 11: 创建 Conversations Router（CRUD 部分）
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
+- Create: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
 
 - [ ] **Step 1: 创建 conversations.py — 会话 CRUD 端点**
 
@@ -747,9 +747,9 @@ from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.exceptions import InternalError, InvalidInputError, NotFoundError
-from cubebox.db import get_session
-from cubebox.repositories.conversation import ConversationRepository
+from cubeplex.api.exceptions import InternalError, InvalidInputError, NotFoundError
+from cubeplex.db import get_session
+from cubeplex.repositories.conversation import ConversationRepository
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -837,7 +837,7 @@ async def get_conversation(
     session: AsyncSession = Depends(get_session),
 ) -> ConversationDetailResponse:
     """Get conversation with full message history."""
-    from cubebox.repositories.message import MessageRepository
+    from cubeplex.repositories.message import MessageRepository
 
     conv_repo = ConversationRepository(session)
     conversation = await conv_repo.get_by_id(conversation_id)
@@ -874,7 +874,7 @@ async def delete_conversation(
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Delete a conversation and all its messages."""
-    from cubebox.repositories.message import MessageRepository
+    from cubeplex.repositories.message import MessageRepository
 
     conv_repo = ConversationRepository(session)
     conversation = await conv_repo.get_by_id(conversation_id)
@@ -914,10 +914,10 @@ async def update_conversation(
 
 - [ ] **Step 2: 注册 router 到 v1/__init__.py**
 
-修改 `cubebox/api/routes/v1/__init__.py`，添加：
+修改 `cubeplex/api/routes/v1/__init__.py`，添加：
 
 ```python
-from cubebox.api.routes.v1.conversations import router as conversations_router
+from cubeplex.api.routes.v1.conversations import router as conversations_router
 ```
 
 并在 `v1_router.include_router(...)` 中注册。
@@ -927,7 +927,7 @@ from cubebox.api.routes.v1.conversations import router as conversations_router
 ```bash
 cd backend
 uv run python -c "
-from cubebox.api.app import create_app
+from cubeplex.api.app import create_app
 app = create_app()
 routes = [r.path for r in app.routes]
 print([r for r in routes if 'conversation' in r])
@@ -939,7 +939,7 @@ Expected: 输出包含 `/api/v1/conversations` 的路由列表
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py cubebox/api/routes/v1/__init__.py
+git add cubeplex/api/routes/v1/conversations.py cubeplex/api/routes/v1/__init__.py
 git commit -m "feat(api): add conversation CRUD endpoints"
 ```
 
@@ -948,13 +948,13 @@ git commit -m "feat(api): add conversation CRUD endpoints"
 ### Task 12: 添加 NotFoundError 异常
 
 **Files:**
-- Modify: `backend/cubebox/api/exceptions.py`
+- Modify: `backend/cubeplex/api/exceptions.py`
 
 - [ ] **Step 1: 检查 exceptions.py 是否已有 NotFoundError**
 
 ```bash
 cd backend
-grep -n "NotFoundError" cubebox/api/exceptions.py
+grep -n "NotFoundError" cubeplex/api/exceptions.py
 ```
 
 如果不存在，添加：
@@ -975,7 +975,7 @@ class NotFoundError(APIException):
 - [ ] **Step 2: 提交**
 
 ```bash
-git add cubebox/api/exceptions.py
+git add cubeplex/api/exceptions.py
 git commit -m "feat(api): add NotFoundError exception"
 ```
 
@@ -986,7 +986,7 @@ git commit -m "feat(api): add NotFoundError exception"
 ### Task 13: 修改 DeepAgentExecutor 支持 checkpoint
 
 **Files:**
-- Modify: `backend/cubebox/agents/executor.py`
+- Modify: `backend/cubeplex/agents/executor.py`
 
 - [ ] **Step 1: 修改 stream() 签名**
 
@@ -1045,7 +1045,7 @@ Expected: 所有测试通过（不传 thread_id/checkpointer 时行为不变）
 - [ ] **Step 5: 提交**
 
 ```bash
-git add cubebox/agents/executor.py
+git add cubeplex/agents/executor.py
 git commit -m "feat(executor): add thread_id and checkpointer support for conversation persistence"
 ```
 
@@ -1054,7 +1054,7 @@ git commit -m "feat(executor): add thread_id and checkpointer support for conver
 ### Task 14: 添加消息端点（发送 + 历史）
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 
 - [ ] **Step 1: 添加 POST messages 端点（SSE 流式）**
 
@@ -1065,9 +1065,9 @@ from collections.abc import AsyncIterator
 
 from fastapi.responses import StreamingResponse
 
-from cubebox.agents.executor import DeepAgentExecutor
-from cubebox.agents.schemas import DoneEvent
-from cubebox.repositories.message import MessageRepository
+from cubeplex.agents.executor import DeepAgentExecutor
+from cubeplex.agents.schemas import DoneEvent
+from cubeplex.repositories.message import MessageRepository
 
 
 class SendMessageRequest(BaseModel):
@@ -1209,13 +1209,13 @@ async def list_messages(
 在文件顶部添加：
 
 ```python
-from cubebox.db import async_session_maker, get_session
+from cubeplex.db import async_session_maker, get_session
 ```
 
 - [ ] **Step 4: 提交**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py
+git add cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(api): add message send (SSE) and list endpoints"
 ```
 
@@ -1224,7 +1224,7 @@ git commit -m "feat(api): add message send (SSE) and list endpoints"
 ### Task 15: 添加 LangGraph Checkpoint 初始化到 App Lifespan
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: 修改 app.py 添加 lifespan**
 
@@ -1242,7 +1242,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize LangGraph checkpoint tables
     try:
         from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
-        from cubebox.db.engine import _build_database_url
+        from cubeplex.db.engine import _build_database_url
 
         db_url = _build_database_url()
         logger.info("Initializing LangGraph checkpoint tables")
@@ -1255,7 +1255,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     # Cleanup
-    from cubebox.db import engine
+    from cubeplex.db import engine
     await engine.dispose()
     logger.info("Database engine disposed")
 
@@ -1277,7 +1277,7 @@ Expected: 所有测试通过
 - [ ] **Step 3: 提交**
 
 ```bash
-git add cubebox/api/app.py
+git add cubeplex/api/app.py
 git commit -m "feat(app): add lifespan for LangGraph checkpoint init and DB cleanup"
 ```
 
@@ -1298,8 +1298,8 @@ git commit -m "feat(app): add lifespan for LangGraph checkpoint init and DB clea
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from cubebox.api.app import create_app
-from cubebox.db import engine, init_db
+from cubeplex.api.app import create_app
+from cubeplex.db import engine, init_db
 from sqlmodel import SQLModel
 
 
@@ -1445,14 +1445,14 @@ git commit -m "test: add E2E tests for conversations API"
 ### Task 17: 删除旧的 agents/run 端点
 
 **Files:**
-- Delete: `backend/cubebox/api/routes/v1/agents.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Delete: `backend/cubeplex/api/routes/v1/agents.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: 删除 agents.py**
 
 ```bash
-rm cubebox/api/routes/v1/agents.py
+rm cubeplex/api/routes/v1/agents.py
 ```
 
 - [ ] **Step 2: 从 v1/__init__.py 移除 agents_router 导出**

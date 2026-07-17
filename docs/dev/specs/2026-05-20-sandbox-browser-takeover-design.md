@@ -11,7 +11,7 @@ to browse the web. When a site needs a human — login, OAuth consent, CAPTCHA,
 2FA — the agent is stuck: the sandbox has no display, and the user has no way to
 see the page or type into it. Today these tasks simply fail.
 
-We want the user to **see the sandbox browser live in the cubebox frontend and
+We want the user to **see the sandbox browser live in the cubeplex frontend and
 take over** (click, type, submit) when the agent needs help, then hand control
 back to the agent.
 
@@ -101,7 +101,7 @@ The full Dockerfile gotchas are captured from the PoC; the plan covers them.
 
 ### 2. Backend
 
-- **Sandbox abstraction** (`cubebox/sandbox/base.py`, `opensandbox.py`): add a
+- **Sandbox abstraction** (`cubeplex/sandbox/base.py`, `opensandbox.py`): add a
   method to surface a signed endpoint for an in-sandbox port
   (`get_browser_endpoint()` wrapping `opensandbox.Sandbox.get_signed_endpoint`).
   Local sandbox backend returns a localhost URL.

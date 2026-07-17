@@ -20,8 +20,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.streams.hitl_resume import ClaimResumeOutcome, ClaimResumeResult
-from cubebox.streams.run_manager import (
+from cubeplex.streams.hitl_resume import ClaimResumeOutcome, ClaimResumeResult
+from cubeplex.streams.run_manager import (
     ResumeConflict,
     ResumeInFlight,
     ResumeNoPending,
@@ -58,7 +58,7 @@ def _patch_checkpointer(monkeypatch: pytest.MonkeyPatch, *, pending: Any) -> Asy
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
     return load_mock
@@ -76,7 +76,7 @@ def _patch_claim_resume(
     )
     mock = AsyncMock(return_value=result)
     monkeypatch.setattr(
-        "cubebox.streams.hitl_resume.claim_resume",
+        "cubeplex.streams.hitl_resume.claim_resume",
         mock,
     )
     return mock
@@ -240,7 +240,7 @@ async def test_build_cancel_answer_unknown_kind_falls_back_to_marker_only() -> N
     """If the payload doesn't expose a recognised ``kind`` (e.g. a future
     HITL type), still return SOMETHING the model can interpret —
     just the cancel marker, no per-question keys."""
-    from cubebox.streams.run_manager import _build_cancel_answer
+    from cubeplex.streams.run_manager import _build_cancel_answer
 
     payload = MagicMock()
     payload.kind = "future_unknown_kind"

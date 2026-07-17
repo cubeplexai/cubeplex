@@ -1,8 +1,8 @@
 """TextParser plugin tests."""
 
-from cubebox.parsers.plugins.text import TextParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import ParseOptions, TextOutput
+from cubeplex.parsers.plugins.text import TextParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import ParseOptions, TextOutput
 
 
 def test_satisfies_protocol() -> None:

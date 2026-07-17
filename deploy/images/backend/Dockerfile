@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for the cubebox FastAPI backend.
+# Multi-stage build for the cubeplex FastAPI backend.
 #
 # Stage 1 (builder): pip-install all deps from a pre-resolved requirements
 #   file into /app/.venv. The requirements file is generated on the host
@@ -61,7 +61,7 @@ ENV PATH=/app/.venv/bin:$PATH
 COPY backend/pyproject.toml backend/uv.lock backend/requirements-frozen.txt ./
 RUN uv pip install -r requirements-frozen.txt
 
-COPY backend/cubebox ./cubebox
+COPY backend/cubeplex ./cubeplex
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/main.py ./main.py
@@ -70,8 +70,8 @@ COPY backend/scripts ./scripts
 COPY backend/skills ./skills
 COPY backend/config.yaml backend/config.development.yaml backend/config.production.yaml backend/config.test.yaml ./
 
-# cubebox itself runs from /app via `python main.py` (which imports
-# `cubebox.*` from the same directory). No pip install of the project is
+# cubeplex itself runs from /app via `python main.py` (which imports
+# `cubeplex.*` from the same directory). No pip install of the project is
 # needed — keeping the source uninstalled also avoids pulling in hatchling
 # and re-validating pyproject metadata at build time.
 
@@ -99,18 +99,18 @@ RUN set -eux; \
         ca-certificates \
         tini \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 1000 cubebox \
-    && useradd --system --uid 1000 --gid 1000 --create-home cubebox
+    && groupadd --system --gid 1000 cubeplex \
+    && useradd --system --uid 1000 --gid 1000 --create-home cubeplex
 
-COPY --from=builder --chown=cubebox:cubebox /app /app
+COPY --from=builder --chown=cubeplex:cubeplex /app /app
 
 # Pre-create writable dirs for non-root container — loguru file sink,
 # cubepi traces, skill artefact cache. K8s could mount an emptyDir, but
 # this is simpler and survives `--read-only-root-filesystem` callers.
 RUN mkdir -p /app/logs /app/cubepi-traces /app/skills_cache \
-    && chown -R cubebox:cubebox /app/logs /app/cubepi-traces /app/skills_cache
+    && chown -R cubeplex:cubeplex /app/logs /app/cubepi-traces /app/skills_cache
 
-USER cubebox
+USER cubeplex
 
 EXPOSE 8000
 

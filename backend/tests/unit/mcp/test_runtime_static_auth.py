@@ -14,8 +14,8 @@ mcp-installs E2E suite.
 
 from __future__ import annotations
 
-from cubebox.mcp.cubepi_runtime import _apply_static_credential, _inject_query_param
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.cubepi_runtime import _apply_static_credential, _inject_query_param
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _make_spec(
@@ -26,7 +26,7 @@ def _make_spec(
     server_url: str = "https://mcp.example.com/mcp",
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id="mcins_test",
+        connector_id="mcins_test",
         name="test",
         server_url=server_url,
         transport="streamable_http",

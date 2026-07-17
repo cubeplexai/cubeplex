@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
-import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -316,9 +316,14 @@ export function ProviderConfigForm({
           <Input
             id="pcf-api-key"
             type="password"
+            name="provider-api-key"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={isCreate ? 'sk-…' : t('apiKeyEditHint')}
+            autoComplete="new-password"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
           <span className="text-[11px] text-muted-foreground">
             {isCreate ? tc('apiKeyRequired') : t('apiKeyEditHint')}

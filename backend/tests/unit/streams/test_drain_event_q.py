@@ -21,12 +21,12 @@ from typing import Any
 
 import pytest
 
-from cubebox.agents.schemas import (
+from cubeplex.agents.schemas import (
     CitationEvent,
     TextDeltaEvent,
     ToolResultEvent,
 )
-from cubebox.streams.run_manager import _drain_subagent_citation_queue
+from cubeplex.streams.run_manager import _drain_subagent_citation_queue
 
 
 @pytest.mark.asyncio

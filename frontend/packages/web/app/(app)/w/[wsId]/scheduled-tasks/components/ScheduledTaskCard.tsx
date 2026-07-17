@@ -1,7 +1,7 @@
 'use client'
 
 import { MoreHorizontal, Pause, Play, Pencil, Trash2 } from 'lucide-react'
-import type { ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import {
   DropdownMenu,
   DropdownMenuContent,

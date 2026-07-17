@@ -47,7 +47,7 @@ metadata:
   name: egress-webhook-tls
   namespace: opensandbox
   labels:
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 spec:
   secretName: egress-webhook-tls
   # DNS SANs that Kubernetes uses to reach the webhook Service.

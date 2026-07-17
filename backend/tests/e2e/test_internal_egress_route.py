@@ -18,19 +18,19 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.keys import parse_vault_keys
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models import EgressRef, Organization, Workspace
-from cubebox.models.user import User
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.sandbox_env.placeholder import hash_placeholder, mint_placeholder
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SANDBOX_ENV_KIND
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.keys import parse_vault_keys
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models import EgressRef, Organization, Workspace
+from cubeplex.models.user import User
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.sandbox_env.placeholder import hash_placeholder, mint_placeholder
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SANDBOX_ENV_KIND
 
 _DEV_TOKEN = "test-egress-token"
 
@@ -38,7 +38,7 @@ _DEV_TOKEN = "test-egress-token"
 # Use the same vault key the app will use (set by tests/conftest.py so the app
 # and the seed step encrypt/decrypt with the same key).
 def _test_backend() -> FernetBackend:
-    raw_key = os.environ.get("CUBEBOX_AUTH__VAULT_KEY", "")
+    raw_key = os.environ.get("CUBEPLEX_AUTH__VAULT_KEY", "")
     return FernetBackend(parse_vault_keys(raw_key))
 
 
@@ -116,7 +116,7 @@ async def egress_client() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     # Seed the ref in a separate session before the app starts.
     async with test_session_maker() as seed_session:
@@ -129,7 +129,7 @@ async def egress_client() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
     app = create_app()
     app.dependency_overrides[get_session] = override_get_session
     # Confirm the test config wired the dev authenticator.
-    from cubebox.sandbox_env.exchange_auth import DevSharedSecretAuthenticator
+    from cubeplex.sandbox_env.exchange_auth import DevSharedSecretAuthenticator
 
     assert isinstance(app.state.sidecar_authenticator, DevSharedSecretAuthenticator), (
         "Expected DevSharedSecretAuthenticator from test config; "

@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createApiClient, archiveMemory, listMemory } from '@cubebox/core'
-import type { MemoryItem, MemoryScope, MemoryStatus } from '@cubebox/core'
+import { createApiClient, archiveMemory, listMemory } from '@cubeplex/core'
+import type { MemoryItem, MemoryScope, MemoryStatus } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 import { Brain } from 'lucide-react'
 import { EmptyState } from '@/components/shared/EmptyState'

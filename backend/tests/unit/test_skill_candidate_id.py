@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.skills.sources.base import (
+from cubeplex.skills.sources.base import (
     CandidateIdError,
     decode_candidate_id,
     encode_candidate_id,

@@ -16,13 +16,13 @@
 
 ### Backend — new files
 
-- `backend/cubebox/models/organization_membership.py` — `OrgRole` enum + `OrganizationMembership` SQLModel
-- `backend/cubebox/repositories/organization_membership.py` — repository with `grant` / `get_role` / `is_admin` / `list_org_members` / `promote` / `revoke`
-- `backend/cubebox/api/routes/v1/system.py` — `GET /api/v1/system/info` (public) + `POST /api/v1/system/setup` (auth)
-- `backend/cubebox/api/schemas/system.py` — `SystemInfoResponse`, `SetupRequest`, `SetupResponse`, slug validators
-- `backend/cubebox/cli/__init__.py` — Click group entry point
-- `backend/cubebox/cli/admin.py` — `cubebox admin grant-admin` / `revoke-admin` commands
-- `backend/cubebox/auth/singleton_org.py` — `get_singleton_org_id` helper + advisory-lock helpers
+- `backend/cubeplex/models/organization_membership.py` — `OrgRole` enum + `OrganizationMembership` SQLModel
+- `backend/cubeplex/repositories/organization_membership.py` — repository with `grant` / `get_role` / `is_admin` / `list_org_members` / `promote` / `revoke`
+- `backend/cubeplex/api/routes/v1/system.py` — `GET /api/v1/system/info` (public) + `POST /api/v1/system/setup` (auth)
+- `backend/cubeplex/api/schemas/system.py` — `SystemInfoResponse`, `SetupRequest`, `SetupResponse`, slug validators
+- `backend/cubeplex/cli/__init__.py` — Click group entry point
+- `backend/cubeplex/cli/admin.py` — `cubeplex admin grant-admin` / `revoke-admin` commands
+- `backend/cubeplex/auth/singleton_org.py` — `get_singleton_org_id` helper + advisory-lock helpers
 - `backend/alembic/versions/{rev}_add_organization_memberships.py` — table + indexes + backfill
 - `backend/tests/e2e/test_single_tenant_bootstrap.py`
 - `backend/tests/e2e/test_multi_tenant_unchanged.py`
@@ -32,16 +32,16 @@
 
 - `backend/config.yaml` — add `deployment.mode: single_tenant` default
 - `backend/config.production.yaml` — add `deployment.mode: multi_tenant`
-- `backend/cubebox/auth/users.py` — `on_after_register` mode branch + advisory lock + `OrganizationMembership(role=owner)` insert in multi_tenant path
-- `backend/cubebox/auth/dependencies.py:138` — `require_org_admin` reads new repo
-- `backend/cubebox/api/routes/v1/admin.py:36` — `/admin/me` reads new repo
-- `backend/cubebox/api/routes/v1/cost.py:46` — admin check reads new repo
-- `backend/cubebox/api/routes/v1/workspaces.py` — `create_workspace` mode-aware org_id resolution
-- `backend/cubebox/api/routes/v1/auth.py:88-90` — `/auth/me` adds `needs_org_setup`
-- `backend/cubebox/api/app.py` — register `system_router`, startup mode-consistency check
-- `backend/cubebox/repositories/__init__.py` — export `OrganizationMembershipRepository`
-- `backend/cubebox/models/__init__.py` — export `OrganizationMembership`, `OrgRole`
-- `backend/pyproject.toml` — `[project.scripts] cubebox = "cubebox.cli:main"`
+- `backend/cubeplex/auth/users.py` — `on_after_register` mode branch + advisory lock + `OrganizationMembership(role=owner)` insert in multi_tenant path
+- `backend/cubeplex/auth/dependencies.py:138` — `require_org_admin` reads new repo
+- `backend/cubeplex/api/routes/v1/admin.py:36` — `/admin/me` reads new repo
+- `backend/cubeplex/api/routes/v1/cost.py:46` — admin check reads new repo
+- `backend/cubeplex/api/routes/v1/workspaces.py` — `create_workspace` mode-aware org_id resolution
+- `backend/cubeplex/api/routes/v1/auth.py:88-90` — `/auth/me` adds `needs_org_setup`
+- `backend/cubeplex/api/app.py` — register `system_router`, startup mode-consistency check
+- `backend/cubeplex/repositories/__init__.py` — export `OrganizationMembershipRepository`
+- `backend/cubeplex/models/__init__.py` — export `OrganizationMembership`, `OrgRole`
+- `backend/pyproject.toml` — `[project.scripts] cubeplex = "cubeplex.cli:main"`
 - `backend/tests/e2e/conftest.py` — fixture inserts `OrganizationMembership` row alongside workspace `Membership`
 
 ### Frontend — new files
@@ -77,7 +77,7 @@ Tasks 1–4 introduce the org-membership model and rewire admin gates. Both mode
 **Files:**
 - Modify: `backend/config.yaml`
 - Modify: `backend/config.production.yaml`
-- Modify: `backend/cubebox/api/app.py:316-340` (FastAPI factory)
+- Modify: `backend/cubeplex/api/app.py:316-340` (FastAPI factory)
 - Test: `backend/tests/e2e/test_deployment_mode_config.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -122,12 +122,12 @@ deployment:
 
 - [ ] **Step 3: Read into `app.state` at factory time**
 
-Edit `backend/cubebox/api/app.py`. Find the FastAPI factory (around line 316 — `def create_app()` or similar). After existing `app.state.* = ...` assignments, add:
+Edit `backend/cubeplex/api/app.py`. Find the FastAPI factory (around line 316 — `def create_app()` or similar). After existing `app.state.* = ...` assignments, add:
 
 ```python
-from cubebox.config import config as _cubebox_config
+from cubeplex.config import config as _cubeplex_config
 
-_mode = str(_cubebox_config.get("deployment.mode", "single_tenant")).lower()
+_mode = str(_cubeplex_config.get("deployment.mode", "single_tenant")).lower()
 if _mode not in ("single_tenant", "multi_tenant"):
     raise RuntimeError(
         f"Invalid deployment.mode={_mode!r}; must be 'single_tenant' or 'multi_tenant'"
@@ -143,8 +143,8 @@ Expected: same baseline pass/fail as before this task. No new failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/config.yaml backend/config.production.yaml backend/cubebox/api/app.py
+cd ~/cubeplex
+git add backend/config.yaml backend/config.production.yaml backend/cubeplex/api/app.py
 git commit -m "feat(m9): add deployment.mode config (default single_tenant)"
 ```
 
@@ -153,10 +153,10 @@ git commit -m "feat(m9): add deployment.mode config (default single_tenant)"
 ## Task 2: `OrganizationMembership` model + migration + repository
 
 **Files:**
-- Create: `backend/cubebox/models/organization_membership.py`
-- Create: `backend/cubebox/repositories/organization_membership.py`
-- Modify: `backend/cubebox/models/__init__.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/models/organization_membership.py`
+- Create: `backend/cubeplex/repositories/organization_membership.py`
+- Modify: `backend/cubeplex/models/__init__.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 - Create: `backend/alembic/versions/{rev}_add_organization_memberships.py`
 - Test: `backend/tests/e2e/test_organization_membership_repo.py`
 
@@ -169,9 +169,9 @@ git commit -m "feat(m9): add deployment.mode config (default single_tenant)"
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Organization, User
-from cubebox.models.organization_membership import OrgRole
-from cubebox.repositories import (
+from cubeplex.models import Organization, User
+from cubeplex.models.organization_membership import OrgRole
+from cubeplex.repositories import (
     OrganizationMembershipRepository,
     OrganizationRepository,
 )
@@ -271,11 +271,11 @@ async def session_factory():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/e2e/test_organization_membership_repo.py -v --timeout=60`
-Expected: ImportError on `cubebox.models.organization_membership` / `OrganizationMembershipRepository`.
+Expected: ImportError on `cubeplex.models.organization_membership` / `OrganizationMembershipRepository`.
 
 - [ ] **Step 3: Write the model**
 
-Create `backend/cubebox/models/organization_membership.py`:
+Create `backend/cubeplex/models/organization_membership.py`:
 
 ```python
 """OrganizationMembership — User × Organization × org-level role.
@@ -289,7 +289,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.mixins import TimestampMixin
+from cubeplex.models.mixins import TimestampMixin
 
 
 class OrgRole(StrEnum):
@@ -310,17 +310,17 @@ class OrganizationMembership(SQLModel, TimestampMixin, table=True):
 
 - [ ] **Step 4: Export from models package**
 
-Edit `backend/cubebox/models/__init__.py`. Add the import alongside other model imports:
+Edit `backend/cubeplex/models/__init__.py`. Add the import alongside other model imports:
 
 ```python
-from cubebox.models.organization_membership import OrganizationMembership, OrgRole
+from cubeplex.models.organization_membership import OrganizationMembership, OrgRole
 ```
 
 Add `"OrganizationMembership", "OrgRole"` to the `__all__` list (alphabetical insertion).
 
 - [ ] **Step 5: Write the repository**
 
-Create `backend/cubebox/repositories/organization_membership.py`:
+Create `backend/cubeplex/repositories/organization_membership.py`:
 
 ```python
 """OrganizationMembership repository — User × Organization × OrgRole."""
@@ -328,7 +328,7 @@ Create `backend/cubebox/repositories/organization_membership.py`:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import OrganizationMembership, OrgRole
+from cubeplex.models import OrganizationMembership, OrgRole
 
 
 class OrganizationMembershipRepository:
@@ -391,10 +391,10 @@ class OrganizationMembershipRepository:
 
 - [ ] **Step 6: Export from repositories package**
 
-Edit `backend/cubebox/repositories/__init__.py`. Add:
+Edit `backend/cubeplex/repositories/__init__.py`. Add:
 
 ```python
-from cubebox.repositories.organization_membership import OrganizationMembershipRepository
+from cubeplex.repositories.organization_membership import OrganizationMembershipRepository
 ```
 
 Add to `__all__`.
@@ -485,11 +485,11 @@ Expected: same baseline pass/fail as before this task plus the 4 new tests.
 - [ ] **Step 10: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/models/organization_membership.py \
-        backend/cubebox/repositories/organization_membership.py \
-        backend/cubebox/models/__init__.py \
-        backend/cubebox/repositories/__init__.py \
+cd ~/cubeplex
+git add backend/cubeplex/models/organization_membership.py \
+        backend/cubeplex/repositories/organization_membership.py \
+        backend/cubeplex/models/__init__.py \
+        backend/cubeplex/repositories/__init__.py \
         backend/alembic/versions/*_add_organization_memberships.py \
         backend/tests/e2e/conftest.py \
         backend/tests/e2e/test_organization_membership_repo.py
@@ -501,7 +501,7 @@ git commit -m "feat(m9): OrganizationMembership model + repo + migration with ba
 ## Task 3: Multi-tenant `on_after_register` inserts `OrganizationMembership(role=owner)`
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py:85-145`
+- Modify: `backend/cubeplex/auth/users.py:85-145`
 - Modify: `backend/tests/e2e/conftest.py` — fixture inserts org-membership rows
 - Test: `backend/tests/e2e/test_register_creates_org_membership.py`
 
@@ -517,7 +517,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Organization, OrganizationMembership, OrgRole, User
+from cubeplex.models import Organization, OrganizationMembership, OrgRole, User
 
 pytestmark = pytest.mark.e2e
 
@@ -560,11 +560,11 @@ Expected: FAIL — `NoResultFound` because no `OrganizationMembership` row is cr
 
 - [ ] **Step 3: Modify `on_after_register` to insert org membership**
 
-Edit `backend/cubebox/auth/users.py`. In the bootstrap try-block (currently around lines 95-109), after `MembershipRepository.grant(...)` and before `agent_cfg = AgentConfig(...)`, add:
+Edit `backend/cubeplex/auth/users.py`. In the bootstrap try-block (currently around lines 95-109), after `MembershipRepository.grant(...)` and before `agent_cfg = AgentConfig(...)`, add:
 
 ```python
-from cubebox.models import OrgRole
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.models import OrgRole
+from cubeplex.repositories import OrganizationMembershipRepository
 
 await OrganizationMembershipRepository(session).grant(
     user_id=user.id, org_id=org.id, role=OrgRole.OWNER
@@ -576,8 +576,8 @@ await OrganizationMembershipRepository(session).grant(
 Edit `backend/tests/e2e/conftest.py`. In `_ensure_test_user_membership` (around line 318), after `mem_repo.grant(...)` and before `return`, add:
 
 ```python
-from cubebox.models import OrgRole
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.models import OrgRole
+from cubeplex.repositories import OrganizationMembershipRepository
 
 # Seed org-level membership: fresh user is the only one in the fresh org → owner.
 await OrganizationMembershipRepository(session).grant(
@@ -596,8 +596,8 @@ Expected: full suite passes; no regressions. (`/admin/me` tests still pass again
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/auth/users.py backend/tests/e2e/conftest.py backend/tests/e2e/test_register_creates_org_membership.py
+cd ~/cubeplex
+git add backend/cubeplex/auth/users.py backend/tests/e2e/conftest.py backend/tests/e2e/test_register_creates_org_membership.py
 git commit -m "feat(m9): on_after_register grants OrganizationMembership(role=owner)"
 ```
 
@@ -606,9 +606,9 @@ git commit -m "feat(m9): on_after_register grants OrganizationMembership(role=ow
 ## Task 4: Rewire admin gates to read `OrganizationMembership`
 
 **Files:**
-- Modify: `backend/cubebox/auth/dependencies.py:138-154` (`require_org_admin`)
-- Modify: `backend/cubebox/api/routes/v1/admin.py:36` (`/admin/me`)
-- Modify: `backend/cubebox/api/routes/v1/cost.py:46`
+- Modify: `backend/cubeplex/auth/dependencies.py:138-154` (`require_org_admin`)
+- Modify: `backend/cubeplex/api/routes/v1/admin.py:36` (`/admin/me`)
+- Modify: `backend/cubeplex/api/routes/v1/cost.py:46`
 - Test: existing tests `tests/e2e/test_admin_me.py` keep passing
 
 - [ ] **Step 1: Add a regression test that exercises the new rule**
@@ -627,13 +627,13 @@ async def test_admin_me_uses_org_membership_not_workspace_admin(
     # OrganizationMembership stays role=member.
     from sqlalchemy import select
 
-    from cubebox.models import Membership, Role, User, Workspace
-    from cubebox.repositories import (
+    from cubeplex.models import Membership, Role, User, Workspace
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         WorkspaceRepository,
     )
-    from cubebox.models.organization_membership import OrgRole
+    from cubeplex.models.organization_membership import OrgRole
 
     me_resp = await client.get("/api/v1/auth/me")
     user_email = me_resp.json()["email"]
@@ -679,7 +679,7 @@ Expected: FAIL with `assert True is False`.
 
 - [ ] **Step 3: Rewire `require_org_admin`**
 
-Edit `backend/cubebox/auth/dependencies.py`. Replace the body of `require_org_admin` (currently at lines 134-154):
+Edit `backend/cubeplex/auth/dependencies.py`. Replace the body of `require_org_admin` (currently at lines 134-154):
 
 ```python
 async def require_org_admin(
@@ -687,7 +687,7 @@ async def require_org_admin(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
     """User has org-level admin or owner role in their current org."""
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     org_id = await resolve_current_org_id(user, session)
     is_admin = await OrganizationMembershipRepository(session).is_admin(
@@ -703,10 +703,10 @@ async def require_org_admin(
 
 - [ ] **Step 4: Rewire `/admin/me`**
 
-Edit `backend/cubebox/api/routes/v1/admin.py`. Replace lines 36-37:
+Edit `backend/cubeplex/api/routes/v1/admin.py`. Replace lines 36-37:
 
 ```python
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.repositories import OrganizationMembershipRepository
 
 is_admin = await OrganizationMembershipRepository(session).is_admin(
     user_id=user.id, org_id=org_id
@@ -717,10 +717,10 @@ Drop the now-unused import of `MembershipRepository` if no other reference remai
 
 - [ ] **Step 5: Rewire cost route**
 
-Edit `backend/cubebox/api/routes/v1/cost.py:46-49`. Replace:
+Edit `backend/cubeplex/api/routes/v1/cost.py:46-49`. Replace:
 
 ```python
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.repositories import OrganizationMembershipRepository
 
 is_admin = await OrganizationMembershipRepository(session).is_admin(
     user_id=user.id, org_id=org_id
@@ -738,10 +738,10 @@ Expected: no regressions.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/auth/dependencies.py \
-        backend/cubebox/api/routes/v1/admin.py \
-        backend/cubebox/api/routes/v1/cost.py \
+cd ~/cubeplex
+git add backend/cubeplex/auth/dependencies.py \
+        backend/cubeplex/api/routes/v1/admin.py \
+        backend/cubeplex/api/routes/v1/cost.py \
         backend/tests/e2e/test_admin_me.py
 git commit -m "feat(m9): admin gates read OrganizationMembership; retire workspace-admin shortcut"
 ```
@@ -751,9 +751,9 @@ git commit -m "feat(m9): admin gates read OrganizationMembership; retire workspa
 ## Task 5: `GET /api/v1/system/info`
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/system.py`
-- Create: `backend/cubebox/api/schemas/system.py`
-- Modify: `backend/cubebox/api/app.py` (register router)
+- Create: `backend/cubeplex/api/routes/v1/system.py`
+- Create: `backend/cubeplex/api/schemas/system.py`
+- Modify: `backend/cubeplex/api/app.py` (register router)
 - Test: `backend/tests/e2e/test_system_info.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -790,7 +790,7 @@ Expected: 404.
 
 - [ ] **Step 3: Write schemas**
 
-Create `backend/cubebox/api/schemas/system.py`:
+Create `backend/cubeplex/api/schemas/system.py`:
 
 ```python
 """Schemas for /api/v1/system/* endpoints."""
@@ -818,7 +818,7 @@ class SetupResponse(BaseModel):
 
 - [ ] **Step 4: Write the route**
 
-Create `backend/cubebox/api/routes/v1/system.py`:
+Create `backend/cubeplex/api/routes/v1/system.py`:
 
 ```python
 """System routes: /system/info (public) and /system/setup (auth, single_tenant)."""
@@ -830,14 +830,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
-from cubebox.api.schemas.system import SystemInfoResponse
-from cubebox.db import get_session
-from cubebox.models import Organization
+from cubeplex.api.schemas.system import SystemInfoResponse
+from cubeplex.db import get_session
+from cubeplex.models import Organization
 
 router = APIRouter(prefix="/system", tags=["system"])
 
 # v1 hardcoded; bump on release. Kept in sync with backend/pyproject.toml.
-_CUBEBOX_VERSION = "0.1.0"
+_CUBEPLEX_VERSION = "0.1.0"
 
 
 @router.get("/info", response_model=SystemInfoResponse)
@@ -852,17 +852,17 @@ async def get_system_info(
     needs_setup = mode == "single_tenant" and int(org_count) == 0
     return SystemInfoResponse(
         deployment_mode=mode,  # type: ignore[arg-type]
-        version=_CUBEBOX_VERSION,
+        version=_CUBEPLEX_VERSION,
         needs_org_setup=needs_setup,
     )
 ```
 
 - [ ] **Step 5: Register the router**
 
-Edit `backend/cubebox/api/app.py`. Find the `# Register routers` block (around line 362). Add `system_router` to the imports and the inclusion list:
+Edit `backend/cubeplex/api/app.py`. Find the `# Register routers` block (around line 362). Add `system_router` to the imports and the inclusion list:
 
 ```python
-from cubebox.api.routes.v1.system import router as system_router
+from cubeplex.api.routes.v1.system import router as system_router
 
 # In the include_router() block:
 app.include_router(system_router, prefix="/api/v1")
@@ -876,10 +876,10 @@ Expected: 2 passed.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/api/routes/v1/system.py \
-        backend/cubebox/api/schemas/system.py \
-        backend/cubebox/api/app.py \
+cd ~/cubeplex
+git add backend/cubeplex/api/routes/v1/system.py \
+        backend/cubeplex/api/schemas/system.py \
+        backend/cubeplex/api/app.py \
         backend/tests/e2e/test_system_info.py
 git commit -m "feat(m9): public GET /api/v1/system/info"
 ```
@@ -889,7 +889,7 @@ git commit -m "feat(m9): public GET /api/v1/system/info"
 ## Task 6: `/auth/me` returns `needs_org_setup`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py:88-103`
+- Modify: `backend/cubeplex/api/routes/v1/auth.py:88-103`
 - Test: `backend/tests/e2e/test_auth_needs_org_setup.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -918,7 +918,7 @@ Expected: FAIL — `'needs_org_setup'` not in response.
 
 - [ ] **Step 3: Update `/auth/me`**
 
-Edit `backend/cubebox/api/routes/v1/auth.py`. Replace the `me` handler (around lines 88-90):
+Edit `backend/cubeplex/api/routes/v1/auth.py`. Replace the `me` handler (around lines 88-90):
 
 ```python
 @router.get("/me")
@@ -927,7 +927,7 @@ async def me(
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
 ) -> dict[str, str | bool]:
-    from cubebox.models import Organization, OrganizationMembership
+    from cubeplex.models import Organization, OrganizationMembership
     from sqlalchemy import func, select
 
     mode = getattr(request.app.state, "deployment_mode", "single_tenant")
@@ -977,8 +977,8 @@ Expected: existing auth tests still pass (response shape change is additive).
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/api/routes/v1/auth.py backend/tests/e2e/test_auth_needs_org_setup.py
+cd ~/cubeplex
+git add backend/cubeplex/api/routes/v1/auth.py backend/tests/e2e/test_auth_needs_org_setup.py
 git commit -m "feat(m9): /auth/me returns needs_org_setup"
 ```
 
@@ -987,8 +987,8 @@ git commit -m "feat(m9): /auth/me returns needs_org_setup"
 ## Task 7: Single-tenant `on_after_register` pending-owner state + concurrent-register guard
 
 **Files:**
-- Create: `backend/cubebox/auth/singleton_org.py`
-- Modify: `backend/cubebox/auth/users.py:85-145`
+- Create: `backend/cubeplex/auth/singleton_org.py`
+- Modify: `backend/cubeplex/auth/users.py:85-145`
 - Test: `backend/tests/e2e/test_single_tenant_register.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1003,7 +1003,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Membership, Organization, OrganizationMembership, OrgRole, User
+from cubeplex.models import Membership, Organization, OrganizationMembership, OrgRole, User
 
 pytestmark = pytest.mark.e2e
 
@@ -1109,7 +1109,7 @@ Expected: both tests fail (current `on_after_register` always creates an org).
 
 - [ ] **Step 3: Write the singleton-org helper module**
 
-Create `backend/cubebox/auth/singleton_org.py`:
+Create `backend/cubeplex/auth/singleton_org.py`:
 
 ```python
 """Singleton-org helpers for single_tenant mode.
@@ -1122,9 +1122,9 @@ to create the singleton.
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Organization
+from cubeplex.models import Organization
 
-_ADVISORY_LOCK_KEY = "cubebox-singleton-org-setup"
+_ADVISORY_LOCK_KEY = "cubeplex-singleton-org-setup"
 
 
 async def acquire_setup_lock(session: AsyncSession) -> bool:
@@ -1155,20 +1155,20 @@ async def org_count(session: AsyncSession) -> int:
 
 - [ ] **Step 4: Modify `on_after_register` to branch on mode**
 
-Edit `backend/cubebox/auth/users.py`. Replace the body of `on_after_register` (current lines 85-150) so the multi_tenant branch is exactly today's behavior plus the OrganizationMembership row from Task 3, and the single_tenant branch implements pending-owner / attach-as-member logic with advisory-lock guard:
+Edit `backend/cubeplex/auth/users.py`. Replace the body of `on_after_register` (current lines 85-150) so the multi_tenant branch is exactly today's behavior plus the OrganizationMembership row from Task 3, and the single_tenant branch implements pending-owner / attach-as-member logic with advisory-lock guard:
 
 ```python
 async def on_after_register(self, user: User, request: Request | None = None) -> None:
     logger.info("User registered: {}", user.email)
     session = self.user_db.session  # type: ignore[attr-defined]
 
-    from cubebox.auth.singleton_org import (
+    from cubeplex.auth.singleton_org import (
         acquire_setup_lock,
         get_singleton_org_id,
         org_count,
     )
-    from cubebox.models import OrgRole, Role
-    from cubebox.repositories import (
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         OrganizationRepository,
@@ -1195,8 +1195,8 @@ async def _on_register_multi_tenant(
     self, *, user: User, session: AsyncSession
 ) -> None:
     """Existing per-user-org bootstrap + new OrganizationMembership(role=owner)."""
-    from cubebox.models import OrgRole, Role
-    from cubebox.repositories import (
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         OrganizationRepository,
@@ -1216,7 +1216,7 @@ async def _on_register_multi_tenant(
         await MembershipRepository(session).grant(
             user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
         )
-        from cubebox.models.agent_config import AgentConfig
+        from cubeplex.models.agent_config import AgentConfig
 
         agent_cfg = AgentConfig(org_id=org.id, workspace_id=ws.id)
         session.add(agent_cfg)
@@ -1242,8 +1242,8 @@ async def _on_register_single_tenant(
     org_count_fn,
 ) -> None:
     """First user → pending owner (just User row); else attach to singleton."""
-    from cubebox.models import OrgRole, Role
-    from cubebox.repositories import (
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         WorkspaceRepository,
@@ -1284,7 +1284,7 @@ async def _on_register_single_tenant(
         await MembershipRepository(session).grant(
             user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
         )
-        from cubebox.models.agent_config import AgentConfig
+        from cubeplex.models.agent_config import AgentConfig
 
         agent_cfg = AgentConfig(org_id=singleton_org_id, workspace_id=ws.id)
         session.add(agent_cfg)
@@ -1308,8 +1308,8 @@ async def _best_effort_cleanup_register(
     """Mirror existing best-effort delete; preserve atomic semantics."""
     from sqlalchemy import delete
 
-    from cubebox.models import User as UserModel
-    from cubebox.models.organization import Organization
+    from cubeplex.models import User as UserModel
+    from cubeplex.models.organization import Organization
 
     try:
         if org is not None:
@@ -1356,9 +1356,9 @@ Expected: no regressions.
 - [ ] **Step 8: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/auth/users.py \
-        backend/cubebox/auth/singleton_org.py \
+cd ~/cubeplex
+git add backend/cubeplex/auth/users.py \
+        backend/cubeplex/auth/singleton_org.py \
         backend/tests/e2e/conftest.py \
         backend/tests/e2e/test_single_tenant_register.py
 git commit -m "feat(m9): single_tenant on_after_register pending-owner + concurrent-register guard"
@@ -1369,8 +1369,8 @@ git commit -m "feat(m9): single_tenant on_after_register pending-owner + concurr
 ## Task 8: `POST /api/v1/system/setup`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/system.py` (add slug validator)
-- Modify: `backend/cubebox/api/routes/v1/system.py` (add setup handler)
+- Modify: `backend/cubeplex/api/schemas/system.py` (add slug validator)
+- Modify: `backend/cubeplex/api/routes/v1/system.py` (add setup handler)
 - Test: `backend/tests/e2e/test_setup_endpoint.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1420,7 +1420,7 @@ async def test_setup_creates_org_and_owner(
 
     from sqlalchemy import select
 
-    from cubebox.models import (
+    from cubeplex.models import (
         AgentConfig,
         Membership,
         Organization,
@@ -1520,7 +1520,7 @@ Expected: tests fail (route doesn't exist yet).
 
 - [ ] **Step 3: Add slug validator to schemas**
 
-Edit `backend/cubebox/api/schemas/system.py`:
+Edit `backend/cubeplex/api/schemas/system.py`:
 
 ```python
 """Schemas for /api/v1/system/* endpoints."""
@@ -1560,18 +1560,18 @@ class SetupResponse(BaseModel):
 
 - [ ] **Step 4: Add the setup handler**
 
-Append to `backend/cubebox/api/routes/v1/system.py`:
+Append to `backend/cubeplex/api/routes/v1/system.py`:
 
 ```python
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
-from cubebox.api.schemas.system import SetupRequest, SetupResponse
-from cubebox.auth.dependencies import current_active_user
-from cubebox.auth.singleton_org import acquire_setup_lock, org_count
-from cubebox.models import OrgRole, Role, User
-from cubebox.models.agent_config import AgentConfig
-from cubebox.repositories import (
+from cubeplex.api.schemas.system import SetupRequest, SetupResponse
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.auth.singleton_org import acquire_setup_lock, org_count
+from cubeplex.models import OrgRole, Role, User
+from cubeplex.models.agent_config import AgentConfig
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,
@@ -1617,7 +1617,7 @@ async def post_setup(
 
     # best-effort preinstall — same pattern as on_after_register
     try:
-        from cubebox.auth.users import _install_preinstalled_skills
+        from cubeplex.auth.users import _install_preinstalled_skills
 
         await _install_preinstalled_skills(session, org_id=org.id, user_id=user.id)
     except Exception:
@@ -1632,7 +1632,7 @@ Pydantic's default 422 already includes the message. Verify by running just one 
 
 Run: `cd backend && uv run pytest tests/e2e/test_setup_endpoint.py::test_setup_slug_validation -v --timeout=60 2>&1 | tail -30`
 
-If the response body doesn't include the literal `slug_too_short` / `slug_invalid_format` strings, add a custom exception handler in `backend/cubebox/api/exceptions.py` (or wherever validation errors are formatted) to surface `ctx.error` from Pydantic. Otherwise the parametrized assertions already match because Pydantic surfaces the raised string in the `msg` field.
+If the response body doesn't include the literal `slug_too_short` / `slug_invalid_format` strings, add a custom exception handler in `backend/cubeplex/api/exceptions.py` (or wherever validation errors are formatted) to surface `ctx.error` from Pydantic. Otherwise the parametrized assertions already match because Pydantic surfaces the raised string in the `msg` field.
 
 - [ ] **Step 6: Run all setup tests**
 
@@ -1646,9 +1646,9 @@ Run: `cd backend && uv run pytest tests/e2e/ -x --timeout=180 -q 2>&1 | tail -30
 - [ ] **Step 8: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/api/schemas/system.py \
-        backend/cubebox/api/routes/v1/system.py \
+cd ~/cubeplex
+git add backend/cubeplex/api/schemas/system.py \
+        backend/cubeplex/api/routes/v1/system.py \
         backend/tests/e2e/test_setup_endpoint.py
 git commit -m "feat(m9): POST /api/v1/system/setup with slug validation"
 ```
@@ -1658,7 +1658,7 @@ git commit -m "feat(m9): POST /api/v1/system/setup with slug validation"
 ## Task 9: `POST /api/v1/workspaces` mode-aware org_id resolution
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py:84-101`
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py:84-101`
 - Test: `backend/tests/e2e/test_workspace_create_modes.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1728,7 +1728,7 @@ Expected: both fail (current code accepts any `org_id` blindly).
 
 - [ ] **Step 3: Modify `create_workspace`**
 
-Edit `backend/cubebox/api/routes/v1/workspaces.py`. Replace the `create_workspace` body (lines 84-101):
+Edit `backend/cubeplex/api/routes/v1/workspaces.py`. Replace the `create_workspace` body (lines 84-101):
 
 ```python
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -1738,8 +1738,8 @@ async def create_workspace(
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
 ) -> dict[str, str]:
-    from cubebox.auth.singleton_org import get_singleton_org_id
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.auth.singleton_org import get_singleton_org_id
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     mode = getattr(request.app.state, "deployment_mode", "single_tenant")
     if mode == "single_tenant":
@@ -1778,8 +1778,8 @@ Run: `cd backend && uv run pytest tests/e2e/ -x --timeout=180 -q 2>&1 | tail -30
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/api/routes/v1/workspaces.py \
+cd ~/cubeplex
+git add backend/cubeplex/api/routes/v1/workspaces.py \
         backend/tests/e2e/test_workspace_create_modes.py
 git commit -m "feat(m9): workspace create forces singleton org in single_tenant; validates membership in multi_tenant"
 ```
@@ -1789,7 +1789,7 @@ git commit -m "feat(m9): workspace create forces singleton org in single_tenant;
 ## Task 10: Startup mode-consistency check
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py` (lifespan)
+- Modify: `backend/cubeplex/api/app.py` (lifespan)
 - Test: `backend/tests/e2e/test_startup_mode_consistency.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1803,10 +1803,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.api.app import lifespan
-from cubebox.api.app_factory import create_app
-from cubebox.models import Organization
-from cubebox.repositories import OrganizationRepository
+from cubeplex.api.app import lifespan
+from cubeplex.api.app_factory import create_app
+from cubeplex.models import Organization
+from cubeplex.repositories import OrganizationRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -1830,11 +1830,11 @@ Expected: lifespan completes silently → test fails.
 
 - [ ] **Step 3: Add the startup check**
 
-Edit `backend/cubebox/api/app.py`. Inside the `lifespan` async context manager, after `app.state.encryption_backend = ...` and after the redis/db setup but before yielding control, add:
+Edit `backend/cubeplex/api/app.py`. Inside the `lifespan` async context manager, after `app.state.encryption_backend = ...` and after the redis/db setup but before yielding control, add:
 
 ```python
-from cubebox.db import async_session_maker
-from cubebox.models import Organization
+from cubeplex.db import async_session_maker
+from cubeplex.models import Organization
 from sqlalchemy import func, select
 
 mode = getattr(_app.state, "deployment_mode", "single_tenant")
@@ -1850,7 +1850,7 @@ if mode == "single_tenant":
         )
 ```
 
-(Adjust import name `async_session_maker` to match the actual symbol exported by `cubebox/db.py` — e.g. `get_session_maker()` or `AsyncSessionLocal`.)
+(Adjust import name `async_session_maker` to match the actual symbol exported by `cubeplex/db.py` — e.g. `get_session_maker()` or `AsyncSessionLocal`.)
 
 - [ ] **Step 4: Run test**
 
@@ -1860,18 +1860,18 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/api/app.py backend/tests/e2e/test_startup_mode_consistency.py
+cd ~/cubeplex
+git add backend/cubeplex/api/app.py backend/tests/e2e/test_startup_mode_consistency.py
 git commit -m "feat(m9): startup refuses single_tenant when DB has >1 orgs"
 ```
 
 ---
 
-## Task 11: `cubebox admin` CLI
+## Task 11: `cubeplex admin` CLI
 
 **Files:**
-- Create: `backend/cubebox/cli/__init__.py`
-- Create: `backend/cubebox/cli/admin.py`
+- Create: `backend/cubeplex/cli/__init__.py`
+- Create: `backend/cubeplex/cli/admin.py`
 - Modify: `backend/pyproject.toml`
 - Test: `backend/tests/e2e/test_grant_admin_cli.py`
 
@@ -1879,7 +1879,7 @@ git commit -m "feat(m9): startup refuses single_tenant when DB has >1 orgs"
 
 ```python
 # backend/tests/e2e/test_grant_admin_cli.py
-"""E2E: cubebox admin grant-admin / revoke-admin via subprocess."""
+"""E2E: cubeplex admin grant-admin / revoke-admin via subprocess."""
 
 import os
 import subprocess
@@ -1888,7 +1888,7 @@ import secrets
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import OrganizationMembership, OrgRole
+from cubeplex.models import OrganizationMembership, OrgRole
 
 pytestmark = pytest.mark.e2e
 
@@ -1897,7 +1897,7 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env.setdefault("ENV_FOR_DYNACONF", "test")
     return subprocess.run(
-        ["uv", "run", "cubebox", *args],
+        ["uv", "run", "cubeplex", *args],
         capture_output=True,
         text=True,
         env=env,
@@ -1943,32 +1943,32 @@ async def test_grant_admin_refuses_to_demote_owner(memory_client):
 - [ ] **Step 2: Run — expect "command not found"**
 
 Run: `cd backend && uv run pytest tests/e2e/test_grant_admin_cli.py -v --timeout=60`
-Expected: FAIL — `cubebox` script not installed.
+Expected: FAIL — `cubeplex` script not installed.
 
 - [ ] **Step 3: Write the CLI entry point**
 
-Create `backend/cubebox/cli/__init__.py`:
+Create `backend/cubeplex/cli/__init__.py`:
 
 ```python
-"""cubebox CLI."""
+"""cubeplex CLI."""
 
 import click
 
-from cubebox.cli.admin import admin_group
+from cubeplex.cli.admin import admin_group
 
 
 @click.group()
 def main() -> None:
-    """cubebox operator CLI."""
+    """cubeplex operator CLI."""
 
 
 main.add_command(admin_group)
 ```
 
-Create `backend/cubebox/cli/admin.py`:
+Create `backend/cubeplex/cli/admin.py`:
 
 ```python
-"""cubebox admin subcommands: grant-admin / revoke-admin."""
+"""cubeplex admin subcommands: grant-admin / revoke-admin."""
 
 import asyncio
 import sys
@@ -1977,9 +1977,9 @@ import click
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db import get_session_maker
-from cubebox.models import Organization, OrganizationMembership, OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.db import get_session_maker
+from cubeplex.models import Organization, OrganizationMembership, OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository
 
 
 @click.group(name="admin")
@@ -2077,7 +2077,7 @@ async def _revoke_admin_async(email: str, org_slug: str | None) -> None:
         click.echo(f"Demoted {email} to member of org {org.slug!r} ({org.id}).")
 ```
 
-(Adjust `from cubebox.db import get_session_maker` to whatever the existing helper is named; if the only export is `get_session()` as an async dependency, build a sessionmaker directly: `from cubebox.db import engine; AsyncSession(engine)` — the spirit is "open a session outside FastAPI".)
+(Adjust `from cubeplex.db import get_session_maker` to whatever the existing helper is named; if the only export is `get_session()` as an async dependency, build a sessionmaker directly: `from cubeplex.db import engine; AsyncSession(engine)` — the spirit is "open a session outside FastAPI".)
 
 - [ ] **Step 4: Wire console_script**
 
@@ -2085,7 +2085,7 @@ Edit `backend/pyproject.toml`. Add (or extend the existing `[project.scripts]` b
 
 ```toml
 [project.scripts]
-cubebox = "cubebox.cli:main"
+cubeplex = "cubeplex.cli:main"
 ```
 
 Then re-install for the script to register: `cd backend && uv sync`.
@@ -2098,9 +2098,9 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/cubebox
-git add backend/cubebox/cli/ backend/pyproject.toml backend/uv.lock backend/tests/e2e/test_grant_admin_cli.py
-git commit -m "feat(m9): cubebox admin CLI (grant-admin / revoke-admin)"
+cd ~/cubeplex
+git add backend/cubeplex/cli/ backend/pyproject.toml backend/uv.lock backend/tests/e2e/test_grant_admin_cli.py
+git commit -m "feat(m9): cubeplex admin CLI (grant-admin / revoke-admin)"
 ```
 
 ---
@@ -2217,19 +2217,19 @@ export { useDeploymentMode } from './hooks/useDeploymentMode'
 
 - [ ] **Step 5: Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: `success` with no TS errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/packages/core/src/api/system.ts \
         frontend/packages/core/src/hooks/useDeploymentMode.ts \
         frontend/packages/core/src/api/auth.ts \
         frontend/packages/core/src/types/index.ts \
         frontend/packages/core/src/index.ts
-git commit -m "feat(m9): @cubebox/core useDeploymentMode + system-info API"
+git commit -m "feat(m9): @cubeplex/core useDeploymentMode + system-info API"
 ```
 
 ---
@@ -2291,7 +2291,7 @@ Create `frontend/packages/web/components/setup/SetupForm.tsx`:
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, postSetup } from '@cubebox/core'
+import { createApiClient, postSetup } from '@cubeplex/core'
 import {
   SLUG_MAX,
   SLUG_MIN,
@@ -2420,7 +2420,7 @@ Create `frontend/packages/web/app/(setup)/setup/page.tsx`:
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useAuthStore } from '@cubebox/core'
+import { createApiClient, useAuthStore } from '@cubeplex/core'
 import { SetupForm } from '@/components/setup/SetupForm'
 
 export default function SetupPage() {
@@ -2455,7 +2455,7 @@ Expected: no errors.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/packages/web/lib/slugRules.ts \
         frontend/packages/web/components/setup/ \
         frontend/packages/web/app/\(setup\)/
@@ -2471,7 +2471,7 @@ git commit -m "feat(m9): /setup page with slug validation"
 
 - [ ] **Step 1: Read the current layout**
 
-Run: `cat ~/cubebox/frontend/packages/web/app/\(app\)/layout.tsx`
+Run: `cat ~/cubeplex/frontend/packages/web/app/\(app\)/layout.tsx`
 
 Identify where `loadMe` is called and where the workspace-list redirect is wired.
 
@@ -2499,7 +2499,7 @@ Run: `cd frontend && pnpm type-check`
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/packages/web/app/\(app\)/layout.tsx
 git commit -m "feat(m9): (app) layout redirects to /setup when needs_org_setup"
 ```
@@ -2538,7 +2538,7 @@ Run: `cd frontend && pnpm dev` (in a separate terminal); browse to `http://local
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/packages/web/proxy.ts frontend/packages/web/next.config.ts
 git commit -m "feat(m9): /setup auth-required; /api/v1/system/* proxied"
 ```
@@ -2627,7 +2627,7 @@ test.describe('M9 single-tenant setup flow', () => {
 
 The `_test/reset-db` endpoint does not exist; add it as a test-only route, gated on `ENV_FOR_DYNACONF=test`:
 
-Edit `backend/cubebox/api/routes/v1/system.py` — at the bottom, conditionally:
+Edit `backend/cubeplex/api/routes/v1/system.py` — at the bottom, conditionally:
 
 ```python
 import os
@@ -2655,14 +2655,14 @@ if os.environ.get("ENV_FOR_DYNACONF") == "test":
 
 - [ ] **Step 2: Add a Playwright config variant for single_tenant runs**
 
-Most Playwright suites use the worktree-allocated dev server, which boots backend with whatever the local config says. For this suite, ensure `CUBEBOX_DEPLOYMENT__MODE=single_tenant` is set when the backend boots. The simplest path: add a comment in the spec file referencing the env var requirement, and add to the Playwright project's `globalSetup` or `webServer.env` block in `frontend/packages/web/playwright.config.ts`:
+Most Playwright suites use the worktree-allocated dev server, which boots backend with whatever the local config says. For this suite, ensure `CUBEPLEX_DEPLOYMENT__MODE=single_tenant` is set when the backend boots. The simplest path: add a comment in the spec file referencing the env var requirement, and add to the Playwright project's `globalSetup` or `webServer.env` block in `frontend/packages/web/playwright.config.ts`:
 
 ```typescript
 webServer: {
   // ...existing config...
   env: {
     ...process.env,
-    CUBEBOX_DEPLOYMENT__MODE: 'single_tenant',
+    CUBEPLEX_DEPLOYMENT__MODE: 'single_tenant',
   },
 }
 ```
@@ -2675,10 +2675,10 @@ Expected: 3 passed.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/packages/web/e2e/single-tenant-setup.spec.ts \
         frontend/packages/web/playwright.config.ts \
-        backend/cubebox/api/routes/v1/system.py
+        backend/cubeplex/api/routes/v1/system.py
 git commit -m "test(m9): playwright E2E for single-tenant setup flow"
 ```
 
@@ -2699,7 +2699,7 @@ Append to `frontend/CLAUDE.md` under "Auth & Workspace Model":
 
 The backend exposes `GET /api/v1/system/info` (public, pre-login) returning
 `{deployment_mode, version, needs_org_setup}`. The `useDeploymentMode()` hook
-in `@cubebox/core` reads it. Any UI surface that lets a user create another
+in `@cubeplex/core` reads it. Any UI surface that lets a user create another
 org or switch between orgs must be hidden when `mode === 'single_tenant'`.
 M9 itself adds no such surfaces (none exist yet); future work landing org
 chrome must respect this.
@@ -2718,10 +2718,10 @@ Append under "Commands":
 ```markdown
 ### Operator CLI
 
-`cubebox admin grant-admin <email> [--org-slug X]` promotes a user to org admin.
-`cubebox admin revoke-admin <email> [--org-slug X]` demotes admin → member.
+`cubeplex admin grant-admin <email> [--org-slug X]` promotes a user to org admin.
+`cubeplex admin revoke-admin <email> [--org-slug X]` demotes admin → member.
 Both refuse to touch the owner role. Use these to recover from "wrong first
-user registered" or to seed admin accounts after running `cubebox admin
+user registered" or to seed admin accounts after running `cubeplex admin
 grant-admin` against the singleton org in single_tenant deployments.
 ```
 
@@ -2738,7 +2738,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/cubebox
+cd ~/cubeplex
 git add frontend/CLAUDE.md backend/CLAUDE.md
 git commit -m "docs(m9): document deployment mode contract + admin CLI"
 ```
@@ -2760,7 +2760,7 @@ Spec coverage check:
 | §Multi-tenant register | Task 3 |
 | §Alembic migration + backfill | Task 2 |
 | §Frontend `/setup` page + slug UI | Tasks 13–15 |
-| §`cubebox admin` CLI | Task 11 |
+| §`cubeplex admin` CLI | Task 11 |
 | §Startup mode-consistency check | Task 10 |
 | §Tests | Tasks 2-11 (backend) + Task 16 (frontend) |
 

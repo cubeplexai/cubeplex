@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from cubebox.im.link import sign_link_token, verify_link_token
+from cubeplex.im.link import sign_link_token, verify_link_token
 
 _SECRET = "test-secret-for-link-tokens"
 
@@ -61,7 +61,7 @@ class TestSignLinkToken:
                 "act": "imca_1",
                 "ws": "ws_1",
                 "plt": "discord",
-                "iss": "cubebox:im-link",
+                "iss": "cubeplex:im-link",
                 "exp": int(time.time()) - 10,
                 "iat": int(time.time()) - 700,
             },

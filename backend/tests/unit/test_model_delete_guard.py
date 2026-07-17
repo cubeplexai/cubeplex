@@ -16,16 +16,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.api.exceptions import ModelInUseByPresetError
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.models.provider import Model, Provider
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.model import ModelRepository
-from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.provider import ProviderRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.provider_service import ProviderService
+from cubeplex.api.exceptions import ModelInUseByPresetError
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model, Provider
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.model import ModelRepository
+from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
+from cubeplex.repositories.provider import ProviderRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.provider_service import ProviderService
 
 CALLER_ORG = "org-caller"
 OTHER_ORG = "org-other"

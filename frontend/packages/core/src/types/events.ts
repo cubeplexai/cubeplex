@@ -68,13 +68,20 @@ export type AgentEventType =
   | 'model_failover'
 
 /**
- * Thinking depth level requested per-message by the composer. Mirrors the
- * backend ``ThinkingLevel`` enum (see ``backend/cubebox/llm/snapshot_schema``).
- * Defined here (alongside ``AgentEventType``) so message-store send signatures
- * and the SSE event types share one source of truth — the web package
- * (`@/lib/types/presets`) re-uses this directly.
+ * Slider values used by the composer. ``off`` maps to ``ReasoningControl.mode =
+ * "off"``; the other values map to ``mode = "on"`` with the same effort.
  */
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
+
+export type ReasoningMode = 'off' | 'auto' | 'on'
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
+export type ReasoningSummary = 'none' | 'auto' | 'detailed' | 'summarized'
+
+export interface ReasoningControl {
+  mode: ReasoningMode
+  effort: ReasoningEffort
+  summary: ReasoningSummary
+}
 
 /**
  * Emitted by the backend ``FallbackBoundModel`` chain when a leg fails and
@@ -100,6 +107,11 @@ export interface AgentEvent {
   agent_id: string | null
   agent_name: string | null
   event_id?: string
+  // Set by the backend ``run_manager._publish_event`` on every payload it
+  // emits. The send/streamMessages path uses the first event that carries
+  // it to populate ``currentRunId`` on the direct-SSE branch (the JSON
+  // branch learns it from the POST response body instead).
+  run_id?: string | null
 }
 
 export interface TextDeltaEvent extends AgentEvent {
@@ -266,7 +278,7 @@ export interface AskUserResolvedEvent extends AgentEvent {
  * Cold-start fallback payload returned by the bootstrap endpoint when the
  * Redis stream replay has aged out but the conversation still has an
  * unresolved HITL request. Mirrors backend ``serialize_pending_hitl``
- * (see :mod:`cubebox.streams.hitl_resume`).
+ * (see :mod:`cubeplex.streams.hitl_resume`).
  */
 export type PendingHitl =
   | {

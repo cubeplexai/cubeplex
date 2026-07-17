@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.streams.run_manager import _make_failover_publisher
+from cubeplex.streams.run_manager import _make_failover_publisher
 
 
 class _FakeSpec:

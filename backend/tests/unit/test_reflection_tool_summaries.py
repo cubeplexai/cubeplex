@@ -10,7 +10,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.streams.run_manager import _extract_tool_summaries
+from cubeplex.streams.run_manager import _extract_tool_summaries
 
 
 def _user(text: str = "hi") -> UserMessage:

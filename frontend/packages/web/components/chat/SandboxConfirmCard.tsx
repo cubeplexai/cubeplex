@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Check, X, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { PendingConfirm } from '@cubebox/core'
+import type { PendingConfirm } from '@cubeplex/core'
 
 interface SandboxConfirmCardProps {
   pending: PendingConfirm

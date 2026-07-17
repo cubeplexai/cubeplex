@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-04-28-m7-file-upload-design.md`
 
-**Working tree:** `/home/chris/cubebox/.worktrees/feat/m7-file-upload` (branch `feat/m7-file-upload`)
+**Working tree:** `/home/chris/cubeplex/.worktrees/feat/m7-file-upload` (branch `feat/m7-file-upload`)
 
 **Required env files (already copied into the worktree):**
 - `backend/.env`
@@ -32,30 +32,30 @@
 
 | File | Purpose |
 |---|---|
-| `backend/cubebox/models/attachment.py` | `Attachment` SQLModel table |
-| `backend/cubebox/repositories/attachment.py` | `AttachmentRepository` (ScopedRepository) |
-| `backend/cubebox/services/__init__.py` | Init the new services package (if absent) |
-| `backend/cubebox/services/attachments.py` | `AttachmentService` — upload, validate, thumbnail, delete |
-| `backend/cubebox/api/routes/v1/attachments.py` | 5 REST endpoints |
-| `backend/cubebox/agents/hydrator.py` | `AttachmentHydrator` — sandbox sync before run |
-| `backend/cubebox/llm/capabilities.py` | `LLMCapabilities` — input modality union |
-| `backend/cubebox/tools/builtin/view_images.py` | New `view_images` tool factory |
+| `backend/cubeplex/models/attachment.py` | `Attachment` SQLModel table |
+| `backend/cubeplex/repositories/attachment.py` | `AttachmentRepository` (ScopedRepository) |
+| `backend/cubeplex/services/__init__.py` | Init the new services package (if absent) |
+| `backend/cubeplex/services/attachments.py` | `AttachmentService` — upload, validate, thumbnail, delete |
+| `backend/cubeplex/api/routes/v1/attachments.py` | 5 REST endpoints |
+| `backend/cubeplex/agents/hydrator.py` | `AttachmentHydrator` — sandbox sync before run |
+| `backend/cubeplex/llm/capabilities.py` | `LLMCapabilities` — input modality union |
+| `backend/cubeplex/tools/builtin/view_images.py` | New `view_images` tool factory |
 | `backend/alembic/versions/<rev>_create_attachments.py` | Schema migration |
 
 ### Backend — modified files
 
 | File | Change |
 |---|---|
-| `backend/cubebox/models/__init__.py` | Export `Attachment` |
-| `backend/cubebox/repositories/__init__.py` | Export `AttachmentRepository` |
-| `backend/cubebox/api/app.py` | Register `attachments_router` (line ~310) |
-| `backend/cubebox/api/exceptions.py` | Add typed exceptions for attachments |
-| `backend/cubebox/agents/convert.py` | Handle `file_attachment` content blocks (both directions) |
-| `backend/cubebox/api/routes/v1/conversations.py` | `SendMessageRequest.attachments`, validate, pass through |
-| `backend/cubebox/streams/run_manager.py` | `start_run(attachments=...)`, hydrate before HumanMessage |
-| `backend/cubebox/tools/__init__.py` | Register `view_images` tool |
-| `backend/cubebox/prompts/base.py` (or equivalent) | Add attachment-tool guidance |
-| `backend/cubebox/sandbox/cleanup.py` (or app lifecycle) | Schedule orphan cleanup |
+| `backend/cubeplex/models/__init__.py` | Export `Attachment` |
+| `backend/cubeplex/repositories/__init__.py` | Export `AttachmentRepository` |
+| `backend/cubeplex/api/app.py` | Register `attachments_router` (line ~310) |
+| `backend/cubeplex/api/exceptions.py` | Add typed exceptions for attachments |
+| `backend/cubeplex/agents/convert.py` | Handle `file_attachment` content blocks (both directions) |
+| `backend/cubeplex/api/routes/v1/conversations.py` | `SendMessageRequest.attachments`, validate, pass through |
+| `backend/cubeplex/streams/run_manager.py` | `start_run(attachments=...)`, hydrate before HumanMessage |
+| `backend/cubeplex/tools/__init__.py` | Register `view_images` tool |
+| `backend/cubeplex/prompts/base.py` (or equivalent) | Add attachment-tool guidance |
+| `backend/cubeplex/sandbox/cleanup.py` (or app lifecycle) | Schedule orphan cleanup |
 | `backend/config.yaml` | `attachments:` section with defaults |
 | `backend/pyproject.toml` | Add `pillow` dependency |
 
@@ -116,7 +116,7 @@
 - [ ] **Step 1: Add Pillow via uv (records to pyproject + uv.lock)**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend
 uv add "pillow>=10.4.0"
 ```
 
@@ -141,13 +141,13 @@ git commit -m "chore(deps): add pillow for image processing in attachments (M7)"
 ### Task 2: `Attachment` SQLModel
 
 **Files:**
-- Create: `backend/cubebox/models/attachment.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/attachment.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Create the model**
 
 ```python
-# backend/cubebox/models/attachment.py
+# backend/cubeplex/models/attachment.py
 """Attachment model for per-conversation file uploads."""
 
 from datetime import UTC, datetime
@@ -156,7 +156,7 @@ from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class Attachment(SQLModel, OrgScopedMixin, table=True):
@@ -199,10 +199,10 @@ class Attachment(SQLModel, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: Export from models package**
 
-Edit `backend/cubebox/models/__init__.py`:
+Edit `backend/cubeplex/models/__init__.py`:
 
 ```python
-from cubebox.models.attachment import Attachment
+from cubeplex.models.attachment import Attachment
 ```
 
 Add `"Attachment"` (alphabetical position) to the `__all__` list.
@@ -210,7 +210,7 @@ Add `"Attachment"` (alphabetical position) to the `__all__` list.
 - [ ] **Step 3: Type-check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend
 make type-check
 ```
 Expected: `Success: no issues found`.
@@ -218,7 +218,7 @@ Expected: `Success: no issues found`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/models/attachment.py cubebox/models/__init__.py
+git add cubeplex/models/attachment.py cubeplex/models/__init__.py
 git commit -m "feat(m7): add Attachment SQLModel"
 ```
 
@@ -232,7 +232,7 @@ git commit -m "feat(m7): add Attachment SQLModel"
 - [ ] **Step 1: Generate migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend
 uv run alembic revision --autogenerate -m "create attachments table"
 ```
 Expected: new file under `alembic/versions/`. Open it and verify it contains:
@@ -247,7 +247,7 @@ uv run alembic upgrade head
 uv run python -c "
 import asyncio
 from sqlalchemy import inspect
-from cubebox.db.engine import engine
+from cubeplex.db.engine import engine
 async def check():
     async with engine.connect() as conn:
         cols = await conn.run_sync(lambda c: inspect(c).get_columns('attachments'))
@@ -277,21 +277,21 @@ git commit -m "feat(m7): alembic migration for attachments table"
 ### Task 4: `AttachmentRepository`
 
 **Files:**
-- Create: `backend/cubebox/repositories/attachment.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/attachment.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Create repository**
 
 ```python
-# backend/cubebox/repositories/attachment.py
+# backend/cubeplex/repositories/attachment.py
 """Attachment repository."""
 
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
-from cubebox.models import Attachment
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models import Attachment
+from cubeplex.repositories.base import ScopedRepository
 
 
 class AttachmentRepository(ScopedRepository[Attachment]):
@@ -383,10 +383,10 @@ class AttachmentRepository(ScopedRepository[Attachment]):
 
 - [ ] **Step 2: Export**
 
-Edit `backend/cubebox/repositories/__init__.py`:
+Edit `backend/cubeplex/repositories/__init__.py`:
 
 ```python
-from cubebox.repositories.attachment import AttachmentRepository
+from cubeplex.repositories.attachment import AttachmentRepository
 ```
 
 Add `"AttachmentRepository"` to `__all__`.
@@ -401,7 +401,7 @@ Expected: `Success: no issues found`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/repositories/attachment.py cubebox/repositories/__init__.py
+git add cubeplex/repositories/attachment.py cubeplex/repositories/__init__.py
 git commit -m "feat(m7): AttachmentRepository with state-machine ops"
 ```
 
@@ -451,7 +451,7 @@ attachments:
 
 ```bash
 uv run python -c "
-from cubebox.config import config
+from cubeplex.config import config
 print(config.get('attachments.max_file_bytes'))
 print(config.get('attachments.allowed_mime_types'))
 "
@@ -471,8 +471,8 @@ git commit -m "feat(m7): default attachments config"
 
 **Files:**
 - Create: `backend/tests/test_image_resize.py`
-- Create: `backend/cubebox/services/__init__.py` (if absent)
-- Create: `backend/cubebox/services/attachments.py` (only the helpers used by this test)
+- Create: `backend/cubeplex/services/__init__.py` (if absent)
+- Create: `backend/cubeplex/services/attachments.py` (only the helpers used by this test)
 
 - [ ] **Step 1: Write failing test**
 
@@ -485,7 +485,7 @@ import io
 import pytest
 from PIL import Image
 
-from cubebox.services.attachments import (
+from cubeplex.services.attachments import (
     InvalidImageError,
     decode_image_dimensions,
     resize_to_long_edge,
@@ -534,14 +534,14 @@ Expected: ImportError (the symbols don't exist yet).
 - [ ] **Step 3: Create `services` package init**
 
 ```python
-# backend/cubebox/services/__init__.py
+# backend/cubeplex/services/__init__.py
 """Application services orchestrating repositories + external systems."""
 ```
 
 - [ ] **Step 4: Implement helpers**
 
 ```python
-# backend/cubebox/services/attachments.py
+# backend/cubeplex/services/attachments.py
 """Attachment service: validate / persist / process uploaded files."""
 
 from __future__ import annotations
@@ -600,7 +600,7 @@ Expected: 4 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/services/__init__.py cubebox/services/attachments.py tests/test_image_resize.py
+git add cubeplex/services/__init__.py cubeplex/services/attachments.py tests/test_image_resize.py
 git commit -m "feat(m7): image resize/decode helpers with unit tests"
 ```
 
@@ -609,11 +609,11 @@ git commit -m "feat(m7): image resize/decode helpers with unit tests"
 ### Task 7: API exception classes for attachments
 
 **Files:**
-- Modify: `backend/cubebox/api/exceptions.py`
+- Modify: `backend/cubeplex/api/exceptions.py`
 
 - [ ] **Step 1: Append new exception classes**
 
-After the existing `InvalidInputError` block in `backend/cubebox/api/exceptions.py`, append:
+After the existing `InvalidInputError` block in `backend/cubeplex/api/exceptions.py`, append:
 
 ```python
 class AttachmentTooLargeError(APIException):
@@ -710,7 +710,7 @@ Expected: `Success: no issues found`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/api/exceptions.py
+git add cubeplex/api/exceptions.py
 git commit -m "feat(m7): API exception classes for attachments"
 ```
 
@@ -719,11 +719,11 @@ git commit -m "feat(m7): API exception classes for attachments"
 ### Task 8: `AttachmentService` — upload pipeline
 
 **Files:**
-- Modify: `backend/cubebox/services/attachments.py`
+- Modify: `backend/cubeplex/services/attachments.py`
 
 - [ ] **Step 1: Append `AttachmentService` class to existing module**
 
-Append this to `backend/cubebox/services/attachments.py`:
+Append this to `backend/cubeplex/services/attachments.py`:
 
 ```python
 import mimetypes
@@ -735,20 +735,20 @@ from loguru import logger
 from PIL import Image
 from uuid_utils import uuid7
 
-from cubebox.api.exceptions import (
+from cubeplex.api.exceptions import (
     AttachmentInvalidImageError,
     AttachmentMimeRejectedError,
     AttachmentQuotaExceededError,
     AttachmentTooLargeError,
 )
-from cubebox.config import config
-from cubebox.models import Attachment
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories import AttachmentRepository
-from cubebox.utils.time import utc_isoformat
+from cubeplex.config import config
+from cubeplex.models import Attachment
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories import AttachmentRepository
+from cubeplex.utils.time import utc_isoformat
 
 if TYPE_CHECKING:
-    from cubebox.objectstore.client import ObjectStoreClient
+    from cubeplex.objectstore.client import ObjectStoreClient
 
 
 AttachmentKind = Literal["image", "document", "other"]
@@ -961,7 +961,7 @@ class AttachmentService:
 
 - [ ] **Step 2: Add `delete_file` to ObjectStoreClient if missing**
 
-Check `backend/cubebox/objectstore/client.py` — if `delete_file` does not exist, add:
+Check `backend/cubeplex/objectstore/client.py` — if `delete_file` does not exist, add:
 
 ```python
     async def delete_file(self, key: str) -> None:
@@ -983,7 +983,7 @@ Expected: `Success: no issues found`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/services/attachments.py cubebox/objectstore/client.py
+git add cubeplex/services/attachments.py cubeplex/objectstore/client.py
 git commit -m "feat(m7): AttachmentService upload/delete pipeline"
 ```
 
@@ -994,13 +994,13 @@ git commit -m "feat(m7): AttachmentService upload/delete pipeline"
 ### Task 9: REST endpoints
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/attachments.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/attachments.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Create the router**
 
 ```python
-# backend/cubebox/api/routes/v1/attachments.py
+# backend/cubeplex/api/routes/v1/attachments.py
 """Conversation attachments API."""
 
 from typing import Annotated, Literal
@@ -1009,16 +1009,16 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.exceptions import (
+from cubeplex.api.exceptions import (
     AttachmentAlreadyAttachedError,
     AttachmentReferenceInvalidError,
 )
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db import get_session
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories import AttachmentRepository, ConversationRepository
-from cubebox.services.attachments import AttachmentService
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db import get_session
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories import AttachmentRepository, ConversationRepository
+from cubeplex.services.attachments import AttachmentService
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/conversations/{conversation_id}/attachments",
@@ -1210,10 +1210,10 @@ async def delete_attachment(
 
 - [ ] **Step 2: Register the router**
 
-Edit `backend/cubebox/api/app.py` near the existing `app.include_router(...)` block (around line ~310):
+Edit `backend/cubeplex/api/app.py` near the existing `app.include_router(...)` block (around line ~310):
 
 ```python
-from cubebox.api.routes.v1.attachments import router as attachments_router
+from cubeplex.api.routes.v1.attachments import router as attachments_router
 ...
 app.include_router(attachments_router, prefix="/api/v1")
 ```
@@ -1228,7 +1228,7 @@ Expected: all checks pass (the existing test suite shouldn't have changed).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/attachments.py cubebox/api/app.py
+git add cubeplex/api/routes/v1/attachments.py cubeplex/api/app.py
 git commit -m "feat(m7): REST endpoints for conversation attachments"
 ```
 
@@ -1415,7 +1415,7 @@ async def test_cross_workspace_returns_404(
 - [ ] **Step 3: Run E2E**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend
 uv run pytest tests/e2e/test_attachments_api.py -v
 ```
 Expected: all 9 tests pass.
@@ -1435,7 +1435,7 @@ git commit -m "test(m7): E2E HTTP contract tests for attachments"
 
 **Files:**
 - Create: `backend/tests/test_convert_attachments.py`
-- Modify: `backend/cubebox/agents/convert.py`
+- Modify: `backend/cubeplex/agents/convert.py`
 
 - [ ] **Step 1: Write failing test**
 
@@ -1445,7 +1445,7 @@ git commit -m "test(m7): E2E HTTP contract tests for attachments"
 
 from langchain_core.messages import HumanMessage
 
-from cubebox.agents.convert import convert_to_api_messages, render_attachments_hint
+from cubeplex.agents.convert import convert_to_api_messages, render_attachments_hint
 
 
 def _file_attachment(**overrides: object) -> dict[str, object]:
@@ -1519,7 +1519,7 @@ Expected: ImportError (`render_attachments_hint` not exported) + behavior failur
 
 - [ ] **Step 3: Modify `convert.py`**
 
-Add to `backend/cubebox/agents/convert.py` (near the top, after existing helpers):
+Add to `backend/cubeplex/agents/convert.py` (near the top, after existing helpers):
 
 ```python
 def _format_size(n: int) -> str:
@@ -1639,7 +1639,7 @@ Expected: previous tests still pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/agents/convert.py tests/test_convert_attachments.py
+git add cubeplex/agents/convert.py tests/test_convert_attachments.py
 git commit -m "feat(m7): convert.py renders file_attachment hints + splits API messages"
 ```
 
@@ -1648,12 +1648,12 @@ git commit -m "feat(m7): convert.py renders file_attachment hints + splits API m
 ### Task 12: `convert_to_lc_messages` — collapse attachments to text hint
 
 **Files:**
-- Modify: `backend/cubebox/agents/convert.py`
+- Modify: `backend/cubeplex/agents/convert.py`
 
 - [ ] **Step 1: Locate `convert_to_lc_messages`**
 
 ```bash
-grep -n "def convert_to_lc_messages" cubebox/agents/convert.py
+grep -n "def convert_to_lc_messages" cubeplex/agents/convert.py
 ```
 
 - [ ] **Step 2: Extend test file with reverse case**
@@ -1662,7 +1662,7 @@ Append to `backend/tests/test_convert_attachments.py`:
 
 ```python
 def test_convert_to_lc_messages_appends_attachments_hint() -> None:
-    from cubebox.agents.convert import convert_to_lc_messages
+    from cubeplex.agents.convert import convert_to_lc_messages
 
     api_msgs = [
         {
@@ -1733,7 +1733,7 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/agents/convert.py tests/test_convert_attachments.py
+git add cubeplex/agents/convert.py tests/test_convert_attachments.py
 git commit -m "feat(m7): convert_to_lc_messages renders [Attachments] hint"
 ```
 
@@ -1742,12 +1742,12 @@ git commit -m "feat(m7): convert_to_lc_messages renders [Attachments] hint"
 ### Task 13: SendMessageRequest accepts `attachments`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Edit SendMessageRequest**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, update the model:
+In `backend/cubeplex/api/routes/v1/conversations.py`, update the model:
 
 ```python
 class SendMessageRequest(BaseModel):
@@ -1770,11 +1770,11 @@ Replace the existing validation block in `send_message`:
             details="Provide content text and/or one or more file attachments",
         )
 
-    from cubebox.api.exceptions import (
+    from cubeplex.api.exceptions import (
         AttachmentReferenceInvalidError,
         AttachmentTooManyError,
     )
-    from cubebox.config import config as _cfg
+    from cubeplex.config import config as _cfg
 
     max_per_msg = int(_cfg.get("attachments.max_per_message", 10))
     if len(request_obj.attachments) > max_per_msg:
@@ -1784,7 +1784,7 @@ Replace the existing validation block in `send_message`:
 
     # Verify each file_id belongs to this conversation and is in a usable state
     if request_obj.attachments:
-        from cubebox.repositories import AttachmentRepository
+        from cubeplex.repositories import AttachmentRepository
 
         async with async_session_maker() as att_session:
             att_repo = AttachmentRepository(
@@ -1814,7 +1814,7 @@ In the same `send_message`, change the `start_run` call:
 
 - [ ] **Step 4: Update `start_run` signature**
 
-In `backend/cubebox/streams/run_manager.py`, update `start_run`:
+In `backend/cubeplex/streams/run_manager.py`, update `start_run`:
 
 ```python
     async def start_run(
@@ -1868,7 +1868,7 @@ uv run pytest -m "not e2e and not sandbox" --ignore=tests/e2e -v
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py cubebox/streams/run_manager.py
+git add cubeplex/api/routes/v1/conversations.py cubeplex/streams/run_manager.py
 git commit -m "feat(m7): SendMessageRequest.attachments + run_manager passthrough"
 ```
 
@@ -1877,7 +1877,7 @@ git commit -m "feat(m7): SendMessageRequest.attachments + run_manager passthroug
 ### Task 14: Hydrator (TDD with mocked sandbox)
 
 **Files:**
-- Create: `backend/cubebox/agents/hydrator.py`
+- Create: `backend/cubeplex/agents/hydrator.py`
 - Create: `backend/tests/test_hydrator.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1892,11 +1892,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.agents.hydrator import (
+from cubeplex.agents.hydrator import (
     AttachmentHydrationError,
     AttachmentHydrator,
 )
-from cubebox.models import Attachment
+from cubeplex.models import Attachment
 
 
 def _att(**kwargs: object) -> Attachment:
@@ -1992,7 +1992,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement hydrator**
 
 ```python
-# backend/cubebox/agents/hydrator.py
+# backend/cubeplex/agents/hydrator.py
 """AttachmentHydrator — sync ObjectStore attachments to sandbox before run."""
 
 from __future__ import annotations
@@ -2002,9 +2002,9 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from cubebox.objectstore.client import ObjectStoreClient
-    from cubebox.repositories import AttachmentRepository
-    from cubebox.sandbox.base import Sandbox
+    from cubeplex.objectstore.client import ObjectStoreClient
+    from cubeplex.repositories import AttachmentRepository
+    from cubeplex.sandbox.base import Sandbox
 
 
 class AttachmentHydrationError(RuntimeError):
@@ -2072,7 +2072,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/agents/hydrator.py tests/test_hydrator.py
+git add cubeplex/agents/hydrator.py tests/test_hydrator.py
 git commit -m "feat(m7): AttachmentHydrator with unit tests"
 ```
 
@@ -2081,7 +2081,7 @@ git commit -m "feat(m7): AttachmentHydrator with unit tests"
 ### Task 15: Wire hydrator + HumanMessage in `_execute_run`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Add helper to build content blocks**
 
@@ -2103,8 +2103,8 @@ async def _build_attachment_content_blocks(
     if not attachment_ids:
         return []
 
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories import AttachmentRepository
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories import AttachmentRepository
 
     async with async_session_maker() as session:
         repo = AttachmentRepository(session, org_id=org_id, workspace_id=workspace_id)
@@ -2137,13 +2137,13 @@ In `_execute_run` (around line 538), replace the `human_msg = HumanMessage(conte
                     attachment_blocks: list[dict[str, Any]] = []
                     if attachments:
                         if sandbox is not None:
-                            from cubebox.agents.hydrator import (
+                            from cubeplex.agents.hydrator import (
                                 AttachmentHydrationError,
                                 AttachmentHydrator,
                             )
-                            from cubebox.db.engine import async_session_maker
-                            from cubebox.objectstore import get_objectstore_client
-                            from cubebox.repositories import AttachmentRepository
+                            from cubeplex.db.engine import async_session_maker
+                            from cubeplex.objectstore import get_objectstore_client
+                            from cubeplex.repositories import AttachmentRepository
 
                             try:
                                 async with async_session_maker() as h_session:
@@ -2196,8 +2196,8 @@ Right after building `human_msg`, before `agent.astream`:
 
 ```python
                     if attachments:
-                        from cubebox.db.engine import async_session_maker
-                        from cubebox.repositories import AttachmentRepository
+                        from cubeplex.db.engine import async_session_maker
+                        from cubeplex.repositories import AttachmentRepository
 
                         async with async_session_maker() as att_session:
                             mark_repo = AttachmentRepository(
@@ -2219,7 +2219,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/streams/run_manager.py
+git add cubeplex/streams/run_manager.py
 git commit -m "feat(m7): hydrate attachments + build multimodal HumanMessage on run"
 ```
 
@@ -2366,17 +2366,17 @@ git commit -m "test(m7): E2E send-with-attachments + history shape"
 ### Task 17: `LLMCapabilities`
 
 **Files:**
-- Create: `backend/cubebox/llm/capabilities.py`
+- Create: `backend/cubeplex/llm/capabilities.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# backend/cubebox/llm/capabilities.py
+# backend/cubeplex/llm/capabilities.py
 """Aggregated input modality capability across primary + fallback models."""
 
 from __future__ import annotations
 
-from cubebox.llm.config import LLMConfig, ModelConfig
+from cubeplex.llm.config import LLMConfig, ModelConfig
 
 
 class LLMCapabilities:
@@ -2421,7 +2421,7 @@ Expected: pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/llm/capabilities.py
+git add cubeplex/llm/capabilities.py
 git commit -m "feat(m7): LLMCapabilities for input modality detection"
 ```
 
@@ -2430,12 +2430,12 @@ git commit -m "feat(m7): LLMCapabilities for input modality detection"
 ### Task 18: `view_images` tool factory
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/view_images.py`
+- Create: `backend/cubeplex/tools/builtin/view_images.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# backend/cubebox/tools/builtin/view_images.py
+# backend/cubeplex/tools/builtin/view_images.py
 """view_images tool — load attachment images into a multimodal ToolMessage."""
 
 from __future__ import annotations
@@ -2448,11 +2448,11 @@ from langchain_core.tools import StructuredTool
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from cubebox.config import config
-from cubebox.llm.capabilities import LLMCapabilities
-from cubebox.objectstore.client import ObjectStoreClient
-from cubebox.repositories import AttachmentRepository
-from cubebox.services.attachments import resize_to_long_edge
+from cubeplex.config import config
+from cubeplex.llm.capabilities import LLMCapabilities
+from cubeplex.objectstore.client import ObjectStoreClient
+from cubeplex.repositories import AttachmentRepository
+from cubeplex.services.attachments import resize_to_long_edge
 
 
 class ViewImagesInput(BaseModel):
@@ -2508,7 +2508,7 @@ def make_view_images_tool(
                 status="error",
             )
 
-        from cubebox.db.engine import async_session_maker
+        from cubeplex.db.engine import async_session_maker
         out_blocks: list[dict[str, object]] = [
             {"type": "text", "text": f"Loaded {len(paths)} image(s):"},
         ]
@@ -2585,7 +2585,7 @@ Expected: pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/tools/builtin/view_images.py
+git add cubeplex/tools/builtin/view_images.py
 git commit -m "feat(m7): view_images tool factory with capability gate"
 ```
 
@@ -2594,27 +2594,27 @@ git commit -m "feat(m7): view_images tool factory with capability gate"
 ### Task 19: Register `view_images` in graph factory
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py`
+- Modify: `backend/cubeplex/agents/graph.py`
 
 The `view_images` tool needs `org_id` + `workspace_id` bound at construction (run-scoped), so it must be added per-graph-build rather than registered in the global `ToolRegistry`.
 
 - [ ] **Step 1: Locate the graph factory and identify how it receives scope**
 
 ```bash
-grep -n "def create_cubebox_agent\|org_id\|workspace_id" backend/cubebox/agents/graph.py | head -30
+grep -n "def create_cubeplex_agent\|org_id\|workspace_id" backend/cubeplex/agents/graph.py | head -30
 ```
 
-Confirm that `create_cubebox_agent` (or an equivalent factory) takes `org_id` and `workspace_id` as parameters. They are passed in from `_execute_run` in `run_manager.py` (already verified — see `RunContext` in `streams/run_manager.py`).
+Confirm that `create_cubeplex_agent` (or an equivalent factory) takes `org_id` and `workspace_id` as parameters. They are passed in from `_execute_run` in `run_manager.py` (already verified — see `RunContext` in `streams/run_manager.py`).
 
 - [ ] **Step 2: Add view_images to the tools list**
 
-In `create_cubebox_agent`, locate the section where tools are assembled (look for `tools = [...]` or `tools.append(...)` near where the registry's built-ins are pulled in). Add immediately after that block:
+In `create_cubeplex_agent`, locate the section where tools are assembled (look for `tools = [...]` or `tools.append(...)` near where the registry's built-ins are pulled in). Add immediately after that block:
 
 ```python
-    from cubebox.llm.capabilities import LLMCapabilities
-    from cubebox.llm.config import LLMConfig
-    from cubebox.objectstore import get_objectstore_client
-    from cubebox.tools.builtin.view_images import make_view_images_tool
+    from cubeplex.llm.capabilities import LLMCapabilities
+    from cubeplex.llm.config import LLMConfig
+    from cubeplex.objectstore import get_objectstore_client
+    from cubeplex.tools.builtin.view_images import make_view_images_tool
 
     llm_cfg_obj = LLMConfig(**config.get("llm", {}))
     view_images_tool = make_view_images_tool(
@@ -2626,16 +2626,16 @@ In `create_cubebox_agent`, locate the section where tools are assembled (look fo
     tools.append(view_images_tool)
 ```
 
-If the factory does not already have `org_id` / `workspace_id` parameters, add them to its signature and update its callers in `run_manager.py` (search for `create_cubebox_agent(` to find them).
+If the factory does not already have `org_id` / `workspace_id` parameters, add them to its signature and update its callers in `run_manager.py` (search for `create_cubeplex_agent(` to find them).
 
 - [ ] **Step 3: Smoke-test that the agent still constructs**
 
 ```bash
 uv run python -c "
 import asyncio
-from cubebox.agents.graph import create_cubebox_agent
+from cubeplex.agents.graph import create_cubeplex_agent
 async def go():
-    g = await create_cubebox_agent(org_id='demo', workspace_id='demo')
+    g = await create_cubeplex_agent(org_id='demo', workspace_id='demo')
     print('OK', type(g).__name__)
 asyncio.run(go())
 " 2>&1 | tail -5
@@ -2651,7 +2651,7 @@ make check
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/agents/graph.py cubebox/streams/run_manager.py
+git add cubeplex/agents/graph.py cubeplex/streams/run_manager.py
 git commit -m "feat(m7): wire view_images tool into agent graph factory"
 ```
 
@@ -2660,13 +2660,13 @@ git commit -m "feat(m7): wire view_images tool into agent graph factory"
 ### Task 20: System-prompt guidance for attachments
 
 **Files:**
-- Modify: appropriate prompt module under `backend/cubebox/prompts/` (likely `base.py`)
+- Modify: appropriate prompt module under `backend/cubeplex/prompts/` (likely `base.py`)
 
 - [ ] **Step 1: Identify the right prompt module**
 
 ```bash
-ls backend/cubebox/prompts/
-grep -rn "system_prompt\|SystemMessage" backend/cubebox/prompts/ | head -10
+ls backend/cubeplex/prompts/
+grep -rn "system_prompt\|SystemMessage" backend/cubeplex/prompts/ | head -10
 ```
 
 - [ ] **Step 2: Append the attachment guidance**
@@ -2691,7 +2691,7 @@ make type-check
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/prompts/
+git add cubeplex/prompts/
 git commit -m "feat(m7): system-prompt guidance for attachment tools"
 ```
 
@@ -2849,7 +2849,7 @@ async def test_view_images_capability_gated(
     # Force capability gate to refuse image input regardless of real config.
     # Monkeypatching the LLMCapabilities method is more reliable than rewriting
     # the dynaconf settings object across providers.
-    from cubebox.llm.capabilities import LLMCapabilities
+    from cubeplex.llm.capabilities import LLMCapabilities
 
     monkeypatch.setattr(
         LLMCapabilities, "supports_image", lambda self: False,
@@ -2921,12 +2921,12 @@ git commit -m "test(m7): E2E capability-gate path for view_images"
 ### Task 23: Wire cascade delete on conversation delete
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 
 - [ ] **Step 1: Locate `delete_conversation` handler**
 
 ```bash
-grep -n "def delete_conversation" backend/cubebox/api/routes/v1/conversations.py
+grep -n "def delete_conversation" backend/cubeplex/api/routes/v1/conversations.py
 ```
 
 - [ ] **Step 2: Add attachment cascade BEFORE conversation delete**
@@ -2935,8 +2935,8 @@ In `delete_conversation`, before `await repo.delete(conversation_id)`:
 
 ```python
     # Cascade-delete attachments (best-effort; do not block conversation delete)
-    from cubebox.repositories import AttachmentRepository
-    from cubebox.services.attachments import AttachmentService
+    from cubeplex.repositories import AttachmentRepository
+    from cubeplex.services.attachments import AttachmentService
 
     att_repo = AttachmentRepository(
         session, org_id=ctx.org_id, workspace_id=ctx.workspace_id,
@@ -2954,7 +2954,7 @@ make type-check
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py
+git add cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(m7): cascade-delete attachments when conversation is deleted"
 ```
 
@@ -2963,12 +2963,12 @@ git commit -m "feat(m7): cascade-delete attachments when conversation is deleted
 ### Task 24: Orphan cleanup task
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py` (lifespan startup)
-- Modify: `backend/cubebox/services/attachments.py` (add cleanup helper)
+- Modify: `backend/cubeplex/api/app.py` (lifespan startup)
+- Modify: `backend/cubeplex/services/attachments.py` (add cleanup helper)
 
 - [ ] **Step 1: Add cleanup helper**
 
-Append to `backend/cubebox/services/attachments.py`:
+Append to `backend/cubeplex/services/attachments.py`:
 
 ```python
 async def cleanup_orphan_attachments() -> int:
@@ -2978,7 +2978,7 @@ async def cleanup_orphan_attachments() -> int:
     are deleted under the same scope each time and ObjectStore deletes are
     idempotent.
     """
-    from cubebox.db.engine import async_session_maker
+    from cubeplex.db.engine import async_session_maker
 
     ttl = int(config.get("attachments.orphan_ttl_seconds", 3600))
     objectstore = get_objectstore_client()
@@ -2989,7 +2989,7 @@ async def cleanup_orphan_attachments() -> int:
         # privileged "*" repo by querying the table directly — no scope filter
         # at the cleanup stage.
         from sqlalchemy import select as sa_select
-        from cubebox.models import Attachment as _A
+        from cubeplex.models import Attachment as _A
 
         cutoff_seconds = ttl
         from datetime import UTC as _UTC, datetime as _dt, timedelta as _td
@@ -3016,12 +3016,12 @@ async def cleanup_orphan_attachments() -> int:
 
 - [ ] **Step 2: Add periodic loop in app lifespan**
 
-In `backend/cubebox/api/app.py`'s `lifespan` async context manager, after existing startup tasks register a background loop:
+In `backend/cubeplex/api/app.py`'s `lifespan` async context manager, after existing startup tasks register a background loop:
 
 ```python
     # M7: orphan attachment reaper
     import asyncio as _asyncio_for_atta_cleanup
-    from cubebox.services.attachments import cleanup_orphan_attachments
+    from cubeplex.services.attachments import cleanup_orphan_attachments
 
     _attachment_cleanup_task: _asyncio_for_atta_cleanup.Task[None] | None = None
 
@@ -3059,7 +3059,7 @@ make type-check
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/services/attachments.py cubebox/api/app.py
+git add cubeplex/services/attachments.py cubeplex/api/app.py
 git commit -m "feat(m7): orphan attachment cleanup task in app lifespan"
 ```
 
@@ -3106,7 +3106,7 @@ async def _upload(client, ws, conv, content, name="a.png"):
 async def test_delete_conversation_cascades_attachments(
     member_client_org_a, sample_png_bytes
 ) -> None:
-    from cubebox.objectstore import get_objectstore_client
+    from cubeplex.objectstore import get_objectstore_client
 
     client, ws = member_client_org_a
     conv = await _make_conv(client, ws)
@@ -3136,9 +3136,9 @@ async def test_orphan_cleanup_removes_old_pending(
     member_client_org_a, sample_png_bytes
 ) -> None:
     from sqlalchemy import select as sa_select
-    from cubebox.db.engine import async_session_maker
-    from cubebox.models import Attachment
-    from cubebox.services.attachments import cleanup_orphan_attachments
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.models import Attachment
+    from cubeplex.services.attachments import cleanup_orphan_attachments
 
     client, ws = member_client_org_a
     conv = await _make_conv(client, ws)
@@ -3240,7 +3240,7 @@ export async function uploadAttachment(
     xhr.withCredentials = true
     const csrf = document.cookie
       .split('; ')
-      .find((c) => c.startsWith('cubebox_csrf='))
+      .find((c) => c.startsWith('cubeplex_csrf='))
       ?.split('=')[1]
     if (csrf) xhr.setRequestHeader('X-CSRF-Token', decodeURIComponent(csrf))
 
@@ -3297,7 +3297,7 @@ export * from './api/attachments'
 - [ ] **Step 4: Type-check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/frontend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/frontend
 pnpm type-check
 ```
 Expected: pass.
@@ -3305,11 +3305,11 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/core/src/types/attachment.ts \
         frontend/packages/core/src/api/attachments.ts \
         frontend/packages/core/src/index.ts
-git commit -m "feat(m7): @cubebox/core types + API client for attachments"
+git commit -m "feat(m7): @cubeplex/core types + API client for attachments"
 ```
 
 ---
@@ -3385,8 +3385,8 @@ describe('attachmentStore', () => {
 - [ ] **Step 2: Run to confirm failure**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/frontend
-pnpm test --filter @cubebox/core
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/frontend
+pnpm test --filter @cubeplex/core
 ```
 Expected: import error.
 
@@ -3533,14 +3533,14 @@ export * from './stores/attachmentStore'
 - [ ] **Step 5: Run tests**
 
 ```bash
-pnpm test --filter @cubebox/core
+pnpm test --filter @cubeplex/core
 ```
 Expected: pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/core/src/stores/attachmentStore.ts \
         frontend/packages/core/src/index.ts \
         frontend/packages/core/__tests__/stores/attachmentStore.test.ts
@@ -3613,7 +3613,7 @@ cd frontend && pnpm type-check
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/core/src/stores/messageStore.ts \
         frontend/packages/core/src/api/runStreams.ts \
         frontend/packages/core/src/api/stream.ts
@@ -3635,7 +3635,7 @@ git commit -m "feat(m7): messageStore.send accepts attachmentIds"
 'use client'
 
 import { X, FileText, ImageIcon, Loader2 } from 'lucide-react'
-import type { UploadingFile } from '@cubebox/core'
+import type { UploadingFile } from '@cubeplex/core'
 
 interface Props {
   item: UploadingFile
@@ -3691,7 +3691,7 @@ export function AttachmentChip({ item, thumbnailUrl, onRemove }: Props) {
 // frontend/packages/web/components/chat/AttachmentChips.tsx
 'use client'
 
-import { useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChip } from './AttachmentChip'
 
@@ -3736,7 +3736,7 @@ cd frontend && pnpm type-check
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/web/components/chat/AttachmentChip.tsx \
         frontend/packages/web/components/chat/AttachmentChips.tsx
 git commit -m "feat(m7): AttachmentChip + AttachmentChips components"
@@ -3757,7 +3757,7 @@ git commit -m "feat(m7): AttachmentChip + AttachmentChips components"
 
 import { useEffect, useState, useCallback } from 'react'
 import { Upload } from 'lucide-react'
-import { useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface Props {
@@ -3833,7 +3833,7 @@ cd frontend && pnpm type-check
 ```
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/web/components/chat/UploadDropzone.tsx
 git commit -m "feat(m7): UploadDropzone component"
 ```
@@ -3854,7 +3854,7 @@ Replace InputBar with:
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useMessageStore, useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { ArrowUp, Loader2, Paperclip } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
@@ -4010,7 +4010,7 @@ Open http://localhost:3000, navigate to a conversation, drag a small PNG into th
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/web/components/layout/InputBar.tsx
 git commit -m "feat(m7): InputBar — attachments, chips, dropzone, paperclip"
 ```
@@ -4236,7 +4236,7 @@ cd frontend && pnpm type-check && pnpm test
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/web/components/chat/ImageLightbox.tsx \
         frontend/packages/web/components/chat/MessageAttachments.tsx \
         frontend/packages/web/components/chat/MessageList.tsx \
@@ -4304,7 +4304,7 @@ test.describe('M7 attachments happy path', () => {
 - [ ] **Step 2: Run**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/frontend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/frontend
 pnpm test:e2e -- attachments.spec.ts
 ```
 Expected: pass. (Requires backend + frontend running; existing fixtures may auto-spawn.)
@@ -4312,7 +4312,7 @@ Expected: pass. (Requires backend + frontend running; existing fixtures may auto
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git add frontend/packages/web/e2e/attachments.spec.ts
 git commit -m "test(m7): Playwright happy-path for attachment upload+send"
 ```
@@ -4326,7 +4326,7 @@ git commit -m "test(m7): Playwright happy-path for attachment upload+send"
 - [ ] **Step 1: Backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend
 make check
 ```
 Expected: format, lint, type-check, full pytest pass.
@@ -4334,7 +4334,7 @@ Expected: format, lint, type-check, full pytest pass.
 - [ ] **Step 2: Frontend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/frontend
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/frontend
 pnpm type-check
 pnpm test
 pnpm test:e2e
@@ -4351,10 +4351,10 @@ Expected: all green.
 
 ```bash
 # terminal 1
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/backend && python main.py
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/backend && python main.py
 
 # terminal 2
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload/frontend && pnpm dev
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload/frontend && pnpm dev
 ```
 
 - [ ] **Step 2: Walk the happy path manually**
@@ -4380,7 +4380,7 @@ Visit http://localhost:3000, log in, open a conversation, drag in a small image,
 - [ ] **Step 1: Push branch**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/m7-file-upload
+cd /home/chris/cubeplex/.worktrees/feat/m7-file-upload
 git push -u origin feat/m7-file-upload
 ```
 

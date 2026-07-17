@@ -62,6 +62,25 @@ describe('commit on injected_message', () => {
     expect(roles).toEqual(['user', 'user'])
   })
 
+  it('stamps group-chat sender identity onto the injected user message', () => {
+    useMessageStore.getState().__commitTurnAndInject('c1', {
+      content: 'do X',
+      steer_id: 's1',
+      sender_user_id: 'user_abc',
+      sender_display_name: 'Alice',
+    })
+    const injected = useMessageStore.getState().messages.c1.at(-1)
+    expect(injected?.metadata?.sender_user_id).toBe('user_abc')
+    expect(injected?.metadata?.sender_display_name).toBe('Alice')
+  })
+
+  it('omits sender identity for non-group steers', () => {
+    applyInjected('c1', 'do X', 's1')
+    const injected = useMessageStore.getState().messages.c1.at(-1)
+    expect(injected?.metadata?.sender_user_id).toBeUndefined()
+    expect(injected?.metadata?.sender_display_name).toBeUndefined()
+  })
+
   it('is idempotent — re-applying the same steer_id is a no-op', () => {
     applyInjected('c1', 'do X', 's1')
     const before = useMessageStore.getState().messages.c1.length

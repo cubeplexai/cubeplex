@@ -30,7 +30,7 @@ request-shape differences between the langgraph and cubepi runtimes.
 
 ## Phase 1 — Raw cache smoke tests
 
-Bypass cubebox, cubepi, and langchain entirely. Send two identical prompts directly
+Bypass cubeplex, cubepi, and langchain entirely. Send two identical prompts directly
 to a provider API and check whether the second request reports cache tokens > 0.
 
 **Phase 1 results (2026-05-14):**

@@ -1,11 +1,9 @@
-"""E2E tests for shared-mode inbound lifecycle (Task 4).
+"""E2E tests for inbound lifecycle across routing/topic modes.
 
-Exercises the shared-mode branch in ``ingest_inbound_event``:
-- First message to a shared binding creates Topic + TopicParticipant +
-  Conversation(topic_id) + ConversationParticipant.
-- Subsequent messages reuse the topic and auto-join new senders.
-- Thread scope_key creates a separate conversation under the same topic.
-- Isolated binding and no-binding cases are unchanged.
+Routing/topic is account-level (``IMBotSettings`` on ``account.config``):
+- shared → one Topic + Conversation for the channel, is_group_chat True.
+- isolated + topic (the default) → a per-sender Topic, is_group_chat False.
+- isolated + flat → no Topic (standalone personal conversation).
 """
 
 from collections.abc import AsyncIterator
@@ -20,12 +18,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubeplex.models.topic import Topic, TopicParticipant
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
     im_cleanup,
@@ -44,6 +42,21 @@ _CRED = "cred-icb-ingest-001"
 _ACCOUNT = "imac-icb-ingest-001"
 _CHANNEL = "oc_shared_ch1"
 _EXT_ACCT = "cli_icb_ingest"
+
+
+async def _set(
+    maker: async_sessionmaker[AsyncSession],
+    account: IMConnectorAccount,
+    settings: IMBotSettings,
+) -> None:
+    """Persist account-level settings to the DB. ingest reloads the account at
+    its boundary, so settings must live in the row, not just in memory."""
+    account.config = store_bot_settings(account.config, settings)
+    async with maker() as session:
+        row = await session.get(IMConnectorAccount, account.id)
+        assert row is not None
+        row.config = account.config
+        await session.commit()
 
 
 @pytest_asyncio.fixture
@@ -84,7 +97,6 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
             yield maker, account
         finally:
             async with maker() as session:
-                # 1. conversation_participants (references conversations)
                 await session.execute(
                     text(
                         "DELETE FROM conversation_participants "
@@ -93,12 +105,15 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
                     ),
                     {"ws": _WS},
                 )
-                # 2. Null out conversation.topic_id so topics can be deleted
                 await session.execute(
                     text("UPDATE conversations SET topic_id = NULL WHERE workspace_id = :ws"),
                     {"ws": _WS},
                 )
-                # 3. topic_participants (references topics)
+                # im_thread_links.topic_id FKs topics — null before deleting topics.
+                await session.execute(
+                    text("UPDATE im_thread_links SET topic_id = NULL WHERE account_id = ANY(:ids)"),
+                    {"ids": [_ACCOUNT]},
+                )
                 await session.execute(
                     text(
                         "DELETE FROM topic_participants WHERE topic_id IN "
@@ -106,23 +121,7 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
                     ),
                     {"org": _ORG},
                 )
-                # 4. Null out binding.topic_id before deleting topics
-                await session.execute(
-                    text(
-                        "UPDATE im_channel_bindings SET topic_id = NULL "
-                        "WHERE account_id = ANY(:ids)"
-                    ),
-                    {"ids": [_ACCOUNT]},
-                )
-                # 5. Topics (now safe: no FK references)
                 await session.execute(text("DELETE FROM topics WHERE org_id = :org"), {"org": _ORG})
-                # 6. Bindings (before accounts FK)
-                await session.execute(
-                    text("DELETE FROM im_channel_bindings WHERE account_id = ANY(:ids)"),
-                    {"ids": [_ACCOUNT]},
-                )
-                # 7. Standard IM cleanup (queue/receipts/links/conversations/
-                #    accounts/creds/workspaces/users/orgs)
                 await im_cleanup(
                     session,
                     account_ids=[_ACCOUNT],
@@ -162,66 +161,29 @@ def _event(
     )
 
 
-async def _insert_binding(
-    session: AsyncSession,
-    *,
-    mode: str = "shared",
-    channel_id: str = _CHANNEL,
-    channel_name: str = "Test Group",
-    sandbox_mode: str | None = None,
-    topic_id: str | None = None,
-) -> None:
-    """Insert a binding row for the seeded account."""
-    binding = IMChannelBinding(
-        org_id=_ORG,
-        workspace_id=_WS,
-        account_id=_ACCOUNT,
-        channel_id=channel_id,
-        channel_name=channel_name,
-        mode=mode,
-        sandbox_mode=sandbox_mode,
-        topic_id=topic_id,
-    )
-    session.add(binding)
-    await session.flush()
-
-
 async def test_first_shared_message_creates_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """First @bot in a shared binding creates Topic + participants + Conversation."""
+    """First @bot in shared mode creates Topic + owner participant + group conv."""
     maker, account = _seeded
+    await _set(maker, account, IMBotSettings(routing_mode="shared"))
 
-    # Seed binding (shared, no topic yet)
-    async with maker() as s:
-        await _insert_binding(s, mode="shared")
-        await s.commit()
-
-    res = await ingest_inbound_event(
-        _event(),
-        account=account,
-        session_maker=maker,
-    )
+    res = await ingest_inbound_event(_event(), account=account, session_maker=maker)
     assert res.outcome == "enqueued"
 
     async with maker() as s:
-        # Binding now has topic_id
-        binding = (
-            await s.execute(
-                select(IMChannelBinding).where(
-                    IMChannelBinding.account_id == _ACCOUNT,
-                    IMChannelBinding.channel_id == _CHANNEL,
-                )
-            )
+        conv = (
+            await s.execute(select(Conversation).where(Conversation.id == res.conversation_id))
         ).scalar_one()
-        assert binding.topic_id is not None
+        assert conv.topic_id is not None
+        assert conv.is_group_chat is True
+        assert conv.attributes.get("im", {}).get("account_id") == _ACCOUNT
 
-        # Topic exists with correct title
-        topic = (await s.execute(select(Topic).where(Topic.id == binding.topic_id))).scalar_one()
-        assert topic.title == "Test Group"
+        topic = (await s.execute(select(Topic).where(Topic.id == conv.topic_id))).scalar_one()
+        assert topic.title == ""  # no platform name → empty (UI localizes), never channel id
         assert topic.max_participants == 100
+        assert topic.attributes["im"]["scope_kind"] == "channel"
 
-        # acting_user is TopicParticipant(owner)
         owner_tp = (
             await s.execute(
                 select(TopicParticipant).where(
@@ -232,160 +194,112 @@ async def test_first_shared_message_creates_topic(
         ).scalar_one()
         assert owner_tp.role == "owner"
 
-        # Conversation has topic_id set
-        conv = (
-            await s.execute(
-                select(Conversation).where(
-                    Conversation.id == res.conversation_id,
-                )
-            )
+        link = (
+            await s.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
         ).scalar_one()
-        assert conv.topic_id == topic.id
-        assert conv.is_group_chat is True
+        assert link.topic_id == conv.topic_id
 
 
 async def test_subsequent_shared_reuses_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """Second message in shared mode reuses the topic; new sender auto-joins."""
+    """Second message in shared mode reuses the same conversation + topic."""
     maker, account = _seeded
+    await _set(maker, account, IMBotSettings(routing_mode="shared"))
 
-    async with maker() as s:
-        await _insert_binding(s, mode="shared")
-        await s.commit()
-
-    # First message creates topic
     r1 = await ingest_inbound_event(
-        _event(event_id="ev-sub-1"),
-        account=account,
-        session_maker=maker,
+        _event(event_id="ev-sub-1"), account=account, session_maker=maker
     )
-    assert r1.outcome == "enqueued"
-
-    # Second message, same scope_key → same conversation, same topic
     r2 = await ingest_inbound_event(
-        _event(event_id="ev-sub-2"),
-        account=account,
-        session_maker=maker,
+        _event(event_id="ev-sub-2"), account=account, session_maker=maker
     )
-    assert r2.outcome == "enqueued"
+    assert r1.outcome == "enqueued" and r2.outcome == "enqueued"
     assert r1.conversation_id == r2.conversation_id
 
     async with maker() as s:
-        binding = (
-            await s.execute(
-                select(IMChannelBinding).where(
-                    IMChannelBinding.account_id == _ACCOUNT,
-                    IMChannelBinding.channel_id == _CHANNEL,
-                )
-            )
+        conv = (
+            await s.execute(select(Conversation).where(Conversation.id == r1.conversation_id))
         ).scalar_one()
-        # Topic count under this binding: exactly 1
-        topic_count = (
+        owners = (
             (
                 await s.execute(
                     select(TopicParticipant).where(
-                        TopicParticipant.topic_id == binding.topic_id,
+                        TopicParticipant.topic_id == conv.topic_id,
+                        TopicParticipant.role == "owner",
                     )
                 )
             )
             .scalars()
             .all()
         )
-        # Owner was added once
-        owners = [tp for tp in topic_count if tp.role == "owner"]
         assert len(owners) == 1
 
 
-async def test_thread_creates_separate_conversation(
+async def test_default_isolated_creates_per_sender_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """Different scope_key (channel vs thread) creates separate conversations
-    under the same topic."""
+    """Default settings (empty config) = isolated + topic: a per-sender Topic
+    is created, owned by the sender, conversation stays personal."""
     maker, account = _seeded
-
-    async with maker() as s:
-        await _insert_binding(s, mode="shared")
-        await s.commit()
-
-    r_ch = await ingest_inbound_event(
-        _event(event_id="ev-ch-1", scope_key="ch", scope_kind="channel"),
-        account=account,
-        session_maker=maker,
-    )
-    r_thread = await ingest_inbound_event(
-        _event(event_id="ev-th-1", scope_key="t:1234", scope_kind="thread"),
-        account=account,
-        session_maker=maker,
-    )
-    assert r_ch.outcome == "enqueued"
-    assert r_thread.outcome == "enqueued"
-    assert r_ch.conversation_id != r_thread.conversation_id
-
-    async with maker() as s:
-        # Both conversations share the same topic_id
-        conv_ch = (
-            await s.execute(
-                select(Conversation).where(
-                    Conversation.id == r_ch.conversation_id,
-                )
-            )
-        ).scalar_one()
-        conv_th = (
-            await s.execute(
-                select(Conversation).where(
-                    Conversation.id == r_thread.conversation_id,
-                )
-            )
-        ).scalar_one()
-        assert conv_ch.topic_id is not None
-        assert conv_ch.topic_id == conv_th.topic_id
-
-
-async def test_isolated_no_topic(
-    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
-) -> None:
-    """Isolated binding creates no topic; conversation.topic_id is None."""
-    maker, account = _seeded
-
-    async with maker() as s:
-        await _insert_binding(s, mode="isolated")
-        await s.commit()
+    # No _set(): account.config is empty → defaults (isolated, topic).
 
     res = await ingest_inbound_event(
-        _event(event_id="ev-iso-1"),
+        _event(event_id="ev-def-1", scope_key="u:on_senderA", scope_kind="participant"),
         account=account,
         session_maker=maker,
     )
     assert res.outcome == "enqueued"
 
     async with maker() as s:
-        binding = (
-            await s.execute(
-                select(IMChannelBinding).where(
-                    IMChannelBinding.account_id == _ACCOUNT,
-                    IMChannelBinding.channel_id == _CHANNEL,
-                )
-            )
-        ).scalar_one()
-        assert binding.topic_id is None
-
         conv = (
             await s.execute(select(Conversation).where(Conversation.id == res.conversation_id))
         ).scalar_one()
-        assert conv.topic_id is None
+        assert conv.topic_id is not None
         assert conv.is_group_chat is False
 
+        topic = (await s.execute(select(Topic).where(Topic.id == conv.topic_id))).scalar_one()
+        assert topic.creator_user_id == _USER  # sender owns their own topic
+        assert "im" in topic.attributes
 
-async def test_no_binding_is_isolated(
+
+async def test_ingest_reloads_stale_account_settings(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """No binding row at all → isolated behavior (unchanged from before)."""
+    """A long-connection transport holds the account captured at startup. When
+    settings change in the DB, ingest must reload and honor them — without a
+    reconnect. Here the passed account object stays stale (empty config) while
+    the DB row is switched to shared."""
     maker, account = _seeded
+    async with maker() as s:
+        row = await s.get(IMConnectorAccount, account.id)
+        assert row is not None
+        row.config = store_bot_settings(row.config, IMBotSettings(routing_mode="shared"))
+        await s.commit()
+    # The in-memory transport object is deliberately NOT updated.
+    assert (account.config or {}).get("bot_settings") is None
 
-    # No binding inserted for this channel
     res = await ingest_inbound_event(
-        _event(event_id="ev-nobd-1", channel_id="oc_unbound_ch"),
+        _event(event_id="ev-stale-1"), account=account, session_maker=maker
+    )
+    assert res.outcome == "enqueued"
+    async with maker() as s:
+        conv = (
+            await s.execute(select(Conversation).where(Conversation.id == res.conversation_id))
+        ).scalar_one()
+        # Reloaded config took effect: shared routing → group chat + topic.
+        assert conv.is_group_chat is True
+        assert conv.topic_id is not None
+
+
+async def test_flat_mode_no_topic(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Isolated + flat: no Topic; conversation.topic_id is None."""
+    maker, account = _seeded
+    await _set(maker, account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
+
+    res = await ingest_inbound_event(
+        _event(event_id="ev-flat-1", scope_key="u:on_senderA", scope_kind="participant"),
         account=account,
         session_maker=maker,
     )

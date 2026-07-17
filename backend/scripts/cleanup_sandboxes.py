@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from cubebox.config import config
-from cubebox.db.engine import _build_database_url
-from cubebox.models.user_sandbox import UserSandbox
+from cubeplex.config import config
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.user_sandbox import UserSandbox
 
 
 def _session_factory() -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:

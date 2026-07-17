@@ -19,14 +19,14 @@ import uvicorn
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models.user_event import UserEventType
-from cubebox.repositories.user_event import UserEventRepository
-from cubebox.services.user_event import PublishUserEventInput, UserEventService
-from cubebox.services.user_event_bus import UserEventBus
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models.user_event import UserEventType
+from cubeplex.repositories.user_event import UserEventRepository
+from cubeplex.services.user_event import PublishUserEventInput, UserEventService
+from cubeplex.services.user_event_bus import UserEventBus
 from tests.e2e.conftest import (
     DEFAULT_TEST_EMAIL,
     DEFAULT_TEST_PASSWORD,
@@ -54,7 +54,7 @@ async def user_events_client() -> AsyncIterator[tuple[httpx.AsyncClient, str, Us
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -99,7 +99,7 @@ async def live_user_events_server() -> AsyncIterator[tuple[str, str, str, UserEv
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:

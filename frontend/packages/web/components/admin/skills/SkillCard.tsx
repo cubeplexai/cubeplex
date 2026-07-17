@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, ArrowUpCircle, Package, Sparkles } from 'lucide-react'
-import type { SkillSummary } from '@cubebox/core'
+import type { SkillSummary } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 

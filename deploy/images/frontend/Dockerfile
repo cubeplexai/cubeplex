@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for the cubebox Next.js frontend.
+# Multi-stage build for the cubeplex Next.js frontend.
 #
 # Stage 1 (builder): pnpm install + build all workspace packages, produce
 #   the Next.js standalone output (gated by NEXT_OUTPUT=standalone in
@@ -44,7 +44,7 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/packages ./packages
 COPY frontend/scripts ./scripts
 
-RUN pnpm --filter @cubebox/core build || true
+RUN pnpm --filter @cubeplex/core build || true
 RUN pnpm --filter web build
 
 
@@ -57,14 +57,14 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 cubebox \
-    && adduser --system --uid 1001 --ingroup cubebox cubebox
+RUN addgroup --system --gid 1001 cubeplex \
+    && adduser --system --uid 1001 --ingroup cubeplex cubeplex
 
-COPY --from=builder --chown=cubebox:cubebox /app/packages/web/.next/standalone ./
-COPY --from=builder --chown=cubebox:cubebox /app/packages/web/.next/static ./packages/web/.next/static
-COPY --from=builder --chown=cubebox:cubebox /app/packages/web/public ./packages/web/public
+COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/.next/standalone ./
+COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/.next/static ./packages/web/.next/static
+COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/public ./packages/web/public
 
-USER cubebox
+USER cubeplex
 
 EXPOSE 3000
 

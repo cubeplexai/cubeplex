@@ -1,9 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import type { Artifact } from '@cubebox/core'
+import { useState, useEffect } from 'react'
+import type { Artifact } from '@cubeplex/core'
+import { buildPreviewUrl, hasImageExt } from './previewUtils'
+import { ImageViewer } from '@/components/shared/previews'
 import { PreviewLoading } from './PreviewLoading'
-import { buildPreviewUrl } from './previewUtils'
+import { FallbackPreview } from './FallbackPreview'
+import { ImageCarousel } from './ImageCarousel'
 
 interface ImagePreviewProps {
   artifact: Artifact
@@ -11,26 +14,76 @@ interface ImagePreviewProps {
   workspaceId: string
 }
 
-export function ImagePreview({ artifact, version, workspaceId }: ImagePreviewProps) {
-  const [loading, setLoading] = useState(true)
-  const filename = artifact.path.split('/').pop() || 'image'
-  const previewUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
+interface FilesResponse {
+  version: number
+  files: string[]
+}
 
+export function ImagePreview({
+  artifact,
+  version,
+  workspaceId,
+}: ImagePreviewProps): React.ReactElement {
+  const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
+
+  const v = version ?? artifact.version
+  // Tag the cached file list with the version it was fetched for, so a
+  // version switch shows loading instead of the old version's images while
+  // the new /files request is in flight.
+  const [data, setData] = useState<{ files: string[]; version: number } | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    if (hasImageExt(filename)) return
+    let cancelled = false
+    const url =
+      `/api/v1/ws/${workspaceId}/conversations/${artifact.conversation_id}` +
+      `/artifacts/${artifact.id}/files?filter=image&version=${v}`
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`)
+        return res.json() as Promise<FilesResponse>
+      })
+      .then((body) => {
+        if (!cancelled) setData({ files: body.files, version: v })
+      })
+      .catch(() => {
+        if (!cancelled) setError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifact.id, artifact.conversation_id, v, workspaceId, filename])
+
+  // Heuristic: a path that already points at an image file → single image,
+  // no list call. Otherwise (directory like /workspace/charts) fetch the
+  // file list and render a carousel.
+  if (hasImageExt(filename)) {
+    const url = buildPreviewUrl(artifact, filename, version, workspaceId)
+    return <ImageViewer url={url} alt={artifact.name} />
+  }
+
+  if (error) {
+    return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+  }
+  // No data yet, or data is from a different version than the one selected.
+  if (!data || data.version !== v) {
+    return <PreviewLoading />
+  }
+  const files = data.files
+  if (files.length === 0) {
+    return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+  }
+  if (files.length === 1) {
+    const url = buildPreviewUrl(artifact, files[0], version, workspaceId)
+    return <ImageViewer url={url} alt={artifact.name} />
+  }
   return (
-    <div className="flex items-center justify-center h-full p-4 bg-muted/20">
-      {loading && (
-        <div className="absolute inset-0">
-          <PreviewLoading />
-        </div>
-      )}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        key={`${artifact.id}-${version}`}
-        src={previewUrl}
-        alt={artifact.name}
-        className="max-w-full max-h-full object-contain rounded-md"
-        onLoad={() => setLoading(false)}
-      />
-    </div>
+    <ImageCarousel
+      artifact={artifact}
+      imageFiles={files}
+      version={version}
+      workspaceId={workspaceId}
+    />
   )
 }

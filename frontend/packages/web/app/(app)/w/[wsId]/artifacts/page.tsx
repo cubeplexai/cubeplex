@@ -10,8 +10,8 @@ import {
   deleteArtifact,
   useArtifactStore,
   usePanelStore,
-} from '@cubebox/core'
-import type { Artifact } from '@cubebox/core'
+} from '@cubeplex/core'
+import type { Artifact } from '@cubeplex/core'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { ArtifactsToolbar } from '@/components/artifacts/ArtifactsToolbar'

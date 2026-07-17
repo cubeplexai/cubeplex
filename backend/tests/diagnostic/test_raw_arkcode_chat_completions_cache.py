@@ -1,6 +1,6 @@
 """Phase 1c — Raw HTTP cache validation for arkcode (Ark Coding / ByteDance, OpenAI-spec).
 
-Fallback provider. This test bypasses cubebox / cubepi / langchain entirely.
+Fallback provider. This test bypasses cubeplex / cubepi / langchain entirely.
 It sends two identical prompts directly to
 `https://ark.cn-beijing.volces.com/api/coding/v3` using the official `openai` SDK,
 then verifies that the second request reports cached tokens > 0.

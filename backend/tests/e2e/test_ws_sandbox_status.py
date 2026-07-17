@@ -9,8 +9,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 
 @pytest_asyncio.fixture
@@ -50,6 +50,8 @@ async def test_status_running_when_row_exists(
         repo = UserSandboxRepository(s, org_id=org_id, workspace_id=ws_id)
         await repo.create(
             user_id=user_id,
+            scope_type="user",
+            scope_id=user_id,
             sandbox_id=f"sbx-test-{user_id[-6:]}",
             image="python:3.12",
         )

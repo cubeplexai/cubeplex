@@ -123,6 +123,7 @@ class TestPersonaRuntimeApplied:
     """Workspace persona system_prompt is actually injected into the running agent."""
 
     @pytest.mark.asyncio
+    @pytest.mark.real_llm
     async def test_persona_sentinel_appears_in_agent_response(
         self,
         authenticated_client: tuple[httpx.AsyncClient, str],

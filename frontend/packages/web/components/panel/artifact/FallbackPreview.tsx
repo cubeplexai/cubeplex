@@ -1,7 +1,7 @@
 'use client'
 
 import { File, Download } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { buildDownloadUrl } from './previewUtils'

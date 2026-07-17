@@ -1,4 +1,4 @@
-from cubebox.models import EgressRef
+from cubeplex.models import EgressRef
 
 
 def test_prefix_and_fields():

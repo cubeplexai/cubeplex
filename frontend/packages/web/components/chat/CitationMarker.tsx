@@ -9,8 +9,8 @@ import {
   bareToolName,
   getSubagentSummary,
   getToolResultPreviewContent,
-} from '@cubebox/core'
-import type { CitationData } from '@cubebox/core'
+} from '@cubeplex/core'
+import type { CitationData } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'

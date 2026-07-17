@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Archive } from 'lucide-react'
-import type { MemoryItem, MemoryType } from '@cubebox/core'
+import type { MemoryItem, MemoryType } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 
 interface MemoryItemCardProps {

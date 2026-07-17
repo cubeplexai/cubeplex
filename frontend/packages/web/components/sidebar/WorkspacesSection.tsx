@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { Folder, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 

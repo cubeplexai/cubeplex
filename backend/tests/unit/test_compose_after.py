@@ -14,7 +14,7 @@ from cubepi.agent.types import (
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, Usage
 
-from cubebox.middleware._compose import compose_after_tool_call
+from cubeplex.middleware._compose import compose_after_tool_call
 
 
 def _ctx(content_text: str = "raw") -> AfterToolCallContext:

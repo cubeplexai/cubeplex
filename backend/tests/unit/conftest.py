@@ -7,16 +7,16 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-import cubebox.models  # noqa: F401  -- register all models on metadata
-from cubebox.auth.users import UserManager
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import (
+import cubeplex.models  # noqa: F401  -- register all models on metadata
+from cubeplex.auth.users import UserManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import (
     Organization,
     OrganizationMembership,
     OrgRole,
     User,
 )
-from cubebox.repositories import OrganizationRepository
+from cubeplex.repositories import OrganizationRepository
 
 
 @pytest.fixture

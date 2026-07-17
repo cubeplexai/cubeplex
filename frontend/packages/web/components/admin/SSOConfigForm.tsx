@@ -9,7 +9,7 @@
  * `error.code` → i18n key under `adminAuthentication.form.errors.*`.
  *
  * SP redirect URI / ACS URL / SP entity ID are deterministic from
- * `frontend_base_url` (see backend/cubebox/api/routes/v1/sso.py) so we
+ * `frontend_base_url` (see backend/cubeplex/api/routes/v1/sso.py) so we
  * compute them client-side and surface them prominently — the admin
  * pastes them into their IdP.
  */
@@ -25,7 +25,7 @@ import {
   discoverOidcEndpoints,
   updateSsoConnection,
   type SsoConnectionResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -522,9 +522,14 @@ export function SSOConfigForm({ connection, orgSlug, onUpdated }: SSOConfigFormP
                 <Input
                   id="oidc-client-secret"
                   type="password"
+                  name="oidc-client-secret"
                   value={state.clientSecret}
                   onChange={(e) => update('clientSecret', e.target.value)}
                   placeholder={isEdit ? t('oidc.clientSecretPlaceholder') : ''}
+                  autoComplete="new-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   data-testid="sso-client-secret"
                   aria-invalid={Boolean(errors.clientSecret)}
                 />

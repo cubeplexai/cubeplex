@@ -118,9 +118,14 @@ export function SecretRevealAndRotate({
                 <Input
                   id="new-secret"
                   type="password"
+                  name="trigger-rotated-secret"
                   value={newSecret}
                   onChange={(e) => setNewSecret(e.target.value)}
                   placeholder={t('newSecretPlaceholder')}
+                  autoComplete="new-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   data-testid="new-secret-input"
                 />
               </div>

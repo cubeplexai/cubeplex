@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { X } from 'lucide-react'
-import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubebox/core'
+import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -301,11 +301,15 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             <Input
               id="env-value"
               type="password"
+              name="sandbox-env-secret-value"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               className="font-mono text-sm"
               placeholder="••••••••"
-              autoComplete="off"
+              autoComplete="new-password"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               maxLength={isSecret ? undefined : 4096}
             />
           </div>

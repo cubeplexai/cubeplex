@@ -1,3 +1,5 @@
+import type { ReasoningControl } from './events'
+
 export interface Conversation {
   id: string
   title: string
@@ -12,6 +14,6 @@ export interface Conversation {
    * default. Server-stored so the composer can restore it cross-device.
    */
   model_key: string | null
-  /** The user's last-sent thinking level for this conversation (e.g. ``"medium"``). */
-  thinking: string
+  /** The user's last-sent reasoning control for this conversation. */
+  reasoning: ReasoningControl
 }

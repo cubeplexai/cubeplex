@@ -2,10 +2,10 @@
 
 **Status**: Draft · 2026-04-22
 **Owner**: @xfgong
-**Scope**: 为 agent 新增通用 `file_read` 工具；抽象 `Sandbox.file_read` 方法；引入 `cubebox.parsers` 共享后台库 + `FileParser` 插件架构；v1 内置 text / notebook / docling 三个默认 parser；docling-serve 作为独立 HTTP 服务承担多格式解析。
+**Scope**: 为 agent 新增通用 `file_read` 工具；抽象 `Sandbox.file_read` 方法；引入 `cubeplex.parsers` 共享后台库 + `FileParser` 插件架构；v1 内置 text / notebook / docling 三个默认 parser；docling-serve 作为独立 HTTP 服务承担多格式解析。
 **属于**: v1 开源发布待办 · M6
 **Backlog 索引**: `docs/superpowers/specs/2026-04-21-v1-oss-release-backlog.md`
-**依赖**: M-CI（占位 job）；不依赖 M0（独立 plugin group `cubebox.parsers` 而非 `cubebox.*`）
+**依赖**: M-CI（占位 job）；不依赖 M0（独立 plugin group `cubeplex.parsers` 而非 `cubeplex.*`）
 
 ---
 
@@ -15,7 +15,7 @@
 
 - Agent 工具集中**没有**通用文件读取能力。`load_skill` 只读 skill 的 SKILL.md，`execute` / `write_file` / `edit_file` 是沙盒操作工具（来自 `SandboxMiddleware`，`sandbox.py:68-98`），不做内容归一化
 - 无 PDF / DOCX / XLSX / PPTX 等非文本文件的读取支持
-- 沙盒抽象（`backend/cubebox/sandbox/base.py:15-54`）只有 `execute / upload / download`，没有"读取并解析文件"的高层语义
+- 沙盒抽象（`backend/cubeplex/sandbox/base.py:15-54`）只有 `execute / upload / download`，没有"读取并解析文件"的高层语义
 - Agent 若需读 PDF，现在只能 `execute("pdftotext ...")` 凭沙盒镜像里装了什么工具运气处理
 - 视觉/图像管线未接通：`convert.py:115` / `stream.py:95` 只支持 `msg.content: str`；`ModelConfig.input` 虽有 image/pdf 字段但运行时未消费
 
@@ -24,7 +24,7 @@
 - Agent 调用 `file_read(path)` 即可读沙盒里任何支持格式的文件，返回 LLM 可直接消费的 markdown / 结构化输出
 - 沙盒抽象层新增 `Sandbox.file_read(path, options) -> FileReadOutput`，与 `execute` 同层；不同 Sandbox 实现可各自 override
 - 解析器走**后台插件架构**（参考 MarkItDown 的 converter registry）：每类文件一个 plugin；docling-serve 是默认多格式 parser 的实现细节
-- `cubebox.parsers` 是共享后台库：本次 file_read 第一个消费；未来 filebox（workspace RAG）也调用同一 registry
+- `cubeplex.parsers` 是共享后台库：本次 file_read 第一个消费；未来 filebox（workspace RAG）也调用同一 registry
 - Tool description 充分详述"能用/不能用/返回什么"，直接影响 agent 使用率与错误率
 
 ### 1.3 非目标
@@ -46,12 +46,12 @@
 |---|---|---|---|
 | D1 | Parser 跑在 **backend Python 进程**；sandbox 只暴露文件、不 bake parser 依赖 | Parser 跑在 sandbox 容器内 | 未来 filebox 等后台 worker 可复用；sandbox 镜像保持轻量；不同 sandbox 实现无需各自 bake 同套依赖 |
 | D2 | Sandbox 抽象新增方法 `Sandbox.file_read(path, options) -> FileReadOutput`，与 `execute` 同层 | 单独做一个 backend 模块不走 Sandbox | agent 上下文围绕 sandbox；未来 sandbox 实现自带原生解析能力（假设）可 override 本方法 |
-| D3 | `cubebox.parsers` 作为 backend 子模块（非独立 PyPI 包） | 独立发 `cubebox-parsers` 包 | filebox future 也在 backend 进程，直接 import；发布维护成本低 |
-| D4 | `FileParser` Protocol + `@runtime_checkable` + entry_points group `cubebox.parsers` | class base + 手动注册 | 与 M0 plugin 思路一致（Protocol + entry_points）；装错签名启动即失败 |
+| D3 | `cubeplex.parsers` 作为 backend 子模块（非独立 PyPI 包） | 独立发 `cubeplex-parsers` 包 | filebox future 也在 backend 进程，直接 import；发布维护成本低 |
+| D4 | `FileParser` Protocol + `@runtime_checkable` + entry_points group `cubeplex.parsers` | class base + 手动注册 | 与 M0 plugin 思路一致（Protocol + entry_points）；装错签名启动即失败 |
 | D5 | v1 内置 3 个 plugin：`TextParser` / `NotebookParser` / `DoclingParser` | 单 parser 或更多 | 覆盖全部 v1 需求；粒度清晰；都按 Protocol 挂接 |
 | D6 | 默认多格式走 `DoclingParser` → HTTP 到独立 **docling-serve** 容器（CPU 镜像 `docling-serve-cpu`，4.4 GB） | MarkItDown 嵌入 / LlamaParse 云 / 无 | 不把 heavy ML 依赖引入核心库；docling 精度高；Apache-2.0 许可可与 CE 共发；自部署单容器即可 |
 | D7 | `.html` 走文本路径（`TextParser`），不走 docling | 走 docling 做 HTML 清洗 | agent 常读写 HTML artifacts（源码级），避免被重写 |
-| D8 | TEXT_DIRECT 扩展名列表**宽**（含 `.py .js .ts .go .rs .c .cpp .java .rb .php .html .svg .xml` 等） | 严格文本 `.txt .md` | cubebox 是 dev-friendly agent 平台；读代码文件是常态；TextParser 只做 UTF-8 decode 代价极小 |
+| D8 | TEXT_DIRECT 扩展名列表**宽**（含 `.py .js .ts .go .rs .c .cpp .java .rb .php .html .svg .xml` 等） | 严格文本 `.txt .md` | cubeplex 是 dev-friendly agent 平台；读代码文件是常态；TextParser 只做 UTF-8 decode 代价极小 |
 | D9 | OCR 图片归 `text` kind，`metadata.parser = "docling-ocr"` 区分 | 独立 `image` kind | v1 无 vision 管线；OCR 结果本质是文本；union 不提前扩展 |
 | D10 | Output union 共 **5 种 kind**：`text` / `notebook` / `unsupported` / `unchanged` / `error` | 7 种（含 image / pdf_native / parts / office_markdown） | 砍掉无下游消费者的 kind；`image` / `pdf_native` 未来加为纯新增，非破坏性 |
 | D11 | `unchanged` sentinel 走 **conversation 级 SHA-256 hash cache，存 Redis**；无显式 invalidation；TTL 6h 自动过期 | 显式 write_file / execute 回调 invalidate | hash 对比天然捕获写入变化；Redis TTL 处理空闲清理（conversation 没有明确"结束"事件）；多 backend 副本天然共享 |
@@ -97,7 +97,7 @@
 │                                                │
 │  Layer 3 · Parser 共享库                        │
 │  ┌────────────────────────────────────────┐    │
-│  │ cubebox.parsers                        │    │
+│  │ cubeplex.parsers                        │    │
 │  │  ├─ protocols.py  (FileParser)         │    │
 │  │  ├─ registry.py   (entry_points)       │    │
 │  │  ├─ schema.py     (FileReadOutput 等)  │    │
@@ -115,17 +115,17 @@
    └──────────────────────┘
 
    未来 filebox（workspace RAG indexer）：
-     不经 sandbox，直接 `from cubebox.parsers import registry`
+     不经 sandbox，直接 `from cubeplex.parsers import registry`
      → 复用同一 registry。
 ```
 
 ### 3.2 Sandbox 抽象增强
 
-**`backend/cubebox/sandbox/base.py`**（新增方法）：
+**`backend/cubeplex/sandbox/base.py`**（新增方法）：
 
 ```python
-from cubebox.parsers import ParseOptions, registry as parser_registry
-from cubebox.parsers.schema import FileReadOutput
+from cubeplex.parsers import ParseOptions, registry as parser_registry
+from cubeplex.parsers.schema import FileReadOutput
 
 class Sandbox(ABC):
     # ... existing methods ...
@@ -160,7 +160,7 @@ class Sandbox(ABC):
 
 `OpenSandbox`（现有唯一实现）用默认实现；无需 override。
 
-### 3.3 `cubebox.parsers` 的定位
+### 3.3 `cubeplex.parsers` 的定位
 
 - **后台工具库**，不对外暴露 plugin 发现 API 给 agent / sandbox caller
 - 三个职责：
@@ -168,7 +168,7 @@ class Sandbox(ABC):
   2. 启动期发现并校验所有已注册 plugin
   3. 暴露 `dispatch(...)` 统一入口，内部按 MIME 路由到对应 plugin
 - 对 file_read：通过 `Sandbox.file_read` 间接使用
-- 对 filebox future：直接 `from cubebox.parsers import registry` 调用
+- 对 filebox future：直接 `from cubeplex.parsers import registry` 调用
 
 ---
 
@@ -176,11 +176,11 @@ class Sandbox(ABC):
 
 ### 4.1 `FileParser` Protocol
 
-**`backend/cubebox/parsers/protocols.py`**：
+**`backend/cubeplex/parsers/protocols.py`**：
 
 ```python
 from typing import Protocol, runtime_checkable
-from cubebox.parsers.schema import ParseOptions, FileReadOutput
+from cubeplex.parsers.schema import ParseOptions, FileReadOutput
 
 
 @runtime_checkable
@@ -211,18 +211,18 @@ class FileParser(Protocol):
 **`backend/pyproject.toml`**（新增）：
 
 ```toml
-[project.entry-points."cubebox.parsers"]
-text     = "cubebox.parsers.plugins.text:TextParser"
-notebook = "cubebox.parsers.plugins.notebook:NotebookParser"
-docling  = "cubebox.parsers.plugins.docling:DoclingParser"
+[project.entry-points."cubeplex.parsers"]
+text     = "cubeplex.parsers.plugins.text:TextParser"
+notebook = "cubeplex.parsers.plugins.notebook:NotebookParser"
+docling  = "cubeplex.parsers.plugins.docling:DoclingParser"
 ```
 
-**Registry 启动流程**（`cubebox/parsers/registry.py`）：
+**Registry 启动流程**（`cubeplex/parsers/registry.py`）：
 
 ```python
 def discover() -> ParserRegistry:
     reg = ParserRegistry()
-    for ep in importlib.metadata.entry_points(group="cubebox.parsers"):
+    for ep in importlib.metadata.entry_points(group="cubeplex.parsers"):
         cls = ep.load()
         instance = cls()
         if not isinstance(instance, FileParser):
@@ -234,12 +234,12 @@ def discover() -> ParserRegistry:
 ```
 
 - **运行时 Protocol 校验**：装错签名启动即失败（与 M0 一致）
-- **外部插件发现**：第三方 wheel 只需声明 `cubebox.parsers` group，装进 backend 的 Python path 即可
-- **保留名**：`text` / `notebook` / `docling` 三个名 v1 cubebox 占用；外部插件若注册同名 → Registry 按 `priority` 或字母序择一（v1 保守地使外部优先级高 → 替换默认）
+- **外部插件发现**：第三方 wheel 只需声明 `cubeplex.parsers` group，装进 backend 的 Python path 即可
+- **保留名**：`text` / `notebook` / `docling` 三个名 v1 cubeplex 占用；外部插件若注册同名 → Registry 按 `priority` 或字母序择一（v1 保守地使外部优先级高 → 替换默认）
 
 ### 4.3 v1 三个默认 plugin
 
-#### `TextParser`（`cubebox/parsers/plugins/text.py`）
+#### `TextParser`（`cubeplex/parsers/plugins/text.py`）
 
 **响应范围**：
 - MIME 通配：`text/*`
@@ -282,7 +282,7 @@ def discover() -> ParserRegistry:
 
 `page_range` 参数对 TextParser **不生效**（silently ignored）；`line_range` 是 text 文件的"切片"语义。
 
-#### `NotebookParser`（`cubebox/parsers/plugins/notebook.py`）
+#### `NotebookParser`（`cubeplex/parsers/plugins/notebook.py`）
 
 **响应范围**：MIME `application/x-ipynb+json` / 扩展名 `ipynb`；`priority = 10`。
 
@@ -301,7 +301,7 @@ metadata 必含字段：
 
 NotebookParser 当前不接受 cell_range 参数；agent 续读靠 cache（hash 不变 → unchanged sentinel；想看后面 cells 只能等未来扩展 cell_range，本 spec 不做）。
 
-#### `DoclingParser`（`cubebox/parsers/plugins/docling.py`）
+#### `DoclingParser`（`cubeplex/parsers/plugins/docling.py`）
 
 **响应范围**：MIME `application/pdf`, `application/vnd.openxmlformats-officedocument.{wordprocessingml.document,presentationml.presentation,spreadsheetml.sheet}`, `application/epub+zip`, `image/*` (PNG/JPEG/GIF/WebP/TIFF/BMP) 等 / 扩展名 `pdf docx pptx xlsx epub png jpg jpeg gif webp tiff bmp` / `priority = 20`。
 
@@ -418,7 +418,7 @@ def _unsupported_hint(mime: str, ext: str) -> str | None:
 | `unchanged` | 文件未变 sentinel | 同 conversation 内同 path 同 hash 二次 read |
 | `error` | 解析或网络错误 | parser 抛错 / docling-serve 超时或不可达 |
 
-### 5.2 Schema（`cubebox/parsers/schema.py`）
+### 5.2 Schema（`cubeplex/parsers/schema.py`）
 
 ```python
 from pydantic import BaseModel, Field
@@ -589,7 +589,7 @@ When truncated=true, metadata tells you where to resume:
 
 ### 7.1 Redis-backed hash cache
 
-**`backend/cubebox/parsers/dedup.py`**：
+**`backend/cubeplex/parsers/dedup.py`**：
 
 ```python
 import asyncio
@@ -597,8 +597,8 @@ import hashlib
 import json
 from uuid import UUID
 
-from cubebox.cache import get_redis  # 复用 streaming 已建立的 Redis client（M6 新增的 thin accessor）
-from cubebox.parsers.schema import ParseOptions
+from cubeplex.cache import get_redis  # 复用 streaming 已建立的 Redis client（M6 新增的 thin accessor）
+from cubeplex.parsers.schema import ParseOptions
 
 DEDUP_TTL_SECONDS = 6 * 3600       # 6 小时不活跃自动过期
 KEY_PREFIX = "parsers:dedup:v1:"
@@ -713,7 +713,7 @@ async def convert_via_docling(content: bytes, mime: str, options):
 - **Port**：默认 `5001`
 - **环境变量**：`DOCLING_SERVE_API_KEY`（可选）
 - **资源建议**：2 CPU / 4 GB RAM 起步；GPU 镜像 (`docling-serve-cu128`) 用户自换
-- **许可**：Apache-2.0，与 cubebox CE 可共发布
+- **许可**：Apache-2.0，与 cubeplex CE 可共发布
 
 ### 9.2 Backend 配置
 
@@ -791,18 +791,18 @@ Unit 测试仅覆盖纯逻辑层（不替代 e2e）：
 
 ### 10.1 新增文件
 
-- `backend/cubebox/parsers/__init__.py`
-- `backend/cubebox/parsers/protocols.py`（`FileParser`）
-- `backend/cubebox/parsers/schema.py`（`FileReadOutput` / `ParseOptions` / dataclasses）
-- `backend/cubebox/parsers/registry.py`（discover + dispatch + resolve）
-- `backend/cubebox/parsers/dedup.py`（Redis-backed hash cache，key 含 ParseOptions 签名）
-- `backend/cubebox/cache/__init__.py`（thin accessor `get_redis()` / `set_redis()`；复用 streaming 已建立的 Redis client）
-- `backend/cubebox/parsers/plugins/__init__.py`
-- `backend/cubebox/parsers/plugins/text.py`
-- `backend/cubebox/parsers/plugins/notebook.py`
-- `backend/cubebox/parsers/plugins/docling.py`
-- `backend/cubebox/parsers/mime.py`（libmagic wrapper + 扩展名 fallback）
-- `backend/cubebox/tools/builtin/file_read.py`（StructuredTool 定义 + description）
+- `backend/cubeplex/parsers/__init__.py`
+- `backend/cubeplex/parsers/protocols.py`（`FileParser`）
+- `backend/cubeplex/parsers/schema.py`（`FileReadOutput` / `ParseOptions` / dataclasses）
+- `backend/cubeplex/parsers/registry.py`（discover + dispatch + resolve）
+- `backend/cubeplex/parsers/dedup.py`（Redis-backed hash cache，key 含 ParseOptions 签名）
+- `backend/cubeplex/cache/__init__.py`（thin accessor `get_redis()` / `set_redis()`；复用 streaming 已建立的 Redis client）
+- `backend/cubeplex/parsers/plugins/__init__.py`
+- `backend/cubeplex/parsers/plugins/text.py`
+- `backend/cubeplex/parsers/plugins/notebook.py`
+- `backend/cubeplex/parsers/plugins/docling.py`
+- `backend/cubeplex/parsers/mime.py`（libmagic wrapper + 扩展名 fallback）
+- `backend/cubeplex/tools/builtin/file_read.py`（StructuredTool 定义 + description）
 - `backend/tests/parsers/test_registry.py`
 - `backend/tests/parsers/test_text_parser.py`
 - `backend/tests/parsers/test_notebook_parser.py`
@@ -812,13 +812,13 @@ Unit 测试仅覆盖纯逻辑层（不替代 e2e）：
 
 ### 10.2 修改文件
 
-- `backend/cubebox/sandbox/base.py` —— 新增 `Sandbox.file_read(...)` 默认实现
-- `backend/cubebox/sandbox/opensandbox.py` —— 继承默认即可，无需 override
-- `backend/cubebox/middleware/sandbox.py` —— `SandboxMiddleware` 注册 `file_read` 工具到 tools 列表
-- `backend/cubebox/config.py` —— **不改**（cubebox 用 dynaconf，无 pydantic Settings 类；配置通过 `config.get(...)` 访问，YAML 是默认值的源）
-- `backend/cubebox/api/app.py` —— lifespan 里在创建 Redis client 后追加一行 `cache.set_redis(redis_client)` 注册到模块级 accessor（保留现有 `app.state.redis` 不动）
+- `backend/cubeplex/sandbox/base.py` —— 新增 `Sandbox.file_read(...)` 默认实现
+- `backend/cubeplex/sandbox/opensandbox.py` —— 继承默认即可，无需 override
+- `backend/cubeplex/middleware/sandbox.py` —— `SandboxMiddleware` 注册 `file_read` 工具到 tools 列表
+- `backend/cubeplex/config.py` —— **不改**（cubeplex 用 dynaconf，无 pydantic Settings 类；配置通过 `config.get(...)` 访问，YAML 是默认值的源）
+- `backend/cubeplex/api/app.py` —— lifespan 里在创建 Redis client 后追加一行 `cache.set_redis(redis_client)` 注册到模块级 accessor（保留现有 `app.state.redis` 不动）
 - `backend/config.yaml` / `config.development.yaml` / `config.test.yaml` —— 加 `parsers:` 节（**不**加 `redis:`：复用现有 `streaming.redis_url`）
-- `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `fakeredis`（dev only，dedup 单测用）；`redis>=5.2.0` 与 `httpx` 已有
+- `backend/pyproject.toml` —— `[project.entry-points."cubeplex.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `fakeredis`（dev only，dedup 单测用）；`redis>=5.2.0` 与 `httpx` 已有
 - `docker-compose.yml` / 部署编排 —— 加 docling-serve service
 - `.github/workflows/ci.yml` —— e2e job 注入 `DOCLING_URL` / `DOCLING_SERVE_API_KEY` secrets；缺失时对应 e2e skip
 
@@ -855,7 +855,7 @@ Unit 测试仅覆盖纯逻辑层（不替代 e2e）：
 - 改 `FileParser.parse` 签名（参数增减 / 返回类型变）
 - 改 kind 的 discriminator 值（"text" → 改名）
 - 改 dataclass 必填字段（`TextOutput.content` 变必选可选）
-- 改 entry_points group 名（`cubebox.parsers` → 别的）
+- 改 entry_points group 名（`cubeplex.parsers` → 别的）
 
 ---
 
@@ -880,4 +880,4 @@ Unit 测试仅覆盖纯逻辑层（不替代 e2e）：
 - [ ] docling-serve `FileSourceRequest` 的确切 JSON schema（multipart vs base64）—— 读 OpenAPI 后确认
 - [ ] Redis dedup TTL（默认 6h）是否需要按 conversation 活跃度自适应延长 —— 上线观察后再调
 - [ ] `UnchangedOutput` 是否应包含首次读取的 metadata 摘要（便于 agent 不回翻历史也能快速引用）—— v1 先不加，等使用反馈
-- [ ] `cubebox.cache` 当前不存在；streaming 通过 `app.state.redis` 直接访问 Redis client。本 spec 加一个模块级 thin accessor 让 dedup（无 app context）也能拿到同一 client。是否要顺带把 streaming 的几处 `app.state.redis` 用法迁到 `cubebox.cache.get_redis()` —— 可选清理，**不在** M6 范围
+- [ ] `cubeplex.cache` 当前不存在；streaming 通过 `app.state.redis` 直接访问 Redis client。本 spec 加一个模块级 thin accessor 让 dedup（无 app context）也能拿到同一 client。是否要顺带把 streaming 的几处 `app.state.redis` 用法迁到 `cubeplex.cache.get_redis()` —— 可选清理，**不在** M6 范围

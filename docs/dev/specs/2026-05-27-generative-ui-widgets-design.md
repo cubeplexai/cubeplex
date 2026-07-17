@@ -9,7 +9,7 @@
 Let the agent render live, interactive HTML/JS widgets inline in the chat
 stream — charts, sliders, diagrams, animations — that assemble themselves
 token-by-token as the model generates them. This is the Claude.ai "artifacts /
-generative UI" experience, adapted for cubebox's web frontend.
+generative UI" experience, adapted for cubeplex's web frontend.
 
 The model calls a new `show_widget` tool whose `widget_code` parameter is an
 HTML fragment. That fragment streams to the browser and renders inside a

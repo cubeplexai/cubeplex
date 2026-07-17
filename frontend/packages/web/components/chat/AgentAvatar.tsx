@@ -1,8 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
-import { createAvatar } from '@dicebear/core'
-import { bottts } from '@dicebear/collection'
+import { Avatar } from '@/components/ui/avatar-resolved'
 
 interface AgentAvatarProps {
   seed: string
@@ -10,15 +8,19 @@ interface AgentAvatarProps {
   className?: string
 }
 
-export function AgentAvatar({ seed, size = 32, className }: AgentAvatarProps) {
-  const svgDataUri = useMemo(() => {
-    const avatar = createAvatar(bottts, {
-      seed,
-      size,
-    })
-    return avatar.toDataUri()
-  }, [seed, size])
+function nearestPreset(size: number): 'sm' | 'default' | 'lg' {
+  if (size <= 24) return 'sm'
+  if (size <= 32) return 'default'
+  return 'lg'
+}
 
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={svgDataUri} alt="" width={size} height={size} className={className} />
+export function AgentAvatar({ seed, size = 32, className }: AgentAvatarProps) {
+  return (
+    <Avatar
+      style="bottts"
+      seed={seed}
+      size={size ? nearestPreset(size) : undefined}
+      className={className}
+    />
+  )
 }

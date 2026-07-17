@@ -1,6 +1,6 @@
 # Frontend streaming-perf — verification trace
 
-Manual perf verification for [PR #188](https://github.com/xfgong/cubebox/pull/188) (branch `feat/frontend-stream-perf`).
+Manual perf verification for [PR #188](https://github.com/xfgong/cubeplex/pull/188) (branch `feat/frontend-stream-perf`).
 
 ## Method
 
@@ -14,8 +14,8 @@ Both targets point at logical clones of the same data:
 
 | Target | Frontend port | Backend port | DB |
 |---|---|---|---|
-| `before` (main, unfixed) | :3000 | :8000 | `cubebox` |
-| `after` (`feat/frontend-stream-perf`) | :3087 | :8087 | `cubebox_feat_frontend_stream_perf` — `pg_dump | psql` clone of `cubebox` |
+| `before` (main, unfixed) | :3000 | :8000 | `cubeplex` |
+| `after` (`feat/frontend-stream-perf`) | :3087 | :8087 | `cubeplex_feat_frontend_stream_perf` — `pg_dump | psql` clone of `cubeplex` |
 
 Conversation under test: `conv-1fwZQ8u3ZDukx3` in workspace `ws-1cmDVQzDJpWuVG`
 (104 prior messages). Prompt: 50-char Chinese summary request.

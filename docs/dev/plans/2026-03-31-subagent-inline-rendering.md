@@ -13,7 +13,7 @@
 ### Task 1: Backend — Rename tool and add name parameter
 
 **Files:**
-- Modify: `backend/cubebox/middleware/subagents.py`
+- Modify: `backend/cubeplex/middleware/subagents.py`
 
 - [ ] **Step 1: Update `_TaskSchema` to `_SubAgentSchema` with `name` field**
 
@@ -110,14 +110,14 @@ return StructuredTool.from_function(
 
 - [ ] **Step 4: Run backend linting and type check**
 
-Run: `cd /home/chris/cubebox/backend && make lint && make type-check`
+Run: `cd /home/chris/cubeplex/backend && make lint && make type-check`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/backend
-git add cubebox/middleware/subagents.py
+cd /home/chris/cubeplex/backend
+git add cubeplex/middleware/subagents.py
 git commit -m "refactor: rename task tool to subagent, add name param, use tool_call_id as agent_id"
 ```
 
@@ -126,11 +126,11 @@ git commit -m "refactor: rename task tool to subagent, add name param, use tool_
 ### Task 2: Backend — Update subagent prompt to reflect new tool name
 
 **Files:**
-- Modify: `backend/cubebox/prompts/subagents.py`
+- Modify: `backend/cubeplex/prompts/subagents.py`
 
 - [ ] **Step 1: Read the current subagent prompt**
 
-Read `backend/cubebox/prompts/subagents.py` fully before editing.
+Read `backend/cubeplex/prompts/subagents.py` fully before editing.
 
 - [ ] **Step 2: Update all references from `task` tool to `subagent` tool**
 
@@ -139,7 +139,7 @@ Replace references to calling `task(...)` with `subagent(name=..., description=.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/prompts/subagents.py
+git add cubeplex/prompts/subagents.py
 git commit -m "docs: update subagent prompt to reflect renamed tool and name parameter"
 ```
 
@@ -148,7 +148,7 @@ git commit -m "docs: update subagent prompt to reflect renamed tool and name par
 ### Task 3: Backend — Update agent_id comment in schemas.py
 
 **Files:**
-- Modify: `backend/cubebox/agents/schemas.py`
+- Modify: `backend/cubeplex/agents/schemas.py`
 
 - [ ] **Step 1: Update the `agent_id` field description**
 
@@ -164,7 +164,7 @@ agent_id: str | None = Field(
 - [ ] **Step 2: Commit**
 
 ```bash
-git add cubebox/agents/schemas.py
+git add cubeplex/agents/schemas.py
 git commit -m "docs: update agent_id field description to match new subagent format"
 ```
 
@@ -182,7 +182,7 @@ git commit -m "docs: update agent_id field description to match new subagent for
 'use client'
 
 import { useEffect } from 'react'
-import { useMessageStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -262,13 +262,13 @@ No behavioral change yet — just plumbing.
 
 - [ ] **Step 3: Run type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/components/chat/MessageList.tsx packages/web/components/chat/AssistantMessage.tsx
 git commit -m "refactor: pass subAgentStreams into AssistantMessage instead of rendering at top level"
 ```
@@ -290,7 +290,7 @@ The card needs to show live output when streaming AND static content from histor
 
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Bot } from 'lucide-react'
-import type { AgentStream } from '@cubebox/core'
+import type { AgentStream } from '@cubeplex/core'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 interface Props {
@@ -472,13 +472,13 @@ In the `AssistantMessage` component body, pass `subAgentStreams` to `ContentBloc
 
 - [ ] **Step 5: Run type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/components/chat/AssistantMessage.tsx packages/web/components/chat/SubAgentCard.tsx
 git commit -m "feat: render subagent output inline within assistant message blocks"
 ```
@@ -505,7 +505,7 @@ export interface AgentEvent {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/core/src/types/events.ts
 git commit -m "docs: update agent_id comment to reflect new subagent format"
 ```
@@ -516,20 +516,20 @@ git commit -m "docs: update agent_id comment to reflect new subagent format"
 
 - [ ] **Step 1: Run backend checks**
 
-Run: `cd /home/chris/cubebox/backend && make check`
+Run: `cd /home/chris/cubeplex/backend && make check`
 Expected: All pass (format, lint, type-check, tests)
 
 - [ ] **Step 2: Run frontend type check**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/frontend && pnpm type-check`
 Expected: PASS
 
 - [ ] **Step 3: Manual smoke test**
 
 Start backend and frontend:
 ```bash
-cd /home/chris/cubebox/backend && python main.py &
-cd /home/chris/cubebox/frontend && pnpm dev &
+cd /home/chris/cubeplex/backend && python main.py &
+cd /home/chris/cubeplex/frontend && pnpm dev &
 ```
 
 Send a message that triggers subagent dispatch (e.g., a research question). Verify:

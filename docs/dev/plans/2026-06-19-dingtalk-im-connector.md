@@ -10,7 +10,7 @@
 
 **Spec:** `docs/dev/specs/2026-06-19-dingtalk-im-connector-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk`
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk`
 **Ports:** 8059 (backend), 3059 (frontend)
 
 ---
@@ -23,14 +23,14 @@
 - [ ] **Step 1: Install the SDK**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv add dingtalk-stream
 ```
 
 - [ ] **Step 2: Verify import works**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run python -c "import dingtalk_stream; print(dingtalk_stream.__version__)"
 ```
 
@@ -39,7 +39,7 @@ Expected: version string, no ImportError.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 git add pyproject.toml uv.lock
 git commit -m "chore: add dingtalk-stream dependency"
 ```
@@ -51,14 +51,14 @@ git commit -m "chore: add dingtalk-stream dependency"
 The core connector class: parses raw Stream events into `InboundEvent`, provides outbound API helpers (send card, update card, send message), and implements `IdentityResolver` + `RejectionNotifier` protocols.
 
 **Files:**
-- Create: `backend/cubebox/im/dingtalk/__init__.py`
-- Create: `backend/cubebox/im/dingtalk/connector.py`
+- Create: `backend/cubeplex/im/dingtalk/__init__.py`
+- Create: `backend/cubeplex/im/dingtalk/connector.py`
 - Test: `backend/tests/unit/im/test_dingtalk_connector.py`
 
 - [ ] **Step 1: Create the package init (empty for now)**
 
 ```python
-# backend/cubebox/im/dingtalk/__init__.py
+# backend/cubeplex/im/dingtalk/__init__.py
 ```
 
 Just create the empty `__init__.py`. Platform registration happens in Task 7.
@@ -71,8 +71,8 @@ Just create the empty `__init__.py`. Platform registration happens in Task 7.
 
 from __future__ import annotations
 
-from cubebox.im.dingtalk.connector import DingtalkConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.dingtalk.connector import DingtalkConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 class TestParseInbound:
@@ -154,7 +154,7 @@ class TestParseInbound:
 - [ ] **Step 3: Run tests to verify they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_connector.py -v --no-cov 2>&1 | tail -10
 ```
 
@@ -163,7 +163,7 @@ Expected: FAIL — `DingtalkConnector` not found.
 - [ ] **Step 4: Implement DingtalkConnector**
 
 ```python
-# backend/cubebox/im/dingtalk/connector.py
+# backend/cubeplex/im/dingtalk/connector.py
 """DingTalk connector: inbound parse + outbound card/message API + identity."""
 
 from __future__ import annotations
@@ -175,8 +175,8 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from cubebox.im.outbound import _FloodSignal
-from cubebox.im.types import (
+from cubeplex.im.outbound import _FloodSignal
+from cubeplex.im.types import (
     DM_SCOPE_KEY,
     InboundEvent,
     make_participant_scope,
@@ -511,7 +511,7 @@ class DingtalkConnector:
 - [ ] **Step 5: Run tests to verify they pass**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_connector.py -v --no-cov 2>&1 | tail -10
 ```
 
@@ -520,8 +520,8 @@ Expected: all PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/__init__.py cubebox/im/dingtalk/connector.py tests/unit/im/test_dingtalk_connector.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/__init__.py cubeplex/im/dingtalk/connector.py tests/unit/im/test_dingtalk_connector.py
 git commit -m "feat(im): add DingtalkConnector — inbound parse + outbound API + identity"
 ```
 
@@ -532,7 +532,7 @@ git commit -m "feat(im): add DingtalkConnector — inbound parse + outbound API 
 Implements the `OpDispatcher` protocol: creates interactive cards, streams markdown content, patches buttons for AskUser/SandboxConfirm, and finalizes with artifacts.
 
 **Files:**
-- Create: `backend/cubebox/im/dingtalk/renderer.py`
+- Create: `backend/cubeplex/im/dingtalk/renderer.py`
 - Test: `backend/tests/unit/im/test_dingtalk_renderer.py`
 
 - [ ] **Step 1: Write unit tests for DingtalkOpDispatcher**
@@ -548,8 +548,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.im.dingtalk.renderer import DingtalkOpDispatcher
-from cubebox.im.types import RenderState
+from cubeplex.im.dingtalk.renderer import DingtalkOpDispatcher
+from cubeplex.im.types import RenderState
 
 
 @pytest.fixture()
@@ -646,7 +646,7 @@ class TestDispatchFinalize:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_renderer.py -v --no-cov 2>&1 | tail -10
 ```
 
@@ -655,7 +655,7 @@ Expected: FAIL — `DingtalkOpDispatcher` not found.
 - [ ] **Step 3: Implement DingtalkOpDispatcher**
 
 ```python
-# backend/cubebox/im/dingtalk/renderer.py
+# backend/cubeplex/im/dingtalk/renderer.py
 """DingTalk outbound renderer — Interactive Card with streaming updates."""
 
 from __future__ import annotations
@@ -665,9 +665,9 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.outbound import note_edit_success, note_flood_strike
-from cubebox.im.dingtalk.connector import DingtalkRateLimitError
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import note_edit_success, note_flood_strike
+from cubeplex.im.dingtalk.connector import DingtalkRateLimitError
+from cubeplex.im.types import RenderState
 
 
 class DingtalkOpDispatcher:
@@ -691,7 +691,7 @@ class DingtalkOpDispatcher:
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
         text = s.card_state.streaming_content or "..."
-        out_track_id = f"cubebox-{s.run_id}-{uuid.uuid4().hex[:8]}"
+        out_track_id = f"cubeplex-{s.run_id}-{uuid.uuid4().hex[:8]}"
 
         ok = await self._connector.create_and_deliver_card(
             card_template_id=self._card_template_id,
@@ -704,7 +704,7 @@ class DingtalkOpDispatcher:
             return True
         s.card_unavailable = True
         await self._connector.reply_markdown(
-            title="cubebox",
+            title="cubeplex",
             text=text,
             open_conversation_id=self._open_conversation_id,
         )
@@ -760,7 +760,7 @@ class DingtalkOpDispatcher:
 
     async def _emergency_pending_input(self, pending: Any) -> None:
         """Fallback: send HITL question as plain markdown when card is unavailable."""
-        text = pending.question or "Please continue in the cubebox web UI."
+        text = pending.question or "Please continue in the cubeplex web UI."
         if pending.choices:
             labels = ", ".join(label for label, _, _ in pending.choices)
             text = f"{text}\n\nOptions: {labels}\n\n_(Please answer in the web UI.)_"
@@ -829,7 +829,7 @@ class DingtalkOpDispatcher:
             )
         elif full_content:
             await self._connector.reply_markdown(
-                title="cubebox",
+                title="cubeplex",
                 text=full_content[:4000],
                 open_conversation_id=self._open_conversation_id,
             )
@@ -838,7 +838,7 @@ class DingtalkOpDispatcher:
     async def emergency_text(self, text: str) -> None:
         try:
             await self._connector.reply_markdown(
-                title="cubebox",
+                title="cubeplex",
                 text=text[:4000],
                 open_conversation_id=self._open_conversation_id,
             )
@@ -852,7 +852,7 @@ class DingtalkOpDispatcher:
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_renderer.py -v --no-cov 2>&1 | tail -10
 ```
 
@@ -861,8 +861,8 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/renderer.py tests/unit/im/test_dingtalk_renderer.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/renderer.py tests/unit/im/test_dingtalk_renderer.py
 git commit -m "feat(im): add DingtalkOpDispatcher — interactive card rendering"
 ```
 
@@ -873,7 +873,7 @@ git commit -m "feat(im): add DingtalkOpDispatcher — interactive card rendering
 Routes interactive card button clicks to `resume_paused_run`, following the same action ID format as Slack.
 
 **Files:**
-- Create: `backend/cubebox/im/dingtalk/interactions.py`
+- Create: `backend/cubeplex/im/dingtalk/interactions.py`
 - Test: `backend/tests/unit/im/test_dingtalk_interactions.py`
 
 - [ ] **Step 1: Write unit test**
@@ -888,24 +888,24 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cubebox.im.dingtalk.interactions import handle_card_action
+from cubeplex.im.dingtalk.interactions import handle_card_action
 
 
 class TestHandleCardAction:
     @pytest.mark.anyio()
     async def test_routes_to_resume(self) -> None:
         callback = {
-            "outTrackId": "cubebox-run_001-abc123",
+            "outTrackId": "cubeplex-run_001-abc123",
             "content": '{"cardActionId":"im:ask_user:run_001:q1234567:answer:yes"}',
         }
         with (
             patch(
-                "cubebox.im.dingtalk.interactions.resolve_full_question_id",
+                "cubeplex.im.dingtalk.interactions.resolve_full_question_id",
                 new_callable=AsyncMock,
                 return_value="q123456789abcdef",
             ),
             patch(
-                "cubebox.im.dingtalk.interactions.resume_paused_run",
+                "cubeplex.im.dingtalk.interactions.resume_paused_run",
                 new_callable=AsyncMock,
             ) as mock_resume,
         ):
@@ -923,11 +923,11 @@ class TestHandleCardAction:
     @pytest.mark.anyio()
     async def test_ignores_non_im_actions(self) -> None:
         callback = {
-            "outTrackId": "cubebox-run_001-abc123",
+            "outTrackId": "cubeplex-run_001-abc123",
             "content": '{"cardActionId":"other:action"}',
         }
         with patch(
-            "cubebox.im.dingtalk.interactions.resume_paused_run",
+            "cubeplex.im.dingtalk.interactions.resume_paused_run",
             new_callable=AsyncMock,
         ) as mock_resume:
             await handle_card_action(callback=callback, run_manager=AsyncMock())
@@ -937,14 +937,14 @@ class TestHandleCardAction:
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_interactions.py -v --no-cov 2>&1 | tail -10
 ```
 
 - [ ] **Step 3: Implement handle_card_action**
 
 ```python
-# backend/cubebox/im/dingtalk/interactions.py
+# backend/cubeplex/im/dingtalk/interactions.py
 """Handle DingTalk interactive card action callbacks (button clicks)."""
 
 from __future__ import annotations
@@ -954,7 +954,7 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.resume import resolve_full_question_id, resume_paused_run
+from cubeplex.im.resume import resolve_full_question_id, resume_paused_run
 
 
 async def handle_card_action(
@@ -1001,15 +1001,15 @@ async def handle_card_action(
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_interactions.py -v --no-cov 2>&1 | tail -10
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/interactions.py tests/unit/im/test_dingtalk_interactions.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/interactions.py tests/unit/im/test_dingtalk_interactions.py
 git commit -m "feat(im): add DingTalk card action handler"
 ```
 
@@ -1020,12 +1020,12 @@ git commit -m "feat(im): add DingTalk card action handler"
 Manages a `dingtalk-stream` client per account. Registers chat message + card action callback handlers.
 
 **Files:**
-- Create: `backend/cubebox/im/dingtalk/gateway.py`
+- Create: `backend/cubeplex/im/dingtalk/gateway.py`
 
 - [ ] **Step 1: Implement DingtalkGateway**
 
 ```python
-# backend/cubebox/im/dingtalk/gateway.py
+# backend/cubeplex/im/dingtalk/gateway.py
 """DingTalk Stream gateway — one long-connection per IM account."""
 
 from __future__ import annotations
@@ -1038,7 +1038,7 @@ import httpx
 import dingtalk_stream
 from loguru import logger
 
-from cubebox.im.dingtalk.connector import DingtalkConnector
+from cubeplex.im.dingtalk.connector import DingtalkConnector
 
 
 class DingtalkGateway:
@@ -1090,7 +1090,7 @@ class DingtalkGateway:
             await self._handle_inbound(raw, account, session_maker, ingest)
 
         async def on_card_action(raw: dict[str, Any]) -> None:
-            from cubebox.im.dingtalk.interactions import handle_card_action
+            from cubeplex.im.dingtalk.interactions import handle_card_action
 
             await handle_card_action(
                 callback=raw,
@@ -1231,7 +1231,7 @@ class DingtalkGateway:
         return self._access_token
 
     async def _register_card_template(self) -> str:
-        """Register the cubebox streaming card template. Returns template ID."""
+        """Register the cubeplex streaming card template. Returns template ID."""
         import httpx
 
         url = "https://api.dingtalk.com/v1.0/card/templates"
@@ -1286,15 +1286,15 @@ Note: The `dingtalk-stream` SDK's exact API surface needs to be verified at impl
 - [ ] **Step 2: Verify mypy passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-uv run mypy cubebox/im/dingtalk/ 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+uv run mypy cubeplex/im/dingtalk/ 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/gateway.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/gateway.py
 git commit -m "feat(im): add DingtalkGateway — Stream mode lifecycle"
 ```
 
@@ -1305,15 +1305,15 @@ git commit -m "feat(im): add DingtalkGateway — Stream mode lifecycle"
 Implements `PlatformConnector` protocol and wires everything together. Registers with the platform registry.
 
 **Files:**
-- Create: `backend/cubebox/im/dingtalk/_platform.py`
-- Modify: `backend/cubebox/im/dingtalk/__init__.py`
-- Modify: `backend/cubebox/im/runtime.py` (line 121–123: add dingtalk import)
-- Modify: `backend/cubebox/services/im_connector.py` (add `compute_runtime` handling for `"stream"`)
+- Create: `backend/cubeplex/im/dingtalk/_platform.py`
+- Modify: `backend/cubeplex/im/dingtalk/__init__.py`
+- Modify: `backend/cubeplex/im/runtime.py` (line 121–123: add dingtalk import)
+- Modify: `backend/cubeplex/services/im_connector.py` (add `compute_runtime` handling for `"stream"`)
 
 - [ ] **Step 1: Implement DingtalkPlatform**
 
 ```python
-# backend/cubebox/im/dingtalk/_platform.py
+# backend/cubeplex/im/dingtalk/_platform.py
 """DingtalkPlatform — PlatformConnector implementation for DingTalk."""
 
 from __future__ import annotations
@@ -1328,7 +1328,7 @@ class DingtalkPlatform:
     """PlatformConnector for DingTalk (Stream mode only)."""
 
     def parse_inbound(self, raw: dict[str, Any]) -> Any:
-        from cubebox.im.dingtalk.connector import DingtalkConnector
+        from cubeplex.im.dingtalk.connector import DingtalkConnector
 
         connector = DingtalkConnector()
         return connector.parse_inbound(raw)
@@ -1336,10 +1336,10 @@ class DingtalkPlatform:
     async def build_tailer(
         self, *, run_id: str, queue_item: Any, account: Any, **kwargs: Any
     ) -> Any:
-        from cubebox.im.dingtalk.connector import DingtalkConnector
-        from cubebox.im.dingtalk.renderer import DingtalkOpDispatcher
-        from cubebox.im.outbound import OutboundRunTailer
-        from cubebox.im.types import RenderState
+        from cubeplex.im.dingtalk.connector import DingtalkConnector
+        from cubeplex.im.dingtalk.renderer import DingtalkOpDispatcher
+        from cubeplex.im.outbound import OutboundRunTailer
+        from cubeplex.im.types import RenderState
 
         app = kwargs["app"]
         gateways: dict[str, Any] = kwargs.get("gateways", {})
@@ -1368,7 +1368,7 @@ class DingtalkPlatform:
 
         cfg = account.config or {}
         state = RenderState(
-            bot_name=cfg.get("bot_app_name") or "cubebox",
+            bot_name=cfg.get("bot_app_name") or "cubeplex",
             run_id=run_id,
             reply_to_id=queue_item.reply_to_id,
             inbound_message_id=queue_item.inbound_message_id,
@@ -1395,8 +1395,8 @@ class DingtalkPlatform:
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 
     async def on_account_enabled(self, account: Any, **kwargs: Any) -> None:
-        from cubebox.im.dingtalk.gateway import DingtalkGateway
-        from cubebox.im.inbound import ingest_inbound_event
+        from cubeplex.im.dingtalk.gateway import DingtalkGateway
+        from cubeplex.im.inbound import ingest_inbound_event
 
         secrets: dict[str, Any] = kwargs.get("secrets", {})
         gateways: dict[str, Any] = kwargs.get("gateways", {})
@@ -1436,22 +1436,22 @@ class DingtalkPlatform:
 - [ ] **Step 2: Update `__init__.py` to register the platform**
 
 ```python
-# backend/cubebox/im/dingtalk/__init__.py
-from cubebox.im.dingtalk._platform import DingtalkPlatform
-from cubebox.im.registry import register_platform
+# backend/cubeplex/im/dingtalk/__init__.py
+from cubeplex.im.dingtalk._platform import DingtalkPlatform
+from cubeplex.im.registry import register_platform
 
 register_platform("dingtalk", DingtalkPlatform())
 ```
 
 - [ ] **Step 3: Add dingtalk import to runtime.py**
 
-In `backend/cubebox/im/runtime.py`, add `import cubebox.im.dingtalk` alongside the other platform imports (after line 123):
+In `backend/cubeplex/im/runtime.py`, add `import cubeplex.im.dingtalk` alongside the other platform imports (after line 123):
 
 ```python
-    import cubebox.im.discord  # noqa: F401
-    import cubebox.im.feishu  # noqa: F401
-    import cubebox.im.slack  # noqa: F401
-    import cubebox.im.dingtalk  # noqa: F401
+    import cubeplex.im.discord  # noqa: F401
+    import cubeplex.im.feishu  # noqa: F401
+    import cubeplex.im.slack  # noqa: F401
+    import cubeplex.im.dingtalk  # noqa: F401
 ```
 
 Also update the `delivery_mode.in_()` filter (lines 262–264 and the identical filter in `_sweep`) to include `"stream"`:
@@ -1464,7 +1464,7 @@ IMConnectorAccount.delivery_mode.in_(
 
 - [ ] **Step 4: Update compute_runtime for "stream" delivery mode**
 
-In `backend/cubebox/services/im_connector.py`, add a `"stream"` branch in `compute_runtime()` (after the `"gateway"` branch around line 53):
+In `backend/cubeplex/services/im_connector.py`, add a `"stream"` branch in `compute_runtime()` (after the `"gateway"` branch around line 53):
 
 ```python
     elif account.delivery_mode in ("gateway", "stream"):
@@ -1474,7 +1474,7 @@ Merge the `"gateway"` and `"stream"` checks since they both use the `gateways` d
 
 - [ ] **Step 5: Update enable route delivery_mode check**
 
-In `backend/cubebox/api/routes/v1/ws_im.py` line 352, update:
+In `backend/cubeplex/api/routes/v1/ws_im.py` line 352, update:
 
 ```python
     if updated.delivery_mode in ("long_connection", "gateway", "stream"):
@@ -1483,15 +1483,15 @@ In `backend/cubebox/api/routes/v1/ws_im.py` line 352, update:
 - [ ] **Step 6: Verify mypy passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-uv run mypy cubebox/im/dingtalk/ cubebox/im/runtime.py cubebox/services/im_connector.py cubebox/api/routes/v1/ws_im.py 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+uv run mypy cubeplex/im/dingtalk/ cubeplex/im/runtime.py cubeplex/services/im_connector.py cubeplex/api/routes/v1/ws_im.py 2>&1 | tail -10
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/_platform.py cubebox/im/dingtalk/__init__.py cubebox/im/runtime.py cubebox/services/im_connector.py cubebox/api/routes/v1/ws_im.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/_platform.py cubeplex/im/dingtalk/__init__.py cubeplex/im/runtime.py cubeplex/services/im_connector.py cubeplex/api/routes/v1/ws_im.py
 git commit -m "feat(im): add DingtalkPlatform + wire into runtime + delivery_mode=stream"
 ```
 
@@ -1502,13 +1502,13 @@ git commit -m "feat(im): add DingtalkPlatform + wire into runtime + delivery_mod
 Adds `connect_dingtalk()` service method, schema, and route dispatch branch.
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/im_connector.py`
-- Modify: `backend/cubebox/services/im_connector.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py`
+- Modify: `backend/cubeplex/api/schemas/im_connector.py`
+- Modify: `backend/cubeplex/services/im_connector.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py`
 
 - [ ] **Step 1: Add ConnectDingtalkAccountIn schema**
 
-In `backend/cubebox/api/schemas/im_connector.py`, add after `ConnectSlackAccountIn`:
+In `backend/cubeplex/api/schemas/im_connector.py`, add after `ConnectSlackAccountIn`:
 
 ```python
 class ConnectDingtalkAccountIn(BaseModel):
@@ -1534,7 +1534,7 @@ ConnectIMAccountIn = Annotated[
 
 - [ ] **Step 2: Add connect_dingtalk service method**
 
-In `backend/cubebox/services/im_connector.py`, add after `connect_slack`:
+In `backend/cubeplex/services/im_connector.py`, add after `connect_slack`:
 
 ```python
     async def connect_dingtalk(
@@ -1638,11 +1638,11 @@ In `backend/cubebox/services/im_connector.py`, add after `connect_slack`:
 
 - [ ] **Step 3: Add route dispatch branch**
 
-In `backend/cubebox/api/routes/v1/ws_im.py`:
+In `backend/cubeplex/api/routes/v1/ws_im.py`:
 
 Add import at top:
 ```python
-from cubebox.api.schemas.im_connector import ConnectDingtalkAccountIn
+from cubeplex.api.schemas.im_connector import ConnectDingtalkAccountIn
 ```
 
 Add `_connect_dingtalk` handler (following the Slack pattern):
@@ -1687,21 +1687,21 @@ Add the `elif` branch in `connect_account`:
 - [ ] **Step 4: Verify mypy passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-uv run mypy cubebox/api/schemas/im_connector.py cubebox/services/im_connector.py cubebox/api/routes/v1/ws_im.py 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+uv run mypy cubeplex/api/schemas/im_connector.py cubeplex/services/im_connector.py cubeplex/api/routes/v1/ws_im.py 2>&1 | tail -10
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/api/schemas/im_connector.py cubebox/services/im_connector.py cubebox/api/routes/v1/ws_im.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/api/schemas/im_connector.py cubeplex/services/im_connector.py cubeplex/api/routes/v1/ws_im.py
 git commit -m "feat(im): add DingTalk connect route + service method"
 ```
 
 ---
 
-## Task 8: Frontend — @cubebox/core schema + platform descriptor
+## Task 8: Frontend — @cubeplex/core schema + platform descriptor
 
 Adds the `ConnectDingtalkAccountIn` type to the core package and creates the frontend platform descriptor.
 
@@ -1714,7 +1714,7 @@ Adds the `ConnectDingtalkAccountIn` type to the core package and creates the fro
 - Modify: `frontend/packages/web/messages/en.json`
 - Modify: `frontend/packages/web/messages/zh.json`
 
-- [ ] **Step 1: Add ConnectDingtalkAccountIn to @cubebox/core**
+- [ ] **Step 1: Add ConnectDingtalkAccountIn to @cubeplex/core**
 
 In `frontend/packages/core/src/api/im.ts`, add:
 
@@ -1865,15 +1865,15 @@ In `frontend/packages/web/messages/zh.json`, add equivalent Chinese translations
 - [ ] **Step 7: Build core + check frontend types**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web tsc --noEmit 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web tsc --noEmit 2>&1 | tail -10
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/frontend
 git add packages/core/src/api/im.ts \
   packages/web/components/im/ImConnectWizard/platforms/dingtalk.ts \
   packages/web/components/im/ImConnectWizard/platforms/types.ts \
@@ -1891,8 +1891,8 @@ git commit -m "feat(im): add DingTalk frontend platform descriptor + core schema
 DingTalk has no slash commands. The bot recognizes the keyword "link" and generates a JWT identity-link URL.
 
 **Files:**
-- Modify: `backend/cubebox/im/dingtalk/connector.py` (add link keyword detection)
-- Modify: `backend/cubebox/im/dingtalk/gateway.py` (check for link keyword before ingest)
+- Modify: `backend/cubeplex/im/dingtalk/connector.py` (add link keyword detection)
+- Modify: `backend/cubeplex/im/dingtalk/gateway.py` (check for link keyword before ingest)
 
 - [ ] **Step 1: Add link keyword detection to connector**
 
@@ -1953,7 +1953,7 @@ Add `_handle_link_command` method to `DingtalkGateway`:
             return
 
         try:
-            from cubebox.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
+            from cubeplex.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
 
             token = sign_link_token(
                 im_user_id=sender_staff_id,
@@ -1977,7 +1977,7 @@ Add `_handle_link_command` method to `DingtalkGateway`:
         )
         await gate_connector.reply_markdown(
             title="Link your account",
-            text=f"Click to bind your cubebox account:\n\n[Link your account]({url})",
+            text=f"Click to bind your cubeplex account:\n\n[Link your account]({url})",
             open_conversation_id=conversation_id,
         )
 ```
@@ -1985,15 +1985,15 @@ Add `_handle_link_command` method to `DingtalkGateway`:
 - [ ] **Step 3: Verify mypy passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-uv run mypy cubebox/im/dingtalk/ 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+uv run mypy cubeplex/im/dingtalk/ 2>&1 | tail -5
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-git add cubebox/im/dingtalk/connector.py cubebox/im/dingtalk/gateway.py
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+git add cubeplex/im/dingtalk/connector.py cubeplex/im/dingtalk/gateway.py
 git commit -m "feat(im): add DingTalk keyword-based link command"
 ```
 
@@ -2006,30 +2006,30 @@ Run the full backend checks before opening a PR.
 - [ ] **Step 1: Run mypy on the full backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 mkdir -p tmp
-uv run mypy cubebox/ 2>&1 | tee tmp/mypy.log | tail -5
+uv run mypy cubeplex/ 2>&1 | tee tmp/mypy.log | tail -5
 ```
 
 - [ ] **Step 2: Run ruff**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
-uv run ruff check cubebox/im/dingtalk/ tests/unit/im/test_dingtalk_*.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
+uv run ruff check cubeplex/im/dingtalk/ tests/unit/im/test_dingtalk_*.py 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Run unit tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/backend
 uv run pytest tests/unit/im/test_dingtalk_*.py -v --no-cov 2>&1 | tee tmp/test.log | tail -15
 ```
 
 - [ ] **Step 4: Run frontend type check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-im-dingtalk/frontend
-pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web tsc --noEmit 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-im-dingtalk/frontend
+pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web tsc --noEmit 2>&1 | tail -5
 ```
 
 - [ ] **Step 5: Fix any issues found, then commit**

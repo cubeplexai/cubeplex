@@ -1,22 +1,12 @@
 import { test, expect } from '@playwright/test'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
+import { registerAndLand } from './_helpers/auth'
 
 test('workspace switching isolates conversation lists', async ({ page }) => {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
+  await registerAndLand(page)
   const firstWsUrl = page.url()
   const firstWsId = firstWsUrl.split('/w/')[1]
 
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Hello in workspace 1')
   await input.press('Enter')
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })

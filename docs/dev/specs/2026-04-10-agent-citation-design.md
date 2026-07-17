@@ -2,7 +2,7 @@
 
 ## Overview
 
-A citation system that allows the cubebox agent to reliably mark inline references in its output, sourced from tool call results. Citations are collected and standardized at the middleware layer, keeping tools and the agent graph decoupled from citation logic.
+A citation system that allows the cubeplex agent to reliably mark inline references in its output, sourced from tool call results. Citations are collected and standardized at the middleware layer, keeping tools and the agent graph decoupled from citation logic.
 
 ## Goals
 
@@ -196,7 +196,7 @@ No code changes required.
 ### File Structure
 
 ```
-cubebox/middleware/
+cubeplex/middleware/
 ├── citations/
 │   ├── __init__.py          # Export CitationMiddleware
 │   ├── middleware.py         # CitationMiddleware class
@@ -246,7 +246,7 @@ No special handling required:
 
 - `ContextVar` is automatically inherited by child coroutines in asyncio
 - Subagent's `_run_subagent` runs in the same event loop
-- CitationMiddleware must be included in subagent's middleware stack — this is done in `create_cubebox_agent` by adding CitationMiddleware before SubAgentMiddleware, and passing it through to subagent creation
+- CitationMiddleware must be included in subagent's middleware stack — this is done in `create_cubeplex_agent` by adding CitationMiddleware before SubAgentMiddleware, and passing it through to subagent creation
 
 The subagent already uses `subagent_event_queue` ContextVar for forwarding SSE events. Citation events follow the same path.
 
@@ -337,7 +337,7 @@ like 【N-M】, you MUST follow these rules:
 
 ### Design Decisions
 
-- Single prompt, not multi-stage (cubebox is a general-purpose agent, not a research pipeline)
+- Single prompt, not multi-stage (cubeplex is a general-purpose agent, not a research pipeline)
 - No evidence tiering — unnecessary complexity for general use
 - No hallucination firewall rules — keep prompt concise for higher LLM compliance
 - Only injected when citation tools are configured
@@ -403,7 +403,7 @@ if buffer:
 
 ### graph.py — Middleware Registration
 
-Add CitationMiddleware to the stack in `create_cubebox_agent()`:
+Add CitationMiddleware to the stack in `create_cubeplex_agent()`:
 
 ```python
 # After TimestampMiddleware, before other middleware
@@ -432,7 +432,7 @@ In `send_message` route, before `astream()`:
 Citation events are pushed from inside `awrap_tool_call` (which runs within the `astream()` loop) to the unified event queue via a new ContextVar:
 
 ```python
-# cubebox/middleware/citations/counter.py
+# cubeplex/middleware/citations/counter.py
 citation_event_queue: ContextVar[asyncio.Queue | None] = ContextVar(
     "citation_event_queue", default=None
 )
@@ -468,15 +468,15 @@ Ensure CitationMiddleware is included when creating subagent middleware stacks.
 
 | File | Change |
 |------|--------|
-| `cubebox/middleware/citations/__init__.py` | New — export CitationMiddleware |
-| `cubebox/middleware/citations/middleware.py` | New — CitationMiddleware class |
-| `cubebox/middleware/citations/counter.py` | New — CitationCounter + ContextVar |
-| `cubebox/middleware/citations/chunker.py` | New — chunk_text() |
-| `cubebox/middleware/citations/config.py` | New — CitationConfig model |
-| `cubebox/prompts/citations.py` | New — CITATION_PROMPT |
-| `cubebox/agents/schemas.py` | Modify — add CitationEvent |
-| `cubebox/agents/graph.py` | Modify — add CitationMiddleware to stack |
-| `cubebox/agents/stream.py` | Modify — use original_content for tool_result SSE |
-| `cubebox/api/routes/v1/conversations.py` | Modify — counter init + stream buffering |
-| `cubebox/middleware/subagents.py` | Modify — pass CitationMiddleware to subagents |
+| `cubeplex/middleware/citations/__init__.py` | New — export CitationMiddleware |
+| `cubeplex/middleware/citations/middleware.py` | New — CitationMiddleware class |
+| `cubeplex/middleware/citations/counter.py` | New — CitationCounter + ContextVar |
+| `cubeplex/middleware/citations/chunker.py` | New — chunk_text() |
+| `cubeplex/middleware/citations/config.py` | New — CitationConfig model |
+| `cubeplex/prompts/citations.py` | New — CITATION_PROMPT |
+| `cubeplex/agents/schemas.py` | Modify — add CitationEvent |
+| `cubeplex/agents/graph.py` | Modify — add CitationMiddleware to stack |
+| `cubeplex/agents/stream.py` | Modify — use original_content for tool_result SSE |
+| `cubeplex/api/routes/v1/conversations.py` | Modify — counter init + stream buffering |
+| `cubeplex/middleware/subagents.py` | Modify — pass CitationMiddleware to subagents |
 | `config.yaml` | Modify — add citation config example |

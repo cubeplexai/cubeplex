@@ -248,7 +248,7 @@ ME="$(gh api user --jq .login)"
 
 # Specific repo (rarely needed; auto-detects from cwd)
 "$SKILL_DIR/scripts/codex-poll.sh" 107 \
-    --repo xfgong/cubebox \
+    --repo xfgong/cubeplex \
     --exclude-author "$ME"
 ```
 

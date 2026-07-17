@@ -1,6 +1,6 @@
-# cubebox 部署手册
+# cubeplex 部署手册
 
-本文是 cubebox 在 Kubernetes 上的完整部署指南：从前置依赖、构建镜像、
+本文是 cubeplex 在 Kubernetes 上的完整部署指南：从前置依赖、构建镜像、
 撰写 `values.local.yaml`、helm 安装，到部署后验证。chart 设计与决策见
 [`docs/dev/specs/2026-06-10-helm-deploy-design.md`](../docs/dev/specs/2026-06-10-helm-deploy-design.md)。
 
@@ -27,7 +27,7 @@
 |---|---|---|
 | Kubernetes | ≥ 1.21 | kubeadm / k3s / 任意 CNCF 一致集群 |
 | Ingress Controller | ingress-nginx 推荐 | chart 的 Ingress `ingressClassName: nginx` |
-| StorageClass | 任意 hostpath / dynamic provisioner | chart 默认创建 `cubebox-work-hostpath`（openebs hostpath，BasePath 可改） |
+| StorageClass | 任意 hostpath / dynamic provisioner | chart 默认创建 `cubeplex-work-hostpath`（openebs hostpath，BasePath 可改） |
 | Docker registry | 任意可写入 + 可被节点 pull | 默认 `192.168.1.101:8050/library`，可改 |
 | Helm | ≥ 3.9 | dep update + install |
 | LLM provider 凭证 | 至少 1 个 | api_key 或 base_url+key，配置详见 §4 |
@@ -47,15 +47,15 @@
 一条 `helm upgrade --install` 部署：
 
 ```
-Namespace: cubebox
+Namespace: cubeplex
 ┌────────────────────────────────────────────────────────────────┐
-│  Ingress (cubebox.local)                                       │
+│  Ingress (cubeplex.local)                                       │
 │    /api/*, /health/* → backend  Service:8000                  │
 │    /*                → frontend Service:3000                  │
 ├────────────────────────────────────────────────────────────────┤
 │  backend Deployment (1 replica)                                │
 │    initContainer: alembic upgrade head (等待 postgres)         │
-│    container:     uvicorn (cubebox.api.app:create_app)         │
+│    container:     uvicorn (cubeplex.api.app:create_app)         │
 │    挂载: ConfigMap (非密钥) + Secret (密钥) → dynaconf 合并    │
 ├────────────────────────────────────────────────────────────────┤
 │  frontend Deployment (1 replica)                               │
@@ -70,7 +70,7 @@ Namespace: cubebox
                                               └─→ LLM Providers (外部)
 ```
 
-**所有 PVC 默认使用 chart 创建的 `cubebox-work-hostpath` StorageClass**，
+**所有 PVC 默认使用 chart 创建的 `cubeplex-work-hostpath` StorageClass**，
 其 BasePath 可在 `values.local.yaml` 改。
 
 ---
@@ -125,9 +125,9 @@ GITHUB_MIRROR= deploy/kubernetes/scripts/build-and-push.sh
 `values.local.yaml` 是 operator 唯一需要写的文件。从模板复制：
 
 ```bash
-cp deploy/kubernetes/charts/cubebox/values.local.yaml.example \
-   deploy/kubernetes/charts/cubebox/values.local.yaml
-$EDITOR deploy/kubernetes/charts/cubebox/values.local.yaml
+cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
+   deploy/kubernetes/charts/cubeplex/values.local.yaml
+$EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```
 
 下面按节解释**每个**字段。
@@ -147,7 +147,7 @@ image:
 ```yaml
 image:
   registry: "harbor.example.com"
-  repository: "cubebox"
+  repository: "cubeplex"
   backend:
     name: "backend"
     tag: "v1.0.0"
@@ -159,9 +159,9 @@ image:
 backend:
   configOverrides:
     api:
-      public_url: "http://cubebox.example.com"
-    public_base_url: "http://cubebox.example.com"
-    frontend_base_url: "http://cubebox.example.com"
+      public_url: "http://cubeplex.example.com"
+    public_base_url: "http://cubeplex.example.com"
+    frontend_base_url: "http://cubeplex.example.com"
     deployment:
       mode: single_tenant       # single_tenant | multi_tenant
     auth:
@@ -172,7 +172,7 @@ backend:
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `api.public_url` | `http://cubebox.local` | 后端给前端 / OAuth 回调用的对外 URL（一定带 schema） |
+| `api.public_url` | `http://cubeplex.local` | 后端给前端 / OAuth 回调用的对外 URL（一定带 schema） |
 | `public_base_url` | 同上 | 后端拼绝对 URL 用 |
 | `frontend_base_url` | 同上 | 后端给浏览器跳转用 |
 | `deployment.mode` | `single_tenant` | 单租户：注册自动加入唯一 org；多租户：每用户独立 org |
@@ -219,7 +219,7 @@ backend:
     llm:
       default_model: "deepseek/deepseek-v4-flash"
       fallback_models:
-        - "cubebox/qwen3.5-plus-thinking"
+        - "cubeplex/qwen3.5-plus-thinking"
       providers:
         # 模式 A：使用 cubepi 内置 preset（最简）
         deepseek:
@@ -227,7 +227,7 @@ backend:
           api_key: "sk-..."
 
         # 模式 B：自定义 base_url + models（私有部署 / 自托管）
-        cubebox:
+        cubeplex:
           base_url: "https://gateway.example.com/v1"
           api_key: "..."
           api: "openai-completions"
@@ -267,7 +267,7 @@ backend:
 
 ### 4.5 Sandbox — 可选
 
-cubebox 的 sandbox 是 agent 工具调用（bash / file_read 等）落地的容器
+cubeplex 的 sandbox 是 agent 工具调用（bash / file_read 等）落地的容器
 运行时。**禁用** sandbox 后 agent 仍可对话，但工具调用会失败。
 
 #### 启用方式
@@ -277,7 +277,7 @@ backend:
   secrets:
     sandbox:
       domain: "39.99.248.80:18080"     # OpenSandbox API 地址（不带 schema）
-      image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531"
+      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
       api_key: "my-secret-api-key-12345"
   sandbox:
     enabled: true            # ★ 显式启用 backend 侧 sandbox 集成
@@ -288,7 +288,7 @@ backend:
 
 | 场景 | 配置 |
 |---|---|
-| 用 chart 自带 OpenSandbox 子 chart | `opensandbox.enabled: true`，`backend.secrets.sandbox.domain` 指向集群内 service（`cubebox-opensandbox-server.cubebox.svc.cluster.local:8090`） |
+| 用 chart 自带 OpenSandbox 子 chart | `opensandbox.enabled: true`，`backend.secrets.sandbox.domain` 指向集群内 service（`cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090`） |
 | 用外部已有 OpenSandbox | `opensandbox.enabled: false`，`backend.sandbox.enabled: true`，`backend.secrets.sandbox.domain` 填外部地址 |
 | 完全禁用 sandbox（仅对话） | `opensandbox.enabled: false`，`backend.sandbox.enabled` 不填（继承 opensandbox.enabled = false） |
 
@@ -321,8 +321,8 @@ backend:
     database:
       host: "external-pg.example.com"
       port: 5432
-      user: cubebox
-      name: cubebox
+      user: cubeplex
+      name: cubeplex
   secrets:
     sandbox: { ... }
     # 把密码也放 secrets：
@@ -338,7 +338,7 @@ backend:
 ingress:
   enabled: true
   className: "nginx"
-  host: "cubebox.example.com"
+  host: "cubeplex.example.com"
   tls:
     enabled: false        # HTTPS 见下文
   annotations:
@@ -357,9 +357,9 @@ ingress:
 backend:
   configOverrides:
     api:
-      public_url: "https://cubebox.example.com"
-    public_base_url: "https://cubebox.example.com"
-    frontend_base_url: "https://cubebox.example.com"
+      public_url: "https://cubeplex.example.com"
+    public_base_url: "https://cubeplex.example.com"
+    frontend_base_url: "https://cubeplex.example.com"
     auth:
       cookie_secure: true       # HTTPS 下可以保留 true
 ```
@@ -369,8 +369,8 @@ backend:
 ```yaml
 storageClass:
   create: true                  # 不需要 chart 创建则 false
-  name: cubebox-work-hostpath
-  basePath: /work/cubebox       # 改成集群节点上的大盘路径
+  name: cubeplex-work-hostpath
+  basePath: /work/cubeplex       # 改成集群节点上的大盘路径
 ```
 
 如果集群已有合用的 StorageClass：
@@ -392,7 +392,7 @@ minio:
 ### 4.9 OpenSandbox 子 chart — 可选
 
 默认 `opensandbox.enabled: true`，会部署 alibaba OpenSandbox umbrella
-（controller + server）到 cubebox 命名空间。其镜像源在
+（controller + server）到 cubeplex 命名空间。其镜像源在
 `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com`，需要节点能拉。
 
 如果只想用外部 sandbox，设置：
@@ -411,11 +411,11 @@ opensandbox:
 deploy/kubernetes/scripts/helm-install.sh
 
 # 等价于
-helm dependency update deploy/kubernetes/charts/cubebox
-helm upgrade --install cubebox deploy/kubernetes/charts/cubebox \
-  --namespace cubebox --create-namespace \
-  -f deploy/kubernetes/charts/cubebox/values.yaml \
-  -f deploy/kubernetes/charts/cubebox/values.local.yaml \
+helm dependency update deploy/kubernetes/charts/cubeplex
+helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
+  --namespace cubeplex --create-namespace \
+  -f deploy/kubernetes/charts/cubeplex/values.yaml \
+  -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -425,9 +425,9 @@ helm upgrade --install cubebox deploy/kubernetes/charts/cubebox \
 ### 卸载
 
 ```bash
-helm uninstall cubebox -n cubebox
+helm uninstall cubeplex -n cubeplex
 # StatefulSet 的 PVC 不会自动删，手动清：
-kubectl delete pvc -n cubebox -l app.kubernetes.io/name=cubebox
+kubectl delete pvc -n cubeplex -l app.kubernetes.io/name=cubeplex
 ```
 
 ---
@@ -437,13 +437,13 @@ kubectl delete pvc -n cubebox -l app.kubernetes.io/name=cubebox
 ### 6.1 Pod 状态
 
 ```bash
-kubectl -n cubebox get pods
+kubectl -n cubeplex get pods
 # 期望：
-#   cubebox-backend-...     1/1  Running
-#   cubebox-frontend-...    1/1  Running
-#   cubebox-postgresql-0    1/1  Running
-#   cubebox-redis-master-0  1/1  Running
-#   cubebox-minio-0         1/1  Running
+#   cubeplex-backend-...     1/1  Running
+#   cubeplex-frontend-...    1/1  Running
+#   cubeplex-postgresql-0    1/1  Running
+#   cubeplex-redis-master-0  1/1  Running
+#   cubeplex-minio-0         1/1  Running
 ```
 
 ### 6.2 Smoke test（部署正确性）
@@ -458,7 +458,7 @@ INGRESS_IP=<节点 IP> deploy/kubernetes/scripts/smoke-test.sh
 ### 6.3 E2E test（端到端含 LLM）
 
 ```bash
-HOST=cubebox.local IP=<节点 IP> PORT=30019 \
+HOST=cubeplex.local IP=<节点 IP> PORT=30019 \
 PROMPT="Say the word hello and nothing else." \
   deploy/kubernetes/scripts/e2e.sh
 ```
@@ -478,8 +478,8 @@ PROMPT='List the contents of /workspace (run `ls -la /workspace` in the sandbox)
 
 ```bash
 # 在 operator 本机
-echo "<节点 IP> cubebox.local" | sudo tee -a /etc/hosts
-# 打开 http://cubebox.local:<ingress NodePort>/
+echo "<节点 IP> cubeplex.local" | sudo tee -a /etc/hosts
+# 打开 http://cubeplex.local:<ingress NodePort>/
 ```
 
 NodePort 一般是 30019（ingress-nginx 默认），可由
@@ -493,14 +493,14 @@ NodePort 一般是 30019（ingress-nginx 默认），可由
 ### 7.1 Backend CrashLoopBackOff
 
 ```bash
-kubectl -n cubebox logs deploy/cubebox-backend -c backend --previous
+kubectl -n cubeplex logs deploy/cubeplex-backend -c backend --previous
 ```
 
 | 错误 | 修法 |
 |---|---|
 | `PermissionError: '/app/logs'` | 应已修；镜像 < `75da36fb` 才会出现 |
-| `CUBEBOX_AUTH__VAULT_KEY is required` | values.local.yaml 缺 `backend.secrets.auth.vault_key` |
-| `Could not connect to 'cubebox-postgresql:5432'` | postgres pod 还没 Ready；通常自愈 |
+| `CUBEPLEX_AUTH__VAULT_KEY is required` | values.local.yaml 缺 `backend.secrets.auth.vault_key` |
+| `Could not connect to 'cubeplex-postgresql:5432'` | postgres pod 还没 Ready；通常自愈 |
 | `Provider 'X' not found` | `default_model: "X/..."` 的 `X` 不在 `providers` 列表 |
 
 ### 7.2 PVC Pending（init-pvc 镜像拉不下来）
@@ -515,7 +515,7 @@ docker pull openebs/linux-utils:3.5.0
 ### 7.3 登录 cookie 拿不到 / 拿到 403
 
 - HTTP 部署必须 `backend.configOverrides.auth.cookie_secure: false`
-- CSRF 403：调 mutating 接口前必须先 GET 任一接口拿 `cubebox_csrf` cookie，并把 cookie 值作为 `X-CSRF-Token` header 回传
+- CSRF 403：调 mutating 接口前必须先 GET 任一接口拿 `cubeplex_csrf` cookie，并把 cookie 值作为 `X-CSRF-Token` header 回传
 
 ### 7.4 Ingress 502
 
@@ -539,7 +539,7 @@ docker pull openebs/linux-utils:3.5.0
 
 ### 7.6 LLM 调用失败 / 返回空
 
-- 看 backend 日志：`kubectl -n cubebox logs deploy/cubebox-backend -c backend -f`
+- 看 backend 日志：`kubectl -n cubeplex logs deploy/cubeplex-backend -c backend -f`
 - 常见原因：api_key 失效、preset 名拼写错误、模型已下线
 - 验证 provider 配置：`curl https://<base_url>/v1/models` 或直接对端
   vendor 的 health endpoint
@@ -557,10 +557,10 @@ image:
   repository: "library"            # registry 二级 namespace
   pullPolicy: "IfNotPresent"
   backend:
-    name: "cubebox-backend"
+    name: "cubeplex-backend"
     tag: ""                         # 必填
   frontend:
-    name: "cubebox-frontend"
+    name: "cubeplex-frontend"
     tag: ""                         # 必填
 
 # Backend
@@ -599,38 +599,38 @@ frontend:
 ingress:
   enabled: true
   className: "nginx"
-  host: "cubebox.local"
+  host: "cubeplex.local"
   tls: { enabled: false }
   annotations: { ... }              # SSE-friendly 默认已包含
 
 # StorageClass
 storageClass:
   create: true
-  name: "cubebox-work-hostpath"
-  basePath: "/work/cubebox"
+  name: "cubeplex-work-hostpath"
+  basePath: "/work/cubeplex"
 
 # 基础设施
 postgres:
   enabled: true
   image: "postgres:16-alpine"
-  auth: { username: "cubebox", database: "cubebox", password: "" }
-  persistence: { storageClass: "cubebox-work-hostpath", size: "8Gi" }
+  auth: { username: "cubeplex", database: "cubeplex", password: "" }
+  persistence: { storageClass: "cubeplex-work-hostpath", size: "8Gi" }
   resources: { ... }
 
 redis:
   enabled: true
   image: "redis:7-alpine"
   auth: { password: "" }
-  persistence: { storageClass: "cubebox-work-hostpath", size: "2Gi" }
+  persistence: { storageClass: "cubeplex-work-hostpath", size: "2Gi" }
   resources: { ... }
 
 minio:
   enabled: true
   image: "minio/minio:..."
   mcImage: "minio/mc:..."
-  auth: { rootUser: "cubebox", rootPassword: "" }
-  defaultBucket: "cubebox"
-  persistence: { storageClass: "cubebox-work-hostpath", size: "20Gi" }
+  auth: { rootUser: "cubeplex", rootPassword: "" }
+  defaultBucket: "cubeplex"
+  persistence: { storageClass: "cubeplex-work-hostpath", size: "20Gi" }
   resources: { ... }
 
 # OpenSandbox 子 chart（alibaba）
@@ -650,9 +650,9 @@ image:
 backend:
   configOverrides:
     api:
-      public_url: "http://cubebox.local"
-    public_base_url: "http://cubebox.local"
-    frontend_base_url: "http://cubebox.local"
+      public_url: "http://cubeplex.local"
+    public_base_url: "http://cubeplex.local"
+    frontend_base_url: "http://cubeplex.local"
     auth:
       cookie_secure: false
   secrets:
@@ -681,4 +681,4 @@ opensandbox:
   enabled: false                    # 不部署内置 OpenSandbox
 ```
 
-完整可执行的示例可参考 `deploy/kubernetes/charts/cubebox/values.local.yaml.example`。
+完整可执行的示例可参考 `deploy/kubernetes/charts/cubeplex/values.local.yaml.example`。

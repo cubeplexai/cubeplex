@@ -1,6 +1,6 @@
 """Phase 1b — Raw HTTP cache validation for alicode (DashScope coding, OpenAI-spec).
 
-This test bypasses cubebox / cubepi / langchain entirely. It sends two identical
+This test bypasses cubeplex / cubepi / langchain entirely. It sends two identical
 prompts directly to `https://coding.dashscope.aliyuncs.com/v1` using the official
 `openai` SDK, then verifies that the second request reports cached_tokens > 0 in
 the usage object.

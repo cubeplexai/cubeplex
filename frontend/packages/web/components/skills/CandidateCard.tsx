@@ -1,7 +1,7 @@
 'use client'
 
 import { Globe, ShieldCheck, ShieldAlert, ShieldOff } from 'lucide-react'
-import type { SkillCandidateOut } from '@cubebox/core'
+import type { SkillCandidateOut } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 

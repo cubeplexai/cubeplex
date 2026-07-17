@@ -7,19 +7,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.exceptions import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.exceptions import (
     CredentialInUseError,
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models import MCPConnectorInstall, MCPCredentialGrant
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
+from cubeplex.models.mcp import MCPConnector, MCPConnectorTemplate, MCPCredentialGrant
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.mcp import (
+    MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
-from cubebox.services.credential import CredentialService
+from cubeplex.services.credential import CredentialService
 
 # All org IDs used across vault tests. Each needs an organizations row so the
 # credentials.org_id FK is satisfied. user-1/user-2 need users rows.
@@ -197,18 +197,30 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
         name=_name("mcp-ref"),
         plaintext="secret",
     )
-    install_repo = MCPConnectorInstallRepository(db_session, org_id="org-vault-mcp-ref")
-    install = await install_repo.add(
-        MCPConnectorInstall(
+    # template_id is NOT NULL (FK); create a minimal global template first.
+    tpl = MCPConnectorTemplate(
+        slug=f"vault-mcp-ref-{uuid7()}",
+        name="Vault MCP Ref Template",
+        description="test",
+        provider="test",
+        server_url="https://mcp-ref",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="org",
+        scope="global",
+    )
+    db_session.add(tpl)
+    await db_session.flush()
+
+    connector_repo = MCPConnectorRepository(db_session, org_id="org-vault-mcp-ref")
+    connector = await connector_repo.add(
+        MCPConnector(
             org_id="org-vault-mcp-ref",
-            workspace_id=None,
-            install_scope="org",
-            template_id=None,
+            template_id=tpl.id,
             name=_name("ins"),
             server_url="https://mcp-ref",
             server_url_hash=_name("mcp-ref-hash"),
             transport="streamable_http",
-            auth_method="static",
             default_credential_policy="org",
             created_by_user_id="user-1",
         )
@@ -217,8 +229,9 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
     await grant_repo.add(
         MCPCredentialGrant(
             org_id="org-vault-mcp-ref",
-            install_id=install.id,
+            connector_id=connector.id,
             grant_scope="org",
+            auth_method="static",
             workspace_id=None,
             user_id=None,
             credential_id=credential_id,

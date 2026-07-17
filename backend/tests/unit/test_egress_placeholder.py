@@ -1,6 +1,6 @@
 import re
 
-from cubebox.sandbox_env.placeholder import (
+from cubeplex.sandbox_env.placeholder import (
     PLACEHOLDER_RE,
     hash_placeholder,
     mint_placeholder,

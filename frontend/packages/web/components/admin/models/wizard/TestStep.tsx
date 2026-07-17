@@ -10,7 +10,7 @@ import {
   type ApiClient,
   type ProbeResult,
   type ProbeStep,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { LivenessRow } from './LivenessRow'
 import { ModelTestCard, type ModelTestState } from './ModelTestCard'

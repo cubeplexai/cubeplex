@@ -1,19 +1,18 @@
 import { test, expect } from '@playwright/test'
+import { completeOnboarding, PASSWORD, uniqueEmail } from './_helpers/auth'
 
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-test('register → auto-login → land in personal workspace', async ({ page }) => {
+// The Playwright backend runs the dev config (password_policy=high, email
+// verification OFF since email.backend=log). So register auto-verifies and the
+// user lands on the onboarding wizard (multi_tenant no longer auto-bootstraps
+// an org/workspace). The password must satisfy the high-strength rules.
+test('register → onboarding wizard → land in personal workspace', async ({ page }) => {
   const email = uniqueEmail()
   await page.goto('/register')
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-  await expect(page.getByRole('heading', { name: 'cubebox' })).toBeVisible()
+  await completeOnboarding(page)
+  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeVisible()
 })
 
 test('login → redirect to workspace; logout → redirect to login', async ({ page, context }) => {
@@ -22,7 +21,7 @@ test('login → redirect to workspace; logout → redirect to login', async ({ p
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\//)
+  await completeOnboarding(page)
 
   await context.clearCookies()
   await page.goto('/login')

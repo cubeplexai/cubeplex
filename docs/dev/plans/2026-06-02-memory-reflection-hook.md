@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an `on_run_end` hook to cubepi that fires once after every agent run completes, then use it in cubebox's `ReflectionMiddleware` to prompt the agent to proactively save memories.
+**Goal:** Add an `on_run_end` hook to cubepi that fires once after every agent run completes, then use it in cubeplex's `ReflectionMiddleware` to prompt the agent to proactively save memories.
 
-**Architecture:** cubepi gains `on_run_end` as a new middleware hook that runs after all turns and tool calls finish, before `AgentEndEvent`. cubebox implements `ReflectionMiddleware` using that hook to inject a reflection `UserMessage`, causing the agent to call `memory_save`/`memory_update` if the turn contained memorable content. The reflection turn is tagged `metadata["is_reflection"]=True` so the frontend can treat it specially later.
+**Architecture:** cubepi gains `on_run_end` as a new middleware hook that runs after all turns and tool calls finish, before `AgentEndEvent`. cubeplex implements `ReflectionMiddleware` using that hook to inject a reflection `UserMessage`, causing the agent to call `memory_save`/`memory_update` if the turn contained memorable content. The reflection turn is tagged `metadata["is_reflection"]=True` so the frontend can treat it specially later.
 
-**Tech Stack:** Python, cubepi middleware system, cubebox FastAPI backend, Alembic (no migrations needed — pure Python changes).
+**Tech Stack:** Python, cubepi middleware system, cubeplex FastAPI backend, Alembic (no migrations needed — pure Python changes).
 
 ---
 
@@ -18,10 +18,10 @@
 - Modify: `cubepi/agent/agent.py` — extract `on_run_end` from `_mw_hooks`, wire through `_run_prompt` / `_run_continuation` / `_run_hitl_resume`
 - Create: `tests/middleware/test_on_run_end.py`
 
-**cubebox repo (`/home/chris/cubebox/backend`):**
-- Create: `cubebox/prompts/reflection.py`
-- Create: `cubebox/middleware/reflection.py`
-- Modify: `cubebox/streams/run_manager.py` — append `ReflectionMiddleware` as entry #12
+**cubeplex repo (`/home/chris/cubeplex/backend`):**
+- Create: `cubeplex/prompts/reflection.py`
+- Create: `cubeplex/middleware/reflection.py`
+- Modify: `cubeplex/streams/run_manager.py` — append `ReflectionMiddleware` as entry #12
 - Create: `tests/unit/test_reflection_middleware.py`
 
 ---
@@ -613,31 +613,31 @@ Save this SHA — it's needed for the pin bump in Task 6.
 
 ---
 
-## Task 6 — cubebox: Bump cubepi pin
+## Task 6 — cubeplex: Bump cubepi pin
 
 **Files:**
-- Modify: `pyproject.toml` (cubebox backend)
+- Modify: `pyproject.toml` (cubeplex backend)
 
 - [ ] **Step 1: Update cubepi dependency to the new commit**
 
 ```bash
-cd /home/chris/cubebox/backend && uv add "cubepi @ git+https://github.com/xfgong/cubepi.git@<SHA-FROM-TASK-5>"
+cd /home/chris/cubeplex/backend && uv add "cubepi @ git+https://github.com/xfgong/cubepi.git@<SHA-FROM-TASK-5>"
 ```
 Replace `<SHA-FROM-TASK-5>` with the actual SHA.
 
 - [ ] **Step 2: Verify the new cubepi is importable with the new hook**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c "from cubepi.middleware.base import Middleware; m = Middleware.__dict__; print('on_run_end' in m)"
+cd /home/chris/cubeplex/backend && uv run python -c "from cubepi.middleware.base import Middleware; m = Middleware.__dict__; print('on_run_end' in m)"
 ```
 Expected: `True`
 
 ---
 
-## Task 7 — cubebox: `REFLECTION_PROMPT`
+## Task 7 — cubeplex: `REFLECTION_PROMPT`
 
 **Files:**
-- Create: `cubebox/prompts/reflection.py`
+- Create: `cubeplex/prompts/reflection.py`
 
 - [ ] **Step 1: Write the prompt file**
 
@@ -658,16 +658,16 @@ REFLECTION_PROMPT: str = (
 - [ ] **Step 2: Verify import**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c "from cubebox.prompts.reflection import REFLECTION_PROMPT; print(len(REFLECTION_PROMPT), 'chars')"
+cd /home/chris/cubeplex/backend && uv run python -c "from cubeplex.prompts.reflection import REFLECTION_PROMPT; print(len(REFLECTION_PROMPT), 'chars')"
 ```
 Expected: prints a non-zero char count.
 
 ---
 
-## Task 8 — cubebox: `ReflectionMiddleware`
+## Task 8 — cubeplex: `ReflectionMiddleware`
 
 **Files:**
-- Create: `cubebox/middleware/reflection.py`
+- Create: `cubeplex/middleware/reflection.py`
 
 - [ ] **Step 1: Write the middleware**
 
@@ -682,7 +682,7 @@ from typing import Any
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Message, TextContent, UserMessage
 
-from cubebox.prompts.reflection import REFLECTION_PROMPT
+from cubeplex.prompts.reflection import REFLECTION_PROMPT
 
 
 class ReflectionMiddleware(Middleware):
@@ -709,16 +709,16 @@ class ReflectionMiddleware(Middleware):
 - [ ] **Step 2: Verify import**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c "from cubebox.middleware.reflection import ReflectionMiddleware; print('ok')"
+cd /home/chris/cubeplex/backend && uv run python -c "from cubeplex.middleware.reflection import ReflectionMiddleware; print('ok')"
 ```
 Expected: `ok`
 
 ---
 
-## Task 9 — cubebox: Wire `ReflectionMiddleware` into run_manager
+## Task 9 — cubeplex: Wire `ReflectionMiddleware` into run_manager
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py`
+- Modify: `cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Append `ReflectionMiddleware` as entry #12**
 
@@ -727,7 +727,7 @@ After the `TodoListMiddleware` block (the `# 11. TodoListMiddleware` comment sec
 ```python
         # 12. ReflectionMiddleware — memory self-review at end of every run
         try:
-            from cubebox.middleware.reflection import ReflectionMiddleware
+            from cubeplex.middleware.reflection import ReflectionMiddleware
 
             cubepi_middleware.append(ReflectionMiddleware())
         except Exception as _exc:
@@ -737,13 +737,13 @@ After the `TodoListMiddleware` block (the `# 11. TodoListMiddleware` comment sec
 - [ ] **Step 2: Verify the import resolves**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run python -c "from cubebox.middleware.reflection import ReflectionMiddleware; print('ok')"
+cd /home/chris/cubeplex/backend && uv run python -c "from cubeplex.middleware.reflection import ReflectionMiddleware; print('ok')"
 ```
 Expected: `ok`
 
 ---
 
-## Task 10 — cubebox: Unit tests for `ReflectionMiddleware`
+## Task 10 — cubeplex: Unit tests for `ReflectionMiddleware`
 
 **Files:**
 - Create: `tests/unit/test_reflection_middleware.py`
@@ -759,8 +759,8 @@ import pytest
 from cubepi.agent.types import AgentContext
 from cubepi.providers.base import UserMessage
 
-from cubebox.middleware.reflection import ReflectionMiddleware
-from cubebox.prompts.reflection import REFLECTION_PROMPT
+from cubeplex.middleware.reflection import ReflectionMiddleware
+from cubeplex.prompts.reflection import REFLECTION_PROMPT
 
 
 def _mk_ctx() -> AgentContext:
@@ -800,31 +800,31 @@ async def test_on_run_end_metadata_is_reflection() -> None:
 - [ ] **Step 2: Run unit tests**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/test_reflection_middleware.py -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/test_reflection_middleware.py -v
 ```
 Expected: all 3 tests pass.
 
 - [ ] **Step 3: Run full unit suite**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run pytest tests/unit/ -v
+cd /home/chris/cubeplex/backend && uv run pytest tests/unit/ -v
 ```
 Expected: no regressions.
 
 ---
 
-## Task 11 — cubebox: Commit
+## Task 11 — cubeplex: Commit
 
 - [ ] **Step 1: Run mypy on changed files**
 
 ```bash
-cd /home/chris/cubebox/backend && uv run mypy cubebox/prompts/reflection.py cubebox/middleware/reflection.py cubebox/streams/run_manager.py
+cd /home/chris/cubeplex/backend && uv run mypy cubeplex/prompts/reflection.py cubeplex/middleware/reflection.py cubeplex/streams/run_manager.py
 ```
 Expected: no errors.
 
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/backend && git add cubebox/prompts/reflection.py cubebox/middleware/reflection.py cubebox/streams/run_manager.py tests/unit/test_reflection_middleware.py pyproject.toml uv.lock
+cd /home/chris/cubeplex/backend && git add cubeplex/prompts/reflection.py cubeplex/middleware/reflection.py cubeplex/streams/run_manager.py tests/unit/test_reflection_middleware.py pyproject.toml uv.lock
 git commit -m "feat(memory): add ReflectionMiddleware — end-of-run memory self-review via cubepi on_run_end hook"
 ```

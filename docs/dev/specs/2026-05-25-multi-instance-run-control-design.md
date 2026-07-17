@@ -26,7 +26,7 @@ today; `steer` (shipped in #132) inherits it.
 ## What is already multi-instance-safe (do NOT change)
 
 - **Run state** lives in Redis: active-run key, run-events Stream
-  (`cubebox/streams/run_events.py` — `create_run`, `get_active_run`,
+  (`cubeplex/streams/run_events.py` — `create_run`, `get_active_run`,
   `append_run_event`, `read_run_events_after`).
 - **SSE read path** (`_build_run_streaming_response` in
   `api/routes/v1/conversations.py`) replays + tails the Redis Stream, so **any**
@@ -190,7 +190,7 @@ Proposed response shape (generalizes today's `{steered, run_id}`):
 **Frontend impact (steer):** the optimistic bubble currently rolls back when
 `steered === false`. New rule: keep the bubble for `steered` **and**
 `published`; roll back only for `no_active_run`. (`messageStore.steer` +
-`SteerRunResponse` in `@cubebox/core`.)
+`SteerRunResponse` in `@cubeplex/core`.)
 
 ### Cross-instance cancel ack (Option B mechanics)
 
@@ -471,9 +471,9 @@ B2's targeted delivery removes it.
      `published` (B ack timeout) fall back to the active-run poll / retry-on-409
      before resending. This is exactly the signal Option B provides.
 
-   *Migration.* Single repo, frontend + backend land together; cubebox hasn't
+   *Migration.* Single repo, frontend + backend land together; cubeplex hasn't
    shipped publicly, so cut the booleans (`cancelled` / `steered`) over cleanly
    to `status` — no back-compat shim. Touch points: backend `cancel_active_run`
-   + `steer_active_run`; `@cubebox/core` `CancelRunResponse` / `SteerRunResponse`
+   + `steer_active_run`; `@cubeplex/core` `CancelRunResponse` / `SteerRunResponse`
    types + `cancelStream` / `steer` store actions (the steer rollback rule and
    the cancel resend-gating above).

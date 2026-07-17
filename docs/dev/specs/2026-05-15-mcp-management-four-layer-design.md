@@ -64,7 +64,7 @@ credential、admin distribution 继续叠加时会变得更难维护。
   credential，以及 workspace-local install。
 - Workspace member 只能管理自己的 user credential grant。
 
-不推荐完全收紧成 "只有 org admin 安装"，因为 cubebox 的 workspace 是独立协作单元，
+不推荐完全收紧成 "只有 org admin 安装"，因为 cubeplex 的 workspace 是独立协作单元，
 workspace-local connector 是合理能力。
 
 也不推荐完全放开成 "每个成员都能安装自己的 connector"，因为那会引入 personal
@@ -199,7 +199,7 @@ Rules:
 - Grant is not workspace enablement.
 - Static token and OAuth token are both grants.
 - One install can have many user grants.
-- `auth_method=none` does not create a grant; runtime signs cubebox identity token.
+- `auth_method=none` does not create a grant; runtime signs cubeplex identity token.
 
 ## Functional State Composition
 
@@ -377,7 +377,7 @@ Outcome:
 1. Admin or workspace admin installs a no-auth template such as Microsoft Learn.
 2. Install uses `auth_method=none` and `auth_status=not_required`.
 3. Workspace state uses `credential_policy=none`.
-4. Runtime signs a short-lived cubebox identity token for the MCP server when needed.
+4. Runtime signs a short-lived cubeplex identity token for the MCP server when needed.
 5. No `CredentialGrant` is created.
 
 Outcome:

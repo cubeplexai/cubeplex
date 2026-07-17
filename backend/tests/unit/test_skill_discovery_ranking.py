@@ -1,5 +1,5 @@
-from cubebox.skills.discovery import rank_candidates
-from cubebox.skills.sources.base import SkillCandidate, TrustTier
+from cubeplex.skills.discovery import rank_candidates
+from cubeplex.skills.sources.base import SkillCandidate, TrustTier
 
 
 def _c(

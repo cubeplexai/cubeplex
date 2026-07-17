@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cubebox.config import config as settings
-from cubebox.seeders.provider_seeder import resolve_provider_config
+from cubeplex.config import config as settings
+from cubeplex.seeders.provider_seeder import resolve_provider_config
 
 _SNAPSHOT = Path(__file__).parent / "llm" / "catalog" / "data" / "flat_providers_snapshot.yaml"
 

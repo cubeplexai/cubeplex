@@ -31,7 +31,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
 
-from cubebox.middleware.timestamps import TimestampMiddleware, _turn_started_at
+from cubeplex.middleware.timestamps import TimestampMiddleware, _turn_started_at
 
 # ---------------------------------------------------------------------------
 # Helpers

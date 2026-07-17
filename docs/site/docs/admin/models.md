@@ -5,9 +5,14 @@ title: Model Management
 
 # Model Management
 
-CubeBox connects to LLM providers through API keys you configure at the organization level. Once a provider is set up and its models are enabled, workspace members can select those models in their conversations.
+CubePlex connects to LLM providers through API keys you configure at the organization level. Once a provider is set up and its models are enabled, workspace members can select those models in their conversations.
 
 All model management happens at **Admin > Models** (`/admin/models`).
+
+:::info 📸 Screenshot placeholder
+**Capture:** The Admin > Models page showing the list of configured providers with their logos and connection/test status, and the models each provider exposes.
+**Asset:** `/img/admin/models-providers.png`
+:::
 
 ## Providers
 
@@ -20,7 +25,7 @@ A provider represents an LLM API endpoint. Each provider has:
 
 ### Add a provider from a preset
 
-CubeBox ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
+CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
 
 1. Go to **Admin > Models**.
 2. Click **Add Provider**.
@@ -41,7 +46,7 @@ Any service that exposes an OpenAI-compatible chat completions endpoint can be a
 
 ### Test provider connectivity
 
-After adding a provider, click **Test Connection** to verify that CubeBox can reach the endpoint and authenticate. The test sends a lightweight request and reports success or failure with details.
+After adding a provider, click **Test Connection** to verify that CubePlex can reach the endpoint and authenticate. The test sends a lightweight request and reports success or failure with details.
 
 ## Models
 
@@ -51,11 +56,11 @@ Each provider exposes one or more models. After adding a provider, its available
 
 You can configure the following for each model:
 
-| Setting | Description |
-|---|---|
-| **Reasoning mode** | How the model handles extended thinking. Options vary by model: binary on/off, budget (token budget), effort level, or enum selection. |
-| **Modalities** | Input/output capabilities — text, vision, tool use, etc. |
-| **Cost rates** | Input and output token costs, used for the [Cost Tracking](./cost-tracking.md) dashboard. |
+| Setting                  | Description                                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reasoning capability** | How CubePlex maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format.                                   |
+| **Modalities**           | Input/output capabilities — text, vision, tool use, etc.                                                                                       |
+| **Cost rates**           | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
 
 ### How models reach workspaces
 
@@ -75,4 +80,39 @@ If you want to stop offering a specific model to your team, disable it in the mo
 
 ### Add a self-hosted or proxy endpoint
 
-For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubeBox backend server.
+For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubePlex backend server.
+
+### Configure reasoning for a custom endpoint
+
+CubePlex stores one standard reasoning control for each conversation:
+
+| Field     | Values                                       |
+| --------- | -------------------------------------------- |
+| `mode`    | `off` or `on`                                |
+| `effort`  | `minimal`, `low`, `medium`, `high`, or `max` |
+| `summary` | `none`, `auto`, `detailed`, or `summarized`  |
+
+Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages already translate that standard shape into each API's expected payload. For a custom or proxy endpoint, add a capability descriptor that tells CubePlex which fields to write:
+
+```json
+{
+  "reasoning": {
+    "mode_payloads": {
+      "off": { "extra_body": { "thinking": "disabled" } },
+      "on": { "extra_body": { "thinking": "enabled" } }
+    },
+    "effort_path": "reasoning_effort",
+    "effort_values": {
+      "minimal": "minimal",
+      "low": "low",
+      "medium": "medium",
+      "high": "high",
+      "max": "max"
+    },
+    "apply_effort_when_off": false,
+    "unsupported_mode_policy": "skip"
+  }
+}
+```
+
+Use `effort_path: "reasoning.effort"` for Responses-style nested payloads, or put provider-specific fields under `extra_body` for OpenAI-compatible gateways such as LiteLLM. If a model only supports reasoning on/off, omit `effort_path` and `effort_values`.

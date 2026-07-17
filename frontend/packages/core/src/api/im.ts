@@ -59,7 +59,20 @@ export interface ConnectDingtalkAccountIn {
   platform: 'dingtalk'
   app_key: string
   app_secret: string
+  bot_name?: string
+  bot_avatar_url?: string
   acting_user_id?: string
+}
+
+export interface DingtalkAppInfo {
+  agent_id: number
+  name: string
+  icon_url: string
+  desc: string
+}
+
+export interface DingtalkAppsOut {
+  apps: DingtalkAppInfo[]
 }
 
 export interface ConnectTeamsAccountIn {
@@ -95,6 +108,20 @@ export async function wsConnectImAccount(
   return (await res.json()) as ImAccount
 }
 
+export async function wsListDingtalkApps(
+  client: ApiClient,
+  wsId: string,
+  appKey: string,
+  appSecret: string,
+): Promise<DingtalkAppsOut> {
+  const res = await client.post(`/api/v1/ws/${wsId}/im/dingtalk/apps`, {
+    app_key: appKey,
+    app_secret: appSecret,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as DingtalkAppsOut
+}
+
 export async function wsDeleteImAccount(
   client: ApiClient,
   wsId: string,
@@ -122,6 +149,38 @@ export async function wsEnableImAccount(
   const res = await client.post(`/api/v1/ws/${wsId}/im/accounts/${accountId}/enable`, {})
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as ImAccount
+}
+
+// ── Bot settings (account-level routing + topic mode) ────────────────────────
+
+export type ImRoutingMode = 'isolated' | 'shared'
+export type ImTopicMode = 'topic' | 'flat'
+
+export interface ImBotSettings {
+  routing_mode: ImRoutingMode
+  topic_mode: ImTopicMode
+  sandbox_mode: string | null
+}
+
+export async function wsGetImBotSettings(
+  client: ApiClient,
+  wsId: string,
+  accountId: string,
+): Promise<ImBotSettings> {
+  const res = await client.get(`/api/v1/ws/${wsId}/im/accounts/${accountId}/settings`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImBotSettings
+}
+
+export async function wsUpdateImBotSettings(
+  client: ApiClient,
+  wsId: string,
+  accountId: string,
+  body: ImBotSettings,
+): Promise<ImBotSettings> {
+  const res = await client.put(`/api/v1/ws/${wsId}/im/accounts/${accountId}/settings`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImBotSettings
 }
 
 // ── Admin scope ──────────────────────────────────────────────────────────────

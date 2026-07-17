@@ -32,7 +32,7 @@ spec:
         - "--listening-ip=192.168.1.208"
         - "--relay-ip=192.168.1.208"
         - "--external-ip=192.168.1.208"
-        - "--realm=cubebox"
+        - "--realm=cubeplex"
         - "--fingerprint"
         - "--lt-cred-mech"
         - "--user=neko:neko"

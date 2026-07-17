@@ -1,4 +1,4 @@
-# CubeBox User Documentation Site — Design Spec
+# CubePlex User Documentation Site — Design Spec
 
 **Date**: 2026-06-10
 **Status**: Approved
@@ -7,7 +7,7 @@
 
 ## Goal
 
-Create a standalone documentation site for CubeBox end-users (both self-hosted
+Create a standalone documentation site for CubePlex end-users (both self-hosted
 and SaaS), covering the full product from onboarding to administration.
 
 ## Decisions
@@ -16,7 +16,7 @@ and SaaS), covering the full product from onboarding to administration.
 |---|---|
 | Target audience | Self-hosted + SaaS users; deployment-mode differences marked inline |
 | Framework | Docusaurus 3.10, forked from cubepi `website/` |
-| Location | `docs/site/` within the cubebox repo |
+| Location | `docs/site/` within the cubeplex repo |
 | Language | English primary; i18n skeleton for `zh-Hans` (translation is a follow-up) |
 | First-version scope | 24 docs across 7 sections |
 | Homepage | Hero + FeatureGrid (6 tiles) |
@@ -53,7 +53,7 @@ and SaaS), covering the full product from onboarding to administration.
 
 ```
 docs/
-├── intro.mdx                          # Product intro — what is CubeBox, capability overview
+├── intro.mdx                          # Product intro — what is CubePlex, capability overview
 ├── getting-started/
 │   ├── quick-start.md                 # Register/login → create workspace → first conversation
 │   ├── core-concepts.md               # Key concepts: Organization, Workspace, Agent, Conversation, Artifact
@@ -173,7 +173,7 @@ const sidebars = {
 
 ### Hero
 
-- **Title**: CubeBox
+- **Title**: CubePlex
 - **Tagline**: "Your AI agent workspace — chat, automate, extend"
 - **CTA buttons**: Get Started → `/getting-started/quick-start`, GitHub → repo URL
 
@@ -196,7 +196,7 @@ Where the UX differs between single-tenant (self-hosted) and multi-tenant
 ```mdx
 <Tabs groupId="deploy-mode">
   <TabItem value="cloud" label="Cloud">
-    Sign up at cubebox.ai. Your organization is created automatically.
+    Sign up at cubeplex.ai. Your organization is created automatically.
   </TabItem>
   <TabItem value="self-hosted" label="Self-hosted">
     The first user to register creates the organization and becomes its owner.

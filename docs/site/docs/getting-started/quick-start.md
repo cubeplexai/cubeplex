@@ -15,16 +15,18 @@ Get from zero to your first AI conversation in a few minutes.
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="Cloud">
 
-1. Go to [cubebox.ai](https://cubebox.ai) and click **Sign up**.
+1. Go to [cubeplex.ai](https://cubeplex.ai) and click **Sign up**.
 2. Enter your email and password (or use a social login).
-3. Your personal organization and default workspace are created automatically.
+3. If your instance has email verification enabled, enter the one-time code sent to your inbox to confirm your address.
+4. Finish the **onboarding** wizard: name your organization, choose a slug, and create your first workspace.
 
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">
 
-1. Open the CubeBox URL your administrator provided.
-2. If you are the **first user**, you will create the organization and become its owner.
-3. Otherwise, register with an invite link or sign up and wait for an admin to approve your membership.
+1. Open the CubePlex URL your administrator provided.
+2. Register with your email and password. If email verification is enabled, enter the one-time code sent to your inbox.
+3. If you are the **first user**, the onboarding wizard has you name the organization, choose a slug, and create your first workspace. You become the organization's owner.
+4. Otherwise you join the existing organization as a member and create your own personal workspace through the same wizard.
 
 </TabItem>
 </Tabs>
@@ -33,7 +35,7 @@ Get from zero to your first AI conversation in a few minutes.
 
 Before chatting, make sure at least one AI model is available.
 
-- **Org owners/admins**: Go to **Settings > Models** and add a provider (e.g., Anthropic, OpenAI) with your API key. Then enable the models you want your team to use.
+- **Org owners/admins**: Open the **Admin** area and go to **Models > Model Providers**. Add a provider (e.g., Anthropic, OpenAI) with your API key, then enable the models you want your team to use.
 - **Members**: You will see whichever models your admin has enabled. No setup needed.
 
 ## 3. Start a conversation
@@ -43,6 +45,11 @@ Before chatting, make sure at least one AI model is available.
 3. Type a message and press **Send**.
 
 The agent responds with text, and may also produce tool calls, code execution results, or artifacts depending on the model and available tools.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The chat view mid-conversation — show the model selector on the chat input, the attachment icon, and a streaming agent response.
+**Asset:** `/img/getting-started/first-conversation.png`
+:::
 
 ### Try attaching a file
 
@@ -58,7 +65,7 @@ If the agent generates a deliverable, it appears as an **artifact** you can prev
 
 ## 4. Explore further
 
-You now have a working CubeBox setup. Here is where to go next:
+You now have a working CubePlex setup. Here is where to go next:
 
 - [Core Concepts](./core-concepts.md) — Understand conversations, skills, memory, MCP tools, and automation.
 - [Workspace Setup](./workspace-setup.md) — Invite team members and configure workspace settings.

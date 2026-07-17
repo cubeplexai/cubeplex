@@ -20,7 +20,7 @@ You do not need to memorize skill names. The agent matches your intent to instal
 
 Skills come from three places:
 
-- **Built-in (preinstalled)** — Ship with CubeBox and are available by default. Your org admin can disable specific built-in skills if they are not needed.
+- **Built-in (preinstalled)** — Ship with CubePlex and are available by default. Your org admin can disable specific built-in skills if they are not needed.
 - **Uploaded** — Published by your org admin (or by you at the workspace level). These are custom skills tailored to your team's workflows.
 - **Remote registries** — External skill sources (such as [skills.sh](https://skills.sh)) that your admin has connected. You can search these registries and install skills from them directly.
 
@@ -32,9 +32,9 @@ Skills from remote registries carry a trust indicator so you know what you are i
 |---|---|
 | **Official** | Vetted by the registry maintainer or a known publisher. |
 | **Community** | Published by community contributors; not formally vetted. |
-| **Unvetted** | No review has been performed. Inspect the skill content before installing. |
+| **Untrusted** | No review has been performed. Inspect the skill content before installing. |
 
-Built-in and uploaded skills are inherently trusted because they come from CubeBox or your own organization.
+Built-in and uploaded skills are inherently trusted because they come from CubePlex or your own organization.
 
 ## Installation scopes
 
@@ -51,7 +51,7 @@ Every skill contains at least a `SKILL.md` file — a markdown document with fro
 - **Templates** — Starter files, boilerplate, or reference material.
 - **Configuration** — Settings that control the skill's behavior.
 
-When a skill is loaded, its files are mounted at `/.skills/<name>/<version>/` inside the sandbox so the agent can reference them.
+When a skill is loaded, its files are mounted at `/.skills/<name>/<version>/` inside the sandbox so the agent can reference them. The agent reads a skill's instructions by calling the built-in `load_skill` tool with the skill's exact name.
 
 ## Next steps
 

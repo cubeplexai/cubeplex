@@ -4,7 +4,7 @@ import secrets
 
 import pytest
 
-from cubebox.api.middleware.rate_limit import limiter
+from cubeplex.api.middleware.rate_limit import limiter
 from tests.e2e.conftest import _auth_cookie_name
 from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
@@ -28,12 +28,12 @@ async def _seed_csrf(client) -> str:
     """Ensure the CSRF cookie is set on the client and return its value.
 
     After login, a safe GET to `/api/v1/auth/me` is enough to guarantee the
-    `cubebox_csrf` cookie lands in the client jar. The value is then used
+    `cubeplex_csrf` cookie lands in the client jar. The value is then used
     in the `X-CSRF-Token` header on subsequent mutating requests.
     """
     await client.get("/api/v1/auth/me")
     csrf = client.cookies.get(_csrf_cookie_name())
-    assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
+    assert csrf, "cubeplex_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
 
@@ -57,23 +57,20 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     r = await client.post("/api/v1/auth/register", json={"email": b_email, "password": pw})
     assert r.status_code == 201, r.text
 
-    # --- User A: login, create workspace W_A, create conversation -----------
+    # --- User A: login, complete onboarding, create conversation -----------
     r = await client.post("/api/v1/auth/login", data={"username": a_email, "password": pw})
     assert r.status_code in (200, 204), r.text
     assert _auth_cookie_name() in client.cookies
 
     csrf_a = await _seed_csrf(client)
-    # Fetch the org_id from A's auto-created workspace (created by on_after_register).
-    r = await client.get("/api/v1/workspaces")
-    assert r.status_code == 200, r.text
-    a_org_id = r.json()[0]["org_id"]
+    a_slug = f"scope-a-{secrets.token_hex(4)}"
     r = await client.post(
-        "/api/v1/workspaces",
-        json={"name": "A's ws", "org_id": a_org_id},
+        "/api/v1/onboarding",
+        json={"org_name": "A's org", "org_slug": a_slug, "workspace_name": "A's ws"},
         headers={"X-CSRF-Token": csrf_a},
     )
     assert r.status_code == 201, r.text
-    ws_a = r.json()["id"]
+    ws_a = r.json()["workspace_id"]
 
     r = await client.post(
         f"/api/v1/ws/{ws_a}/conversations",
@@ -100,22 +97,19 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     # token and mask a CSRF-rotation bug.
     client.cookies.clear()
 
-    # --- User B: login, create workspace W_B, try to read A's conversation ---
+    # --- User B: login, complete onboarding, try to read A's conversation ---
     r = await client.post("/api/v1/auth/login", data={"username": b_email, "password": pw})
     assert r.status_code in (200, 204), r.text
 
     csrf_b = await _seed_csrf(client)
-    # Fetch the org_id from B's auto-created workspace (created by on_after_register).
-    r = await client.get("/api/v1/workspaces")
-    assert r.status_code == 200, r.text
-    b_org_id = r.json()[0]["org_id"]
+    b_slug = f"scope-b-{secrets.token_hex(4)}"
     r = await client.post(
-        "/api/v1/workspaces",
-        json={"name": "B's ws", "org_id": b_org_id},
+        "/api/v1/onboarding",
+        json={"org_name": "B's org", "org_slug": b_slug, "workspace_name": "B's ws"},
         headers={"X-CSRF-Token": csrf_b},
     )
     assert r.status_code == 201, r.text
-    ws_b = r.json()["id"]
+    ws_b = r.json()["workspace_id"]
 
     # Direct read must 404 — structurally invisible, not a 403 auth error.
     # 404 because ScopedRepository filters by (org_id, workspace_id) at the

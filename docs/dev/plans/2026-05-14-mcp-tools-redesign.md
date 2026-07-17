@@ -6,11 +6,11 @@
 
 **Architecture:** The frontend is split into a `ServerHero` + `ServerErrorBanner` + `OverviewPanel` + `ToolsPanel` tree. `ToolsPanel` is a master-detail (`ToolList` left, `ToolDetail` right) with a Schema / Try-it / JSON view switch. `SchemaView` is a recursive renderer over JSON Schema; `TryItView` is a disabled UI shell — backend invoke endpoint is a follow-up.
 
-> The originally-paired backend bug (empty `input_schema` from `langchain-mcp-adapters`) was fixed upstream by PR #95 (replaced `cubebox/mcp/discovery.py` with `cubepi_admin_discovery.py` using the raw `mcp` SDK). Task 1 below is preserved for historical record but was dropped during the rebase onto main.
+> The originally-paired backend bug (empty `input_schema` from `langchain-mcp-adapters`) was fixed upstream by PR #95 (replaced `cubeplex/mcp/discovery.py` with `cubepi_admin_discovery.py` using the raw `mcp` SDK). Task 1 below is preserved for historical record but was dropped during the rebase onto main.
 
 **Tech Stack:** Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn-ui / next-intl.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/mcp-tools-redesign` (slot 19, backend 8019, frontend 3019).
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/mcp-tools-redesign` (slot 19, backend 8019, frontend 3019).
 
 **Reference spec:** `docs/superpowers/specs/2026-05-14-mcp-tools-redesign-design.md`.
 
@@ -43,7 +43,7 @@
 
 ## Task 1: ~~Backend `serialize_tool` dict-schema fix~~ (obsolete)
 
-Superseded by PR #95 — `cubebox/mcp/discovery.py` and `tests/unit/test_discovery_serialize.py` were both removed from main when admin discovery was ported to `cubebox/mcp/cubepi_admin_discovery.py` (raw `mcp` SDK). Nothing to do on this branch.
+Superseded by PR #95 — `cubeplex/mcp/discovery.py` and `tests/unit/test_discovery_serialize.py` were both removed from main when admin discovery was ported to `cubeplex/mcp/cubepi_admin_discovery.py` (raw `mcp` SDK). Nothing to do on this branch.
 
 The task commit was auto-dropped as empty during the rebase.
 
@@ -995,7 +995,7 @@ git commit -m "feat(mcp): try-it ui shell with disabled run button"
 // frontend/packages/web/components/mcp/detail/tools/ToolList.tsx
 'use client'
 
-import type { MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubeplex/core'
 import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
@@ -1122,7 +1122,7 @@ git commit -m "feat(mcp): tool list with search and selection"
 // frontend/packages/web/components/mcp/detail/tools/ToolDetail.tsx
 'use client'
 
-import type { MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -1203,7 +1203,7 @@ git commit -m "feat(mcp): tool detail panel with schema/try-it/json switch"
 // frontend/packages/web/components/mcp/detail/tools/ToolsPanel.tsx
 'use client'
 
-import type { MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubeplex/core'
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
@@ -1359,7 +1359,7 @@ git commit -m "feat(mcp): error banner with expandable long-error body"
 // frontend/packages/web/components/mcp/detail/ServerHero.tsx
 'use client'
 
-import type { MCPServer } from '@cubebox/core'
+import type { MCPServer } from '@cubeplex/core'
 import { Loader2, RefreshCw, Share2, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -1512,7 +1512,7 @@ git commit -m "feat(mcp): server hero with status pill and action cluster"
 // frontend/packages/web/components/mcp/detail/OverviewPanel.tsx
 'use client'
 
-import type { ApiClient, MCPServer } from '@cubebox/core'
+import type { ApiClient, MCPServer } from '@cubeplex/core'
 import { Check, Copy } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
@@ -1656,7 +1656,7 @@ git commit -m "feat(mcp): overview panel with connection card and copy buttons"
 'use client'
 
 import { useState } from 'react'
-import type { ApiClient, MCPServer } from '@cubebox/core'
+import type { ApiClient, MCPServer } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'

@@ -3,7 +3,7 @@ import json
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     _run_events_key,
     iter_run_events_chunked,
 )

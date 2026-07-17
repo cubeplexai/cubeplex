@@ -48,7 +48,7 @@ scoping; the "skip optional probes" toggle (deferred — not in v1).
 3. **SSE for the Test step.** A new SSE endpoint runs liveness once, then each
    model's probe, emitting an event per result as it completes. This fulfills
    parent spec §4.5 ("test results streamed back as the probe runs (SSE)"),
-   reuses cubebox's SSE infrastructure, and avoids the multi-minute
+   reuses cubeplex's SSE infrastructure, and avoids the multi-minute
    single-request timeout risk of looping JSON calls (worst case ~45–50s per
    model × N sequentially). *(Rev 1 proposed JSON polling; the latency reality
    reverses that.)*
@@ -90,7 +90,7 @@ Configure step; authoritative per-model testing is post-persist on step 4.
 
 ## 5. Backend addition — `usage` probe step
 
-In `cubebox/services/provider_probe.py`:
+In `cubeplex/services/provider_probe.py`:
 - `ProbeStepName` gains `"usage"`; **not** in `_BLOCKING_STEPS`.
 - `probe_usage(...)` runs its **own** minimal stream (rev 1 wrongly said it
   could reuse the reasoning step's drained events — the reasoning step exposes
@@ -185,7 +185,7 @@ Frontend:
   `LivenessRow`, SSE client), `WizardStepRail`.
 - `components/admin/models/ReadinessBadge.tsx` — shared by detail + pickers.
 - `ProviderDetail` / `ModelRow` — readiness dots + re-test (M7).
-- `@cubebox/core` `api/providers.ts` — helpers: `listPresets`,
+- `@cubeplex/core` `api/providers.ts` — helpers: `listPresets`,
   `createProvider`/`updateProvider` (extended bodies), `presaveLiveness`,
   `presaveTest`, `testModel(id, mid)`, `testStream(id, modelIds)` (SSE), `setModelEnabled`;
   types for `ProbeResult`/`ProbeStep`/`ProviderPreset`/readiness.
@@ -210,7 +210,7 @@ Frontend:
    untested providers (deletable). A later polish could auto-prune zero-model
    providers older than N.
 2. **SSE endpoint placement.** A dedicated `…/test/stream` route vs reusing the
-   agent SSE infra wrapper — decide in the plan against how cubebox's existing
+   agent SSE infra wrapper — decide in the plan against how cubeplex's existing
    SSE endpoints are structured.
 3. **Capability editor depth.** v1 = JSON view + reasoning-template popover;
    a full per-field form can follow.

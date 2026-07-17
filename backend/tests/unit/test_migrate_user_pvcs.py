@@ -7,15 +7,15 @@ skip-already-migrated). No cluster I/O.
 
 from unittest.mock import MagicMock
 
-from cubebox.sandbox.manager import (
+from cubeplex.sandbox.manager import (
     SandboxManager,
     build_legacy_user_pvc_name,
     build_user_pvc_name,
 )
-from cubebox.scripts.dev import migrate_user_pvcs
-from cubebox.scripts.dev.migrate_user_pvcs import build_migration_plan, main_async
+from cubeplex.scripts.dev import migrate_user_pvcs
+from cubeplex.scripts.dev.migrate_user_pvcs import build_migration_plan, main_async
 
-_PREFIX = "cubebox-user"
+_PREFIX = "cubeplex-user"
 
 
 def test_user_with_one_workspace_gets_a_rename_action() -> None:
@@ -51,7 +51,8 @@ def test_planned_new_name_matches_what_sandbox_manager_actually_mounts(
     through SandboxManager._build_user_volume directly."""
     manager = SandboxManager(MagicMock(), mock_encryption_backend)
     proposed = build_user_pvc_name(manager._volume_pvc_prefix, "ws-A", "user-1")
-    actual = manager._build_user_volume("ws-A", "user-1").pvc.claim_name  # type: ignore[union-attr]
+    volume = manager._build_user_volume("ws-A", "user", "user-1")
+    actual = volume.pvc.claim_name  # type: ignore[union-attr]
     assert proposed == actual
 
 

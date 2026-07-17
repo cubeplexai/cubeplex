@@ -2,7 +2,7 @@
 
 ## Overview
 
-Redesign the cubebox frontend chat interface to match the emerging dominant UI pattern for AI agent applications (split-screen: chat + tool detail panel), with specific reference to Kimi's interaction design. Key areas: tool call display, task progress, SubAgent visualization, and a right-side tool detail panel.
+Redesign the cubeplex frontend chat interface to match the emerging dominant UI pattern for AI agent applications (split-screen: chat + tool detail panel), with specific reference to Kimi's interaction design. Key areas: tool call display, task progress, SubAgent visualization, and a right-side tool detail panel.
 
 Goals:
 - **Professional, polished UI** — clean visual hierarchy, not prototype-quality
@@ -413,7 +413,7 @@ A **tool execution detail viewer** — not an artifact preview. Opens when user 
 ├──────────────────────────────────────────────┤
 │  $ npm run build                             │
 │  ┌────────────────────────────────────────┐  │
-│  │ > cubebox@1.0.0 build                 │  │
+│  │ > cubeplex@1.0.0 build                 │  │
 │  │ > next build                          │  │
 │  │                                       │  │
 │  │ ✓ Compiled successfully               │  │
@@ -571,18 +571,18 @@ In the chat message flow, `write_todos` tool calls are **invisible**:
 
 Only 2 files need modification:
 
-**1) `backend/cubebox/agents/graph.py`** — Add TodoListMiddleware:
+**1) `backend/cubeplex/agents/graph.py`** — Add TodoListMiddleware:
 
 ```python
 from langchain.agents.middleware import TodoListMiddleware
 
-# In create_cubebox_agent(), add to middleware stack:
+# In create_cubeplex_agent(), add to middleware stack:
 middleware.append(TodoListMiddleware())
 ```
 
 Position in stack: after `SkillsMiddleware`, before `SubAgentMiddleware`. This ensures the todo prompt is injected and the `write_todos` tool is available to both main agent and (if desired) subagents.
 
-**2) `backend/cubebox/agents/stream.py`** — Add `tool_call_id` to tool_result events:
+**2) `backend/cubeplex/agents/stream.py`** — Add `tool_call_id` to tool_result events:
 
 Current `tool_result` event (line 73-86) only includes `tool_name` and `content`. The `tool_call_id` field is available on ToolMessage objects but not extracted.
 
@@ -772,7 +772,7 @@ frontend/packages/core/src/
 ### 8.5 Backend Changes
 
 ```
-backend/cubebox/
+backend/cubeplex/
 ├── agents/graph.py               MODIFY: add TodoListMiddleware() to middleware stack
 └── agents/stream.py              MODIFY: add tool_call_id field to tool_result events
 ```

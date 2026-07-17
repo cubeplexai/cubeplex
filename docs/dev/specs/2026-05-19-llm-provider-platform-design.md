@@ -52,7 +52,7 @@ couldn't be expressed in YAML, and conflated *where the field lives* with
 
 **Scope** unchanged from the rev-1 framing:
 
-1. Adding a model in the cubebox UI is a one-form task — pick preset,
+1. Adding a model in the cubeplex UI is a one-form task — pick preset,
    paste API key, click Test, save.
 2. cubepi owns vendor knowledge as **data**, not branched code.
 3. A wired model is a tested model.
@@ -69,7 +69,7 @@ symptom but leave the same problem standing for every next vendor: more
 schema, more `extra_body` documentation, no in-UI validation. The product
 unit is **Provider Preset** — a declarative bundle of (display name,
 wire protocol, base URL, auth mode, capability descriptor, default model
-list). cubebox sees a catalog of presets; picking one fills the form;
+list). cubeplex sees a catalog of presets; picking one fills the form;
 capability descriptors travel through DB → cubepi → wire; the Test step
 proves the wiring before save.
 
@@ -100,7 +100,7 @@ Three axes — name each slot, keep them in their own home.
 The whole point of "capability on Provider" is that **after Provider is
 constructed, the outward-facing API is uniform**. Callers say
 `StreamOptions(thinking="off")`; the Provider translates per its
-constructor-time capability. No call site, including cubebox, ever
+constructor-time capability. No call site, including cubeplex, ever
 branches on vendor identity.
 
 ```
@@ -396,9 +396,9 @@ class ProviderPreset(BaseModel):
     category: Literal["saas", "oss-framework", "custom"]
     description: str
     # Logo identifier from @lobehub/icons (200+ AI/LLM brand SVGs, CC0
-    # license, used by the cubebox frontend). The catalog only carries
+    # license, used by the cubeplex frontend). The catalog only carries
     # the lookup key (lowercase id like "anthropic", "openai",
-    # "deepseek"); the rendering side belongs to cubebox UI, which
+    # "deepseek"); the rendering side belongs to cubeplex UI, which
     # imports @lobehub/icons and renders <ProviderIcon
     # provider={preset.logo} size={28} type="color" />. None = render
     # a generic fallback (custom-* presets, OSS frameworks without a
@@ -425,8 +425,8 @@ class ModelPreset(BaseModel):
 ```
 
 The preset is the **single source of truth** the admin UI pulls from.
-cubebox stores `preset_slug` on the provider row; the descriptor itself
-is cached in the row (so cubebox doesn't depend on a particular cubepi
+cubeplex stores `preset_slug` on the provider row; the descriptor itself
+is cached in the row (so cubeplex doesn't depend on a particular cubepi
 version being installed to render the form), then refreshable from the
 catalog on demand.
 
@@ -465,7 +465,7 @@ OpenRouter's preset entry is the one with a non-trivial
 qwen-plus, etc. carrying their respective reasoning shape; non-listed
 models inherit the "no reasoning off-switch" provider default.
 
-## 4. cubebox changes
+## 4. cubeplex changes
 
 ### 4.1 Schema
 
@@ -780,7 +780,7 @@ No behavior change for existing callers.
 - Catalog round-trip tested: every preset parses, every wire api is
   one of the three.
 
-### M3 — cubebox: schema + factory + read-only catalog endpoints
+### M3 — cubeplex: schema + factory + read-only catalog endpoints
 
 - Alembic: provider columns + provider `last_liveness_*` + model
   `last_test_*` per §4.1.
@@ -793,7 +793,7 @@ No behavior change for existing callers.
 - Seed migration: existing system providers backfilled with their
   matching preset's capability where slug matches.
 
-### M4 — cubebox: test endpoint + runtime writeback
+### M4 — cubeplex: test endpoint + runtime writeback
 
 - Probe runner per §4.4: phase A (liveness) + phase B (per-model).
 - `POST /admin/providers/liveness` + `/{id}/liveness`,
@@ -804,12 +804,12 @@ No behavior change for existing callers.
 - Runtime writeback (§4.4a): 401/403 → provider liveness fail;
   model_not_found → model unavailable. Best-effort, out-of-band.
 
-### M5 — cubebox: Add Provider wizard UI
+### M5 — cubeplex: Add Provider wizard UI
 
 - Four-step flow per §4.5.
 - Test results streamed back as the probe runs (SSE).
 
-### M6 — cubebox: task model routing + title-gen switch
+### M6 — cubeplex: task model routing + title-gen switch
 
 - `OrgSettings.task_models` schema.
 - `resolve_task_model`.
@@ -832,9 +832,9 @@ No behavior change for existing callers.
    with the older shape should keep loading. pydantic's default
    permissive parsing covers additive change; we should write a
    regression test that pins this.
-2. **Catalog version pinning.** A cubebox install that has a preset
+2. **Catalog version pinning.** A cubeplex install that has a preset
    slug in DB that's been removed from a newer cubepi catalog must
-   still load the provider. Solution: cubebox caches the full
+   still load the provider. Solution: cubeplex caches the full
    capability on the row at creation time. cubepi version skew never
    breaks loading; admin can re-pull preset on demand to update.
 3. **Probe-cost surface.** Each capability probe is 1–3 LLM calls. For
@@ -853,7 +853,7 @@ No behavior change for existing callers.
 5. **Provider logos** — resolved. `ProviderPreset.logo` carries an
    `@lobehub/icons` provider id (e.g. `anthropic`, `openai`,
    `deepseek`). cubepi ships only the string; no SVG assets in cubepi.
-   The cubebox frontend `pnpm add @lobehub/icons` and renders via
+   The cubeplex frontend `pnpm add @lobehub/icons` and renders via
    `<ProviderIcon provider={preset.logo} size={28} type="color" />`.
    When `preset.logo` is null (custom-* presets), the UI shows a
    generic fallback icon. Verify each preset's `logo` id against the

@@ -21,14 +21,14 @@ metadata:
 
 # pdf
 
-Cubebox adaptation of MiniMax `minimax-pdf`.
+Cubeplex adaptation of MiniMax `minimax-pdf`.
 
-## Cubebox Sandbox Path
+## Cubeplex Sandbox Path
 
-Enabled skill files are available at `/.skills/pdf/1.0.0-cubebox.2/`.
+Enabled skill files are available at `/.skills/pdf/1.0.0-cubeplex.2/`.
 
 ```bash
-export SKILL_DIR="/.skills/pdf/1.0.0-cubebox.2"
+export SKILL_DIR="/.skills/pdf/1.0.0-cubeplex.2"
 cd "$SKILL_DIR"
 ```
 

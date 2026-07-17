@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.agents.schemas import AskUserResolvedEvent, SandboxConfirmResolvedEvent
-from cubebox.streams.run_manager import _emit_synthetic_resolved
+from cubeplex.agents.schemas import AskUserResolvedEvent, SandboxConfirmResolvedEvent
+from cubeplex.streams.run_manager import _emit_synthetic_resolved
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,6 +51,6 @@ async def test_dangling_cleanup_raises_on_unknown_kind():
     drop the synthetic event — otherwise the frontend card sticks."""
     publish = AsyncMock()
     pending = MagicMock()
-    pending.payload.kind = "confirm"  # cubepi ConfirmRequest, not used by cubebox today
+    pending.payload.kind = "confirm"  # cubepi ConfirmRequest, not used by cubeplex today
     with pytest.raises(ValueError, match="unhandled HITL kind"):
         await _emit_synthetic_resolved(publish, pending, "q1")

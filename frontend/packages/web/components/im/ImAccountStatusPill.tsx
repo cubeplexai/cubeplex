@@ -3,7 +3,7 @@
 import { AlertTriangle, CheckCircle2, MinusCircle, PauseCircle } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import type { ImConnectionState } from '@cubebox/core'
+import type { ImConnectionState } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 
 interface Props {

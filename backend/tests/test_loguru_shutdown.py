@@ -37,7 +37,7 @@ def unregister(name, rtype):
 resource_tracker.register = register
 resource_tracker.unregister = unregister
 
-from cubebox.utils import log
+from cubeplex.utils import log
 
 log.init(log_path=sys.argv[1], debug=False)
 log.shutdown()
@@ -57,7 +57,7 @@ print(
 def test_loguru_shutdown_releases_enqueue_semaphores(tmp_path: Path) -> None:
     """Loguru enqueue=True handlers must be stopped before a reload child exits."""
     env = os.environ.copy()
-    env.pop("CUBEBOX_TRACE_MP_SEMAPHORES", None)
+    env.pop("CUBEPLEX_TRACE_MP_SEMAPHORES", None)
 
     result = subprocess.run(
         [sys.executable, "-c", _SEMAPHORE_TRACE_SCRIPT, str(tmp_path / "app.log")],

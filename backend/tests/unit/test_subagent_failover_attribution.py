@@ -6,7 +6,7 @@ the subagent middleware must NOT see that callback — otherwise subagent
 chain failovers fire the main-agent publisher and the SSE event is
 misattributed to the top-level conversation.
 
-The fix lives in :func:`cubebox.streams.run_manager._subagent_model_for`:
+The fix lives in :func:`cubeplex.streams.run_manager._subagent_model_for`:
 on ``FallbackBoundModel`` it returns ``dataclasses.replace(model,
 on_failover=None)``; on a plain ``BoundModel`` it passes the model
 through unchanged.
@@ -23,7 +23,7 @@ from typing import Any
 from cubepi.providers.fallback import FallbackBoundModel
 from cubepi.providers.faux import FauxProvider
 
-from cubebox.streams.run_manager import _subagent_model_for
+from cubeplex.streams.run_manager import _subagent_model_for
 
 
 def _make_fallback_with_callback() -> tuple[FallbackBoundModel, Any]:

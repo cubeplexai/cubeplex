@@ -13,16 +13,16 @@ from unittest.mock import AsyncMock
 
 from pydantic import BaseModel
 
-from cubebox.agents.actions.builder import build_capability_tools
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.builder import build_capability_tools
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     ActionNotFound,
     ActionPermissionDenied,
     AgentCapability,
     AgentOperation,
 )
-from cubebox.models.membership import Role
+from cubeplex.models.membership import Role
 
 FAKE_CTX = ScopeContext(
     org_id="org_1",
@@ -96,6 +96,33 @@ class TestMutationGate:
         )
         tools = build_capability_tools(cap, fake_context_factory, allow_mutations=False)
         assert [t.name for t in tools] == ["items_list"]
+
+    def test_always_mutable_capability_bypasses_gate(self) -> None:
+        """``always_mutable=True`` keeps mutating ops even when the run-level
+        ``allow_mutations`` flag is off — used by scheduled_tasks so IM users
+        and schedule fires can still create/cancel tasks."""
+        list_op = AgentOperation(
+            name="list",
+            description="List items",
+            input_model=ListInput,
+            handler=AsyncMock(),
+            mutates=False,
+        )
+        create_op = AgentOperation(
+            name="create",
+            description="Create item",
+            input_model=CreateInput,
+            handler=AsyncMock(),
+            mutates=True,
+        )
+        cap = AgentCapability(
+            name="items",
+            description="Item management",
+            operations=[list_op, create_op],
+            always_mutable=True,
+        )
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=False)
+        assert [t.name for t in tools] == ["items_list", "items_create"]
 
     def test_deny_mutations_all_mutating_returns_empty(self) -> None:
         create_op = AgentOperation(

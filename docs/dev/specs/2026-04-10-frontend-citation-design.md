@@ -281,8 +281,8 @@ export type PanelView =
 | `web/components/panel/WebFetchView.tsx`              | Accept `highlightText`, scroll + highlight                                                        |
 | `web/components/panel/GenericToolView.tsx`           | Accept `highlightText`, scroll + highlight                                                        |
 | **Backend (small)**                                  |                                                                                                   |
-| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` in `additional_kwargs`                                                          |
-| `backend/cubebox/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                                             |
+| `backend/cubeplex/middleware/citations/middleware.py` | Store `citations` in `additional_kwargs`                                                          |
+| `backend/cubeplex/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                                             |
 
 ---
 

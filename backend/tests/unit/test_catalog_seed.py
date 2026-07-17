@@ -9,14 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp.template_seed import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.mcp._constants import server_url_hash
+from cubeplex.mcp.template_seed import (
     CATALOG,
     MCPConnectorTemplateSeedEntry,
     seed_templates,
 )
-from cubebox.models import Credential, MCPConnectorTemplate
-from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+from cubeplex.models import Credential, MCPConnector, MCPConnectorTemplate
+from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
 
 @pytest.fixture
@@ -51,6 +52,88 @@ def _make_get_env(values: dict[str, str]) -> Callable[[str], str | None]:
         return values.get(key)
 
     return _getter
+
+
+def test_intercom_catalog_declares_authorization_server_metadata_url() -> None:
+    intercom = next(entry for entry in CATALOG if entry.slug == "intercom")
+
+    assert intercom.template_metadata["oauth_authorization_server_metadata_url"] == (
+        "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+    )
+
+
+def test_catalog_entries_have_brand_icon_keys() -> None:
+    """Every catalog template ships a stable icon key for frontend static assets."""
+    for entry in CATALOG:
+        icon = entry.template_metadata.get("icon")
+        assert isinstance(icon, str) and icon, f"{entry.slug} missing icon"
+        assert all(c.isalnum() or c in "-_" for c in icon)
+    # Cloudflare family shares one brand glyph.
+    cf = [e for e in CATALOG if e.slug.startswith("cloudflare-")]
+    assert cf
+    assert all(e.template_metadata["icon"] == "cloudflare" for e in cf)
+    assert next(e for e in CATALOG if e.slug == "linear").template_metadata["icon"] == "linear"
+
+
+def test_atlassian_catalog_uses_rovo_mcp_authv2_endpoint() -> None:
+    atlassian = next(entry for entry in CATALOG if entry.slug == "atlassian")
+
+    assert atlassian.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
+    assert atlassian.transport == "streamable_http"
+    assert atlassian.supported_auth_methods == ["oauth", "static"]
+    assert atlassian.static_auth_header_template == "Basic {b64(email:api_token)}"
+    assert "atlassian-rovo-mcp-server" in atlassian.template_metadata["docs_url"]
+
+
+async def test_seed_updates_active_connectors_materialized_from_template(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    old_url = "https://mcp.atlassian.com/v1/sse"
+    old_template = MCPConnectorTemplate(
+        slug="atlassian",
+        name="Atlassian",
+        description="Atlassian MCP server: Jira and Confluence.",
+        provider="Atlassian",
+        server_url=old_url,
+        transport="sse",
+        supported_auth_methods=["oauth", "static"],
+        default_credential_policy="org",
+        oauth_dcr_supported=True,
+        static_auth_header_template="Basic {b64(email:api_token)}",
+        template_metadata={},
+        status="active",
+    )
+    session.add(old_template)
+    await session.flush()
+
+    connector = MCPConnector(
+        org_id="org-1",
+        template_id=old_template.id,
+        name="Atlassian",
+        server_url=old_url,
+        server_url_hash=server_url_hash(old_url),
+        transport="sse",
+        auth_method="oauth",
+        default_credential_policy="org",
+        auth_status="pending",
+        status="active",
+    )
+    session.add(connector)
+    await session.flush()
+    before_updated_at = connector.updated_at
+
+    result = await seed_templates(session, backend, get_env=lambda _k: None)
+
+    assert result.upserted >= 1
+    refreshed_connector = (
+        await session.execute(select(MCPConnector).where(MCPConnector.id == connector.id))
+    ).scalar_one()
+    assert refreshed_connector.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
+    assert refreshed_connector.server_url_hash == server_url_hash(
+        "https://mcp.atlassian.com/v1/mcp/authv2"
+    )
+    assert refreshed_connector.transport == "streamable_http"
+    assert refreshed_connector.updated_at > before_updated_at
 
 
 async def test_seed_with_full_env_writes_templates_and_credentials(
@@ -105,7 +188,7 @@ async def test_seed_skips_static_oauth_connector_when_env_missing(
 ) -> None:
     # Drop only github's secret env so other DCR-less connectors still seed.
     env = _full_env()
-    env.pop("CUBEBOX_MCP_OAUTH__GITHUB__CLIENT_SECRET")
+    env.pop("CUBEPLEX_MCP_OAUTH__GITHUB__CLIENT_SECRET")
 
     result = await seed_templates(session, backend, get_env=_make_get_env(env))
 
@@ -139,6 +222,44 @@ async def test_seed_marks_removed_slugs_as_deprecated(
     assert deprecated_row.status == "deprecated"
 
 
+async def test_seed_leaves_custom_scope_templates_alone(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    """Regression: custom (org/workspace-scoped) templates must survive re-seed.
+
+    Prior to this guard, ``mark_deprecated_for_missing_slugs`` deprecated ANY
+    active row whose slug wasn't in the built-in seed list — including
+    user-created custom connectors — silently deleting them on every restart.
+    """
+    env = _full_env()
+    await seed_templates(session, backend, get_env=_make_get_env(env))
+
+    # Insert a custom org-scoped template directly (bypasses the seed path).
+    custom = MCPConnectorTemplate(
+        slug="custom-my-thing-abcdef",
+        name="my thing",
+        description="",
+        provider="custom",
+        server_url="https://example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        scope="org",
+        org_id="org-abcdef",
+        status="active",
+    )
+    session.add(custom)
+    await session.flush()
+
+    # Re-run seed — the custom row must not be touched.
+    await seed_templates(session, backend, get_env=_make_get_env(env))
+
+    repo = MCPConnectorTemplateRepository(session)
+    row = await repo.get_by_slug("custom-my-thing-abcdef")
+    assert row is not None
+    assert row.status == "active", "custom template must survive re-seed"
+
+
 async def test_seed_is_idempotent(session: AsyncSession, backend: FernetBackend) -> None:
     env = _full_env()
     first = await seed_templates(session, backend, get_env=_make_get_env(env))
@@ -167,7 +288,7 @@ async def test_seed_persists_tool_citation_defaults(
         MCPConnectorTemplateSeedEntry(
             slug="webtools-test",
             name="WebTools Test",
-            provider="Cubebox",
+            provider="Cubeplex",
             description="test entry",
             server_url="http://example.com/mcp",
             transport="streamable_http",
@@ -260,7 +381,7 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
 
 def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
     """Every tool_citation_defaults entry across CATALOG must be a valid CitationConfig."""
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     for entry in CATALOG:
         for tool_name, raw in entry.tool_citation_defaults.items():

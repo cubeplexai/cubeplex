@@ -22,7 +22,15 @@ production:
 
   # Auth (production overrides — secrets MUST come from env)
   auth:
-    jwt_secret: "USE ENV"      # ENV: CUBEBOX_AUTH__JWT_SECRET
-    csrf_secret: "USE ENV"     # ENV: CUBEBOX_AUTH__CSRF_SECRET
+    jwt_secret: "USE ENV"      # ENV: CUBEPLEX_AUTH__JWT_SECRET
+    csrf_secret: "USE ENV"     # ENV: CUBEPLEX_AUTH__CSRF_SECRET
     cookie_secure: true
+    password_policy: "high"
+    email_verification:
+      enabled: "auto"
+      code_length: 6
+      code_ttl_seconds: 600
+      max_attempts: 5
+      resend_cooldown_seconds: 60
+      rate_limit_per_hour: 10
   

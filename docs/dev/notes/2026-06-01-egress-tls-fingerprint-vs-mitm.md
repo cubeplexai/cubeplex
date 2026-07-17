@@ -5,7 +5,7 @@
   isolated A/B/C experiment (see "Correction" below). No platform change made
   yet; current usage relies on a workaround whose cost is documented.
 - **Area:** sandbox egress (`deploy/egress-bundle`), credential vault injection
-  (`cubebox/sandbox_env`), OpenSandbox egress sidecar (mitmproxy).
+  (`cubeplex/sandbox_env`), OpenSandbox egress sidecar (mitmproxy).
 
 ## Symptom
 
@@ -22,7 +22,7 @@ sandbox as `cbxref_` placeholders) bound to hosts `*.x.com`.
   redirects the sandbox's outbound TCP 80/443 into mitmproxy:
   `tcp dport { 80, 443 } redirect to :18081`.
 - mitmproxy MITM-terminates the TLS, `inject.py` swaps each `cbxref_` token in
-  the request headers for the real secret (via the cubebox exchange endpoint),
+  the request headers for the real secret (via the cubeplex exchange endpoint),
   then mitmproxy re-originates the request to the upstream.
 - `twitter-cli` uses `curl_cffi` with `impersonate="chrome133a"` to forge
   Chrome's TLS fingerprint — its usual defense against Twitter bot detection.

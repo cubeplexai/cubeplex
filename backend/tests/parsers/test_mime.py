@@ -1,6 +1,6 @@
 """MIME sniffing helper tests."""
 
-from cubebox.parsers.mime import sniff_mime, sniff_mime_async
+from cubeplex.parsers.mime import sniff_mime, sniff_mime_async
 
 
 def test_sniff_mime_detects_pdf_from_bytes() -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.im.runtime import LEASE_TTL, release_lease, try_acquire_lease
+from cubeplex.im.runtime import LEASE_TTL, release_lease, try_acquire_lease
 
 
 class FakeRedis:

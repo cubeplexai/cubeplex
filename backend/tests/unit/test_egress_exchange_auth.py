@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.sandbox_env.exchange_auth import (
+from cubeplex.sandbox_env.exchange_auth import (
     DevSharedSecretAuthenticator,
     MtlsAuthenticator,
     SidecarIdentity,
@@ -73,7 +73,7 @@ _PEERCERT_REALISTIC: dict = {
         (("countryName", "US"),),
         (("commonName", "sbx-42"),),
     ),
-    "issuer": ((("commonName", "cubebox-egress-ca"),),),
+    "issuer": ((("commonName", "cubeplex-egress-ca"),),),
     "version": 3,
 }
 

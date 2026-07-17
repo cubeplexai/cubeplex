@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { Check, Minus, TriangleAlert, X } from 'lucide-react'
-import type { ProbeResult, ProbeStep } from '@cubebox/core'
+import type { ProbeResult, ProbeStep } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

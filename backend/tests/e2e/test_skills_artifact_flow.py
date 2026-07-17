@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from cubebox.repositories.skill import SkillRepository
+from cubeplex.repositories.skill import SkillRepository
 
 
 @pytest.mark.asyncio

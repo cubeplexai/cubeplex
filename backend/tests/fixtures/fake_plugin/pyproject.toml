@@ -1,26 +1,26 @@
 [project]
 name = "fake-plugin"
 version = "0.0.1"
-description = "Fake cubebox plugin used by Layer 1 contract tests."
+description = "Fake cubeplex plugin used by Layer 1 contract tests."
 requires-python = ">=3.12"
 dependencies = []
 
-[project.entry-points."cubebox.plugin_manifest"]
+[project.entry-points."cubeplex.plugin_manifest"]
 main = "fake_plugin:MANIFEST"
 
-[project.entry-points."cubebox.auth_provider"]
+[project.entry-points."cubeplex.auth_provider"]
 fake = "fake_plugin.auth:FakeAuthProvider"
 
-[project.entry-points."cubebox.permission_checker"]
+[project.entry-points."cubeplex.permission_checker"]
 fake = "fake_plugin.permissions:FakePermissionChecker"
 
-[project.entry-points."cubebox.audit_sink"]
+[project.entry-points."cubeplex.audit_sink"]
 fake = "fake_plugin.audit:FakeAuditSink"
 
-[project.entry-points."cubebox.user_directory_syncer"]
+[project.entry-points."cubeplex.user_directory_syncer"]
 fake = "fake_plugin.directory:FakeUserDirectorySyncer"
 
-[project.entry-points."cubebox.admin_panel_extension"]
+[project.entry-points."cubeplex.admin_panel_extension"]
 fake = "fake_plugin.admin_panel:FakeAdminPanelExtension"
 
 [build-system]

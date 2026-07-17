@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from cubebox.triggers.signature import (
+from cubeplex.triggers.signature import (
     sign,
     timestamp_fresh,
     verify,

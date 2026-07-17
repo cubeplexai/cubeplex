@@ -37,7 +37,7 @@ workspace, by model). The summary response already includes a `by_day`
 breakdown that the page silently discards. CSV export buttons exist per-row
 and at the top.
 
-Backend (`backend/cubebox/api/routes/v1/cost.py`):
+Backend (`backend/cubeplex/api/routes/v1/cost.py`):
 - `GET /cost/summary` → totals + `by_workspace` + `by_model` + `by_day`
   (all single-dimension aggregates)
 - `GET /cost/by-workspace/{ws}` → second-level drill (group_by day | user |
@@ -154,7 +154,7 @@ repository already supports `group_by="user"`; only the route and pydantic
 schema need updating.
 
 ```python
-# backend/cubebox/api/schemas/billing.py
+# backend/cubeplex/api/schemas/billing.py
 class CostSummaryResponse(BaseModel):
     from_date: date
     to_date: date

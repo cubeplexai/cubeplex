@@ -1,21 +1,22 @@
 """E2E migration verification.
 
-These tests run against whatever DB ``cubebox.config`` resolves to. They
+These tests run against whatever DB ``cubeplex.config`` resolves to. They
 are read-only — they only check that the short-public-id baseline migration
 has been applied (tables exist with the expected column shapes).
 
 For the destructive upgrade/downgrade roundtrip verification, see the
 manual procedure documented in plan Task 6 (run alembic against a
-disposable test DB via ``CUBEBOX_DATABASE__NAME=cubebox_p1_test``).
+disposable test DB via ``CUBEPLEX_DATABASE__NAME=cubeplex_p1_test``).
 """
 
 import importlib
+import inspect
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.e2e
 
@@ -144,3 +145,59 @@ def test_migration_slug_rewrite_ref_deepseek_collision() -> None:
     assert _rewrite_ref("Unknown/m-1", name_to_slug) == "Unknown/m-1"
     # Malformed ref (no slash) is left unchanged
     assert _rewrite_ref("no-slash", name_to_slug) == "no-slash"
+
+
+def test_mcp_connector_backfill_migration_preserves_workspace_credential_policy() -> None:
+    """MCP backfill creates connector state before tombstoning workspace installs."""
+    m = _load_migration("7959ed1b3e5c")
+
+    create_state_sql = m.CREATE_WORKSPACE_STATES_SQL  # type: ignore[attr-defined]
+    tombstone_sql = m.TOMBSTONE_WORKSPACE_INSTALLS_SQL  # type: ignore[attr-defined]
+
+    assert "mcp_connectors" in m.BACKFILL_CONNECTORS_SQL  # type: ignore[attr-defined]
+    assert "i.default_credential_policy" in create_state_sql
+    assert "'workspace_install'" in create_state_sql
+    assert "i.workspace_id IS NOT NULL" in create_state_sql
+    assert "install_state = 'uninstalled'" in tombstone_sql
+    assert "workspace_id IS NOT NULL" in tombstone_sql
+
+
+def test_mcp_connector_state_and_grants_are_rekeyed_by_connector_id() -> None:
+    """Connector cleanup must make connector_id the DB-enforced runtime key."""
+    m = _load_migration("bdf4b31f91d2")
+
+    upgrade_consts = [const for const in m.upgrade.__code__.co_consts if isinstance(const, str)]
+    upgrade_text = "\n".join(upgrade_consts)
+
+    assert "mcp_workspace_connector_states" in upgrade_text
+    assert "connector_id" in upgrade_text
+    assert "uq_mcp_workspace_connector_state" in upgrade_text
+    assert "mcp_credential_grants" in upgrade_text
+    assert "uq_mcp_credential_grant_org" in upgrade_text
+    assert "uq_mcp_credential_grant_workspace" in upgrade_text
+    assert "uq_mcp_credential_grant_user" in upgrade_text
+    assert "grant_scope = 'org'" in upgrade_text
+    assert "grant_scope = 'workspace'" in upgrade_text
+    assert "grant_scope = 'user'" in upgrade_text
+
+
+def test_mcp_connector_rekey_migration_drops_stale_tombstone_rows_before_not_null() -> None:
+    """Legacy uninstalled installs can leave state/grant rows with no connector.
+
+    Those rows cannot survive after ``install_id`` is dropped, so the migration
+    must remove them before making ``connector_id`` NOT NULL.
+    """
+    m = _load_migration("bdf4b31f91d2")
+
+    cleanup_sql = m.DROP_STALE_LEGACY_INSTALL_ROWS_SQL  # type: ignore[attr-defined]
+    assert "DELETE FROM mcp_workspace_connector_states" in cleanup_sql
+    assert "DELETE FROM mcp_credential_grants" in cleanup_sql
+    assert "mcp_connector_installs" in cleanup_sql
+    assert "install_state <> 'active'" in cleanup_sql
+
+    upgrade_source = inspect.getsource(m.upgrade)  # type: ignore[attr-defined]
+    cleanup_pos = upgrade_source.index("DROP_STALE_LEGACY_INSTALL_ROWS_SQL")
+    grant_not_null_pos = upgrade_source.index("mcp_credential_grants")
+    state_not_null_pos = upgrade_source.index("mcp_workspace_connector_states")
+    assert cleanup_pos < grant_not_null_pos
+    assert cleanup_pos < state_not_null_pos

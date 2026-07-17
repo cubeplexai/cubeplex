@@ -9,7 +9,7 @@ You can attach files to your messages so the agent can read, analyze, or referen
 
 ## Supported file types
 
-CubeBox classifies attachments into three kinds:
+CubePlex classifies attachments into three kinds:
 
 | Kind | Examples |
 |---|---|
@@ -28,7 +28,7 @@ The exact set of allowed MIME types is configured by your org admin. If you try 
 3. The files appear as chips above the input area while they upload.
 4. Type your message (optional) and press **Enter** to send.
 
-You can attach multiple files to a single message.
+You can attach multiple files to a single message, up to the per-message cap (see [Size and quota limits](#size-and-quota-limits)).
 
 ### Drag and drop
 
@@ -42,7 +42,7 @@ While files are still uploading or staged (before you send the message), click t
 
 When you send a message with attachments, the files are:
 
-1. **Stored** in CubeBox's object store.
+1. **Stored** in CubePlex's object store.
 2. **Injected** into the agent's sandbox at a known path so it can access them with code execution tools.
 3. **Referenced** in the message context so the agent knows what files are available and their types.
 
@@ -53,16 +53,21 @@ For images, the agent can also "see" the image directly through vision-capable m
 Sent attachments appear above the message bubble:
 
 - **Images** display as thumbnails. Click a thumbnail to open a full-size lightbox.
-- **Documents and other files** display as compact chips showing the filename and size. Click to download or preview.
+- **Documents and other files** display as compact chips showing the filename and size. Click a chip to open a preview in the side panel:
+  - PDF, Markdown, plain text, code, JSON, and CSV files render directly.
+  - Word, Excel, and PowerPoint files (`.docx` / `.xlsx` / `.pptx`) render through Microsoft's Office Online viewer. This requires the deployment to have a public URL configured (`api.public_url`); the viewer fetches the document through a short-lived tokenized link.
+  - Audio and video files open with playback controls.
+  - File types that can't be previewed (archives, unknown formats) show a download button instead.
 
 ## Size and quota limits
 
 | Limit | Default |
 |---|---|
 | **Max file size** | 50 MB per file |
+| **Max files per message** | 10 attachments referenced in a single message |
 | **Max per conversation** | 500 MB total across all attachments |
 
-These limits are configurable by the org admin. If you exceed the per-file limit, the upload is rejected. If you exceed the per-conversation quota, you need to start a new conversation or ask an admin to adjust the limit.
+These limits are configurable by the org admin. If you exceed the per-file limit, the upload is rejected. If you attach more than the per-message cap, sending the message is rejected — split the files across multiple messages. If you exceed the per-conversation quota, you need to start a new conversation or ask an admin to adjust the limit.
 
 ## Tips
 

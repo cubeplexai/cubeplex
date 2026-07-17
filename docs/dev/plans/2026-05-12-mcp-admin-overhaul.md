@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Zustand, FastAPI, SQLAlchemy/SQLModel
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/mcp-optimize` (branch `feat/mcp-optimize`, ports 8026/3026)
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/mcp-optimize` (branch `feat/mcp-optimize`, ports 8026/3026)
 
 ---
 
@@ -55,12 +55,12 @@
 | `frontend/packages/core/src/types/mcp.ts` | Add `credential_source` field, `MCPAdminConnector` union type |
 | `frontend/packages/core/src/stores/mcpStore.ts` | Rewrite: unified admin store for master-detail |
 | `frontend/packages/core/src/types/workspace-settings.ts` | Add `credential_source` to `MCPServerItem` |
-| `backend/cubebox/models/mcp.py` | Add `credential_mode` column to `WorkspaceMCPOverride` + update docstring |
-| `backend/cubebox/services/mcp_catalog.py` | Invert override logic in `list_for_member` |
-| `backend/cubebox/services/mcp.py` | Update `promote_to_org` for new override semantics |
-| `backend/cubebox/api/routes/v1/ws_settings.py` | Add `credential_mode` + `credential_source` to MCP list response, accept `credential_mode` in PATCH |
-| `backend/cubebox/api/routes/v1/ws_mcp.py` | Update `_get_workspace_visible_server` for new semantics |
-| `backend/cubebox/api/schemas/ws_settings.py` | Add `credential_mode`, `credential_source`, `credential_shared_by` to `MCPServerItem` |
+| `backend/cubeplex/models/mcp.py` | Add `credential_mode` column to `WorkspaceMCPOverride` + update docstring |
+| `backend/cubeplex/services/mcp_catalog.py` | Invert override logic in `list_for_member` |
+| `backend/cubeplex/services/mcp.py` | Update `promote_to_org` for new override semantics |
+| `backend/cubeplex/api/routes/v1/ws_settings.py` | Add `credential_mode` + `credential_source` to MCP list response, accept `credential_mode` in PATCH |
+| `backend/cubeplex/api/routes/v1/ws_mcp.py` | Update `_get_workspace_visible_server` for new semantics |
+| `backend/cubeplex/api/schemas/ws_settings.py` | Add `credential_mode`, `credential_source`, `credential_shared_by` to `MCPServerItem` |
 
 ---
 
@@ -69,11 +69,11 @@
 The core semantic change. After this, org installs are invisible by default; `WorkspaceMCPOverride(enabled=True)` explicitly enables. Also adds the `credential_mode` column to `WorkspaceMCPOverride` for workspace-level credential mode control.
 
 **Files:**
-- Modify: `backend/cubebox/models/mcp.py:123-139` (add column + update docstring)
-- Modify: `backend/cubebox/services/mcp_catalog.py:126-146`
-- Modify: `backend/cubebox/services/mcp.py:490-520`
-- Modify: `backend/cubebox/api/routes/v1/ws_settings.py:263-296`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py:51-71`
+- Modify: `backend/cubeplex/models/mcp.py:123-139` (add column + update docstring)
+- Modify: `backend/cubeplex/services/mcp_catalog.py:126-146`
+- Modify: `backend/cubeplex/services/mcp.py:490-520`
+- Modify: `backend/cubeplex/api/routes/v1/ws_settings.py:263-296`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py:51-71`
 - Create: Alembic migration for `credential_mode` column
 - Test: `backend/tests/e2e/test_mcp_override_inversion.py`
 
@@ -149,13 +149,13 @@ async def test_org_install_hidden_after_disable(
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/test_mcp_override_inversion.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/test_mcp_override_inversion.py -v`
 
 Expected: FAIL — org install currently visible by default (old semantics).
 
 - [ ] **Step 3: Invert `list_for_member` in mcp_catalog.py**
 
-In `backend/cubebox/services/mcp_catalog.py`, change lines 127-146:
+In `backend/cubeplex/services/mcp_catalog.py`, change lines 127-146:
 
 ```python
     # OLD: Workspace overrides (disable rows) for the active workspace.
@@ -185,7 +185,7 @@ And the visibility check inside the loop (line ~144-146):
 
 - [ ] **Step 4: Invert `set_workspace_override` in mcp.py**
 
-In `backend/cubebox/services/mcp.py`, method `set_workspace_override` (lines ~490-520):
+In `backend/cubeplex/services/mcp.py`, method `set_workspace_override` (lines ~490-520):
 
 ```python
     async def set_workspace_override(
@@ -224,7 +224,7 @@ In `backend/cubebox/services/mcp.py`, method `set_workspace_override` (lines ~49
 
 - [ ] **Step 5: Invert workspace settings MCP list endpoint**
 
-In `backend/cubebox/api/routes/v1/ws_settings.py`, the `list_workspace_mcp` function (lines 263-296):
+In `backend/cubeplex/api/routes/v1/ws_settings.py`, the `list_workspace_mcp` function (lines 263-296):
 
 ```python
 @router.get("/mcp", response_model=WorkspaceMCPOut)
@@ -266,7 +266,7 @@ async def list_workspace_mcp(
 
 - [ ] **Step 6: Invert `_get_workspace_visible_server` in ws_mcp.py**
 
-In `backend/cubebox/api/routes/v1/ws_mcp.py` (lines 51-71):
+In `backend/cubeplex/api/routes/v1/ws_mcp.py` (lines 51-71):
 
 ```python
 async def _get_workspace_visible_server(
@@ -293,7 +293,7 @@ async def _get_workspace_visible_server(
 
 - [ ] **Step 7: Update `promote_to_org` for new semantics**
 
-In `backend/cubebox/services/mcp.py`, method `promote_to_org` (around line 322-333). After setting `owner_workspace_id = None`, CREATE an enabled override for the source workspace instead of deleting disable overrides:
+In `backend/cubeplex/services/mcp.py`, method `promote_to_org` (around line 322-333). After setting `owner_workspace_id = None`, CREATE an enabled override for the source workspace instead of deleting disable overrides:
 
 ```python
         server.owner_workspace_id = None
@@ -314,10 +314,10 @@ In `backend/cubebox/services/mcp.py`, method `promote_to_org` (around line 322-3
 
 - [ ] **Step 8: Update WorkspaceMCPOverride model — docstring + credential_mode column**
 
-In `backend/cubebox/models/mcp.py` (lines 123-139), update the model:
+In `backend/cubeplex/models/mcp.py` (lines 123-139), update the model:
 
 ```python
-class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
+class WorkspaceMCPOverride(CubeplexBase, OrgScopedMixin, table=True):
     """Workspace-level visibility and credential override for org-wide MCP installs.
 
     A row with ``enabled=True`` means this workspace can see and use the
@@ -344,13 +344,13 @@ class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 8b: Generate Alembic migration for credential_mode column**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && alembic revision --autogenerate -m "add credential_mode to workspace_mcp_overrides"`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && alembic revision --autogenerate -m "add credential_mode to workspace_mcp_overrides"`
 
-Then run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && alembic upgrade head`
+Then run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && alembic upgrade head`
 
 - [ ] **Step 9: Update toggle_mcp_binding in ws_settings.py to handle enabled + credential_mode**
 
-In `backend/cubebox/api/routes/v1/ws_settings.py`, the `toggle_mcp_binding` function (lines 299-326):
+In `backend/cubeplex/api/routes/v1/ws_settings.py`, the `toggle_mcp_binding` function (lines 299-326):
 
 ```python
 @router.patch("/mcp/{server_id}")
@@ -408,21 +408,21 @@ async def toggle_mcp_binding(
 
 - [ ] **Step 10: Run tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/test_mcp_override_inversion.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/test_mcp_override_inversion.py -v`
 
 Expected: PASS
 
 - [ ] **Step 11: Run existing MCP test suite to check for regressions**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/ -k mcp -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && uv run pytest tests/e2e/ -k mcp -v`
 
 Fix any failures caused by the semantic inversion — tests that assumed "no override row = visible" need to create explicit `enabled=True` rows.
 
 - [ ] **Step 12: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
-git add backend/cubebox/services/mcp_catalog.py backend/cubebox/services/mcp.py backend/cubebox/api/routes/v1/ws_settings.py backend/cubebox/api/routes/v1/ws_mcp.py backend/cubebox/models/mcp.py backend/tests/e2e/test_mcp_override_inversion.py
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
+git add backend/cubeplex/services/mcp_catalog.py backend/cubeplex/services/mcp.py backend/cubeplex/api/routes/v1/ws_settings.py backend/cubeplex/api/routes/v1/ws_mcp.py backend/cubeplex/models/mcp.py backend/tests/e2e/test_mcp_override_inversion.py
 git commit -m "$(cat <<'EOF'
 feat(mcp): invert override logic — org installs invisible by default
 
@@ -441,19 +441,19 @@ EOF
 The workspace settings MCP list response needs `credential_mode` and `credential_source` fields per connector so the frontend can display credential state and offer the right actions. The `toggle_mcp_binding` endpoint also needs to accept `credential_mode` changes.
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/ws_settings.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_settings.py:263-296`
+- Modify: `backend/cubeplex/api/schemas/ws_settings.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_settings.py:263-296`
 - Modify: `frontend/packages/core/src/types/workspace-settings.ts`
 
 - [ ] **Step 1: Find and read the ws_settings schema file**
 
-Run: `find /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend -path "*/schemas/ws_settings.py" -type f`
+Run: `find /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend -path "*/schemas/ws_settings.py" -type f`
 
 Read the file to find the `MCPServerItem` Pydantic model.
 
 - [ ] **Step 2: Add credential_mode and credential_source to schema**
 
-In `backend/cubebox/api/schemas/ws_settings.py`, add both fields to `MCPServerItem`:
+In `backend/cubeplex/api/schemas/ws_settings.py`, add both fields to `MCPServerItem`:
 
 ```python
 class MCPServerItem(BaseModel):
@@ -478,10 +478,10 @@ class MCPBindingPatch(BaseModel):
 
 - [ ] **Step 3: Compute credential_mode + credential_source in list_workspace_mcp**
 
-In `backend/cubebox/api/routes/v1/ws_settings.py`, update `list_workspace_mcp` to compute both fields. Resolution is mode-driven:
+In `backend/cubeplex/api/routes/v1/ws_settings.py`, update `list_workspace_mcp` to compute both fields. Resolution is mode-driven:
 
 ```python
-from cubebox.repositories.mcp import (
+from cubeplex.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
@@ -582,13 +582,13 @@ export interface MCPServerItem {
 
 - [ ] **Step 5: Run backend lint and type check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && make lint && make type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && make lint && make type-check`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
-git add backend/cubebox/api/schemas/ws_settings.py backend/cubebox/api/routes/v1/ws_settings.py frontend/packages/core/src/types/workspace-settings.ts
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
+git add backend/cubeplex/api/schemas/ws_settings.py backend/cubeplex/api/routes/v1/ws_settings.py frontend/packages/core/src/types/workspace-settings.ts
 git commit -m "$(cat <<'EOF'
 feat(mcp): add credential_mode + credential_source to workspace MCP list
 
@@ -643,12 +643,12 @@ export interface MCPAdminConnector {
 
 - [ ] **Step 2: Run frontend type check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/core/src/types/mcp.ts
 git commit -m "feat(mcp): add MCPAdminConnector union type for unified sidebar"
 ```
@@ -992,12 +992,12 @@ Check `frontend/packages/core/src/index.ts` — ensure `MCPAdminConnector`, `MCP
 
 - [ ] **Step 3: Run type check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/core/src/stores/mcpStore.ts frontend/packages/core/src/index.ts
 git commit -m "feat(mcp): rewrite mcpStore for unified admin master-detail"
 ```
@@ -1018,7 +1018,7 @@ Search + filter pills + Add Custom button, matching SkillsToolbar.
 
 import { Plus, Search } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { MCPConnectorFilter } from '@cubebox/core'
+import type { MCPConnectorFilter } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -1095,7 +1095,7 @@ export function MCPToolbar({
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPToolbar.tsx
 git commit -m "feat(mcp): add MCPToolbar component (search + filter pills)"
 ```
@@ -1116,7 +1116,7 @@ Rich sidebar card matching SkillCard. Shows icon, name, provider, status chip, t
 
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, AlertCircle, Globe, Server } from 'lucide-react'
-import type { MCPAdminConnector } from '@cubebox/core'
+import type { MCPAdminConnector } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
@@ -1206,7 +1206,7 @@ export function MCPConnectorCard({ connector, active, onClick }: MCPConnectorCar
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPConnectorCard.tsx
 git commit -m "feat(mcp): add MCPConnectorCard sidebar component"
 ```
@@ -1227,7 +1227,7 @@ Sidebar list that filters, sorts, and renders MCPConnectorCard items.
 
 import { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import type { MCPAdminConnector, MCPConnectorFilter } from '@cubebox/core'
+import type { MCPAdminConnector, MCPConnectorFilter } from '@cubeplex/core'
 import { MCPConnectorCard } from './MCPConnectorCard'
 
 interface MCPConnectorListProps {
@@ -1301,7 +1301,7 @@ export function MCPConnectorList({
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPConnectorList.tsx
 git commit -m "feat(mcp): add MCPConnectorList sidebar component"
 ```
@@ -1323,10 +1323,10 @@ The admin Workspaces tab: workspace name + enabled toggle + credential source la
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, X, Loader2 } from 'lucide-react'
-import type { ApiClient, WorkspaceOverride } from '@cubebox/core'
-import { adminGetOverrides, adminPutOverride } from '@cubebox/core'
-import type { Workspace } from '@cubebox/core'
-import { createApiClient, listWorkspaces } from '@cubebox/core'
+import type { ApiClient, WorkspaceOverride } from '@cubeplex/core'
+import { adminGetOverrides, adminPutOverride } from '@cubeplex/core'
+import type { Workspace } from '@cubeplex/core'
+import { createApiClient, listWorkspaces } from '@cubeplex/core'
 
 interface MCPWorkspacesTabProps {
   serverId: string
@@ -1494,7 +1494,7 @@ export function MCPWorkspacesTab({ serverId, client }: MCPWorkspacesTabProps) {
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPWorkspacesTab.tsx
 git commit -m "feat(mcp): add MCPWorkspacesTab with inline confirm pattern"
 ```
@@ -1523,7 +1523,7 @@ This is a large component. It delegates to MCPToolsTable (unchanged), MCPWorkspa
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, FileText, Loader2, Network, RefreshCw, Trash2, Wrench, X } from 'lucide-react'
-import type { ApiClient, MCPAdminConnector } from '@cubebox/core'
+import type { ApiClient, MCPAdminConnector } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -1738,7 +1738,7 @@ export function MCPAdminDetailPanel({
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPAdminDetailPanel.tsx
 git commit -m "feat(mcp): add MCPAdminDetailPanel with tabs and inline confirm"
 ```
@@ -1757,8 +1757,8 @@ The master-detail page that wires all components together. Matches Skills page.t
 - [ ] **Step 1: Delete old sub-pages**
 
 ```bash
-rm -f /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend/packages/web/app/admin/mcp/new/page.tsx
-rm -rf /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend/packages/web/app/admin/mcp/\[id\]
+rm -f /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend/packages/web/app/admin/mcp/new/page.tsx
+rm -rf /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend/packages/web/app/admin/mcp/\[id\]
 ```
 
 - [ ] **Step 2: Rewrite admin/mcp/page.tsx**
@@ -1773,7 +1773,7 @@ import {
   useMcpStore,
   useWorkspaceStore,
   type MCPConnectorFilter,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
 import { MCPConnectorList } from '@/components/mcp/MCPConnectorList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
@@ -1878,7 +1878,7 @@ export default function AdminMcpPage() {
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add -A frontend/packages/web/app/admin/mcp/
 git commit -m "$(cat <<'EOF'
 feat(mcp): rewrite admin page as master-detail layout
@@ -1914,7 +1914,7 @@ Clean up the deleted pages and catalog components.
 - [ ] **Step 1: Delete files**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 rm -rf frontend/packages/web/app/\(app\)/w/\[wsId\]/integrations/mcp
 rm -rf frontend/packages/web/components/mcp/catalog
 rm -f frontend/packages/web/components/mcp/MCPServerList.tsx
@@ -1938,14 +1938,14 @@ The `McpPanel.tsx` has links to `/w/${wsId}/integrations/mcp/new` and `/w/${wsId
 
 - [ ] **Step 4: Run type check to catch broken imports**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
 
 Fix any errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add -A
 git commit -m "$(cat <<'EOF'
 refactor(mcp): delete old pages, catalog components, and workspaceMcpStore
@@ -2136,12 +2136,12 @@ The `handleCredentialModeChange` function calls `PATCH /ws/{wsId}/settings/mcp/{
 
 - [ ] **Step 2: Run type check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/workspace-settings/McpPanel.tsx
 git commit -m "$(cat <<'EOF'
 feat(mcp): enhance McpPanel with credential mode selector
@@ -2183,7 +2183,7 @@ In `frontend/packages/web/components/mcp/MCPServerForm.tsx`, delete the disabled
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/mcp/MCPServerForm.tsx
 git commit -m "fix(mcp): remove OAuth 'coming soon' from custom server form"
 ```
@@ -2201,7 +2201,7 @@ Add the translation keys used by all new components.
 - [ ] **Step 1: Find the i18n file structure**
 
 ```bash
-find /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend -name "en.json" -o -name "messages" -type d | head -10
+find /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend -name "en.json" -o -name "messages" -type d | head -10
 ```
 
 - [ ] **Step 2: Add mcpAdmin namespace keys**
@@ -2289,14 +2289,14 @@ Add to the `mcp.wsPanel` namespace:
 
 - [ ] **Step 4: Run the dev server to verify no missing translation warnings**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm dev`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm dev`
 
 Check browser console for missing translation warnings.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/messages/
 git commit -m "feat(mcp): add i18n keys for admin master-detail and credential source"
 ```
@@ -2309,26 +2309,26 @@ Full verification pass.
 
 - [ ] **Step 1: Run frontend type check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm type-check`
 
 Fix all type errors.
 
 - [ ] **Step 2: Run frontend build**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm build`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm build`
 
 Fix any build errors.
 
 - [ ] **Step 3: Run backend checks**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && make lint && make type-check`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && make lint && make type-check`
 
 Fix any errors.
 
 - [ ] **Step 4: Commit fixes if any**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add -A
 git commit -m "fix: resolve type check and build errors from MCP overhaul"
 ```
@@ -2341,13 +2341,13 @@ Start dev servers and verify the new admin page in browser.
 
 - [ ] **Step 1: Start backend**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && python main.py`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/backend && python main.py`
 
 (Uses port from .worktree.env, likely 8026)
 
 - [ ] **Step 2: Start frontend**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm dev`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm dev`
 
 (Uses port from .worktree.env, likely 3026)
 
@@ -2374,7 +2374,7 @@ Navigate to `http://localhost:3026/w/<wsId>/settings` and verify:
 - [ ] **Step 5: Commit any visual fixes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add -A
 git commit -m "fix(mcp): visual fixes from smoke test"
 ```
@@ -2391,7 +2391,7 @@ Update or create E2E tests for the new admin page and workspace settings.
 - [ ] **Step 1: Check existing E2E test structure**
 
 ```bash
-find /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend -path "*e2e*mcp*" -type f
+find /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend -path "*e2e*mcp*" -type f
 ```
 
 - [ ] **Step 2: Write admin MCP page E2E test**
@@ -2406,12 +2406,12 @@ Key scenarios:
 
 - [ ] **Step 3: Run E2E tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm test:e2e --grep mcp`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize/frontend && pnpm test:e2e --grep mcp`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
+cd /home/chris/cubeplex/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/__tests__/e2e/
 git commit -m "test(mcp): add E2E tests for admin master-detail page"
 ```

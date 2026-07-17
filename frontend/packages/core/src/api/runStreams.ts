@@ -1,4 +1,4 @@
-import type { AgentEvent, Message, PendingHitl } from '../types'
+import type { AgentEvent, Message, PendingHitl, TodoItem } from '../types'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 
@@ -24,9 +24,20 @@ export interface LastRunError {
   error_message: string
 }
 
-export interface ConversationBootstrap {
+export interface HistoryWindowPage {
   messages: Message[]
-  total: number
+  /** seq of the oldest message in this slice (null when empty). Pass as
+   *  ``before_seq`` to fetch the next older window. */
+  oldest_seq: number | null
+  /** True iff at least one message exists with ``seq < oldest_seq``. */
+  has_more: boolean
+}
+
+export interface ConversationBootstrap extends HistoryWindowPage {
+  /** Latest write_todos state, precomputed from the full history (not just
+   *  the tail) so the panel hydrates correctly on long conversations.
+   *  ``null`` when no write_todos has ever been observed for this thread. */
+  todos: TodoItem[] | null
   active_run: ActiveRunBootstrap | null
   last_run_status: 'stale' | null
   last_run_error?: LastRunError | null
@@ -88,6 +99,20 @@ export async function getConversationBootstrap(
   const res = await client.get(`/api/v1/conversations/${conversationId}/bootstrap`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<ConversationBootstrap>
+}
+
+export async function getHistoryWindow(
+  client: ApiClient,
+  conversationId: string,
+  opts: { beforeSeq: number; limit?: number },
+): Promise<HistoryWindowPage> {
+  const params = new URLSearchParams({ before_seq: String(opts.beforeSeq) })
+  if (opts.limit != null) params.set('limit', String(opts.limit))
+  const res = await client.get(
+    `/api/v1/conversations/${conversationId}/messages?${params.toString()}`,
+  )
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<HistoryWindowPage>
 }
 
 export async function startMessageRun(

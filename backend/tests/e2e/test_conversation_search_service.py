@@ -3,11 +3,11 @@ and the worker round-trips a real conversation."""
 
 import pytest
 
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.conversation_chunk import ConversationChunkRepository
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
-from cubebox.services.conversation_search.worker import EmbeddingWorker
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.worker import EmbeddingWorker
 
 
 class _Det(EmbeddingProvider):
@@ -70,7 +70,7 @@ async def test_search_returns_seeded_conversation(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:
     """After indexing, a search for 'docling' returns the seeded conversation."""
-    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubeplex.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -82,7 +82,7 @@ async def test_search_returns_seeded_conversation(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -102,8 +102,8 @@ async def test_search_excludes_soft_deleted_conversation(
 
     from sqlalchemy import update
 
-    from cubebox.models.conversation import Conversation
-    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubeplex.models.conversation import Conversation
+    from cubeplex.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -123,7 +123,7 @@ async def test_search_excludes_soft_deleted_conversation(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -142,7 +142,7 @@ async def test_search_legs_run_concurrently_without_session_race(
     silently swallowed as empty legs. After the fix, each leg opens its own
     ``async_session_maker()`` and both legs see real data.
     """
-    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubeplex.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -154,7 +154,7 @@ async def test_search_legs_run_concurrently_without_session_race(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -178,7 +178,7 @@ async def test_vector_leg_filters_by_embed_model(
     """
     from sqlalchemy import text as sql_text
 
-    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubeplex.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -201,7 +201,7 @@ async def test_vector_leg_filters_by_embed_model(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -219,8 +219,8 @@ async def test_search_runs_lexical_only_when_provider_is_none(
     Worker writes chunks with embedding=NULL; service must return real
     lexical hits and vector_count=0 (vector leg short-circuits).
     """
-    from cubebox.services.conversation_search.service import ConversationSearchService
-    from cubebox.services.conversation_search.worker import EmbeddingWorker
+    from cubeplex.services.conversation_search.service import ConversationSearchService
+    from cubeplex.services.conversation_search.worker import EmbeddingWorker
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -232,7 +232,7 @@ async def test_search_runs_lexical_only_when_provider_is_none(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -246,8 +246,8 @@ async def test_search_rejects_control_characters(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:
     """Query with embedded control characters raises InvalidInputError."""
-    from cubebox.api.exceptions import InvalidInputError
-    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubeplex.api.exceptions import InvalidInputError
+    from cubeplex.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, _conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -256,7 +256,7 @@ async def test_search_rejects_control_characters(
             await svc.search(
                 org_id=org_id,
                 workspace_id=ws_id,
-                creator_user_id=user_id,
+                user_id=user_id,
                 q="doc\x00ling",
                 limit=8,
             )

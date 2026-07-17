@@ -74,13 +74,13 @@ asyncio event loop while handling a large backlog.
 ### Where
 
 Only the **replay segment** of `event_generator`
-(`backend/cubebox/api/routes/v1/conversations.py:321-365`). The **live tail**
+(`backend/cubeplex/api/routes/v1/conversations.py:321-365`). The **live tail**
 segment (lines 341-365) is unchanged. The `done`/`error` short-circuit
 (`conversations.py:337`) is preserved.
 
 ### `ReplayCoalescer` — stateful streaming folder
 
-A new pure (no IO) helper at `backend/cubebox/streams/replay_coalescer.py`,
+A new pure (no IO) helper at `backend/cubeplex/streams/replay_coalescer.py`,
 unit-testable in isolation. It is **streaming** (not list-in/list-out) so it can fold across
 read chunks without holding the whole backlog in memory:
 
@@ -299,10 +299,10 @@ not break the `injected_message` flush/commit ordering.
 
 ## Files touched
 
-- `backend/cubebox/streams/replay_coalescer.py` — `ReplayCoalescer` (new).
-- `backend/cubebox/streams/run_events.py` — add chunked reader; leave
+- `backend/cubeplex/streams/replay_coalescer.py` — `ReplayCoalescer` (new).
+- `backend/cubeplex/streams/run_events.py` — add chunked reader; leave
   `iter_run_events` and callers untouched.
-- `backend/cubebox/api/routes/v1/conversations.py` — replay segment of
+- `backend/cubeplex/api/routes/v1/conversations.py` — replay segment of
   `event_generator` uses the chunked reader + coalescer.
 - `frontend/packages/core/src/stores/messageStore.ts` — yield in both consume
   loops.

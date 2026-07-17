@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, vi } from 'vitest'
-import type { Provider, ProviderCreate, ProviderUpdate } from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate } from '@cubeplex/core'
 import en from '../../../../messages/en.json'
 import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
 

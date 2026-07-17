@@ -1,4 +1,4 @@
-from cubebox.plugins import SyncResult, SyncSchedule
+from cubeplex.plugins import SyncResult, SyncSchedule
 
 
 class FakeUserDirectorySyncer:

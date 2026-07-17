@@ -6,14 +6,14 @@ from uuid import uuid4
 import fakeredis.aioredis
 import pytest
 
-from cubebox.parsers.dedup import check, hash_bytes, update
-from cubebox.parsers.schema import ParseOptions
+from cubeplex.parsers.dedup import check, hash_bytes, update
+from cubeplex.parsers.schema import ParseOptions
 
 
 @pytest.fixture
 async def fake_redis() -> AsyncIterator[fakeredis.aioredis.FakeRedis]:
-    """Inject a fakeredis instance via cubebox.cache.set_redis."""
-    from cubebox.cache import reset_for_tests, set_redis
+    """Inject a fakeredis instance via cubeplex.cache.set_redis."""
+    from cubeplex.cache import reset_for_tests, set_redis
 
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     set_redis(fake)

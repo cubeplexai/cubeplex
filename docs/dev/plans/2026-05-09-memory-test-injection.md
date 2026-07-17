@@ -10,7 +10,7 @@
 
 **Branch:** `feat/test-memory-injection` from `origin/main`.
 **Spec:** `docs/superpowers/specs/2026-05-09-memory-llm-behavior-e2e-design.md` (PR2 section).
-**Issue:** [#64](https://github.com/xfgong/cubebox/issues/64).
+**Issue:** [#64](https://github.com/xfgong/cubeplex/issues/64).
 
 ---
 
@@ -222,7 +222,7 @@ async def second_member_client(
         _login_and_attach,
         _make_isolated_user,
     )
-    from cubebox.models.membership import Role
+    from cubeplex.models.membership import Role
 
     app, email, password, _other_workspace_id = await _make_isolated_user(Role.MEMBER)
     app.state.deployment_mode = "multi_tenant"
@@ -244,7 +244,7 @@ async def second_member_client(
 
 Notes:
 - The two clients run **different** ASGI apps under the hood. That is fine for E2E — the database is shared (same Postgres), so memberships and workspaces are visible across both.
-- If the actual route names differ (`/api/v1/workspaces/{ws}/invites` vs `/api/v1/ws/{ws}/invites`), update to match. Find with `grep -n "invites" backend/cubebox/api/`.
+- If the actual route names differ (`/api/v1/workspaces/{ws}/invites` vs `/api/v1/ws/{ws}/invites`), update to match. Find with `grep -n "invites" backend/cubeplex/api/`.
 - If `tests/e2e/conftest.py` does not export `_make_isolated_user` etc. as top-level functions (e.g. they are nested), restructure the import or copy the small bits needed.
 
 - [ ] **Step 3.3: Smoke-test the fixture (no real LLM)**
@@ -268,7 +268,7 @@ async def test_second_member_client_smoke(
     assert r2.status_code == 200
 ```
 
-Adjust the URL to match the actual memory list endpoint — `grep -n "memory.*items" backend/cubebox/api/`.
+Adjust the URL to match the actual memory list endpoint — `grep -n "memory.*items" backend/cubeplex/api/`.
 
 Run:
 
@@ -423,7 +423,7 @@ Important notes for the engineer:
 2. The memory-create endpoint (`POST /api/v1/ws/{ws}/memory/items`) and its scope/content schema must match the actual contract. Verify with:
 
    ```bash
-   grep -n -E "(memory.*items|scope.*personal)" backend/cubebox/api/ -r | head -10
+   grep -n -E "(memory.*items|scope.*personal)" backend/cubeplex/api/ -r | head -10
    ```
 
    Adjust `_save_memory` payload to match.

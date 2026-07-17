@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
-import type { ProbeStep } from '@cubebox/core'
+import type { ProbeStep } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { formatProbeDetail } from '@/lib/probeDetail'
 

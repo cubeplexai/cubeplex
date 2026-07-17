@@ -10,16 +10,16 @@
 
 **Branch:** `feat/test-prompt-cache-gate` from `origin/main`.
 **Spec:** `docs/superpowers/specs/2026-05-09-memory-llm-behavior-e2e-design.md` (PR1 section).
-**Issue:** [#64](https://github.com/xfgong/cubebox/issues/64).
+**Issue:** [#64](https://github.com/xfgong/cubeplex/issues/64).
 
 ---
 
 ## File Structure
 
 **Production code:**
-- Modify: `backend/cubebox/llm/factory.py:471-473` — replace `NotImplementedError` with `ChatAnthropic` branch
-- Modify: `backend/cubebox/agents/schemas.py:140` (end of file) — add `UsageEvent`
-- Modify: `backend/cubebox/agents/stream.py:48-142` (`convert_messages_chunk`) — emit `UsageEvent` when `usage_metadata` indicates a turn end
+- Modify: `backend/cubeplex/llm/factory.py:471-473` — replace `NotImplementedError` with `ChatAnthropic` branch
+- Modify: `backend/cubeplex/agents/schemas.py:140` (end of file) — add `UsageEvent`
+- Modify: `backend/cubeplex/agents/stream.py:48-142` (`convert_messages_chunk`) — emit `UsageEvent` when `usage_metadata` indicates a turn end
 
 **Tests:**
 - Create: `backend/tests/e2e/memory/_helpers.py` — `send_message_and_collect_usage`
@@ -110,7 +110,7 @@ git commit -m "chore(memory-e2e): add langchain-anthropic + real_llm pytest mark
 
 **Files:**
 - Create: `backend/tests/unit/llm/test_factory_anthropic.py`
-- Modify: `backend/cubebox/llm/factory.py:471-473`
+- Modify: `backend/cubeplex/llm/factory.py:471-473`
 
 - [ ] **Step 2.1: Write the failing unit test**
 
@@ -120,7 +120,7 @@ Create `backend/tests/unit/llm/test_factory_anthropic.py`:
 """Factory branch for Anthropic API providers — unit tests.
 
 We do not call the real network here; we assert that the factory builds
-a ChatAnthropic instance with the right kwargs and the correct cubebox
+a ChatAnthropic instance with the right kwargs and the correct cubeplex
 metadata attached for CostMiddleware.
 """
 
@@ -131,8 +131,8 @@ from typing import Any
 import pytest
 from langchain_anthropic import ChatAnthropic
 
-from cubebox.llm.config import LLMConfig, ModelConfig, ModelCost, ProviderConfig
-from cubebox.llm.factory import LLMFactory
+from cubeplex.llm.config import LLMConfig, ModelConfig, ModelCost, ProviderConfig
+from cubeplex.llm.factory import LLMFactory
 
 
 def _build_config() -> LLMConfig:
@@ -166,10 +166,10 @@ async def test_factory_builds_chat_anthropic_for_anthropic_api() -> None:
     llm = factory.create_model("anthropic-test", "claude-test")
 
     assert isinstance(llm, ChatAnthropic)
-    # Cubebox metadata must round-trip for CostMiddleware
-    assert getattr(llm, "_cubebox_provider", None) == "anthropic-test"
-    assert getattr(llm, "_cubebox_model_id", None) == "claude-test"
-    assert getattr(llm, "_cubebox_model_cost", None) is not None
+    # Cubeplex metadata must round-trip for CostMiddleware
+    assert getattr(llm, "_cubeplex_provider", None) == "anthropic-test"
+    assert getattr(llm, "_cubeplex_model_id", None) == "claude-test"
+    assert getattr(llm, "_cubeplex_model_cost", None) is not None
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ Expected: all three tests fail. Most likely first failure is `NotImplementedErro
 
 - [ ] **Step 2.3: Implement the Anthropic branch**
 
-Open `backend/cubebox/llm/factory.py`. Find the block at lines 471–473:
+Open `backend/cubeplex/llm/factory.py`. Find the block at lines 471–473:
 
 ```python
         if provider_config.api == "anthropic":
@@ -242,10 +242,10 @@ Replace it with:
 
             llm = ChatAnthropic(**anthropic_kwargs)
 
-            # Attach cubebox metadata for CostMiddleware to read.
-            llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
-            llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
-            llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+            # Attach cubeplex metadata for CostMiddleware to read.
+            llm._cubeplex_provider = provider_name  # type: ignore[attr-defined]
+            llm._cubeplex_model_id = model_config.id  # type: ignore[attr-defined]
+            llm._cubeplex_model_cost = model_config.cost  # type: ignore[attr-defined]
 
             provider_kind = provider_kind_from_api(provider_config.api)
             return _wrap_with_cache_markers(llm, provider_kind=provider_kind)
@@ -264,8 +264,8 @@ Expected: all three tests pass.
 - [ ] **Step 2.5: Run lint + typecheck**
 
 ```bash
-uv run ruff check cubebox/llm/factory.py tests/unit/llm/test_factory_anthropic.py
-uv run mypy cubebox/llm/factory.py
+uv run ruff check cubeplex/llm/factory.py tests/unit/llm/test_factory_anthropic.py
+uv run mypy cubeplex/llm/factory.py
 ```
 
 Expected: no errors.
@@ -273,7 +273,7 @@ Expected: no errors.
 - [ ] **Step 2.6: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/tests/unit/llm/test_factory_anthropic.py
+git add backend/cubeplex/llm/factory.py backend/tests/unit/llm/test_factory_anthropic.py
 git commit -m "feat(llm): ChatAnthropic provider branch in factory"
 ```
 
@@ -282,11 +282,11 @@ git commit -m "feat(llm): ChatAnthropic provider branch in factory"
 ### Task 3: UsageEvent schema
 
 **Files:**
-- Modify: `backend/cubebox/agents/schemas.py` (append after `CitationEvent`)
+- Modify: `backend/cubeplex/agents/schemas.py` (append after `CitationEvent`)
 
 - [ ] **Step 3.1: Add UsageEvent**
 
-Open `backend/cubebox/agents/schemas.py`. After the `CitationEvent` class (around line 130–145), append:
+Open `backend/cubeplex/agents/schemas.py`. After the `CitationEvent` class (around line 130–145), append:
 
 ```python
 class UsageEvent(AgentEvent):
@@ -311,7 +311,7 @@ class UsageEvent(AgentEvent):
 - [ ] **Step 3.2: Verify it imports cleanly**
 
 ```bash
-uv run python -c "from cubebox.agents.schemas import UsageEvent; print(UsageEvent(timestamp='t', data={'input_tokens': 1, 'output_tokens': 2, 'cache_read_tokens': 0, 'cache_write_tokens': 0}).model_dump())"
+uv run python -c "from cubeplex.agents.schemas import UsageEvent; print(UsageEvent(timestamp='t', data={'input_tokens': 1, 'output_tokens': 2, 'cache_read_tokens': 0, 'cache_write_tokens': 0}).model_dump())"
 ```
 
 Expected: prints a dict with `type='usage'` and the data fields.
@@ -319,7 +319,7 @@ Expected: prints a dict with `type='usage'` and the data fields.
 - [ ] **Step 3.3: Commit**
 
 ```bash
-git add backend/cubebox/agents/schemas.py
+git add backend/cubeplex/agents/schemas.py
 git commit -m "feat(streams): UsageEvent SSE event type"
 ```
 
@@ -328,7 +328,7 @@ git commit -m "feat(streams): UsageEvent SSE event type"
 ### Task 4: Emit UsageEvent from convert_messages_chunk
 
 **Files:**
-- Modify: `backend/cubebox/agents/stream.py:48-142`
+- Modify: `backend/cubeplex/agents/stream.py:48-142`
 - Test: `backend/tests/unit/agents/test_stream_usage_event.py`
 
 - [ ] **Step 4.1: Write the failing test**
@@ -342,7 +342,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessageChunk
 
-from cubebox.agents.stream import convert_messages_chunk
+from cubeplex.agents.stream import convert_messages_chunk
 
 
 def _wrap(msg: AIMessageChunk) -> tuple[AIMessageChunk, dict]:
@@ -402,7 +402,7 @@ Expected: at least the second test fails (no UsageEvent emitted).
 
 - [ ] **Step 4.3: Implement UsageEvent emission**
 
-Open `backend/cubebox/agents/stream.py`. Find the end of the existing `text_delta` block in `convert_messages_chunk` (around line 114, right after the `events.append(...)` call that adds text_delta).
+Open `backend/cubeplex/agents/stream.py`. Find the end of the existing `text_delta` block in `convert_messages_chunk` (around line 114, right after the `events.append(...)` call that adds text_delta).
 
 After the text_delta append, add:
 
@@ -453,17 +453,17 @@ Expected: existing tests pass; no new failures.
 
 - [ ] **Step 4.6: Wire UsageEvent through `_dicts_to_sse_events`**
 
-Find the `_dicts_to_sse_events` function in `backend/cubebox/streams/run_manager.py` or `backend/cubebox/api/conversations_route.py` (search for it):
+Find the `_dicts_to_sse_events` function in `backend/cubeplex/streams/run_manager.py` or `backend/cubeplex/api/conversations_route.py` (search for it):
 
 ```bash
-grep -rn "_dicts_to_sse_events" backend/cubebox/ | head -5
+grep -rn "_dicts_to_sse_events" backend/cubeplex/ | head -5
 ```
 
 Open the file and look at the if/elif chain that maps `"type": "..."` to `Event` classes. Add a branch for `"usage"`:
 
 ```python
         elif evt_type == "usage":
-            from cubebox.agents.schemas import UsageEvent
+            from cubeplex.agents.schemas import UsageEvent
 
             sse_events.append(
                 UsageEvent(
@@ -485,7 +485,7 @@ Add to `backend/tests/unit/agents/test_stream_usage_event.py`:
 ```python
 def test_dicts_to_sse_events_handles_usage_type() -> None:
     """Cover the dispatch path; UsageEvent must serialize through the SSE layer."""
-    from cubebox.streams.run_manager import _dicts_to_sse_events  # adjust if elsewhere
+    from cubeplex.streams.run_manager import _dicts_to_sse_events  # adjust if elsewhere
 
     events = _dicts_to_sse_events(
         [
@@ -521,8 +521,8 @@ Expected: pass.
 - [ ] **Step 4.9: Commit**
 
 ```bash
-git add backend/cubebox/agents/stream.py \
-        backend/cubebox/streams/run_manager.py \
+git add backend/cubeplex/agents/stream.py \
+        backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/agents/test_stream_usage_event.py
 git commit -m "feat(streams): emit UsageEvent per LLM call with cache breakdown"
 ```
@@ -755,7 +755,7 @@ If pass: continue. If skip: capture the skip reason, paste in the PR description
 
 - [ ] **Step 6.4: Pollution canary check (manual, not committed)**
 
-Temporarily add a timestamp into the system prompt to verify the test catches the regression. Find the system prompt construction (likely in `cubebox/middleware/memory.py` or the base prompt module) and add a transient `f"\n[time={datetime.now().isoformat()}]"`. Re-run `uv run pytest tests/e2e/memory/test_prompt_cache.py -v`. Expected: turn-2 cache ratio drops below 50%, test fails with the expected error message.
+Temporarily add a timestamp into the system prompt to verify the test catches the regression. Find the system prompt construction (likely in `cubeplex/middleware/memory.py` or the base prompt module) and add a transient `f"\n[time={datetime.now().isoformat()}]"`. Re-run `uv run pytest tests/e2e/memory/test_prompt_cache.py -v`. Expected: turn-2 cache ratio drops below 50%, test fails with the expected error message.
 
 Revert the canary change. Do not commit it.
 

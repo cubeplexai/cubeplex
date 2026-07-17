@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import useSWR from 'swr'
-import type { SkillSource, SkillSummary, WorkspaceSkills } from '@cubebox/core'
+import type { SkillSource, SkillSummary, WorkspaceSkills } from '@cubeplex/core'
 
 /**
  * Workspace-aware skill state. Mirrors the four real states a skill can be in

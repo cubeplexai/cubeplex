@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.utils.slug import slugify
+from cubeplex.utils.slug import slugify
 
 
 @pytest.mark.parametrize(

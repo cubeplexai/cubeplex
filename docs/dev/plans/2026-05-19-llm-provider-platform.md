@@ -4,12 +4,12 @@
 
 **Spec:** `docs/dev/specs/2026-05-19-llm-provider-platform-design.md`
 **Slice:** Milestones M1 (capability core) + M2 (preset catalog) — both
-in the cubepi repo. cubebox-side milestones (M3–M7) get a follow-up
+in the cubepi repo. cubeplex-side milestones (M3–M7) get a follow-up
 plan once this slice is merged + cubepi released.
 
 **Revision 4** (icons): `ProviderPreset` gains a `logo: str | None`
 field carrying an `@lobehub/icons` provider id. cubepi ships no
-SVG assets — only the lookup key. cubebox frontend installs
+SVG assets — only the lookup key. cubeplex frontend installs
 `@lobehub/icons` (M4 milestone) and renders via
 `<ProviderIcon provider={preset.logo} … />`. All 20 preset entries
 in the YAML now declare a `logo:` line (`logo: null` for the two
@@ -38,7 +38,7 @@ Task 16.
 **Goal:** Land the `CapabilityDescriptor` runtime in cubepi so every
 Provider class translates vendor-specific reasoning / temperature /
 max-tokens quirks from data, not branched code. Ship the
-`ProviderPreset` catalog alongside it so cubebox can pull a list of 20
+`ProviderPreset` catalog alongside it so cubeplex can pull a list of 20
 preset bundles and offer one-click vendor onboarding.
 
 **Architecture:** A `CapabilityDescriptor` pydantic model is passed to
@@ -56,9 +56,9 @@ via anthropic/openai SDK deps), pytest + pytest-asyncio (existing).
 
 **Where the executor works:**
 - Code changes happen in `/home/chris/cubepi`.
-- This plan and the spec live in cubebox worktree
-  `/home/chris/cubebox/.worktrees/feat/llm-provider-platform` (port slot 28).
-  After this slice is done, the cubebox worktree gets a follow-up plan
+- This plan and the spec live in cubeplex worktree
+  `/home/chris/cubeplex/.worktrees/feat/llm-provider-platform` (port slot 28).
+  After this slice is done, the cubeplex worktree gets a follow-up plan
   for M3 onwards.
 
 ---
@@ -1269,8 +1269,8 @@ Note: the rename direction is inverted — the old quirk renamed
 `max_completion_tokens` → `max_tokens`; the new field selects what
 name to USE. The presets reflect the actual wire convention.
 
-The most likely caller is `cubebox/backend/cubebox/llm/factory.py`,
-but we are not changing cubebox in this slice. Confirm cubepi has no
+The most likely caller is `cubeplex/backend/cubeplex/llm/factory.py`,
+but we are not changing cubeplex in this slice. Confirm cubepi has no
 internal callers other than tests:
 
 ```bash
@@ -1741,7 +1741,7 @@ class ProviderPreset(BaseModel):
     category: Literal["saas", "oss-framework", "custom"]
     description: str
     # @lobehub/icons provider id (lowercase, e.g. "anthropic", "openai",
-    # "deepseek"). cubebox frontend renders via
+    # "deepseek"). cubeplex frontend renders via
     # <ProviderIcon provider={preset.logo} size=28 type="color" />.
     # None = render generic fallback. Spec §3.6, §7 Q5.
     logo: str | None = None
@@ -2491,9 +2491,9 @@ EOF
 - **Spec §3.6 + §3.7 (catalog + 20 presets)** → Tasks 12-15.
 
 Skipped vs spec for this slice:
-- §4 (cubebox changes), §6 milestones M3-M7 — follow-up plan.
+- §4 (cubeplex changes), §6 milestones M3-M7 — follow-up plan.
 - §7 open questions — addressed implicitly (Q1 logo: not yet, no logo
-  files included; Q2 catalog version pinning: cubebox will cache
+  files included; Q2 catalog version pinning: cubeplex will cache
   capability on row in the next slice; Q3 probe cost: M4 plan; Q4
   override editability: M5 plan).
 

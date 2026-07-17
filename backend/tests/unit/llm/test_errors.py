@@ -1,6 +1,6 @@
 """LLMConfigError hierarchy + HTTP status mapping."""
 
-from cubebox.llm.errors import (
+from cubeplex.llm.errors import (
     BrokenPresetError,
     CorruptPresetsRowError,
     LLMConfigError,

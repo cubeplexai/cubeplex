@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.api.routes.v1 import admin_traces
-from cubebox.api.schemas.trace import TraceSummary
+from cubeplex.api.routes.v1 import admin_traces
+from cubeplex.api.schemas.trace import TraceSummary
 
 pytestmark = pytest.mark.e2e
 
@@ -64,7 +64,7 @@ async def test_tag_values_whitelist(admin_client, fake_tempo) -> None:
 @pytest.fixture
 def fake_resolve_org(monkeypatch):
     """Pin resolve_current_org_id to a known org id, auto-restored after the test."""
-    from cubebox.api.routes.v1 import admin_traces as mod
+    from cubeplex.api.routes.v1 import admin_traces as mod
 
     async def _fake(*_a, **_kw):
         return "org-MATCH"
@@ -74,7 +74,7 @@ def fake_resolve_org(monkeypatch):
 
 
 async def test_detail_returns_trace(admin_client, fake_tempo, fake_resolve_org) -> None:
-    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+    from cubeplex.api.schemas.trace import SpanKind, SpanNode, TraceDetail
 
     fake_tempo.get_trace.return_value = TraceDetail(
         summary=TraceSummary(
@@ -113,7 +113,7 @@ async def test_list_rejects_naive_datetime(admin_client, fake_tempo) -> None:
 async def test_detail_rejects_foreign_org_in_child_span(
     admin_client, fake_tempo, fake_resolve_org
 ) -> None:
-    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+    from cubeplex.api.schemas.trace import SpanKind, SpanNode, TraceDetail
 
     fake_tempo.get_trace.return_value = TraceDetail(
         summary=TraceSummary(
@@ -152,7 +152,7 @@ async def test_detail_rejects_foreign_org_in_child_span(
 
 
 async def test_detail_404_on_org_mismatch(admin_client, fake_tempo, fake_resolve_org) -> None:
-    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+    from cubeplex.api.schemas.trace import SpanKind, SpanNode, TraceDetail
 
     fake_tempo.get_trace.return_value = TraceDetail(
         summary=TraceSummary(

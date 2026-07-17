@@ -6,7 +6,7 @@ import pytest
 from cubepi.errors import RateLimited
 from cubepi.providers.images import FauxImagesProvider
 
-from cubebox.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
+from cubeplex.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
 
 
 class _StubSandbox:

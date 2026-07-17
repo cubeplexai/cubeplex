@@ -20,7 +20,7 @@ state persistence.
 - No dual-driver support. MySQL is removed in the same change; nothing
   retains a fallback path.
 - No production cluster setup. Prod-time creds flow through the existing
-  `CUBEBOX_DATABASE__*` env vars; standing up a managed PG instance is a
+  `CUBEPLEX_DATABASE__*` env vars; standing up a managed PG instance is a
   separate operational task.
 - No primary-key scheme change. Today's UUIDv7-as-`varchar(36)` shape is
   preserved. A "TypeID-style prefixed IDs" project is parked as a
@@ -62,7 +62,7 @@ database:
   port: 5432
   user: "postgres"
   password: "postgres"   # dev default; prod overrides via env
-  name: "cubebox"        # config.test.yaml: "cubebox_test"
+  name: "cubeplex"        # config.test.yaml: "cubeplex_test"
   pool_size: 10
   max_overflow: 20
   echo: false
@@ -70,13 +70,13 @@ database:
 
 ### Secrets contract
 
-Configuration values are read exclusively via the `CUBEBOX_*` env
+Configuration values are read exclusively via the `CUBEPLEX_*` env
 contract (dynaconf prefix). No hardcoded credentials in source.
 
 - Real values for non-development environments come from
-  `CUBEBOX_DATABASE__HOST` / `CUBEBOX_DATABASE__PORT` /
-  `CUBEBOX_DATABASE__USER` / `CUBEBOX_DATABASE__PASSWORD` /
-  `CUBEBOX_DATABASE__NAME`.
+  `CUBEPLEX_DATABASE__HOST` / `CUBEPLEX_DATABASE__PORT` /
+  `CUBEPLEX_DATABASE__USER` / `CUBEPLEX_DATABASE__PASSWORD` /
+  `CUBEPLEX_DATABASE__NAME`.
 - Local dev secrets live in `backend/.env` (gitignored) or
   `backend/config.development.local.yaml` (gitignored). The worktree
   toolchain writes to the same env contract.
@@ -87,7 +87,7 @@ contract (dynaconf prefix). No hardcoded credentials in source.
   migration does not need to anticipate that UX, but it must keep the
   env-var contract clean so the feature has a single, stable hook.
 
-### Engine (`backend/cubebox/db/engine.py`)
+### Engine (`backend/cubeplex/db/engine.py`)
 
 ```python
 return f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
@@ -107,7 +107,7 @@ Switch URL builder to `postgresql+psycopg://`. The existing
 tables (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
 `checkpoint_migrations`) stays as-is.
 
-## 4. Checkpointer (`backend/cubebox/agents/checkpointer.py`)
+## 4. Checkpointer (`backend/cubeplex/agents/checkpointer.py`)
 
 Drop the manual `aiomysql.connect()` plumbing. Use the official
 `AsyncPostgresSaver` backed by a shared `AsyncConnectionPool`.
@@ -139,7 +139,7 @@ Action:
 
 1. Delete every file under `backend/alembic/versions/` (16 files,
    including the MySQL-dialect-typed `1d1dab71f0fa_*`).
-2. With an empty `cubebox` database on the local PG cluster, run
+2. With an empty `cubeplex` database on the local PG cluster, run
    `alembic revision --autogenerate -m "initial postgres schema"`.
 3. Hand-review the generated migration: confirm `varchar(36)` widths
    for identity IDs, JSON columns map to PG `JSON` (or `JSONB` — see
@@ -166,23 +166,23 @@ The migration list grows additively as before.
 ## 6. Worktree provisioning (`scripts/worktree-env`)
 
 The script provisions per-worktree isolation today via two MySQL
-schemas: `cubebox_<slug>_dev` and `cubebox_<slug>_test`. PG keeps the
+schemas: `cubeplex_<slug>_dev` and `cubeplex_<slug>_test`. PG keeps the
 same names — they're databases on a shared cluster, semantically
 identical to MySQL "schemas" for our purposes.
 
 Change set:
 
 - `_mysql_creds_from_env()` → `_pg_creds_from_env()`. Reads
-  `CUBEBOX_DATABASE__HOST` (default `localhost`),
-  `CUBEBOX_DATABASE__PORT` (default `5432`),
-  `CUBEBOX_DATABASE__USER` (default `postgres`),
-  `CUBEBOX_DATABASE__PASSWORD` (default `postgres`).
+  `CUBEPLEX_DATABASE__HOST` (default `localhost`),
+  `CUBEPLEX_DATABASE__PORT` (default `5432`),
+  `CUBEPLEX_DATABASE__USER` (default `postgres`),
+  `CUBEPLEX_DATABASE__PASSWORD` (default `postgres`).
 - `_mysql_exec(sql)` → `_pg_exec(sql, db="postgres")`. Invokes `psql`
   with `PGPASSWORD` env, `-h/-p/-U`, `-d <db>`, `-v ON_ERROR_STOP=1`,
   `-c <sql>`. Connects to the maintenance DB `postgres` for
   `CREATE/DROP DATABASE` calls.
 - `db_dev_schema(slug)` / `db_test_schema(slug)` → unchanged names
-  (`cubebox_<slug>_dev`, `cubebox_<slug>_test`).
+  (`cubeplex_<slug>_dev`, `cubeplex_<slug>_test`).
 - `ensure_schemas(slug)` → PG has no `CREATE DATABASE IF NOT EXISTS`.
   Pre-check via `SELECT 1 FROM pg_database WHERE datname = $1`; only
   issue `CREATE DATABASE "<name>"` when absent.
@@ -191,11 +191,11 @@ Change set:
   to evict any straggler connections, then `DROP DATABASE IF EXISTS "<name>"`.
 - `doctor` → replace MySQL `USE` connectivity probe with a `psql -d
   <name> -c "SELECT 1"` check.
-- `clean-orphans` → query `pg_database` for `datname LIKE 'cubebox_%'`
+- `clean-orphans` → query `pg_database` for `datname LIKE 'cubeplex_%'`
   instead of `information_schema.schemata`.
 
 **Identifier quoting.** Slugs may contain hyphens (e.g.,
-`cubebox_feat-postgres-migration_dev`). PG folds unquoted identifiers
+`cubeplex_feat-postgres-migration_dev`). PG folds unquoted identifiers
 to lowercase but rejects unquoted hyphens entirely. All `psql -c`
 statements that mention a worktree DB name must double-quote the
 identifier. Add a `_quote_ident(name)` helper used in every
@@ -203,7 +203,7 @@ DDL-generating call site.
 
 `.worktree.env` keeps every variable name it has today — only the
 defaults change (port `3306` → `5432`, user/password). Existing
-loaders in `backend/cubebox/config.py`, `frontend/next.config.ts`, and
+loaders in `backend/cubeplex/config.py`, `frontend/next.config.ts`, and
 `frontend/playwright.config.ts` see no behavior change beyond the new
 defaults.
 
@@ -217,7 +217,7 @@ postgres:
   env:
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: testpass
-    POSTGRES_DB: cubebox_test
+    POSTGRES_DB: cubeplex_test
   ports: ['5432:5432']
   options: >-
     --health-cmd="pg_isready -U postgres"
@@ -232,9 +232,9 @@ PG equivalent:
 ```bash
 PGPASSWORD=testpass psql -h 127.0.0.1 -U postgres -d postgres \
   -v ON_ERROR_STOP=1 \
-  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'cubebox_test';" \
-  -c "DROP DATABASE IF EXISTS cubebox_test;" \
-  -c "CREATE DATABASE cubebox_test;"
+  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'cubeplex_test';" \
+  -c "DROP DATABASE IF EXISTS cubeplex_test;" \
+  -c "CREATE DATABASE cubeplex_test;"
 ```
 
 `config.test.yaml` keeps `password: "testpass"` for CI; CI's PG service
@@ -265,7 +265,7 @@ Primary verification — E2E. Acceptance bar:
 
 1. `make dev-install` cleanly installs the new deps (no leftover
    `aiomysql`, `langgraph-checkpoint-mysql`).
-2. `alembic upgrade head` against an empty `cubebox_test` database on
+2. `alembic upgrade head` against an empty `cubeplex_test` database on
    `~/infra/postgresql` succeeds and produces the expected schema.
 3. `make backend-test-e2e` passes locally against
    `~/infra/postgresql`. The existing `tests/e2e/test_agents.py`
@@ -275,7 +275,7 @@ Primary verification — E2E. Acceptance bar:
    `./scripts/new-worktree feat/test-pg-rt` provisions databases +
    migrates, `./scripts/worktree-env doctor` is green, then
    `./scripts/worktree-env destroy` cleans up. Confirm via
-   `psql -d postgres -c "\l"` that no orphaned `cubebox_test_pg_rt_*`
+   `psql -d postgres -c "\l"` that no orphaned `cubeplex_test_pg_rt_*`
    databases remain.
 5. CI green on the branch.
 
@@ -286,7 +286,7 @@ plumbing. Doctor + the round-trip in (4) is the integration check.
 
 - **`AsyncConnectionPool` lifecycle.** Forgetting `await pool.close()`
   on shutdown leaks connections and prints noisy warnings in pytest.
-  Wire it into the FastAPI lifespan handler in `cubebox/api/app.py`.
+  Wire it into the FastAPI lifespan handler in `cubeplex/api/app.py`.
 - **Identifier quoting.** Worktree DB names can contain hyphens. Every
   `psql -c` that names one must double-quote it. Encapsulate in
   `_quote_ident()` to make the rule unmissable.

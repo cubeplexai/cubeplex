@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from cubebox.services.tempo_client import TempoClient, TempoQueryError, TempoTraceNotFoundError
+from cubeplex.services.tempo_client import TempoClient, TempoQueryError, TempoTraceNotFoundError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
 
@@ -37,7 +37,7 @@ async def test_search_builds_traceql_with_filters(search_json: dict) -> None:
     )
     assert route.called
     q = route.calls.last.request.url.params["q"]
-    assert 'resource.service.name="cubebox"' in q
+    assert 'resource.service.name="cubeplex"' in q
     assert 'cubepi.metadata.org_id="org-1"' in q
     assert 'cubepi.metadata.workspace_id="ws-1"' in q
     assert 'cubepi.metadata.conversation_id="conv-9"' in q
@@ -53,7 +53,7 @@ async def test_search_raises_on_5xx() -> None:
 
 
 async def test_search_rejects_injection_attempts() -> None:
-    from cubebox.services.tempo_client import TempoQueryValueError
+    from cubeplex.services.tempo_client import TempoQueryValueError
 
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     with pytest.raises(TempoQueryValueError):
@@ -145,7 +145,7 @@ async def test_search_passes_zero_duration_filter() -> None:
 
 
 async def test_get_trace_rejects_invalid_trace_id() -> None:
-    from cubebox.services.tempo_client import TempoQueryValueError
+    from cubeplex.services.tempo_client import TempoQueryValueError
 
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     with pytest.raises(TempoQueryValueError):

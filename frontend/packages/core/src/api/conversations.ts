@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactVersion, Conversation, Message } from '../types'
+import type { Artifact, ArtifactVersion, Conversation } from '../types'
 import { toApiError, type ApiClient } from './client'
 
 export async function createConversation(
@@ -69,6 +69,18 @@ export async function setPinConversation(
   return res.json() as Promise<Conversation>
 }
 
+export async function forkConversation(
+  client: ApiClient,
+  id: string,
+  afterRunId: string,
+): Promise<Conversation> {
+  const res = await client.post(`/api/v1/conversations/${id}/fork`, {
+    after_run_id: afterRunId,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Conversation>
+}
+
 export async function generateConversationTitle(
   client: ApiClient,
   id: string,
@@ -77,19 +89,6 @@ export async function generateConversationTitle(
   const res = await client.post(`/api/v1/conversations/${id}/generate-title`, { content })
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Conversation>
-}
-
-export async function listMessages(
-  client: ApiClient,
-  conversationId: string,
-  limit = 50,
-  offset = 0,
-): Promise<Message[]> {
-  const url = `/api/v1/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`
-  const res = await client.get(url)
-  if (!res.ok) throw await toApiError(res)
-  const data = (await res.json()) as { messages?: Message[] }
-  return data.messages || []
 }
 
 export async function listArtifacts(
@@ -128,6 +127,17 @@ export async function requestPreviewToken(
 ): Promise<PreviewTokenResponse> {
   const params = version != null ? `?version=${version}` : ''
   const url = `/api/v1/conversations/${conversationId}/artifacts/${artifactId}/preview-token${params}`
+  const res = await client.post(url, {})
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<PreviewTokenResponse>
+}
+
+export async function requestAttachmentPreviewToken(
+  client: ApiClient,
+  conversationId: string,
+  attachmentId: string,
+): Promise<PreviewTokenResponse> {
+  const url = `/api/v1/conversations/${conversationId}/attachments/${attachmentId}/preview-token`
   const res = await client.post(url, {})
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<PreviewTokenResponse>

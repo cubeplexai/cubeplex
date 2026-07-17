@@ -15,7 +15,7 @@ import {
   type CreateEnvIn,
   type EnvEntryOut,
   type UpdateEntryIn,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'

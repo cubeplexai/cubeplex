@@ -16,12 +16,12 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `backend/cubebox/agents/actions/capabilities/skills.py` | `SkillDeps` dataclass + `build_skills_capability` factory + 3 handlers (find/preview/install) |
-| Modify | `backend/cubebox/agents/actions/registry.py` | `tools_for_run` accepts optional `skill_deps` and dynamically appends the skills capability |
-| Modify | `backend/cubebox/streams/run_manager.py` | Delete lines 1133-1195 (bespoke wiring); construct `SkillDeps` and pass to `tools_for_run` |
-| Delete | `backend/cubebox/tools/builtin/find_skills.py` | Superseded by capability |
-| Delete | `backend/cubebox/tools/builtin/preview_skill.py` | Superseded by capability (logic lifted into `skills.py`) |
-| Delete | `backend/cubebox/tools/builtin/install_skill.py` | Superseded by capability |
+| Create | `backend/cubeplex/agents/actions/capabilities/skills.py` | `SkillDeps` dataclass + `build_skills_capability` factory + 3 handlers (find/preview/install) |
+| Modify | `backend/cubeplex/agents/actions/registry.py` | `tools_for_run` accepts optional `skill_deps` and dynamically appends the skills capability |
+| Modify | `backend/cubeplex/streams/run_manager.py` | Delete lines 1133-1195 (bespoke wiring); construct `SkillDeps` and pass to `tools_for_run` |
+| Delete | `backend/cubeplex/tools/builtin/find_skills.py` | Superseded by capability |
+| Delete | `backend/cubeplex/tools/builtin/preview_skill.py` | Superseded by capability (logic lifted into `skills.py`) |
+| Delete | `backend/cubeplex/tools/builtin/install_skill.py` | Superseded by capability |
 | Delete | `backend/tests/unit/test_install_skill.py` | Replaced by capability tests |
 | Delete | `backend/tests/unit/test_preview_skill.py` | Replaced by capability tests |
 | Delete | `backend/tests/e2e/test_find_skills_tool.py` | Replaced by capability tests |
@@ -32,14 +32,14 @@
 ### Task 1: Skills capability — `SkillDeps`, input models, factory skeleton
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/capabilities/skills.py`
+- Create: `backend/cubeplex/agents/actions/capabilities/skills.py`
 
 This task creates the file scaffold with `SkillDeps`, the three Pydantic input models, and a `build_skills_capability` that returns an `AgentCapability` with three `AgentOperation`s whose handlers are placeholders that raise `NotImplementedError`. Subsequent tasks fill in each handler one at a time using TDD.
 
 - [ ] **Step 1: Create the skeleton**
 
 ```python
-# backend/cubebox/agents/actions/capabilities/skills.py
+# backend/cubeplex/agents/actions/capabilities/skills.py
 """skills capability — find/preview/install operations.
 
 Unlike SCHEDULED_TASKS_CAPABILITY (a module-level constant), the skills
@@ -61,14 +61,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     AgentCapability,
     AgentOperation,
 )
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.registry import SkillsAdapterManager
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.registry import SkillsAdapterManager
 
 
 @dataclass(frozen=True)
@@ -211,18 +211,18 @@ async def _handle_install_impl(
 
 - [ ] **Step 2: Verify imports + structure**
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.capabilities.skills import SkillDeps, build_skills_capability; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.capabilities.skills import SkillDeps, build_skills_capability; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Run mypy on the new file**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/capabilities/skills.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/capabilities/skills.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/skills.py
+git add backend/cubeplex/agents/actions/capabilities/skills.py
 git commit -m "feat(actions): skeleton for skills capability (deps, inputs, factory)"
 ```
 
@@ -231,7 +231,7 @@ git commit -m "feat(actions): skeleton for skills capability (deps, inputs, fact
 ### Task 2: `find` handler
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/skills.py`
+- Modify: `backend/cubeplex/agents/actions/capabilities/skills.py`
 - Create: `backend/tests/unit/test_skills_capability.py`
 
 The `find` handler is a thin wrapper around `SkillDiscoveryService.discover()`. The shape of the returned dict must match what today's `find_skills.py` returns so any callers in tests / future docs remain compatible.
@@ -251,13 +251,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.agents.actions.capabilities.skills import (
+from cubeplex.agents.actions.capabilities.skills import (
     FindInput,
     SkillDeps,
     _handle_find_impl,
 )
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.models.membership import Role
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.models.membership import Role
 
 
 def _make_deps(
@@ -322,7 +322,7 @@ async def test_find_returns_candidates_payload() -> None:
         install_count=3,
     )
     # Patch SkillDiscoveryService.discover to return [fake]
-    import cubebox.agents.actions.capabilities.skills as mod
+    import cubeplex.agents.actions.capabilities.skills as mod
 
     fake_discovery = MagicMock()
     fake_discovery.discover = AsyncMock(return_value=[fake])
@@ -350,10 +350,10 @@ Expected: FAIL with `NotImplementedError: Task 2 fills this in`
 
 - [ ] **Step 3: Implement the `find` handler**
 
-In `cubebox/agents/actions/capabilities/skills.py`, add the `SkillDiscoveryService` import at the top:
+In `cubeplex/agents/actions/capabilities/skills.py`, add the `SkillDiscoveryService` import at the top:
 
 ```python
-from cubebox.skills.discovery import SkillDiscoveryService
+from cubeplex.skills.discovery import SkillDiscoveryService
 
 # Module-level alias for tests to monkeypatch.
 _SkillDiscoveryService = SkillDiscoveryService
@@ -402,13 +402,13 @@ Expected: PASS
 
 - [ ] **Step 5: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/capabilities/skills.py tests/unit/test_skills_capability.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/capabilities/skills.py tests/unit/test_skills_capability.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
+git add backend/cubeplex/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
 git commit -m "feat(actions): skills.find handler — delegates to SkillDiscoveryService"
 ```
 
@@ -417,7 +417,7 @@ git commit -m "feat(actions): skills.find handler — delegates to SkillDiscover
 ### Task 3: `preview` handler
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/skills.py`
+- Modify: `backend/cubeplex/agents/actions/capabilities/skills.py`
 - Modify: `backend/tests/unit/test_skills_capability.py`
 
 The `preview` handler ports today's `preview_skill.py` logic verbatim: decode `candidate_id`, branch on local vs remote, return the SKILL.md content with env vars extracted. Errors map to `ActionInvalidInput` with the same text codes today's tool returns.
@@ -429,12 +429,12 @@ Append to `backend/tests/unit/test_skills_capability.py`:
 ```python
 # --- preview tests ---
 
-import cubebox.agents.actions.capabilities.skills as _skills_mod
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+import cubeplex.agents.actions.capabilities.skills as _skills_mod
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     PreviewInput,
     _handle_preview_impl,
 )
-from cubebox.agents.actions.types import ActionInvalidInput  # noqa: E402
+from cubeplex.agents.actions.types import ActionInvalidInput  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -448,7 +448,7 @@ async def test_preview_bad_candidate_id_raises_invalid_input() -> None:
 
 @pytest.mark.asyncio
 async def test_preview_local_returns_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     # Fake repos & catalog
     fake_skill = MagicMock(
@@ -492,7 +492,7 @@ async def test_preview_local_returns_content(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.asyncio
 async def test_preview_remote_missing_source_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     registry = MagicMock()
     registry.adapter_by_id = MagicMock(return_value=None)
@@ -512,20 +512,20 @@ Expected: 3 new tests fail with `NotImplementedError` or `AttributeError` (the m
 
 - [ ] **Step 3: Implement the `preview` handler**
 
-In `cubebox/agents/actions/capabilities/skills.py`:
+In `cubeplex/agents/actions/capabilities/skills.py`:
 
 Add imports at the top:
 
 ```python
 import httpx
 
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     SkillRepository,
     SkillVersionRepository,
 )
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md
-from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
+from cubeplex.skills.frontmatter import extract_env_vars, parse_skill_md
+from cubeplex.skills.sources.base import CandidateIdError, decode_candidate_id
 
 # Module-level aliases so tests can monkeypatch.
 _SkillRepository = SkillRepository
@@ -616,13 +616,13 @@ Expected: all preview tests pass
 
 - [ ] **Step 5: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/capabilities/skills.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/capabilities/skills.py`
 Expected: Success
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
+git add backend/cubeplex/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
 git commit -m "feat(actions): skills.preview handler — ports preview_skill logic"
 ```
 
@@ -631,7 +631,7 @@ git commit -m "feat(actions): skills.preview handler — ports preview_skill log
 ### Task 4: `install` handler
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/skills.py`
+- Modify: `backend/cubeplex/agents/actions/capabilities/skills.py`
 - Modify: `backend/tests/unit/test_skills_capability.py`
 
 The `install` handler validates the candidate_id, instantiates a `SkillInstallService` with run-scoped deps + per-call session, and calls `install()`. `SkillInstallError` is mapped to `ActionInvalidInput` (same text the legacy tool returned), so the builder yields `is_error=True` with identical wire format.
@@ -645,11 +645,11 @@ Append to `backend/tests/unit/test_skills_capability.py`:
 ```python
 # --- install tests ---
 
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     InstallInput,
     _handle_install_impl,
 )
-from cubebox.skills.discovery import InstallResult, SkillInstallError  # noqa: E402
+from cubeplex.skills.discovery import InstallResult, SkillInstallError  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -663,7 +663,7 @@ async def test_install_bad_candidate_id_raises_invalid_input() -> None:
 
 @pytest.mark.asyncio
 async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     fake_svc = MagicMock()
     fake_svc.install = AsyncMock(
@@ -694,7 +694,7 @@ async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) 
 
 @pytest.mark.asyncio
 async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     fake_svc = MagicMock()
     fake_svc.install = AsyncMock(side_effect=SkillInstallError("trust tier too low"))
@@ -717,11 +717,11 @@ Expected: 3 new install tests fail (NotImplementedError or AttributeError)
 
 - [ ] **Step 3: Implement the `install` handler**
 
-In `cubebox/agents/actions/capabilities/skills.py`, add imports + aliases at the top:
+In `cubeplex/agents/actions/capabilities/skills.py`, add imports + aliases at the top:
 
 ```python
-from cubebox.skills.discovery import SkillInstallError, SkillInstallService
-from cubebox.skills.service import SkillPublishService
+from cubeplex.skills.discovery import SkillInstallError, SkillInstallService
+from cubeplex.skills.service import SkillPublishService
 
 _SkillInstallService = SkillInstallService
 _SkillPublishService = SkillPublishService
@@ -767,13 +767,13 @@ Expected: all install tests pass; all skills_capability tests pass
 
 - [ ] **Step 5: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/capabilities/skills.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/capabilities/skills.py`
 Expected: Success
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
+git add backend/cubeplex/agents/actions/capabilities/skills.py backend/tests/unit/test_skills_capability.py
 git commit -m "feat(actions): skills.install handler — delegates to SkillInstallService"
 ```
 
@@ -796,8 +796,8 @@ Append to `backend/tests/unit/test_skills_capability.py`:
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
-from cubebox.agents.actions.builder import build_capability_tool  # noqa: E402
-from cubebox.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
+from cubeplex.agents.actions.builder import build_capability_tool  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
 
 
 @asynccontextmanager
@@ -848,13 +848,13 @@ git commit -m "test(actions): skills capability mutation gate excludes install f
 ### Task 6: Registry — accept `skill_deps`
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/registry.py`
+- Modify: `backend/cubeplex/agents/actions/registry.py`
 
 Extend `tools_for_run` with an optional `skill_deps: SkillDeps | None = None`. When provided, build the skills capability dynamically and append its tool to the list.
 
 - [ ] **Step 1: Update registry.py**
 
-Replace the contents of `cubebox/agents/actions/registry.py` with:
+Replace the contents of `cubeplex/agents/actions/registry.py` with:
 
 ```python
 """Agent capability registry — the single entry point for run_manager."""
@@ -865,10 +865,10 @@ from typing import Any
 
 from cubepi.agent.types import AgentTool
 
-from cubebox.agents.actions.builder import ContextFactory, build_capability_tool
-from cubebox.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
-from cubebox.agents.actions.capabilities.skills import SkillDeps, build_skills_capability
-from cubebox.agents.actions.types import AgentCapability
+from cubeplex.agents.actions.builder import ContextFactory, build_capability_tool
+from cubeplex.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
+from cubeplex.agents.actions.capabilities.skills import SkillDeps, build_skills_capability
+from cubeplex.agents.actions.types import AgentCapability
 
 AGENT_CAPABILITIES: list[AgentCapability] = [
     SCHEDULED_TASKS_CAPABILITY,
@@ -906,22 +906,22 @@ def tools_for_run(
 
 - [ ] **Step 2: Verify import**
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.registry import tools_for_run, SkillDeps; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.registry import tools_for_run, SkillDeps; print('OK')"`
 
 Wait — `SkillDeps` is exported from the capability module, not registry. Verify via the capability module instead:
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.registry import tools_for_run; from cubebox.agents.actions.capabilities.skills import SkillDeps; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.registry import tools_for_run; from cubeplex.agents.actions.capabilities.skills import SkillDeps; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/registry.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/registry.py`
 Expected: Success
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/registry.py
+git add backend/cubeplex/agents/actions/registry.py
 git commit -m "feat(actions): tools_for_run accepts skill_deps for dynamic skills capability"
 ```
 
@@ -930,7 +930,7 @@ git commit -m "feat(actions): tools_for_run accepts skill_deps for dynamic skill
 ### Task 7: Wire `skill_deps` into run_manager and delete bespoke wiring
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 Two edits to `_run_cubepi_path`:
 
@@ -960,7 +960,7 @@ Find the block beginning with the comment:
 
 Delete the entire block (~62 lines). Verify the file still parses:
 
-Run: `cd backend && uv run python -c "import cubebox.streams.run_manager; print('OK')"`
+Run: `cd backend && uv run python -c "import cubeplex.streams.run_manager; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 2: Add `SkillDeps` construction inside the action-tools try block**
@@ -975,22 +975,22 @@ Locate the existing block beginning with the comment:
 Inside that `try:` (before the `async with async_session_maker() as _action_session:` block), replace the imports section:
 
 ```python
-            from cubebox.agents.actions.registry import (
+            from cubeplex.agents.actions.registry import (
                 tools_for_run as _action_tools_for_run,
             )
-            from cubebox.repositories.membership import MembershipRepository
+            from cubeplex.repositories.membership import MembershipRepository
 ```
 
 With this expanded set (additive):
 
 ```python
-            from cubebox.agents.actions.capabilities.skills import SkillDeps
-            from cubebox.agents.actions.registry import (
+            from cubeplex.agents.actions.capabilities.skills import SkillDeps
+            from cubeplex.agents.actions.registry import (
                 tools_for_run as _action_tools_for_run,
             )
-            from cubebox.repositories.membership import MembershipRepository
-            from cubebox.repositories.organization import OrganizationRepository
-            from cubebox.skills.sources.registry import SkillsAdapterManager
+            from cubeplex.repositories.membership import MembershipRepository
+            from cubeplex.repositories.organization import OrganizationRepository
+            from cubeplex.skills.sources.registry import SkillsAdapterManager
 ```
 
 Then, just before the `_builtin_tools.extend(_action_tools_for_run(...))` call near the bottom of that block, add the SkillDeps construction:
@@ -1032,18 +1032,18 @@ Make sure to remove the OLD call (the one without `skill_deps=_skill_deps`).
 
 - [ ] **Step 3: Verify imports + parses**
 
-Run: `cd backend && uv run python -c "import cubebox.streams.run_manager; print('OK')"`
+Run: `cd backend && uv run python -c "import cubeplex.streams.run_manager; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 4: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/streams/run_manager.py`
+Run: `cd backend && uv run mypy cubeplex/streams/run_manager.py`
 Expected: Success
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "refactor(run_manager): wire skills capability via tools_for_run; drop bespoke wiring"
 ```
 
@@ -1052,9 +1052,9 @@ git commit -m "refactor(run_manager): wire skills capability via tools_for_run; 
 ### Task 8: Delete legacy tool files and obsolete tests
 
 **Files:**
-- Delete: `backend/cubebox/tools/builtin/find_skills.py`
-- Delete: `backend/cubebox/tools/builtin/preview_skill.py`
-- Delete: `backend/cubebox/tools/builtin/install_skill.py`
+- Delete: `backend/cubeplex/tools/builtin/find_skills.py`
+- Delete: `backend/cubeplex/tools/builtin/preview_skill.py`
+- Delete: `backend/cubeplex/tools/builtin/install_skill.py`
 - Delete: `backend/tests/unit/test_install_skill.py`
 - Delete: `backend/tests/unit/test_preview_skill.py`
 - Delete: `backend/tests/e2e/test_find_skills_tool.py`
@@ -1063,17 +1063,17 @@ After Task 7, these files have no live imports. Delete them.
 
 - [ ] **Step 1: Confirm no live imports remain**
 
-Run: `cd backend && grep -rn "from cubebox.tools.builtin.find_skills\|from cubebox.tools.builtin.preview_skill\|from cubebox.tools.builtin.install_skill" cubebox tests 2>&1 | grep -v "^Binary file"`
+Run: `cd backend && grep -rn "from cubeplex.tools.builtin.find_skills\|from cubeplex.tools.builtin.preview_skill\|from cubeplex.tools.builtin.install_skill" cubeplex tests 2>&1 | grep -v "^Binary file"`
 Expected: only references inside the three to-be-deleted test files (or zero results).
 
-If `cubebox/` shows any matches → STOP and re-do Task 7. Else continue.
+If `cubeplex/` shows any matches → STOP and re-do Task 7. Else continue.
 
 - [ ] **Step 2: Delete the legacy production files**
 
 ```bash
-rm backend/cubebox/tools/builtin/find_skills.py
-rm backend/cubebox/tools/builtin/preview_skill.py
-rm backend/cubebox/tools/builtin/install_skill.py
+rm backend/cubeplex/tools/builtin/find_skills.py
+rm backend/cubeplex/tools/builtin/preview_skill.py
+rm backend/cubeplex/tools/builtin/install_skill.py
 ```
 
 - [ ] **Step 3: Delete the legacy test files**
@@ -1086,13 +1086,13 @@ rm backend/tests/e2e/test_find_skills_tool.py
 
 - [ ] **Step 4: Run mypy on the whole backend**
 
-Run: `cd backend && uv run mypy cubebox/`
+Run: `cd backend && uv run mypy cubeplex/`
 Expected: `Success: no issues found`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A backend/cubebox/tools/builtin/ backend/tests/
+git add -A backend/cubeplex/tools/builtin/ backend/tests/
 git commit -m "chore(actions): delete legacy skill tool factories and their tests"
 ```
 
@@ -1104,7 +1104,7 @@ git commit -m "chore(actions): delete legacy skill tool factories and their test
 
 - [ ] **Step 1: Full mypy**
 
-Run: `cd backend && uv run mypy cubebox/`
+Run: `cd backend && uv run mypy cubeplex/`
 Expected: `Success: no issues found`
 
 - [ ] **Step 2: All new unit tests pass**

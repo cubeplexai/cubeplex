@@ -3,7 +3,7 @@
 **This is a MANUAL operator runbook, not automated CI.**
 
 Per the project's "real E2E, no fake sidecar" rule (spec §8), this test
-requires a live Kubernetes cluster and a running cubebox backend. Do not
+requires a live Kubernetes cluster and a running cubeplex backend. Do not
 substitute a fake local sidecar or mocked egress image — the whole point is to
 verify the real webhook + mitmproxy addon path end to end.
 
@@ -43,12 +43,12 @@ Before starting, confirm:
   If cert-manager is not available, follow Option B in
   `deploy/egress-bundle/k8s/webhook-tls.yaml` to create the TLS Secret
   manually.
-- The cubebox exchange endpoint (Plan 2) is reachable from inside the
+- The cubeplex exchange endpoint (Plan 2) is reachable from inside the
   `opensandbox` namespace at the URL configured in `webhook-deployment.yaml`
   (`EGRESS_EXCHANGE_URL`). Default:
-  `https://egress-exchange.cubebox.internal/api/v1/internal/egress/exchange`.
+  `https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange`.
 - You have credentials to push images to the registry referenced in
-  `webhook-deployment.yaml` (`REGISTRY_PLACEHOLDER/cubebox-egress-webhook:latest`).
+  `webhook-deployment.yaml` (`REGISTRY_PLACEHOLDER/cubeplex-egress-webhook:latest`).
 
 ---
 
@@ -57,7 +57,7 @@ Before starting, confirm:
 ### 1a — Generate and apply the MITM CA Secret (one-time, idempotent)
 
 ```bash
-cd /path/to/cubebox/deploy/egress-bundle
+cd /path/to/cubeplex/deploy/egress-bundle
 
 # Generate the CA.  The script refuses to overwrite an existing Secret.
 NAMESPACE=opensandbox bash scripts/gen-ca.sh
@@ -114,11 +114,11 @@ kubectl apply -f k8s/addon-configmap.yaml -n opensandbox
 ```bash
 # From the repo root:
 docker build \
-  -t <YOUR_REGISTRY>/cubebox-egress-webhook:latest \
+  -t <YOUR_REGISTRY>/cubeplex-egress-webhook:latest \
   -f deploy/egress-bundle/webhook/Dockerfile \
   deploy/egress-bundle/webhook/
 
-docker push <YOUR_REGISTRY>/cubebox-egress-webhook:latest
+docker push <YOUR_REGISTRY>/cubeplex-egress-webhook:latest
 ```
 
 ### 1d — Edit webhook-deployment.yaml placeholders
@@ -130,7 +130,7 @@ In `deploy/egress-bundle/k8s/webhook-deployment.yaml`, replace:
   the OpenSandbox server (e.g.
   `registry.example.com/opensandbox/egress:v1.0.12`). This must match exactly
   — the webhook uses it for pod narrow-matching.
-- `https://egress-exchange.cubebox.internal/api/v1/internal/egress/exchange`
+- `https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange`
   with the actual exchange URL if it differs.
 
 ### 1e — Provision webhook serving TLS
@@ -190,7 +190,7 @@ kubectl get pods -n opensandbox -l app=egress-webhook
 
 ### 1g — Configure the exchange endpoint with mTLS
 
-The cubebox backend (Plan 2) must serve the exchange endpoint with client-cert
+The cubeplex backend (Plan 2) must serve the exchange endpoint with client-cert
 verification enabled. In `config.development.local.yaml` (or production
 config):
 
@@ -204,13 +204,13 @@ egress_exchange:
     # the exchange trusts for client certs (both are the same egress-mitm CA).
     ca_cert: /path/to/mitmproxy-ca-cert.pem
 sandbox:
-  egress_exchange_host: egress-exchange.cubebox.internal  # hostname the sandbox is allowed to reach
+  egress_exchange_host: egress-exchange.cubeplex.internal  # hostname the sandbox is allowed to reach
 ```
 
 The exchange service must be started with uvicorn mTLS flags:
 
 ```bash
-uvicorn cubebox.main:app \
+uvicorn cubeplex.main:app \
   --ssl-certfile /path/to/exchange-server.crt \
   --ssl-keyfile  /path/to/exchange-server.key \
   --ssl-ca-certs /path/to/mitmproxy-ca-cert.pem \
@@ -226,7 +226,7 @@ Confirm the exchange endpoint is ready from inside the cluster:
 kubectl run curl-test --image=curlimages/curl:latest -n opensandbox --restart=Never \
   --rm -it -- \
   curl -sv --cacert /dev/stdin \
-  https://egress-exchange.cubebox.internal/health <<< "$(
+  https://egress-exchange.cubeplex.internal/health <<< "$(
     kubectl get secret egress-mitm-ca -n opensandbox \
       -o jsonpath='{.data.ca-cert\.pem}' | base64 -d
   )"
@@ -239,7 +239,7 @@ kubectl run curl-test --image=curlimages/curl:latest -n opensandbox --restart=Ne
 
 ### 2a — Create an org + workspace + user (if not already present)
 
-Use the cubebox API or admin CLI. Record:
+Use the cubeplex API or admin CLI. Record:
 - `ORG_ID` — the org public ID.
 - `WS_ID` — the workspace public ID.
 - `USER_TOKEN` — a bearer token for the workspace user.
@@ -277,7 +277,7 @@ echo "SandboxEnvVar ID: ${SENV_ID}"
 
 ### 2c — Create a run that opens a sandbox with egress enabled
 
-The `sandbox.egress_exchange_host` config must be set (Step 1g). cubebox will
+The `sandbox.egress_exchange_host` config must be set (Step 1g). cubeplex will
 then:
 1. Resolve the vault entry and mint a placeholder `R = cbxref_<32 base32 chars>`.
 2. Set `GITHUB_TOKEN=R` in the sandbox env.
@@ -369,7 +369,7 @@ kubectl exec -n opensandbox <sandbox-pod> -c sandbox -- \
     -X POST \
     -H 'Content-Type: application/json' \
     -d '{\"placeholder\":\"${PLACEHOLDER}\",\"host\":\"api.github.com\"}' \
-    https://egress-exchange.cubebox.internal/api/v1/internal/egress/exchange \
+    https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange \
     -o /dev/null"
 ```
 
@@ -405,7 +405,7 @@ curl -sw '%{http_code}' \
   -X POST \
   -H 'Content-Type: application/json' \
   -d "{\"placeholder\":\"${PLACEHOLDER_B}\",\"host\":\"api.github.com\"}" \
-  https://egress-exchange.cubebox.internal/api/v1/internal/egress/exchange \
+  https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange \
   -o /dev/null
 ```
 
@@ -457,12 +457,12 @@ kubectl get pods -n opensandbox -w   # watch until a new sandbox pod is Running
   was not blocked by the webhook being down (`failurePolicy: Ignore` is
   working).
 - [ ] The sandbox's `GITHUB_TOKEN` still shows a `cbxref_...` placeholder
-  (cubebox still minted it at run-start), but because the webhook did not fire,
+  (cubeplex still minted it at run-start), but because the webhook did not fire,
   the egress sidecar was not patched: no `inject.py` addon, no per-sandbox
   mTLS cert. A tool call to `api.github.com` with the placeholder fails
   authentication at GitHub (`401 Bad credentials`) — the placeholder is not
   substituted.
-- [ ] The real token is still absent from the sandbox container. Cubebox
+- [ ] The real token is still absent from the sandbox container. Cubeplex
   never placed it there; the worst outcome of the webhook outage is that the
   tool call fails, not that the token leaks.
 
@@ -499,7 +499,7 @@ kubectl logs -n opensandbox <sandbox-pod> -c egress | grep "cbxref_" && echo PLA
 ## Step 4: Teardown
 
 ```bash
-# Delete the test sandboxes and runs via the cubebox API or by stopping the runs.
+# Delete the test sandboxes and runs via the cubeplex API or by stopping the runs.
 
 # Remove the egress bundle from the cluster:
 kubectl delete mutatingwebhookconfiguration egress-inject
@@ -511,7 +511,7 @@ kubectl delete issuer egress-webhook-selfsigned -n opensandbox 2>/dev/null || tr
 
 # Per-sandbox client cert Secrets are owned by the Sandbox CR and are GC'd
 # automatically when the sandbox is deleted.  Verify:
-kubectl get secrets -n opensandbox -l app.kubernetes.io/part-of=cubebox-egress
+kubectl get secrets -n opensandbox -l app.kubernetes.io/part-of=cubeplex-egress
 
 # Delete the MITM CA Secret (careful — this invalidates all existing certs):
 # kubectl delete secret egress-mitm-ca -n opensandbox

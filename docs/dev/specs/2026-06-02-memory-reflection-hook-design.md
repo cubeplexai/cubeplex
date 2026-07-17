@@ -13,7 +13,7 @@ that information is lost after the conversation ends.
 ## Solution
 
 Add an `on_run_end` middleware hook to cubepi that fires once after the entire agent run
-completes (all turns and tool calls done, before `AgentEndEvent`). cubebox implements
+completes (all turns and tool calls done, before `AgentEndEvent`). cubeplex implements
 a `ReflectionMiddleware` that uses this hook to inject a short reflection prompt, causing
 the agent to review the current conversation turn and call `memory_save` / `memory_update`
 if appropriate. No separate LLM process is spawned — this is one extra turn appended to
@@ -63,9 +63,9 @@ break
 Extract `on_run_end` from `_mw_hooks` (same pattern as `after_model_response`) and
 thread it through `_run_loop` → `run_agent_loop`.
 
-## cubebox Changes
+## cubeplex Changes
 
-### `cubebox/prompts/reflection.py`
+### `cubeplex/prompts/reflection.py`
 
 New file. Contains `REFLECTION_PROMPT`:
 
@@ -81,7 +81,7 @@ to share with their team.
 If nothing is worth saving, reply with "done" and stop.
 ```
 
-### `cubebox/middleware/reflection.py`
+### `cubeplex/middleware/reflection.py`
 
 New file. `ReflectionMiddleware(Middleware)` implements `on_run_end`:
 
@@ -93,7 +93,7 @@ async def on_run_end(self, ctx, *, signal=None) -> list[Message] | None:
     )]
 ```
 
-### `cubebox/streams/run_manager.py`
+### `cubeplex/streams/run_manager.py`
 
 Add `ReflectionMiddleware` as the last entry in the middleware stack (after
 `TodoListMiddleware`), so the reflection turn has the full memory tool set and

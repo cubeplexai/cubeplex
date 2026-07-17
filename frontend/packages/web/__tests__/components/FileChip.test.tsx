@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it } from 'vitest'
-import type { UploadingFile } from '@cubebox/core'
+import type { UploadingFile } from '@cubeplex/core'
 import en from '../../messages/en.json'
 import { FileChip } from '../../components/chat/FileChip'
 

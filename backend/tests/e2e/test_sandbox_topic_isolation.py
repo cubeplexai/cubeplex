@@ -28,26 +28,26 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.auth.users import UserManager, _slugify_org_name
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.models import (
+from cubeplex.auth.users import UserManager, _slugify_org_name
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import (
     Membership as MembershipModel,
 )
-from cubebox.models import (
+from cubeplex.models import (
     OrganizationMembership,
     OrgRole,
     Role,
     User,
 )
-from cubebox.repositories import (
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,
     WorkspaceRepository,
 )
-from cubebox.repositories.topic import TopicRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.repositories.topic import TopicRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 
 class _FakeRaw:
@@ -59,6 +59,9 @@ class _FakeRaw:
 
     def __init__(self, sandbox_id: str | None = None) -> None:
         self.id = sandbox_id or f"prov-{secrets.token_hex(6)}"
+
+    async def check_ready(self, timeout: object, polling_interval: object) -> None:
+        del timeout, polling_interval
 
     async def is_healthy(self) -> bool:
         return True
@@ -190,7 +193,7 @@ async def test_dedicated_topic_sandbox_isolated_from_personal(
         org_id=org_id,
         workspace_id=ws_id,
     )
-    assert personal.id != topic_sb.id
+    assert personal.sandbox.id != topic_sb.sandbox.id
 
     again = await sandbox_manager.get_or_create(
         scope_type="topic",
@@ -199,7 +202,7 @@ async def test_dedicated_topic_sandbox_isolated_from_personal(
         org_id=org_id,
         workspace_id=ws_id,
     )
-    assert again.id == topic_sb.id
+    assert again.sandbox.id == topic_sb.sandbox.id
 
     again_personal = await sandbox_manager.get_or_create(
         scope_type="user",
@@ -208,7 +211,7 @@ async def test_dedicated_topic_sandbox_isolated_from_personal(
         org_id=org_id,
         workspace_id=ws_id,
     )
-    assert again_personal.id == personal.id
+    assert again_personal.sandbox.id == personal.sandbox.id
 
     async with session_factory() as s:
         rows = (
@@ -254,7 +257,7 @@ async def test_topic_sandbox_shared_across_participants(
         org_id=org_id,
         workspace_id=ws_id,
     )
-    assert shared.id == winner.id
+    assert shared.sandbox.id == winner.sandbox.id
 
     async with session_factory() as s:
         count = (
@@ -296,7 +299,7 @@ async def test_standalone_group_chat_scope_distinct_from_user(
         org_id=org_id,
         workspace_id=ws_id,
     )
-    assert personal.id != group.id
+    assert personal.sandbox.id != group.sandbox.id
 
     async with session_factory() as s:
         rows = (

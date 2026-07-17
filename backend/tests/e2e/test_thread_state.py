@@ -5,7 +5,7 @@ import pytest
 
 from tests.e2e.conftest import DEFAULT_WS_ID, collect_sse_events
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.real_llm]
 
 
 @pytest.mark.asyncio

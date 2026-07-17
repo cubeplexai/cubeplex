@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
@@ -64,6 +64,7 @@ async def test_create_preinstalled_skill_and_version(db_session) -> None:
         storage_prefix=f"skills/_global/{name}/1.0.0/",
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
     assert version.skill_id == skill.id
     assert version.version == "1.0.0"

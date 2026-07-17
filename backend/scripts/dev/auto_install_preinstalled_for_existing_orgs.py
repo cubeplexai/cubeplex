@@ -11,8 +11,8 @@ import asyncio
 
 from sqlalchemy import select
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models import (
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import (
     Organization,
     OrgSkillInstall,
     Skill,

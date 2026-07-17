@@ -13,7 +13,7 @@ After these changes, the streaming-render work per delta drops to roughly: 1 × 
 
 **Tech Stack:** React 19, Next.js 15 (app router), Zustand, react-markdown + remark/rehype plugins, Vitest + React Testing Library.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/frontend-stream-perf` (slot 87, frontend on `:3087`, backend on `:8087`). All paths below are relative to that worktree.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/frontend-stream-perf` (slot 87, frontend on `:3087`, backend on `:8087`). All paths below are relative to that worktree.
 
 ### Why historical messages still need confirm props
 
@@ -195,7 +195,7 @@ import {
   AssistantMessage,
   HistoryAssistantMessage,
 } from '@/components/chat/AssistantMessage'
-import type { AssistantMessage as AssistantMessageType } from '@cubebox/core'
+import type { AssistantMessage as AssistantMessageType } from '@cubeplex/core'
 
 const baseMessage = {
   id: 'msg-1',

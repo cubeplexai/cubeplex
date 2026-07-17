@@ -9,7 +9,7 @@ Translates OrgSettings rows with keys in
 'model_presets' row per (org_id) tuple. No table schema changes.
 
 Note: ``ALLOWED_TASKS`` is inlined (not imported from
-``cubebox.llm.snapshot_schema``) so this migration stays frozen against
+``cubeplex.llm.snapshot_schema``) so this migration stays frozen against
 future schema drift. Legacy ``task_models`` keys outside this set (e.g.
 the historical ``"chat"`` key) are dropped on purpose — they previously
 fell through to the default model, and should continue doing so under
@@ -23,7 +23,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from cubebox.models.public_id import PREFIX_ORG_SETTING, generate_public_id
+from cubeplex.models.public_id import PREFIX_ORG_SETTING, generate_public_id
 
 revision: str = "3e8d2018cdb9"
 down_revision: Union[str, Sequence[str], None] = "fef7470bc3a5"

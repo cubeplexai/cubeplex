@@ -1,8 +1,8 @@
-# cubebox Artifacts 系统设计方案
+# cubeplex Artifacts 系统设计方案
 
 ## Context
 
-cubebox 是一个 AI Agent 平台（FastAPI 后端 + Next.js 前端）。用户希望设计一套类似 Kimi OK Computer 风格的 Artifacts 系统 — "自主交付型"：Agent 在沙箱中自主生成完整交付物（文档、网站、代码、数据可视化等），前端以一等公民方式展示、预览、下载这些产物。
+cubeplex 是一个 AI Agent 平台（FastAPI 后端 + Next.js 前端）。用户希望设计一套类似 Kimi OK Computer 风格的 Artifacts 系统 — "自主交付型"：Agent 在沙箱中自主生成完整交付物（文档、网站、代码、数据可视化等），前端以一等公民方式展示、预览、下载这些产物。
 
 **核心设计原则**: Agent 通过已有的 `execute` 工具在沙箱中自由写文件，然后调用新的 `save_artifact` 工具注册为 Artifact。前端接收 SSE 事件后展示 ArtifactCard。
 
@@ -37,7 +37,7 @@ Backend: 发送 artifact_updated 事件 → Frontend 刷新预览
 
 ### 1.1 数据模型
 
-新建 `/backend/cubebox/models/artifact.py` (SQLModel，与 Conversation 同层):
+新建 `/backend/cubeplex/models/artifact.py` (SQLModel，与 Conversation 同层):
 
 ```python
 class Artifact(SQLModel, table=True):
@@ -64,7 +64,7 @@ class Artifact(SQLModel, table=True):
 
 ### 1.2 ArtifactMiddleware (新建中间件)
 
-新建 `/backend/cubebox/middleware/artifacts.py`，遵循已有中间件模式（与 SandboxMiddleware、SubAgentMiddleware 同级）。
+新建 `/backend/cubeplex/middleware/artifacts.py`，遵循已有中间件模式（与 SandboxMiddleware、SubAgentMiddleware 同级）。
 
 **为什么不放在 SandboxMiddleware 中**:
 - SandboxMiddleware 职责单一（只管 `execute` 工具），不应膨胀
@@ -181,7 +181,7 @@ elif evt_type == "artifact":
 
 ### 1.5 Agent Graph 工厂
 
-`create_cubebox_agent()` 增加 ArtifactMiddleware 接入:
+`create_cubeplex_agent()` 增加 ArtifactMiddleware 接入:
 
 ```python
 # graph.py — 在 SandboxMiddleware 之后添加
@@ -192,7 +192,7 @@ if sandbox is not None:
 
 ### 1.6 API 端点
 
-新建 `/backend/cubebox/api/routes/v1/artifacts.py`:
+新建 `/backend/cubeplex/api/routes/v1/artifacts.py`:
 
 | 端点 | 说明 |
 |------|------|
@@ -206,7 +206,7 @@ if sandbox is not None:
 
 ### 1.7 ArtifactRepository
 
-新建 `/backend/cubebox/repositories/artifact.py`，遵循 ConversationRepository 模式:
+新建 `/backend/cubeplex/repositories/artifact.py`，遵循 ConversationRepository 模式:
 
 ```python
 class ArtifactRepository:
@@ -228,7 +228,7 @@ def register_content_type(self, tool_name: str, content_type: str) -> None:
 
 ### 1.9 Prompt 注入
 
-新建 `/backend/cubebox/prompts/artifacts.py`，由 ArtifactMiddleware 通过 `awrap_model_call` 注入:
+新建 `/backend/cubeplex/prompts/artifacts.py`，由 ArtifactMiddleware 通过 `awrap_model_call` 注入:
 
 ```
 ## Artifacts
@@ -393,23 +393,23 @@ components/
 ## 五、需要修改的关键文件
 
 **后端 (修改)**:
-- `/backend/cubebox/agents/schemas.py` — 新增 ArtifactEvent
-- `/backend/cubebox/agents/stream.py` — `_extract_tool_events` 增加 artifact 事件发送
-- `/backend/cubebox/agents/graph.py` — 中间件栈接入 ArtifactMiddleware
-- `/backend/cubebox/api/routes/v1/conversations.py` — `_dicts_to_sse_events` 增加 artifact 映射
-- `/backend/cubebox/api/app.py` — 注册 artifacts 路由
-- `/backend/cubebox/api/routes/v1/__init__.py` — 导出 artifacts_router
-- `/backend/cubebox/models/__init__.py` — 导出 Artifact
-- `/backend/cubebox/tools/registry.py` — 新增 `register_content_type()` 方法
-- `/backend/cubebox/repositories/__init__.py` — 导出 ArtifactRepository
+- `/backend/cubeplex/agents/schemas.py` — 新增 ArtifactEvent
+- `/backend/cubeplex/agents/stream.py` — `_extract_tool_events` 增加 artifact 事件发送
+- `/backend/cubeplex/agents/graph.py` — 中间件栈接入 ArtifactMiddleware
+- `/backend/cubeplex/api/routes/v1/conversations.py` — `_dicts_to_sse_events` 增加 artifact 映射
+- `/backend/cubeplex/api/app.py` — 注册 artifacts 路由
+- `/backend/cubeplex/api/routes/v1/__init__.py` — 导出 artifacts_router
+- `/backend/cubeplex/models/__init__.py` — 导出 Artifact
+- `/backend/cubeplex/tools/registry.py` — 新增 `register_content_type()` 方法
+- `/backend/cubeplex/repositories/__init__.py` — 导出 ArtifactRepository
 
 **后端 (新建)**:
-- `/backend/cubebox/models/artifact.py` — Artifact SQLModel
+- `/backend/cubeplex/models/artifact.py` — Artifact SQLModel
 - `/backend/alembic/versions/xxx_create_artifacts_table.py` — Alembic migration
-- `/backend/cubebox/repositories/artifact.py` — ArtifactRepository (CRUD)
-- `/backend/cubebox/middleware/artifacts.py` — ArtifactMiddleware (save_artifact 工具 + prompt)
-- `/backend/cubebox/prompts/artifacts.py` — Artifact prompt
-- `/backend/cubebox/api/routes/v1/artifacts.py` — 下载 + 列表 API
+- `/backend/cubeplex/repositories/artifact.py` — ArtifactRepository (CRUD)
+- `/backend/cubeplex/middleware/artifacts.py` — ArtifactMiddleware (save_artifact 工具 + prompt)
+- `/backend/cubeplex/prompts/artifacts.py` — Artifact prompt
+- `/backend/cubeplex/api/routes/v1/artifacts.py` — 下载 + 列表 API
 
 **前端 (修改)**:
 - `/frontend/packages/core/src/types/events.ts` — 新增 artifact 事件类型
@@ -460,4 +460,4 @@ components/
 - **Kimi OK Computer**: Agent 拥有虚拟机 (浏览器+终端+文件系统)，38+ 工具，生成独立可下载/部署资产 (DOCX/XLSX/WebApp)
 - **Perplexity Computer**: 19 模型编排，400+ 应用集成，生成报告/仪表板/代码
 
-cubebox 的 Artifacts 系统采用 **Kimi 风格** — Agent 在沙箱中自主工作，生成完整交付物，而非 Claude 风格的内联代码预览。这更适合 cubebox 已有的沙箱基础设施。
+cubeplex 的 Artifacts 系统采用 **Kimi 风格** — Agent 在沙箱中自主工作，生成完整交付物，而非 Claude 风格的内联代码预览。这更适合 cubeplex 已有的沙箱基础设施。

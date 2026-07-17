@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.repositories import ConversationRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.repositories import ConversationRepository
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -124,8 +124,8 @@ class TestConversationsCRUD:
 
         from sqlalchemy import select, text
 
-        from cubebox import db as _cubebox_db
-        from cubebox.models.billing import BillingEvent
+        from cubeplex import db as _cubeplex_db
+        from cubeplex.models.billing import BillingEvent
 
         create_resp = client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "with billing"}
@@ -133,7 +133,7 @@ class TestConversationsCRUD:
         conversation_id = create_resp.json()["id"]
 
         async def _seed_and_check() -> str:
-            async with _cubebox_db.async_session_maker() as session:
+            async with _cubeplex_db.async_session_maker() as session:
                 user_id = (
                     await session.execute(
                         text("SELECT creator_user_id FROM conversations WHERE id=:id"),
@@ -164,7 +164,7 @@ class TestConversationsCRUD:
         )
 
         async def _verify_billing_intact() -> str | None:
-            async with _cubebox_db.async_session_maker() as session:
+            async with _cubeplex_db.async_session_maker() as session:
                 row = (
                     await session.execute(select(BillingEvent).where(BillingEvent.id == event_id))
                 ).scalar_one()
@@ -184,8 +184,8 @@ class TestConversationsCRUD:
         """
         import asyncio
 
-        from cubebox import db as _cubebox_db
-        from cubebox.models.artifact import Artifact
+        from cubeplex import db as _cubeplex_db
+        from cubeplex.models.artifact import Artifact
 
         create_resp = client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "for artifacts"}
@@ -193,7 +193,7 @@ class TestConversationsCRUD:
         conversation_id = create_resp.json()["id"]
 
         async def _seed_artifact() -> str:
-            async with _cubebox_db.async_session_maker() as session:
+            async with _cubeplex_db.async_session_maker() as session:
                 art = Artifact(
                     org_id="org-00000000000000",
                     workspace_id=DEFAULT_WS_ID,
@@ -246,7 +246,8 @@ class TestConversationsMessages:
         assert response.status_code == 200
         data = response.json()
         assert data["messages"] == []
-        assert data["total"] == 0
+        assert data["oldest_seq"] is None
+        assert data["has_more"] is False
 
     def test_list_messages_not_found(self, client: TestClient) -> None:
         """List messages for non-existent conversation returns 404."""
@@ -254,6 +255,7 @@ class TestConversationsMessages:
         assert response.status_code == 404
 
 
+@pytest.mark.real_llm
 @pytest.mark.slow
 class TestSendMessage:
     """Message send (SSE streaming) tests — requires real LLM API access."""
@@ -344,7 +346,7 @@ async def _default_user_id() -> str:
     """Resolve the seeded default user's id for repo-scoped tests."""
     from sqlalchemy import select
 
-    from cubebox.models import User
+    from cubeplex.models import User
 
     await _ensure_default_user_and_membership()
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
@@ -364,7 +366,7 @@ class TestConversationModelSetting:
 
     @pytest.mark.asyncio
     async def test_mark_active_persists_model_setting(self, _default_user_id: str) -> None:
-        """mark_active(model_setting=...) stores the key + thinking; a plain
+        """mark_active(model_setting=...) stores the key + reasoning; a plain
         mark_active afterwards leaves them untouched."""
         engine = create_async_engine(_build_database_url(), poolclass=NullPool)
         try:
@@ -378,17 +380,18 @@ class TestConversationModelSetting:
                 )
                 conv = await repo.create(title="model-setting", draft=True)
 
-                await repo.mark_active(conv.id, model_setting=("pro", "high"))
+                reasoning = {"mode": "on", "effort": "high", "summary": "none"}
+                await repo.mark_active(conv.id, model_setting=("pro", reasoning))
                 await session.refresh(conv)
                 assert conv.model_key == "pro"
-                assert conv.thinking == "high"
+                assert conv.reasoning == reasoning
 
                 # A timestamp-only mark_active (the install-fallback caller)
                 # must NOT clobber the previously stored model setting.
                 await repo.mark_active(conv.id)
                 await session.refresh(conv)
                 assert conv.model_key == "pro"
-                assert conv.thinking == "high"
+                assert conv.reasoning == reasoning
         finally:
             await engine.dispose()
 
@@ -396,7 +399,7 @@ class TestConversationModelSetting:
     async def test_get_conversation_returns_model_setting(
         self, async_client: httpx.AsyncClient, _default_user_id: str
     ) -> None:
-        """GET /conversations/{id} surfaces model_key + thinking."""
+        """GET /conversations/{id} surfaces model_key + reasoning."""
         engine = create_async_engine(_build_database_url(), poolclass=NullPool)
         try:
             maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -408,7 +411,8 @@ class TestConversationModelSetting:
                     user_id=_default_user_id,
                 )
                 conv = await repo.create(title="serialize-model-setting")
-                await repo.mark_active(conv.id, model_setting=("ultra", "low"))
+                reasoning = {"mode": "on", "effort": "low", "summary": "none"}
+                await repo.mark_active(conv.id, model_setting=("ultra", reasoning))
                 conv_id = conv.id
         finally:
             await engine.dispose()
@@ -417,4 +421,4 @@ class TestConversationModelSetting:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["model_key"] == "ultra"
-        assert data["thinking"] == "low"
+        assert data["reasoning"] == reasoning

@@ -3,7 +3,7 @@
 import { useMemo, useReducer, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, deleteProvider } from '@cubebox/core'
+import { createApiClient, deleteProvider } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { WizardStepRail } from '@/components/admin/models/wizard/WizardStepRail'
 import { PresetPicker } from '@/components/admin/models/wizard/PresetPicker'

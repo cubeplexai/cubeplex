@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from cubebox.schedules.compute import (
+from cubeplex.schedules.compute import (
     MissedDecision,
     decide_missed,
     latest_due_before,

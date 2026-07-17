@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cubebox.prompts.widget import WIDGET_GUIDELINES
-from cubebox.streams.run_manager import _subagent_shared_tools
-from cubebox.tools.builtin.show_widget import _ShowWidgetArgs, make_show_widget_tool
+from cubeplex.prompts.widget import WIDGET_GUIDELINES
+from cubeplex.streams.run_manager import _subagent_shared_tools
+from cubeplex.tools.builtin.show_widget import _ShowWidgetArgs, make_show_widget_tool
 
 
 def test_tool_metadata() -> None:

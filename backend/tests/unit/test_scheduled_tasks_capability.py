@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from cubebox.agents.actions.capabilities.scheduled_tasks import (
+from cubeplex.agents.actions.capabilities.scheduled_tasks import (
     SCHEDULED_TASKS_CAPABILITY,
     CreateInput,
     UpdateInput,
     _handle_create,
     _handle_update,
 )
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, AgentOperation
-from cubebox.models.membership import Role
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, AgentOperation
+from cubeplex.models.membership import Role
 
 
 def _ctx(conversation_id: str | None = "conv-test") -> ScopeContext:
@@ -111,35 +111,52 @@ def test_create_unknown_kind_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _fake_task_from_data(data: dict) -> AsyncMock:
+    task = AsyncMock()
+    task.id = "stask-1"
+    task.name = data["name"]
+    task.status = "active"
+    task.schedule_kind = data["schedule_kind"]
+    task.cron_expr = data.get("cron_expr")
+    task.interval_seconds = data.get("interval_seconds")
+    task.timezone = data.get("timezone", "UTC")
+    task.prompt = data["prompt"]
+    task.target_mode = data["target_mode"]
+    task.next_fire_at = datetime(2026, 6, 4, 9, 0, tzinfo=UTC)
+    task.last_fired_at = None
+    return task
+
+
+def _session() -> AsyncMock:
+    """Session stub: no Conversation row unless a test overrides ``get``."""
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=None)
+    return session
+
+
 @pytest.mark.asyncio
 async def test_handle_create_cron_flattens_to_service_dict() -> None:
     captured: dict = {}
 
     async def fake_create(ctx, session, data):  # type: ignore[no-untyped-def]
         captured.update(data)
-        task = AsyncMock()
-        task.id = "stask-1"
-        task.name = data["name"]
-        task.status = "active"
-        task.schedule_kind = data["schedule_kind"]
-        task.cron_expr = data.get("cron_expr")
-        task.interval_seconds = data.get("interval_seconds")
-        task.timezone = data.get("timezone", "UTC")
-        task.prompt = data["prompt"]
-        task.target_mode = data["target_mode"]
-        task.next_fire_at = datetime(2026, 6, 4, 9, 0, tzinfo=UTC)
-        task.last_fired_at = None
-        return task
+        return _fake_task_from_data(data)
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = CreateInput(
         name="morning-reply",
         prompt="reply to bigv",
         schedule={"kind": "cron", "cron_expr": "0 9 * * *", "timezone": "Asia/Shanghai"},
     )
-    with patch.object(cap._svc, "create", new=fake_create):
-        await _handle_create(_ctx(), AsyncMock(), inp)
+    with (
+        patch.object(cap._svc, "create", new=fake_create),
+        patch(
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        await _handle_create(_ctx(), _session(), inp)
 
     assert captured["schedule_kind"] == "cron"
     assert captured["cron_expr"] == "0 9 * * *"
@@ -152,25 +169,14 @@ async def test_handle_create_cron_flattens_to_service_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
+    """Non-IM conversation: current_conversation → fixed + ctx conversation id."""
     captured: dict = {}
 
     async def fake_create(ctx, session, data):  # type: ignore[no-untyped-def]
         captured.update(data)
-        task = AsyncMock()
-        task.id = "stask-1"
-        task.name = data["name"]
-        task.status = "active"
-        task.schedule_kind = data["schedule_kind"]
-        task.cron_expr = data.get("cron_expr")
-        task.interval_seconds = data.get("interval_seconds")
-        task.timezone = "UTC"
-        task.prompt = data["prompt"]
-        task.target_mode = data["target_mode"]
-        task.next_fire_at = None
-        task.last_fired_at = None
-        return task
+        return _fake_task_from_data(data)
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = CreateInput(
         name="x",
@@ -178,11 +184,60 @@ async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
         schedule={"kind": "cron", "cron_expr": "0 9 * * *"},
         target="current_conversation",
     )
-    with patch.object(cap._svc, "create", new=fake_create):
-        await _handle_create(_ctx("conv-abc"), AsyncMock(), inp)
+    with (
+        patch.object(cap._svc, "create", new=fake_create),
+        patch(
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        await _handle_create(_ctx("conv-abc"), _session(), inp)
 
     assert captured["target_mode"] == "fixed"
     assert captured["target_conversation_id"] == "conv-abc"
+    assert captured.get("im_account_id") is None
+
+
+@pytest.mark.asyncio
+async def test_handle_create_current_conversation_on_im_upgrades_to_im_channel() -> None:
+    """IM-bound conversation: current_conversation → im_channel (not fixed)."""
+    from cubeplex.services.schedule_destination import ImLinkSnapshot
+
+    captured: dict = {}
+
+    async def fake_create(ctx, session, data):  # type: ignore[no-untyped-def]
+        captured.update(data)
+        return _fake_task_from_data(data)
+
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
+
+    im = ImLinkSnapshot(
+        im_account_id="imac-1",
+        im_channel_id="oc-feishu",
+        im_scope_key="dm",
+        im_scope_kind="dm",
+    )
+    inp = CreateInput(
+        name="x",
+        prompt="y",
+        schedule={"kind": "cron", "cron_expr": "0 9 * * *"},
+        target="current_conversation",
+    )
+    with (
+        patch.object(cap._svc, "create", new=fake_create),
+        patch(
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
+            new=AsyncMock(return_value=im),
+        ),
+    ):
+        await _handle_create(_ctx("conv-im"), _session(), inp)
+
+    assert captured["target_mode"] == "im_channel"
+    assert captured["target_conversation_id"] is None
+    assert captured["im_account_id"] == "imac-1"
+    assert captured["im_channel_id"] == "oc-feishu"
+    assert captured["im_scope_key"] == "dm"
+    assert captured["im_scope_kind"] == "dm"
 
 
 @pytest.mark.asyncio
@@ -245,7 +300,7 @@ async def test_handle_update_flattens_schedule() -> None:
         task.last_fired_at = None
         return task
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = UpdateInput(
         task_id="stask-1",
@@ -278,7 +333,16 @@ def _op(name: str) -> AgentOperation:
 def test_each_operation_description_contains_example_payload() -> None:
     # Every op (except list, which is no-arg) should show a JSON-shaped
     # example payload the model can copy as direct tool input.
-    for op_name in ("create", "update", "pause", "resume", "delete", "get", "list_runs"):
+    for op_name in (
+        "create",
+        "update",
+        "retarget",
+        "pause",
+        "resume",
+        "delete",
+        "get",
+        "list_runs",
+    ):
         desc = _op(op_name).description
         assert "Example" in desc or "example" in desc, f"{op_name} description has no example"
         # The umbrella "operation" discriminator is gone — examples are the
@@ -286,6 +350,11 @@ def test_each_operation_description_contains_example_payload() -> None:
         assert '"operation"' not in desc, (
             f"{op_name} description still mentions the old operation discriminator"
         )
+
+
+def test_retarget_operation_registered() -> None:
+    assert _op("retarget").name == "retarget"
+    assert "im_channel" in _op("retarget").description
 
 
 def test_create_description_documents_all_three_schedule_kinds() -> None:

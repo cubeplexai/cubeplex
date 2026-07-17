@@ -1,0 +1,76 @@
+# Operator-local overrides for cubeplex helm install.
+# Copy this file to `values.local.yaml` on the operator workstation (NOT
+# committed — gitignored via `*.local.yaml`). Fill in real secrets and
+# model provider keys.
+#
+# Apply: helm upgrade --install cubeplex ./deploy/charts/cubeplex \
+#          -n cubeplex --create-namespace \
+#          -f values.yaml -f values.local.yaml
+
+image:
+  backend:
+    tag: "<git-sha-short>"   # filled by build-and-push.sh
+  frontend:
+    tag: "<git-sha-short>"
+
+backend:
+  secrets:
+    auth:
+      # openssl rand -hex 32
+      jwt_secret: "REPLACE_ME"
+      csrf_secret: "REPLACE_ME"
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      vault_key: "REPLACE_ME"
+    # Mirror of backend/config.development.local.yaml `llm` block. Written
+    # verbatim into the backend Secret as config.production.secrets.yaml.
+    llm:
+      default_model: "deepseek/deepseek-v4-flash"
+      fallback_models:
+        - "cubeplex/qwen3.5-plus-thinking"
+      providers:
+        deepseek:
+          preset: "deepseek/cn/anthropic-messages"
+          api_key: "sk-..."
+        cubeplex:
+          base_url: "https://..."
+          api_key: "..."
+          api: "openai-completions"
+    sandbox:
+      domain: "cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090"
+      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
+      api_key: "REPLACE_ME"
+
+# Flip backend.sandbox.enabled if you're using an external sandbox endpoint
+# (backend.secrets.sandbox.domain) WITHOUT deploying the OpenSandbox subchart.
+# backend:
+#   sandbox:
+#     enabled: true
+#     use_server_proxy: false
+
+postgres:
+  auth:
+    password: "REPLACE_ME"
+
+redis:
+  auth:
+    password: "REPLACE_ME"
+
+rustfs:
+  auth:
+    secretKey: "REPLACE_ME"
+
+# ── Egress secret-injection (opt-in) ─────────────────────────────────────
+# Enables the MITM webhook + backend mTLS exchange. Requires building one
+# more image (egress-webhook) — append `egress-webhook` to TARGET when
+# running build-and-push.sh:
+#   TARGET="backend frontend egress-webhook" \
+#     deploy/kubernetes/scripts/build-and-push.sh
+#
+# egress:
+#   enabled: true
+#   sandboxNamespace: "opensandbox-system"
+#   webhook:
+#     image:
+#       tag: "<git-sha-short>"             # same tag the script just pushed
+#     # MUST match opensandbox-server's configured egress.image exactly:
+#     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"

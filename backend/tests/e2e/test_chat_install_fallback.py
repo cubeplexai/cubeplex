@@ -109,7 +109,7 @@ async def test_install_command_409s_when_a_run_is_already_active(
     corrupt history, so it returns 409 instead."""
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import _active_run_key, create_run
+    from cubeplex.streams.run_events import _active_run_key, create_run
 
     convo = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", json={"title": "install-active-run"}

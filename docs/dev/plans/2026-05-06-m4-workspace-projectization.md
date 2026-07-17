@@ -13,20 +13,20 @@
 ## File Map
 
 **Backend — new:**
-- `backend/cubebox/api/routes/v1/ws_settings.py` — agent config + skills + MCP settings routes
-- `backend/cubebox/api/schemas/ws_settings.py` — Pydantic schemas for settings endpoints
+- `backend/cubeplex/api/routes/v1/ws_settings.py` — agent config + skills + MCP settings routes
+- `backend/cubeplex/api/schemas/ws_settings.py` — Pydantic schemas for settings endpoints
 - `backend/alembic/versions/<rev>_m4_workspace_settings.py` — schema + data migration
 - `backend/tests/e2e/test_ws_settings.py` — E2E tests for all settings endpoints
 
 **Backend — modified:**
-- `backend/cubebox/models/skill.py` — add `workspace_id` FK to `OrgSkillInstall`
-- `backend/cubebox/repositories/skill.py` — add workspace-private install methods
-- `backend/cubebox/skills/service.py` — include workspace-private skills in catalog loading
-- `backend/cubebox/agents/graph.py:204` — add `system_prompt` param to `create_cubebox_agent`
-- `backend/cubebox/streams/run_manager.py:607` — load `AgentConfig`, pass persona
-- `backend/cubebox/api/routes/v1/workspaces.py:95` — auto-create `AgentConfig` on workspace creation
-- `backend/cubebox/api/routes/v1/__init__.py` — export `ws_settings`
-- `backend/cubebox/api/app.py:384` — register `ws_settings.router`
+- `backend/cubeplex/models/skill.py` — add `workspace_id` FK to `OrgSkillInstall`
+- `backend/cubeplex/repositories/skill.py` — add workspace-private install methods
+- `backend/cubeplex/skills/service.py` — include workspace-private skills in catalog loading
+- `backend/cubeplex/agents/graph.py:204` — add `system_prompt` param to `create_cubeplex_agent`
+- `backend/cubeplex/streams/run_manager.py:607` — load `AgentConfig`, pass persona
+- `backend/cubeplex/api/routes/v1/workspaces.py:95` — auto-create `AgentConfig` on workspace creation
+- `backend/cubeplex/api/routes/v1/__init__.py` — export `ws_settings`
+- `backend/cubeplex/api/app.py:384` — register `ws_settings.router`
 
 **Frontend — new:**
 - `frontend/packages/core/src/types/workspace-settings.ts` — TypeScript types
@@ -50,15 +50,15 @@
 ## Task 1: Schema + Data Migration
 
 **Files:**
-- Modify: `backend/cubebox/models/skill.py`
+- Modify: `backend/cubeplex/models/skill.py`
 - Create: `backend/alembic/versions/<rev>_m4_workspace_settings.py`
 
 - [ ] **Step 1: Add `workspace_id` to `OrgSkillInstall` model**
 
-In `backend/cubebox/models/skill.py`, update `OrgSkillInstall`:
+In `backend/cubeplex/models/skill.py`, update `OrgSkillInstall`:
 
 ```python
-class OrgSkillInstall(CubeboxBase, table=True):
+class OrgSkillInstall(CubeplexBase, table=True):
     """Org-level install — admin promoted a skill into the org marketplace.
 
     workspace_id=None → org-wide install (visible to all workspaces).
@@ -188,7 +188,7 @@ Expected: no new errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/skill.py backend/alembic/versions/
+git add backend/cubeplex/models/skill.py backend/alembic/versions/
 git commit -m "feat(m4): add workspace_id to OrgSkillInstall + backfill AgentConfig"
 ```
 
@@ -197,9 +197,9 @@ git commit -m "feat(m4): add workspace_id to OrgSkillInstall + backfill AgentCon
 ## Task 2: Wire Persona to Runtime
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py`
+- Modify: `backend/cubeplex/agents/graph.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -257,12 +257,12 @@ uv run pytest tests/e2e/test_ws_settings.py::TestPersonaRuntime -v
 
 Expected: FAIL — `404` because the route doesn't exist yet.
 
-- [ ] **Step 3: Add `system_prompt` param to `create_cubebox_agent`**
+- [ ] **Step 3: Add `system_prompt` param to `create_cubeplex_agent`**
 
-In `backend/cubebox/agents/graph.py`, update the function signature (around line 33):
+In `backend/cubeplex/agents/graph.py`, update the function signature (around line 33):
 
 ```python
-def create_cubebox_agent(
+def create_cubeplex_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
     *,
@@ -291,7 +291,7 @@ system_prompt=system_prompt,
 
 - [ ] **Step 4: Create the agent config schemas**
 
-Create `backend/cubebox/api/schemas/ws_settings.py`:
+Create `backend/cubeplex/api/schemas/ws_settings.py`:
 
 ```python
 """Pydantic schemas for workspace settings endpoints."""
@@ -308,7 +308,7 @@ class AgentConfigPatch(BaseModel):
 
 - [ ] **Step 5: Create the ws_settings router with agent config routes**
 
-Create `backend/cubebox/api/routes/v1/ws_settings.py`:
+Create `backend/cubeplex/api/routes/v1/ws_settings.py`:
 
 ```python
 """Workspace settings routes: agent config, skill bindings, MCP bindings."""
@@ -321,11 +321,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from cubebox.api.schemas.ws_settings import AgentConfigOut, AgentConfigPatch
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db import get_session
-from cubebox.models.agent_config import AgentConfig
+from cubeplex.api.schemas.ws_settings import AgentConfigOut, AgentConfigPatch
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db import get_session
+from cubeplex.models.agent_config import AgentConfig
 
 router = APIRouter(prefix="/ws/{workspace_id}/settings", tags=["workspace-settings"])
 
@@ -373,10 +373,10 @@ async def update_agent_config(
 
 - [ ] **Step 6: Register the router**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add:
+In `backend/cubeplex/api/routes/v1/__init__.py`, add:
 
 ```python
-from cubebox.api.routes.v1 import admin_mcp, admin_skills, ws_mcp, ws_settings, ws_skills
+from cubeplex.api.routes.v1 import admin_mcp, admin_skills, ws_mcp, ws_settings, ws_skills
 # ...
 __all__ = [
     # existing entries ...
@@ -384,7 +384,7 @@ __all__ = [
 ]
 ```
 
-In `backend/cubebox/api/app.py`, after the `ws_mcp` registration (around line 384):
+In `backend/cubeplex/api/app.py`, after the `ws_mcp` registration (around line 384):
 
 ```python
 app.include_router(ws_settings.router, prefix="/api/v1")
@@ -392,10 +392,10 @@ app.include_router(ws_settings.router, prefix="/api/v1")
 
 - [ ] **Step 7: Auto-create AgentConfig on workspace creation**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, update `create_workspace`:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, update `create_workspace`:
 
 ```python
-from cubebox.models.agent_config import AgentConfig
+from cubeplex.models.agent_config import AgentConfig
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_workspace(
@@ -416,11 +416,11 @@ async def create_workspace(
 
 - [ ] **Step 8: Load persona in run_manager**
 
-In `backend/cubebox/streams/run_manager.py`, add AgentConfig loading before the `create_cubebox_agent` call (around line 552, before the agent creation block):
+In `backend/cubeplex/streams/run_manager.py`, add AgentConfig loading before the `create_cubeplex_agent` call (around line 552, before the agent creation block):
 
 ```python
-from cubebox.models.agent_config import AgentConfig
-from cubebox.prompts.system import BASE_SYSTEM_PROMPT
+from cubeplex.models.agent_config import AgentConfig
+from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
 from sqlmodel import select
 
 # Load persona from AgentConfig
@@ -440,10 +440,10 @@ except Exception as exc:
     logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
 ```
 
-Then update the `create_cubebox_agent` call to pass it:
+Then update the `create_cubeplex_agent` call to pass it:
 
 ```python
-agent = create_cubebox_agent(
+agent = create_cubeplex_agent(
     llm=llm,
     tools=tools,
     system_prompt=effective_system_prompt,   # add this
@@ -473,13 +473,13 @@ Expected: all checks pass.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/cubebox/agents/graph.py \
-        backend/cubebox/streams/run_manager.py \
-        backend/cubebox/api/routes/v1/workspaces.py \
-        backend/cubebox/api/routes/v1/ws_settings.py \
-        backend/cubebox/api/schemas/ws_settings.py \
-        backend/cubebox/api/routes/v1/__init__.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/agents/graph.py \
+        backend/cubeplex/streams/run_manager.py \
+        backend/cubeplex/api/routes/v1/workspaces.py \
+        backend/cubeplex/api/routes/v1/ws_settings.py \
+        backend/cubeplex/api/schemas/ws_settings.py \
+        backend/cubeplex/api/routes/v1/__init__.py \
+        backend/cubeplex/api/app.py \
         backend/tests/e2e/test_ws_settings.py
 git commit -m "feat(m4): wire persona to runtime + agent config API"
 ```
@@ -489,8 +489,8 @@ git commit -m "feat(m4): wire persona to runtime + agent config API"
 ## Task 3: Workspace-Private Skill Support
 
 **Files:**
-- Modify: `backend/cubebox/repositories/skill.py`
-- Modify: `backend/cubebox/skills/service.py`
+- Modify: `backend/cubeplex/repositories/skill.py`
+- Modify: `backend/cubeplex/skills/service.py`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -545,7 +545,7 @@ Expected: FAIL — `404` (route not yet added).
 
 - [ ] **Step 3: Add repository methods for workspace-private skills**
 
-In `backend/cubebox/repositories/skill.py`, update `OrgSkillInstallRepository`:
+In `backend/cubeplex/repositories/skill.py`, update `OrgSkillInstallRepository`:
 
 ```python
 async def create_for_workspace(
@@ -611,7 +611,7 @@ async def list_for_org(self, org_id: str) -> list[OrgSkillInstall]:
 
 - [ ] **Step 4: Update SkillCatalogService to include workspace-private skills**
 
-In `backend/cubebox/skills/service.py`, update `list_enabled_for_workspace` to also include workspace-private installs (they are always enabled — no binding row needed):
+In `backend/cubeplex/skills/service.py`, update `list_enabled_for_workspace` to also include workspace-private installs (they are always enabled — no binding row needed):
 
 ```python
 async def list_enabled_for_workspace(
@@ -642,22 +642,22 @@ async def list_enabled_for_workspace(
     return org_wide_results + ws_private
 ```
 
-> **Note:** Read the existing `list_enabled_for_workspace` body in `backend/cubebox/skills/service.py` before editing — preserve its exact existing logic and append the workspace-private query result. Do not rewrite the existing org-wide query.
+> **Note:** Read the existing `list_enabled_for_workspace` body in `backend/cubeplex/skills/service.py` before editing — preserve its exact existing logic and append the workspace-private query result. Do not rewrite the existing org-wide query.
 
 - [ ] **Step 5: Add skills settings routes to `ws_settings.py`**
 
-Add to `backend/cubebox/api/routes/v1/ws_settings.py`:
+Add to `backend/cubeplex/api/routes/v1/ws_settings.py`:
 
 ```python
-from cubebox.api.schemas.ws_settings import (
+from cubeplex.api.schemas.ws_settings import (
     AgentConfigOut,
     AgentConfigPatch,
     SkillBindingPatch,
     SkillInstallCreate,
     WorkspaceSkillsOut,
 )
-from cubebox.models.skill import OrgSkillInstall, WorkspaceSkillBinding
-from cubebox.repositories.skill import OrgSkillInstallRepository, WorkspaceSkillBindingRepository
+from cubeplex.models.skill import OrgSkillInstall, WorkspaceSkillBinding
+from cubeplex.repositories.skill import OrgSkillInstallRepository, WorkspaceSkillBindingRepository
 from sqlmodel import select
 
 
@@ -729,7 +729,7 @@ async def install_workspace_skill(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
-    from cubebox.repositories.skill import SkillRepository
+    from cubeplex.repositories.skill import SkillRepository
 
     skill_repo = SkillRepository(session)
     skill = await skill_repo.get(body.skill_id)
@@ -761,7 +761,7 @@ async def delete_workspace_skill(
 
 - [ ] **Step 6: Add new schemas to `ws_settings.py`**
 
-In `backend/cubebox/api/schemas/ws_settings.py`, add:
+In `backend/cubeplex/api/schemas/ws_settings.py`, add:
 
 ```python
 from pydantic import BaseModel, Field
@@ -800,7 +800,7 @@ class SkillInstallCreate(BaseModel):
 - [ ] **Step 7: Check SkillRepository.get exists**
 
 ```bash
-grep -n "async def get\b" backend/cubebox/repositories/skill.py
+grep -n "async def get\b" backend/cubeplex/repositories/skill.py
 ```
 
 If no `async def get(self, skill_id: str)` method exists on `SkillRepository`, add:
@@ -832,10 +832,10 @@ make check
 - [ ] **Step 10: Commit**
 
 ```bash
-git add backend/cubebox/repositories/skill.py \
-        backend/cubebox/skills/service.py \
-        backend/cubebox/api/routes/v1/ws_settings.py \
-        backend/cubebox/api/schemas/ws_settings.py \
+git add backend/cubeplex/repositories/skill.py \
+        backend/cubeplex/skills/service.py \
+        backend/cubeplex/api/routes/v1/ws_settings.py \
+        backend/cubeplex/api/schemas/ws_settings.py \
         backend/tests/e2e/test_ws_settings.py
 git commit -m "feat(m4): workspace skill binding + private skill install API"
 ```
@@ -845,8 +845,8 @@ git commit -m "feat(m4): workspace skill binding + private skill install API"
 ## Task 4: MCP Settings List API
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_settings.py`
-- Modify: `backend/cubebox/api/schemas/ws_settings.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_settings.py`
+- Modify: `backend/cubeplex/api/schemas/ws_settings.py`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -877,19 +877,19 @@ Expected: FAIL — 404.
 
 - [ ] **Step 3: Understand MCPServer listing**
 
-Read `backend/cubebox/repositories/mcp.py` and `backend/cubebox/services/mcp.py` to understand how to query:
+Read `backend/cubeplex/repositories/mcp.py` and `backend/cubeplex/services/mcp.py` to understand how to query:
 - Org-wide servers: `MCPServer.owner_workspace_id IS NULL` with their `WorkspaceMCPBinding` for this workspace
 - Workspace-private servers: `MCPServer.owner_workspace_id == workspace_id`
 
 ```bash
 grep -n "def list\|owner_workspace_id\|WorkspaceMCPBinding" \
-  backend/cubebox/repositories/mcp.py \
-  backend/cubebox/services/mcp.py | head -30
+  backend/cubeplex/repositories/mcp.py \
+  backend/cubeplex/services/mcp.py | head -30
 ```
 
 - [ ] **Step 4: Add MCP schemas**
 
-In `backend/cubebox/api/schemas/ws_settings.py`, add:
+In `backend/cubeplex/api/schemas/ws_settings.py`, add:
 
 ```python
 class MCPServerItem(BaseModel):
@@ -912,11 +912,11 @@ class MCPBindingPatch(BaseModel):
 
 - [ ] **Step 5: Add MCP routes to `ws_settings.py`**
 
-Add to `backend/cubebox/api/routes/v1/ws_settings.py`:
+Add to `backend/cubeplex/api/routes/v1/ws_settings.py`:
 
 ```python
-from cubebox.models.mcp import MCPServer, WorkspaceMCPBinding
-from cubebox.api.schemas.ws_settings import MCPBindingPatch, WorkspaceMCPOut, MCPServerItem
+from cubeplex.models.mcp import MCPServer, WorkspaceMCPBinding
+from cubeplex.api.schemas.ws_settings import MCPBindingPatch, WorkspaceMCPOut, MCPServerItem
 
 
 @router.get("/mcp", response_model=WorkspaceMCPOut)
@@ -998,7 +998,7 @@ async def toggle_mcp_binding(
     return {"server_id": server_id, "enabled": body.enabled}
 ```
 
-> **Note:** After writing, check the actual column names on `WorkspaceMCPBinding` by reading `backend/cubebox/models/mcp.py`. Adjust field names in the query if they differ.
+> **Note:** After writing, check the actual column names on `WorkspaceMCPBinding` by reading `backend/cubeplex/models/mcp.py`. Adjust field names in the query if they differ.
 
 - [ ] **Step 6: Run tests**
 
@@ -1019,8 +1019,8 @@ make check
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_settings.py \
-        backend/cubebox/api/schemas/ws_settings.py \
+git add backend/cubeplex/api/routes/v1/ws_settings.py \
+        backend/cubeplex/api/schemas/ws_settings.py \
         backend/tests/e2e/test_ws_settings.py
 git commit -m "feat(m4): workspace MCP settings list + toggle API"
 ```
@@ -1233,7 +1233,7 @@ export { useWorkspaceSettingsStore } from './stores/workspaceSettingsStore'
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 ```
 
 Expected: builds without errors.
@@ -1505,7 +1505,7 @@ Create `frontend/packages/web/components/workspace-settings/PersonaEditor.tsx`:
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
+import { createApiClient, useWorkspaceSettingsStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -1614,8 +1614,8 @@ Create `frontend/packages/web/components/workspace-settings/SkillsPanel.tsx`:
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
-import type { SkillInstall } from '@cubebox/core'
+import { createApiClient, useWorkspaceSettingsStore } from '@cubeplex/core'
+import type { SkillInstall } from '@cubeplex/core'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -1766,8 +1766,8 @@ Create `frontend/packages/web/components/workspace-settings/McpPanel.tsx`:
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
-import type { MCPServerItem } from '@cubebox/core'
+import { createApiClient, useWorkspaceSettingsStore } from '@cubeplex/core'
+import type { MCPServerItem } from '@cubeplex/core'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'

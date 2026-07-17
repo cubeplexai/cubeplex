@@ -1,17 +1,17 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { LineChart, Search, Workflow } from 'lucide-react'
+import { FileText, Table2, Workflow } from 'lucide-react'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 
 interface CardEntry {
-  key: 'analyze' | 'research' | 'automate'
-  icon: typeof LineChart
+  key: 'document' | 'analyze' | 'automate'
+  icon: typeof FileText
 }
 
 const CARDS: CardEntry[] = [
-  { key: 'analyze', icon: LineChart },
-  { key: 'research', icon: Search },
+  { key: 'document', icon: FileText },
+  { key: 'analyze', icon: Table2 },
   { key: 'automate', icon: Workflow },
 ]
 

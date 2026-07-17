@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from cubebox.im.discord.connector import DiscordConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.discord.connector import DiscordConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _make_message(
@@ -26,6 +26,7 @@ def _make_message(
     msg.author.id = author_id
     msg.author.bot = author_bot
     msg.channel.id = thread_id or channel_id
+    msg.channel.name = "general" if not is_dm else None
     msg.channel.type = MagicMock()
     if is_dm:
         msg.channel.type.value = 1  # DM
@@ -38,6 +39,7 @@ def _make_message(
     if thread_id is not None:
         msg.channel.type.value = 11  # PUBLIC_THREAD
         msg.channel.parent_id = channel_id
+        msg.channel.name = "thread-topic"
     # User mentions
     if mentions_bot:
         mention = MagicMock()
@@ -77,6 +79,13 @@ class TestDiscordConnectorParseInbound:
         assert event.scope_key == "u:111"
         assert event.scope_kind == "channel"
         assert event.reply_to_id == "333"
+        assert event.channel_name == "general"
+
+    def test_dm_has_no_channel_name(self) -> None:
+        msg = _make_message(is_dm=True, mentions_bot=False)
+        event = self.connector.parse_inbound(msg)
+        assert event is not None
+        assert event.channel_name is None
 
     def test_guild_no_mention_ignored(self) -> None:
         msg = _make_message(mentions_bot=False)

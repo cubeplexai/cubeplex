@@ -8,7 +8,7 @@ import {
   useMcpToolRegistryStore,
   useTopicStore,
   useWorkspaceSettingsStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 export default function WorkspaceLayout({

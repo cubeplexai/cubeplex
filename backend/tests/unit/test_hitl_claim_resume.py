@@ -20,11 +20,11 @@ from __future__ import annotations
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.hitl_resume import (
+from cubeplex.streams.hitl_resume import (
     ClaimResumeOutcome,
     claim_resume,
 )
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     create_run,
     get_active_run,
     get_run_meta,

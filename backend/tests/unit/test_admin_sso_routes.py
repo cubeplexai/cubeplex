@@ -28,9 +28,9 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from cubebox.api.routes.v1 import admin_sso
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import (
+from cubeplex.api.routes.v1 import admin_sso
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import (
     Credential,
     ExternalIdentity,
     Organization,
@@ -63,7 +63,7 @@ def _bypass_ssrf_guard_for_test_idp_hosts(
     """
     if request.node.get_closest_marker("real_ssrf_guard"):
         return
-    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +74,7 @@ def _force_tz_aware_on_load() -> Any:
     assertion. Postgres returns tz-aware values natively, so production is
     unaffected — this only patches the in-memory test session.
     """
-    from cubebox.models import Credential, ExternalIdentity, SSOConnection
+    from cubeplex.models import Credential, ExternalIdentity, SSOConnection
 
     targets = (SSOConnection, ExternalIdentity, Credential)
 
@@ -679,9 +679,9 @@ async def test_discover_oidc_happy_path(
         kwargs["transport"] = transport
         return original(*args, **kwargs)
 
-    monkeypatch.setattr("cubebox.sso.oidc.httpx.AsyncClient", factory)
+    monkeypatch.setattr("cubeplex.sso.oidc.httpx.AsyncClient", factory)
     # Bypass the SSRF guard's DNS lookup so the mock can serve the request.
-    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
 
     resp = await admin_sso.discover_oidc(
         admin_sso.OIDCDiscoveryRequest(issuer_url="https://idp.example.com"),
@@ -709,8 +709,8 @@ async def test_discover_oidc_400_on_missing_field(
         kwargs["transport"] = transport
         return original(*args, **kwargs)
 
-    monkeypatch.setattr("cubebox.sso.oidc.httpx.AsyncClient", factory)
-    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+    monkeypatch.setattr("cubeplex.sso.oidc.httpx.AsyncClient", factory)
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_sso.discover_oidc(
@@ -770,7 +770,7 @@ async def test_unlink_identity_rejects_cross_org_eid(
         sso_session,
     )
     # Forge an identity that belongs to a DIFFERENT sso_id (Org B's, conceptually).
-    from cubebox.models.external_identity import ExternalIdentity
+    from cubeplex.models.external_identity import ExternalIdentity
 
     foreign = ExternalIdentity(
         user_id="usr-foreign",
@@ -855,7 +855,7 @@ async def test_non_admin_user_gets_403(
     The conftest fixture only adds the user as a MEMBER, so calling the
     dependency directly exercises the real guard.
     """
-    from cubebox.auth.dependencies import require_org_admin
+    from cubeplex.auth.dependencies import require_org_admin
 
     _, user = await make_org_with_user(email="member@acme.com")
     with pytest.raises(HTTPException) as exc_info:

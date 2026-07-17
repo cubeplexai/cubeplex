@@ -16,8 +16,9 @@ from typing import Any
 
 import pytest
 
-from cubebox.api.routes.v1 import ws_browser as ws_browser_routes
-from cubebox.sandbox.base import BrowserEndpoint
+from cubeplex.api.routes.v1 import ws_browser as ws_browser_routes
+from cubeplex.sandbox.base import BrowserEndpoint
+from cubeplex.sandbox.manager import SandboxAttachment
 
 
 @dataclass
@@ -62,7 +63,7 @@ class _FakeManager:
         user_id: str,
         org_id: str,
         workspace_id: str,
-    ) -> _FakeSandbox:
+    ) -> SandboxAttachment:
         self.calls.append(
             (
                 "get_or_create",
@@ -75,7 +76,7 @@ class _FakeManager:
                 },
             )
         )
-        return self._sandbox
+        return SandboxAttachment(sandbox=self._sandbox, user_sandbox_id="rec-stub")  # type: ignore[arg-type]
 
     async def touch(self, sandbox_id: str, *, org_id: str, workspace_id: str) -> None:
         self.calls.append(

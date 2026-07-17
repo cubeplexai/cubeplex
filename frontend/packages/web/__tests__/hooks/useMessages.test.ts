@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react'
-import { useMessageStore, getTextContent } from '@cubebox/core'
+import { useMessageStore, getTextContent } from '@cubeplex/core'
 
 const CONV_ID = 'conv-1'
 
@@ -93,7 +93,7 @@ describe('messageStore.send', () => {
     expect(assistantMsg && getTextContent(assistantMsg)).toBe('Hello world')
   })
 
-  it('sets error on error event', async () => {
+  it('renders an assistant failure bubble on error event', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
@@ -117,7 +117,9 @@ describe('messageStore.send', () => {
     expect(errEntry).not.toBeNull()
     expect(errEntry?.data.message).toBe('Something failed')
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
-    expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+    const assistantMsg = msgs.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.stop_reason).toBe('error')
+    expect(assistantMsg?.error_message).toBe('Something failed')
     expect(useMessageStore.getState().isStreaming).toBe(false)
     expect(useMessageStore.getState().streamingConversationId).toBe(null)
   })

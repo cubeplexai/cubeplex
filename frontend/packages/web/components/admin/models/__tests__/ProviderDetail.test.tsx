@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, type ApiClient, type Model, type Provider } from '@cubebox/core'
+import { ApiError, type ApiClient, type Model, type Provider } from '@cubeplex/core'
 import en from '../../../../messages/en.json'
 import { ProviderDetail, extractPresetRefs, parsePresetRefs } from '../ProviderDetail'
 

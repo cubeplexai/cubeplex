@@ -8,8 +8,8 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from cubebox.config import config
-from cubebox.triggers.rate_limit import allow
+from cubeplex.config import config
+from cubeplex.triggers.rate_limit import allow
 
 
 def _test_key_prefix() -> str:
@@ -19,7 +19,7 @@ def _test_key_prefix() -> str:
     each test, so test keys must share that prefix to be cleaned up between
     runs.
     """
-    base = config.get("redis.key_prefix", "cubebox")
+    base = config.get("redis.key_prefix", "cubeplex")
     env = os.getenv("ENV_FOR_DYNACONF", "development")
     return f"{base}:{env}:rl-test"
 

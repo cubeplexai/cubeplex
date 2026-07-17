@@ -5,9 +5,9 @@ import secrets
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Organization, User
-from cubebox.models.organization_membership import OrgRole
-from cubebox.repositories import (
+from cubeplex.models import Organization, User
+from cubeplex.models.organization_membership import OrgRole
+from cubeplex.repositories import (
     OrganizationMembershipRepository,
     OrganizationRepository,
 )

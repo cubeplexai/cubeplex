@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.models.external_identity import ExternalIdentity
-from cubebox.repositories.external_identity import ExternalIdentityRepository
+from cubeplex.models.external_identity import ExternalIdentity
+from cubeplex.repositories.external_identity import ExternalIdentityRepository
 
 
 @pytest.fixture

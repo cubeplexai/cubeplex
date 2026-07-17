@@ -61,7 +61,7 @@ def _generate_keypair() -> tuple[str, str]:
     subject = issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, "idp.example.com"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Cubebox Test IdP"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Cubeplex Test IdP"),
         ]
     )
     cert = (

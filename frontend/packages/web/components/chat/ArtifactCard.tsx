@@ -2,8 +2,8 @@
 
 import { memo, useCallback, useEffect } from 'react'
 import { Download, Package, Eye, PackagePlus, Loader2, Check, AlertCircle } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
-import { usePanelStore, useArtifactStore } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
+import { usePanelStore, useArtifactStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'

@@ -1,11 +1,11 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient } from '@cubebox/core'
-import * as core from '@cubebox/core'
+import type { ApiClient } from '@cubeplex/core'
+import * as core from '@cubeplex/core'
 
 import en from '../../../../messages/en.json'
-import { CSRF_COOKIE_NAME } from '@cubebox/core'
+import { CSRF_COOKIE_NAME } from '@cubeplex/core'
 import AdminPresetsPage from '../page'
 import { PresetEditor } from '../PresetEditor'
 import type { AdminModelPresetsResponse } from '@/lib/api/presets'
@@ -19,7 +19,7 @@ const fakeClient = {
   get: vi.fn(),
 } as unknown as ApiClient
 
-vi.mock('@cubebox/core', async (importOriginal) => {
+vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
   return {
     ...actual,
@@ -164,5 +164,46 @@ describe('PresetEditor', () => {
     expect(screen.getByRole('alert').textContent).toContain(en.adminPresets.errorBrokenPreset)
     // The offending ref shows the "Missing" badge.
     expect(screen.getAllByText(en.adminPresets.missingRefBadge).length).toBeGreaterThan(0)
+  })
+
+  it('loads more model choices when the picker list is scrolled', async () => {
+    const models = Array.from(
+      { length: 65 },
+      (_, i) => `provider/model-${String(i).padStart(2, '0')}`,
+    )
+
+    renderWithIntl(<PresetEditor initial={initialResponse()} availableModels={models} />)
+
+    fireEvent.click(document.getElementById('tier-enabled-max')!)
+    const picker = screen.getAllByLabelText(en.adminPresets.primary)[0]
+    fireEvent.focus(picker)
+
+    expect(screen.getByRole('option', { name: 'provider/model-00' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'provider/model-64' })).toBeNull()
+
+    const list = screen.getByRole('listbox')
+    fireEvent.scroll(list, {
+      currentTarget: { scrollTop: 1000, clientHeight: 200, scrollHeight: 1000 },
+    })
+
+    expect(screen.getByRole('option', { name: 'provider/model-64' })).toBeTruthy()
+  })
+
+  it('selects filtered model choices with the keyboard', async () => {
+    renderWithIntl(
+      <PresetEditor
+        initial={initialResponse()}
+        availableModels={['litellm/alpha', 'litellm/beta', 'litellm/gamma']}
+      />,
+    )
+
+    fireEvent.click(document.getElementById('tier-enabled-max')!)
+    const picker = screen.getAllByLabelText(en.adminPresets.primary)[0]
+    fireEvent.change(picker, { target: { value: 'litellm' } })
+    fireEvent.keyDown(picker, { key: 'ArrowDown' })
+    fireEvent.keyDown(picker, { key: 'ArrowDown' })
+    fireEvent.keyDown(picker, { key: 'Enter' })
+
+    expect(screen.getByText('litellm/beta')).toBeTruthy()
   })
 })

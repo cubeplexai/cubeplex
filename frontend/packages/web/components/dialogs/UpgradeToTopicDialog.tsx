@@ -13,7 +13,7 @@ import {
   useMemberStore,
   useTopicStore,
   type WsMember,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

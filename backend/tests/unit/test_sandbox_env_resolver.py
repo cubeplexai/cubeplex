@@ -6,11 +6,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvResolver, SandboxEnvService
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SandboxEnvResolver, SandboxEnvService
 
 
 @pytest.fixture

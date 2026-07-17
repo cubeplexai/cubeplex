@@ -12,7 +12,7 @@ import {
   createApiClient,
   useConversationStore,
   useTopicStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,9 +26,10 @@ import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
 import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
+import { AvatarStack } from '@/components/ui/avatar-stack'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { VscMcp } from 'react-icons/vsc'
 import {
-  Box,
   CalendarClock,
   Layers,
   type LucideIcon,
@@ -60,36 +61,17 @@ const SIDEBAR_AVATAR_MAX = 3
 function GroupChatAvatars({ convoId }: { convoId: string }): React.ReactElement | null {
   const participants = useConversationStore((s) => s.conversationParticipants[convoId])
   if (!participants || participants.length === 0) return null
-  const shown = participants.slice(0, SIDEBAR_AVATAR_MAX)
-  const overflow = participants.length - shown.length
   return (
-    <div className="flex -space-x-1 shrink-0">
-      {shown.map((p) => {
-        const label = p.display_name || p.email || p.user_id
-        return (
-          <div
-            key={p.id}
-            title={label}
-            className={cn(
-              'size-4 rounded-full bg-muted ring-1 ring-card',
-              'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-            )}
-          >
-            {label.slice(0, 1).toUpperCase()}
-          </div>
-        )
-      })}
-      {overflow > 0 && (
-        <div
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-        >
-          +{overflow}
-        </div>
-      )}
-    </div>
+    <AvatarStack
+      items={participants.map((p) => ({
+        src: p.avatar_url,
+        seed: p.avatar_seed ?? p.user_id,
+        name: p.display_name,
+        userId: p.user_id,
+      }))}
+      size={16}
+      max={SIDEBAR_AVATAR_MAX}
+    />
   )
 }
 
@@ -405,19 +387,23 @@ type MixedEntry =
   | { kind: 'group-chat'; conversation: Conversation; sortKey: number }
   | { kind: 'topic'; topic: Topic; conversations: Conversation[]; sortKey: number }
 
-function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEntry[] {
+function buildMixedList(
+  topics: Topic[],
+  conversations: Conversation[],
+  topicConversations: Record<string, Conversation[]>,
+): MixedEntry[] {
   const ts = (iso: string): number => {
     const t = new Date(iso).getTime()
     return Number.isNaN(t) ? 0 : t
   }
 
-  // Pinned conversations float out of their topic so the user can find
-  // them at the top regardless of which topic they live under. The topic
-  // still appears below with the rest of its (unpinned) conversations.
+  // A conversation with a topic_id belongs under that topic (pinned or not —
+  // pinning sorts it first *within* the topic). Only topicless conversations
+  // go in the flat list, where pinned ones float to the top.
   const byTopic = new Map<string, Conversation[]>()
   const flat: Conversation[] = []
   for (const c of conversations) {
-    if (c.topic_id && !c.is_pinned) {
+    if (c.topic_id) {
       const list = byTopic.get(c.topic_id) ?? []
       list.push(c)
       byTopic.set(c.topic_id, list)
@@ -432,12 +418,21 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
     entries.push({ kind, conversation: c, sortKey: ts(c.updated_at) })
   }
   for (const topic of topics) {
-    const convs = (byTopic.get(topic.id) ?? [])
-      .slice()
-      .sort((a, b) => ts(b.updated_at) - ts(a.updated_at))
+    // Merge the full per-topic list (from the topic-detail endpoint, no limit)
+    // with the window subset (from the limited flat list). Dedup by id,
+    // preferring the window copy since it carries live updates (new messages,
+    // pin toggles). This decouples a topic's conversations from the flat
+    // list's limit, so old conversations under a topic aren't truncated.
+    const merged = new Map<string, Conversation>()
+    for (const c of topicConversations[topic.id] ?? []) merged.set(c.id, c)
+    for (const c of byTopic.get(topic.id) ?? []) merged.set(c.id, c)
+    const convs = [...merged.values()].sort((a, b) => {
+      if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+      return ts(b.updated_at) - ts(a.updated_at)
+    })
     // last_activity_at bumps on every message; updated_at only on metadata
     // edits. Without this, topics freeze in place after the first message.
-    const newest = convs.length > 0 ? ts(convs[0]!.updated_at) : 0
+    const newest = convs.reduce((m, c) => Math.max(m, ts(c.updated_at)), 0)
     const sortKey = Math.max(ts(topic.last_activity_at), newest)
     entries.push({ kind: 'topic', topic, conversations: convs, sortKey })
   }
@@ -463,7 +458,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
   const tShell = useTranslations('shellLayout')
   const t = useTranslations('topics')
   const { conversations, activeId } = useConversationStore()
-  const { topics } = useTopicStore()
+  const { topics, topicConversations } = useTopicStore()
   const pathname = usePathname()
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
 
@@ -474,7 +469,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
 
   // Build a mixed list: standalone conversations (no topic_id) and topics with
   // their grouped conversations, ordered by most-recent activity in the group.
-  const mixedList = buildMixedList(topics, conversations)
+  const mixedList = buildMixedList(topics, conversations, topicConversations)
 
   return (
     <aside
@@ -485,24 +480,20 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
         collapsed ? 'w-12' : 'w-56',
       )}
     >
-      {/* Brand — shows logo + "cubebox" + collapse button when expanded;
+      {/* Brand — shows logo + wordmark + collapse button when expanded;
           logo only (centered) when collapsed. */}
       <div
         className={cn('border-b border-border', collapsed ? 'px-2 pt-3 pb-2.5' : 'px-3 pt-4 pb-3')}
       >
         <div className={cn('flex items-center mb-3', collapsed ? 'justify-center' : 'px-0.5')}>
           <div className={cn('flex items-center gap-2 min-w-0', !collapsed && 'flex-1')}>
-            <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
-              <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
-            </div>
-            <span
-              className={cn(
-                'text-sm font-semibold tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200',
+            <CubePlexLogo
+              markClassName="size-6"
+              wordmarkClassName={cn(
+                'text-sm whitespace-nowrap overflow-hidden transition-all duration-200',
                 collapsed ? 'max-w-0 opacity-0' : 'max-w-full opacity-100',
               )}
-            >
-              cubebox
-            </span>
+            />
           </div>
           {/* Collapse button — desktop only (onCollapse provided). In the
               mobile drawer there's no collapse handler and the Sheet renders

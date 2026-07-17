@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
-from cubebox.seeders import seed_preinstalled_skills
+from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
+from cubeplex.seeders import seed_preinstalled_skills
 
 
 def _unique_name(prefix: str) -> str:
@@ -102,7 +102,7 @@ async def test_seed_redis_lock_prevents_concurrent_runs(
     _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
 
     # Acquire the lock manually so seeder finds it held
-    holder = redis_client.lock("cubebox:lock:skill_seeder", timeout=10, blocking=False)
+    holder = redis_client.lock("cubeplex:lock:skill_seeder", timeout=10, blocking=False)
     acquired = await holder.acquire()
     assert acquired
 
@@ -118,3 +118,21 @@ async def test_seed_redis_lock_prevents_concurrent_runs(
     # Now seed should run
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
     assert await SkillRepository(db_session).find_by_name(skill_name) is not None
+
+
+@pytest.mark.asyncio
+async def test_seeder_writes_content_hash(tmp_path: Path, db_session, redis_client: Redis) -> None:
+    """Every SkillVersion row created by the seeder must have a non-empty content_hash."""
+    skill_name = _unique_name("hash-check")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    # Confirm the seeded row itself has a sha256 hash.
+    skills = SkillRepository(db_session)
+    skill = await skills.find_by_name(skill_name)
+    assert skill is not None
+    versions = await SkillVersionRepository(db_session).list_for_skill(skill.id)
+    assert len(versions) == 1
+    assert versions[0].content_hash.startswith("sha256:")

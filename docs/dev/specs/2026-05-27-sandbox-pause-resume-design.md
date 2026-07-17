@@ -1,7 +1,7 @@
 # Sandbox pause/resume — design
 
 **Date:** 2026-05-27
-**Issue:** [#145](https://github.com/cubebox/cubebox/issues/145)
+**Issue:** [#145](https://github.com/cubeplex/cubeplex/issues/145)
 **Related:** #146 (e2b as a second provider), #144 (sandbox ownership → (workspace_id, user_id))
 
 ## Problem & motivation
@@ -52,18 +52,18 @@ lifecycle logic is written once.
 
 ### Lifecycle and state model today
 
-`UserSandbox` (`backend/cubebox/models/user_sandbox.py`) tracks one row per
+`UserSandbox` (`backend/cubeplex/models/user_sandbox.py`) tracks one row per
 (user_id, workspace_id) with a free-text `status` column (`max_length=20`), only ever set
 to `"running"` or `"terminated"`. Fields relevant here: `sandbox_id` (provider id, unique),
 `status`, `image`, `volumes_config`, `last_activity_at`, `ttl_seconds`.
 
-`UserSandboxRepository` (`backend/cubebox/repositories/user_sandbox.py`):
+`UserSandboxRepository` (`backend/cubeplex/repositories/user_sandbox.py`):
 - `get_active_by_user` filters `status == "running"`.
 - `list_expired` / `list_expired_system` find `running` rows past
   `last_activity_at + ttl_seconds`.
 - `mark_terminated` is the only state transition.
 
-`SandboxManager` (`backend/cubebox/sandbox/manager.py`):
+`SandboxManager` (`backend/cubeplex/sandbox/manager.py`):
 - `get_or_create` — reuse the running row if `is_healthy()`, else `mark_terminated` +
   create new. Re-applies egress (`_apply_egress`) on both paths; network policy is only
   settable at create.
@@ -71,12 +71,12 @@ to `"running"` or `"terminated"`. Fields relevant here: `sandbox_id` (provider i
 - `cleanup_expired` — background reaper (`sandbox_cleanup_loop`, 60s) that **kills** every
   expired running sandbox and marks it terminated, revoking egress refs.
 
-`LazySandbox` (`backend/cubebox/sandbox/lazy.py`) defers create to first tool use and
+`LazySandbox` (`backend/cubeplex/sandbox/lazy.py`) defers create to first tool use and
 transparently re-creates on failure. It calls `manager.touch` before each op.
 
-`OpenSandbox` driver (`backend/cubebox/sandbox/opensandbox.py`) wraps the SDK sandbox.
+`OpenSandbox` driver (`backend/cubeplex/sandbox/opensandbox.py`) wraps the SDK sandbox.
 `get_browser_endpoint` builds the signed live-view URL from the provider proxy. There is
-**no** pause/resume on the `Sandbox` base class (`backend/cubebox/sandbox/base.py`) today.
+**no** pause/resume on the `Sandbox` base class (`backend/cubeplex/sandbox/base.py`) today.
 
 ### What survives a kill today vs. what we lose
 
@@ -154,7 +154,7 @@ the provider deletes it; we mirror that with a paused-TTL reaper.
 
 ### Sandbox state machine
 
-cubebox-side states stored in `UserSandbox.status`:
+cubeplex-side states stored in `UserSandbox.status`:
 
 ```
    create
@@ -203,7 +203,7 @@ not just timestamp freshness.
 
 ### DB fields (UserSandbox)
 
-Add to `backend/cubebox/models/user_sandbox.py` (migration via
+Add to `backend/cubeplex/models/user_sandbox.py` (migration via
 `alembic revision --autogenerate`):
 
 - `status` — widen the accepted set to the states above; column stays `str(20)`.
@@ -258,7 +258,7 @@ Repository additions (`UserSandboxRepository`):
 
 ### Provider-interface methods
 
-On `Sandbox` (`backend/cubebox/sandbox/base.py`), add capability-gated lifecycle methods.
+On `Sandbox` (`backend/cubeplex/sandbox/base.py`), add capability-gated lifecycle methods.
 Keep them on the abstraction so the manager never imports a concrete driver:
 
 - `supports_pause() -> bool` — default `False`; OpenSandbox returns `True`. Lets the
@@ -478,8 +478,8 @@ Run worktree tests on the per-slot DB (`uv run pytest`, ports from `.worktree.en
   `.../models/sandboxes.py`).
 - Endpoint reconstruction concern: `docs/dev/notes/2026-05-27-opensandbox-issue-949-endpoint-mode.md`.
 - Browser deployment / profile persistence: `docs/dev/notes/2026-05-22-sandbox-browser-deployment.md`.
-- Current lifecycle code: `backend/cubebox/sandbox/{base,opensandbox,manager,lazy,cleanup}.py`,
-  `backend/cubebox/models/user_sandbox.py`, `backend/cubebox/repositories/user_sandbox.py`.
+- Current lifecycle code: `backend/cubeplex/sandbox/{base,opensandbox,manager,lazy,cleanup}.py`,
+  `backend/cubeplex/models/user_sandbox.py`, `backend/cubeplex/repositories/user_sandbox.py`.
 - [e2b persistence docs](https://e2b.dev/docs/sandbox/persistence) ·
   [e2b auto-pause #875](https://github.com/e2b-dev/e2b/issues/875) ·
   [e2b resume-not-persisting #884](https://github.com/e2b-dev/E2B/issues/884) ·

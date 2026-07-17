@@ -75,7 +75,7 @@ def _server_script(auth_mode: str, jwt_secret: str | None, static_token: str | N
                     claims = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
                 except Exception as exc:
                     return False, f"jwt: {{exc}}"
-                if claims.get("iss") != "cubebox":
+                if claims.get("iss") != "cubeplex":
                     return False, f"bad issuer: {{claims.get('iss')}}"
                 return True, json.dumps(claims)
             return False, f"unknown auth mode: {{AUTH_MODE}}"

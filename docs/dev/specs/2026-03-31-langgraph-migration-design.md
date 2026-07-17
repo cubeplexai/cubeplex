@@ -29,7 +29,7 @@ Replace `deepagents` dependency with `langchain.agents.create_agent()` + custom 
 - Simplify `Sandbox` to async-first base class with `execute` only
 - Implement `OpenSandbox` adapter and `LocalSandbox` for dev
 - Delete `messages` table; read messages from checkpointer thread state
-- Create `cubebox/prompts/` directory for prompt management
+- Create `cubeplex/prompts/` directory for prompt management
 - Simplify frontend `messageStore` — flat state, store-level text accumulation
 - Add backend E2E tests, frontend Playwright E2E tests, and unit tests
 - Dependency injection in `create_app` for testability
@@ -46,7 +46,7 @@ Replace `deepagents` dependency with `langchain.agents.create_agent()` + custom 
 ### Backend Directory Changes
 
 ```
-cubebox/
+cubeplex/
 ├── agents/
 │   ├── graph.py              # NEW: agent factory using create_agent() + middleware
 │   ├── schemas.py            # KEEP: SSE event types (remove ChainStartEvent)
@@ -92,13 +92,13 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
-from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.middleware.subagents import SubAgentMiddleware
-from cubebox.middleware.skills import SkillsMiddleware
-from cubebox.prompts.system import BASE_SYSTEM_PROMPT
-from cubebox.sandbox.base import Sandbox
+from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.subagents import SubAgentMiddleware
+from cubeplex.middleware.skills import SkillsMiddleware
+from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
+from cubeplex.sandbox.base import Sandbox
 
-def create_cubebox_agent(
+def create_cubeplex_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
     *,
@@ -245,7 +245,7 @@ def create_execute_tool(sandbox: Sandbox) -> BaseTool:
 
 ### Prompts
 
-All prompts in `cubebox/prompts/`, one file per concern:
+All prompts in `cubeplex/prompts/`, one file per concern:
 
 | File | Content |
 |---|---|
@@ -260,8 +260,8 @@ Prompts are composed by middleware — each middleware appends its prompt sectio
 
 #### Delete `messages` table
 
-- Remove `cubebox/models/message.py`
-- Remove `cubebox/repositories/message.py`
+- Remove `cubeplex/models/message.py`
+- Remove `cubeplex/repositories/message.py`
 - Alembic migration to drop `messages` table
 
 #### `list_messages` endpoint reads from checkpointer
@@ -366,7 +366,7 @@ The stream processor maps `ns` to `agent_id`/`agent_name` on each SSE event.
 
 ```python
 async def event_generator():
-    agent = create_cubebox_agent(llm, tools, sandbox=sandbox, checkpointer=checkpointer)
+    agent = create_cubeplex_agent(llm, tools, sandbox=sandbox, checkpointer=checkpointer)
     config = {"configurable": {"thread_id": conversation_id}}
 
     async for chunk in agent.astream(
@@ -642,13 +642,13 @@ pnpm test:e2e                             # Playwright E2E (needs running backen
 1. Create `sandbox/base.py`, `sandbox/local.py`, update `sandbox/opensandbox.py`
 2. Create `prompts/` with all prompt files (system, sandbox, subagents, skills)
 3. Create `middleware/` — vendor and adapt SandboxMiddleware, SubAgentMiddleware, SkillsMiddleware from deepagents
-4. Create `agents/graph.py` (create_cubebox_agent using create_agent + middleware)
+4. Create `agents/graph.py` (create_cubeplex_agent using create_agent + middleware)
 5. Create `agents/convert.py` (LangChain Message → API format)
 6. Update `create_app` with dependency injection (checkpointer_factory, sandbox_factory)
 
 ### Phase 2: Backend API Migration
 
-7. Update `conversations.py` — new `send_message` (stream via create_cubebox_agent) and `list_messages` (read from checkpointer)
+7. Update `conversations.py` — new `send_message` (stream via create_cubeplex_agent) and `list_messages` (read from checkpointer)
 8. Delete `executor.py`, `models/message.py`, `repositories/message.py`
 9. Remove `deepagents` from dependencies, remove `nest-asyncio`, `asyncer`
 10. Alembic migration to drop `messages` table

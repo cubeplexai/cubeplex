@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { Variable } from 'lucide-react'
-import { type EnvEntryOut } from '@cubebox/core'
+import { type EnvEntryOut } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'

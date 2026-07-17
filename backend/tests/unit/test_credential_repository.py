@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.models import Credential
+from cubeplex.models import Credential
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ async def session() -> AsyncIterator[AsyncSession]:
 
 
 async def test_credential_repository_enforces_org_scope(session: AsyncSession) -> None:
-    from cubebox.repositories.credential import CredentialRepository
+    from cubeplex.repositories.credential import CredentialRepository
 
     repo = CredentialRepository(session, org_id="org-1")
     cred = Credential(
@@ -40,7 +40,7 @@ async def test_credential_repository_enforces_org_scope(session: AsyncSession) -
 
 
 async def test_credential_repository_delete_respects_org_scope(session: AsyncSession) -> None:
-    from cubebox.repositories.credential import CredentialRepository
+    from cubeplex.repositories.credential import CredentialRepository
 
     repo = CredentialRepository(session, org_id="org-1")
     saved = await repo.add(

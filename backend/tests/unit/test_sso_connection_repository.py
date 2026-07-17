@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.models.sso_connection import SSOConnection
-from cubebox.repositories.sso_connection import SSOConnectionRepository
+from cubeplex.models.sso_connection import SSOConnection
+from cubeplex.repositories.sso_connection import SSOConnectionRepository
 
 
 @pytest.fixture

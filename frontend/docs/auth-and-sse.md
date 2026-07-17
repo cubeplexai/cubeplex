@@ -11,7 +11,7 @@ URL routing, SSE proxy route, CSRF handling, deployment-mode UI surfaces.
 
 ## Proxy Middleware (`proxy.ts`)
 
-Checks for the `cubebox_auth` cookie:
+Checks for the `cubeplex_auth` cookie:
 
 - Unauthenticated hits to `/w/*` or `/workspaces` → redirect to
   `/login?next=<path>`.
@@ -41,7 +41,7 @@ the URL builders in
 
 ## CSRF
 
-Double-submit pattern. `ApiClient` reads `cubebox_csrf` from
+Double-submit pattern. `ApiClient` reads `cubeplex_csrf` from
 `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend
 seeds the cookie on login.
 
@@ -71,7 +71,7 @@ scoping rides in the URL path, **not a header**.
 
 The backend exposes `GET /api/v1/system/info` (public, pre-login)
 returning `{deployment_mode, version, needs_org_setup}`. The
-`useDeploymentMode()` hook in `@cubebox/core` reads it.
+`useDeploymentMode()` hook in `@cubeplex/core` reads it.
 
 ### `single_tenant` (OSS default)
 

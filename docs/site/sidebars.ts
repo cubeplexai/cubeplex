@@ -25,6 +25,8 @@ const sidebars: SidebarsConfig = {
             'guides/conversations/attachments',
             'guides/conversations/artifacts',
             'guides/conversations/model-selection',
+            'guides/conversations/topics',
+            'guides/conversations/sandboxes',
           ],
         },
         {
@@ -50,7 +52,7 @@ const sidebars: SidebarsConfig = {
           label: 'MCP Tools',
           items: [
             'guides/mcp/overview',
-            'guides/mcp/installing-connectors',
+            'guides/mcp/enabling-connectors',
             'guides/mcp/using-tools',
           ],
         },
@@ -61,6 +63,23 @@ const sidebars: SidebarsConfig = {
             'guides/automation/scheduled-tasks',
             'guides/automation/event-triggers',
           ],
+        },
+        {
+          type: 'category',
+          label: 'IM Connectors',
+          items: [
+            'guides/im/overview',
+            'guides/im/feishu',
+            'guides/im/slack',
+            'guides/im/dingtalk',
+            'guides/im/teams',
+            'guides/im/discord',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Account',
+          items: ['guides/account/profile'],
         },
       ],
     },

@@ -11,7 +11,7 @@ describe('conversation messages route proxy', () => {
 
     const request = {
       headers: new Headers([
-        ['cookie', 'cubebox_user_id=user-cookie'],
+        ['cookie', 'cubeplex_user_id=user-cookie'],
         ['x-user-id', 'header-user'],
       ]),
       text: async () => JSON.stringify({ content: 'hello' }),
@@ -27,7 +27,7 @@ describe('conversation messages route proxy', () => {
     expect(init.headers).toMatchObject({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      cookie: 'cubebox_user_id=user-cookie',
+      cookie: 'cubeplex_user_id=user-cookie',
       'x-user-id': 'header-user',
     })
     expect(init.headers).not.toHaveProperty('X-Workspace-Id')
@@ -40,7 +40,7 @@ describe('conversation messages route proxy', () => {
           status: 200,
           headers: {
             'content-type': 'application/json',
-            'set-cookie': 'cubebox_user_id=user-cookie; Path=/; HttpOnly',
+            'set-cookie': 'cubeplex_user_id=user-cookie; Path=/; HttpOnly',
           },
         }),
     )
@@ -55,7 +55,7 @@ describe('conversation messages route proxy', () => {
       params: Promise.resolve({ wsId: 'ws-42', id: 'conv-1' }),
     })
 
-    expect(response.headers.get('set-cookie')).toContain('cubebox_user_id=user-cookie')
+    expect(response.headers.get('set-cookie')).toContain('cubeplex_user_id=user-cookie')
   })
 
   it('forwards identity headers and wsId in the URL on GET requests too', async () => {
@@ -65,7 +65,7 @@ describe('conversation messages route proxy', () => {
     const request = {
       url: 'http://localhost/api/v1/ws/ws-42/conversations/conv-1/messages?limit=10',
       headers: new Headers([
-        ['cookie', 'cubebox_user_id=user-cookie'],
+        ['cookie', 'cubeplex_user_id=user-cookie'],
         ['x-user-id', 'header-user'],
       ]),
     } as any
@@ -78,7 +78,7 @@ describe('conversation messages route proxy', () => {
     const [url, init] = backendFetch.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/ws/ws-42/conversations/conv-1/messages?limit=10')
     expect(init?.headers).toMatchObject({
-      cookie: 'cubebox_user_id=user-cookie',
+      cookie: 'cubeplex_user_id=user-cookie',
       'x-user-id': 'header-user',
     })
   })

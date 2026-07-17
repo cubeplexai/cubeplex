@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Discord as the second IM platform in cubebox, with a platform-registry mechanism that replaces the current hard-coded Feishu wiring so future platforms slot in cleanly.
+**Goal:** Add Discord as the second IM platform in cubeplex, with a platform-registry mechanism that replaces the current hard-coded Feishu wiring so future platforms slot in cleanly.
 
 **Architecture:** Platform-registry pattern: `PlatformConnector` protocol in `im/registry.py` with `register_platform()`/`get_platform()`. Each platform registers itself in its `__init__.py`. The outbound rendering path gets an `OpDispatcher` protocol extracted from the current `_dispatch_op` monolith, with `FeishuOpDispatcher` wrapping existing CardKit logic and `DiscordOpDispatcher` doing message edits. Distributed Redis lease (`SETNX` with 30s TTL, 15s sweep) coordinates Gateway ownership across API instances.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/dev/specs/2026-06-15-discord-im-connector-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/`
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/`
 
 ---
 
@@ -20,16 +20,16 @@
 
 | File | Purpose |
 |------|---------|
-| `backend/cubebox/im/registry.py` | `PlatformConnector` protocol + `register_platform()`/`get_platform()` registry |
-| `backend/cubebox/im/card_model.py` | Shared accumulation models lifted from `im/feishu/card_model.py` |
-| `backend/cubebox/im/op_dispatcher.py` | `OpDispatcher` protocol |
-| `backend/cubebox/im/feishu/op_dispatcher.py` | `FeishuOpDispatcher` — extracted from `OutboundRunTailer._dispatch_op` |
-| `backend/cubebox/im/discord/__init__.py` | Register `DiscordPlatform` connector |
-| `backend/cubebox/im/discord/connector.py` | `DiscordConnector` — `parse_inbound`, send/edit message, reactions |
-| `backend/cubebox/im/discord/gateway.py` | discord.py Bot lifecycle (start/stop per account) |
-| `backend/cubebox/im/discord/renderer.py` | `DiscordOpDispatcher` (uses shared `RenderState` from `im/types.py`) |
-| `backend/cubebox/im/discord/interactions.py` | Button interaction handling (AskUser/SandboxConfirm resume) |
-| `backend/cubebox/im/discord/commands.py` | `/new` `/reset` slash commands |
+| `backend/cubeplex/im/registry.py` | `PlatformConnector` protocol + `register_platform()`/`get_platform()` registry |
+| `backend/cubeplex/im/card_model.py` | Shared accumulation models lifted from `im/feishu/card_model.py` |
+| `backend/cubeplex/im/op_dispatcher.py` | `OpDispatcher` protocol |
+| `backend/cubeplex/im/feishu/op_dispatcher.py` | `FeishuOpDispatcher` — extracted from `OutboundRunTailer._dispatch_op` |
+| `backend/cubeplex/im/discord/__init__.py` | Register `DiscordPlatform` connector |
+| `backend/cubeplex/im/discord/connector.py` | `DiscordConnector` — `parse_inbound`, send/edit message, reactions |
+| `backend/cubeplex/im/discord/gateway.py` | discord.py Bot lifecycle (start/stop per account) |
+| `backend/cubeplex/im/discord/renderer.py` | `DiscordOpDispatcher` (uses shared `RenderState` from `im/types.py`) |
+| `backend/cubeplex/im/discord/interactions.py` | Button interaction handling (AskUser/SandboxConfirm resume) |
+| `backend/cubeplex/im/discord/commands.py` | `/new` `/reset` slash commands |
 | `backend/tests/unit/im/test_registry.py` | Registry unit tests |
 | `backend/tests/unit/im/test_card_model_lift.py` | Verify card_model lift preserves behavior |
 | `backend/tests/unit/im/test_op_dispatcher_protocol.py` | OpDispatcher protocol conformance |
@@ -42,17 +42,17 @@
 
 | File | Change |
 |------|--------|
-| `backend/cubebox/im/types.py` | Add `make_channel_scope()`, decouple `RenderState` from `CardState` import |
-| `backend/cubebox/im/feishu/card_model.py` | Re-export from shared `im/card_model.py` |
-| `backend/cubebox/im/outbound.py` | Import from `im/card_model.py` instead of `im/feishu/card_model.py`; inject `OpDispatcher` into `OutboundRunTailer` |
+| `backend/cubeplex/im/types.py` | Add `make_channel_scope()`, decouple `RenderState` from `CardState` import |
+| `backend/cubeplex/im/feishu/card_model.py` | Re-export from shared `im/card_model.py` |
+| `backend/cubeplex/im/outbound.py` | Import from `im/card_model.py` instead of `im/feishu/card_model.py`; inject `OpDispatcher` into `OutboundRunTailer` |
 | `backend/tests/im/test_awaiting_responder.py` | Update `OutboundRunTailer` construction: `cardkit=` → `dispatcher=` (4 call sites) |
 | `backend/tests/im/test_tailer_dispatch.py` | Update `OutboundRunTailer` construction: `cardkit=` → `dispatcher=` (1 call site) |
 | `backend/tests/e2e/test_im_end_to_end.py` | Update `OutboundRunTailer` construction: `cardkit=` → `dispatcher=` (2 call sites) |
-| `backend/cubebox/im/artifacts.py` | Import from `im/card_model.py` instead of `im/feishu/card_model.py` |
-| `backend/cubebox/im/runtime.py` | Registry-based startup + distributed Redis lease sweep |
-| `backend/cubebox/api/schemas/im_connector.py` | Add `ConnectDiscordAccountIn` |
-| `backend/cubebox/api/routes/v1/ws_im.py` | Dispatch connect by platform field |
-| `backend/cubebox/services/im_connector.py` | Add `connect_discord()` |
+| `backend/cubeplex/im/artifacts.py` | Import from `im/card_model.py` instead of `im/feishu/card_model.py` |
+| `backend/cubeplex/im/runtime.py` | Registry-based startup + distributed Redis lease sweep |
+| `backend/cubeplex/api/schemas/im_connector.py` | Add `ConnectDiscordAccountIn` |
+| `backend/cubeplex/api/routes/v1/ws_im.py` | Dispatch connect by platform field |
+| `backend/cubeplex/services/im_connector.py` | Add `connect_discord()` |
 | `frontend/packages/core/src/api/im.ts` | Add `ConnectDiscordAccountIn`, union body type, extend `delivery_mode` |
 | `frontend/packages/web/components/im/ImConnectWizard/platforms/types.ts` | Extend `PlatformDescriptor.id` union, generalize `buildPayload` return type |
 | `frontend/packages/web/components/im/ImConnectWizard/platforms/index.ts` | Export + register `discordDescriptor` |
@@ -65,7 +65,7 @@
 ### Task 1: Platform Registry
 
 **Files:**
-- Create: `backend/cubebox/im/registry.py`
+- Create: `backend/cubeplex/im/registry.py`
 - Test: `backend/tests/unit/im/test_registry.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -78,7 +78,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.registry import (
+from cubeplex.im.registry import (
     PlatformConnector,
     get_platform,
     register_platform,
@@ -123,13 +123,13 @@ def test_double_register_raises() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_registry.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.im.registry'`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_registry.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.im.registry'`
 
 - [ ] **Step 3: Implement the registry**
 
 ```python
-# backend/cubebox/im/registry.py
+# backend/cubeplex/im/registry.py
 """Platform connector registry.
 
 Each IM platform registers itself at import time via ``register_platform()``.
@@ -178,13 +178,13 @@ def registered_platforms() -> list[str]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_registry.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_registry.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/registry.py backend/tests/unit/im/test_registry.py && git commit -m "feat(im): add platform connector registry"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/registry.py backend/tests/unit/im/test_registry.py && git commit -m "feat(im): add platform connector registry"
 ```
 
 ---
@@ -194,11 +194,11 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 Move `CardState`, `ToolStep`, `ArtifactItem`, `PendingInput`, `SubAgentRow` from `im/feishu/card_model.py` into `im/card_model.py`. The Feishu module re-exports for backward compatibility during the transition, then all importers are updated.
 
 **Files:**
-- Create: `backend/cubebox/im/card_model.py`
-- Modify: `backend/cubebox/im/feishu/card_model.py`
-- Modify: `backend/cubebox/im/outbound.py` (4 import sites: lines 98, 192, 244, 321)
-- Modify: `backend/cubebox/im/artifacts.py` (line 19)
-- Modify: `backend/cubebox/im/types.py` (line 15)
+- Create: `backend/cubeplex/im/card_model.py`
+- Modify: `backend/cubeplex/im/feishu/card_model.py`
+- Modify: `backend/cubeplex/im/outbound.py` (4 import sites: lines 98, 192, 244, 321)
+- Modify: `backend/cubeplex/im/artifacts.py` (line 19)
+- Modify: `backend/cubeplex/im/types.py` (line 15)
 - Test: `backend/tests/unit/im/test_card_model_lift.py`
 
 - [ ] **Step 1: Write the verification test**
@@ -208,7 +208,7 @@ Move `CardState`, `ToolStep`, `ArtifactItem`, `PendingInput`, `SubAgentRow` from
 """Verify shared card_model exports match the original feishu card_model."""
 from __future__ import annotations
 
-from cubebox.im.card_model import (
+from cubeplex.im.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
@@ -241,8 +241,8 @@ def test_card_state_find_tool() -> None:
 
 def test_feishu_reexport() -> None:
     """The feishu module must still re-export the same classes."""
-    from cubebox.im.feishu.card_model import CardState as FeishuCardState
-    from cubebox.im.feishu.card_model import ToolStep as FeishuToolStep
+    from cubeplex.im.feishu.card_model import CardState as FeishuCardState
+    from cubeplex.im.feishu.card_model import ToolStep as FeishuToolStep
 
     assert FeishuCardState is CardState
     assert FeishuToolStep is ToolStep
@@ -250,22 +250,22 @@ def test_feishu_reexport() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_card_model_lift.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.im.card_model'`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_card_model_lift.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.im.card_model'`
 
 - [ ] **Step 3: Create shared card_model.py**
 
-Copy the full content of `backend/cubebox/im/feishu/card_model.py` to `backend/cubebox/im/card_model.py`. The file is identical — same docstring, same classes, same `__all__`.
+Copy the full content of `backend/cubeplex/im/feishu/card_model.py` to `backend/cubeplex/im/card_model.py`. The file is identical — same docstring, same classes, same `__all__`.
 
 - [ ] **Step 4: Replace feishu/card_model.py with re-exports**
 
 ```python
-# backend/cubebox/im/feishu/card_model.py
+# backend/cubeplex/im/feishu/card_model.py
 """Re-export shared card models for backward compatibility.
 
-The canonical definitions now live in ``cubebox.im.card_model``.
+The canonical definitions now live in ``cubeplex.im.card_model``.
 """
-from cubebox.im.card_model import (
+from cubeplex.im.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
@@ -284,40 +284,40 @@ __all__ = [
 
 - [ ] **Step 5: Update imports in outbound.py**
 
-In `backend/cubebox/im/outbound.py`, change 4 import sites:
+In `backend/cubeplex/im/outbound.py`, change 4 import sites:
 
-Line 98: `from cubebox.im.feishu.card_model import SubAgentRow, ToolStep` → `from cubebox.im.card_model import SubAgentRow, ToolStep`
+Line 98: `from cubeplex.im.feishu.card_model import SubAgentRow, ToolStep` → `from cubeplex.im.card_model import SubAgentRow, ToolStep`
 
-Line 192: `from cubebox.im.feishu.card_model import ArtifactItem` → `from cubebox.im.card_model import ArtifactItem`
+Line 192: `from cubeplex.im.feishu.card_model import ArtifactItem` → `from cubeplex.im.card_model import ArtifactItem`
 
-Line 244: `from cubebox.im.feishu.card_model import PendingInput` → `from cubebox.im.card_model import PendingInput`
+Line 244: `from cubeplex.im.feishu.card_model import PendingInput` → `from cubeplex.im.card_model import PendingInput`
 
-Line 321: `from cubebox.im.feishu.card_model import PendingInput` → `from cubebox.im.card_model import PendingInput`
+Line 321: `from cubeplex.im.feishu.card_model import PendingInput` → `from cubeplex.im.card_model import PendingInput`
 
 - [ ] **Step 6: Update import in artifacts.py**
 
-In `backend/cubebox/im/artifacts.py`, line 19:
-`from cubebox.im.feishu.card_model import ArtifactItem, CardState` → `from cubebox.im.card_model import ArtifactItem, CardState`
+In `backend/cubeplex/im/artifacts.py`, line 19:
+`from cubeplex.im.feishu.card_model import ArtifactItem, CardState` → `from cubeplex.im.card_model import ArtifactItem, CardState`
 
 - [ ] **Step 7: Update import in types.py**
 
-In `backend/cubebox/im/types.py`, line 15:
-`from cubebox.im.feishu.card_model import CardState` → `from cubebox.im.card_model import CardState`
+In `backend/cubeplex/im/types.py`, line 15:
+`from cubeplex.im.feishu.card_model import CardState` → `from cubeplex.im.card_model import CardState`
 
 - [ ] **Step 8: Run tests to verify**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_card_model_lift.py tests/unit/im/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_card_model_lift.py tests/unit/im/ -v`
 Expected: PASS
 
 - [ ] **Step 9: Run existing IM tests to verify no regressions**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
 Expected: All PASS
 
 - [ ] **Step 10: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/card_model.py backend/cubebox/im/feishu/card_model.py backend/cubebox/im/outbound.py backend/cubebox/im/artifacts.py backend/cubebox/im/types.py backend/tests/unit/im/test_card_model_lift.py && git commit -m "refactor(im): lift CardState to shared im/card_model.py"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/card_model.py backend/cubeplex/im/feishu/card_model.py backend/cubeplex/im/outbound.py backend/cubeplex/im/artifacts.py backend/cubeplex/im/types.py backend/tests/unit/im/test_card_model_lift.py && git commit -m "refactor(im): lift CardState to shared im/card_model.py"
 ```
 
 ---
@@ -327,9 +327,9 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 Extract `OutboundRunTailer._dispatch_op` into an `OpDispatcher` protocol. Create `FeishuOpDispatcher` wrapping the existing CardKit logic. Inject the dispatcher into `OutboundRunTailer` instead of having it call CardKit directly.
 
 **Files:**
-- Create: `backend/cubebox/im/op_dispatcher.py`
-- Create: `backend/cubebox/im/feishu/op_dispatcher.py`
-- Modify: `backend/cubebox/im/outbound.py`
+- Create: `backend/cubeplex/im/op_dispatcher.py`
+- Create: `backend/cubeplex/im/feishu/op_dispatcher.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Test: `backend/tests/unit/im/test_op_dispatcher_protocol.py`
 
 - [ ] **Step 1: Write the protocol test**
@@ -342,7 +342,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.op_dispatcher import OpDispatcher
+from cubeplex.im.op_dispatcher import OpDispatcher
 
 
 class FakeDispatcher:
@@ -389,13 +389,13 @@ async def test_fake_dispatch_create() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_op_dispatcher_protocol.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_op_dispatcher_protocol.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Create OpDispatcher protocol**
 
 ```python
-# backend/cubebox/im/op_dispatcher.py
+# backend/cubeplex/im/op_dispatcher.py
 """OpDispatcher protocol — platform-specific outbound rendering.
 
 Each platform implements this protocol. The OutboundRunTailer calls
@@ -419,7 +419,7 @@ class OpDispatcher(Protocol):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_op_dispatcher_protocol.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_op_dispatcher_protocol.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Create FeishuOpDispatcher**
@@ -427,7 +427,7 @@ Expected: PASS
 Extract the body of `OutboundRunTailer._dispatch_op` (lines 601–758 of `outbound.py`) into `FeishuOpDispatcher`. Also extract `_emergency_text`, `_maybe_surface_pending_via_emergency`, and `_emergency_card_create_fallback`.
 
 ```python
-# backend/cubebox/im/feishu/op_dispatcher.py
+# backend/cubeplex/im/feishu/op_dispatcher.py
 """Feishu-specific OpDispatcher — wraps CardKit calls.
 
 Extracted from OutboundRunTailer._dispatch_op so the tailer no longer
@@ -439,8 +439,8 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.outbound import _FloodSignal, note_edit_success, note_flood_strike
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import _FloodSignal, note_edit_success, note_flood_strike
+from cubeplex.im.types import RenderState
 
 
 class FeishuOpDispatcher:
@@ -458,7 +458,7 @@ class FeishuOpDispatcher:
         self._cardkit = cardkit
 
     async def dispatch_create(self, state: Any) -> bool:
-        from cubebox.im.feishu.card_renderer import render
+        from cubeplex.im.feishu.card_renderer import render
 
         s = self._state
         if s.card_unavailable:
@@ -493,7 +493,7 @@ class FeishuOpDispatcher:
         return True
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
-        from cubebox.im.feishu.card_renderer import optimize_markdown_style as _optimize
+        from cubeplex.im.feishu.card_renderer import optimize_markdown_style as _optimize
 
         s = self._state
         if s.card_id is None or s.card_unavailable:
@@ -517,7 +517,7 @@ class FeishuOpDispatcher:
             return False
 
     async def dispatch_patch(self, state: Any) -> bool:
-        from cubebox.im.feishu.card_renderer import render
+        from cubeplex.im.feishu.card_renderer import render
 
         s = self._state
         if s.card_id is None or s.card_unavailable:
@@ -541,7 +541,7 @@ class FeishuOpDispatcher:
             return False
 
     async def dispatch_finalize(self, state: Any) -> bool:
-        from cubebox.im.feishu.card_renderer import render
+        from cubeplex.im.feishu.card_renderer import render
 
         s = self._state
         if s.card_id is None or s.card_unavailable:
@@ -603,7 +603,7 @@ class FeishuOpDispatcher:
         kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
         await self.emergency_text(
             f"{kind_label}\n\n{pending.question}\n\n"
-            f"_(卡片更新暂时不可用；请在 cubebox 网页端继续。)_"[:4000]
+            f"_(卡片更新暂时不可用；请在 cubeplex 网页端继续。)_"[:4000]
         )
 
     async def _emergency_card_create_fallback(self) -> None:
@@ -615,15 +615,15 @@ class FeishuOpDispatcher:
         if pending is not None and pending.resolved_choice is None:
             kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
             await self.emergency_text(
-                f"{kind_label}\n\n{pending.question}\n\n_(请在 cubebox 网页端继续。)_"[:4000]
+                f"{kind_label}\n\n{pending.question}\n\n_(请在 cubeplex 网页端继续。)_"[:4000]
             )
 ```
 
 - [ ] **Step 6: Rewire OutboundRunTailer to use OpDispatcher**
 
-In `backend/cubebox/im/outbound.py`:
+In `backend/cubeplex/im/outbound.py`:
 
-1. Replace `__init__` parameter `cardkit` with `dispatcher: OpDispatcher` (from `cubebox.im.op_dispatcher`). Keep `connector` for lifecycle hooks only (`on_processing_start/complete/failed`).
+1. Replace `__init__` parameter `cardkit` with `dispatcher: OpDispatcher` (from `cubeplex.im.op_dispatcher`). Keep `connector` for lifecycle hooks only (`on_processing_start/complete/failed`).
 
 2. Replace `_dispatch_op` body with delegation to the dispatcher:
 
@@ -650,7 +650,7 @@ async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
 
 - [ ] **Step 7: Update runtime.py to construct FeishuOpDispatcher**
 
-In `backend/cubebox/im/runtime.py`, in `_on_run_started`:
+In `backend/cubeplex/im/runtime.py`, in `_on_run_started`:
 
 Replace:
 ```python
@@ -662,7 +662,7 @@ tailer = OutboundRunTailer(
 
 With:
 ```python
-from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
+from cubeplex.im.feishu.op_dispatcher import FeishuOpDispatcher
 
 op_dispatcher = FeishuOpDispatcher(
     connector=connector, state=state, cardkit=cardkit
@@ -681,17 +681,17 @@ Three test files still pass `cardkit=` to `OutboundRunTailer`. Each must create 
 - `backend/tests/im/test_tailer_dispatch.py` — 1 call site, same change
 - `backend/tests/e2e/test_im_end_to_end.py` — 2 call sites, same change
 
-In each file, add `from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher` and update each `OutboundRunTailer(... cardkit=X ...)` to `OutboundRunTailer(... dispatcher=FeishuOpDispatcher(connector=connector, state=state, cardkit=X) ...)`.
+In each file, add `from cubeplex.im.feishu.op_dispatcher import FeishuOpDispatcher` and update each `OutboundRunTailer(... cardkit=X ...)` to `OutboundRunTailer(... dispatcher=FeishuOpDispatcher(connector=connector, state=state, cardkit=X) ...)`.
 
 - [ ] **Step 9: Run all IM tests (including e2e)**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/im/ tests/e2e/test_im_end_to_end.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/im/ tests/e2e/test_im_end_to_end.py -v`
 Expected: All PASS
 
 - [ ] **Step 10: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/op_dispatcher.py backend/cubebox/im/feishu/op_dispatcher.py backend/cubebox/im/outbound.py backend/cubebox/im/runtime.py backend/tests/unit/im/test_op_dispatcher_protocol.py backend/tests/im/test_awaiting_responder.py backend/tests/im/test_tailer_dispatch.py backend/tests/e2e/test_im_end_to_end.py && git commit -m "refactor(im): extract OpDispatcher protocol from OutboundRunTailer"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/op_dispatcher.py backend/cubeplex/im/feishu/op_dispatcher.py backend/cubeplex/im/outbound.py backend/cubeplex/im/runtime.py backend/tests/unit/im/test_op_dispatcher_protocol.py backend/tests/im/test_awaiting_responder.py backend/tests/im/test_tailer_dispatch.py backend/tests/e2e/test_im_end_to_end.py && git commit -m "refactor(im): extract OpDispatcher protocol from OutboundRunTailer"
 ```
 
 ---
@@ -699,11 +699,11 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 4: Add `make_channel_scope()` Helper
 
 **Files:**
-- Modify: `backend/cubebox/im/types.py`
+- Modify: `backend/cubeplex/im/types.py`
 
 - [ ] **Step 1: Add the helper**
 
-In `backend/cubebox/im/types.py`, after `make_participant_scope` (line 26):
+In `backend/cubeplex/im/types.py`, after `make_participant_scope` (line 26):
 
 ```python
 def make_channel_scope() -> str:
@@ -718,13 +718,13 @@ def make_channel_scope() -> str:
 
 - [ ] **Step 2: Run existing tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
 Expected: All PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/types.py && git commit -m "feat(im): add make_channel_scope() helper for channel-shared sessions"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/types.py && git commit -m "feat(im): add make_channel_scope() helper for channel-shared sessions"
 ```
 
 ---
@@ -735,17 +735,17 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 
 - [ ] **Step 1: Install discord.py**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv add discord.py`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv add discord.py`
 
 - [ ] **Step 2: Verify import works**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run python -c "import discord; print(discord.__version__)"`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run python -c "import discord; print(discord.__version__)"`
 Expected: Version printed without error
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/pyproject.toml backend/uv.lock && git commit -m "deps(backend): add discord.py for Gateway integration"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/pyproject.toml backend/uv.lock && git commit -m "deps(backend): add discord.py for Gateway integration"
 ```
 
 ---
@@ -753,8 +753,8 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 6: Discord Connector — parse_inbound
 
 **Files:**
-- Create: `backend/cubebox/im/discord/__init__.py`
-- Create: `backend/cubebox/im/discord/connector.py`
+- Create: `backend/cubeplex/im/discord/__init__.py`
+- Create: `backend/cubeplex/im/discord/connector.py`
 - Test: `backend/tests/unit/im/discord/test_connector.py`
 
 - [ ] **Step 1: Write tests**
@@ -768,8 +768,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.im.discord.connector import DiscordConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.discord.connector import DiscordConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _make_message(
@@ -877,13 +877,13 @@ class TestDiscordConnectorParseInbound:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_connector.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_connector.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Create `__init__.py`**
 
 ```python
-# backend/cubebox/im/discord/__init__.py
+# backend/cubeplex/im/discord/__init__.py
 ```
 
 Create empty `backend/tests/unit/im/discord/__init__.py` too.
@@ -891,7 +891,7 @@ Create empty `backend/tests/unit/im/discord/__init__.py` too.
 - [ ] **Step 4: Implement DiscordConnector**
 
 ```python
-# backend/cubebox/im/discord/connector.py
+# backend/cubeplex/im/discord/connector.py
 """Discord connector: inbound parse + outbound message send/edit + reactions.
 
 All discord.py API calls are async-native (no to_thread needed unlike
@@ -904,8 +904,8 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.outbound import _FloodSignal
-from cubebox.im.types import (
+from cubeplex.im.outbound import _FloodSignal
+from cubeplex.im.types import (
     DM_SCOPE_KEY,
     InboundEvent,
     make_channel_scope,
@@ -1145,13 +1145,13 @@ class DiscordConnector:
 
 - [ ] **Step 5: Run tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_connector.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_connector.py -v`
 Expected: All PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/discord/__init__.py backend/cubebox/im/discord/connector.py backend/tests/unit/im/discord/__init__.py backend/tests/unit/im/discord/test_connector.py && git commit -m "feat(im/discord): add DiscordConnector with parse_inbound"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/discord/__init__.py backend/cubeplex/im/discord/connector.py backend/tests/unit/im/discord/__init__.py backend/tests/unit/im/discord/test_connector.py && git commit -m "feat(im/discord): add DiscordConnector with parse_inbound"
 ```
 
 ---
@@ -1159,7 +1159,7 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 7: Discord OpDispatcher (Renderer)
 
 **Files:**
-- Create: `backend/cubebox/im/discord/renderer.py`
+- Create: `backend/cubeplex/im/discord/renderer.py`
 - Test: `backend/tests/unit/im/discord/test_renderer.py`
 
 - [ ] **Step 1: Write tests**
@@ -1174,9 +1174,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.im.card_model import CardState
-from cubebox.im.discord.renderer import DiscordOpDispatcher
-from cubebox.im.types import RenderState
+from cubeplex.im.card_model import CardState
+from cubeplex.im.discord.renderer import DiscordOpDispatcher
+from cubeplex.im.types import RenderState
 
 
 @dataclass
@@ -1276,13 +1276,13 @@ class TestDiscordDispatchFinalize:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_renderer.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_renderer.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement DiscordOpDispatcher**
 
 ```python
-# backend/cubebox/im/discord/renderer.py
+# backend/cubeplex/im/discord/renderer.py
 """Discord outbound renderer — plain Markdown message edits.
 
 Unlike Feishu's CardKit pipeline, Discord rendering is straightforward:
@@ -1300,9 +1300,9 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.discord.connector import DiscordRateLimitError
-from cubebox.im.outbound import note_edit_success, note_flood_strike
-from cubebox.im.types import RenderState
+from cubeplex.im.discord.connector import DiscordRateLimitError
+from cubeplex.im.outbound import note_edit_success, note_flood_strike
+from cubeplex.im.types import RenderState
 
 _DISCORD_MSG_LIMIT = 2000
 _SPLIT_THRESHOLD = 1900
@@ -1421,7 +1421,7 @@ class DiscordOpDispatcher:
         msg_id = await self._connector.send_message_with_view(text, view)
         if msg_id is None:
             # Fallback: send plain text with web client notice
-            notice = "_(请在 cubebox 网页端继续。)_"
+            notice = "_(请在 cubeplex 网页端继续。)_"
             await self._connector.send_message(f"{text}\n\n{notice}")
 
     async def dispatch_finalize(self, state: Any) -> bool:
@@ -1484,18 +1484,18 @@ def _find_split_point(text: str, limit: int) -> int:
 
 # _note_flood / _note_success are not needed — the dispatcher uses the
 # shared ``note_flood_strike()`` and ``note_edit_success()`` from
-# ``cubebox.im.outbound`` which already operate on ``RenderState``.
+# ``cubeplex.im.outbound`` which already operate on ``RenderState``.
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_renderer.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/discord/test_renderer.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/discord/renderer.py backend/tests/unit/im/discord/test_renderer.py && git commit -m "feat(im/discord): add DiscordOpDispatcher with message-edit rendering"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/discord/renderer.py backend/tests/unit/im/discord/test_renderer.py && git commit -m "feat(im/discord): add DiscordOpDispatcher with message-edit rendering"
 ```
 
 ---
@@ -1503,12 +1503,12 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 8: Discord Gateway Lifecycle
 
 **Files:**
-- Create: `backend/cubebox/im/discord/gateway.py`
+- Create: `backend/cubeplex/im/discord/gateway.py`
 
 - [ ] **Step 1: Implement gateway module**
 
 ```python
-# backend/cubebox/im/discord/gateway.py
+# backend/cubeplex/im/discord/gateway.py
 """Discord Gateway lifecycle — one discord.py Bot per IM account.
 
 The Bot runs in an asyncio.Task. ``start()`` decrypts the bot token,
@@ -1524,8 +1524,8 @@ import discord
 from discord.ext import commands
 from loguru import logger
 
-from cubebox.im.discord.connector import DiscordConnector
-from cubebox.im.inbound import ingest_inbound_event
+from cubeplex.im.discord.connector import DiscordConnector
+from cubeplex.im.inbound import ingest_inbound_event
 
 
 class DiscordGateway:
@@ -1579,7 +1579,7 @@ class DiscordGateway:
                 bot.user.id,
             )
             self._connector = DiscordConnector(bot_user_id=bot.user.id)
-            from cubebox.im.discord.commands import register_commands
+            from cubeplex.im.discord.commands import register_commands
 
             await register_commands(bot)
 
@@ -1608,7 +1608,7 @@ class DiscordGateway:
         @bot.event
         async def on_interaction(interaction: discord.Interaction) -> None:
             if interaction.type == discord.InteractionType.component:
-                from cubebox.im.discord.interactions import handle_component_interaction
+                from cubeplex.im.discord.interactions import handle_component_interaction
 
                 await handle_component_interaction(
                     interaction,
@@ -1651,7 +1651,7 @@ class DiscordGateway:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/discord/gateway.py && git commit -m "feat(im/discord): add DiscordGateway lifecycle"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/discord/gateway.py && git commit -m "feat(im/discord): add DiscordGateway lifecycle"
 ```
 
 ---
@@ -1659,12 +1659,12 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 9: Discord Interactions (Button Resume)
 
 **Files:**
-- Create: `backend/cubebox/im/discord/interactions.py`
+- Create: `backend/cubeplex/im/discord/interactions.py`
 
 - [ ] **Step 1: Implement interactions handler**
 
 ```python
-# backend/cubebox/im/discord/interactions.py
+# backend/cubeplex/im/discord/interactions.py
 """Handle Discord component interactions (button clicks for AskUser / SandboxConfirm)."""
 from __future__ import annotations
 
@@ -1696,7 +1696,7 @@ async def handle_component_interaction(
 
     _, kind, run_id, value = parts
 
-    from cubebox.im.resume import resume_paused_run
+    from cubeplex.im.resume import resume_paused_run
 
     try:
         result = await resume_paused_run(
@@ -1723,7 +1723,7 @@ async def handle_component_interaction(
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/discord/interactions.py && git commit -m "feat(im/discord): add button interaction handler for AskUser/SandboxConfirm"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/discord/interactions.py && git commit -m "feat(im/discord): add button interaction handler for AskUser/SandboxConfirm"
 ```
 
 ---
@@ -1731,12 +1731,12 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 10: Discord Slash Commands
 
 **Files:**
-- Create: `backend/cubebox/im/discord/commands.py`
+- Create: `backend/cubeplex/im/discord/commands.py`
 
 - [ ] **Step 1: Implement slash commands**
 
 ```python
-# backend/cubebox/im/discord/commands.py
+# backend/cubeplex/im/discord/commands.py
 """Discord slash commands: /new and /reset."""
 from __future__ import annotations
 
@@ -1768,7 +1768,7 @@ async def register_commands(bot: commands.Bot) -> None:
 async def _reset_conversation(interaction: discord.Interaction) -> None:
     """Delete the IMThreadLink for the current channel/scope so the next
     message starts a fresh conversation."""
-    from cubebox.im.types import DM_SCOPE_KEY, make_channel_scope, make_thread_scope
+    from cubeplex.im.types import DM_SCOPE_KEY, make_channel_scope, make_thread_scope
 
     channel = interaction.channel
     if channel is None:
@@ -1788,10 +1788,10 @@ async def _reset_conversation(interaction: discord.Interaction) -> None:
     else:
         scope_key = make_channel_scope()
 
-    from cubebox.im.models import IMThreadLink
+    from cubeplex.im.models import IMThreadLink
 
-    session_maker = getattr(bot, "_cubebox_session_maker", None)
-    account_id = getattr(bot, "_cubebox_account_id", None)
+    session_maker = getattr(bot, "_cubeplex_session_maker", None)
+    account_id = getattr(bot, "_cubeplex_account_id", None)
     if session_maker is None or account_id is None:
         await interaction.response.send_message("内部错误。", ephemeral=True)
         return
@@ -1817,7 +1817,7 @@ async def _reset_conversation(interaction: discord.Interaction) -> None:
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/discord/commands.py && git commit -m "feat(im/discord): add /new and /reset slash commands"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/discord/commands.py && git commit -m "feat(im/discord): add /new and /reset slash commands"
 ```
 
 ---
@@ -1827,11 +1827,11 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 11: API Schema — ConnectDiscordAccountIn
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/im_connector.py`
+- Modify: `backend/cubeplex/api/schemas/im_connector.py`
 
 - [ ] **Step 1: Add the schema**
 
-In `backend/cubebox/api/schemas/im_connector.py`, after `ConnectFeishuAccountIn`:
+In `backend/cubeplex/api/schemas/im_connector.py`, after `ConnectFeishuAccountIn`:
 
 ```python
 class ConnectDiscordAccountIn(BaseModel):
@@ -1845,13 +1845,13 @@ class ConnectDiscordAccountIn(BaseModel):
 
 - [ ] **Step 2: Run mypy on the file**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubebox/api/schemas/im_connector.py --strict`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubeplex/api/schemas/im_connector.py --strict`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/api/schemas/im_connector.py && git commit -m "feat(im): add ConnectDiscordAccountIn schema"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/api/schemas/im_connector.py && git commit -m "feat(im): add ConnectDiscordAccountIn schema"
 ```
 
 ---
@@ -1859,7 +1859,7 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 12: Service — connect_discord()
 
 **Files:**
-- Modify: `backend/cubebox/services/im_connector.py`
+- Modify: `backend/cubeplex/services/im_connector.py`
 
 - [ ] **Step 1: Add connect_discord method**
 
@@ -1984,13 +1984,13 @@ async def _hydrate_discord_bot_info(
 
 - [ ] **Step 2: Run mypy**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubebox/services/im_connector.py --strict`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubeplex/services/im_connector.py --strict`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/services/im_connector.py && git commit -m "feat(im): add connect_discord() to IMConnectorService"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/services/im_connector.py && git commit -m "feat(im): add connect_discord() to IMConnectorService"
 ```
 
 ---
@@ -1998,13 +1998,13 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 13: Route — Dispatch Connect by Platform
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py`
 
 - [ ] **Step 1: Update the connect_account route**
 
 Use a Pydantic discriminated union so FastAPI auto-generates the correct OpenAPI schema.
 
-In `backend/cubebox/api/schemas/im_connector.py`, add the union type after both schema classes:
+In `backend/cubeplex/api/schemas/im_connector.py`, add the union type after both schema classes:
 
 ```python
 from typing import Annotated, Literal, Union
@@ -2022,7 +2022,7 @@ ConnectIMAccountIn = Annotated[
 
 In `ws_im.py`:
 
-1. Add import: `from cubebox.api.schemas.im_connector import ConnectDiscordAccountIn, ConnectIMAccountIn`
+1. Add import: `from cubeplex.api.schemas.im_connector import ConnectDiscordAccountIn, ConnectIMAccountIn`
 
 2. Change the route signature to use the discriminated union:
 
@@ -2115,13 +2115,13 @@ async def _resolve_acting_user(
 
 - [ ] **Step 2: Run mypy**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubebox/api/routes/v1/ws_im.py --strict`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubeplex/api/routes/v1/ws_im.py --strict`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/api/routes/v1/ws_im.py && git commit -m "feat(im): dispatch connect route by platform (feishu + discord)"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/api/routes/v1/ws_im.py && git commit -m "feat(im): dispatch connect route by platform (feishu + discord)"
 ```
 
 ---
@@ -2131,27 +2131,27 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/
 ### Task 14: Register FeishuPlatform + DiscordPlatform
 
 **Files:**
-- Create: `backend/cubebox/im/discord/__init__.py` (update — register DiscordPlatform)
-- Modify: `backend/cubebox/im/feishu/__init__.py` (register FeishuPlatform)
-- Modify: `backend/cubebox/im/runtime.py`
+- Create: `backend/cubeplex/im/discord/__init__.py` (update — register DiscordPlatform)
+- Modify: `backend/cubeplex/im/feishu/__init__.py` (register FeishuPlatform)
+- Modify: `backend/cubeplex/im/runtime.py`
 
 - [ ] **Step 1: Implement FeishuPlatform connector**
 
-Add registration to `backend/cubebox/im/feishu/__init__.py`:
+Add registration to `backend/cubeplex/im/feishu/__init__.py`:
 
 ```python
-# backend/cubebox/im/feishu/__init__.py
+# backend/cubeplex/im/feishu/__init__.py
 """Feishu IM platform — registers itself with the platform registry."""
-from cubebox.im.registry import register_platform
-from cubebox.im.feishu._platform import FeishuPlatform
+from cubeplex.im.registry import register_platform
+from cubeplex.im.feishu._platform import FeishuPlatform
 
 register_platform("feishu", FeishuPlatform())
 ```
 
-Create `backend/cubebox/im/feishu/_platform.py`:
+Create `backend/cubeplex/im/feishu/_platform.py`:
 
 ```python
-# backend/cubebox/im/feishu/_platform.py
+# backend/cubeplex/im/feishu/_platform.py
 """FeishuPlatform — PlatformConnector implementation for Feishu."""
 from __future__ import annotations
 
@@ -2164,7 +2164,7 @@ class FeishuPlatform:
     """PlatformConnector for Feishu (long-connection + webhook)."""
 
     def parse_inbound(self, raw: dict[str, Any]) -> Any:
-        from cubebox.im.feishu.connector import FeishuConnector
+        from cubeplex.im.feishu.connector import FeishuConnector
 
         connector = FeishuConnector()
         return connector.parse_inbound(raw)
@@ -2187,21 +2187,21 @@ class FeishuPlatform:
 
 - [ ] **Step 2: Implement DiscordPlatform connector**
 
-Update `backend/cubebox/im/discord/__init__.py`:
+Update `backend/cubeplex/im/discord/__init__.py`:
 
 ```python
-# backend/cubebox/im/discord/__init__.py
+# backend/cubeplex/im/discord/__init__.py
 """Discord IM platform — registers itself with the platform registry."""
-from cubebox.im.registry import register_platform
-from cubebox.im.discord._platform import DiscordPlatform
+from cubeplex.im.registry import register_platform
+from cubeplex.im.discord._platform import DiscordPlatform
 
 register_platform("discord", DiscordPlatform())
 ```
 
-Create `backend/cubebox/im/discord/_platform.py`:
+Create `backend/cubeplex/im/discord/_platform.py`:
 
 ```python
-# backend/cubebox/im/discord/_platform.py
+# backend/cubeplex/im/discord/_platform.py
 """DiscordPlatform — PlatformConnector implementation for Discord."""
 from __future__ import annotations
 
@@ -2214,7 +2214,7 @@ class DiscordPlatform:
     """PlatformConnector for Discord (Gateway only)."""
 
     def parse_inbound(self, raw: dict[str, Any]) -> Any:
-        from cubebox.im.discord.connector import DiscordConnector
+        from cubeplex.im.discord.connector import DiscordConnector
 
         connector = DiscordConnector()
         return connector.parse_inbound(raw)
@@ -2234,7 +2234,7 @@ class DiscordPlatform:
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/feishu/__init__.py backend/cubebox/im/feishu/_platform.py backend/cubebox/im/discord/__init__.py backend/cubebox/im/discord/_platform.py && git commit -m "feat(im): register FeishuPlatform + DiscordPlatform in registry"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/feishu/__init__.py backend/cubeplex/im/feishu/_platform.py backend/cubeplex/im/discord/__init__.py backend/cubeplex/im/discord/_platform.py && git commit -m "feat(im): register FeishuPlatform + DiscordPlatform in registry"
 ```
 
 ---
@@ -2248,9 +2248,9 @@ This is the largest single task. The runtime needs to:
 4. Add distributed Redis lease sweep for multi-instance gateway ownership
 
 **Files:**
-- Modify: `backend/cubebox/im/runtime.py`
-- Modify: `backend/cubebox/im/feishu/_platform.py` (wire build_tailer / on_account_enabled)
-- Modify: `backend/cubebox/im/discord/_platform.py` (wire build_tailer / on_account_enabled)
+- Modify: `backend/cubeplex/im/runtime.py`
+- Modify: `backend/cubeplex/im/feishu/_platform.py` (wire build_tailer / on_account_enabled)
+- Modify: `backend/cubeplex/im/discord/_platform.py` (wire build_tailer / on_account_enabled)
 - Test: `backend/tests/unit/im/test_gateway_lease.py`
 
 - [ ] **Step 1: Write lease test**
@@ -2261,7 +2261,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.im.runtime import try_acquire_lease, release_lease, LEASE_TTL
+from cubeplex.im.runtime import try_acquire_lease, release_lease, LEASE_TTL
 
 
 class FakeRedis:
@@ -2317,7 +2317,7 @@ async def test_release_lease() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_gateway_lease.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_gateway_lease.py -v`
 Expected: FAIL — `ImportError: cannot import name 'try_acquire_lease'`
 
 - [ ] **Step 3: Rewrite runtime.py**
@@ -2357,7 +2357,7 @@ async def renew_lease(
 ```
 
 2. Replace `start()` to:
-   - Import platform registrations: `import cubebox.im.feishu; import cubebox.im.discord`
+   - Import platform registrations: `import cubeplex.im.feishu; import cubeplex.im.discord`
    - Generate `instance_id = str(uuid.uuid4())`
    - Replace `_on_run_started` with registry-based dispatch
    - Replace `_connect_one` with platform-dispatched connection
@@ -2397,23 +2397,23 @@ async with async_session_maker() as s:
 
 - [ ] **Step 4: Wire FeishuPlatform.build_tailer and on_account_enabled**
 
-In `backend/cubebox/im/feishu/_platform.py`, implement the full methods that mirror the current `runtime.py` logic but scoped to Feishu.
+In `backend/cubeplex/im/feishu/_platform.py`, implement the full methods that mirror the current `runtime.py` logic but scoped to Feishu.
 
 - [ ] **Step 5: Wire DiscordPlatform.build_tailer and on_account_enabled**
 
-In `backend/cubebox/im/discord/_platform.py`, implement:
+In `backend/cubeplex/im/discord/_platform.py`, implement:
 
 ```python
 async def build_tailer(
     self, *, run_id: str, queue_item: Any, account: Any, **kwargs: Any
 ) -> Any:
     import asyncio
-    from cubebox.im.discord.connector import DiscordConnector
-    from cubebox.im.discord.renderer import DiscordOpDispatcher
-    from cubebox.im.artifacts import IMArtifactDispatcher
-    from cubebox.im.card_model import CardState
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.types import RenderState
+    from cubeplex.im.discord.connector import DiscordConnector
+    from cubeplex.im.discord.renderer import DiscordOpDispatcher
+    from cubeplex.im.artifacts import IMArtifactDispatcher
+    from cubeplex.im.card_model import CardState
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
 
     redis = kwargs["redis"]
     key_prefix = kwargs["key_prefix"]
@@ -2430,7 +2430,7 @@ async def build_tailer(
         channel_id=queue_item.channel_id,
         reply_to_id=queue_item.reply_to_id,
     )
-    card_state = CardState(bot_name="cubebox", run_id=run_id)
+    card_state = CardState(bot_name="cubeplex", run_id=run_id)
     state = RenderState(
         card_state=card_state,
         inbound_message_id=queue_item.inbound_message_id,
@@ -2455,7 +2455,7 @@ async def build_tailer(
     asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 
 async def on_account_enabled(self, account: Any, **kwargs: Any) -> None:
-    from cubebox.im.discord.gateway import DiscordGateway
+    from cubeplex.im.discord.gateway import DiscordGateway
 
     secrets = kwargs.get("secrets", {})
     gateways = kwargs.get("gateways", {})
@@ -2491,23 +2491,23 @@ async def on_account_disabled(self, account: Any, **kwargs: Any) -> None:
 
 - [ ] **Step 6: Run lease tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_gateway_lease.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/test_gateway_lease.py -v`
 Expected: All PASS
 
 - [ ] **Step 7: Run all IM unit tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/im/ -v`
 Expected: All PASS
 
 - [ ] **Step 8: Run mypy on modified modules**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubebox/im/runtime.py cubebox/im/feishu/_platform.py cubebox/im/discord/_platform.py --strict`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubeplex/im/runtime.py cubeplex/im/feishu/_platform.py cubeplex/im/discord/_platform.py --strict`
 Expected: PASS (or only pre-existing warnings)
 
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add backend/cubebox/im/runtime.py backend/cubebox/im/feishu/_platform.py backend/cubebox/im/discord/_platform.py backend/tests/unit/im/test_gateway_lease.py && git commit -m "feat(im): registry-based runtime startup + distributed Redis lease"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add backend/cubeplex/im/runtime.py backend/cubeplex/im/feishu/_platform.py backend/cubeplex/im/discord/_platform.py backend/tests/unit/im/test_gateway_lease.py && git commit -m "feat(im): registry-based runtime startup + distributed Redis lease"
 ```
 
 ---
@@ -2549,13 +2549,13 @@ export async function wsConnectImAccount(
 
 - [ ] **Step 2: Build core package**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build --filter @cubebox/core`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build --filter @cubeplex/core`
 Expected: PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/core/src/api/im.ts && git commit -m "feat(im-fe): add ConnectDiscordAccountIn + union type"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/core/src/api/im.ts && git commit -m "feat(im-fe): add ConnectDiscordAccountIn + union type"
 ```
 
 ---
@@ -2572,19 +2572,19 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add frontend
 id: 'feishu' | 'slack' | 'teams' | 'discord'
 
 // Change buildPayload return type:
-import type { ConnectImAccountIn } from '@cubebox/core'
+import type { ConnectImAccountIn } from '@cubeplex/core'
 buildPayload: (form: FormState) => ConnectImAccountIn
 ```
 
 - [ ] **Step 2: Verify feishu.ts still type-checks**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit --project packages/web/tsconfig.json 2>&1 | head -20`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit --project packages/web/tsconfig.json 2>&1 | head -20`
 Expected: No new errors
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/web/components/im/ImConnectWizard/platforms/types.ts && git commit -m "feat(im-fe): extend PlatformDescriptor for discord"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/web/components/im/ImConnectWizard/platforms/types.ts && git commit -m "feat(im-fe): extend PlatformDescriptor for discord"
 ```
 
 ---
@@ -2707,13 +2707,13 @@ export const ALL_PLATFORMS: PlatformDescriptor[] = [
 
 - [ ] **Step 3: Verify frontend type-checks**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit --project packages/web/tsconfig.json 2>&1 | head -20`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit --project packages/web/tsconfig.json 2>&1 | head -20`
 Expected: No errors
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/web/components/im/ImConnectWizard/platforms/discord.ts frontend/packages/web/components/im/ImConnectWizard/platforms/index.ts && git commit -m "feat(im-fe): add Discord platform descriptor + register in wizard"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add frontend/packages/web/components/im/ImConnectWizard/platforms/discord.ts frontend/packages/web/components/im/ImConnectWizard/platforms/index.ts && git commit -m "feat(im-fe): add Discord platform descriptor + register in wizard"
 ```
 
 ---
@@ -2760,13 +2760,13 @@ And Chinese equivalents:
 
 - [ ] **Step 3: Verify frontend builds**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build --filter web`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build --filter web`
 Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add -A frontend/packages/web/components/im/PlatformLogo.tsx frontend/packages/web/locales/ && git commit -m "feat(im-fe): add Discord logo + i18n keys"
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im && git add -A frontend/packages/web/components/im/PlatformLogo.tsx frontend/packages/web/locales/ && git commit -m "feat(im-fe): add Discord logo + i18n keys"
 ```
 
 ---
@@ -2777,20 +2777,20 @@ cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im && git add -A front
 
 - [ ] **Step 1: Run all backend unit tests**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/ -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run pytest tests/unit/ -v`
 Expected: All PASS
 
 - [ ] **Step 2: Run mypy on full backend**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubebox/ --strict`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/backend && uv run mypy cubeplex/ --strict`
 Expected: PASS (or only pre-existing warnings)
 
 - [ ] **Step 3: Run frontend type-check**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm tsc --noEmit`
 Expected: PASS
 
 - [ ] **Step 4: Verify frontend build**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-discord-im/frontend && pnpm build`
 Expected: PASS

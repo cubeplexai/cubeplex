@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A cubebox-owned Kubernetes bundle that turns OpenSandbox's stock egress sidecar into a secret-injecting MITM: a mutating admission webhook patches each sandbox pod (enable transparent MITM, mount a per-sandbox mTLS identity + a fixed CA, load the `inject.py` addon, inject CA trust into the app container), and the `inject.py` addon swaps `cbxref_` placeholders for real secrets via Plan 2's exchange endpoint.
+**Goal:** A cubeplex-owned Kubernetes bundle that turns OpenSandbox's stock egress sidecar into a secret-injecting MITM: a mutating admission webhook patches each sandbox pod (enable transparent MITM, mount a per-sandbox mTLS identity + a fixed CA, load the `inject.py` addon, inject CA trust into the app container), and the `inject.py` addon swaps `cbxref_` placeholders for real secrets via Plan 2's exchange endpoint.
 
-**Architecture:** OpenSandbox server + egress image stay 100% stock. A Python (FastAPI) admission webhook, deployed by us into the dedicated sandbox namespace, mints a short-lived per-sandbox client cert (CN=sandbox_id) signed by a cubebox CA the exchange endpoint trusts, and patches the pod. The egress sidecar runs the bundled `inject.py` (from a ConfigMap) which scans outbound headers for `cbxref_`, calls the exchange endpoint over mTLS, and substitutes the secret.
+**Architecture:** OpenSandbox server + egress image stay 100% stock. A Python (FastAPI) admission webhook, deployed by us into the dedicated sandbox namespace, mints a short-lived per-sandbox client cert (CN=sandbox_id) signed by a cubeplex CA the exchange endpoint trusts, and patches the pod. The egress sidecar runs the bundled `inject.py` (from a ConfigMap) which scans outbound headers for `cbxref_`, calls the exchange endpoint over mTLS, and substitutes the secret.
 
 **Tech Stack:** Python (FastAPI admission webhook), `cryptography` (cert minting), mitmproxy addon (Python), Kubernetes (MutatingWebhookConfiguration, Secret, ConfigMap), OpenSandbox egress image ≥ 2026-05 (mitmproxy transparent support).
 
-**Scope:** Plan 3 of 3. Depends on Plan 2 (the exchange endpoint + `cbxref_` format + per-sandbox mTLS identity contract). This is the only plan that requires a real cluster; its E2E runs on the self-hosted `kubernetes-admin@kubernetes`. Decisions locked (spec §9): mTLS, initContainer CA trust, dedicated namespace, no CA rotation v1, cubebox-owned bundle, token find-and-replace, host-from-vault.
+**Scope:** Plan 3 of 3. Depends on Plan 2 (the exchange endpoint + `cbxref_` format + per-sandbox mTLS identity contract). This is the only plan that requires a real cluster; its E2E runs on the self-hosted `kubernetes-admin@kubernetes`. Decisions locked (spec §9): mTLS, initContainer CA trust, dedicated namespace, no CA rotation v1, cubeplex-owned bundle, token find-and-replace, host-from-vault.
 
 **Spec:** `docs/dev/specs/2026-05-25-egress-key-injection-design.md` (§4.1 mTLS, §6.1 webhook, §6.2 addon, §6.7 CA).
 
@@ -18,7 +18,7 @@
 
 - [ ] OpenSandbox server config `egress.image` points at a build with mitmproxy transparent support (`docker/egress` ≥ the 2026-05 line). Verify: the image runs mitmdump when `OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT=true`.
 - [ ] Sandboxes run in a **dedicated namespace** (e.g. `opensandbox`). The webhook is scoped to it.
-- [ ] cubebox's exchange endpoint (Plan 2) is reachable from that namespace at a stable internal host:port and is configured with `egress_exchange.auth.mode=mtls` trusting the CA this bundle creates.
+- [ ] cubeplex's exchange endpoint (Plan 2) is reachable from that namespace at a stable internal host:port and is configured with `egress_exchange.auth.mode=mtls` trusting the CA this bundle creates.
 
 ---
 
@@ -28,11 +28,11 @@ Plan 2 deferred two backend items that this feature is **not production-correct*
 
 ### Task B1 (P1): `MtlsAuthenticator` must read the real client cert from the ASGI scope
 
-File: `cubebox/sandbox_env/exchange_auth.py` (`MtlsAuthenticator.verify`), plus the exchange service's serving config.
+File: `cubeplex/sandbox_env/exchange_auth.py` (`MtlsAuthenticator.verify`), plus the exchange service's serving config.
 
 Today `MtlsAuthenticator.verify` reads `request.client_cert`, which **FastAPI/Starlette never populate** — so in production (`mode=mtls`) every sidecar request hits `cert is None` → 401, and the endpoint is unusable outside the dev-token path. Wire it to the real peer certificate:
 
-- Serve the exchange endpoint with client-cert verification enabled. With uvicorn: `ssl_certfile`/`ssl_keyfile` for the server cert + `ssl_ca_certs=<egress CA>` + `ssl_cert_reqs=ssl.CERT_REQUIRED`. Confirm how cubebox's exchange service is served (its own uvicorn process / a sidecar TLS terminator) and enable mTLS there. If TLS is terminated by an ingress/mesh instead, have it pass the verified client cert (e.g. `X-Forwarded-Client-Cert` / SPIFFE) and read that header instead — but only trust it from the terminator, never from the sandbox.
+- Serve the exchange endpoint with client-cert verification enabled. With uvicorn: `ssl_certfile`/`ssl_keyfile` for the server cert + `ssl_ca_certs=<egress CA>` + `ssl_cert_reqs=ssl.CERT_REQUIRED`. Confirm how cubeplex's exchange service is served (its own uvicorn process / a sidecar TLS terminator) and enable mTLS there. If TLS is terminated by an ingress/mesh instead, have it pass the verified client cert (e.g. `X-Forwarded-Client-Cert` / SPIFFE) and read that header instead — but only trust it from the terminator, never from the sandbox.
 - In `MtlsAuthenticator.verify`, read the verified peer cert from the ASGI scope (uvicorn exposes the peercert via `request.scope["transport"].get_extra_info("peercert")` / the `extensions` transport info, depending on version) and extract `sandbox_id` from its CN (matching what Task 1's `CertMinter` puts in the CN). Verify CHAIN validation is done by the TLS layer (CERT_REQUIRED + the egress CA), not in Python.
 - Test: a unit/integration test that constructs a request scope carrying a peer cert with `CN=sbx-1` and asserts `verify(...)` returns `SidecarIdentity(sandbox_id="sbx-1")`; and that a missing/invalid cert → `PermissionError` → 401. Add a cluster-E2E assertion (Task 6) that a real sidecar mTLS call succeeds and a call without the client cert is rejected.
 
@@ -46,8 +46,8 @@ What stays vs moves:
 - **`EgressRef` → refreshed per run** (mint/refresh at `get_or_create`, expiry bounded + extended, revoked on sandbox death — already wired on the unhealthy + cleanup paths).
 
 Implementation:
-1. `cubebox/sandbox/base.py` + `cubebox/sandbox/opensandbox.py`: add `envs: dict[str, str] | None = None` to `execute(...)`; `OpenSandbox.execute` passes `opts=RunCommandOpts(envs=<merged>, working_directory=self._workdir)` to `self._sandbox.commands.run(...)`. The backend holds a `self._run_env: dict[str,str]` (default `{}`) and a `set_run_env(env)` setter; `execute` merges `self._run_env` with any per-call `envs` (per-call wins).
-2. `cubebox/sandbox/manager.py` `get_or_create`: on **both** the reuse and create-new branches, when `self._exchange_host` is set: resolve the vault (`SandboxEnvResolver`), build the injection (`SandboxEnvInjector`), call `backend.set_run_env(injection.env)`, and **refresh the EgressRef set** for that `sandbox_id` (revoke prior refs for the sandbox, then persist fresh `EgressRef`(s) with `expires_at = now + ttl`). Keep `network_policy` at `Sandbox.create` (create-new branch only). Drop the creation-time `env=injection.env` kwarg (env now flows via execute).
+1. `cubeplex/sandbox/base.py` + `cubeplex/sandbox/opensandbox.py`: add `envs: dict[str, str] | None = None` to `execute(...)`; `OpenSandbox.execute` passes `opts=RunCommandOpts(envs=<merged>, working_directory=self._workdir)` to `self._sandbox.commands.run(...)`. The backend holds a `self._run_env: dict[str,str]` (default `{}`) and a `set_run_env(env)` setter; `execute` merges `self._run_env` with any per-call `envs` (per-call wins).
+2. `cubeplex/sandbox/manager.py` `get_or_create`: on **both** the reuse and create-new branches, when `self._exchange_host` is set: resolve the vault (`SandboxEnvResolver`), build the injection (`SandboxEnvInjector`), call `backend.set_run_env(injection.env)`, and **refresh the EgressRef set** for that `sandbox_id` (revoke prior refs for the sandbox, then persist fresh `EgressRef`(s) with `expires_at = now + ttl`). Keep `network_policy` at `Sandbox.create` (create-new branch only). Drop the creation-time `env=injection.env` kwarg (env now flows via execute).
 3. Tests: (a) `OpenSandbox.execute` passes the run env into `commands.run` opts; (b) `get_or_create` reuse path sets a fresh run env + refreshes/revokes refs; (c) a changed vault value is reflected on the next execute (the placeholder→credential mapping resolves the current credential, and a rotated value decrypts fresh); (d) egress-disabled path (`_exchange_host=""`) passes no env and behaves as today.
 
 ---
@@ -61,7 +61,7 @@ Implementation:
 - Create `deploy/egress-bundle/addon/inject.py` — mitmproxy addon (token scan + header_names + exchange call).
 - Create `deploy/egress-bundle/k8s/` — manifests: `namespace.yaml` (if needed), `ca-secret.yaml` (generated), `addon-configmap.yaml`, `webhook-deployment.yaml`, `webhook-service.yaml`, `mutatingwebhookconfiguration.yaml`, `webhook-tls.yaml`.
 - Create `deploy/egress-bundle/scripts/gen-ca.sh` — one-time fixed-CA generation → Secret.
-- Modify (cross-plan) `cubebox/api/routes/internal_egress.py` — `ExchangeOut` gains `header_names` so the addon can enforce it (see Task 4).
+- Modify (cross-plan) `cubeplex/api/routes/internal_egress.py` — `ExchangeOut` gains `header_names` so the addon can enforce it (see Task 4).
 - Tests: `deploy/egress-bundle/webhook/tests/test_patch.py`, `test_cert_minter.py`, `deploy/egress-bundle/addon/tests/test_inject.py`, and `tests/e2e_cluster/test_egress_injection_e2e.md` (runbook + assertions for the real-cluster check).
 
 ---
@@ -86,7 +86,7 @@ from webhook.cert_minter import CertMinter, load_ca
 def _make_ca(tmp_path):
     # produce a throwaway CA key+cert for the test
     from webhook.cert_minter import generate_ca
-    key_pem, cert_pem = generate_ca("cubebox-egress-test-ca")
+    key_pem, cert_pem = generate_ca("cubeplex-egress-test-ca")
     return load_ca(key_pem, cert_pem)
 
 
@@ -343,7 +343,7 @@ def build_pod_patch(
             "name": "egress-ca-trust",
             "image": egress_image,  # has update-ca-certificates + the tools
             "command": ["/bin/sh", "-c",
-                        "cp /etc/egress-ca-pub/ca.pem /usr/local/share/ca-certificates/cubebox-egress.crt "
+                        "cp /etc/egress-ca-pub/ca.pem /usr/local/share/ca-certificates/cubeplex-egress.crt "
                         "&& update-ca-certificates"],
             "volumeMounts": [
                 {"name": "egress-ca-pub", "mountPath": "/etc/egress-ca-pub", "readOnly": True},
@@ -504,7 +504,7 @@ Runs in the sidecar after the stock system addon. Scans outbound header values f
 **Cross-plan change:** Plan 2's `ExchangeOut` must also return `header_names` so the addon can enforce it. Add `header_names: list[str] | None` to `ExchangeOut` and to `EgressExchangeService.exchange` return (return the matched binding's `header_names` alongside the secret).
 
 **Files:**
-- Modify (Plan 2): `cubebox/api/routes/internal_egress.py`, `cubebox/services/egress_exchange.py` — return `header_names`.
+- Modify (Plan 2): `cubeplex/api/routes/internal_egress.py`, `cubeplex/services/egress_exchange.py` — return `header_names`.
 - Create: `deploy/egress-bundle/addon/inject.py`
 - Test: `deploy/egress-bundle/addon/tests/test_inject.py`
 
@@ -547,7 +547,7 @@ Expected: FAIL `ModuleNotFoundError: inject`
 """OpenSandbox egress addon: swap cbxref_ placeholders for real secrets.
 
 Loaded after the bundled system addon. For each outbound request, scan header
-values for cbxref_ tokens; for each, call the cubebox exchange endpoint over
+values for cbxref_ tokens; for each, call the cubeplex exchange endpoint over
 mTLS using the per-sandbox client cert, and replace the token with the returned
 secret (only in headers allowed by the binding's header_names). Fails closed.
 """
@@ -641,7 +641,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/api/routes/internal_egress.py cubebox/services/egress_exchange.py tests/unit/test_egress_exchange_service.py deploy/egress-bundle/addon/
+git add cubeplex/api/routes/internal_egress.py cubeplex/services/egress_exchange.py tests/unit/test_egress_exchange_service.py deploy/egress-bundle/addon/
 git commit -m "feat(egress-bundle): inject.py addon + header_names in exchange response"
 ```
 
@@ -679,7 +679,7 @@ The only cluster-dependent verification. Document as a runbook with explicit ass
 **Files:**
 - Create: `tests/e2e_cluster/test_egress_injection_e2e.md`
 
-- [ ] **Step 1: Deploy the bundle** to a test namespace on `kubernetes-admin@kubernetes`: CA Secret, addon ConfigMap, webhook (Deployment+Service+MutatingWebhookConfiguration), and point `EGRESS_EXCHANGE_URL` at cubebox's exchange endpoint configured with `mode=mtls` trusting the egress CA.
+- [ ] **Step 1: Deploy the bundle** to a test namespace on `kubernetes-admin@kubernetes`: CA Secret, addon ConfigMap, webhook (Deployment+Service+MutatingWebhookConfiguration), and point `EGRESS_EXCHANGE_URL` at cubeplex's exchange endpoint configured with `mode=mtls` trusting the egress CA.
 
 - [ ] **Step 2: Seed** an org/workspace/user with a secret env-vault entry (`GITHUB_TOKEN` → `api.github.com`) via Plan 1's routes, and ensure the sandbox is created with the egress feature enabled (`sandbox.egress_exchange_host` set, Plan 2).
 
@@ -703,7 +703,7 @@ git commit -m "docs(egress-bundle): real-cluster E2E runbook + assertions"
 
 ## Self-Review Checklist (completed by plan author)
 
-- **Spec coverage:** §6.1 webhook narrow match + Ignore failurePolicy + per-sandbox mTLS mount (Tasks 2/3/5); §4.1/§6.6 mTLS identity carrying sandbox_id (Task 1, consumed by Plan 2's `MtlsAuthenticator`); §6.2 addon token scan + header_names enforcement + verified-host + fail-closed + no-log (Task 4); §6.7 fixed CA + initContainer trust install (Tasks 2/5); §6.8 cubebox-owned bundle, OpenSandbox stock (whole plan).
+- **Spec coverage:** §6.1 webhook narrow match + Ignore failurePolicy + per-sandbox mTLS mount (Tasks 2/3/5); §4.1/§6.6 mTLS identity carrying sandbox_id (Task 1, consumed by Plan 2's `MtlsAuthenticator`); §6.2 addon token scan + header_names enforcement + verified-host + fail-closed + no-log (Task 4); §6.7 fixed CA + initContainer trust install (Tasks 2/5); §6.8 cubeplex-owned bundle, OpenSandbox stock (whole plan).
 - **Cross-plan consistency:** the addon calls Plan 2's `/api/v1/internal/egress/exchange` with `{placeholder, host}`; Task 4 Step 1 extends Plan 2's `ExchangeOut`/service to return `header_names` (the one backward edit into Plan 2 code). `cbxref_` regex matches Plan 2/Plan 1 (`cbxref_[A-Z2-7]{32}`). `MtlsAuthenticator` reads CN=sandbox_id, which Task 1 mints.
 - **Flagged implementer confirmations (lookups, not gaps):** exact mitm confdir filenames the egress image expects; how mitmproxy exposes the verified upstream host in transparent mode; webhook serving-TLS provisioning (cert-manager vs bootstrap); the `kubernetes` async client calls in `k8s_client.py`.
 - **Cluster-only:** Task 6 is a runbook, not automated CI — by design (no fake sidecar; real cluster per project discipline).

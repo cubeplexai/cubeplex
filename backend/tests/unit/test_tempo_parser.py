@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from cubebox.api.schemas.trace import SpanKind
-from cubebox.services.tempo_client import parse_trace_detail
+from cubeplex.api.schemas.trace import SpanKind
+from cubeplex.services.tempo_client import parse_trace_detail
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
 

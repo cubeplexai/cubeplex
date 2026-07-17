@@ -15,8 +15,8 @@ import pytest
 from cubepi.providers.base import BoundModel, Model
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
-from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -64,9 +64,7 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, provider: FauxProvider) -> N
     async def _fake_load(session: Any, org_id: str, backend: Any) -> LLMSnapshot:
         return _snap()
 
-    def _fake_build_chain_model(
-        snap: LLMSnapshot, preset: ModelPreset, *, thinking: str = "off", **_: Any
-    ) -> BoundModel:
+    def _fake_build_chain_model(snap: LLMSnapshot, preset: ModelPreset, **_: Any) -> BoundModel:
         spec = Model(
             id="title-m",
             provider_id="acme",
@@ -76,11 +74,11 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, provider: FauxProvider) -> N
         return BoundModel(provider=provider, spec=spec)
 
     monkeypatch.setattr(
-        "cubebox.services.conversation_title.load_llm_snapshot",
+        "cubeplex.services.conversation_title.load_llm_snapshot",
         _fake_load,
     )
     monkeypatch.setattr(
-        "cubebox.services.conversation_title.build_chain_model",
+        "cubeplex.services.conversation_title.build_chain_model",
         _fake_build_chain_model,
     )
 
@@ -95,7 +93,7 @@ async def test_generate_title_returns_streamed_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """FauxProvider text chunks are concatenated and returned."""
-    from cubebox.services.conversation_title import _generate_title
+    from cubeplex.services.conversation_title import _generate_title
 
     provider = FauxProvider(provider_id="acme")
     provider.set_responses([faux_assistant_message("Quick chat about Tokyo")])
@@ -111,7 +109,7 @@ async def test_generate_title_raises_on_error_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A provider error event surfaces as RuntimeError."""
-    from cubebox.services.conversation_title import _generate_title
+    from cubeplex.services.conversation_title import _generate_title
 
     # FauxProvider with no queued responses emits an error event automatically.
     provider = FauxProvider(provider_id="acme")  # no responses queued
@@ -126,7 +124,7 @@ async def test_generate_title_empty_response_returns_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An assistant message with no text content returns an empty string."""
-    from cubebox.services.conversation_title import _generate_title
+    from cubeplex.services.conversation_title import _generate_title
 
     # faux_assistant_message with an empty string still yields text_delta events
     # but with no content — result should be empty string (not crash).
@@ -143,7 +141,7 @@ async def test_generate_title_provider_called_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider.stream is called exactly once per invocation."""
-    from cubebox.services.conversation_title import _generate_title
+    from cubeplex.services.conversation_title import _generate_title
 
     provider = FauxProvider(provider_id="acme")
     provider.set_responses([faux_assistant_message("A title")])

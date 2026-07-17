@@ -10,7 +10,7 @@ Run with: pytest -m sandbox
 import pytest
 import pytest_asyncio
 
-from cubebox.config import config
+from cubeplex.config import config
 
 pytestmark = pytest.mark.e2e
 
@@ -73,7 +73,7 @@ async def sandbox(shared_sandbox_id):
     import opensandbox
     from opensandbox.config import ConnectionConfig
 
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     # Connect to existing sandbox (creates new httpx client for current event loop)
     raw_sandbox = await opensandbox.Sandbox.connect(

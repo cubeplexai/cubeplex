@@ -8,7 +8,7 @@
 
 **Tech Stack:** `microsoft-teams-apps` (Python SDK), `httpx` (Graph API), FastAPI webhook route, Adaptive Cards v1.4.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector`
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector`
 **Spec:** `docs/dev/specs/2026-06-19-teams-im-connector-design.md`
 
 ---
@@ -19,15 +19,15 @@
 
 | File | Responsibility |
 |---|---|
-| `backend/cubebox/im/teams/__init__.py` | `register_platform("teams", TeamsPlatform())` |
-| `backend/cubebox/im/teams/_platform.py` | `TeamsPlatform` — 4-method `PlatformConnector` |
-| `backend/cubebox/im/teams/connector.py` | `TeamsConnector` — parse_inbound, send/edit/resolve_email |
-| `backend/cubebox/im/teams/renderer.py` | `TeamsOpDispatcher` — dispatch_create/stream/patch/finalize |
-| `backend/cubebox/im/teams/interactions.py` | `handle_card_action` — Adaptive Card submit → resume |
-| `backend/cubebox/im/teams/commands.py` | `/link` text command recognition |
-| `backend/cubebox/im/teams/format.py` | Markdown normalization for Teams |
-| `backend/cubebox/im/teams/app_manager.py` | `TeamsAppManager` — App instance lifecycle + cache |
-| `backend/cubebox/im/teams/graph.py` | `TeamsGraphClient` — Graph API email lookup + token cache |
+| `backend/cubeplex/im/teams/__init__.py` | `register_platform("teams", TeamsPlatform())` |
+| `backend/cubeplex/im/teams/_platform.py` | `TeamsPlatform` — 4-method `PlatformConnector` |
+| `backend/cubeplex/im/teams/connector.py` | `TeamsConnector` — parse_inbound, send/edit/resolve_email |
+| `backend/cubeplex/im/teams/renderer.py` | `TeamsOpDispatcher` — dispatch_create/stream/patch/finalize |
+| `backend/cubeplex/im/teams/interactions.py` | `handle_card_action` — Adaptive Card submit → resume |
+| `backend/cubeplex/im/teams/commands.py` | `/link` text command recognition |
+| `backend/cubeplex/im/teams/format.py` | Markdown normalization for Teams |
+| `backend/cubeplex/im/teams/app_manager.py` | `TeamsAppManager` — App instance lifecycle + cache |
+| `backend/cubeplex/im/teams/graph.py` | `TeamsGraphClient` — Graph API email lookup + token cache |
 | `backend/tests/unit/im/test_teams_connector.py` | Unit tests for connector parse_inbound |
 | `backend/tests/unit/im/test_teams_format.py` | Unit tests for format.py |
 | `frontend/packages/web/components/im/ImConnectWizard/platforms/teams.ts` | Full `PlatformDescriptor` (replaces stub) |
@@ -36,11 +36,11 @@
 
 | File | Change |
 |---|---|
-| `backend/cubebox/api/schemas/im_connector.py` | Add `ConnectTeamsAccountIn`, update union |
-| `backend/cubebox/services/im_connector.py` | Add `connect_teams()` + `_hydrate_teams_bot_info()` |
-| `backend/cubebox/api/routes/v1/ws_im.py` | Add `_connect_teams()` branch |
-| `backend/cubebox/api/routes/v1/im_ingress.py` | Add `POST /im/teams/messages` route |
-| `backend/cubebox/im/runtime.py` | Add `import cubebox.im.teams`, init webhook Apps on startup |
+| `backend/cubeplex/api/schemas/im_connector.py` | Add `ConnectTeamsAccountIn`, update union |
+| `backend/cubeplex/services/im_connector.py` | Add `connect_teams()` + `_hydrate_teams_bot_info()` |
+| `backend/cubeplex/api/routes/v1/ws_im.py` | Add `_connect_teams()` branch |
+| `backend/cubeplex/api/routes/v1/im_ingress.py` | Add `POST /im/teams/messages` route |
+| `backend/cubeplex/im/runtime.py` | Add `import cubeplex.im.teams`, init webhook Apps on startup |
 | `frontend/packages/core/src/api/im.ts` | Add `ConnectTeamsAccountIn` type + union |
 | `frontend/packages/web/messages/en.json` | Add Teams wizard i18n keys |
 | `frontend/packages/web/messages/zh.json` | Add Teams wizard i18n keys (Chinese) |
@@ -52,19 +52,19 @@
 
 **Files:**
 - Modify: `backend/pyproject.toml` (via `uv add`)
-- Create: `backend/cubebox/im/teams/__init__.py` (empty placeholder)
+- Create: `backend/cubeplex/im/teams/__init__.py` (empty placeholder)
 
 - [ ] **Step 1: Add `microsoft-teams-apps` to backend deps**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv add microsoft-teams-apps
 ```
 
 - [ ] **Step 2: Verify the SDK is importable**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run python -c "from microsoft_teams.apps import App; print('OK')"
 ```
 
@@ -72,7 +72,7 @@ Expected: `OK`
 
 - [ ] **Step 3: Create the empty package**
 
-Create `backend/cubebox/im/teams/__init__.py`:
+Create `backend/cubeplex/im/teams/__init__.py`:
 
 ```python
 """Microsoft Teams IM connector."""
@@ -81,7 +81,7 @@ Create `backend/cubebox/im/teams/__init__.py`:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/pyproject.toml backend/uv.lock backend/cubebox/im/teams/__init__.py
+git add backend/pyproject.toml backend/uv.lock backend/cubeplex/im/teams/__init__.py
 git commit -m "feat(im): add microsoft-teams-apps SDK dependency + teams package skeleton"
 ```
 
@@ -90,7 +90,7 @@ git commit -m "feat(im): add microsoft-teams-apps SDK dependency + teams package
 ## Task 2: Markdown format utility
 
 **Files:**
-- Create: `backend/cubebox/im/teams/format.py`
+- Create: `backend/cubeplex/im/teams/format.py`
 - Test: `backend/tests/unit/im/test_teams_format.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -98,7 +98,7 @@ git commit -m "feat(im): add microsoft-teams-apps SDK dependency + teams package
 Create `backend/tests/unit/im/test_teams_format.py`:
 
 ```python
-from cubebox.im.teams.format import normalize_for_teams, strip_mention_tags
+from cubeplex.im.teams.format import normalize_for_teams, strip_mention_tags
 
 
 def test_strikethrough_stripped() -> None:
@@ -141,7 +141,7 @@ def test_empty_after_strip() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run pytest tests/unit/im/test_teams_format.py -v --no-cov 2>&1 | tail -5
 ```
 
@@ -149,7 +149,7 @@ Expected: FAIL with `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement format.py**
 
-Create `backend/cubebox/im/teams/format.py`:
+Create `backend/cubeplex/im/teams/format.py`:
 
 ```python
 """Markdown normalization for Teams.
@@ -196,7 +196,7 @@ def strip_mention_tags(text: str) -> str:
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run pytest tests/unit/im/test_teams_format.py -v --no-cov 2>&1 | tail -5
 ```
 
@@ -205,7 +205,7 @@ Expected: all PASSED
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/format.py backend/tests/unit/im/test_teams_format.py
+git add backend/cubeplex/im/teams/format.py backend/tests/unit/im/test_teams_format.py
 git commit -m "feat(im): teams markdown format utility"
 ```
 
@@ -214,8 +214,8 @@ git commit -m "feat(im): teams markdown format utility"
 ## Task 3: TeamsConnector — parse_inbound + outbound
 
 **Files:**
-- Create: `backend/cubebox/im/teams/connector.py`
-- Create: `backend/cubebox/im/teams/graph.py`
+- Create: `backend/cubeplex/im/teams/connector.py`
+- Create: `backend/cubeplex/im/teams/graph.py`
 - Test: `backend/tests/unit/im/test_teams_connector.py`
 
 The `TeamsConnector` is the core class: inbound event parsing and outbound message API. It follows the dual-role pattern of `SlackConnector` — serves as both `IdentityResolver` and `RejectionNotifier`.
@@ -225,8 +225,8 @@ The `TeamsConnector` is the core class: inbound event parsing and outbound messa
 Create `backend/tests/unit/im/test_teams_connector.py`:
 
 ```python
-from cubebox.im.teams.connector import TeamsConnector
-from cubebox.im.types import DM_SCOPE_KEY, make_participant_scope, make_thread_participant_scope
+from cubeplex.im.teams.connector import TeamsConnector
+from cubeplex.im.types import DM_SCOPE_KEY, make_participant_scope, make_thread_participant_scope
 
 
 def _make_activity(
@@ -356,13 +356,13 @@ class TestParseInbound:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run pytest tests/unit/im/test_teams_connector.py -v --no-cov 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Implement graph.py — Graph API email resolver**
 
-Create `backend/cubebox/im/teams/graph.py`:
+Create `backend/cubeplex/im/teams/graph.py`:
 
 ```python
 """Microsoft Graph API client for Teams identity resolution.
@@ -447,7 +447,7 @@ class TeamsGraphClient:
 
 - [ ] **Step 4: Implement connector.py**
 
-Create `backend/cubebox/im/teams/connector.py`:
+Create `backend/cubeplex/im/teams/connector.py`:
 
 ```python
 """Teams connector: inbound parse + outbound message send/edit + identity.
@@ -462,9 +462,9 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.outbound import _FloodSignal
-from cubebox.im.teams.format import normalize_for_teams, strip_mention_tags
-from cubebox.im.types import (
+from cubeplex.im.outbound import _FloodSignal
+from cubeplex.im.teams.format import normalize_for_teams, strip_mention_tags
+from cubeplex.im.types import (
     DM_SCOPE_KEY,
     InboundEvent,
     RenderState,
@@ -711,7 +711,7 @@ def _is_rate_limit(exc: Exception) -> bool:
 - [ ] **Step 5: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run pytest tests/unit/im/test_teams_connector.py -v --no-cov 2>&1 | tail -10
 ```
 
@@ -720,8 +720,8 @@ Expected: all PASSED
 - [ ] **Step 6: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/im/teams/ 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/im/teams/ 2>&1 | tail -5
 ```
 
 Fix any type errors.
@@ -729,7 +729,7 @@ Fix any type errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/connector.py backend/cubebox/im/teams/graph.py \
+git add backend/cubeplex/im/teams/connector.py backend/cubeplex/im/teams/graph.py \
   backend/tests/unit/im/test_teams_connector.py
 git commit -m "feat(im): teams connector with parse_inbound, outbound, graph identity"
 ```
@@ -739,14 +739,14 @@ git commit -m "feat(im): teams connector with parse_inbound, outbound, graph ide
 ## Task 4: TeamsOpDispatcher — outbound renderer
 
 **Files:**
-- Create: `backend/cubebox/im/teams/renderer.py`
+- Create: `backend/cubeplex/im/teams/renderer.py`
 
 Mirrors `SlackOpDispatcher` and `DiscordOpDispatcher`. Markdown streaming
 via `edit_message`, Adaptive Card buttons for HITL.
 
 - [ ] **Step 1: Implement renderer.py**
 
-Create `backend/cubebox/im/teams/renderer.py`:
+Create `backend/cubeplex/im/teams/renderer.py`:
 
 ```python
 """Teams outbound renderer — Markdown messages with updateActivity streaming."""
@@ -757,9 +757,9 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.outbound import find_split_point, note_edit_success, note_flood_strike
-from cubebox.im.teams.connector import TEAMS_MSG_LIMIT, TeamsRateLimitError
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import find_split_point, note_edit_success, note_flood_strike
+from cubeplex.im.teams.connector import TEAMS_MSG_LIMIT, TeamsRateLimitError
+from cubeplex.im.types import RenderState
 
 _SPLIT_THRESHOLD = 24000
 
@@ -891,7 +891,7 @@ class TeamsOpDispatcher:
         msg_id = await self._connector.send_card(card)
         if msg_id is None:
             text = pending.question or "Please choose:"
-            notice = "_(Please continue in the cubebox web UI.)_"
+            notice = "_(Please continue in the cubeplex web UI.)_"
             await self._connector.send_message(f"{text}\n\n{notice}")
 
     async def dispatch_finalize(self, state: Any) -> bool:
@@ -953,14 +953,14 @@ class TeamsOpDispatcher:
 - [ ] **Step 2: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/im/teams/renderer.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/im/teams/renderer.py 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/renderer.py
+git add backend/cubeplex/im/teams/renderer.py
 git commit -m "feat(im): teams outbound renderer with adaptive card HITL buttons"
 ```
 
@@ -969,12 +969,12 @@ git commit -m "feat(im): teams outbound renderer with adaptive card HITL buttons
 ## Task 5: Interactions + Commands
 
 **Files:**
-- Create: `backend/cubebox/im/teams/interactions.py`
-- Create: `backend/cubebox/im/teams/commands.py`
+- Create: `backend/cubeplex/im/teams/interactions.py`
+- Create: `backend/cubeplex/im/teams/commands.py`
 
 - [ ] **Step 1: Implement interactions.py**
 
-Create `backend/cubebox/im/teams/interactions.py`:
+Create `backend/cubeplex/im/teams/interactions.py`:
 
 ```python
 """Handle Adaptive Card Action.Submit callbacks from Teams."""
@@ -1009,7 +1009,7 @@ async def handle_card_action(
         return False
     _, kind, run_id, short_qid, akey, value = parts
 
-    from cubebox.im.resume import resolve_full_question_id, resume_paused_run
+    from cubeplex.im.resume import resolve_full_question_id, resume_paused_run
 
     try:
         question_id = await resolve_full_question_id(run_id, short_qid)
@@ -1030,7 +1030,7 @@ async def handle_card_action(
 
 - [ ] **Step 2: Implement commands.py**
 
-Create `backend/cubebox/im/teams/commands.py`:
+Create `backend/cubeplex/im/teams/commands.py`:
 
 ```python
 """Text command recognition for Teams.
@@ -1059,14 +1059,14 @@ def parse_link_command(text: str) -> str | None:
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/im/teams/interactions.py cubebox/im/teams/commands.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/im/teams/interactions.py cubeplex/im/teams/commands.py 2>&1 | tail -5
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/interactions.py backend/cubebox/im/teams/commands.py
+git add backend/cubeplex/im/teams/interactions.py backend/cubeplex/im/teams/commands.py
 git commit -m "feat(im): teams card action handler and /link command parser"
 ```
 
@@ -1075,7 +1075,7 @@ git commit -m "feat(im): teams card action handler and /link command parser"
 ## Task 6: TeamsAppManager — App instance lifecycle + webhook bridge
 
 **Files:**
-- Create: `backend/cubebox/im/teams/app_manager.py`
+- Create: `backend/cubeplex/im/teams/app_manager.py`
 
 The `TeamsAppManager` manages one `microsoft_teams.apps.App` instance per
 enabled Teams account. Unlike Slack/Discord gateways, there is no persistent
@@ -1084,7 +1084,7 @@ webhooks and for outbound API calls (send/edit/update).
 
 - [ ] **Step 1: Implement app_manager.py**
 
-Create `backend/cubebox/im/teams/app_manager.py`:
+Create `backend/cubeplex/im/teams/app_manager.py`:
 
 ```python
 """Teams App instance lifecycle manager.
@@ -1145,7 +1145,7 @@ async def init_app(
     )
     await app.initialize()
 
-    from cubebox.im.teams.graph import TeamsGraphClient
+    from cubeplex.im.teams.graph import TeamsGraphClient
 
     graph_client = TeamsGraphClient(
         app_id=app_id, app_secret=app_secret, tenant_id=tenant_id,
@@ -1187,14 +1187,14 @@ def all_entries() -> list[TeamsAppEntry]:
 - [ ] **Step 2: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/im/teams/app_manager.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/im/teams/app_manager.py 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/app_manager.py
+git add backend/cubeplex/im/teams/app_manager.py
 git commit -m "feat(im): teams app instance manager for webhook delivery"
 ```
 
@@ -1203,12 +1203,12 @@ git commit -m "feat(im): teams app instance manager for webhook delivery"
 ## Task 7: TeamsPlatform + registration
 
 **Files:**
-- Create: `backend/cubebox/im/teams/_platform.py`
-- Modify: `backend/cubebox/im/teams/__init__.py`
+- Create: `backend/cubeplex/im/teams/_platform.py`
+- Modify: `backend/cubeplex/im/teams/__init__.py`
 
 - [ ] **Step 1: Implement _platform.py**
 
-Create `backend/cubebox/im/teams/_platform.py`:
+Create `backend/cubeplex/im/teams/_platform.py`:
 
 ```python
 """Teams platform connector — webhook delivery mode.
@@ -1228,7 +1228,7 @@ class TeamsPlatform:
     """PlatformConnector implementation for Microsoft Teams."""
 
     def parse_inbound(self, raw: dict[str, Any]) -> Any:
-        from cubebox.im.teams.connector import TeamsConnector
+        from cubeplex.im.teams.connector import TeamsConnector
 
         connector = TeamsConnector()
         return connector.parse_inbound(raw)
@@ -1241,12 +1241,12 @@ class TeamsPlatform:
         account: Any,
         **kwargs: Any,
     ) -> Any:
-        from cubebox.im.outbound import OutboundRunTailer
-        from cubebox.im.teams.app_manager import get_entry_by_bot_id
-        from cubebox.im.teams.connector import TeamsConnector
-        from cubebox.im.teams.graph import TeamsGraphClient
-        from cubebox.im.teams.renderer import TeamsOpDispatcher
-        from cubebox.im.types import RenderState
+        from cubeplex.im.outbound import OutboundRunTailer
+        from cubeplex.im.teams.app_manager import get_entry_by_bot_id
+        from cubeplex.im.teams.connector import TeamsConnector
+        from cubeplex.im.teams.graph import TeamsGraphClient
+        from cubeplex.im.teams.renderer import TeamsOpDispatcher
+        from cubeplex.im.types import RenderState
 
         app_ref = kwargs.get("app")
         redis = app_ref.state.redis if app_ref else kwargs.get("redis")
@@ -1278,7 +1278,7 @@ class TeamsPlatform:
             graph_client=graph_client,
         )
 
-        bot_name = (account.config or {}).get("bot_app_name") or "cubebox"
+        bot_name = (account.config or {}).get("bot_app_name") or "cubeplex"
         state = RenderState(
             bot_name=bot_name,
             run_id=run_id,
@@ -1303,7 +1303,7 @@ class TeamsPlatform:
 
     async def on_account_enabled(self, account: Any, **kwargs: Any) -> None:
         """Initialize the App instance so the webhook ingress can dispatch."""
-        from cubebox.im.teams.app_manager import init_app
+        from cubeplex.im.teams.app_manager import init_app
 
         secrets: dict[str, Any] = kwargs["secrets"]
         bot_id = str(secrets.get("app_id") or account.external_account_id)
@@ -1323,7 +1323,7 @@ class TeamsPlatform:
 
     async def on_account_disabled(self, account: Any, **kwargs: Any) -> None:
         """Remove the App instance from cache."""
-        from cubebox.im.teams.app_manager import remove_app
+        from cubeplex.im.teams.app_manager import remove_app
 
         load_secrets = kwargs.get("load_secrets")
         if load_secrets:
@@ -1339,13 +1339,13 @@ class TeamsPlatform:
 
 - [ ] **Step 2: Update __init__.py with registration**
 
-Replace `backend/cubebox/im/teams/__init__.py`:
+Replace `backend/cubeplex/im/teams/__init__.py`:
 
 ```python
 """Microsoft Teams IM connector."""
 
-from cubebox.im.registry import register_platform
-from cubebox.im.teams._platform import TeamsPlatform
+from cubeplex.im.registry import register_platform
+from cubeplex.im.teams._platform import TeamsPlatform
 
 register_platform("teams", TeamsPlatform())
 ```
@@ -1353,14 +1353,14 @@ register_platform("teams", TeamsPlatform())
 - [ ] **Step 3: Run mypy on the full teams package**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/im/teams/ 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/im/teams/ 2>&1 | tail -10
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/im/teams/_platform.py backend/cubebox/im/teams/__init__.py
+git add backend/cubeplex/im/teams/_platform.py backend/cubeplex/im/teams/__init__.py
 git commit -m "feat(im): teams platform connector + registration"
 ```
 
@@ -1369,13 +1369,13 @@ git commit -m "feat(im): teams platform connector + registration"
 ## Task 8: Connect flow — Schema + Service + API route
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/im_connector.py`
-- Modify: `backend/cubebox/services/im_connector.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py`
+- Modify: `backend/cubeplex/api/schemas/im_connector.py`
+- Modify: `backend/cubeplex/services/im_connector.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py`
 
 - [ ] **Step 1: Add ConnectTeamsAccountIn schema**
 
-In `backend/cubebox/api/schemas/im_connector.py`, add after `ConnectSlackAccountIn`:
+In `backend/cubeplex/api/schemas/im_connector.py`, add after `ConnectSlackAccountIn`:
 
 ```python
 class ConnectTeamsAccountIn(BaseModel):
@@ -1402,7 +1402,7 @@ ConnectIMAccountIn = Annotated[
 
 - [ ] **Step 2: Add connect_teams to IMConnectorService**
 
-In `backend/cubebox/services/im_connector.py`, add after `connect_slack`:
+In `backend/cubeplex/services/im_connector.py`, add after `connect_slack`:
 
 ```python
     async def connect_teams(
@@ -1527,12 +1527,12 @@ In `backend/cubebox/services/im_connector.py`, add after `connect_slack`:
 
 - [ ] **Step 3: Add _connect_teams route handler**
 
-In `backend/cubebox/api/routes/v1/ws_im.py`:
+In `backend/cubeplex/api/routes/v1/ws_im.py`:
 
 Add `ConnectTeamsAccountIn` to the imports:
 
 ```python
-from cubebox.api.schemas.im_connector import (
+from cubeplex.api.schemas.im_connector import (
     ConnectDiscordAccountIn,
     ConnectFeishuAccountIn,
     ConnectIMAccountIn,
@@ -1589,17 +1589,17 @@ Add the elif branch in `connect_account`:
 - [ ] **Step 4: Run mypy on changed files**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/api/schemas/im_connector.py cubebox/services/im_connector.py \
-  cubebox/api/routes/v1/ws_im.py 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/api/schemas/im_connector.py cubeplex/services/im_connector.py \
+  cubeplex/api/routes/v1/ws_im.py 2>&1 | tail -10
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/im_connector.py \
-  backend/cubebox/services/im_connector.py \
-  backend/cubebox/api/routes/v1/ws_im.py
+git add backend/cubeplex/api/schemas/im_connector.py \
+  backend/cubeplex/services/im_connector.py \
+  backend/cubeplex/api/routes/v1/ws_im.py
 git commit -m "feat(im): teams connect flow — schema, service, API route"
 ```
 
@@ -1608,18 +1608,18 @@ git commit -m "feat(im): teams connect flow — schema, service, API route"
 ## Task 9: Webhook ingress + runtime integration
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/im_ingress.py`
-- Modify: `backend/cubebox/im/runtime.py`
+- Modify: `backend/cubeplex/api/routes/v1/im_ingress.py`
+- Modify: `backend/cubeplex/im/runtime.py`
 
 - [ ] **Step 1: Add Teams webhook ingress route**
 
-In `backend/cubebox/api/routes/v1/im_ingress.py`, add the Teams route
+In `backend/cubeplex/api/routes/v1/im_ingress.py`, add the Teams route
 after the Feishu route. Add necessary imports at the top:
 
 ```python
-from cubebox.im.teams.app_manager import get_entry_by_bot_id
-from cubebox.im.teams.commands import parse_link_command as parse_teams_link
-from cubebox.im.teams.connector import TeamsConnector
+from cubeplex.im.teams.app_manager import get_entry_by_bot_id
+from cubeplex.im.teams.commands import parse_link_command as parse_teams_link
+from cubeplex.im.teams.connector import TeamsConnector
 ```
 
 Add the route function:
@@ -1669,7 +1669,7 @@ async def teams_messages(
         value = activity.get("value") or {}
         action_data = value.get("action")
         if isinstance(action_data, str) and action_data.startswith("im:"):
-            from cubebox.im.teams.interactions import handle_card_action
+            from cubeplex.im.teams.interactions import handle_card_action
 
             ok = await handle_card_action(
                 data={"action": action_data},
@@ -1738,8 +1738,8 @@ async def _handle_teams_link_command(
     connector: Any,
 ) -> None:
     """Generate an identity-link token and reply to the Teams chat."""
-    from cubebox.config import config
-    from cubebox.im.link import sign_link_token
+    from cubeplex.config import config
+    from cubeplex.im.link import sign_link_token
 
     secret = str(config.get("auth.jwt_secret", "CHANGE_ME"))
     sender_ref = event.sender_ref or event.sender_open_id or ""
@@ -1772,13 +1772,13 @@ async def _handle_teams_link_command(
 
 - [ ] **Step 2: Add Teams to runtime.py startup**
 
-In `backend/cubebox/im/runtime.py`, add the import alongside the others in `start()`:
+In `backend/cubeplex/im/runtime.py`, add the import alongside the others in `start()`:
 
 ```python
-    import cubebox.im.discord  # noqa: F401
-    import cubebox.im.feishu  # noqa: F401
-    import cubebox.im.slack  # noqa: F401
-    import cubebox.im.teams  # noqa: F401
+    import cubeplex.im.discord  # noqa: F401
+    import cubeplex.im.feishu  # noqa: F401
+    import cubeplex.im.slack  # noqa: F401
+    import cubeplex.im.teams  # noqa: F401
 ```
 
 Also add Teams webhook App initialization. After the `asyncio.gather` block
@@ -1803,7 +1803,7 @@ that connects gateway/long-connection accounts, add:
     for wa in webhook_accounts:
         try:
             secrets = await _load_secrets(wa)
-            from cubebox.im.registry import get_platform as _get_platform
+            from cubeplex.im.registry import get_platform as _get_platform
 
             platform = _get_platform(wa.platform)
             await platform.on_account_enabled(wa, secrets=secrets, gateways=gateways)
@@ -1818,14 +1818,14 @@ that connects gateway/long-connection accounts, add:
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/api/routes/v1/im_ingress.py cubebox/im/runtime.py 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/api/routes/v1/im_ingress.py cubeplex/im/runtime.py 2>&1 | tail -10
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/im_ingress.py backend/cubebox/im/runtime.py
+git add backend/cubeplex/api/routes/v1/im_ingress.py backend/cubeplex/im/runtime.py
 git commit -m "feat(im): teams webhook ingress route + runtime startup init"
 ```
 
@@ -2008,7 +2008,7 @@ Same structure in Chinese.
 - [ ] **Step 8: Build frontend to verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/frontend
 pnpm build 2>&1 | tail -10
 ```
 
@@ -2036,8 +2036,8 @@ git commit -m "feat(im): frontend teams connect wizard + API types + i18n"
 - [ ] **Step 1: Full backend mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run mypy cubebox/ 2>&1 | tee tmp/mypy.log | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run mypy cubeplex/ 2>&1 | tee tmp/mypy.log | tail -5
 ```
 
 Expected: `Success: no issues found`
@@ -2045,28 +2045,28 @@ Expected: `Success: no issues found`
 - [ ] **Step 2: Full backend lint**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
-uv run ruff check cubebox/ 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
+uv run ruff check cubeplex/ 2>&1 | tail -5
 ```
 
 - [ ] **Step 3: Run unit tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/backend
 uv run pytest tests/unit/ -v --no-cov 2>&1 | tee tmp/unit.log | tail -10
 ```
 
 - [ ] **Step 4: Frontend build**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/frontend
 pnpm build 2>&1 | tee tmp/build.log | tail -10
 ```
 
 - [ ] **Step 5: Frontend lint**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-19-teams-im-connector/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-19-teams-im-connector/frontend
 pnpm lint 2>&1 | tail -5
 ```
 

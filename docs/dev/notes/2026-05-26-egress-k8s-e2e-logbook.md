@@ -3,7 +3,7 @@
 Live logbook for exercising the full egress secret-injection flow against the
 real test cluster (`kubernetes-admin@kubernetes`). Every cluster mutation is
 recorded here with its rollback. Snapshot for rollback:
-`/home/chris/cubebox/_design-explorations/egress-e2e-snapshot-20260526-143153/`.
+`/home/chris/cubeplex/_design-explorations/egress-e2e-snapshot-20260526-143153/`.
 
 ## Goal
 
@@ -20,8 +20,8 @@ network boundary.
 - OpenSandbox: `opensandbox-system` ns runs `opensandbox-server` (NodePort
   32378), `opensandbox-ingress-gateway` (NodePort 32379), controller-manager.
   Sandboxes run in `opensandbox` ns as `<uuid>-0` pods.
-- Public entry: `39.99.248.80:18080` → NodePort 32378. cubebox uses
-  `CUBEBOX_SANDBOX__DOMAIN=39.99.248.80:18080`, `use_server_proxy=false`,
+- Public entry: `39.99.248.80:18080` → NodePort 32378. cubeplex uses
+  `CUBEPLEX_SANDBOX__DOMAIN=39.99.248.80:18080`, `use_server_proxy=false`,
   `secure_access=True`.
 - Server egress config (`opensandbox-server-config`): `egress.image =
   …/opensandbox/egress:v1.0.12`, `egress.mode = dns+nft`. The egress sidecar
@@ -66,7 +66,7 @@ network boundary.
    interception (and DNS breaks). Rewrote `inject.py` to use only stdlib
    (`http.client` + `ssl` for the mTLS exchange call). **Important bundle fix.**
 8. **Real cause of the "504 / slow pod":** NOT the egress sidecar — the
-   **cubebox-sandbox image is 4.36 GB and took 2m2s to pull** on nodes that
+   **cubeplex-sandbox image is 4.36 GB and took 2m2s to pull** on nodes that
    hadn't cached it, exceeding OpenSandbox's 60s pod-ready window. The init
    containers + mitmproxy were fast. Mitigation: pre-pull the sandbox image on
    all nodes (DaemonSet), OR raise `kubernetes.sandbox_create_timeout_seconds`.
@@ -75,10 +75,10 @@ network boundary.
 
 ## Cluster mutations (with rollback)
 
-All cluster objects created carry label `app.kubernetes.io/part-of: cubebox-egress`
+All cluster objects created carry label `app.kubernetes.io/part-of: cubeplex-egress`
 (except the per-sandbox `egress-client-*` secrets and the test sandboxes).
 Applied manifests kept in `_design-explorations/egress-e2e-applied/`. Local certs
-in `/home/chris/cubebox-egress-certs/` (CA, exchange server cert, webhook cert).
+in `/home/chris/cubeplex-egress-certs/` (CA, exchange server cert, webhook cert).
 
 | # | Action | Rollback |
 |---|--------|----------|
@@ -86,7 +86,7 @@ in `/home/chris/cubebox-egress-certs/` (CA, exchange server cert, webhook cert).
 | 1 | `secret/egress-mitm-ca` in `opensandbox` (gen-ca.sh) | `kubectl -n opensandbox delete secret egress-mitm-ca` |
 | 2 | `secret/egress-webhook-tls` in `opensandbox` | `kubectl -n opensandbox delete secret egress-webhook-tls` |
 | 3 | SA+Role+RoleBinding `egress-webhook` in `opensandbox` | `kubectl -n opensandbox delete sa/egress-webhook role/egress-webhook rolebinding/egress-webhook` |
-| 4 | pushed `hub.sensedeal.vip/library/cubebox-egress-webhook:20260526` | registry image (harmless; leave or delete in registry UI) |
+| 4 | pushed `hub.sensedeal.vip/library/cubeplex-egress-webhook:20260526` | registry image (harmless; leave or delete in registry UI) |
 | 5 | `deploy/egress-webhook` + `svc/egress-webhook` in `opensandbox` | `kubectl -n opensandbox delete deploy/egress-webhook svc/egress-webhook` |
 | 6 | `mutatingwebhookconfiguration/egress-inject` | `kubectl delete mutatingwebhookconfiguration egress-inject` |
 | 7 | `configmap/egress-inject-addon` in `opensandbox` | `kubectl -n opensandbox delete cm egress-inject-addon` |

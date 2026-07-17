@@ -11,7 +11,7 @@ const LEVELS = [
   { value: 'low', labelKey: 'thinkingLevelLow' },
   { value: 'medium', labelKey: 'thinkingLevelMedium' },
   { value: 'high', labelKey: 'thinkingLevelHigh' },
-  { value: 'xhigh', labelKey: 'thinkingLevelXhigh' },
+  { value: 'max', labelKey: 'thinkingLevelMax' },
 ] as const satisfies readonly { value: ThinkingLevel; labelKey: string }[]
 
 const MAX_INDEX = LEVELS.length - 1

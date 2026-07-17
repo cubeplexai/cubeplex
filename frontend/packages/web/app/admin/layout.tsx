@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useAuthStore } from '@cubebox/core'
+import { createApiClient, useAuthStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { AdminSubNav } from '@/components/admin/AdminSubNav'

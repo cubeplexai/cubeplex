@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from cubebox.llm.builder import build_provider
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_provider
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def test_built_provider_carries_provider_id() -> None:

@@ -1,11 +1,11 @@
-"""Unit tests for cubebox.models.public_id."""
+"""Unit tests for cubeplex.models.public_id."""
 
 import re
 import time
 
 import pytest
 
-from cubebox.models import public_id
+from cubeplex.models import public_id
 
 BASE62_RE = re.compile(r"^[0-9A-Za-z]{14}$")
 

@@ -4,13 +4,13 @@
 
 **Goal:** Replace `LLMFactory` with a three-module split (`snapshot.py` / `resolver.py` / `builder.py`), wire `cubepi.FallbackBoundModel` into the agent runtime, and add per-message `preset_label` + `thinking` to the chat API. Implements [Spec 1](../specs/2026-06-09-llm-snapshot-refactor-design.md).
 
-**Architecture:** I/O lives only in `snapshot.py` (one async loader that reads DB + OrgSettings once). `resolver.py` and `builder.py` are pure functions operating on a frozen `LLMSnapshot`. YAML's role drops to seeder-only bootstrap. Runtime imports `cubebox.config` for `llm.*` are deleted.
+**Architecture:** I/O lives only in `snapshot.py` (one async loader that reads DB + OrgSettings once). `resolver.py` and `builder.py` are pure functions operating on a frozen `LLMSnapshot`. YAML's role drops to seeder-only bootstrap. Runtime imports `cubeplex.config` for `llm.*` are deleted.
 
 **Tech Stack:** Python 3.13, FastAPI, SQLModel, alembic, pydantic v2, cubepi 0.9.0 (`FallbackBoundModel`, `FauxProvider`, `ThinkingLevel`).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/llm-snapshot-refactor` — branch `feat/llm-snapshot-refactor`. Always `cat .worktree.env` first; ports 8019 / 3019; DB `cubebox_feat_llm_snapshot_refactor` and `cubebox_test_feat_llm_snapshot_refactor`. Run all commands from `.worktrees/feat/llm-snapshot-refactor/backend/`.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/llm-snapshot-refactor` — branch `feat/llm-snapshot-refactor`. Always `cat .worktree.env` first; ports 8019 / 3019; DB `cubeplex_feat_llm_snapshot_refactor` and `cubeplex_test_feat_llm_snapshot_refactor`. Run all commands from `.worktrees/feat/llm-snapshot-refactor/backend/`.
 
-**Test runner:** `uv run pytest <path> -v`. Type-check: `uv run mypy cubebox/`. Lint: `uv run ruff check cubebox/`.
+**Test runner:** `uv run pytest <path> -v`. Type-check: `uv run mypy cubeplex/`. Lint: `uv run ruff check cubeplex/`.
 
 **PR structure:** This plan ships as **three PRs**, each independently revertable. Tasks are grouped under Part A / B / C.
 
@@ -21,7 +21,7 @@
 ### Task A1: OrgSettings `model_presets` key constant + pydantic schema
 
 **Files:**
-- Modify: `cubebox/models/org_settings.py`
+- Modify: `cubeplex/models/org_settings.py`
 - Test: `tests/unit/llm/test_preset_schema.py`
 
 - [ ] **Step 1: Write failing schema tests**
@@ -34,7 +34,7 @@ Create `tests/unit/llm/test_preset_schema.py`:
 import pytest
 from pydantic import ValidationError
 
-from cubebox.llm.snapshot_schema import ModelPresetsValue
+from cubeplex.llm.snapshot_schema import ModelPresetsValue
 
 
 def _make(label="default", chain=("a/b",), is_default=True):
@@ -110,9 +110,9 @@ def test_rejects_label_with_bad_chars():
 - [ ] **Step 2: Run tests, expect ModuleNotFoundError**
 
 Run: `cd backend && uv run pytest tests/unit/llm/test_preset_schema.py -v`
-Expected: collection error / `ModuleNotFoundError: cubebox.llm.snapshot_schema`.
+Expected: collection error / `ModuleNotFoundError: cubeplex.llm.snapshot_schema`.
 
-- [ ] **Step 3: Create `cubebox/llm/snapshot_schema.py` with the pydantic schema**
+- [ ] **Step 3: Create `cubeplex/llm/snapshot_schema.py` with the pydantic schema**
 
 ```python
 """Pydantic schema for OrgSettings.model_presets row value.
@@ -171,11 +171,11 @@ Expected: 9 passed.
 
 - [ ] **Step 5: Add `MODEL_PRESETS_KEY` constant to `org_settings.py`**
 
-Modify `cubebox/models/org_settings.py` — add after the `TASK_MODELS_KEY` line:
+Modify `cubeplex/models/org_settings.py` — add after the `TASK_MODELS_KEY` line:
 
 ```python
 # Replacement for the legacy default_model / fallback_models / task_models keys.
-# Schema lives in cubebox.llm.snapshot_schema.ModelPresetsValue.
+# Schema lives in cubeplex.llm.snapshot_schema.ModelPresetsValue.
 MODEL_PRESETS_KEY = "model_presets"
 ```
 
@@ -184,8 +184,8 @@ Do not delete `TASK_MODELS_KEY` yet — Task A19 removes it.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/llm-snapshot-refactor
-git add backend/cubebox/llm/snapshot_schema.py backend/cubebox/models/org_settings.py backend/tests/unit/llm/test_preset_schema.py
+cd /home/chris/cubeplex/.worktrees/feat/llm-snapshot-refactor
+git add backend/cubeplex/llm/snapshot_schema.py backend/cubeplex/models/org_settings.py backend/tests/unit/llm/test_preset_schema.py
 git commit -m "feat(llm): add ModelPresetsValue pydantic schema + MODEL_PRESETS_KEY"
 ```
 
@@ -194,7 +194,7 @@ git commit -m "feat(llm): add ModelPresetsValue pydantic schema + MODEL_PRESETS_
 ### Task A2: `LLMSnapshot` / `LLMPreset` dataclasses
 
 **Files:**
-- Create: `cubebox/llm/snapshot.py`
+- Create: `cubeplex/llm/snapshot.py`
 - Test: `tests/unit/llm/test_snapshot_types.py`
 
 - [ ] **Step 1: Write failing test**
@@ -204,7 +204,7 @@ git commit -m "feat(llm): add ModelPresetsValue pydantic schema + MODEL_PRESETS_
 
 import pytest
 
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot
 
 
 def test_preset_is_frozen():
@@ -230,19 +230,19 @@ def test_snapshot_holds_data_unchanged():
 
 Run: `cd backend && uv run pytest tests/unit/llm/test_snapshot_types.py -v`
 
-- [ ] **Step 3: Create `cubebox/llm/snapshot.py` skeleton**
+- [ ] **Step 3: Create `cubeplex/llm/snapshot.py` skeleton**
 
 ```python
 """LLMSnapshot — per-request frozen view of LLM configuration.
 
 A snapshot is loaded once per request via load_llm_snapshot(). Resolver
 and builder modules take a snapshot as input and never read DB or
-cubebox.config themselves.
+cubeplex.config themselves.
 """
 
 from dataclasses import dataclass
 
-from cubebox.llm.config import ProviderConfig
+from cubeplex.llm.config import ProviderConfig
 
 
 @dataclass(frozen=True)
@@ -264,7 +264,7 @@ class LLMSnapshot:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/snapshot.py backend/tests/unit/llm/test_snapshot_types.py
+git add backend/cubeplex/llm/snapshot.py backend/tests/unit/llm/test_snapshot_types.py
 git commit -m "feat(llm): add LLMSnapshot / LLMPreset frozen dataclasses"
 ```
 
@@ -273,7 +273,7 @@ git commit -m "feat(llm): add LLMSnapshot / LLMPreset frozen dataclasses"
 ### Task A3: `LLMConfigError` hierarchy
 
 **Files:**
-- Create: `cubebox/llm/errors.py`
+- Create: `cubeplex/llm/errors.py`
 - Test: `tests/unit/llm/test_errors.py`
 
 - [ ] **Step 1: Write failing test**
@@ -281,7 +281,7 @@ git commit -m "feat(llm): add LLMSnapshot / LLMPreset frozen dataclasses"
 ```python
 """LLMConfigError hierarchy + HTTP status mapping."""
 
-from cubebox.llm.errors import (
+from cubeplex.llm.errors import (
     BrokenPresetError,
     LLMConfigError,
     NoDefaultPresetError,
@@ -316,7 +316,7 @@ def test_all_subclass_llmconfigerror():
 
 - [ ] **Step 2: Run test, expect ImportError**
 
-- [ ] **Step 3: Create `cubebox/llm/errors.py`**
+- [ ] **Step 3: Create `cubeplex/llm/errors.py`**
 
 ```python
 """LLM configuration / resolution errors.
@@ -325,7 +325,7 @@ Inherit from APIException so the existing FastAPI handler maps them to
 HTTP status + error_code automatically.
 """
 
-from cubebox.api.exceptions import APIException
+from cubeplex.api.exceptions import APIException
 
 
 class LLMConfigError(APIException):
@@ -376,7 +376,7 @@ class InvalidModelRefError(LLMConfigError):
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/errors.py backend/tests/unit/llm/test_errors.py
+git add backend/cubeplex/llm/errors.py backend/tests/unit/llm/test_errors.py
 git commit -m "feat(llm): add LLMConfigError hierarchy (unknown/broken/no_default)"
 ```
 
@@ -385,7 +385,7 @@ git commit -m "feat(llm): add LLMConfigError hierarchy (unknown/broken/no_defaul
 ### Task A4: `parse_model_ref` + `resolve_preset` + `resolve_task_preset`
 
 **Files:**
-- Create: `cubebox/llm/resolver.py`
+- Create: `cubeplex/llm/resolver.py`
 - Test: `tests/unit/llm/test_resolver.py`
 
 - [ ] **Step 1: Write failing test**
@@ -395,13 +395,13 @@ git commit -m "feat(llm): add LLMConfigError hierarchy (unknown/broken/no_defaul
 
 import pytest
 
-from cubebox.llm.errors import (
+from cubeplex.llm.errors import (
     InvalidModelRefError,
     NoDefaultPresetError,
     UnknownPresetError,
 )
-from cubebox.llm.resolver import parse_model_ref, resolve_preset, resolve_task_preset
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubeplex.llm.resolver import parse_model_ref, resolve_preset, resolve_task_preset
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot
 
 
 def _snap(*presets: LLMPreset, task_presets: dict[str, str] | None = None) -> LLMSnapshot:
@@ -459,7 +459,7 @@ def test_resolve_task_preset_falls_back_to_default():
 
 - [ ] **Step 2: Run test, expect ImportError**
 
-- [ ] **Step 3: Create `cubebox/llm/resolver.py`**
+- [ ] **Step 3: Create `cubeplex/llm/resolver.py`**
 
 ```python
 """Pure resolver — turns an LLMSnapshot + caller intent into an LLMPreset.
@@ -468,12 +468,12 @@ Functions are sync, no I/O, no cubepi imports. Tests construct snapshots
 directly.
 """
 
-from cubebox.llm.errors import (
+from cubeplex.llm.errors import (
     InvalidModelRefError,
     NoDefaultPresetError,
     UnknownPresetError,
 )
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot
 
 
 def parse_model_ref(ref: str) -> tuple[str, str]:
@@ -509,7 +509,7 @@ def resolve_task_preset(snap: LLMSnapshot, task: str) -> LLMPreset:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/resolver.py backend/tests/unit/llm/test_resolver.py
+git add backend/cubeplex/llm/resolver.py backend/tests/unit/llm/test_resolver.py
 git commit -m "feat(llm): add pure resolver (resolve_preset / resolve_task_preset)"
 ```
 
@@ -520,7 +520,7 @@ git commit -m "feat(llm): add pure resolver (resolve_preset / resolve_task_prese
 Ports `LLMFactory.build_cubepi_provider` to a free function operating on `LLMSnapshot`.
 
 **Files:**
-- Create: `cubebox/llm/builder.py`
+- Create: `cubeplex/llm/builder.py`
 - Test: `tests/unit/llm/test_builder_provider.py`
 
 - [ ] **Step 1: Write failing test**
@@ -530,9 +530,9 @@ Ports `LLMFactory.build_cubepi_provider` to a free function operating on `LLMSna
 
 import pytest
 
-from cubebox.llm.builder import build_provider
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_provider
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def _snap(**provider_kwargs) -> LLMSnapshot:
@@ -559,8 +559,8 @@ def test_build_provider_anthropic_messages_with_cache_policy():
         task_presets={},
     )
     from cubepi.providers.anthropic import AnthropicProvider
-    from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
-    p = build_provider(snap, "anthr", cache_policy=CubeboxCacheMarkerPolicy())
+    from cubeplex.llm.cache_markers import CubeplexCacheMarkerPolicy
+    p = build_provider(snap, "anthr", cache_policy=CubeplexCacheMarkerPolicy())
     assert isinstance(p, AnthropicProvider)
 
 
@@ -571,18 +571,18 @@ def test_build_provider_unknown_slug_raises():
 
 - [ ] **Step 2: Run test, expect ImportError**
 
-- [ ] **Step 3: Create `cubebox/llm/builder.py`**
+- [ ] **Step 3: Create `cubeplex/llm/builder.py`**
 
 ```python
 """Pure builders — emit cubepi Provider / BoundModel objects from a snapshot.
 
-No DB. No cubebox.config. The chain wrapper in build_chain_model() is
+No DB. No cubeplex.config. The chain wrapper in build_chain_model() is
 added in Task A7 (chain length 1 only for PR 1) and Task B1 (length >1).
 """
 
 from typing import TYPE_CHECKING, Any
 
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.snapshot import LLMSnapshot
 
 if TYPE_CHECKING:
     from cubepi.providers.anthropic import CacheMarkerPolicy
@@ -652,7 +652,7 @@ def build_provider(
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/builder.py backend/tests/unit/llm/test_builder_provider.py
+git add backend/cubeplex/llm/builder.py backend/tests/unit/llm/test_builder_provider.py
 git commit -m "feat(llm): add builder.build_provider (free function port of factory)"
 ```
 
@@ -661,7 +661,7 @@ git commit -m "feat(llm): add builder.build_provider (free function port of fact
 ### Task A6: `builder.build_bound_model`
 
 **Files:**
-- Modify: `cubebox/llm/builder.py`
+- Modify: `cubeplex/llm/builder.py`
 - Test: `tests/unit/llm/test_builder_bound.py`
 
 - [ ] **Step 1: Write failing test**
@@ -671,9 +671,9 @@ git commit -m "feat(llm): add builder.build_provider (free function port of fact
 
 import pytest
 
-from cubebox.llm.builder import build_bound_model
-from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_bound_model
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def _snap_with_model() -> LLMSnapshot:
@@ -719,14 +719,14 @@ def test_build_bound_model_unknown_model_id():
 
 - [ ] **Step 2: Run test, expect ImportError**
 
-- [ ] **Step 3: Add `build_bound_model` to `cubebox/llm/builder.py`**
+- [ ] **Step 3: Add `build_bound_model` to `cubeplex/llm/builder.py`**
 
 Append after `build_provider`:
 
 ```python
 from cubepi.providers.base import ThinkingLevel
 
-from cubebox.llm.resolver import parse_model_ref
+from cubeplex.llm.resolver import parse_model_ref
 
 
 def build_bound_model(
@@ -762,7 +762,7 @@ so the signature is stable across A7 / B1 / C2.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/builder.py backend/tests/unit/llm/test_builder_bound.py
+git add backend/cubeplex/llm/builder.py backend/tests/unit/llm/test_builder_bound.py
 git commit -m "feat(llm): add builder.build_bound_model"
 ```
 
@@ -771,7 +771,7 @@ git commit -m "feat(llm): add builder.build_bound_model"
 ### Task A7: `builder.build_chain_model` — chain length 1 only
 
 **Files:**
-- Modify: `cubebox/llm/builder.py`
+- Modify: `cubeplex/llm/builder.py`
 - Test: `tests/unit/llm/test_builder_chain.py`
 
 - [ ] **Step 1: Write failing test**
@@ -781,9 +781,9 @@ git commit -m "feat(llm): add builder.build_bound_model"
 
 import pytest
 
-from cubebox.llm.builder import build_chain_model
-from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubeplex.llm.builder import build_chain_model
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot
 
 
 def _snap() -> LLMSnapshot:
@@ -830,14 +830,14 @@ def test_chain_length_gt_1_raises_in_pr1():
 
 - [ ] **Step 2: Run test, expect ImportError**
 
-- [ ] **Step 3: Add `build_chain_model` to `cubebox/llm/builder.py`**
+- [ ] **Step 3: Add `build_chain_model` to `cubeplex/llm/builder.py`**
 
 Append:
 
 ```python
 from collections.abc import Awaitable, Callable
 
-from cubebox.llm.snapshot import LLMPreset
+from cubeplex.llm.snapshot import LLMPreset
 
 
 OnFailoverCb = Callable[[Any, Any, BaseException | str], Awaitable[None] | None]
@@ -869,7 +869,7 @@ def build_chain_model(
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/builder.py backend/tests/unit/llm/test_builder_chain.py
+git add backend/cubeplex/llm/builder.py backend/tests/unit/llm/test_builder_chain.py
 git commit -m "feat(llm): add builder.build_chain_model (PR1: length 1 only)"
 ```
 
@@ -880,7 +880,7 @@ git commit -m "feat(llm): add builder.build_chain_model (PR1: length 1 only)"
 Reads `Provider` / `Model` / `Credential` and `OrgSettings(org_id=NULL, key='model_presets')`.
 
 **Files:**
-- Modify: `cubebox/llm/snapshot.py`
+- Modify: `cubeplex/llm/snapshot.py`
 - Test: `tests/unit/llm/test_snapshot_loader.py`
 
 - [ ] **Step 1: Write failing test**
@@ -890,10 +890,10 @@ Reads `Provider` / `Model` / `Credential` and `OrgSettings(org_id=NULL, key='mod
 
 import pytest
 
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot, load_llm_snapshot
-from cubebox.models import Credential
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.models.provider import Model, Provider
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot, load_llm_snapshot
+from cubeplex.models import Credential
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model, Provider
 
 
 @pytest.mark.asyncio
@@ -933,7 +933,7 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
 
 (`async_session` and `encryption_backend` fixtures already exist in `tests/conftest.py`; use them as-is.)
 
-- [ ] **Step 3: Implement `load_llm_snapshot` in `cubebox/llm/snapshot.py`**
+- [ ] **Step 3: Implement `load_llm_snapshot` in `cubeplex/llm/snapshot.py`**
 
 Add to the existing file:
 
@@ -944,9 +944,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot_schema import ModelPresetsValue
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot_schema import ModelPresetsValue
 
 logger = logging.getLogger(__name__)
 
@@ -968,10 +968,10 @@ async def _load_providers(
     org_id: str,
     backend: EncryptionBackend,
 ) -> dict[str, ProviderConfig]:
-    from cubebox.models import Credential
-    from cubebox.models.org_provider_override import OrgProviderOverride as DBO
-    from cubebox.models.provider import Model as DBM
-    from cubebox.models.provider import Provider as DBP
+    from cubeplex.models import Credential
+    from cubeplex.models.org_provider_override import OrgProviderOverride as DBO
+    from cubeplex.models.provider import Model as DBM
+    from cubeplex.models.provider import Provider as DBP
 
     stmt = (
         select(DBP)
@@ -1030,7 +1030,7 @@ async def _load_presets(
     session: AsyncSession,
     org_id: str,
 ) -> tuple[tuple[LLMPreset, ...], dict[str, str]]:
-    from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
     # Org row overrides system row in full.
     org_stmt = select(OrgSettings).where(
@@ -1085,7 +1085,7 @@ Run: `cd backend && uv run pytest tests/unit/llm/test_snapshot_loader.py::test_s
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/snapshot.py backend/tests/unit/llm/test_snapshot_loader.py
+git add backend/cubeplex/llm/snapshot.py backend/tests/unit/llm/test_snapshot_loader.py
 git commit -m "feat(llm): load_llm_snapshot reads DB providers + system OrgSettings row"
 ```
 
@@ -1094,7 +1094,7 @@ git commit -m "feat(llm): load_llm_snapshot reads DB providers + system OrgSetti
 ### Task A9: `load_llm_snapshot` — org override + broken-ref detection in resolver
 
 **Files:**
-- Modify: `cubebox/llm/resolver.py` (add `BrokenPresetError` raise)
+- Modify: `cubeplex/llm/resolver.py` (add `BrokenPresetError` raise)
 - Modify: `tests/unit/llm/test_snapshot_loader.py`
 - Modify: `tests/unit/llm/test_resolver.py`
 
@@ -1141,8 +1141,8 @@ async def test_org_row_replaces_system_row(async_session, encryption_backend):
 Append to `tests/unit/llm/test_resolver.py`:
 
 ```python
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.errors import BrokenPresetError
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.errors import BrokenPresetError
 
 
 def test_resolve_preset_broken_ref_raises():
@@ -1158,7 +1158,7 @@ def test_resolve_preset_broken_ref_raises():
 
 - [ ] **Step 3: Update `resolver.resolve_preset` to detect broken refs**
 
-In `cubebox/llm/resolver.py`, change the function to take an optional snapshot-time validation:
+In `cubeplex/llm/resolver.py`, change the function to take an optional snapshot-time validation:
 
 ```python
 def resolve_preset(snap: LLMSnapshot, label: str | None) -> LLMPreset:
@@ -1172,7 +1172,7 @@ def resolve_preset(snap: LLMSnapshot, label: str | None) -> LLMPreset:
             raise UnknownPresetError(label)
     missing = _missing_refs(preset, snap.providers)
     if missing:
-        from cubebox.llm.errors import BrokenPresetError
+        from cubeplex.llm.errors import BrokenPresetError
         raise BrokenPresetError(preset.label, missing_refs=missing)
     return preset
 
@@ -1198,7 +1198,7 @@ Run: `cd backend && uv run pytest tests/unit/llm/test_resolver.py tests/unit/llm
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/llm/resolver.py backend/tests/unit/llm/test_resolver.py backend/tests/unit/llm/test_snapshot_loader.py
+git add backend/cubeplex/llm/resolver.py backend/tests/unit/llm/test_resolver.py backend/tests/unit/llm/test_snapshot_loader.py
 git commit -m "feat(llm): org row overrides system; resolver detects broken refs"
 ```
 
@@ -1211,7 +1211,7 @@ Extends the existing `seed_system_providers_from_config` to translate YAML
 into an `OrgSettings(org_id=NULL, key='model_presets')` row, written only if absent.
 
 **Files:**
-- Modify: `cubebox/seeders/provider_seeder.py`
+- Modify: `cubeplex/seeders/provider_seeder.py`
 - Test: `tests/unit/test_seeder_presets.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1221,14 +1221,14 @@ into an `OrgSettings(org_id=NULL, key='model_presets')` row, written only if abs
 
 import pytest
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.seeders.provider_seeder import seed_default_presets_from_config
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.seeders.provider_seeder import seed_default_presets_from_config
 from sqlalchemy import select
 
 
 @pytest.mark.asyncio
 async def test_first_run_writes_default_preset(async_session, monkeypatch):
-    monkeypatch.setattr("cubebox.config.config.llm", {
+    monkeypatch.setattr("cubeplex.config.config.llm", {
         "default_model": "acme/m1",
         "fallback_models": ["acme/m2"],
         "title_model": "acme/mini",
@@ -1254,7 +1254,7 @@ async def test_first_run_writes_default_preset(async_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_second_run_does_not_overwrite_admin_edits(async_session, monkeypatch):
-    monkeypatch.setattr("cubebox.config.config.llm", {
+    monkeypatch.setattr("cubeplex.config.config.llm", {
         "default_model": "acme/m1",
         "fallback_models": [],
     })
@@ -1279,7 +1279,7 @@ async def test_second_run_does_not_overwrite_admin_edits(async_session, monkeypa
 
 - [ ] **Step 2: Run, expect ImportError**
 
-- [ ] **Step 3: Add `seed_default_presets_from_config` to `cubebox/seeders/provider_seeder.py`**
+- [ ] **Step 3: Add `seed_default_presets_from_config` to `cubeplex/seeders/provider_seeder.py`**
 
 Append at the bottom of the file:
 
@@ -1289,7 +1289,7 @@ async def seed_default_presets_from_config(session: AsyncSession) -> None:
     OrgSettings(org_id=NULL, key='model_presets') row. Idempotent: writes
     only if row does not exist; never overrides admin edits.
     """
-    from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
     cfg: dict[str, Any] = dict(settings.get("llm", {}))
     default_model = cfg.get("default_model")
@@ -1352,19 +1352,19 @@ async def seed_default_presets_from_config(session: AsyncSession) -> None:
 
 - [ ] **Step 5: Wire the new function into the startup hook**
 
-Modify `cubebox/api/app.py` near the existing `seed_system_providers_from_config(...)` call (around line 268):
+Modify `cubeplex/api/app.py` near the existing `seed_system_providers_from_config(...)` call (around line 268):
 
 ```python
 async with async_session_maker() as seed_session:
     await seed_system_providers_from_config(seed_session, _app.state.encryption_backend)
-    from cubebox.seeders.provider_seeder import seed_default_presets_from_config
+    from cubeplex.seeders.provider_seeder import seed_default_presets_from_config
     await seed_default_presets_from_config(seed_session)
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/seeders/provider_seeder.py backend/cubebox/api/app.py backend/tests/unit/test_seeder_presets.py
+git add backend/cubeplex/seeders/provider_seeder.py backend/cubeplex/api/app.py backend/tests/unit/test_seeder_presets.py
 git commit -m "feat(seeder): write OrgSettings.model_presets from YAML on bootstrap"
 ```
 
@@ -1529,7 +1529,7 @@ git commit -m "feat(alembic): migrate orgsettings keys to model_presets"
 ### Task A12: Switch `conversation_title.py` to new API
 
 **Files:**
-- Modify: `cubebox/services/conversation_title.py`
+- Modify: `cubeplex/services/conversation_title.py`
 - Test: `tests/unit/test_conversation_title_pi.py`
 
 - [ ] **Step 1: Update the existing test to expect snapshot-based path**
@@ -1539,8 +1539,8 @@ In `tests/unit/test_conversation_title_pi.py`, find the test that asserts which 
 Concrete change pattern (find equivalent in current file):
 
 ```python
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
-from cubebox.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot
+from cubeplex.llm.config import ModelConfig, ProviderConfig
 
 def _snap():
     return LLMSnapshot(
@@ -1555,21 +1555,21 @@ def _snap():
 @pytest.mark.asyncio
 async def test_title_uses_task_preset(monkeypatch):
     async def _fake_load(*_a, **_kw): return _snap()
-    monkeypatch.setattr("cubebox.services.conversation_title.load_llm_snapshot", _fake_load)
+    monkeypatch.setattr("cubeplex.services.conversation_title.load_llm_snapshot", _fake_load)
     # rest of existing test — assert title call lands on acme/title-m
 ```
 
 - [ ] **Step 2: Run test, expect failure**
 
-- [ ] **Step 3: Modify `cubebox/services/conversation_title.py`**
+- [ ] **Step 3: Modify `cubeplex/services/conversation_title.py`**
 
 Locate the existing `factory = LLMFactory(...)` block (around line 207) and the
 `factory.build_cubepi_provider(...)` (around line 146). Replace with:
 
 ```python
-from cubebox.llm.builder import build_chain_model
-from cubebox.llm.resolver import resolve_task_preset
-from cubebox.llm.snapshot import load_llm_snapshot
+from cubeplex.llm.builder import build_chain_model
+from cubeplex.llm.resolver import resolve_task_preset
+from cubeplex.llm.snapshot import load_llm_snapshot
 
 async with async_session_maker() as s:
     snap = await load_llm_snapshot(s, org_id, encryption_backend)
@@ -1578,14 +1578,14 @@ model = build_chain_model(snap, preset, thinking="off")
 # pass `model` directly where the old code passed `provider.model(model_id, ...)`
 ```
 
-Remove the import `from cubebox.llm.factory import LLMFactory`.
+Remove the import `from cubeplex.llm.factory import LLMFactory`.
 
 - [ ] **Step 4: Run test, expect PASS**
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/conversation_title.py backend/tests/unit/test_conversation_title_pi.py
+git add backend/cubeplex/services/conversation_title.py backend/tests/unit/test_conversation_title_pi.py
 git commit -m "refactor(title): use load_llm_snapshot + resolve_task_preset"
 ```
 
@@ -1594,8 +1594,8 @@ git commit -m "refactor(title): use load_llm_snapshot + resolve_task_preset"
 ### Task A13: Switch `provider_service.py` + `usage.py` to new API
 
 **Files:**
-- Modify: `cubebox/services/provider_service.py`
-- Modify: `cubebox/services/usage.py`
+- Modify: `cubeplex/services/provider_service.py`
+- Modify: `cubeplex/services/usage.py`
 - Test: `tests/test_provider_capability_factory.py` (existing)
 
 - [ ] **Step 1: Update `provider_service.py` lines 376 and 389**
@@ -1606,13 +1606,13 @@ Replace each occurrence:
 
 ```python
 # Before
-from cubebox.llm.factory import LLMFactory
+from cubeplex.llm.factory import LLMFactory
 return LLMFactory().build_cubepi_provider(provider_config, provider_name=provider_name)
 
 # After
-from cubebox.llm.builder import build_provider
+from cubeplex.llm.builder import build_provider
 # Wrap the loose ProviderConfig in a one-key snapshot:
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.snapshot import LLMSnapshot
 snap = LLMSnapshot(providers={provider_name: provider_config}, presets=(), task_presets={})
 return build_provider(snap, provider_name)
 ```
@@ -1623,7 +1623,7 @@ Find the `LLMFactory(session=session, org_id=org_id)` use and the field
 it then reads from `llm_config.providers`. Replace with `load_llm_snapshot`:
 
 ```python
-from cubebox.llm.snapshot import load_llm_snapshot
+from cubeplex.llm.snapshot import load_llm_snapshot
 snap = await load_llm_snapshot(session, org_id, encryption_backend)
 # Use snap.providers[slug].models[...] in place of the old llm_config path.
 ```
@@ -1639,12 +1639,12 @@ uv run pytest tests/test_provider_capability_factory.py tests/unit/llm/test_fact
 ```
 
 (`test_factory_provider_id.py` will need its imports updated to point at
-`cubebox.llm.builder.build_provider`. Do that as part of this task.)
+`cubeplex.llm.builder.build_provider`. Do that as part of this task.)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/services/provider_service.py backend/cubebox/services/usage.py backend/tests/unit/llm/test_factory_provider_id.py
+git add backend/cubeplex/services/provider_service.py backend/cubeplex/services/usage.py backend/tests/unit/llm/test_factory_provider_id.py
 git commit -m "refactor(services): provider_service + usage use builder/snapshot"
 ```
 
@@ -1653,7 +1653,7 @@ git commit -m "refactor(services): provider_service + usage use builder/snapshot
 ### Task A14: Switch main agent run in `run_manager.py`
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py`
+- Modify: `cubeplex/streams/run_manager.py`
 - Test: `tests/unit/test_run_manager_build_agent.py`
 
 - [ ] **Step 1: Update test setup**
@@ -1667,9 +1667,9 @@ Locate the existing block (search for `factory = LLMFactory(`). Replace
 the whole resolve-default-then-try-except-then-build with:
 
 ```python
-from cubebox.llm.builder import build_chain_model
-from cubebox.llm.resolver import resolve_preset
-from cubebox.llm.snapshot import load_llm_snapshot
+from cubeplex.llm.builder import build_chain_model
+from cubeplex.llm.resolver import resolve_preset
+from cubeplex.llm.snapshot import load_llm_snapshot
 
 async with async_session_maker() as llm_session:
     snap = await load_llm_snapshot(
@@ -1679,7 +1679,7 @@ async with async_session_maker() as llm_session:
 
 preset = resolve_preset(snap, None)  # PR 3 adds body.preset_label override
 provider_cache_policy = (
-    lambda slug: CubeboxCacheMarkerPolicy()
+    lambda slug: CubeplexCacheMarkerPolicy()
     if snap.providers[slug].api == "anthropic-messages"
     else None
 )
@@ -1709,7 +1709,7 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_build_agent.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_build_agent.py
 git commit -m "refactor(run_manager): main agent uses load_llm_snapshot + build_chain_model"
 ```
 
@@ -1718,7 +1718,7 @@ git commit -m "refactor(run_manager): main agent uses load_llm_snapshot + build_
 ### Task A15: Switch subagent default model + memory consolidation
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py` (around L2557, L2734)
+- Modify: `cubeplex/streams/run_manager.py` (around L2557, L2734)
 
 - [ ] **Step 1: Subagent**
 
@@ -1761,7 +1761,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "refactor(run_manager): subagent + compaction use load_llm_snapshot"
 ```
 
@@ -1770,34 +1770,34 @@ git commit -m "refactor(run_manager): subagent + compaction use load_llm_snapsho
 ### Task A16: Delete `factory.py` and `task_model_resolver.py`; clear stale imports
 
 **Files:**
-- Delete: `cubebox/llm/factory.py`
-- Delete: `cubebox/services/task_model_resolver.py`
-- Modify: `cubebox/llm/__init__.py`
+- Delete: `cubeplex/llm/factory.py`
+- Delete: `cubeplex/services/task_model_resolver.py`
+- Modify: `cubeplex/llm/__init__.py`
 
 - [ ] **Step 1: Verify nothing imports the doomed modules**
 
 ```bash
-cd backend && grep -rn "from cubebox.llm.factory\|from cubebox.services.task_model_resolver\|LLMFactory" cubebox/ tests/
+cd backend && grep -rn "from cubeplex.llm.factory\|from cubeplex.services.task_model_resolver\|LLMFactory" cubeplex/ tests/
 ```
 
 Expected: only the two files themselves and stale tests show up. If any
-non-test cubebox source still imports them, fix it before deleting.
+non-test cubeplex source still imports them, fix it before deleting.
 
 - [ ] **Step 2: Delete**
 
 ```bash
-rm backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py
+rm backend/cubeplex/llm/factory.py backend/cubeplex/services/task_model_resolver.py
 ```
 
-- [ ] **Step 3: Update `cubebox/llm/__init__.py`**
+- [ ] **Step 3: Update `cubeplex/llm/__init__.py`**
 
-Remove the `from cubebox.llm.factory import LLMFactory` line (and the
+Remove the `from cubeplex.llm.factory import LLMFactory` line (and the
 `__all__` entry if present). Add re-exports for the new API:
 
 ```python
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot, load_llm_snapshot
-from cubebox.llm.resolver import resolve_preset, resolve_task_preset, parse_model_ref
-from cubebox.llm.builder import build_provider, build_bound_model, build_chain_model
+from cubeplex.llm.snapshot import LLMPreset, LLMSnapshot, load_llm_snapshot
+from cubeplex.llm.resolver import resolve_preset, resolve_task_preset, parse_model_ref
+from cubeplex.llm.builder import build_provider, build_bound_model, build_chain_model
 
 __all__ = [
     "LLMPreset", "LLMSnapshot", "load_llm_snapshot",
@@ -1819,7 +1819,7 @@ The replacement tests (`test_snapshot_loader.py` / `test_resolver.py` /
 
 - [ ] **Step 5: Drop legacy constant from `org_settings.py`**
 
-Edit `cubebox/models/org_settings.py`:
+Edit `cubeplex/models/org_settings.py`:
 
 ```python
 # Remove these lines:
@@ -1832,8 +1832,8 @@ Search for usages of `TASK_MODELS_KEY` and confirm none remain.
 - [ ] **Step 6: Run full unit + type checks**
 
 ```bash
-uv run mypy cubebox/
-uv run ruff check cubebox/
+uv run mypy cubeplex/
+uv run ruff check cubeplex/
 uv run pytest tests/unit/ -v
 ```
 
@@ -1898,7 +1898,7 @@ Follow `.claude/skills/pr-codex-review-loop/SKILL.md` until green.
 ### Task B1: Lift chain-length-1 restriction in `build_chain_model`
 
 **Files:**
-- Modify: `cubebox/llm/builder.py`
+- Modify: `cubeplex/llm/builder.py`
 - Modify: `tests/unit/llm/test_builder_chain.py`
 
 - [ ] **Step 1: Add failing test for chain length 2**
@@ -1974,7 +1974,7 @@ return FallbackBoundModel(chain=tuple(bounds), on_failover=on_failover)
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/llm/builder.py backend/tests/unit/llm/test_builder_chain.py
+git add backend/cubeplex/llm/builder.py backend/tests/unit/llm/test_builder_chain.py
 git commit -m "feat(llm): build_chain_model wraps chain>1 in FallbackBoundModel"
 ```
 
@@ -1983,18 +1983,18 @@ git commit -m "feat(llm): build_chain_model wraps chain>1 in FallbackBoundModel"
 ### Task B2: `FailoverEvent` schema + `_make_failover_publisher`
 
 **Files:**
-- Modify: `cubebox/agents/schemas.py` (or wherever SSE event types live)
-- Modify: `cubebox/streams/run_manager.py`
+- Modify: `cubeplex/agents/schemas.py` (or wherever SSE event types live)
+- Modify: `cubeplex/streams/run_manager.py`
 - Test: `tests/unit/test_failover_marker.py`
 
 - [ ] **Step 1: Locate the existing SSE event union**
 
 ```bash
-grep -rn "class TextDeltaEvent\|class ToolCallEvent\|class ErrorEvent" cubebox/ | head
+grep -rn "class TextDeltaEvent\|class ToolCallEvent\|class ErrorEvent" cubeplex/ | head
 ```
 
 Identify the module that defines SSE event Pydantic models. (Likely
-`cubebox/agents/schemas.py`.)
+`cubeplex/agents/schemas.py`.)
 
 - [ ] **Step 2: Add `FailoverEvent`**
 
@@ -2018,7 +2018,7 @@ exists.
 
 import pytest
 
-from cubebox.streams.run_manager import _make_failover_publisher
+from cubeplex.streams.run_manager import _make_failover_publisher
 
 
 class _FakeSpec:
@@ -2092,7 +2092,7 @@ def _make_failover_publisher(
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/schemas.py backend/cubebox/streams/run_manager.py backend/tests/unit/test_failover_marker.py
+git add backend/cubeplex/agents/schemas.py backend/cubeplex/streams/run_manager.py backend/tests/unit/test_failover_marker.py
 git commit -m "feat(stream): FailoverEvent schema + _make_failover_publisher"
 ```
 
@@ -2101,7 +2101,7 @@ git commit -m "feat(stream): FailoverEvent schema + _make_failover_publisher"
 ### Task B3: Wire `on_failover` into main-agent `build_chain_model`
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py`
+- Modify: `cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Locate the main-agent `build_chain_model` call from Task A14**
 
@@ -2128,7 +2128,7 @@ including the same `on_failover` callback. No additional wiring needed.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(run_manager): pipe on_failover into main chain model"
 ```
 
@@ -2154,7 +2154,7 @@ import pytest
 from cubepi.errors import RateLimited
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 
 @pytest.mark.asyncio
@@ -2204,7 +2204,7 @@ inspect existing E2E tests for exact names.)
 In `tests/e2e/conftest.py`, add a fixture that:
 1. Registers a `Provider(slug='primary', provider_type='openai-completions', ...)`.
 2. Registers a `Provider(slug='backup', provider_type='openai-completions', ...)`.
-3. Monkeypatches `cubebox.llm.builder.build_provider` so `slug='primary'`
+3. Monkeypatches `cubeplex.llm.builder.build_provider` so `slug='primary'`
    returns a `FauxProvider` configured to raise `RateLimited` on the
    first response step; `slug='backup'` returns a `FauxProvider`
    returning `faux_assistant_message("hello back")`.
@@ -2212,7 +2212,7 @@ In `tests/e2e/conftest.py`, add a fixture that:
 ```python
 @pytest.fixture
 def provider_seed(monkeypatch, async_session):
-    from cubebox.llm import builder
+    from cubeplex.llm import builder
 
     real_build_provider = builder.build_provider
 
@@ -2301,7 +2301,7 @@ EOF
 - [ ] **Step 1: Locate the request schema**
 
 ```bash
-grep -rn "class CreateMessage\|class SendMessage\|preset_label" backend/cubebox/api/ | head
+grep -rn "class CreateMessage\|class SendMessage\|preset_label" backend/cubeplex/api/ | head
 ```
 
 Identify the Pydantic model used by the SSE message-create endpoint.
@@ -2345,7 +2345,7 @@ def test_thinking_rejects_unknown_value():
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/<schema_file>.py backend/tests/<schema_test>.py
+git add backend/cubeplex/api/<schema_file>.py backend/tests/<schema_test>.py
 git commit -m "feat(api): CreateMessageBody accepts preset_label + thinking"
 ```
 
@@ -2354,7 +2354,7 @@ git commit -m "feat(api): CreateMessageBody accepts preset_label + thinking"
 ### Task C2: Wire `body.preset_label` + `body.thinking` into `run_manager.py`
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py`
+- Modify: `cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Replace hardcoded values in the main-agent `build_chain_model` call**
 
@@ -2388,7 +2388,7 @@ subagent inherits the resolved preset + thinking automatically.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(run_manager): apply per-message preset_label + thinking"
 ```
 
@@ -2397,12 +2397,12 @@ git commit -m "feat(run_manager): apply per-message preset_label + thinking"
 ### Task C3: Register FastAPI handler for `LLMConfigError`
 
 **Files:**
-- Modify: `cubebox/api/exceptions.py` (or `api/app.py` where handlers are registered)
+- Modify: `cubeplex/api/exceptions.py` (or `api/app.py` where handlers are registered)
 
 - [ ] **Step 1: Locate the existing exception-handler registration**
 
 ```bash
-grep -n "register_exception_handlers\|add_exception_handler" cubebox/api/exceptions.py cubebox/api/app.py
+grep -n "register_exception_handlers\|add_exception_handler" cubeplex/api/exceptions.py cubeplex/api/app.py
 ```
 
 - [ ] **Step 2: Confirm `APIException` is already handled**
@@ -2424,7 +2424,7 @@ extend it to catch `APIException` and use `isinstance`.
 
 import pytest
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 
 @pytest.mark.asyncio
@@ -2495,7 +2495,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/tests/e2e/test_preset_errors_e2e.py backend/cubebox/api/exceptions.py
+git add backend/tests/e2e/test_preset_errors_e2e.py backend/cubeplex/api/exceptions.py
 git commit -m "test(e2e): preset error matrix (unknown/broken/no_default)"
 ```
 
@@ -2513,7 +2513,7 @@ git commit -m "test(e2e): preset error matrix (unknown/broken/no_default)"
 
 import pytest
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 
 @pytest.mark.asyncio
@@ -2571,8 +2571,8 @@ git commit -m "test(e2e): per-message preset_label switches model"
 
 ```bash
 cd backend
-uv run mypy cubebox/
-uv run ruff check cubebox/
+uv run mypy cubeplex/
+uv run ruff check cubeplex/
 uv run pytest tests/ -v
 ```
 

@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
+from cubeplex.im.feishu.op_dispatcher import FeishuOpDispatcher
 
 
 @pytest.mark.asyncio
 async def test_register_awaiting_responder_writes_key_with_ttl() -> None:
-    from cubebox.im.outbound import register_awaiting_responder
+    from cubeplex.im.outbound import register_awaiting_responder
 
     state: dict[str, tuple[str, int]] = {}
 
@@ -21,16 +21,16 @@ async def test_register_awaiting_responder_writes_key_with_ttl() -> None:
     await register_awaiting_responder(
         run_id="run_1",
         responder_open_id="ou_user_1",
-        redis_key_prefix="cubebox-dev",
+        redis_key_prefix="cubeplex-dev",
         set_fn=fake_set,
     )
     # Keys are prefixed so two envs sharing Redis don't collide.
-    assert state["cubebox-dev:run:run_1:awaiting_responder"] == ("ou_user_1", 600)
+    assert state["cubeplex-dev:run:run_1:awaiting_responder"] == ("ou_user_1", 600)
 
 
 @pytest.mark.asyncio
 async def test_register_awaiting_responder_noop_when_missing_inputs() -> None:
-    from cubebox.im.outbound import register_awaiting_responder
+    from cubeplex.im.outbound import register_awaiting_responder
 
     state: dict[str, tuple[str, int]] = {}
 
@@ -41,7 +41,7 @@ async def test_register_awaiting_responder_noop_when_missing_inputs() -> None:
     await register_awaiting_responder(
         run_id="run_1",
         responder_open_id="",
-        redis_key_prefix="cubebox-dev",
+        redis_key_prefix="cubeplex-dev",
         set_fn=fake_set,
     )
     assert state == {}
@@ -51,8 +51,8 @@ async def test_register_awaiting_responder_noop_when_missing_inputs() -> None:
 async def test_tailer_registers_responder_after_ask_user_request() -> None:
     """Integration: tailer with a responder_open_id writes the binding
     when fold_event emits a pending_input op for ask_user_request."""
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.types import RenderState
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
 
     redis_writes: dict[str, tuple[str, int]] = {}
 
@@ -81,7 +81,7 @@ async def test_tailer_registers_responder_after_ask_user_request() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -105,8 +105,8 @@ async def test_tailer_registers_responder_after_ask_user_request() -> None:
 
 @pytest.mark.asyncio
 async def test_tailer_does_not_register_for_non_pending_events() -> None:
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.types import RenderState
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
 
     redis_writes: dict[str, tuple[str, int]] = {}
 
@@ -133,7 +133,7 @@ async def test_tailer_does_not_register_for_non_pending_events() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -153,8 +153,8 @@ async def test_tailer_does_not_register_for_non_pending_events() -> None:
 
 @pytest.mark.asyncio
 async def test_tailer_registers_for_sandbox_confirm_request() -> None:
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.types import RenderState
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
 
     redis_writes: dict[str, tuple[str, int]] = {}
 
@@ -181,7 +181,7 @@ async def test_tailer_registers_for_sandbox_confirm_request() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -205,8 +205,8 @@ async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
     binding TTL must use it — otherwise a 30-minute HITL pause expires the
     binding after 10 minutes and a still-valid click surfaces "这不是发给你的".
     """
-    from cubebox.im.outbound import OutboundRunTailer
-    from cubebox.im.types import RenderState
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
 
     redis_writes: dict[str, tuple[str, int]] = {}
 
@@ -233,7 +233,7 @@ async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubebox", run_id="run_30m")
+    state = RenderState(bot_name="cubeplex", run_id="run_30m")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -257,7 +257,7 @@ async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
 @pytest.mark.asyncio
 async def test_register_awaiting_responder_clamps_ttl_max() -> None:
     """A malformed event with a huge timeout must clamp at the 24h cap."""
-    from cubebox.im.outbound import register_awaiting_responder
+    from cubeplex.im.outbound import register_awaiting_responder
 
     state: dict[str, tuple[str, int]] = {}
 

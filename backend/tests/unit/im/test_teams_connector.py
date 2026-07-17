@@ -1,5 +1,5 @@
-from cubebox.im.teams.connector import TeamsConnector
-from cubebox.im.types import (
+from cubeplex.im.teams.connector import TeamsConnector
+from cubeplex.im.types import (
     DM_SCOPE_KEY,
     make_participant_scope,
     make_thread_participant_scope,

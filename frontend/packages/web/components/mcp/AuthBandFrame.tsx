@@ -210,6 +210,11 @@ function StaticTokenForm({
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            name="mcp-band-static-token"
+            autoComplete="new-password"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder={t('staticTokenLabel')}
             className="max-w-xs"
             aria-label={t('staticTokenLabel')}
@@ -300,5 +305,8 @@ function errorReasonCopy(t: BandT, reason: string | undefined): string {
   if (!reason) return ''
   if (reason === 'popup_blocked') return t('errorPopupBlocked')
   if (reason === 'timeout') return t('errorTimeout')
+  if (reason.startsWith('start_failed:')) {
+    return reason.slice('start_failed:'.length)
+  }
   return reason
 }

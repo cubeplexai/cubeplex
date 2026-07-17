@@ -1,4 +1,4 @@
-import type { AgentEvent, ThinkingLevel } from '../types'
+import type { AgentEvent, ReasoningControl } from '../types'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 import { streamRun } from './runStreams'
@@ -8,7 +8,7 @@ import { streamRun } from './runStreams'
  *
  * ``model_key`` selects the model (a tier name or a custom label — the
  * resolved chain lives server-side). ``null`` or omitted means "use the
- * workspace default". ``thinking`` overrides the per-message reasoning depth
+ * workspace default". ``reasoning`` overrides the per-message reasoning control
  * and is sticky across messages on the composer side, so it is sent on every
  * request rather than only when it changes.
  */
@@ -16,7 +16,7 @@ export interface SendMessageRequest {
   content: string
   attachments?: string[]
   model_key?: string | null
-  thinking?: ThinkingLevel
+  reasoning?: ReasoningControl
 }
 
 export interface CancelRunResponse {
@@ -148,7 +148,20 @@ export async function* streamMessages(
   content: string,
   attachmentIds?: string[],
   signal?: AbortSignal,
-  options?: { model_key?: string | null; thinking?: ThinkingLevel },
+  options?: {
+    model_key?: string | null
+    reasoning?: ReasoningControl
+    /**
+     * Fires as soon as the POST returns a run id, BEFORE any event is
+     * yielded — only on the JSON-then-tail path (the production path
+     * through the Next.js SSE proxy). The direct-SSE path keeps it
+     * unset; callers fall back to `currentRunId` derived from later
+     * events. This is the only seam where the store can learn the run
+     * id for an in-flight send so optimistic messages can be stamped
+     * (e.g. for "fork from this message" to work without reload).
+     */
+    onRunId?: (runId: string) => void
+  },
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -165,7 +178,7 @@ export async function* streamMessages(
   // (workspace default), but sending it explicitly lets us round-trip the
   // user's "no model chosen" choice when the prior turn had one.
   if (options?.model_key !== undefined) requestBody.model_key = options.model_key
-  if (options?.thinking !== undefined) requestBody.thinking = options.thinking
+  if (options?.reasoning !== undefined) requestBody.reasoning = options.reasoning
   try {
     const res = await fetch(`${client.baseUrl}${path}`, {
       method: 'POST',
@@ -191,11 +204,24 @@ export async function* streamMessages(
     if (contentType.includes('text/event-stream')) {
       const reader = res.body?.getReader()
       if (!reader) return
+      // SSE branch: no JSON {run_id} envelope to pluck. Every payload
+      // ``run_manager._publish_event`` produces already carries ``run_id``
+      // at the top level, so fire ``onRunId`` on the first event that has
+      // one. Skipping the JSON-branch handshake here would leave
+      // ``currentRunId`` null for the whole turn — the fresh assistant +
+      // tool messages would stamp ``run_id: null`` and Fork would stay
+      // disabled on the just-finished turn until reload.
+      let runIdReported = false
       try {
         for await (const line of readLines(reader)) {
           if (line.startsWith('data: ')) {
             try {
-              yield JSON.parse(line.slice(6)) as AgentEvent
+              const event = JSON.parse(line.slice(6)) as AgentEvent
+              if (!runIdReported && event.run_id) {
+                options?.onRunId?.(event.run_id)
+                runIdReported = true
+              }
+              yield event
             } catch {
               // skip malformed lines
             }
@@ -208,6 +234,7 @@ export async function* streamMessages(
     }
 
     const body = (await res.json()) as { run_id: string }
+    options?.onRunId?.(body.run_id)
     for await (const event of streamRun(client, conversationId, body.run_id, undefined, signal)) {
       yield event
     }

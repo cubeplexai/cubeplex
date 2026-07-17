@@ -280,24 +280,24 @@ spec:
 
 New:
 
-- `backend/cubebox/lifecycle/__init__.py`
-- `backend/cubebox/lifecycle/drain.py` — `DrainState`
-- `backend/cubebox/api/middleware/drain.py` — `DrainMiddleware`
+- `backend/cubeplex/lifecycle/__init__.py`
+- `backend/cubeplex/lifecycle/drain.py` — `DrainState`
+- `backend/cubeplex/api/middleware/drain.py` — `DrainMiddleware`
 - `backend/tests/e2e/test_graceful_restart.py`
 - `backend/tests/unit/test_drain_state.py`
 
 Modified:
 
-- `backend/cubebox/api/app.py` — signal registration, lifespan shutdown
+- `backend/cubeplex/api/app.py` — signal registration, lifespan shutdown
   ordering, middleware wiring
-- `backend/cubebox/api/routes/health.py` — split into `/health/live` and
+- `backend/cubeplex/api/routes/health.py` — split into `/health/live` and
   `/health/ready`, drop `/health`
-- `backend/cubebox/api/routes/v1/conversations.py` — bootstrap stale
+- `backend/cubeplex/api/routes/v1/conversations.py` — bootstrap stale
   detection + `last_run_status` field; stream endpoint stale detection
-- `backend/cubebox/streams/run_manager.py` — rename `shutdown()` →
+- `backend/cubeplex/streams/run_manager.py` — rename `shutdown()` →
   `cancel_all()`, add `drain()`, maintain `_tasks_empty` event, periodic
   drain progress logger, stamp `last_event_at` on appends
-- `backend/cubebox/streams/run_events.py` — add `last_event_at` to
+- `backend/cubeplex/streams/run_events.py` — add `last_event_at` to
   `RunMeta`, extend `_APPEND_EVENT_LUA`, add `_MARK_STALE_LUA`, add
   `mark_run_stale()` helper
 - `backend/config.yaml`, `backend/config.development.yaml`,

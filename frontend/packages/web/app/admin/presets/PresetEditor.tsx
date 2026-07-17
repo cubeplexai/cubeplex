@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from 'lucide-react'
 
@@ -699,21 +699,33 @@ function RefPicker({
   onAdd,
 }: RefPickerProps): React.ReactElement {
   const t = useTranslations('adminPresets')
+  const listboxId = useId()
   const [draft, setDraft] = useState('')
   const [open, setOpen] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(50)
+  const [activeIndex, setActiveIndex] = useState(-1)
 
   const filtered = useMemo(() => {
     const q = draft.trim().toLowerCase()
     const pool = availableModels.filter((m) => !exclude.includes(m))
-    if (!q) return pool.slice(0, 20)
-    return pool.filter((m) => m.toLowerCase().includes(q)).slice(0, 20)
+    if (!q) return pool
+    return pool.filter((m) => m.toLowerCase().includes(q))
   }, [draft, availableModels, exclude])
+  const visible = filtered.slice(0, visibleCount)
+  const activeId =
+    activeIndex >= 0 && activeIndex < visible.length ? `${listboxId}-${activeIndex}` : undefined
+
+  const resetPickerWindow = (): void => {
+    setVisibleCount(50)
+    setActiveIndex(-1)
+  }
 
   const handleAdd = (ref: string): void => {
     if (!ref.trim()) return
     onAdd(ref.trim())
     setDraft('')
     setOpen(false)
+    resetPickerWindow()
   }
 
   return (
@@ -724,20 +736,46 @@ function RefPicker({
           onChange={(e) => {
             setDraft(e.target.value)
             setOpen(true)
+            resetPickerWindow()
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true)
+            resetPickerWindow()
+          }}
           // Reopen on click too: after picking an option the input keeps focus
           // (the option's onMouseDown preventDefault), so onFocus won't refire.
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setOpen(true)
+            resetPickerWindow()
+          }}
           onBlur={() => {
             window.setTimeout(() => setOpen(false), 120)
           }}
           placeholder={t('addModelPlaceholder')}
           aria-label={ariaLabel}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={activeId}
+          aria-autocomplete="list"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'ArrowDown') {
               e.preventDefault()
-              handleAdd(draft)
+              setOpen(true)
+              setActiveIndex((i) => Math.min(i + 1, visible.length - 1))
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setOpen(true)
+              setActiveIndex((i) => (i <= 0 ? -1 : i - 1))
+            } else if (e.key === 'Enter') {
+              e.preventDefault()
+              const selected =
+                activeIndex >= 0 && activeIndex < visible.length ? visible[activeIndex] : draft
+              handleAdd(selected)
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setOpen(false)
+              setActiveIndex(-1)
             }
           }}
         />
@@ -751,17 +789,29 @@ function RefPicker({
           <span>{t('chainAdd')}</span>
         </Button>
       </div>
-      {open && filtered.length > 0 && (
+      {open && visible.length > 0 && (
         <ul
+          id={listboxId}
           role="listbox"
           className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover py-1 text-sm shadow-md"
+          onScroll={(e) => {
+            const el = e.currentTarget
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+              setVisibleCount((count) => Math.min(count + 50, filtered.length))
+            }
+          }}
         >
-          {filtered.map((ref) => (
+          {visible.map((ref, i) => (
             <li
               key={ref}
+              id={`${listboxId}-${i}`}
               role="option"
-              aria-selected={false}
-              className="cursor-pointer px-2.5 py-1 font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+              aria-selected={activeIndex === i}
+              className={cn(
+                'cursor-pointer px-2.5 py-1 font-mono text-xs hover:bg-accent hover:text-accent-foreground',
+                activeIndex === i && 'bg-accent text-accent-foreground',
+              )}
+              onMouseEnter={() => setActiveIndex(i)}
               onMouseDown={(e) => {
                 e.preventDefault()
                 handleAdd(ref)

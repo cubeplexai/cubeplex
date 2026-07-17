@@ -18,14 +18,14 @@ import pytest_asyncio
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from cubebox.api.routes.v1.social_login import (
+from cubeplex.api.routes.v1.social_login import (
     google_authorize,
     google_callback,
 )
-from cubebox.api.routes.v1.sso import _enforce_forced_sso_for_user
-from cubebox.config import config
-from cubebox.models import Organization, SSOConnection, User
-from cubebox.sso.state import SSOStateStore
+from cubeplex.api.routes.v1.sso import _enforce_forced_sso_for_user
+from cubeplex.config import config
+from cubeplex.models import Organization, SSOConnection, User
+from cubeplex.sso.state import SSOStateStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,7 +70,7 @@ async def test_authorize_404_when_disabled(
     """Disabled or misconfigured → same 404 (no enumeration)."""
     # default config has enabled=false, but be explicit:
     monkeypatch.setattr(
-        "cubebox.api.routes.v1.social_login._google_config",
+        "cubeplex.api.routes.v1.social_login._google_config",
         lambda: ("", False),
     )
     request = _make_request(fake_redis)
@@ -84,7 +84,7 @@ async def test_authorize_404_when_enabled_but_no_client_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "cubebox.api.routes.v1.social_login._google_config",
+        "cubeplex.api.routes.v1.social_login._google_config",
         lambda: ("", True),
     )
     request = _make_request(fake_redis)
@@ -98,7 +98,7 @@ async def test_authorize_happy_path_builds_google_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "cubebox.api.routes.v1.social_login._google_config",
+        "cubeplex.api.routes.v1.social_login._google_config",
         lambda: ("test-client-id.apps.googleusercontent.com", True),
     )
     request = _make_request(fake_redis)

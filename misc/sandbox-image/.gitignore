@@ -1,0 +1,3 @@
+# Premium libre fonts staged by stage-fonts.sh from official upstreams
+# (~54MB of OFL .ttf — downloaded at build time, not committed). See Dockerfile.
+fonts/

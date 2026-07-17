@@ -19,7 +19,7 @@ data:
     """OpenSandbox egress addon: swap cbxref_ placeholders for real secrets.
 
     Loaded after the bundled system addon. For each outbound request, scan header
-    values for cbxref_ tokens; for each, call the cubebox exchange endpoint over
+    values for cbxref_ tokens; for each, call the cubeplex exchange endpoint over
     mTLS using the per-sandbox client cert, and replace the token with the returned
     secret (only in headers allowed by the binding's header_names). Fails closed.
 

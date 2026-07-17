@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient, Model, ProbeResult, ProbeStep, TestStreamEvent } from '@cubebox/core'
-import * as core from '@cubebox/core'
+import type { ApiClient, Model, ProbeResult, ProbeStep, TestStreamEvent } from '@cubeplex/core'
+import * as core from '@cubeplex/core'
 import en from '../../../../../messages/en.json'
 import { TestStep } from '../TestStep'
 
-vi.mock('@cubebox/core', async (importOriginal) => {
+vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
   return {
     ...actual,

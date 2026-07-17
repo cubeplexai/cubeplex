@@ -2,8 +2,9 @@
 
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 import { RailCard } from '@/components/shared/RailCard'
+import { Avatar } from '@/components/ui/avatar-resolved'
 
 import { ImAccountStatusPill } from './ImAccountStatusPill'
 import { PlatformLogo } from './PlatformLogo'
@@ -54,16 +55,13 @@ export function ImAccountListItem({
       selected={selected}
       onSelect={() => onSelect(account.id)}
       leading={
-        account.bot_avatar_url ? (
-          // eslint-disable-next-line @next/next/no-img-element -- external IdP avatars; next/image needs remote-pattern config
-          <img
-            src={account.bot_avatar_url}
-            alt={title}
-            className="size-6 rounded-full object-cover"
-          />
-        ) : (
-          <PlatformLogo platform={account.platform} className="size-6" />
-        )
+        <Avatar
+          src={account.bot_avatar_url}
+          seed={account.id}
+          name={account.bot_app_name ?? account.external_account_id}
+          style="bottts"
+          size="sm"
+        />
       }
       title={title}
       badge={

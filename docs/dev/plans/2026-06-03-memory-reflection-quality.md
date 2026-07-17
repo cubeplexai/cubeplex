@@ -16,9 +16,9 @@
 
 | File | What changes |
 |---|---|
-| `backend/cubebox/prompts/reflection_system.py` | Rewrite prompt — conservative bias + mandatory search-first |
-| `backend/cubebox/services/reflection_runner.py` | `ReflectionInput` gets `existing_memory_items`; `_build_seed_prompt` renders it |
-| `backend/cubebox/streams/run_manager.py` | Extract tool summaries from agent messages; load personal memory before spawning reflection |
+| `backend/cubeplex/prompts/reflection_system.py` | Rewrite prompt — conservative bias + mandatory search-first |
+| `backend/cubeplex/services/reflection_runner.py` | `ReflectionInput` gets `existing_memory_items`; `_build_seed_prompt` renders it |
+| `backend/cubeplex/streams/run_manager.py` | Extract tool summaries from agent messages; load personal memory before spawning reflection |
 | `backend/tests/unit/test_reflection_runner.py` | Extend with seed-prompt and existing-memory tests |
 | `backend/tests/unit/test_reflection_tool_summaries.py` | New — unit tests for tool-summary extraction |
 
@@ -27,12 +27,12 @@
 ## Task 1: Rewrite reflection_system.py prompt (C2)
 
 **Files:**
-- Modify: `backend/cubebox/prompts/reflection_system.py`
+- Modify: `backend/cubeplex/prompts/reflection_system.py`
 - Test: `backend/tests/unit/test_reflection_runner.py` (smoke — verify prompt is importable and non-empty)
 
 - [ ] **Step 1: Replace the prompt**
 
-Replace the entire content of `backend/cubebox/prompts/reflection_system.py`:
+Replace the entire content of `backend/cubeplex/prompts/reflection_system.py`:
 
 ```python
 """System prompt for the detached memory-reflection agent."""
@@ -76,7 +76,7 @@ Do not explain — the user will not see your text.
 - [ ] **Step 2: Verify import and run existing tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_runner.py -v
 ```
 
@@ -85,8 +85,8 @@ Expected: all existing tests pass (no behavioural change yet — tests don't ins
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality
-git add backend/cubebox/prompts/reflection_system.py
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality
+git add backend/cubeplex/prompts/reflection_system.py
 git commit -m "fix(memory): add conservative bias and mandatory search-first to reflection prompt"
 ```
 
@@ -95,7 +95,7 @@ git commit -m "fix(memory): add conservative bias and mandatory search-first to 
 ## Task 2: Add existing_memory_items to ReflectionInput and seed prompt (C3 — runner side)
 
 **Files:**
-- Modify: `backend/cubebox/services/reflection_runner.py`
+- Modify: `backend/cubeplex/services/reflection_runner.py`
 - Modify: `backend/tests/unit/test_reflection_runner.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -103,7 +103,7 @@ git commit -m "fix(memory): add conservative bias and mandatory search-first to 
 Add to `backend/tests/unit/test_reflection_runner.py`:
 
 ```python
-from cubebox.services.reflection_runner import ReflectionRunner
+from cubeplex.services.reflection_runner import ReflectionRunner
 
 
 class TestBuildSeedPrompt:
@@ -175,7 +175,7 @@ class TestBuildSeedPrompt:
 - [ ] **Step 2: Run to confirm tests fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_runner.py::TestBuildSeedPrompt -v
 ```
 
@@ -209,9 +209,9 @@ from typing import Any
 from cubepi import Agent
 from cubepi.agent.types import AgentEvent
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.reflection_context import set_reflection_source
-from cubebox.services.user_event import PublishUserEventInput, UserEventService
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.reflection_context import set_reflection_source
+from cubeplex.services.user_event import PublishUserEventInput, UserEventService
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +381,7 @@ class ReflectionRunner:
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_runner.py -v
 ```
 
@@ -390,8 +390,8 @@ Expected: all tests pass including the new `TestBuildSeedPrompt` class.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality
-git add backend/cubebox/services/reflection_runner.py \
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality
+git add backend/cubeplex/services/reflection_runner.py \
         backend/tests/unit/test_reflection_runner.py
 git commit -m "feat(memory): inject existing personal memory into reflection seed prompt"
 ```
@@ -401,7 +401,7 @@ git commit -m "feat(memory): inject existing personal memory into reflection see
 ## Task 3: Extract tool summaries from agent state messages (C1)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Create: `backend/tests/unit/test_reflection_tool_summaries.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -424,7 +424,7 @@ from cubepi.providers.base import (
 
 # Import the helper once it's been extracted into a testable location.
 # It lives as a module-level function in run_manager; we import it directly.
-from cubebox.streams.run_manager import _extract_tool_summaries
+from cubeplex.streams.run_manager import _extract_tool_summaries
 
 
 def _user(text: str = "hi") -> UserMessage:
@@ -527,7 +527,7 @@ def test_only_tools_after_last_user_message() -> None:
 - [ ] **Step 2: Run to confirm import fails**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_tool_summaries.py -v 2>&1 | head -20
 ```
 
@@ -535,7 +535,7 @@ Expected: `ImportError` — `_extract_tool_summaries` does not exist yet.
 
 - [ ] **Step 3: Add `_extract_tool_summaries` to run_manager and wire it**
 
-In `backend/cubebox/streams/run_manager.py`, add the following module-level helper near the top of the file (after imports, before the class definition). Find the `class RunManager` line and insert above it:
+In `backend/cubeplex/streams/run_manager.py`, add the following module-level helper near the top of the file (after imports, before the class definition). Find the `class RunManager` line and insert above it:
 
 ```python
 def _extract_tool_summaries(messages: list[Any]) -> list[dict[str, str]]:
@@ -621,7 +621,7 @@ turn=ReflectionTurn(
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_tool_summaries.py -v
 ```
 
@@ -630,8 +630,8 @@ Expected: all 8 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality
-git add backend/cubebox/streams/run_manager.py \
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality
+git add backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/test_reflection_tool_summaries.py
 git commit -m "feat(memory): populate tool_summaries in reflection turn from agent message history"
 ```
@@ -641,13 +641,13 @@ git commit -m "feat(memory): populate tool_summaries in reflection turn from age
 ## Task 4: Load personal memory in run_manager and pass to reflection (C3 — run_manager side)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 No new unit test file needed — the runner-side rendering is already covered by Task 2's tests. This task wires the DB load.
 
 - [ ] **Step 1: Add memory load inside `_run_reflection`**
 
-In `backend/cubebox/streams/run_manager.py`, inside the `_run_reflection` async closure, add a memory load block after `last_assistant` is confirmed non-empty and before the `ReflectionInput` is constructed. The full updated closure body (from `last_assistant = ...` to `await _runner.reflect(inp)`) becomes:
+In `backend/cubeplex/streams/run_manager.py`, inside the `_run_reflection` async closure, add a memory load block after `last_assistant` is confirmed non-empty and before the `ReflectionInput` is constructed. The full updated closure body (from `last_assistant = ...` to `await _runner.reflect(inp)`) becomes:
 
 ```python
 last_assistant = _last_assistant_text(agent_ref.state.messages)
@@ -661,8 +661,8 @@ _existing_items: list[tuple[str, str, str]] = []
 try:
     import datetime
 
-    from cubebox.models.memory import MemoryScope, MemoryStatus
-    from cubebox.repositories.memory import MemoryRepository
+    from cubeplex.models.memory import MemoryScope, MemoryStatus
+    from cubeplex.repositories.memory import MemoryRepository
 
     async with _ue_session_maker() as _mem_session:
         _mem_repo = MemoryRepository(
@@ -716,8 +716,8 @@ async with _ue_session_maker() as _session:
 - [ ] **Step 2: Run mypy to confirm types**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
-uv run mypy cubebox/streams/run_manager.py cubebox/services/reflection_runner.py cubebox/prompts/reflection_system.py --ignore-missing-imports 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
+uv run mypy cubeplex/streams/run_manager.py cubeplex/services/reflection_runner.py cubeplex/prompts/reflection_system.py --ignore-missing-imports 2>&1 | tail -10
 ```
 
 Expected: `Success: no issues found` (or only pre-existing errors unrelated to these files).
@@ -725,7 +725,7 @@ Expected: `Success: no issues found` (or only pre-existing errors unrelated to t
 - [ ] **Step 3: Run the full unit test suite for changed modules**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/test_reflection_runner.py \
              tests/unit/test_reflection_tool_summaries.py \
              tests/unit/test_reflection_context.py \
@@ -737,8 +737,8 @@ Expected: all pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality
-git add backend/cubebox/streams/run_manager.py
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(memory): load personal memory snapshot into reflection input before spawning agent"
 ```
 
@@ -749,7 +749,7 @@ git commit -m "feat(memory): load personal memory snapshot into reflection input
 - [ ] **Step 1: Run full unit test suite**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
 uv run pytest tests/unit/ -v 2>&1 | tail -20
 ```
 
@@ -758,8 +758,8 @@ Expected: all pass.
 - [ ] **Step 2: Run mypy on all changed files**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
-uv run mypy cubebox/ --ignore-missing-imports 2>&1 | grep -E "error:|Success"
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
+uv run mypy cubeplex/ --ignore-missing-imports 2>&1 | grep -E "error:|Success"
 ```
 
 Expected: no new errors.
@@ -767,10 +767,10 @@ Expected: no new errors.
 - [ ] **Step 3: Run ruff**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/memory-reflection-quality/backend
-uv run ruff check cubebox/prompts/reflection_system.py \
-                  cubebox/services/reflection_runner.py \
-                  cubebox/streams/run_manager.py
+cd /home/chris/cubeplex/.worktrees/feat/memory-reflection-quality/backend
+uv run ruff check cubeplex/prompts/reflection_system.py \
+                  cubeplex/services/reflection_runner.py \
+                  cubeplex/streams/run_manager.py
 ```
 
 Expected: no issues.

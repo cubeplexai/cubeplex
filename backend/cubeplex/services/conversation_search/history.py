@@ -1,0 +1,448 @@
+"""Bounded, agent-facing formatting for persisted conversation messages."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+_SENSITIVE_ARGUMENT_PARTS = ("secret", "token", "password", "authorization", "api_key")
+MIN_HISTORY_MAX_TOKENS = 256
+_MAX_METADATA_DISPLAY_CHARS = 64
+_TOOL_CALL_REFERENCE_PREFIX = "tool_ref_"
+
+
+@dataclass(frozen=True)
+class FormattedHistoryPage:
+    turns: list[dict[str, Any]]
+    has_more: bool
+    next_before_seq: int | None
+    estimated_tokens: int
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class FormattedToolResult:
+    tool_call_id: str
+    tool_name: str | None
+    content: str
+    is_error: bool
+    estimated_tokens: int
+    truncated: bool
+
+
+def estimate_tokens(value: object) -> int:
+    """Return a deliberately cheap estimate suitable for output bounding."""
+    return max(1, len(json.dumps(value, ensure_ascii=False)) // 4)
+
+
+def format_history_turns(
+    messages: list[dict[str, Any]],
+    *,
+    n: int,
+    max_tokens: int,
+    before_seq: int | None,
+    has_older_messages: bool = False,
+) -> FormattedHistoryPage:
+    """Format turns within a token budget of at least ``MIN_HISTORY_MAX_TOKENS``."""
+    _validate_max_tokens(max_tokens)
+    turns = _build_turns(messages, before_seq=before_seq)
+    if n <= 0:
+        has_more = bool(turns)
+        next_before_seq = _first_seq(turns)
+        return FormattedHistoryPage(
+            [],
+            has_more,
+            next_before_seq,
+            _estimate_history_page([], has_more, next_before_seq, truncated=False),
+            False,
+        )
+
+    selected: list[dict[str, Any]] = []
+    truncated = False
+    for index in range(len(turns) - 1, -1, -1):
+        if len(selected) == n:
+            break
+        turn = turns[index]
+        candidate = [turn, *selected]
+        candidate_has_more = index > 0
+        candidate_next_before_seq = _first_seq(candidate) if candidate_has_more else None
+        if (
+            _estimate_history_page(
+                candidate, candidate_has_more, candidate_next_before_seq, truncated=False
+            )
+            <= max_tokens
+        ):
+            selected = candidate
+            continue
+        if not selected:
+            has_more = index > 0
+            next_before_seq = _seq(turn) if has_more else None
+
+            def turn_fits(
+                bounded_turn: dict[str, Any],
+                page_has_more: bool = has_more,
+                page_next_before_seq: int | None = next_before_seq,
+            ) -> bool:
+                return (
+                    _estimate_history_page(
+                        [bounded_turn], page_has_more, page_next_before_seq, truncated=True
+                    )
+                    <= max_tokens
+                )
+
+            bounded_turn = _truncate_turn(turn, turn_fits)
+            selected = [bounded_turn]
+            truncated = True
+        break
+
+    has_more = len(selected) < len(turns) or has_older_messages
+    next_before_seq = _first_seq(selected) if has_more else None
+    return FormattedHistoryPage(
+        turns=selected,
+        has_more=has_more,
+        next_before_seq=next_before_seq,
+        estimated_tokens=_estimate_history_page(
+            selected, has_more, next_before_seq, truncated=truncated
+        ),
+        truncated=truncated,
+    )
+
+
+def format_tool_result(
+    messages: list[dict[str, Any]], *, tool_call_id: str, max_tokens: int
+) -> FormattedToolResult | None:
+    """Return a result for a raw ID or bounded history reference within its token budget."""
+    _validate_max_tokens(max_tokens)
+    for message in sorted(messages, key=_seq):
+        raw_tool_call_id = _optional_string(message.get("tool_call_id"))
+        if message.get("role") != "tool_result" or raw_tool_call_id is None:
+            continue
+        if not _matches_tool_call_id(raw_tool_call_id, tool_call_id):
+            continue
+        content = _message_text(message)
+        bounded_tool_call_id = _bounded_tool_call_id(raw_tool_call_id)
+        tool_name = _bounded_metadata(_optional_string(message.get("tool_name")))
+        is_error = bool(message.get("is_error"))
+        estimated_tokens = _estimate_tool_result(
+            bounded_tool_call_id, tool_name, content, is_error, truncated=False
+        )
+        if estimated_tokens <= max_tokens:
+            return FormattedToolResult(
+                tool_call_id=bounded_tool_call_id,
+                tool_name=tool_name,
+                content=content,
+                is_error=is_error,
+                estimated_tokens=estimated_tokens,
+                truncated=False,
+            )
+        truncated_content = _truncate_tool_result_content(
+            bounded_tool_call_id, tool_name, content, is_error, max_tokens
+        )
+        return FormattedToolResult(
+            tool_call_id=bounded_tool_call_id,
+            tool_name=tool_name,
+            content=truncated_content,
+            is_error=is_error,
+            estimated_tokens=_estimate_tool_result(
+                bounded_tool_call_id, tool_name, truncated_content, is_error, truncated=True
+            ),
+            truncated=True,
+        )
+    return None
+
+
+def _validate_max_tokens(max_tokens: int) -> None:
+    if max_tokens < MIN_HISTORY_MAX_TOKENS:
+        raise ValueError(f"max_tokens must be at least {MIN_HISTORY_MAX_TOKENS}")
+
+
+def _build_turns(messages: list[dict[str, Any]], *, before_seq: int | None) -> list[dict[str, Any]]:
+    turns: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    results: dict[str, bool] = {}
+    for message in sorted(messages, key=_seq):
+        if before_seq is not None and _seq(message) >= before_seq:
+            continue
+        role = message.get("role")
+        if role == "tool_result":
+            call_id = message.get("tool_call_id")
+            if isinstance(call_id, str):
+                results[_bounded_tool_call_id(call_id)] = bool(message.get("is_error"))
+            continue
+        if role == "user":
+            current = {
+                "seq": _seq(message),
+                "user": {"text": _message_text(message)},
+                "assistant": {"text": ""},
+                "tool_calls": [],
+                "tool_calls_omitted": 0,
+            }
+            turns.append(current)
+            continue
+        if current is None or role != "assistant":
+            continue
+        text = _message_text(message)
+        if text:
+            current["assistant"]["text"] += text
+        for block in _tool_call_blocks(message):
+            call_id = block.get("id")
+            if not isinstance(call_id, str):
+                continue
+            current["tool_calls"].append(
+                {
+                    "tool_call_id": _bounded_tool_call_id(call_id),
+                    "name": _bounded_metadata(_optional_string(block.get("name"))),
+                    "arguments": _redact_arguments(block.get("arguments")),
+                    "status": "pending",
+                }
+            )
+
+    for turn in turns:
+        for call in turn["tool_calls"]:
+            call_id = call["tool_call_id"]
+            if call_id in results:
+                call["status"] = "errored" if results[call_id] else "completed"
+    return turns
+
+
+def _seq(message: dict[str, Any]) -> int:
+    value = message.get("seq")
+    return value if isinstance(value, int) else 0
+
+
+def _first_seq(turns: list[dict[str, Any]]) -> int | None:
+    return turns[0]["seq"] if turns else None
+
+
+def _history_page_payload(
+    turns: list[dict[str, Any]],
+    has_more: bool,
+    next_before_seq: int | None,
+    estimated_tokens: int,
+    truncated: bool,
+) -> dict[str, object]:
+    return {
+        "turns": turns,
+        "has_more": has_more,
+        "next_before_seq": next_before_seq,
+        "estimated_tokens": estimated_tokens,
+        "truncated": truncated,
+    }
+
+
+def _estimate_history_page(
+    turns: list[dict[str, Any]],
+    has_more: bool,
+    next_before_seq: int | None,
+    *,
+    truncated: bool,
+) -> int:
+    estimated_tokens = 0
+    for _ in range(3):
+        next_estimate = estimate_tokens(
+            _history_page_payload(turns, has_more, next_before_seq, estimated_tokens, truncated)
+        )
+        if next_estimate == estimated_tokens:
+            return next_estimate
+        estimated_tokens = next_estimate
+    return estimated_tokens
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
+def _tool_call_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+    return [
+        block for block in content if isinstance(block, dict) and block.get("type") == "tool_call"
+    ]
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _bounded_tool_call_id(tool_call_id: str) -> str:
+    if len(tool_call_id) <= _MAX_METADATA_DISPLAY_CHARS:
+        return tool_call_id
+    return _TOOL_CALL_REFERENCE_PREFIX + hashlib.sha256(tool_call_id.encode()).hexdigest()
+
+
+def _matches_tool_call_id(raw_tool_call_id: str, requested_tool_call_id: str) -> bool:
+    return requested_tool_call_id in {
+        raw_tool_call_id,
+        _bounded_tool_call_id(raw_tool_call_id),
+    }
+
+
+def _bounded_metadata(value: str | None) -> str | None:
+    if value is None or len(value) <= _MAX_METADATA_DISPLAY_CHARS:
+        return value
+    return f"{value[: _MAX_METADATA_DISPLAY_CHARS - 3]}..."
+
+
+def _redact_arguments(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]"
+            if any(part in key.lower() for part in _SENSITIVE_ARGUMENT_PARTS)
+            else _redact_arguments(item)
+            for key, item in value.items()
+            if isinstance(key, str)
+        }
+    if isinstance(value, list):
+        return [_redact_arguments(item) for item in value]
+    return value
+
+
+def _truncate_turn(turn: dict[str, Any], fits: Callable[[dict[str, Any]], bool]) -> dict[str, Any]:
+    bounded = copy.deepcopy(turn)
+    fields = [
+        (bounded["user"], turn["user"]["text"], "text"),
+        (bounded["assistant"], turn["assistant"]["text"], "text"),
+        *_argument_string_fields(bounded, turn),
+    ]
+    for container, _, key in fields:
+        container[key] = ""
+    if not fits(bounded):
+        for call in bounded["tool_calls"]:
+            call["arguments"] = _compact_arguments(call["arguments"])
+    while bounded["tool_calls"] and not fits(bounded):
+        bounded["tool_calls"].pop()
+        bounded["tool_calls_omitted"] += 1
+    for container, source, key in fields:
+        container[key] = _longest_prefix_that_fits(container, key, source, lambda: fits(bounded))
+    return bounded
+
+
+def _argument_string_fields(
+    bounded_turn: dict[str, Any], source_turn: dict[str, Any]
+) -> list[tuple[Any, str, str | int]]:
+    fields: list[tuple[Any, str, str | int]] = []
+    for bounded_call, source_call in zip(
+        bounded_turn["tool_calls"], source_turn["tool_calls"], strict=True
+    ):
+        fields.extend(_string_fields(bounded_call["arguments"], source_call["arguments"]))
+    return fields
+
+
+def _compact_arguments(value: object) -> dict[str, str]:
+    """Drop oversized argument values while retaining direct redaction markers."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: "[REDACTED]"
+        for key in value
+        if isinstance(key, str) and any(part in key.lower() for part in _SENSITIVE_ARGUMENT_PARTS)
+    }
+
+
+def _string_fields(bounded_value: object, source_value: object) -> list[tuple[Any, str, str | int]]:
+    fields: list[tuple[Any, str, str | int]] = []
+    if isinstance(bounded_value, dict) and isinstance(source_value, dict):
+        values: list[tuple[str | int, object, object]] = [
+            (key, value, source_value.get(key)) for key, value in bounded_value.items()
+        ]
+    elif isinstance(bounded_value, list) and isinstance(source_value, list):
+        values = list(zip(range(len(bounded_value)), bounded_value, source_value, strict=False))
+    else:
+        return fields
+    for key, value, source in values:
+        if isinstance(value, str) and isinstance(source, str) and value != "[REDACTED]":
+            fields.append((bounded_value, source, key))
+        else:
+            fields.extend(_string_fields(value, source))
+    return fields
+
+
+def _longest_prefix_that_fits(
+    container: Any, key: str | int, text: str, fits: Callable[[], bool]
+) -> str:
+    lower = 0
+    upper = len(text)
+    while lower < upper:
+        middle = (lower + upper + 1) // 2
+        candidate = text[:middle]
+        container[key] = candidate
+        if fits():
+            lower = middle
+        else:
+            upper = middle - 1
+    return _truncate_text(text[:lower], max(1, (lower + 3) // 4))
+
+
+def _tool_result_payload(
+    tool_call_id: str,
+    tool_name: str | None,
+    content: str,
+    is_error: bool,
+    estimated_tokens: int,
+    truncated: bool,
+) -> dict[str, object]:
+    return {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "content": content,
+        "is_error": is_error,
+        "estimated_tokens": estimated_tokens,
+        "truncated": truncated,
+    }
+
+
+def _estimate_tool_result(
+    tool_call_id: str, tool_name: str | None, content: str, is_error: bool, *, truncated: bool
+) -> int:
+    estimated_tokens = 0
+    for _ in range(3):
+        next_estimate = estimate_tokens(
+            _tool_result_payload(
+                tool_call_id, tool_name, content, is_error, estimated_tokens, truncated
+            )
+        )
+        if next_estimate == estimated_tokens:
+            return next_estimate
+        estimated_tokens = next_estimate
+    return estimated_tokens
+
+
+def _truncate_tool_result_content(
+    tool_call_id: str, tool_name: str | None, content: str, is_error: bool, max_tokens: int
+) -> str:
+    lower = 0
+    upper = len(content)
+    while lower < upper:
+        middle = (lower + upper + 1) // 2
+        candidate = content[:middle]
+        if (
+            _estimate_tool_result(tool_call_id, tool_name, candidate, is_error, truncated=True)
+            <= max_tokens
+        ):
+            lower = middle
+        else:
+            upper = middle - 1
+    return _truncate_text(content[:lower], max(1, (lower + 3) // 4))
+
+
+def _truncate_text(text: str, max_tokens: int) -> str:
+    max_chars = max(0, max_tokens * 4)
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return f"{text[: max_chars - 3]}..."

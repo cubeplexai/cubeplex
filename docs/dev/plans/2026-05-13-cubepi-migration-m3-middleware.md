@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Port cubebox's 11 LangChain `AgentMiddleware`s to cubepi's `Middleware` protocol so the cubepi runtime has behavior parity with the langgraph path. Each new file lives at `cubebox/middleware/<name>_pi.py` alongside the existing langgraph version. After M3, the cubepi agent has: memory injection, sandbox lifecycle, skill content injection, subagent dispatch, citations, compaction, cost tracking, timestamps, todo discipline, artifact registry, and attachment rendering — all running through cubepi hooks.
+**Goal:** Port cubeplex's 11 LangChain `AgentMiddleware`s to cubepi's `Middleware` protocol so the cubepi runtime has behavior parity with the langgraph path. Each new file lives at `cubeplex/middleware/<name>_pi.py` alongside the existing langgraph version. After M3, the cubepi agent has: memory injection, sandbox lifecycle, skill content injection, subagent dispatch, citations, compaction, cost tracking, timestamps, todo discipline, artifact registry, and attachment rendering — all running through cubepi hooks.
 
 **Architecture:** Each middleware is a class implementing `cubepi.middleware.Middleware`. The hook signatures are:
 - `transform_context(messages, *, signal) -> messages` (chain)
@@ -10,9 +10,9 @@
 - `before_tool_call(ctx, *, signal) -> BeforeToolCallResult | None`
 - `after_tool_call(ctx, *, signal) -> AfterToolCallResult | None`
 - `after_model_response(response, ctx, *, signal) -> TurnAction | None` (chain; D8 from Spec A)
-- `should_stop_after_turn(state)` (existing cubepi hook; not used by cubebox)
+- `should_stop_after_turn(state)` (existing cubepi hook; not used by cubeplex)
 
-State channels formerly on `CubeboxState` (`memory_snapshots`, `compaction`, `compaction_until_msg_index`, 6 todo channels) now live in `ctx.extra` for singletons, OR in user-message `metadata` for per-message immutable data (per Spec B § "State migration").
+State channels formerly on `CubeplexState` (`memory_snapshots`, `compaction`, `compaction_until_msg_index`, 6 todo channels) now live in `ctx.extra` for singletons, OR in user-message `metadata` for per-message immutable data (per Spec B § "State migration").
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` § M3 + mapping table.
 
@@ -36,13 +36,13 @@ State channels formerly on `CubeboxState` (`memory_snapshots`, `compaction`, `co
 | Timestamp | — | ✅ | — | ✅ | ✅ | ✅ |
 | Todo | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 
-`should_stop_after_turn` is preserved as cubepi feature; cubebox doesn't use it.
+`should_stop_after_turn` is preserved as cubepi feature; cubeplex doesn't use it.
 
 ---
 
 ## File map
 
-Each port creates one new file `cubebox/middleware/<name>_pi.py` + a test file. Plus a final integration commit wiring all `*_pi` middleware into `graph_pi.py` / `run_manager._run_cubepi_path`.
+Each port creates one new file `cubeplex/middleware/<name>_pi.py` + a test file. Plus a final integration commit wiring all `*_pi` middleware into `graph_pi.py` / `run_manager._run_cubepi_path`.
 
 | File | Lines (est) | Hooks |
 |---|---|---|

@@ -21,7 +21,7 @@ This plan is implemented on branch `feat/file-upload-polish` (already created fr
 ### Task 1: `CitationConfig.discriminator` for `file_read` kinds
 
 **Files:**
-- Modify: `backend/cubebox/middleware/citations/config.py`
+- Modify: `backend/cubeplex/middleware/citations/config.py`
 - Test: `backend/tests/unit/test_citation_config.py`
 
 `CitationConfig` needs to skip items whose `kind` field is not in the allowed set, so `file_read` results with `kind: "notebook" | "unsupported" | "unchanged" | "error"` produce zero citations.
@@ -72,7 +72,7 @@ Expected: FAIL — `discriminator_field` and `discriminator_values` are not yet 
 
 - [ ] **Step 1.3 — Add the fields and gate `extract_items`**
 
-Edit `backend/cubebox/middleware/citations/config.py`:
+Edit `backend/cubeplex/middleware/citations/config.py`:
 
 ```python
 class CitationConfig(BaseModel):
@@ -106,7 +106,7 @@ Expected: all tests pass (existing + new).
 - [ ] **Step 1.5 — Commit**
 
 ```bash
-git add backend/cubebox/middleware/citations/config.py backend/tests/unit/test_citation_config.py
+git add backend/cubeplex/middleware/citations/config.py backend/tests/unit/test_citation_config.py
 git commit -m "feat(backend): add discriminator filter to CitationConfig"
 ```
 
@@ -115,7 +115,7 @@ git commit -m "feat(backend): add discriminator filter to CitationConfig"
 ### Task 2: `load_builtin_citation_configs`
 
 **Files:**
-- Modify: `backend/cubebox/middleware/citations/config.py`
+- Modify: `backend/cubeplex/middleware/citations/config.py`
 - Test: `backend/tests/unit/test_citation_config.py`
 
 Built-in tools (`StructuredTool` instances) carry their citation config on the tool's `metadata` dict. We need a loader that mirrors `load_citation_configs` but reads from `tool.metadata['citation']`.
@@ -127,7 +127,7 @@ Append to `backend/tests/unit/test_citation_config.py`:
 ```python
 from langchain_core.tools import StructuredTool
 
-from cubebox.middleware.citations.config import load_builtin_citation_configs
+from cubeplex.middleware.citations.config import load_builtin_citation_configs
 
 
 def _make_tool(name: str, metadata: dict | None) -> StructuredTool:
@@ -178,7 +178,7 @@ Expected: FAIL — `load_builtin_citation_configs` is undefined.
 
 - [ ] **Step 2.3 — Implement the loader**
 
-Append to `backend/cubebox/middleware/citations/config.py`:
+Append to `backend/cubeplex/middleware/citations/config.py`:
 
 ```python
 def load_builtin_citation_configs(
@@ -205,7 +205,7 @@ Expected: all pass.
 - [ ] **Step 2.5 — Commit**
 
 ```bash
-git add backend/cubebox/middleware/citations/config.py backend/tests/unit/test_citation_config.py
+git add backend/cubeplex/middleware/citations/config.py backend/tests/unit/test_citation_config.py
 git commit -m "feat(backend): add load_builtin_citation_configs for tool metadata"
 ```
 
@@ -214,12 +214,12 @@ git commit -m "feat(backend): add load_builtin_citation_configs for tool metadat
 ### Task 3: Attach citation metadata to `file_read` tool
 
 **Files:**
-- Modify: `backend/cubebox/middleware/sandbox.py:190-211`
+- Modify: `backend/cubeplex/middleware/sandbox.py:190-211`
 - Test: `backend/tests/unit/test_citation_config.py` (smoke check via the loader)
 
 - [ ] **Step 3.1 — Update `_create_file_read_tool` metadata**
 
-Edit `backend/cubebox/middleware/sandbox.py` — change the `metadata=` argument on the `StructuredTool.from_function(...)` call inside `_create_file_read_tool` to:
+Edit `backend/cubeplex/middleware/sandbox.py` — change the `metadata=` argument on the `StructuredTool.from_function(...)` call inside `_create_file_read_tool` to:
 
 ```python
 metadata={
@@ -253,7 +253,7 @@ class TestFileReadToolCitationWiring:
     def test_file_read_tool_metadata_loadable(self):
         from unittest.mock import MagicMock
 
-        from cubebox.middleware.sandbox import _create_file_read_tool
+        from cubeplex.middleware.sandbox import _create_file_read_tool
 
         sandbox = MagicMock()
         tool = _create_file_read_tool(sandbox, conversation_id=None)
@@ -280,7 +280,7 @@ Expected: PASS.
 - [ ] **Step 3.4 — Commit**
 
 ```bash
-git add backend/cubebox/middleware/sandbox.py backend/tests/unit/test_citation_config.py
+git add backend/cubeplex/middleware/sandbox.py backend/tests/unit/test_citation_config.py
 git commit -m "feat(backend): attach citation config to file_read tool"
 ```
 
@@ -289,15 +289,15 @@ git commit -m "feat(backend): attach citation config to file_read tool"
 ### Task 4: Wire built-in citation configs into the run manager
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:591-617` (the citation config loading block)
+- Modify: `backend/cubeplex/streams/run_manager.py:591-617` (the citation config loading block)
 
 - [ ] **Step 4.1 — Update the import to bring in the new loader**
 
-In `backend/cubebox/streams/run_manager.py`, change the inline import inside the run setup block:
+In `backend/cubeplex/streams/run_manager.py`, change the inline import inside the run setup block:
 
 ```python
-from cubebox.middleware.citations import CitationConfig, load_citation_configs
-from cubebox.middleware.citations.config import load_builtin_citation_configs
+from cubeplex.middleware.citations import CitationConfig, load_citation_configs
+from cubeplex.middleware.citations.config import load_builtin_citation_configs
 ```
 
 - [ ] **Step 4.2 — Merge the configs**
@@ -327,7 +327,7 @@ Expected: all pass.
 - [ ] **Step 4.5 — Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(backend): merge builtin citation configs into run manager"
 ```
 
@@ -336,12 +336,12 @@ git commit -m "feat(backend): merge builtin citation configs into run manager"
 ### Task 5: `Conversation.has_messages` column + Alembic migration
 
 **Files:**
-- Modify: `backend/cubebox/models/conversation.py`
+- Modify: `backend/cubeplex/models/conversation.py`
 - Create: `backend/alembic/versions/<auto>_conversation_has_messages.py`
 
 - [ ] **Step 5.1 — Add the field on the model**
 
-Edit `backend/cubebox/models/conversation.py`:
+Edit `backend/cubeplex/models/conversation.py`:
 
 ```python
 class Conversation(SQLModel, OrgScopedMixin, table=True):
@@ -393,7 +393,7 @@ Expected: migration applies cleanly.
 - [ ] **Step 5.5 — Commit**
 
 ```bash
-git add backend/cubebox/models/conversation.py backend/alembic/versions/
+git add backend/cubeplex/models/conversation.py backend/alembic/versions/
 git commit -m "feat(backend): add Conversation.has_messages column"
 ```
 
@@ -402,8 +402,8 @@ git commit -m "feat(backend): add Conversation.has_messages column"
 ### Task 6: Set `has_messages` on send and filter the list endpoint
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py:30-60` (the `update_timestamp_after_stream` helper)
+- Modify: `backend/cubeplex/repositories/conversation.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py:30-60` (the `update_timestamp_after_stream` helper)
 - Test: `backend/tests/e2e/test_conversation_filter.py` (new)
 
 - [ ] **Step 6.1 — Write the failing E2E test**
@@ -460,7 +460,7 @@ Expected: the empty-conversation case fails because the empty conversation IS st
 
 - [ ] **Step 6.3 — Add `mark_has_messages` on the repo**
 
-Edit `backend/cubebox/repositories/conversation.py`:
+Edit `backend/cubeplex/repositories/conversation.py`:
 
 ```python
     async def mark_has_messages(self, conversation_id: str) -> None:
@@ -500,7 +500,7 @@ Then change `list_all` to filter:
 
 - [ ] **Step 6.4 — Flip the flag on first send**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, find `update_timestamp_after_stream` (~line 30). Replace its body's `await save_conv_repo.update_timestamp(conversation_id)` line with:
+In `backend/cubeplex/api/routes/v1/conversations.py`, find `update_timestamp_after_stream` (~line 30). Replace its body's `await save_conv_repo.update_timestamp(conversation_id)` line with:
 
 ```python
             await save_conv_repo.mark_has_messages(conversation_id)
@@ -521,7 +521,7 @@ Expected: format / lint / mypy / pytest all green.
 - [ ] **Step 6.7 — Commit**
 
 ```bash
-git add backend/cubebox/ backend/tests/e2e/test_conversation_filter.py
+git add backend/cubeplex/ backend/tests/e2e/test_conversation_filter.py
 git commit -m "feat(backend): filter empty conversations from list endpoint"
 ```
 
@@ -762,7 +762,7 @@ git commit -m "feat(frontend): add shared fileIcons library"
 Edit `frontend/packages/web/components/panel/artifact/artifactIcons.ts`:
 
 ```ts
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import type { IconType } from 'react-icons'
 import { FaCode, FaDatabase, FaFile, FaFileLines, FaGlobe, FaImage } from 'react-icons/fa6'
 import { getFileFamily, getFileVisual } from '@/lib/fileIcons'
@@ -870,7 +870,7 @@ function mapContentType(toolName: string, backendContentType?: string): PanelCon
 
 - [ ] **Step 9.3 — Build core, type-check both**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: green.
 
 - [ ] **Step 9.4 — Commit**
@@ -985,7 +985,7 @@ Inside the store body, add:
 
 - [ ] **Step 10.3 — Build, type-check**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm type-check`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm type-check`
 Expected: green.
 
 - [ ] **Step 10.4 — Commit**
@@ -1064,7 +1064,7 @@ describe('uploadAttachment', () => {
 
 - [ ] **Step 11.2 — Run it and watch it fail**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- attachments`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- attachments`
 Expected: FAIL — `uploadAttachment` does not accept a 5th argument.
 
 - [ ] **Step 11.3 — Add `signal` to `uploadAttachment`**
@@ -1095,7 +1095,7 @@ export async function uploadAttachment(
     xhr.withCredentials = true
     const csrf = document.cookie
       .split('; ')
-      .find((c) => c.startsWith('cubebox_csrf='))
+      .find((c) => c.startsWith('cubeplex_csrf='))
       ?.split('=')[1]
     if (csrf) xhr.setRequestHeader('X-CSRF-Token', decodeURIComponent(csrf))
 
@@ -1140,12 +1140,12 @@ export async function uploadAttachment(
 
 - [ ] **Step 11.4 — Run tests and watch them pass**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- attachments`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- attachments`
 Expected: PASS.
 
 - [ ] **Step 11.5 — Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: clean.
 
 - [ ] **Step 11.6 — Commit**
@@ -1245,7 +1245,7 @@ describe('cancel', () => {
 
 - [ ] **Step 12.3 — Run tests and watch them fail**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- attachmentStore`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- attachmentStore`
 Expected: FAIL — `cancel` is undefined.
 
 - [ ] **Step 12.4 — Implement `cancel` and thread the signal through `upload`**
@@ -1424,12 +1424,12 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
 
 - [ ] **Step 12.5 — Run tests and watch them pass**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: green (existing tests + new `cancel` tests).
 
 - [ ] **Step 12.6 — Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 
 - [ ] **Step 12.7 — Commit**
 
@@ -1467,7 +1467,7 @@ import {
   useAttachmentStore,
   useConversationStore,
   useMessageStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { Box } from 'lucide-react'
 
@@ -1522,7 +1522,7 @@ export default function WorkspaceHomePage({
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 mb-5">
           <Box className="size-6 text-primary" strokeWidth={2} />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubebox</h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubeplex</h1>
         <p className="text-sm text-muted-foreground/70">{t('subtitle')}</p>
       </div>
       <div className="w-full max-w-2xl px-4">
@@ -1648,7 +1648,7 @@ Create `frontend/packages/web/components/chat/FileChip.tsx`:
 
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import type { UploadingFile } from '@cubebox/core'
+import type { UploadingFile } from '@cubeplex/core'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
 
@@ -1766,7 +1766,7 @@ Edit `frontend/packages/web/components/chat/AttachmentChips.tsx`:
 ```tsx
 'use client'
 
-import { useAttachmentStore } from '@cubebox/core'
+import { useAttachmentStore } from '@cubeplex/core'
 import { FileChip } from './FileChip'
 
 interface Props {
@@ -1785,7 +1785,7 @@ export function AttachmentChips({ conversationId }: Props) {
     } else {
       // For completed/error states we still call remove (which goes through
       // the server DELETE for done, no-op for error).
-      const { createApiClient } = require('@cubebox/core') as typeof import('@cubebox/core')
+      const { createApiClient } = require('@cubeplex/core') as typeof import('@cubeplex/core')
       const client = createApiClient('')
       void remove(client, conversationId, tempId)
     }
@@ -1808,10 +1808,10 @@ export function AttachmentChips({ conversationId }: Props) {
 }
 ```
 
-The require trick avoids a circular import at module load. If the codebase uses ESM-only imports throughout, replace with a top-level `import { createApiClient } from '@cubebox/core'` and pull `workspaceId` from `useWorkspaceContext()` for the DELETE call (mirror the previous pattern):
+The require trick avoids a circular import at module load. If the codebase uses ESM-only imports throughout, replace with a top-level `import { createApiClient } from '@cubeplex/core'` and pull `workspaceId` from `useWorkspaceContext()` for the DELETE call (mirror the previous pattern):
 
 ```tsx
-import { createApiClient, useAttachmentStore } from '@cubebox/core'
+import { createApiClient, useAttachmentStore } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { FileChip } from './FileChip'
 
@@ -1873,7 +1873,7 @@ Create `frontend/packages/web/components/chat/MessageFileChip.tsx`:
 ```tsx
 'use client'
 
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
 
@@ -1970,7 +1970,7 @@ Replace `frontend/packages/web/components/chat/MessageAttachments.tsx`:
 'use client'
 
 import { useState, useMemo } from 'react'
-import { createApiClient } from '@cubebox/core'
+import { createApiClient } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { ImageLightbox } from './ImageLightbox'
 import { MessageFileChip } from './MessageFileChip'
@@ -2140,8 +2140,8 @@ Create `frontend/packages/web/components/panel/AttachmentPreviewView.tsx`:
 
 import { useEffect, useState } from 'react'
 import { Download, X } from 'lucide-react'
-import type { AttachmentPanelInfo } from '@cubebox/core'
-import { usePanelStore } from '@cubebox/core'
+import type { AttachmentPanelInfo } from '@cubeplex/core'
+import { usePanelStore } from '@cubeplex/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { PdfPreview } from '@/components/panel/artifact/PdfPreview'
@@ -3057,7 +3057,7 @@ Expected: format / lint / mypy / tests all green.
 
 - [ ] **Step 25.2 — Frontend full check**
 
-Run: `cd frontend && pnpm type-check && pnpm --filter @cubebox/core test && pnpm --filter web test && pnpm --filter web lint`
+Run: `cd frontend && pnpm type-check && pnpm --filter @cubeplex/core test && pnpm --filter web test && pnpm --filter web lint`
 Expected: green.
 
 - [ ] **Step 25.3 — Manual smoke (dev server)**

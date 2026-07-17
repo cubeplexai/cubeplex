@@ -6,7 +6,7 @@ covers the orchestrator's overall-result computation.
 
 import pytest
 
-from cubebox.services.provider_probe import (
+from cubeplex.services.provider_probe import (
     ProbeError,
     ProbeStep,
     _aggregate_overall,
@@ -60,7 +60,7 @@ class _StubProvider:
         return BoundModel(provider=self, spec=Model(id=id, **kwargs))  # type: ignore[arg-type]
 
     async def stream(self, model, messages, *, options=None, system_prompt="", tools=None):
-        self.calls.append({"thinking": getattr(options, "thinking", "off")})
+        self.calls.append({"reasoning": options.reasoning.model_dump()})
         if self._raise_error is not None:
             raise self._raise_error
         events = self._events
@@ -117,18 +117,23 @@ async def test_probe_reasoning_skips_when_capability_empty():
 
 @pytest.mark.asyncio
 async def test_probe_reasoning_runs_both_off_and_on():
-    from cubepi.providers.capability import CapabilityDescriptor
+    from cubepi.providers.capability import CapabilityDescriptor, ReasoningCapability
 
     cap = CapabilityDescriptor(
-        reasoning_off_payload={"extra_body": {"enable_thinking": False}},
-        reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"extra_body": {"enable_thinking": False}},
+                "on": {"extra_body": {"enable_thinking": True}},
+            },
+        ),
     )
     provider = _StubProvider(events=[type("E", (), {"type": "text_delta", "delta": "OK"})()])
     step = await probe_reasoning_toggle(provider, model_id="m", capability=cap)
     assert step.status == "pass"
     assert len(provider.calls) == 2
-    assert provider.calls[0]["thinking"] == "off"
-    assert provider.calls[1]["thinking"] == "medium"
+    assert provider.calls[0]["reasoning"]["mode"] == "off"
+    assert provider.calls[1]["reasoning"]["mode"] == "on"
+    assert provider.calls[1]["reasoning"]["effort"] == "medium"
 
 
 def test_aggregate_tools_fail_is_blocking():
@@ -369,11 +374,15 @@ def _good_event():
 
 
 def _reasoning_cap():
-    from cubepi.providers.capability import CapabilityDescriptor
+    from cubepi.providers.capability import CapabilityDescriptor, ReasoningCapability
 
     return CapabilityDescriptor(
-        reasoning_off_payload={"extra_body": {"enable_thinking": False}},
-        reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+        reasoning=ReasoningCapability(
+            mode_payloads={
+                "off": {"extra_body": {"enable_thinking": False}},
+                "on": {"extra_body": {"enable_thinking": True}},
+            },
+        ),
     )
 
 
@@ -520,7 +529,7 @@ class _UsageStub(_StubProvider):
 async def test_probe_usage_pass_when_usage_present():
     from cubepi.providers.base import Usage
 
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
 
     step = await probe_usage(
         _UsageStub(usage=Usage(input_tokens=10, output_tokens=3), events=[]),
@@ -532,7 +541,7 @@ async def test_probe_usage_pass_when_usage_present():
 
 @pytest.mark.asyncio
 async def test_probe_usage_warn_when_absent():
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
 
     step = await probe_usage(_UsageStub(usage=None, events=[]), model_id="m")
     assert step.status == "warn"

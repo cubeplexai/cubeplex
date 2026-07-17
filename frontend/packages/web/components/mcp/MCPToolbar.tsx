@@ -1,16 +1,21 @@
 'use client'
 
-import { Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { MCPConnectorFilter } from '@cubebox/core'
+import type { AdminCatalogFilter, MCPTemplateScope } from '@cubeplex/core'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 interface MCPToolbarProps {
   search: string
   onSearchChange: (value: string) => void
-  filter: MCPConnectorFilter
-  onFilterChange: (value: MCPConnectorFilter) => void
+  filter: AdminCatalogFilter
+  onFilterChange: (value: AdminCatalogFilter) => void
+  source: MCPTemplateScope | 'all'
+  onSourceChange: (value: MCPTemplateScope | 'all') => void
+  onAddCustom?: () => void
+  addCustomActive?: boolean
 }
 
 function PillGroup<T extends string>({
@@ -52,14 +57,31 @@ function PillGroup<T extends string>({
   )
 }
 
-export function MCPToolbar({ search, onSearchChange, filter, onFilterChange }: MCPToolbarProps) {
+export function MCPToolbar({
+  search,
+  onSearchChange,
+  filter,
+  onFilterChange,
+  source,
+  onSourceChange,
+  onAddCustom,
+  addCustomActive,
+}: MCPToolbarProps) {
   const t = useTranslations('mcpAdmin')
 
-  const FILTER_OPTIONS: { value: MCPConnectorFilter; label: string }[] = [
+  const FILTER_OPTIONS: { value: AdminCatalogFilter; label: string }[] = [
+    { value: 'in_use', label: t('filterInUse') },
+    { value: 'needs_attention', label: t('filterNeedsAttention') },
+    { value: 'org_credential', label: t('filterOrgCredential') },
+    { value: 'unused', label: t('filterUnused') },
     { value: 'all', label: t('filterAll') },
-    { value: 'installed', label: t('filterInstalled') },
-    { value: 'available', label: t('filterAvailable') },
-    { value: 'custom', label: t('filterCustom') },
+  ]
+
+  const SOURCE_OPTIONS: { value: MCPTemplateScope | 'all'; label: string }[] = [
+    { value: 'all', label: t('filterAllSources') },
+    { value: 'global', label: t('sourceFilterGlobal') },
+    { value: 'org', label: t('sourceFilterOrg') },
+    { value: 'workspace', label: t('sourceFilterWorkspace') },
   ]
 
   return (
@@ -68,20 +90,45 @@ export function MCPToolbar({ search, onSearchChange, filter, onFilterChange }: M
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
           type="search"
-          placeholder={t('searchPlaceholder')}
+          placeholder={t('catalogSearchPlaceholder')}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          name="mcp-admin-search"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="pl-7"
-          aria-label={t('searchAriaLabel')}
+          aria-label={t('catalogSearchAriaLabel')}
         />
       </div>
 
       <PillGroup
-        ariaLabel={t('filterByStatus')}
+        ariaLabel={t('catalogFilterAriaLabel')}
         options={FILTER_OPTIONS}
         value={filter}
         onChange={onFilterChange}
       />
+
+      <PillGroup
+        ariaLabel={t('catalogSourceAriaLabel')}
+        options={SOURCE_OPTIONS}
+        value={source}
+        onChange={onSourceChange}
+      />
+
+      {onAddCustom ? (
+        <Button
+          size="sm"
+          variant={addCustomActive ? 'default' : 'outline'}
+          onClick={onAddCustom}
+          className="ml-auto"
+          data-testid="mcp-add-custom-connector"
+        >
+          <Plus className="size-3.5" />
+          {t('addCustomConnector')}
+        </Button>
+      ) : null}
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the cubebox web UI for the IM connector backend
+**Goal:** Ship the cubeplex web UI for the IM connector backend
 (workspace admins self-serve bind a Feishu bot; org admins observe + en/disable).
 
 **Architecture:** Backend first (5 spec §8 touch points, zero migration).
@@ -13,17 +13,17 @@ components (Pill, ListItem, DetailPanel, Toolbar) → wizard infrastructure
 
 **Tech Stack:** Backend Python 3.13 / FastAPI / SQLModel async / pytest.
 Frontend Next.js 15 / React 19 / next-intl / shadcn/ui / Vitest /
-Playwright. SDK package `@cubebox/core` exporting plain fetch-based API
+Playwright. SDK package `@cubeplex/core` exporting plain fetch-based API
 helpers.
 
 ---
 
 ## Worktree
 
-Run all commands in `/home/chris/cubebox/.worktrees/feat/im-frontend`:
+Run all commands in `/home/chris/cubeplex/.worktrees/feat/im-frontend`:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/im-frontend
+cd /home/chris/cubeplex/.worktrees/feat/im-frontend
 cat .worktree.env   # confirm slot 69, backend :8069, frontend :3069
 ```
 
@@ -49,7 +49,7 @@ A chunk is done when:
 ### Task B1: Add `ImRuntimeStatus` schema + embed on `IMAccountOut`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/im_connector.py`
+- Modify: `backend/cubeplex/api/schemas/im_connector.py`
 - Test: `backend/tests/unit/test_im_schemas.py` (new)
 
 - [ ] **Step 1: Write the failing test**
@@ -59,7 +59,7 @@ A chunk is done when:
 ```python
 """ImAccountOut should embed ImRuntimeStatus with the documented fields."""
 
-from cubebox.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
+from cubeplex.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
 
 
 def test_runtime_status_required_fields() -> None:
@@ -106,7 +106,7 @@ Expected: ImportError on `ImRuntimeStatus`.
 
 - [ ] **Step 3: Add the schema + embed**
 
-Replace `backend/cubebox/api/schemas/im_connector.py` contents:
+Replace `backend/cubeplex/api/schemas/im_connector.py` contents:
 
 ```python
 """Pydantic schemas for the IM connector workspace + admin routes."""
@@ -180,7 +180,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/im_connector.py backend/tests/unit/test_im_schemas.py
+git add backend/cubeplex/api/schemas/im_connector.py backend/tests/unit/test_im_schemas.py
 git commit -m "feat(im-fe-B1): ImRuntimeStatus schema on IMAccountOut"
 ```
 
@@ -189,7 +189,7 @@ git commit -m "feat(im-fe-B1): ImRuntimeStatus schema on IMAccountOut"
 ### Task B2: `collect_runtime_aggregates` repo helper
 
 **Files:**
-- Modify: `backend/cubebox/repositories/im_connector.py` (append helpers)
+- Modify: `backend/cubeplex/repositories/im_connector.py` (append helpers)
 - Test: `backend/tests/unit/test_im_runtime_aggregates.py` (new)
 
 - [ ] **Step 1: Write the failing test**
@@ -215,12 +215,12 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubebox.repositories.im_connector import collect_runtime_aggregates
+from cubeplex.repositories.im_connector import collect_runtime_aggregates
 from tests.e2e.conftest import _build_database_url
 
 pytestmark = pytest.mark.asyncio
@@ -344,7 +344,7 @@ Expected: ImportError on `collect_runtime_aggregates`.
 
 - [ ] **Step 3: Implement the helper**
 
-Add to `backend/cubebox/repositories/im_connector.py` (append after
+Add to `backend/cubeplex/repositories/im_connector.py` (append after
 `rewind_queue_item_no_attempt_charge`):
 
 ```python
@@ -449,7 +449,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/repositories/im_connector.py backend/tests/unit/test_im_runtime_aggregates.py
+git add backend/cubeplex/repositories/im_connector.py backend/tests/unit/test_im_runtime_aggregates.py
 git commit -m "feat(im-fe-B2): collect_runtime_aggregates batched helper"
 ```
 
@@ -458,7 +458,7 @@ git commit -m "feat(im-fe-B2): collect_runtime_aggregates batched helper"
 ### Task B3: `compute_runtime` service function
 
 **Files:**
-- Modify: `backend/cubebox/services/im_connector.py` (append helper)
+- Modify: `backend/cubeplex/services/im_connector.py` (append helper)
 - Test: `backend/tests/unit/test_im_compute_runtime.py` (new)
 
 - [ ] **Step 1: Write the failing test**
@@ -471,10 +471,10 @@ git commit -m "feat(im-fe-B2): collect_runtime_aggregates batched helper"
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
-from cubebox.api.schemas.im_connector import ImRuntimeStatus
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.repositories.im_connector import _RuntimeAgg
-from cubebox.services.im_connector import compute_runtime
+from cubeplex.api.schemas.im_connector import ImRuntimeStatus
+from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.repositories.im_connector import _RuntimeAgg
+from cubeplex.services.im_connector import compute_runtime
 
 
 def _mk_account(**kw) -> IMConnectorAccount:
@@ -562,7 +562,7 @@ Expected: ImportError on `compute_runtime`.
 Add `is_open()` to `FeishuLongConnection` (if not already present) and
 the service function.
 
-In `backend/cubebox/im/feishu/long_connection.py`, after `disconnect`:
+In `backend/cubeplex/im/feishu/long_connection.py`, after `disconnect`:
 
 ```python
 def is_open(self) -> bool:
@@ -576,15 +576,15 @@ def is_open(self) -> bool:
     return fut is not None and not fut.done()
 ```
 
-In `backend/cubebox/services/im_connector.py`, append:
+In `backend/cubeplex/services/im_connector.py`, append:
 
 ```python
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from cubebox.api.schemas.im_connector import ImRuntimeStatus
-from cubebox.repositories.im_connector import _RuntimeAgg
-from cubebox.utils.time import utc_isoformat
+from cubeplex.api.schemas.im_connector import ImRuntimeStatus
+from cubeplex.repositories.im_connector import _RuntimeAgg
+from cubeplex.utils.time import utc_isoformat
 
 _WEBHOOK_FRESHNESS_WINDOW = timedelta(minutes=60)
 
@@ -640,7 +640,7 @@ Expected: 6 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/im_connector.py backend/cubebox/im/feishu/long_connection.py backend/tests/unit/test_im_compute_runtime.py
+git add backend/cubeplex/services/im_connector.py backend/cubeplex/im/feishu/long_connection.py backend/tests/unit/test_im_compute_runtime.py
 git commit -m "feat(im-fe-B3): compute_runtime service + LongConnection.is_open"
 ```
 
@@ -649,10 +649,10 @@ git commit -m "feat(im-fe-B3): compute_runtime service + LongConnection.is_open"
 ### Task B4: Wire `compute_runtime` into list endpoints
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_im.py`
-- Modify: `backend/cubebox/services/im_connector.py` (load bot_open_id helper)
-- Create: `backend/cubebox/api/routes/v1/_im_runtime.py` (shared builder)
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_im.py`
+- Modify: `backend/cubeplex/services/im_connector.py` (load bot_open_id helper)
+- Create: `backend/cubeplex/api/routes/v1/_im_runtime.py` (shared builder)
 - Test: `backend/tests/e2e/test_im_routes.py` (extend existing)
 
 - [ ] **Step 1: Write the failing test addition**
@@ -707,7 +707,7 @@ Expected: fails — endpoint returns no `runtime` field.
 
 - [ ] **Step 3: Add a private helper that loads bot_open_id by account**
 
-In `backend/cubebox/services/im_connector.py`, add method on
+In `backend/cubeplex/services/im_connector.py`, add method on
 `IMConnectorService`:
 
 ```python
@@ -734,7 +734,7 @@ async def load_bot_open_id(self, account: IMConnectorAccount) -> str | None:
 
 - [ ] **Step 4: Extract the shared list builder**
 
-Create `backend/cubebox/api/routes/v1/_im_runtime.py`:
+Create `backend/cubeplex/api/routes/v1/_im_runtime.py`:
 
 ```python
 """Shared list-output builder for ws_im + admin_im routes.
@@ -748,13 +748,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.repositories.im_connector import (
+from cubeplex.api.schemas.im_connector import IMAccountListOut, IMAccountOut
+from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.repositories.im_connector import (
     _RuntimeAgg,
     collect_runtime_aggregates,
 )
-from cubebox.services.im_connector import IMConnectorService, compute_runtime
+from cubeplex.services.im_connector import IMConnectorService, compute_runtime
 
 
 async def build_im_list_out(
@@ -798,7 +798,7 @@ async def build_im_list_out(
     return IMAccountListOut(accounts=out_rows)
 ```
 
-In `backend/cubebox/api/routes/v1/ws_im.py`, replace `list_accounts`:
+In `backend/cubeplex/api/routes/v1/ws_im.py`, replace `list_accounts`:
 
 ```python
 @router.get("/accounts", response_model=IMAccountListOut)
@@ -819,7 +819,7 @@ async def list_accounts(
     )
 ```
 
-In `backend/cubebox/api/routes/v1/admin_im.py`, replace `list_org_accounts`:
+In `backend/cubeplex/api/routes/v1/admin_im.py`, replace `list_org_accounts`:
 
 ```python
 @router.get("/accounts", response_model=IMAccountListOut)
@@ -837,7 +837,7 @@ async def list_org_accounts(
     )
 ```
 
-Add `from cubebox.api.routes.v1._im_runtime import build_im_list_out`
+Add `from cubeplex.api.routes.v1._im_runtime import build_im_list_out`
 (and any other missing imports — `Request` from FastAPI) at the top of
 both files.
 
@@ -852,7 +852,7 @@ Expected: all green.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_im.py backend/cubebox/api/routes/v1/admin_im.py backend/cubebox/services/im_connector.py backend/tests/e2e/test_im_routes.py
+git add backend/cubeplex/api/routes/v1/ws_im.py backend/cubeplex/api/routes/v1/admin_im.py backend/cubeplex/services/im_connector.py backend/tests/e2e/test_im_routes.py
 git commit -m "feat(im-fe-B4): list endpoints emit runtime block"
 ```
 
@@ -867,8 +867,8 @@ calls them. We need workspace-scope mirrors that gate on workspace admin
 role only.
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py` (add 2 endpoints)
-- Modify: `backend/cubebox/services/im_connector.py` (existing
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py` (add 2 endpoints)
+- Modify: `backend/cubeplex/services/im_connector.py` (existing
   `set_enabled` already does the work — just reuse)
 - Test: `backend/tests/e2e/test_im_routes.py` (append)
 
@@ -1014,7 +1014,7 @@ Expected: all green (test will short-circuit if hydration mocked).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_im.py backend/tests/e2e/test_im_routes.py
+git add backend/cubeplex/api/routes/v1/ws_im.py backend/tests/e2e/test_im_routes.py
 git commit -m "feat(im-fe-B5): workspace-scope disable/enable endpoints"
 ```
 
@@ -1026,9 +1026,9 @@ git commit -m "feat(im-fe-B5): workspace-scope disable/enable endpoints"
 
 ```bash
 cd backend
-uv run ruff format cubebox tests
-uv run ruff check cubebox tests
-uv run mypy cubebox
+uv run ruff format cubeplex tests
+uv run ruff check cubeplex tests
+uv run mypy cubeplex
 ```
 
 Expected: all green. Fix anything that surfaced (likely just one unused
@@ -1047,7 +1047,7 @@ Expected: ≥ 80 passed (existing 67 + new from B1/B2/B3).
 ```bash
 git status -s
 # if anything modified, commit:
-git add -A backend/cubebox backend/tests
+git add -A backend/cubeplex backend/tests
 git commit -m "chore(im-fe-B5): backend lint sweep" || echo "nothing to commit"
 ```
 
@@ -1077,8 +1077,8 @@ and add an `"im": { ... }` block alongside `"wsSettings"`):
   },
   "empty": {
     "workspace": {
-      "headline": "Connect your team's IM to cubebox",
-      "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubebox user by email.",
+      "headline": "Connect your team's IM to cubeplex",
+      "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubeplex user by email.",
       "cta": "Connect a {platform} bot",
       "comingNote": "Slack · Teams · DingTalk — coming later",
       "guideLink": "Setup guide"
@@ -1194,8 +1194,8 @@ Add the same nesting with Chinese strings. Suggested values:
   },
   "empty": {
     "workspace": {
-      "headline": "把团队 IM 接到 cubebox",
-      "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
+      "headline": "把团队 IM 接到 cubeplex",
+      "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubeplex 用户。",
       "cta": "连接一个 {platform} bot",
       "comingNote": "Slack · Teams · DingTalk — 后续支持",
       "guideLink": "查看部署指南"
@@ -1501,13 +1501,13 @@ describe('IM SDK', () => {
 
 - [ ] **Step 6: Build core + run tests**
 
-The test lives under `@cubebox/core`, which has its own vitest config
+The test lives under `@cubeplex/core`, which has its own vitest config
 (`packages/core/vitest.config.ts`). Run via the core filter:
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/core test -- --run src/api/__tests__/im.test.ts
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/core test -- --run src/api/__tests__/im.test.ts
 ```
 
 Expected: build green, 4 tests pass.
@@ -1515,7 +1515,7 @@ Expected: build green, 4 tests pass.
 - [ ] **Step 7: i18n parity precommit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/im-frontend
+cd /home/chris/cubeplex/.worktrees/feat/im-frontend
 git add frontend/packages/web/messages frontend/packages/core/src/api/im.ts frontend/packages/core/src/index.ts frontend/packages/core/src/api/__tests__/im.test.ts
 pre-commit run --files frontend/packages/web/messages/en.json frontend/packages/web/messages/zh.json
 ```
@@ -1575,7 +1575,7 @@ describe('ImAccountStatusPill', () => {
 - [ ] **Step 2: Run test (fail)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountStatusPill.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountStatusPill.test.tsx
 ```
 
 Expected: module not found.
@@ -1591,7 +1591,7 @@ import { CheckCircle2, AlertTriangle, MinusCircle, PauseCircle } from 'lucide-re
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 
-import type { ImConnectionState } from '@cubebox/core'
+import type { ImConnectionState } from '@cubeplex/core'
 
 interface Props {
   connectionState: ImConnectionState
@@ -1669,7 +1669,7 @@ export function ImAccountStatusPill({
 - [ ] **Step 4: Run test (pass)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountStatusPill.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountStatusPill.test.tsx
 ```
 
 Expected: 4 passed.
@@ -1700,7 +1700,7 @@ import userEvent from '@testing-library/user-event'
 import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { ImAccountListItem } from '@/components/im/ImAccountListItem'
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 
 const acc: ImAccount = {
   id: 'imac-1', platform: 'feishu', external_account_id: 'cli_x',
@@ -1744,7 +1744,7 @@ describe('ImAccountListItem', () => {
 - [ ] **Step 2: Verify it fails**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountListItem.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountListItem.test.tsx
 ```
 
 Expected: module not found.
@@ -1758,7 +1758,7 @@ Expected: module not found.
 
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ImAccountStatusPill } from './ImAccountStatusPill'
@@ -1832,7 +1832,7 @@ export function ImAccountListItem({
 - [ ] **Step 4: Run test (pass)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountListItem.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountListItem.test.tsx
 ```
 
 Expected: 4 passed.
@@ -1862,7 +1862,7 @@ import { render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { ImAccountDetailPanel } from '@/components/im/ImAccountDetailPanel'
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 
 const acc: ImAccount = {
   id: 'imac-1', platform: 'feishu', external_account_id: 'cli_x',
@@ -1916,7 +1916,7 @@ describe('ImAccountDetailPanel', () => {
 - [ ] **Step 2: Verify it fails**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountDetailPanel.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountDetailPanel.test.tsx
 ```
 
 Expected: module not found.
@@ -1930,7 +1930,7 @@ Expected: module not found.
 
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 
@@ -2016,7 +2016,7 @@ export function ImAccountDetailPanel({
 - [ ] **Step 4: Run tests (pass)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountDetailPanel.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountDetailPanel.test.tsx
 ```
 
 Expected: 4 passed.
@@ -2078,7 +2078,7 @@ describe('ImAccountToolbar', () => {
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountToolbar.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountToolbar.test.tsx
 ```
 
 - [ ] **Step 3: Implement**
@@ -2128,7 +2128,7 @@ in both languages.)
 - [ ] **Step 4: Pass**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImAccountToolbar.test.tsx
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImAccountToolbar.test.tsx
 ```
 
 - [ ] **Step 5: Commit**
@@ -2197,13 +2197,13 @@ describe('feishuDescriptor', () => {
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/platforms/feishu.test.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/platforms/feishu.test.ts
 ```
 
 - [ ] **Step 3: Write `platforms/types.ts`**
 
 ```typescript
-import type { ConnectFeishuAccountIn } from '@cubebox/core'
+import type { ConnectFeishuAccountIn } from '@cubeplex/core'
 import type { FC } from 'react'
 
 export type FormState = Record<string, string>
@@ -2379,7 +2379,7 @@ export const ALL_PLATFORMS: PlatformDescriptor[] = [feishuDescriptor, slackDescr
 - [ ] **Step 7: Pass test**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/platforms/feishu.test.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/platforms/feishu.test.ts
 ```
 
 Expected: 5 passed.
@@ -2452,7 +2452,7 @@ describe('classifyConnectError', () => {
 - [ ] **Step 2: Verify fail**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/useConnectMutation.test.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/useConnectMutation.test.ts
 ```
 
 - [ ] **Step 3: Implement `useConnectMutation`**
@@ -2468,7 +2468,7 @@ import {
   wsConnectImAccount,
   type ConnectFeishuAccountIn,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 // ``ApiClient`` is not re-exported from core's package index — using
 // ``ReturnType<typeof createApiClient>`` keeps the type in sync with
@@ -2530,7 +2530,7 @@ export function useConnectMutation(client: ApiClient, wsId: string) {
 - [ ] **Step 4: Pass test for `useConnectMutation`**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/useConnectMutation.test.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/useConnectMutation.test.ts
 ```
 
 Expected: 5 passed.
@@ -2760,7 +2760,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
-import { createApiClient } from '@cubebox/core'
+import { createApiClient } from '@cubeplex/core'
 import { StepPlatform } from './steps/StepPlatform'
 import { useConnectMutation, type ConnectError } from './useConnectMutation'
 import type { FormState, PlatformDescriptor } from './platforms/types'
@@ -2889,8 +2889,8 @@ import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { ImConnectWizard } from '@/components/im/ImConnectWizard'
 
-vi.mock('@cubebox/core', async () => {
-  const actual = await vi.importActual<typeof import('@cubebox/core')>('@cubebox/core')
+vi.mock('@cubeplex/core', async () => {
+  const actual = await vi.importActual<typeof import('@cubeplex/core')>('@cubeplex/core')
   return {
     ...actual,
     createApiClient: () => ({
@@ -2934,7 +2934,7 @@ describe('ImConnectWizard', () => {
 - [ ] **Step 9: Run wizard tests**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im/ImConnectWizard.test.tsx __tests__/im/platforms/feishu.test.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im/ImConnectWizard.test.tsx __tests__/im/platforms/feishu.test.ts
 ```
 
 Expected: 2 + 5 = 7 passed.
@@ -2987,7 +2987,7 @@ import {
   createApiClient,
   wsDeleteImAccount, wsDisableImAccount, wsEnableImAccount, wsListImAccounts,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -3274,11 +3274,11 @@ test('409 on duplicate app_id shows banner + form preserved', async ({ page }) =
 - [ ] **Step 5: Run unit + e2e**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run __tests__/im
+cd frontend && pnpm --filter @cubeplex/web test -- --run __tests__/im
 # backend must be up on :8069 for the page load e2e; if not running:
-# (cd ../../backend && CUBEBOX_API__RELOAD=false uv run python main.py > /tmp/im-fe-be.log 2>&1 &)
-# (cd ../.. && pnpm --filter @cubebox/web exec playwright test __tests__/e2e/im-workspace.spec.ts)
-pnpm --filter @cubebox/web exec playwright test __tests__/e2e/im-workspace.spec.ts
+# (cd ../../backend && CUBEPLEX_API__RELOAD=false uv run python main.py > /tmp/im-fe-be.log 2>&1 &)
+# (cd ../.. && pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/im-workspace.spec.ts)
+pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/im-workspace.spec.ts
 ```
 
 Expected: vitest green; playwright spec 2 passed.
@@ -3325,7 +3325,7 @@ import {
   adminDisableImAccount, adminEnableImAccount,
   adminListImAccounts, createApiClient,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { ImAccountDetailPanel } from '@/components/im/ImAccountDetailPanel'
 import { ImAccountListItem } from '@/components/im/ImAccountListItem'
@@ -3441,8 +3441,8 @@ Full cross-workspace coverage is deferred to manual smoke.)
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web test -- --run
-pnpm --filter @cubebox/web exec playwright test __tests__/e2e/im-admin.spec.ts
+cd frontend && pnpm --filter @cubeplex/web test -- --run
+pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/im-admin.spec.ts
 ```
 
 - [ ] **Step 5: Commit**
@@ -3508,9 +3508,9 @@ Run after F10. These must all pass before opening the PR.
 
 ```bash
 cd backend
-uv run ruff format cubebox tests
-uv run ruff check cubebox tests
-uv run mypy cubebox
+uv run ruff format cubeplex tests
+uv run ruff check cubeplex tests
+uv run mypy cubeplex
 uv run pytest tests/unit -k 'feishu or im_' tests/e2e/test_im_routes.py -q --no-cov
 ```
 
@@ -3518,19 +3518,19 @@ uv run pytest tests/unit -k 'feishu or im_' tests/e2e/test_im_routes.py -q --no-
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web test
-pnpm --filter @cubebox/web exec eslint . --max-warnings=0
-pnpm --filter @cubebox/web exec prettier --check .
-pnpm --filter @cubebox/web exec tsc --noEmit
-pnpm --filter @cubebox/web build
-pnpm --filter @cubebox/web exec playwright test __tests__/e2e/im-workspace.spec.ts __tests__/e2e/im-admin.spec.ts
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web test
+pnpm --filter @cubeplex/web exec eslint . --max-warnings=0
+pnpm --filter @cubeplex/web exec prettier --check .
+pnpm --filter @cubeplex/web exec tsc --noEmit
+pnpm --filter @cubeplex/web build
+pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/im-workspace.spec.ts __tests__/e2e/im-admin.spec.ts
 ```
 
 - [ ] **Pre-commit on everything**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/im-frontend
+cd /home/chris/cubeplex/.worktrees/feat/im-frontend
 pre-commit run --all-files
 ```
 
@@ -3544,8 +3544,8 @@ Start both services in the worktree (per AGENTS.md "Worktrees in brief").
 `.feishurc` provides the @moltbot credentials.
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/im-frontend/backend
-nohup env CUBEBOX_API__RELOAD=false uv run python main.py > /tmp/im-fe-be.log 2>&1 < /dev/null & disown
+cd /home/chris/cubeplex/.worktrees/feat/im-frontend/backend
+nohup env CUBEPLEX_API__RELOAD=false uv run python main.py > /tmp/im-fe-be.log 2>&1 < /dev/null & disown
 cd ../frontend
 HOSTNAME=0.0.0.0 nohup pnpm dev > /tmp/im-fe-fe.log 2>&1 < /dev/null & disown
 ```

@@ -1,7 +1,7 @@
 'use client'
 
 import { Check } from 'lucide-react'
-import type { AskQuestion } from '@cubebox/core'
+import type { AskQuestion } from '@cubeplex/core'
 
 interface AskUserResolvedCardProps {
   questions: AskQuestion[]

@@ -14,9 +14,9 @@
 
 ## File Structure
 
-- Modify `backend/cubebox/streams/run_manager.py` — control/ack channels, `_ack_waiters`, publish helpers, two supervised pub/sub listeners (reconnecting), `_handle_control`, `dispatch_steer`/`dispatch_cancel`, `start_control_listeners`/`stop_control_listeners`.
-- Modify `backend/cubebox/api/app.py` — start listeners after `RunManager` creation; stop them on shutdown after `drain`.
-- Modify `backend/cubebox/api/routes/v1/conversations.py` — `cancel_active_run` + `steer_active_run` return unified `{status, run_id}` via `dispatch_*`.
+- Modify `backend/cubeplex/streams/run_manager.py` — control/ack channels, `_ack_waiters`, publish helpers, two supervised pub/sub listeners (reconnecting), `_handle_control`, `dispatch_steer`/`dispatch_cancel`, `start_control_listeners`/`stop_control_listeners`.
+- Modify `backend/cubeplex/api/app.py` — start listeners after `RunManager` creation; stop them on shutdown after `drain`.
+- Modify `backend/cubeplex/api/routes/v1/conversations.py` — `cancel_active_run` + `steer_active_run` return unified `{status, run_id}` via `dispatch_*`.
 - Modify `frontend/packages/core/src/api/stream.ts` — `CancelRunResponse`/`SteerRunResponse` → `{status, run_id}`.
 - Modify `frontend/packages/core/src/stores/messageStore.ts` — `steer` rollback rule (only `no_active_run`); `cancelStream` records resend-safety from `status`; `send` retries once on 409.
 - Tests: `backend/tests/unit/test_run_control_pubsub.py` (dispatch + listeners + ack + reconnect, fakeredis), `backend/tests/unit/test_run_control_crossinstance.py` (two `RunManager`s, one Redis), frontend `messageStoreSteer`/`messageStoreCancel` updates.
@@ -25,7 +25,7 @@
 
 ## Task 1: RunManager — control + ack pub/sub infrastructure
 
-**Files:** Modify `backend/cubebox/streams/run_manager.py`; Test `backend/tests/unit/test_run_control_pubsub.py`.
+**Files:** Modify `backend/cubeplex/streams/run_manager.py`; Test `backend/tests/unit/test_run_control_pubsub.py`.
 
 - [ ] **Step 1: Failing tests**
 
@@ -38,7 +38,7 @@ import json
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 def _mgr(redis) -> RunManager:
@@ -296,13 +296,13 @@ Add to `RunManager` (near `cancel_run`/`steer_run`):
 
 - [ ] **Step 6: Run tests**
 
-Run: `cd backend && uv run pytest tests/unit/test_run_control_pubsub.py -v && uv run mypy cubebox/streams/run_manager.py`
+Run: `cd backend && uv run pytest tests/unit/test_run_control_pubsub.py -v && uv run mypy cubeplex/streams/run_manager.py`
 Expected: all pass; mypy Success. (The `test_dispatch_cancel_remote_times_out_to_published` test exercises the timeout→published path; `_handle_ack` test the resolve path.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_control_pubsub.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_control_pubsub.py
 git commit -m "feat(runs): Redis pub/sub control + ack infra on RunManager"
 ```
 
@@ -310,7 +310,7 @@ git commit -m "feat(runs): Redis pub/sub control + ack infra on RunManager"
 
 ## Task 2: Wire listeners to the app lifespan
 
-**Files:** Modify `backend/cubebox/api/app.py`.
+**Files:** Modify `backend/cubeplex/api/app.py`.
 
 - [ ] **Step 1: Start listeners after RunManager is created**
 
@@ -332,13 +332,13 @@ Find the shutdown path where `await run_manager.drain(timeout_seconds=...)` runs
 
 - [ ] **Step 3: Sanity-check the app boots**
 
-Run: `cd backend && uv run python -c "from cubebox.api.app import create_app; create_app(); print('ok')"`
+Run: `cd backend && uv run python -c "from cubeplex.api.app import create_app; create_app(); print('ok')"`
 Expected: `ok` (or, if `create_app` needs runtime env, grep-verify both calls are present and report).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py
+git add backend/cubeplex/api/app.py
 git commit -m "feat(runs): start/stop run-control listeners with app lifespan"
 ```
 
@@ -346,7 +346,7 @@ git commit -m "feat(runs): start/stop run-control listeners with app lifespan"
 
 ## Task 3: Endpoints — unified `{status, run_id}` via dispatch
 
-**Files:** Modify `backend/cubebox/api/routes/v1/conversations.py`.
+**Files:** Modify `backend/cubeplex/api/routes/v1/conversations.py`.
 
 - [ ] **Step 1: Rewrite `steer_active_run` body**
 
@@ -383,14 +383,14 @@ Replace the `run_manager.cancel_run(...)` tail with:
 - [ ] **Step 3: Lint + typecheck + existing E2E (local fast-path unchanged)**
 
 ```
-cd backend && uv run ruff check cubebox/api/routes/v1/conversations.py && uv run mypy cubebox/api/routes/v1/conversations.py
+cd backend && uv run ruff check cubeplex/api/routes/v1/conversations.py && uv run mypy cubeplex/api/routes/v1/conversations.py
 ```
 The existing `tests/e2e/test_steer_endpoint.py` still asserts `s.json()["steered"]` — update it to `s.json()["status"] == "steered"` (single instance → local fast-path → `steered`).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/conversations.py backend/tests/e2e/test_steer_endpoint.py
+git add backend/cubeplex/api/routes/v1/conversations.py backend/tests/e2e/test_steer_endpoint.py
 git commit -m "feat(api): unified {status,run_id} for cancel/steer via dispatch"
 ```
 
@@ -441,7 +441,7 @@ In `send`, the run-start request can 409 if a just-cancelled run is still releas
 `messageStoreSteer.test.ts`: the mock returns `{ status: 'steered', run_id: 'r1' }`; the rollback test mocks `{ status: 'no_active_run', run_id: null }`; add a `{ status: 'published' }` case asserting the bubble is **kept**.
 `messageStoreCancel.test.ts`: `cancelActiveRun` mock returns `{ status: 'cancelled', run_id: 'r1' }`.
 
-Run: `cd frontend && pnpm --filter @cubebox/core test && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core test && pnpm --filter @cubeplex/core build`
 Expected: green; `tsc` clean.
 
 - [ ] **Step 5: Commit**
@@ -467,7 +467,7 @@ import asyncio
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 def _mgr(redis):
@@ -552,7 +552,7 @@ git commit -m "test(runs): cross-instance steer + cancel-ack integration (shared
 **Files:** none.
 
 - [ ] **Step 1: Worktree E2E config** (copy if absent — see prior plan):
-`cp /home/chris/cubebox/backend/.env backend/.env; cp /home/chris/cubebox/backend/config.development.local.yaml backend/config.development.local.yaml` (the worktree script usually copies these; skip if present). Migrate the worktree test DB if needed: `CUBEBOX_DATABASE__NAME=cubebox_test_feat_run_control_pubsub ENV_FOR_DYNACONF=test uv run alembic upgrade head`.
+`cp /home/chris/cubeplex/backend/.env backend/.env; cp /home/chris/cubeplex/backend/config.development.local.yaml backend/config.development.local.yaml` (the worktree script usually copies these; skip if present). Migrate the worktree test DB if needed: `CUBEPLEX_DATABASE__NAME=cubeplex_test_feat_run_control_pubsub ENV_FOR_DYNACONF=test uv run alembic upgrade head`.
 
 - [ ] **Step 2: Backend changed-module tests**
 `cd backend && uv run pytest tests/unit/test_run_control_pubsub.py tests/unit/test_run_control_crossinstance.py -v`
@@ -561,10 +561,10 @@ git commit -m "test(runs): cross-instance steer + cancel-ack integration (shared
 `cd backend && uv run pytest tests/e2e/test_steer_endpoint.py -v` (single instance → `status == "steered"`).
 
 - [ ] **Step 4: Frontend tests**
-`cd frontend && pnpm --filter @cubebox/core test`
+`cd frontend && pnpm --filter @cubeplex/core test`
 
 - [ ] **Step 5: Full sweep**
-`cd /home/chris/cubebox/.worktrees/feat/run-control-pubsub && make check-ci`
+`cd /home/chris/cubeplex/.worktrees/feat/run-control-pubsub && make check-ci`
 
 - [ ] **Step 6:** `/finishing-a-development-branch` → PR → `/pr-codex-review-loop`.
 

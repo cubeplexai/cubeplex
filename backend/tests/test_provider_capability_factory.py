@@ -7,9 +7,9 @@ typed CapabilityDescriptor objects.
 
 from typing import Any
 
-from cubebox.llm.builder import build_provider
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_provider
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def _bare_provider_config(
@@ -41,39 +41,58 @@ def test_legacy_no_capability_keeps_cap_inactive() -> None:
 
 def test_with_capability_activates_and_carries_payload() -> None:
     """A non-empty capability dict becomes a typed descriptor and activates the path."""
-    cap = {"reasoning_off_payload": {"reasoning_effort": "none"}}
+    cap = {
+        "reasoning": {
+            "mode_payloads": {"off": {"reasoning_effort": "minimal"}},
+            "effort_path": "reasoning_effort",
+            "effort_values": {"low": "low", "medium": "medium", "high": "high"},
+            "apply_effort_when_off": False,
+        }
+    }
     cfg = _bare_provider_config("openai-completions", capability=cap)
     provider = _build(cfg)
     assert provider._cap_active is True
-    assert provider._capability.reasoning_off_payload == {"reasoning_effort": "none"}
+    assert provider._capability.reasoning is not None
+    assert provider._capability.reasoning.mode_payloads["off"] == {"reasoning_effort": "minimal"}
 
 
 def test_model_capability_overrides_are_typed() -> None:
     """Per-model override dicts become typed descriptors keyed by model id."""
     overrides = {
-        "gpt-5": {"reasoning_off_payload": {"reasoning_effort": "minimal"}},
+        "gpt-5": {
+            "reasoning": {
+                "mode_payloads": {"off": {"reasoning_effort": "minimal"}},
+            }
+        },
     }
     cfg = _bare_provider_config("openai-completions", model_capability_overrides=overrides)
     provider = _build(cfg)
     assert provider._cap_active is True
     assert "gpt-5" in provider._model_overrides
-    assert provider._model_overrides["gpt-5"].reasoning_off_payload == {
-        "reasoning_effort": "minimal"
-    }
+    reasoning = provider._model_overrides["gpt-5"].reasoning
+    assert reasoning is not None
+    assert reasoning.mode_payloads["off"] == {"reasoning_effort": "minimal"}
 
 
 def test_anthropic_receives_capability() -> None:
     """Anthropic provider gets the typed capability (no _cap_active gate on this class)."""
-    cap = {"reasoning_on_payload": {"thinking": {"type": "enabled"}}}
+    cap = {"reasoning": {"mode_payloads": {"on": {"thinking": {"type": "enabled"}}}}}
     cfg = _bare_provider_config("anthropic-messages", capability=cap)
     provider = _build(cfg)
-    assert provider._capability.reasoning_on_payload == {"thinking": {"type": "enabled"}}
+    assert provider._capability.reasoning is not None
+    assert provider._capability.reasoning.mode_payloads["on"] == {"thinking": {"type": "enabled"}}
 
 
 def test_openai_responses_activates_with_capability() -> None:
     """openai-responses provider activates the capability path when a capability is set."""
-    cap = {"reasoning_on_payload": {"reasoning": {"effort": "high"}}}
+    cap = {
+        "reasoning": {
+            "effort_path": "reasoning.effort",
+            "effort_values": {"high": "high"},
+        }
+    }
     cfg = _bare_provider_config("openai-responses", capability=cap)
     provider = _build(cfg)
     assert provider._cap_active is True
-    assert provider._capability.reasoning_on_payload == {"reasoning": {"effort": "high"}}
+    assert provider._capability.reasoning is not None
+    assert provider._capability.reasoning.effort_path == "reasoning.effort"

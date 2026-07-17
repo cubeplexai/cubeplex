@@ -2,7 +2,7 @@
     "traces": [
         {
             "traceID": "e8d4a90b148b1b36e32bddaff29779f1",
-            "rootServiceName": "cubebox",
+            "rootServiceName": "cubeplex",
             "rootTraceName": "invoke_agent",
             "startTimeUnixNano": "1781186527992507016",
             "durationMs": 2614,
@@ -16,7 +16,7 @@
                             {
                                 "key": "service.name",
                                 "value": {
-                                    "stringValue": "cubebox"
+                                    "stringValue": "cubeplex"
                                 }
                             },
                             {
@@ -41,7 +41,7 @@
                                 {
                                     "key": "service.name",
                                     "value": {
-                                        "stringValue": "cubebox"
+                                        "stringValue": "cubeplex"
                                     }
                                 },
                                 {
@@ -57,14 +57,14 @@
                 }
             ],
             "serviceStats": {
-                "cubebox": {
+                "cubeplex": {
                     "spanCount": 2
                 }
             }
         },
         {
             "traceID": "32bc55a5b4d5d2b3e1279c9abc1bf58a",
-            "rootServiceName": "cubebox",
+            "rootServiceName": "cubeplex",
             "rootTraceName": "invoke_agent",
             "startTimeUnixNano": "1781164911580894061",
             "durationMs": 8055,
@@ -78,7 +78,7 @@
                             {
                                 "key": "service.name",
                                 "value": {
-                                    "stringValue": "cubebox"
+                                    "stringValue": "cubeplex"
                                 }
                             },
                             {
@@ -103,7 +103,7 @@
                                 {
                                     "key": "service.name",
                                     "value": {
-                                        "stringValue": "cubebox"
+                                        "stringValue": "cubeplex"
                                     }
                                 },
                                 {
@@ -119,14 +119,14 @@
                 }
             ],
             "serviceStats": {
-                "cubebox": {
+                "cubeplex": {
                     "spanCount": 2
                 }
             }
         },
         {
             "traceID": "430403470ba5b4ab37e1e919be6f3876",
-            "rootServiceName": "cubebox",
+            "rootServiceName": "cubeplex",
             "rootTraceName": "invoke_agent",
             "startTimeUnixNano": "1781164823214973178",
             "durationMs": 87644,
@@ -140,7 +140,7 @@
                             {
                                 "key": "service.name",
                                 "value": {
-                                    "stringValue": "cubebox"
+                                    "stringValue": "cubeplex"
                                 }
                             },
                             {
@@ -165,7 +165,7 @@
                                 {
                                     "key": "service.name",
                                     "value": {
-                                        "stringValue": "cubebox"
+                                        "stringValue": "cubeplex"
                                     }
                                 },
                                 {
@@ -181,14 +181,14 @@
                 }
             ],
             "serviceStats": {
-                "cubebox": {
+                "cubeplex": {
                     "spanCount": 19
                 }
             }
         },
         {
             "traceID": "8222f0602ec0aa03d0837d0be3535c30",
-            "rootServiceName": "cubebox",
+            "rootServiceName": "cubeplex",
             "rootTraceName": "invoke_agent",
             "startTimeUnixNano": "1781129093991299916",
             "durationMs": 6349,
@@ -202,7 +202,7 @@
                             {
                                 "key": "service.name",
                                 "value": {
-                                    "stringValue": "cubebox"
+                                    "stringValue": "cubeplex"
                                 }
                             },
                             {
@@ -227,7 +227,7 @@
                                 {
                                     "key": "service.name",
                                     "value": {
-                                        "stringValue": "cubebox"
+                                        "stringValue": "cubeplex"
                                     }
                                 },
                                 {
@@ -243,14 +243,14 @@
                 }
             ],
             "serviceStats": {
-                "cubebox": {
+                "cubeplex": {
                     "spanCount": 2
                 }
             }
         },
         {
             "traceID": "b27ff7f74d6a240317884914b20a6edf",
-            "rootServiceName": "cubebox",
+            "rootServiceName": "cubeplex",
             "rootTraceName": "invoke_agent",
             "startTimeUnixNano": "1781128814868050161",
             "durationMs": 278060,
@@ -264,7 +264,7 @@
                             {
                                 "key": "service.name",
                                 "value": {
-                                    "stringValue": "cubebox"
+                                    "stringValue": "cubeplex"
                                 }
                             },
                             {
@@ -289,7 +289,7 @@
                                 {
                                     "key": "service.name",
                                     "value": {
-                                        "stringValue": "cubebox"
+                                        "stringValue": "cubeplex"
                                     }
                                 },
                                 {
@@ -305,7 +305,7 @@
                 }
             ],
             "serviceStats": {
-                "cubebox": {
+                "cubeplex": {
                     "spanCount": 46
                 }
             }

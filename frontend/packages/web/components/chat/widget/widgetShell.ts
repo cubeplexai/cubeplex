@@ -27,6 +27,13 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 ._skel-bar{height:.85rem;border-radius:.25rem;background:var(--muted);border:1px solid var(--border);animation:_pulse 1.6s ease-in-out infinite;}
 ._skel-bar._lg{height:1.6rem;width:35%;}
 ._skel-card{margin-top:.4rem;padding:1rem;border:1px solid var(--border);border-radius:.5rem;background:var(--muted);height:8.5rem;display:flex;align-items:center;justify-content:center;color:transparent;animation:_pulse 1.6s ease-in-out infinite;}
+/* Guard against Chart.js responsive + auto-height container feedback loop:
+   when maintainAspectRatio:false and no CSS height is set, Chart.js reads the
+   parent clientHeight (which includes the canvas itself), computes a larger
+   value, resizes, and loops. max-height caps the CSS-rendered size, which is
+   what ResizeObserver sees, so the loop converges. #root prefix wins over a
+   plain canvas{} rule in widget code without needing !important. */
+#root canvas{display:block;max-height:1200px;}
 </style></head>
 <body><div id="root"><div class="_skel" aria-hidden="true"><div class="_skel-bar _lg"></div><div class="_skel-bar" style="width:80%"></div><div class="_skel-bar" style="width:65%"></div><div class="_skel-card">·</div></div></div>
 <script>

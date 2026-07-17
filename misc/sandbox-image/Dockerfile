@@ -13,10 +13,9 @@ ENV PYTHONIOENCODING=utf-8 \
     TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv \
-    DOTNET_ROOT=/opt/dotnet \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     NODE_PATH=/usr/local/lib/node_modules \
-    PATH="/opt/dotnet:/opt/venv/bin:$PATH"
+    PATH="/opt/venv/bin:$PATH"
 
 # Configure apt mirror and install packages in a single layer
 RUN sed -i -r 's/(archive|security|ports).ubuntu.com/mirrors.cloud.aliyuncs.com/' /etc/apt/sources.list.d/ubuntu.sources \
@@ -86,12 +85,6 @@ RUN npm config set registry https://registry.npmmirror.com \
     && npm config set fetch-retry-maxtimeout 120000 \
     && npm config set fetch-timeout 600000
 
-# MiniMax docx skill uses the OpenXML SDK through .NET.
-RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 8.0 --install-dir /opt/dotnet \
-    && rm -f /tmp/dotnet-install.sh
-
 # GitHub CLI (gh) from the official apt repo — Ubuntu's own repo lags and the
 # aliyun mirror doesn't carry it. Follows the upstream install instructions.
 RUN mkdir -p -m 755 /etc/apt/keyrings \
@@ -153,6 +146,7 @@ RUN python3 -m venv /opt/venv \
         httpx \
         aiohttp \
         python-docx \
+        fonttools \
         pdf2image \
         reportlab \
         pdfplumber \
@@ -168,13 +162,22 @@ RUN python3 -m venv /opt/venv \
         playwright==1.59.0 \
     && /opt/venv/bin/playwright install --with-deps chromium
 
+# Curated premium libre fonts used by the preinstalled `pptx` (deckcraft) skill
+# and available to any deck/doc the agent builds: Inter + serif/display Latin
+# (OFL), LXGW WenKai + Smiley Sans + ZCOOL family (OFL CJK). All SIL OFL,
+# downloaded from their official upstreams by stage-fonts.sh into ./fonts/
+# (gitignored; ~54MB). Run that before building. fc-cache so LibreOffice +
+# matplotlib (the skill's overflow checker) resolve them by family name.
+COPY fonts/ /usr/share/fonts/truetype/cubeplex/
+RUN fc-cache -f
+
 # Create app directory
 RUN mkdir -p /workspace
 ENV HOME=/workspace
 
 # ---------------------------------------------------------------------------
 # Neko browser-takeover stack (started on demand, see neko/start-browser.sh).
-# Lets a user watch and take over the sandbox browser from the cubebox frontend
+# Lets a user watch and take over the sandbox browser from the cubeplex frontend
 # while the agent drives the same Chromium over CDP.
 # ---------------------------------------------------------------------------
 RUN apt-get update \
@@ -285,6 +288,6 @@ ENV PIP_PREFIX=/workspace/.python-packages \
     PYTHONPATH=/workspace/.python-packages/lib/python3.12/site-packages:/opt/venv/lib/python3.12/site-packages \
     NPM_CONFIG_PREFIX=/workspace/.npm-global \
     NODE_PATH=/workspace/.npm-global/lib/node_modules:/usr/local/lib/node_modules \
-    PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/dotnet:/opt/venv/bin:$PATH"
+    PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/venv/bin:$PATH"
 
 WORKDIR /workspace

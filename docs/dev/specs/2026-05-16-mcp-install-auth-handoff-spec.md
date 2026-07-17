@@ -108,7 +108,7 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
 ```
 
 - Shown when `connector.reason` is one of the **auth-related** tokens
-  emitted by `backend/cubebox/mcp/effective.py` —
+  emitted by `backend/cubeplex/mcp/effective.py` —
   `pending_oauth | missing_org_grant | missing_workspace_grant |
   user_needs_connection | grant_expired` — AND the caller has authority
   to create the grant at `required_grant_scope` (see §4). Do NOT key the
@@ -311,7 +311,7 @@ Notes on the admin console row:
 - `required_grant_scope` is a **single** value resolved by the backend from
   one effective policy: `workspace_state.credential_policy` when present,
   otherwise `install.default_credential_policy` (see
-  `backend/cubebox/mcp/effective.py` rules 3-4). There is no simultaneous
+  `backend/cubeplex/mcp/effective.py` rules 3-4). There is no simultaneous
   multi-scope-missing case to disambiguate — exactly one scope is required
   per (install, workspace) pair. If a workspace overrides an org-policy
   install down to `user`, the band displayed on the admin's lens row for
@@ -321,7 +321,7 @@ Notes on the admin console row:
 
 ### 5.1 Workspace admin installs a `user`-policy connector, members authorize (e.g. Linear)
 
-Install creation is admin-only (`backend/cubebox/api/routes/v1/ws_mcp.py::
+Install creation is admin-only (`backend/cubeplex/api/routes/v1/ws_mcp.py::
 create_workspace_install` depends on `require_admin`), but the `user`-policy
 means each member runs their own OAuth flow against their own grant. This is
 the two-actor flow.
@@ -444,7 +444,7 @@ input again. A successful Save also clears any `error` banner.
 
 ### 5.5 OAuth pop-up controller (front-end utility)
 
-A single TypeScript helper exported from `@cubebox/core` named
+A single TypeScript helper exported from `@cubeplex/core` named
 `runOAuthFlow`. Inputs: the `oauth/start` URL (preformed per scope) and an
 `ApiClient`. Outputs: a Promise that resolves to `'ok' | 'cancelled' | 'error'`
 plus optional `reason`.
@@ -473,7 +473,7 @@ plus optional `reason`.
       or reports cancelled. The strict per-flow `state` filter
       assumes each popup completes its own redirect chain; a
       shared window breaks that assumption.
-   2. Open a BroadcastChannel named `cubebox-mcp-oauth`.
+   2. Open a BroadcastChannel named `cubeplex-mcp-oauth`.
    3. await POST <oauth/start URL>; receive { authorize_url, state }.
       - On network/server error → child.close(); resolve('error',
         'start_failed').
@@ -543,7 +543,7 @@ fixes its contract:
   the parent ignores it).
 
 - Behavior:
-  1. Post a typed message on `BroadcastChannel('cubebox-mcp-oauth')`:
+  1. Post a typed message on `BroadcastChannel('cubeplex-mcp-oauth')`:
      `{ kind: 'mcp.oauth.return', status, install_id, reason, state }`.
   2. After a 250 ms grace period (lets the channel deliver in slow tabs),
      call `window.close()`.

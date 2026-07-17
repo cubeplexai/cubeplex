@@ -10,7 +10,7 @@ import {
   useConversationStore,
   useMemberStore,
   type WsMember,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'

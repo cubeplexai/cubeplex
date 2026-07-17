@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.credentials.dependencies import build_credential_service
-from cubebox.models.im_connector import (
+from cubeplex.credentials.dependencies import build_credential_service
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
 )
@@ -146,7 +146,7 @@ def _ev_callback_body(*, event_id: str = "ev_iA1", text_: str = "hello") -> byte
 
 
 @patch(
-    "cubebox.api.routes.v1.im_ingress._build_gate_connector",
+    "cubeplex.api.routes.v1.im_ingress._build_gate_connector",
     return_value=None,
 )
 async def test_event_callback_enqueues_run(
@@ -293,7 +293,7 @@ def _encrypt_body_for_test(plaintext: bytes, encrypt_key: str) -> str:
 
 
 @patch(
-    "cubebox.api.routes.v1.im_ingress._build_gate_connector",
+    "cubeplex.api.routes.v1.im_ingress._build_gate_connector",
     return_value=None,
 )
 async def test_encrypted_event_callback_decrypts_and_enqueues(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from cubebox.tools.registry import list_builtin_tools
+from cubeplex.tools.registry import list_builtin_tools
 
 
 def test_registry_returns_at_least_two_nodep_tools() -> None:
@@ -37,6 +37,6 @@ def test_registry_tools_have_callable_execute() -> None:
 
 def test_view_images_factory_exported() -> None:
     """make_view_images_tool must be importable from view_images_pi."""
-    from cubebox.tools.builtin.view_images import make_view_images_tool
+    from cubeplex.tools.builtin.view_images import make_view_images_tool
 
     assert callable(make_view_images_tool)

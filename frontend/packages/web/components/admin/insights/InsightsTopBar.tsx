@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { buildExportUrl } from '@cubebox/core'
+import { buildExportUrl } from '@cubeplex/core'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Download } from 'lucide-react'

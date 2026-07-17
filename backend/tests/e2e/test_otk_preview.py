@@ -9,9 +9,9 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Artifact, Conversation, Membership, Role, Workspace
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Artifact, Conversation, Membership, Role, Workspace
+from cubeplex.objectstore import get_objectstore_client
 from tests.e2e.conftest import (
     _lifespan_context,
     _login_and_attach,
@@ -129,9 +129,11 @@ class TestOTKPreviewToken:
 class TestOTKPublicDownload:
     """Tests for GET /public/artifacts/dl/{token}/{filename}."""
 
-    async def test_download_consumes_token(
+    async def test_download_allows_repeated_fetches_within_ttl(
         self, office_client: tuple[httpx.AsyncClient, str, str, str]
     ) -> None:
+        """Office Online Viewer pulls the URL more than once (probe +
+        conversion nodes), so the token must stay valid for its full TTL."""
         client, ws_id, art_id, conv_id = office_client
         # Issue token
         token_url = f"/api/v1/ws/{ws_id}/conversations/{conv_id}/artifacts/{art_id}/preview-token"
@@ -146,9 +148,10 @@ class TestOTKPublicDownload:
         assert r1.status_code == 200
         assert len(r1.content) > 0
 
-        # Second GET — token consumed, 404
+        # Second GET — token still valid within TTL, same bytes
         r2 = await client.get(path)
-        assert r2.status_code == 404
+        assert r2.status_code == 200
+        assert r2.content == r1.content
 
     async def test_invalid_token_returns_404(
         self, office_client: tuple[httpx.AsyncClient, str, str, str]

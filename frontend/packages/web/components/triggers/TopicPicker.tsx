@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Check, ChevronDown, MessageSquare, X } from 'lucide-react'
-import { createApiClient, listTopics } from '@cubebox/core'
-import type { Topic } from '@cubebox/core'
+import { createApiClient, listTopics } from '@cubeplex/core'
+import type { Topic } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 
 interface TopicPickerProps {
   /** Workspace whose topics should be listed. Required so the API client
@@ -44,6 +46,8 @@ export function TriggerTopicPicker({
   id,
   'aria-labelledby': ariaLabelledBy,
 }: TopicPickerProps) {
+  const tTopics = useTranslations('topics')
+  const emptyTitle = tTopics('newGroupChat')
   const [topics, setTopics] = useState<Topic[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -79,12 +83,13 @@ export function TriggerTopicPicker({
   }, [client])
 
   const selected = topics.find((t) => t.id === value) ?? null
+  const selectedLabel = selected ? topicDisplayTitle(selected.title, emptyTitle) : null
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
     if (!q) return topics
-    return topics.filter((t) => t.title.toLowerCase().includes(q))
-  }, [topics, filter])
+    return topics.filter((t) => topicDisplayTitle(t.title, emptyTitle).toLowerCase().includes(q))
+  }, [topics, filter, emptyTitle])
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -111,7 +116,7 @@ export function TriggerTopicPicker({
             <span
               className={cn('truncate', selected ? 'text-foreground' : 'text-muted-foreground')}
             >
-              {selected ? selected.title : placeholder}
+              {selected ? selectedLabel : placeholder}
             </span>
           </span>
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -186,7 +191,7 @@ export function TriggerTopicPicker({
                   )}
                   data-testid={`trigger-topic-option-${topic.id}`}
                 >
-                  <span className="truncate">{topic.title}</span>
+                  <span className="truncate">{topicDisplayTitle(topic.title, emptyTitle)}</span>
                   {value === topic.id && <Check className="size-3.5 shrink-0 text-primary" />}
                 </button>
               ))}

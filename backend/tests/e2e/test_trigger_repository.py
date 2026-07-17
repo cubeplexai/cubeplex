@@ -2,10 +2,10 @@
 
 import secrets
 
-from cubebox.models import User
-from cubebox.models.credential import Credential
-from cubebox.models.trigger import Trigger, TriggerEvent
-from cubebox.repositories import (
+from cubeplex.models import User
+from cubeplex.models.credential import Credential
+from cubeplex.models.trigger import Trigger, TriggerEvent
+from cubeplex.repositories import (
     OrganizationRepository,
     TriggerEventRepository,
     TriggerRepository,

@@ -1,10 +1,10 @@
-# CubeBox User Documentation Site — Implementation Plan
+# CubePlex User Documentation Site — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Create a Docusaurus 3.10 documentation site at `docs/site/` forked from cubepi's `website/`, with 24 English user-facing docs across 7 sections.
 
-**Architecture:** Copy cubepi `website/` skeleton → strip cubepi-specific content (versioned docs, compare pages, API ref generator, unused homepage components) → rewrite config/brand for CubeBox → create simplified homepage (Hero + FeatureGrid) → write all 24 markdown docs → verify build.
+**Architecture:** Copy cubepi `website/` skeleton → strip cubepi-specific content (versioned docs, compare pages, API ref generator, unused homepage components) → rewrite config/brand for CubePlex → create simplified homepage (Hero + FeatureGrid) → write all 24 markdown docs → verify build.
 
 **Tech Stack:** Docusaurus 3.10, React 19, TypeScript, pnpm, CSS Modules
 
@@ -20,83 +20,83 @@
 - [ ] **Step 1: Copy the cubepi website directory**
 
 ```bash
-cp -r /home/chris/cubepi/website /home/chris/cubebox/docs/site
+cp -r /home/chris/cubepi/website /home/chris/cubeplex/docs/site
 ```
 
 - [ ] **Step 2: Remove versioned docs, sidebars, and versions.json**
 
 ```bash
-rm -rf /home/chris/cubebox/docs/site/versioned_docs
-rm -rf /home/chris/cubebox/docs/site/versioned_sidebars
-rm -f /home/chris/cubebox/docs/site/versions.json
+rm -rf /home/chris/cubeplex/docs/site/versioned_docs
+rm -rf /home/chris/cubeplex/docs/site/versioned_sidebars
+rm -f /home/chris/cubeplex/docs/site/versions.json
 ```
 
 - [ ] **Step 3: Remove compare pages, FAQ, changelog**
 
 ```bash
-rm -rf /home/chris/cubebox/docs/site/src/pages/compare
-rm -f /home/chris/cubebox/docs/site/src/pages/faq.tsx
-rm -f /home/chris/cubebox/docs/site/src/pages/changelog.mdx
+rm -rf /home/chris/cubeplex/docs/site/src/pages/compare
+rm -f /home/chris/cubeplex/docs/site/src/pages/faq.tsx
+rm -f /home/chris/cubeplex/docs/site/src/pages/changelog.mdx
 ```
 
 - [ ] **Step 4: Remove API reference generator and docs**
 
 ```bash
-rm -rf /home/chris/cubebox/docs/site/scripts
-rm -rf /home/chris/cubebox/docs/site/docs/api
+rm -rf /home/chris/cubeplex/docs/site/scripts
+rm -rf /home/chris/cubeplex/docs/site/docs/api
 ```
 
 - [ ] **Step 5: Remove unused homepage components**
 
 ```bash
-rm -f /home/chris/cubebox/docs/site/src/components/Home/WhyTable.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/Home/WhyTable.module.css
-rm -f /home/chris/cubebox/docs/site/src/components/Home/HelloAgent.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/Home/HelloAgent.module.css
-rm -f /home/chris/cubebox/docs/site/src/components/Home/InstallMatrix.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/Home/InstallMatrix.module.css
-rm -f /home/chris/cubebox/docs/site/src/components/Home/MetaBar.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/Home/MetaBar.module.css
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/WhyTable.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/WhyTable.module.css
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/HelloAgent.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/HelloAgent.module.css
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/InstallMatrix.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/InstallMatrix.module.css
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/MetaBar.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/Home/MetaBar.module.css
 ```
 
 - [ ] **Step 6: Remove VersionAwareDocLink and Compare components**
 
 ```bash
-rm -f /home/chris/cubebox/docs/site/src/components/VersionAwareDocLink.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/VersionAwareDocLink.test.tsx
-rm -f /home/chris/cubebox/docs/site/src/components/versionAwareDocLinkConfig.ts
-rm -rf /home/chris/cubebox/docs/site/src/components/Compare
-rm -rf /home/chris/cubebox/docs/site/src/components/HomepageFeatures
-rm -f /home/chris/cubebox/docs/site/src/pages/index.module.css
+rm -f /home/chris/cubeplex/docs/site/src/components/VersionAwareDocLink.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/VersionAwareDocLink.test.tsx
+rm -f /home/chris/cubeplex/docs/site/src/components/versionAwareDocLinkConfig.ts
+rm -rf /home/chris/cubeplex/docs/site/src/components/Compare
+rm -rf /home/chris/cubeplex/docs/site/src/components/HomepageFeatures
+rm -f /home/chris/cubeplex/docs/site/src/pages/index.module.css
 ```
 
 - [ ] **Step 7: Remove all cubepi doc content**
 
 ```bash
-rm -rf /home/chris/cubebox/docs/site/docs
-mkdir -p /home/chris/cubebox/docs/site/docs
+rm -rf /home/chris/cubeplex/docs/site/docs
+mkdir -p /home/chris/cubeplex/docs/site/docs
 ```
 
 - [ ] **Step 8: Remove i18n translated docs (keep structure for later)**
 
 ```bash
-rm -rf /home/chris/cubebox/docs/site/i18n
+rm -rf /home/chris/cubeplex/docs/site/i18n
 ```
 
 - [ ] **Step 9: Remove cubepi brand images (keep fonts)**
 
 ```bash
-rm -f /home/chris/cubebox/docs/site/static/img/brand/cubepi-*
-rm -f /home/chris/cubebox/docs/site/static/img/docusaurus-social-card.jpg
-rm -f /home/chris/cubebox/docs/site/static/img/favicon.ico
-rm -f /home/chris/cubebox/docs/site/static/llms.txt
+rm -f /home/chris/cubeplex/docs/site/static/img/brand/cubepi-*
+rm -f /home/chris/cubeplex/docs/site/static/img/docusaurus-social-card.jpg
+rm -f /home/chris/cubeplex/docs/site/static/img/favicon.ico
+rm -f /home/chris/cubeplex/docs/site/static/llms.txt
 ```
 
 - [ ] **Step 10: Remove pnpm-lock.yaml (will regenerate)**
 
 ```bash
-rm -f /home/chris/cubebox/docs/site/pnpm-lock.yaml
-rm -f /home/chris/cubebox/docs/site/pnpm-workspace.yaml
+rm -f /home/chris/cubeplex/docs/site/pnpm-lock.yaml
+rm -f /home/chris/cubeplex/docs/site/pnpm-workspace.yaml
 ```
 
 - [ ] **Step 11: Commit**
@@ -108,7 +108,7 @@ git commit -m "chore(docs): copy cubepi website skeleton, strip cubepi-specific 
 
 ---
 
-## Task 2: Rewrite docusaurus.config.ts for CubeBox
+## Task 2: Rewrite docusaurus.config.ts for CubePlex
 
 **Files:**
 - Modify: `docs/site/docusaurus.config.ts`
@@ -125,7 +125,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 const classicOptions: ClassicOptions = {
   docs: {
     sidebarPath: './sidebars.ts',
-    editUrl: 'https://github.com/cubeplexai/cubebox/edit/main/docs/site/',
+    editUrl: 'https://github.com/cubeplexai/cubeplex/edit/main/docs/site/',
   },
   blog: false,
   theme: {
@@ -139,14 +139,14 @@ const classicOptions: ClassicOptions = {
 };
 
 const config: Config = {
-  title: 'CubeBox',
+  title: 'CubePlex',
   tagline: 'Your AI agent workspace — chat, automate, extend',
   favicon: 'img/favicon.ico',
 
-  url: 'https://docs.cubebox.ai',
+  url: 'https://docs.cubeplex.ai',
   baseUrl: '/',
   organizationName: 'cubeplexai',
-  projectName: 'cubebox',
+  projectName: 'cubeplex',
 
   onBrokenLinks: 'throw',
   onBrokenAnchors: 'throw',
@@ -168,8 +168,8 @@ const config: Config = {
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'Organization',
-        name: 'CubeBox',
-        url: 'https://cubebox.ai',
+        name: 'CubePlex',
+        url: 'https://cubeplex.ai',
       }),
     },
   ],
@@ -178,15 +178,15 @@ const config: Config = {
 
   themeConfig: {
     metadata: [
-      { name: 'keywords', content: 'CubeBox, AI agent, AI workspace, agent platform, chat AI, MCP tools, AI automation' },
+      { name: 'keywords', content: 'CubePlex, AI agent, AI workspace, agent platform, chat AI, MCP tools, AI automation' },
     ],
     navbar: {
-      title: 'CubeBox',
+      title: 'CubePlex',
       items: [
         { type: 'docSidebar', sidebarId: 'docs', label: 'Docs', position: 'left' },
         { type: 'localeDropdown', position: 'right' },
         {
-          href: 'https://github.com/cubeplexai/cubebox',
+          href: 'https://github.com/cubeplexai/cubeplex',
           position: 'right',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',
@@ -208,7 +208,7 @@ export default config;
 
 ```bash
 git add docs/site/docusaurus.config.ts
-git commit -m "chore(docs): rewrite docusaurus.config.ts for CubeBox"
+git commit -m "chore(docs): rewrite docusaurus.config.ts for CubePlex"
 ```
 
 ---
@@ -224,7 +224,7 @@ Replace the entire content of `docs/site/package.json` with:
 
 ```json
 {
-  "name": "cubebox-docs",
+  "name": "cubeplex-docs",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -278,7 +278,7 @@ Replace the entire content of `docs/site/package.json` with:
 
 ```bash
 git add docs/site/package.json
-git commit -m "chore(docs): rewrite package.json for CubeBox"
+git commit -m "chore(docs): rewrite package.json for CubePlex"
 ```
 
 ---
@@ -381,7 +381,7 @@ export default sidebars;
 
 ```bash
 git add docs/site/sidebars.ts
-git commit -m "chore(docs): add CubeBox sidebar config"
+git commit -m "chore(docs): add CubePlex sidebar config"
 ```
 
 ---
@@ -407,18 +407,18 @@ export default function Home(): React.ReactElement {
   const softwareJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'CubeBox',
+    name: 'CubePlex',
     description: 'Your AI agent workspace — chat, automate, extend.',
-    url: 'https://cubebox.ai',
+    url: 'https://cubeplex.ai',
     applicationCategory: 'BusinessApplication',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    author: { '@type': 'Organization', name: 'CubeBox', url: 'https://cubebox.ai' },
+    author: { '@type': 'Organization', name: 'CubePlex', url: 'https://cubeplex.ai' },
   };
 
   return (
     <Layout
       title="Your AI agent workspace"
-      description="CubeBox is an AI agent workspace — multi-model chat, skills, memory, MCP tools, and automation in one platform."
+      description="CubePlex is an AI agent workspace — multi-model chat, skills, memory, MCP tools, and automation in one platform."
     >
       <Head>
         <script type="application/ld+json">{JSON.stringify(softwareJsonLd)}</script>
@@ -451,7 +451,7 @@ git commit -m "chore(docs): simplify homepage to Hero + FeatureGrid"
 
 ---
 
-## Task 6: Rewrite Hero component for CubeBox
+## Task 6: Rewrite Hero component for CubePlex
 
 **Files:**
 - Modify: `docs/site/src/components/Home/Hero.tsx`
@@ -473,7 +473,7 @@ export default function Hero() {
   return (
     <section className={styles.hero}>
       <h1 className={styles.h1}>
-        CubeBox
+        CubePlex
         <span className={styles.h1sub}>
           {zh
             ? '你的 AI Agent 工作空间 — 对话、自动化、扩展。'
@@ -483,12 +483,12 @@ export default function Hero() {
       <p className={styles.lead}>
         {zh ? (
           <>
-            CubeBox 是一个全功能 AI agent 平台。多模型对话、技能市场、三层记忆、
+            CubePlex 是一个全功能 AI agent 平台。多模型对话、技能市场、三层记忆、
             MCP 工具集成、定时任务与 Webhook 自动化 — 一站式管理你的 AI 工作流。
           </>
         ) : (
           <>
-            CubeBox is a full-featured AI agent platform. Multi-model conversations,
+            CubePlex is a full-featured AI agent platform. Multi-model conversations,
             a skills marketplace, three-tier memory, MCP tool integration, scheduled
             tasks, and webhook automation — manage your AI workflows in one place.
           </>
@@ -498,7 +498,7 @@ export default function Hero() {
         <Link className={`${styles.cta} ${styles.ctaPrimary}`} to="/docs/getting-started/quick-start">
           {zh ? '快速开始 →' : 'Get Started →'}
         </Link>
-        <a className={`${styles.cta} ${styles.ctaGhost}`} href="https://github.com/cubeplexai/cubebox" target="_blank" rel="noopener noreferrer">
+        <a className={`${styles.cta} ${styles.ctaGhost}`} href="https://github.com/cubeplexai/cubeplex" target="_blank" rel="noopener noreferrer">
           GitHub
         </a>
       </div>
@@ -529,12 +529,12 @@ Replace the entire content of `docs/site/src/components/Home/Hero.module.css` wi
 
 ```bash
 git add docs/site/src/components/Home/Hero.tsx docs/site/src/components/Home/Hero.module.css
-git commit -m "feat(docs): CubeBox Hero component"
+git commit -m "feat(docs): CubePlex Hero component"
 ```
 
 ---
 
-## Task 7: Rewrite FeatureGrid component for CubeBox
+## Task 7: Rewrite FeatureGrid component for CubePlex
 
 **Files:**
 - Modify: `docs/site/src/components/Home/FeatureGrid.tsx`
@@ -643,7 +643,7 @@ Replace the entire content of `docs/site/src/components/Home/FeatureGrid.module.
 
 ```bash
 git add docs/site/src/components/Home/FeatureGrid.tsx docs/site/src/components/Home/FeatureGrid.module.css
-git commit -m "feat(docs): CubeBox FeatureGrid component (6 tiles)"
+git commit -m "feat(docs): CubePlex FeatureGrid component (6 tiles)"
 ```
 
 ---
@@ -674,7 +674,7 @@ if (typeof window !== 'undefined' && key) {
     autocapture: false,
     disable_session_recording: true,
   });
-  (window as any).__cubebox_posthog = posthog;
+  (window as any).__cubeplex_posthog = posthog;
 }
 
 export {};
@@ -682,7 +682,7 @@ export {};
 
 - [ ] **Step 2: Update DocFeedback to use new global name**
 
-In `docs/site/src/components/DocFeedback/index.tsx`, change the posthog global reference. Replace `(window as any).__cubepi_posthog` with `(window as any).__cubebox_posthog`.
+In `docs/site/src/components/DocFeedback/index.tsx`, change the posthog global reference. Replace `(window as any).__cubepi_posthog` with `(window as any).__cubeplex_posthog`.
 
 - [ ] **Step 3: Rewrite robots.txt**
 
@@ -692,7 +692,7 @@ Replace the entire content of `docs/site/static/robots.txt` with:
 User-agent: *
 Allow: /
 
-Sitemap: https://docs.cubebox.ai/sitemap.xml
+Sitemap: https://docs.cubeplex.ai/sitemap.xml
 
 User-agent: GPTBot
 Allow: /
@@ -707,7 +707,7 @@ User-agent: anthropic-ai
 Allow: /
 ```
 
-- [ ] **Step 4: Update _worker.js for cubebox domain**
+- [ ] **Step 4: Update _worker.js for cubeplex domain**
 
 Replace the entire content of `docs/site/static/_worker.js` with:
 
@@ -723,7 +723,7 @@ export default {
 
 ```bash
 git add docs/site/src/clientModules/posthog.ts docs/site/src/components/DocFeedback/index.tsx docs/site/static/robots.txt docs/site/static/_worker.js
-git commit -m "chore(docs): update PostHog global, robots.txt, worker for CubeBox"
+git commit -m "chore(docs): update PostHog global, robots.txt, worker for CubePlex"
 ```
 
 ---
@@ -740,24 +740,24 @@ Create `docs/site/docs/intro.mdx`:
 ```mdx
 ---
 slug: /
-title: Welcome to CubeBox
+title: Welcome to CubePlex
 ---
 
-# Welcome to CubeBox
+# Welcome to CubePlex
 
-CubeBox is an AI agent workspace — multi-model conversations, skills, memory, MCP tools, and automation in one platform.
+CubePlex is an AI agent workspace — multi-model conversations, skills, memory, MCP tools, and automation in one platform.
 ```
 
 - [ ] **Step 2: Install dependencies**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm install
+cd /home/chris/cubeplex/docs/site && pnpm install
 ```
 
 - [ ] **Step 3: Run build to verify config is valid**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 Expected: build succeeds with no errors.
@@ -785,9 +785,9 @@ git commit -m "chore(docs): install deps, verify build passes"
 - Create: `docs/site/docs/getting-started/core-concepts.md`
 - Create: `docs/site/docs/getting-started/workspace-setup.md`
 
-Write all 3 getting-started docs plus the intro page. Each doc must have frontmatter with `sidebar_position` for ordering. Content should be written from the end-user perspective, referencing the actual CubeBox UI.
+Write all 3 getting-started docs plus the intro page. Each doc must have frontmatter with `sidebar_position` for ordering. Content should be written from the end-user perspective, referencing the actual CubePlex UI.
 
-**Intro page** (`intro.mdx`): Product overview — what CubeBox is, who it's for, what you can do with it. Link to quick-start. Use MDX to include the `<Tabs>` component for deployment-mode differences where needed.
+**Intro page** (`intro.mdx`): Product overview — what CubePlex is, who it's for, what you can do with it. Link to quick-start. Use MDX to include the `<Tabs>` component for deployment-mode differences where needed.
 
 **Quick start** (`quick-start.md`): Register/login → create workspace → start first conversation → see agent response. Use `<Tabs groupId="deploy-mode">` for Cloud vs Self-hosted registration differences.
 
@@ -797,12 +797,12 @@ Write all 3 getting-started docs plus the intro page. Each doc must have frontma
 
 - [ ] **Step 1: Write all 4 docs**
 
-Write each file with complete user-facing content. Use the cubebox frontend exploration data for accuracy: workspaces are at `/(app)/w/[wsId]`, settings at `/(app)/w/[wsId]/settings`, etc.
+Write each file with complete user-facing content. Use the cubeplex frontend exploration data for accuracy: workspaces are at `/(app)/w/[wsId]`, settings at `/(app)/w/[wsId]/settings`, etc.
 
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -834,7 +834,7 @@ git commit -m "docs: add Getting Started section (intro, quick-start, core-conce
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -863,7 +863,7 @@ git commit -m "docs: add Conversations guide (basics, attachments, artifacts, mo
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -892,7 +892,7 @@ git commit -m "docs: add Skills guide (overview, discover-and-install, managing-
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -921,7 +921,7 @@ git commit -m "docs: add Memory guide (overview, using-memory, managing-memory)"
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -947,7 +947,7 @@ git commit -m "docs: add MCP Tools guide (overview, installing-connectors, using
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -985,7 +985,7 @@ git commit -m "docs: add Automation guide (scheduled-tasks, event-triggers)"
 - [ ] **Step 2: Verify build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm build
 ```
 
 - [ ] **Step 3: Commit**
@@ -1004,7 +1004,7 @@ git commit -m "docs: add Administration section (models, members, mcp-connectors
 - [ ] **Step 1: Clean build**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm clear && pnpm build
+cd /home/chris/cubeplex/docs/site && pnpm clear && pnpm build
 ```
 
 Expected: build succeeds, no broken links, no warnings.
@@ -1012,7 +1012,7 @@ Expected: build succeeds, no broken links, no warnings.
 - [ ] **Step 2: Start dev server and verify in browser**
 
 ```bash
-cd /home/chris/cubebox/docs/site && pnpm start -- --host 0.0.0.0
+cd /home/chris/cubeplex/docs/site && pnpm start -- --host 0.0.0.0
 ```
 
 Verify in browser:

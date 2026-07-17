@@ -10,7 +10,7 @@
 
 **Spec:** `docs/dev/specs/2026-06-15-sandbox-preview-panel-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview`  
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview`
 **Ports:** backend 8077, frontend 3077
 
 ---
@@ -27,12 +27,12 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `backend/cubebox/api/routes/v1/ws_sandbox.py` | Modify | Add files, content, download, terminal, preview-token endpoints |
-| `backend/cubebox/api/routes/v1/sandbox_share.py` | Create | Public nonce-gated sandbox file download (proxy) |
-| `backend/cubebox/api/routes/v1/__init__.py` | Modify | Export `sandbox_share` |
-| `backend/cubebox/api/app.py` | Modify | Register `sandbox_share.router`, gate sandbox file endpoints behind `sandbox.enabled` |
-| `backend/cubebox/sandbox/base.py` | Modify | Add `TERMINAL_PORT`, `start_terminal()`, `get_terminal_endpoint()` |
-| `backend/cubebox/sandbox/opensandbox.py` | Modify | Implement `get_terminal_endpoint()` |
+| `backend/cubeplex/api/routes/v1/ws_sandbox.py` | Modify | Add files, content, download, terminal, preview-token endpoints |
+| `backend/cubeplex/api/routes/v1/sandbox_share.py` | Create | Public nonce-gated sandbox file download (proxy) |
+| `backend/cubeplex/api/routes/v1/__init__.py` | Modify | Export `sandbox_share` |
+| `backend/cubeplex/api/app.py` | Modify | Register `sandbox_share.router`, gate sandbox file endpoints behind `sandbox.enabled` |
+| `backend/cubeplex/sandbox/base.py` | Modify | Add `TERMINAL_PORT`, `start_terminal()`, `get_terminal_endpoint()` |
+| `backend/cubeplex/sandbox/opensandbox.py` | Modify | Implement `get_terminal_endpoint()` |
 
 ### Frontend — new/modified
 
@@ -91,7 +91,7 @@ Note: After merging, a new sandbox image must be built and pushed to the registr
 ## Task 1: Backend — sandbox file listing endpoint
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_sandbox.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_sandbox.py`
 
 - [ ] **Step 1: Add file listing endpoint to ws_sandbox.py**
 
@@ -106,8 +106,8 @@ from fastapi import Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel
 
-from cubebox.sandbox import SandboxError
-from cubebox.sandbox.manager import get_sandbox_manager
+from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox.manager import get_sandbox_manager
 
 
 class SandboxFileEntry(BaseModel):
@@ -174,7 +174,7 @@ async def list_sandbox_files(
 - [ ] **Step 2: Verify endpoint manually**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview/backend
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview/backend
 uv run python main.py
 # In another terminal, call the endpoint with curl (need auth cookie)
 ```
@@ -182,7 +182,7 @@ uv run python main.py
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_sandbox.py
+git add backend/cubeplex/api/routes/v1/ws_sandbox.py
 git commit -m "feat(sandbox): add file listing endpoint"
 ```
 
@@ -191,7 +191,7 @@ git commit -m "feat(sandbox): add file listing endpoint"
 ## Task 2: Backend — file content and download endpoints
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_sandbox.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_sandbox.py`
 
 - [ ] **Step 1: Add file content endpoint**
 
@@ -289,7 +289,7 @@ async def download_sandbox_file(
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_sandbox.py
+git add backend/cubeplex/api/routes/v1/ws_sandbox.py
 git commit -m "feat(sandbox): add file content and download endpoints"
 ```
 
@@ -298,13 +298,13 @@ git commit -m "feat(sandbox): add file content and download endpoints"
 ## Task 3: Backend — terminal endpoint
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/base.py`
-- Modify: `backend/cubebox/sandbox/opensandbox.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_sandbox.py`
+- Modify: `backend/cubeplex/sandbox/base.py`
+- Modify: `backend/cubeplex/sandbox/opensandbox.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_sandbox.py`
 
 - [ ] **Step 1: Add terminal support to Sandbox base class**
 
-In `backend/cubebox/sandbox/base.py`, add after `BROWSER_PORT`:
+In `backend/cubeplex/sandbox/base.py`, add after `BROWSER_PORT`:
 
 ```python
 TERMINAL_PORT = 7681
@@ -332,7 +332,7 @@ async def get_terminal_endpoint(
 
 - [ ] **Step 2: Implement get_terminal_endpoint in OpenSandbox**
 
-In `backend/cubebox/sandbox/opensandbox.py`, add after `get_browser_endpoint`:
+In `backend/cubeplex/sandbox/opensandbox.py`, add after `get_browser_endpoint`:
 
 ```python
 async def get_terminal_endpoint(
@@ -404,8 +404,8 @@ async def get_terminal(
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/base.py backend/cubebox/sandbox/opensandbox.py \
-      backend/cubebox/api/routes/v1/ws_sandbox.py
+git add backend/cubeplex/sandbox/base.py backend/cubeplex/sandbox/opensandbox.py \
+      backend/cubeplex/api/routes/v1/ws_sandbox.py
 git commit -m "feat(sandbox): add terminal endpoint with ttyd support"
 ```
 
@@ -414,10 +414,10 @@ git commit -m "feat(sandbox): add terminal endpoint with ttyd support"
 ## Task 4: Backend — Office preview-token + public proxy download
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_sandbox.py`
-- Create: `backend/cubebox/api/routes/v1/sandbox_share.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_sandbox.py`
+- Create: `backend/cubeplex/api/routes/v1/sandbox_share.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Add preview-token endpoint to ws_sandbox.py**
 
@@ -428,7 +428,7 @@ from urllib.parse import quote
 import orjson
 from fastapi import Request
 
-from cubebox.cache import RedisHandle, redis_dep
+from cubeplex.cache import RedisHandle, redis_dep
 
 SANDBOX_OTK_TTL_SECONDS = 300  # 5 minutes
 OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
@@ -477,7 +477,7 @@ async def create_sandbox_preview_token(
     key = f"{rh.key_prefix}:sandbox_otk:{nonce}"
     await rh.client.set(key, payload, ex=SANDBOX_OTK_TTL_SECONDS)
 
-    from cubebox.config import config
+    from cubeplex.config import config
 
     public_url = config.get("api.public_url", "")
     base = (
@@ -497,7 +497,7 @@ async def create_sandbox_preview_token(
 
 - [ ] **Step 2: Create sandbox_share.py with public proxy download**
 
-Create `backend/cubebox/api/routes/v1/sandbox_share.py`:
+Create `backend/cubeplex/api/routes/v1/sandbox_share.py`:
 
 ```python
 """Public sandbox file download — nonce-gated, no auth.
@@ -519,9 +519,9 @@ from loguru import logger
 import orjson
 from opensandbox.config import ConnectionConfig
 
-from cubebox.cache import RedisHandle, redis_dep
-from cubebox.sandbox.manager import get_sandbox_manager
-from cubebox.sandbox.opensandbox import OpenSandbox
+from cubeplex.cache import RedisHandle, redis_dep
+from cubeplex.sandbox.manager import get_sandbox_manager
+from cubeplex.sandbox.opensandbox import OpenSandbox
 
 router = APIRouter(prefix="/public/sandbox", tags=["sandbox-share"])
 
@@ -573,10 +573,10 @@ async def sandbox_file_download(
 
 - [ ] **Step 3: Register sandbox_share in __init__.py and app.py**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add to the import block:
+In `backend/cubeplex/api/routes/v1/__init__.py`, add to the import block:
 
 ```python
-from cubebox.api.routes.v1 import (
+from cubeplex.api.routes.v1 import (
     # ... existing imports ...
     sandbox_share,  # <-- add
 )
@@ -588,16 +588,16 @@ And to `__all__`:
 "sandbox_share",
 ```
 
-In `backend/cubebox/api/app.py`, near the existing `artifact_share` registration (around line 544):
+In `backend/cubeplex/api/app.py`, near the existing `artifact_share` registration (around line 544):
 
 ```python
-from cubebox.api.routes.v1 import sandbox_share
+from cubeplex.api.routes.v1 import sandbox_share
 app.include_router(sandbox_share.router, prefix="/api/v1")
 ```
 
 - [ ] **Step 4: Gate the new sandbox endpoints behind sandbox.enabled**
 
-In `backend/cubebox/api/app.py`, the existing `ws_sandbox.router` is mounted **unconditionally** (line 563) because it only has `/status`. Keep it unconditional — `SandboxStatusCard` on the workspace `/sandbox` page calls `/status` regardless of the `sandboxEnabled` flag, and the endpoint only touches `UserSandboxRepository` (a plain DB query, no SandboxManager needed).
+In `backend/cubeplex/api/app.py`, the existing `ws_sandbox.router` is mounted **unconditionally** (line 563) because it only has `/status`. Keep it unconditional — `SandboxStatusCard` on the workspace `/sandbox` page calls `/status` regardless of the `sandboxEnabled` flag, and the endpoint only touches `UserSandboxRepository` (a plain DB query, no SandboxManager needed).
 
 Add the new `sandbox_share.router` inside the `sandbox.enabled` gate alongside `ws_browser.router` (around line 582):
 
@@ -612,10 +612,10 @@ The new file/terminal/preview-token endpoints live on the same `ws_sandbox.route
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_sandbox.py \
-      backend/cubebox/api/routes/v1/sandbox_share.py \
-      backend/cubebox/api/routes/v1/__init__.py \
-      backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/ws_sandbox.py \
+      backend/cubeplex/api/routes/v1/sandbox_share.py \
+      backend/cubeplex/api/routes/v1/__init__.py \
+      backend/cubeplex/api/app.py
 git commit -m "feat(sandbox): Office preview-token + public proxy download"
 ```
 
@@ -742,7 +742,7 @@ Create `frontend/packages/web/components/panel/sandbox/SandboxPanel.tsx`:
 
 import { useState } from 'react'
 import { FolderOpen, Globe, TerminalSquare } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 
 import { PanelHeader } from '@/components/panel/PanelHeader'
 import { BrowserView } from '@/components/panel/BrowserView'
@@ -851,7 +851,7 @@ export function SandboxTerminalView({ workspaceId }: SandboxTerminalViewProps) {
 Start the frontend dev server and confirm the sandbox panel opens with three tabs, and switching tabs works:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview/frontend
 source ../.worktree.env && pnpm dev
 ```
 
@@ -1672,7 +1672,7 @@ Task 5 already renamed `openBrowser` → `openSandbox` in `panelStore.ts` and `A
 - [ ] **Step 1: Run TypeScript type-check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview/frontend
 pnpm tsc --noEmit
 ```
 
@@ -1681,9 +1681,9 @@ Fix any type errors.
 - [ ] **Step 2: Run mypy on backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview/backend
-uv run mypy cubebox/api/routes/v1/ws_sandbox.py cubebox/api/routes/v1/sandbox_share.py \
-    cubebox/sandbox/base.py cubebox/sandbox/opensandbox.py
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview/backend
+uv run mypy cubeplex/api/routes/v1/ws_sandbox.py cubeplex/api/routes/v1/sandbox_share.py \
+    cubeplex/sandbox/base.py cubeplex/sandbox/opensandbox.py
 ```
 
 Fix any type errors.
@@ -1691,7 +1691,7 @@ Fix any type errors.
 - [ ] **Step 3: Run eslint**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2025-06-15-sandbox-preview/frontend
+cd /home/chris/cubeplex/.worktrees/feat/2025-06-15-sandbox-preview/frontend
 pnpm lint
 ```
 

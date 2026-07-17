@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cubebox.llm.snapshot_schema import ModelPresetsConfig
+from cubeplex.llm.snapshot_schema import ModelPresetsConfig
 
 
 def _tiers(**over):

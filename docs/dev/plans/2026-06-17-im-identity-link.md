@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let IM users (Discord/Feishu) manually link their IM identity to a cubebox account via a `/link email` command + browser confirmation.
+**Goal:** Let IM users (Discord/Feishu) manually link their IM identity to a cubeplex account via a `/link email` command + browser confirmation.
 
 **Architecture:** The IM bot generates a signed JWT (10-min TTL) containing the IM user ID and email, replies with a confirmation URL. The frontend page calls an authenticated backend endpoint that verifies the email matches the logged-in user, checks workspace membership, and upserts the `IMIdentityLink` row.
 
@@ -15,7 +15,7 @@
 ### Task 1: Token Sign/Verify Module
 
 **Files:**
-- Create: `backend/cubebox/im/link.py`
+- Create: `backend/cubeplex/im/link.py`
 - Test: `backend/tests/unit/im/test_link_token.py`
 
 - [ ] **Step 1: Write tests for sign and verify**
@@ -30,7 +30,7 @@ import time
 
 import pytest
 
-from cubebox.im.link import LinkClaims, sign_link_token, verify_link_token
+from cubeplex.im.link import LinkClaims, sign_link_token, verify_link_token
 
 
 _SECRET = "test-secret-for-link-tokens"
@@ -86,7 +86,7 @@ class TestSignLinkToken:
                 "act": "imca_1",
                 "ws": "ws_1",
                 "plt": "discord",
-                "iss": "cubebox:im-link",
+                "iss": "cubeplex:im-link",
                 "exp": int(time.time()) - 10,
                 "iat": int(time.time()) - 700,
             },
@@ -100,17 +100,17 @@ class TestSignLinkToken:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/unit/im/test_link_token.py -v`
-Expected: FAIL — `cubebox.im.link` does not exist.
+Expected: FAIL — `cubeplex.im.link` does not exist.
 
 - [ ] **Step 3: Implement sign and verify**
 
 ```python
-# backend/cubebox/im/link.py
+# backend/cubeplex/im/link.py
 """JWT token for IM identity linking.
 
 The IM /link command signs a short-lived token encoding the sender's IM
 identity and their claimed email. The browser confirmation endpoint
-decodes it and checks the email against the logged-in cubebox user.
+decodes it and checks the email against the logged-in cubeplex user.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 
-_ISS = "cubebox:im-link"
+_ISS = "cubeplex:im-link"
 _TTL = timedelta(minutes=10)
 
 
@@ -183,7 +183,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/link.py backend/tests/unit/im/test_link_token.py
+git add backend/cubeplex/im/link.py backend/tests/unit/im/test_link_token.py
 git commit -m "feat(im): add JWT sign/verify for identity link tokens"
 ```
 
@@ -192,13 +192,13 @@ git commit -m "feat(im): add JWT sign/verify for identity link tokens"
 ### Task 2: Confirmation Endpoint
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/im_link.py`
-- Modify: `backend/cubebox/api/app.py` (add `include_router`)
+- Create: `backend/cubeplex/api/routes/v1/im_link.py`
+- Modify: `backend/cubeplex/api/app.py` (add `include_router`)
 - Test: `backend/tests/unit/im/test_im_link_confirm.py`
 
 **Context:**
 - Route: `POST /api/v1/im/link/confirm` — authenticated, workspace-neutral
-- Uses `current_active_user` dependency from `cubebox.auth.dependencies`
+- Uses `current_active_user` dependency from `cubeplex.auth.dependencies`
 - Upserts `IMIdentityLink` (unique on `account_id + im_user_id`)
 - Returns JSON with outcome + message
 
@@ -217,9 +217,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from cubebox.api.routes.v1.im_link import router
-from cubebox.im.link import sign_link_token
-from cubebox.models.user import User
+from cubeplex.api.routes.v1.im_link import router
+from cubeplex.im.link import sign_link_token
+from cubeplex.models.user import User
 
 _SECRET = "test-jwt-secret"
 
@@ -241,7 +241,7 @@ def _make_app(user: User | None = None) -> FastAPI:
     app.include_router(router, prefix="/api/v1")
 
     if user is not None:
-        from cubebox.auth.dependencies import current_active_user
+        from cubeplex.auth.dependencies import current_active_user
 
         app.dependency_overrides[current_active_user] = lambda: user
 
@@ -270,7 +270,7 @@ async def test_email_mismatch_rejected() -> None:
     user = _make_user(email="other@example.com")
     app = _make_app(user)
     token = _sign(email="chris@example.com")
-    with patch("cubebox.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET):
+    with patch("cubeplex.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as ac:
@@ -285,9 +285,9 @@ async def test_not_workspace_member_rejected() -> None:
     app = _make_app(user)
     token = _sign(email="chris@example.com")
     with (
-        patch("cubebox.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET),
+        patch("cubeplex.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET),
         patch(
-            "cubebox.api.routes.v1.im_link._check_membership",
+            "cubeplex.api.routes.v1.im_link._check_membership",
             new_callable=AsyncMock,
             return_value=False,
         ),
@@ -306,14 +306,14 @@ async def test_success_creates_link() -> None:
     app = _make_app(user)
     token = _sign(email="chris@example.com")
     with (
-        patch("cubebox.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET),
+        patch("cubeplex.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET),
         patch(
-            "cubebox.api.routes.v1.im_link._check_membership",
+            "cubeplex.api.routes.v1.im_link._check_membership",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "cubebox.api.routes.v1.im_link._upsert_identity_link",
+            "cubeplex.api.routes.v1.im_link._upsert_identity_link",
             new_callable=AsyncMock,
         ) as mock_upsert,
     ):
@@ -330,7 +330,7 @@ async def test_success_creates_link() -> None:
 async def test_invalid_token_rejected() -> None:
     user = _make_user()
     app = _make_app(user)
-    with patch("cubebox.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET):
+    with patch("cubeplex.api.routes.v1.im_link._get_jwt_secret", return_value=_SECRET):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as ac:
@@ -346,7 +346,7 @@ Expected: FAIL — module not found.
 - [ ] **Step 3: Implement the endpoint**
 
 ```python
-# backend/cubebox/api/routes/v1/im_link.py
+# backend/cubeplex/api/routes/v1/im_link.py
 """IM identity link confirmation endpoint.
 
 Workspace-neutral, authenticated. The workspace comes from the JWT
@@ -364,12 +364,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.dependencies import current_active_user
-from cubebox.db.session import get_session
-from cubebox.im.link import LinkClaims, verify_link_token
-from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
-from cubebox.models.membership import Membership
-from cubebox.models.user import User
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.db.session import get_session
+from cubeplex.im.link import LinkClaims, verify_link_token
+from cubeplex.models.im_connector import IMConnectorAccount, IMIdentityLink
+from cubeplex.models.membership import Membership
+from cubeplex.models.user import User
 
 router = APIRouter(prefix="/im/link", tags=["im-link"])
 
@@ -385,7 +385,7 @@ class _ConfirmResult(BaseModel):
 
 
 def _get_jwt_secret() -> str:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     return str(config.get("auth.jwt_secret", "CHANGE_ME"))
 
@@ -481,16 +481,16 @@ async def confirm_im_link(
 
 - [ ] **Step 4: Register the router in app.py**
 
-In `backend/cubebox/api/app.py`, find the IM router registration block (around line 542–547):
+In `backend/cubeplex/api/app.py`, find the IM router registration block (around line 542–547):
 
 ```python
-    from cubebox.api.routes.v1 import admin_im, artifact_share, im_ingress, ws_im
+    from cubeplex.api.routes.v1 import admin_im, artifact_share, im_ingress, ws_im
 ```
 
 Change to:
 
 ```python
-    from cubebox.api.routes.v1 import admin_im, artifact_share, im_ingress, im_link, ws_im
+    from cubeplex.api.routes.v1 import admin_im, artifact_share, im_ingress, im_link, ws_im
 ```
 
 And after line 547 (`app.include_router(admin_im.router, prefix="/api/v1")`), add:
@@ -507,7 +507,7 @@ Expected: 4 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/im_link.py backend/cubebox/api/app.py \
+git add backend/cubeplex/api/routes/v1/im_link.py backend/cubeplex/api/app.py \
        backend/tests/unit/im/test_im_link_confirm.py
 git commit -m "feat(im): add POST /im/link/confirm endpoint for identity binding"
 ```
@@ -517,7 +517,7 @@ git commit -m "feat(im): add POST /im/link/confirm endpoint for identity binding
 ### Task 3: Discord `/link` Slash Command
 
 **Files:**
-- Modify: `backend/cubebox/im/discord/commands.py`
+- Modify: `backend/cubeplex/im/discord/commands.py`
 - Test: `backend/tests/unit/im/discord/test_link_command.py`
 
 **Context:**
@@ -538,7 +538,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubebox.im.discord.commands import _initiate_link
+from cubeplex.im.discord.commands import _initiate_link
 
 
 @pytest.mark.anyio
@@ -548,13 +548,13 @@ async def test_link_generates_token_and_replies_ephemeral() -> None:
     interaction.response.send_message = AsyncMock()
 
     bot = MagicMock()
-    bot._cubebox_account_id = "imca_abc"
-    bot._cubebox_workspace_id = "ws_xyz"
+    bot._cubeplex_account_id = "imca_abc"
+    bot._cubeplex_workspace_id = "ws_xyz"
 
     with (
-        patch("cubebox.im.discord.commands._get_jwt_secret", return_value="test-secret"),
+        patch("cubeplex.im.discord.commands._get_jwt_secret", return_value="test-secret"),
         patch(
-            "cubebox.im.discord.commands._get_frontend_base_url",
+            "cubeplex.im.discord.commands._get_frontend_base_url",
             return_value="http://localhost:3000",
         ),
     ):
@@ -573,8 +573,8 @@ async def test_link_missing_account_id_replies_error() -> None:
     interaction.response.send_message = AsyncMock()
 
     bot = MagicMock()
-    bot._cubebox_account_id = None
-    bot._cubebox_workspace_id = None
+    bot._cubeplex_account_id = None
+    bot._cubeplex_workspace_id = None
 
     await _initiate_link(interaction, bot, email="a@b.com")
 
@@ -592,7 +592,7 @@ Expected: FAIL — `_initiate_link` not found.
 
 - [ ] **Step 3: Implement the /link command**
 
-Add to `backend/cubebox/im/discord/commands.py`. After the existing imports, add:
+Add to `backend/cubeplex/im/discord/commands.py`. After the existing imports, add:
 
 ```python
 from loguru import logger
@@ -601,8 +601,8 @@ from loguru import logger
 Inside `register_commands()`, after the `cmd_reset` registration (before `bot.tree.sync()`), add:
 
 ```python
-    @bot.tree.command(name="link", description="Link your Discord account to cubebox")
-    @discord.app_commands.describe(email="Your cubebox account email")
+    @bot.tree.command(name="link", description="Link your Discord account to cubeplex")
+    @discord.app_commands.describe(email="Your cubeplex account email")
     async def cmd_link(interaction: discord.Interaction, email: str) -> None:
         await _initiate_link(interaction, bot, email=email)
 ```
@@ -611,13 +611,13 @@ Add the helper functions at module level (after `_reset_conversation`):
 
 ```python
 def _get_jwt_secret() -> str:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     return str(config.get("auth.jwt_secret", "CHANGE_ME"))
 
 
 def _get_frontend_base_url() -> str:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     return str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
 
@@ -629,13 +629,13 @@ async def _initiate_link(
     email: str,
 ) -> None:
     """Generate a link token and reply with the confirmation URL."""
-    account_id = getattr(bot, "_cubebox_account_id", None)
-    workspace_id = getattr(bot, "_cubebox_workspace_id", None)
+    account_id = getattr(bot, "_cubeplex_account_id", None)
+    workspace_id = getattr(bot, "_cubeplex_workspace_id", None)
     if not account_id or not workspace_id:
         await interaction.response.send_message("内部错误。", ephemeral=True)
         return
 
-    from cubebox.im.link import sign_link_token
+    from cubeplex.im.link import sign_link_token
 
     sender_ref = str(interaction.user.id)
     try:
@@ -660,17 +660,17 @@ async def _initiate_link(
     )
 ```
 
-- [ ] **Step 4: Ensure `_cubebox_workspace_id` is set on the bot**
+- [ ] **Step 4: Ensure `_cubeplex_workspace_id` is set on the bot**
 
-Read `backend/cubebox/im/discord/gateway.py` to check if `_cubebox_workspace_id` is already set. If not, add it alongside `_cubebox_account_id` in the gateway initialization. The workspace_id comes from the `IMConnectorAccount.workspace_id`.
+Read `backend/cubeplex/im/discord/gateway.py` to check if `_cubeplex_workspace_id` is already set. If not, add it alongside `_cubeplex_account_id` in the gateway initialization. The workspace_id comes from the `IMConnectorAccount.workspace_id`.
 
-In `gateway.py`, find where `bot._cubebox_account_id` is set. Add:
+In `gateway.py`, find where `bot._cubeplex_account_id` is set. Add:
 
 ```python
-bot._cubebox_workspace_id = account.workspace_id
+bot._cubeplex_workspace_id = account.workspace_id
 ```
 
-right after the `_cubebox_account_id` assignment.
+right after the `_cubeplex_account_id` assignment.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -680,7 +680,7 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/discord/commands.py backend/cubebox/im/discord/gateway.py \
+git add backend/cubeplex/im/discord/commands.py backend/cubeplex/im/discord/gateway.py \
        backend/tests/unit/im/discord/test_link_command.py
 git commit -m "feat(im-discord): add /link slash command for identity binding"
 ```
@@ -690,7 +690,7 @@ git commit -m "feat(im-discord): add /link slash command for identity binding"
 ### Task 4: Feishu `/link` Command Interception
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/im_ingress.py`
+- Modify: `backend/cubeplex/api/routes/v1/im_ingress.py`
 - Test: `backend/tests/unit/im/test_feishu_link_intercept.py`
 
 **Context:**
@@ -711,7 +711,7 @@ import re
 
 import pytest
 
-from cubebox.api.routes.v1.im_ingress import _parse_link_command
+from cubeplex.api.routes.v1.im_ingress import _parse_link_command
 
 
 class TestParseLinkCommand:
@@ -744,7 +744,7 @@ Expected: FAIL — `_parse_link_command` not found.
 
 - [ ] **Step 3: Implement the link command parser and interception**
 
-Add the parser function to `backend/cubebox/api/routes/v1/im_ingress.py` (at module level, after imports):
+Add the parser function to `backend/cubeplex/api/routes/v1/im_ingress.py` (at module level, after imports):
 
 ```python
 import re as _re
@@ -803,8 +803,8 @@ async def _handle_feishu_link_command(
     connector: Any,
 ) -> None:
     """Generate an identity-link token and reply to the Feishu chat."""
-    from cubebox.config import config
-    from cubebox.im.link import sign_link_token
+    from cubeplex.config import config
+    from cubeplex.im.link import sign_link_token
 
     secret = str(config.get("auth.jwt_secret", "CHANGE_ME"))
     sender_ref = event.sender_ref or event.sender_open_id or ""
@@ -844,13 +844,13 @@ Expected: 5 passed.
 
 - [ ] **Step 5: Run mypy on modified files**
 
-Run: `cd backend && uv run mypy cubebox/api/routes/v1/im_ingress.py cubebox/im/link.py`
+Run: `cd backend && uv run mypy cubeplex/api/routes/v1/im_ingress.py cubeplex/im/link.py`
 Expected: no errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/im_ingress.py \
+git add backend/cubeplex/api/routes/v1/im_ingress.py \
        backend/tests/unit/im/test_feishu_link_intercept.py
 git commit -m "feat(im-feishu): intercept /link and 绑定 commands for identity binding"
 ```
@@ -910,12 +910,12 @@ In `frontend/packages/web/messages/en.json`, inside the `"im"` object, add:
     "link": {
       "title": "Link IM Account",
       "verifying": "Verifying your identity link...",
-      "success": "Your {platform} account has been linked to cubebox successfully.",
+      "success": "Your {platform} account has been linked to cubeplex successfully.",
       "invalidToken": "This link is invalid or has expired. Please run /link again in your IM.",
       "emailMismatch": "Please log in with the email specified in the /link command.",
       "notMember": "You are not a member of this workspace. Ask the workspace admin to add you.",
       "error": "Linking failed. Please try again.",
-      "goToApp": "Go to cubebox"
+      "goToApp": "Go to cubeplex"
     }
 ```
 
@@ -925,12 +925,12 @@ In `frontend/packages/web/messages/zh.json`, inside the `"im"` object, add:
     "link": {
       "title": "绑定 IM 账号",
       "verifying": "正在验证绑定链接...",
-      "success": "你的 {platform} 账号已成功绑定到 cubebox。",
+      "success": "你的 {platform} 账号已成功绑定到 cubeplex。",
       "invalidToken": "链接无效或已过期，请在 IM 中重新发送 /link 命令。",
       "emailMismatch": "请使用 /link 命令中指定的邮箱登录。",
       "notMember": "你不是该工作区的成员，请联系工作区管理员将你添加后重试。",
       "error": "绑定失败，请重试。",
-      "goToApp": "进入 cubebox"
+      "goToApp": "进入 cubeplex"
     }
 ```
 
@@ -944,7 +944,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { createApiClient, confirmImLink } from '@cubebox/core'
+import { createApiClient, confirmImLink } from '@cubeplex/core'
 
 type Status = 'verifying' | 'success' | 'error'
 
@@ -1045,7 +1045,7 @@ Expected: All pass (including existing tests + new tests from tasks 1–4).
 
 - [ ] **Step 2: Run mypy on the full backend**
 
-Run: `cd backend && uv run mypy cubebox/`
+Run: `cd backend && uv run mypy cubeplex/`
 Expected: No errors.
 
 - [ ] **Step 3: Run frontend build**

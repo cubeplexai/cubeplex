@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Hash, MessageCircle, MessageSquare } from 'lucide-react'
-import { createApiClient, getTopic, getConversation } from '@cubebox/core'
-import type { ScheduledTaskOut } from '@cubebox/core'
+import { createApiClient, getTopic, getConversation } from '@cubeplex/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 
 interface DestinationCellProps {
   /** Workspace whose /topics + /conversations routes the chip looks up. */
@@ -25,6 +26,7 @@ interface DestinationCellProps {
  */
 export function DestinationCell({ wsId, task, className }: DestinationCellProps) {
   const t = useTranslations('scheduledTasks')
+  const tTopics = useTranslations('topics')
   const client = useMemo(() => {
     const c = createApiClient('')
     c.setWorkspaceId(wsId)
@@ -89,7 +91,9 @@ export function DestinationCell({ wsId, task, className }: DestinationCellProps)
         >
           <MessageSquare className="size-3 shrink-0" />
           <span className="max-w-[14ch] truncate">
-            {topicTitle ?? t('destinationTopicFallback')}
+            {topicTitle === null
+              ? t('destinationTopicFallback')
+              : topicDisplayTitle(topicTitle, tTopics('newGroupChat'))}
           </span>
         </span>
       )

@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.sandbox.manager import SandboxManager
 
 
 def _make_manager(*, ttl: int = 600, touch_interval: int = 60) -> SandboxManager:
     factory = MagicMock(name="session_factory")
     encryption = MagicMock(name="encryption_backend")
-    with patch("cubebox.sandbox.manager.config") as mock_config:
+    with patch("cubeplex.sandbox.manager.config") as mock_config:
         config_map: dict[str, Any] = {
             "sandbox.domain": "localhost:8090",
             "sandbox.image": "ubuntu:22.04",
@@ -29,7 +29,7 @@ def _make_manager(*, ttl: int = 600, touch_interval: int = 60) -> SandboxManager
             "sandbox.resource.memory": "100Mi",
             "sandbox.volume.enabled": False,
             "sandbox.volume.mount_path": "/workspace",
-            "sandbox.volume.pvc_prefix": "cubebox-user",
+            "sandbox.volume.pvc_prefix": "cubeplex-user",
             "sandbox.egress_exchange_host": "",
             "sandbox.pause_on_idle": True,
             "sandbox.idle_ttl_seconds": 1800,
@@ -63,8 +63,8 @@ async def test_touch_calls_renew_on_provider() -> None:
     mgr._session_factory = MagicMock(side_effect=lambda: _session_cm())
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
-        patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
+        patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
     ):
         await mgr.touch(
             "sbx-123",
@@ -95,8 +95,8 @@ async def test_touch_renew_failure_is_nonfatal() -> None:
     mgr._session_factory = MagicMock(side_effect=lambda: _session_cm())
 
     with (
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
-        patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
+        patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
     ):
         # Should not raise
         await mgr.touch(

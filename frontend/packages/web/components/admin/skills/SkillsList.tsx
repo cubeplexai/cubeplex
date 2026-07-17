@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { SkillCandidateOut, SkillSummary } from '@cubebox/core'
+import type { SkillCandidateOut, SkillSummary } from '@cubeplex/core'
 import { CandidateCard } from '@/components/skills/CandidateCard'
 import { SkillCard } from './SkillCard'
 

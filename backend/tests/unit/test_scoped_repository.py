@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.mixins import OrgScopedMixin
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.mixins import OrgScopedMixin
+from cubeplex.repositories.base import ScopedRepository
 
 
 class _Item(SQLModel, OrgScopedMixin, table=True):

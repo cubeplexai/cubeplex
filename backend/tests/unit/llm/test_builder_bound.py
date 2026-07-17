@@ -2,9 +2,9 @@
 
 import pytest
 
-from cubebox.llm.builder import build_bound_model
-from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_bound_model
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def _snap_with_model() -> LLMSnapshot:

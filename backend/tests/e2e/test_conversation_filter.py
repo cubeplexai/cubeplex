@@ -14,9 +14,9 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_loop_bound_singletons() -> AsyncIterator[None]:
-    import cubebox.cache as _cache
-    import cubebox.objectstore.client as _oc
-    from cubebox.db.engine import engine
+    import cubeplex.cache as _cache
+    import cubeplex.objectstore.client as _oc
+    from cubeplex.db.engine import engine
 
     _oc._client = None
     _cache.reset_for_tests()
@@ -71,6 +71,7 @@ async def test_explicit_conversation_listed_immediately(member_client_org_a) -> 
     assert convo_id in ids
 
 
+@pytest.mark.real_llm
 async def test_draft_conversation_listed_after_first_message(member_client_org_a) -> None:
     client, ws = member_client_org_a
     convo_id = await _make_conv(client, ws, "hi", draft=True)

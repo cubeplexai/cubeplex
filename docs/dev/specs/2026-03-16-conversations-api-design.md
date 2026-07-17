@@ -25,7 +25,7 @@
 |------|------|------|
 | ORM | SQLModel (基于 SQLAlchemy async) | 与现有 Pydantic 模型风格统一，全异步 |
 | 数据库驱动 | aiomysql | 异步 MySQL 驱动 |
-| 数据库 | MySQL 8.0（192.168.1.211:6603，库名 cubebox） | 测试环境已就绪 |
+| 数据库 | MySQL 8.0（192.168.1.211:6603，库名 cubeplex） | 测试环境已就绪 |
 | 迁移管理 | Alembic | 管理我们自己的业务表 |
 | LangGraph 持久化 | langgraph-checkpoint-mysql[aiomysql] | 存储 agent 执行状态，不纳入 Alembic 管理 |
 
@@ -261,7 +261,7 @@ database:
   port: 3306
   user: "root"
   password: ""
-  name: "cubebox"
+  name: "cubeplex"
   pool_size: 10
   max_overflow: 20
   echo: false
@@ -274,11 +274,11 @@ url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{name}"
 
 通过环境变量覆盖（写入 `.env` 和 `.env.example`）：
 ```
-CUBEBOX_DATABASE__HOST=192.168.1.211
-CUBEBOX_DATABASE__PORT=6603
-CUBEBOX_DATABASE__USER=root
-CUBEBOX_DATABASE__PASSWORD=yourpassword
-CUBEBOX_DATABASE__NAME=cubebox
+CUBEPLEX_DATABASE__HOST=192.168.1.211
+CUBEPLEX_DATABASE__PORT=6603
+CUBEPLEX_DATABASE__USER=root
+CUBEPLEX_DATABASE__PASSWORD=yourpassword
+CUBEPLEX_DATABASE__NAME=cubeplex
 ```
 
 ---
@@ -287,7 +287,7 @@ CUBEBOX_DATABASE__NAME=cubebox
 
 ```
 backend/
-├── cubebox/
+├── cubeplex/
 │   ├── db/                       # 新增
 │   │   ├── __init__.py
 │   │   ├── engine.py             # async engine + session factory
@@ -327,7 +327,7 @@ uv add sqlmodel alembic uuid-utils "langgraph-checkpoint-mysql[aiomysql]"
 
 ## 10. 错误处理
 
-复用现有异常体系（`cubebox/api/exceptions.py`），新增如下错误码：
+复用现有异常体系（`cubeplex/api/exceptions.py`），新增如下错误码：
 
 | 场景 | HTTP 状态 | error_code |
 |------|-----------|------------|

@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.pkce."""
+"""Unit tests for cubeplex.mcp.oauth.pkce."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import base64
 import hashlib
 import re
 
-from cubebox.mcp.oauth.pkce import (
+from cubeplex.mcp.oauth.pkce import (
     PKCE_VERIFIER_MAX_LENGTH,
     PKCE_VERIFIER_MIN_LENGTH,
     generate_pkce,

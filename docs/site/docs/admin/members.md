@@ -5,29 +5,34 @@ title: Members & Roles
 
 # Members & Roles
 
-CubeBox uses a two-level role system: **organization roles** control access to admin settings, and **workspace roles** control what a member can do inside a specific workspace.
+CubePlex uses a two-level role system: **organization roles** control access to admin settings, and **workspace roles** control what a member can do inside a specific workspace.
 
 Org-level member management happens at **Admin > Members** (`/admin/members`). Workspace-level roles are managed within each workspace's settings.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The Admin > Members table with several members listed — show the owner row carrying an **Owner** badge (no role dropdown, no Remove button) alongside other rows that have an admin/member role dropdown and a Remove action.
+**Asset:** `/img/admin/members-table.png`
+:::
 
 ## Organization roles
 
 | Role | Capabilities |
 |---|---|
-| **Owner** | Full control. Manage providers, models, members, billing, org settings. Transfer ownership. Only one owner per org. |
-| **Admin** | Same as owner except cannot transfer ownership or remove the owner. |
+| **Owner** | Full control. Manage providers, models, members, cost tracking, and org settings. Only one owner per org. The owner's role cannot be changed and the owner cannot be removed. |
+| **Admin** | Manage providers, models, members, and other admin settings. Cannot change the owner's role or remove the owner. |
 | **Member** | Use assigned workspaces. No access to admin settings. |
 
 The role hierarchy is: **Owner > Admin > Member**. Higher roles inherit all permissions of lower roles.
 
-## Invite members
+## Add members
 
 1. Go to **Admin > Members**.
-2. Click **Invite Member**.
+2. Click **Add Member**.
 3. Enter the person's email address.
 4. Select an organization role (Admin or Member).
-5. Click **Send Invite**.
+5. Click **Add**.
 
-The invitee receives an email with a link to join your organization. If they do not already have a CubeBox account, they will create one during the sign-up flow.
+The person must already have a CubePlex account — the email is matched against existing accounts, and adding fails if no account with that email exists. Ask new teammates to sign up first, then add them to your organization. Once added, they immediately gain the access their org role grants.
 
 ## Change a member's org role
 
@@ -37,7 +42,7 @@ The invitee receives an email with a link to join your organization. If they do 
 4. Select the new role.
 
 :::note
-You cannot change the owner's role directly. To transfer ownership, the current owner must use the **Transfer Ownership** action.
+The owner's role cannot be changed from the members list — the owner appears with an **Owner** badge instead of a role dropdown, and has no **Remove** action. Each organization has exactly one owner.
 :::
 
 ## Remove a member
@@ -63,7 +68,7 @@ Workspace roles are managed from the workspace's own settings page, not the org-
 
 ### Grant someone admin access without making them org owner
 
-Assign the **Admin** org role. They gain access to all admin settings (models, members, connectors, etc.) but cannot transfer ownership.
+Assign the **Admin** org role. They gain access to all admin settings (models, members, connectors, etc.) but cannot change or remove the owner.
 
 ### Limit a member to specific workspaces
 

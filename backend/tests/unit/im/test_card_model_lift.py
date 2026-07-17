@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.im.card_model import (
+from cubeplex.im.card_model import (
     CardState,
     ToolStep,
 )
@@ -32,8 +32,8 @@ def test_card_state_find_tool() -> None:
 
 def test_feishu_reexport() -> None:
     """The feishu module must still re-export the same classes."""
-    from cubebox.im.feishu.card_model import CardState as FeishuCardState
-    from cubebox.im.feishu.card_model import ToolStep as FeishuToolStep
+    from cubeplex.im.feishu.card_model import CardState as FeishuCardState
+    from cubeplex.im.feishu.card_model import ToolStep as FeishuToolStep
 
     assert FeishuCardState is CardState
     assert FeishuToolStep is ToolStep

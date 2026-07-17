@@ -25,13 +25,13 @@ production:
   database:
     host: "postgres"
     port: 5432
-    user: "cubebox"
-    name: "cubebox"
+    user: "cubeplex"
+    name: "cubeplex"
 
   objectstore:
     provider: "s3"
     endpoint: "http://rustfs:9000"
-    bucket: "cubebox"
+    bucket: "cubeplex"
     region: "us-east-1"
 
   sandbox:
@@ -45,7 +45,7 @@ production:
     secure_access: false
     # Use direct mode (not server-proxy). OpenSandbox v0.1.x has a known
     # issue where proxied endpoint URLs drop the port. Direct mode
-    # appends the host-mapped bridge port correctly; cubebox-backend
+    # appends the host-mapped bridge port correctly; cubeplex-backend
     # needs `host.docker.internal` resolvable (the overlay's extra_hosts
     # entry handles that).
     use_server_proxy: false

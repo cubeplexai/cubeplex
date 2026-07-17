@@ -1,6 +1,6 @@
 name: Nightly real-LLM E2E
 
-# Runs the 10 tests marked `@pytest.mark.real_llm` against the live LLM
+# Runs tests marked `@pytest.mark.real_llm` against the live LLM
 # gateway. These are intentionally deselected from the PR-trigger backend-e2e
 # lane (`make backend-test-e2e` -> `pytest -m "not real_llm"`) because they
 # burn vendor tokens and take ~5-10× longer than mock-path tests. They still
@@ -27,23 +27,23 @@ jobs:
     timeout-minutes: 45
     env:
       ENV_FOR_DYNACONF: test
-      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
-      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
-      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
       # Opts the prompt-cache test into its strict assertion branch. Leave
       # unset to fall back to the lenient "cache may not be wired" path.
-      CUBEBOX_E2E_LLM_CACHE_CAPABLE: "true"
-      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
-      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
-      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
-      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
+      CUBEPLEX_E2E_LLM_CACHE_CAPABLE: "true"
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
+      CUBEPLEX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
     services:
       postgres:
         image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: cubebox_test
+          POSTGRES_DB: cubeplex_test
         ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres"
@@ -95,7 +95,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: rustfsadmin
         run: |
           aws --endpoint-url http://127.0.0.1:9000 \
-            s3 mb s3://cubebox-test --region us-east-1
+            s3 mb s3://cubeplex-test --region us-east-1
 
       - name: Alembic migrate
         run: make backend-migrate

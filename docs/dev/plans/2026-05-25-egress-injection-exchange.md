@@ -16,17 +16,17 @@
 
 ## File Structure
 
-- Create `cubebox/sandbox_env/placeholder.py` — `cbxref_` mint + detect helpers.
-- Create `cubebox/models/egress_ref.py` — `EgressRef` model.
-- Modify `cubebox/models/__init__.py` — export `EgressRef`.
+- Create `cubeplex/sandbox_env/placeholder.py` — `cbxref_` mint + detect helpers.
+- Create `cubeplex/models/egress_ref.py` — `EgressRef` model.
+- Modify `cubeplex/models/__init__.py` — export `EgressRef`.
 - Create `alembic/versions/<autogen>_egress_refs.py` — migration (autogen).
-- Create `cubebox/repositories/egress_ref.py` — `EgressRefRepository`.
-- Create `cubebox/sandbox_env/injector.py` — `SandboxEnvInjector` (resolved set → env + policy + ref bindings).
-- Create `cubebox/sandbox_env/exchange_auth.py` — `SidecarAuthenticator` protocol + `MtlsAuthenticator`, `DevSharedSecretAuthenticator`, `build_sidecar_authenticator(config)` factory + prod guardrail.
-- Create `cubebox/services/egress_exchange.py` — `EgressExchangeService` (verify → match → decrypt).
-- Create `cubebox/api/routes/internal_egress.py` — internal control-plane exchange route.
-- Modify `cubebox/api/app.py` — mount the internal exchange router.
-- Modify `cubebox/sandbox/manager.py` — build env+policy before `Sandbox.create`, persist/revoke `EgressRef` around it.
+- Create `cubeplex/repositories/egress_ref.py` — `EgressRefRepository`.
+- Create `cubeplex/sandbox_env/injector.py` — `SandboxEnvInjector` (resolved set → env + policy + ref bindings).
+- Create `cubeplex/sandbox_env/exchange_auth.py` — `SidecarAuthenticator` protocol + `MtlsAuthenticator`, `DevSharedSecretAuthenticator`, `build_sidecar_authenticator(config)` factory + prod guardrail.
+- Create `cubeplex/services/egress_exchange.py` — `EgressExchangeService` (verify → match → decrypt).
+- Create `cubeplex/api/routes/internal_egress.py` — internal control-plane exchange route.
+- Modify `cubeplex/api/app.py` — mount the internal exchange router.
+- Modify `cubeplex/sandbox/manager.py` — build env+policy before `Sandbox.create`, persist/revoke `EgressRef` around it.
 - Tests: `tests/unit/test_egress_placeholder.py`, `tests/unit/test_egress_injector.py`, `tests/unit/test_egress_exchange_auth.py`, `tests/unit/test_egress_exchange_service.py`, `tests/e2e/test_internal_egress_route.py`.
 
 ---
@@ -34,7 +34,7 @@
 ## Task 1: `cbxref_` placeholder helpers
 
 **Files:**
-- Create: `cubebox/sandbox_env/placeholder.py`
+- Create: `cubeplex/sandbox_env/placeholder.py`
 - Test: `tests/unit/test_egress_placeholder.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -43,7 +43,7 @@
 # tests/unit/test_egress_placeholder.py
 import re
 
-from cubebox.sandbox_env.placeholder import (
+from cubeplex.sandbox_env.placeholder import (
     PLACEHOLDER_RE,
     hash_placeholder,
     mint_placeholder,
@@ -73,12 +73,12 @@ def test_hash_is_stable_and_hex():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_egress_placeholder.py -v`
-Expected: FAIL `ModuleNotFoundError: cubebox.sandbox_env.placeholder`
+Expected: FAIL `ModuleNotFoundError: cubeplex.sandbox_env.placeholder`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/sandbox_env/placeholder.py
+# cubeplex/sandbox_env/placeholder.py
 """Opaque placeholder tokens injected into the sandbox in place of real secrets.
 
 A tool reads the env var, sends the placeholder in a header; the egress addon
@@ -119,7 +119,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/sandbox_env/placeholder.py tests/unit/test_egress_placeholder.py
+git add cubeplex/sandbox_env/placeholder.py tests/unit/test_egress_placeholder.py
 git commit -m "feat(egress): cbxref placeholder mint/scan/hash helpers"
 ```
 
@@ -128,8 +128,8 @@ git commit -m "feat(egress): cbxref placeholder mint/scan/hash helpers"
 ## Task 2: `EgressRef` model + migration
 
 **Files:**
-- Create: `cubebox/models/egress_ref.py`
-- Modify: `cubebox/models/__init__.py`
+- Create: `cubeplex/models/egress_ref.py`
+- Modify: `cubeplex/models/__init__.py`
 - Create: `alembic/versions/<autogen>_egress_refs.py`
 - Test: `tests/unit/test_egress_ref_model.py`
 
@@ -137,7 +137,7 @@ git commit -m "feat(egress): cbxref placeholder mint/scan/hash helpers"
 
 ```python
 # tests/unit/test_egress_ref_model.py
-from cubebox.models import EgressRef
+from cubeplex.models import EgressRef
 
 
 def test_prefix_and_fields():
@@ -163,7 +163,7 @@ Expected: FAIL `ImportError: cannot import name 'EgressRef'`
 - [ ] **Step 3: Implement the model**
 
 ```python
-# cubebox/models/egress_ref.py
+# cubeplex/models/egress_ref.py
 """Per-run egress placeholder reference. Stores only hash(placeholder)."""
 
 from datetime import datetime
@@ -172,10 +172,10 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase
+from cubeplex.models.mixins import CubeplexBase
 
 
-class EgressRef(CubeboxBase, table=True):
+class EgressRef(CubeplexBase, table=True):
     _PREFIX: ClassVar[str] = "eref"
     __tablename__ = "egress_refs"
     __table_args__ = (
@@ -194,7 +194,7 @@ class EgressRef(CubeboxBase, table=True):
     expires_at: datetime | None = Field(default=None, nullable=True)
 ```
 
-- [ ] **Step 4: Export** in `cubebox/models/__init__.py`: `from cubebox.models.egress_ref import EgressRef  # noqa: F401` and add `"EgressRef"` to `__all__`.
+- [ ] **Step 4: Export** in `cubeplex/models/__init__.py`: `from cubeplex.models.egress_ref import EgressRef  # noqa: F401` and add `"EgressRef"` to `__all__`.
 
 - [ ] **Step 5: Run model test**
 
@@ -211,7 +211,7 @@ Expected: clean round-trip.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/models/egress_ref.py cubebox/models/__init__.py alembic/versions/ tests/unit/test_egress_ref_model.py
+git add cubeplex/models/egress_ref.py cubeplex/models/__init__.py alembic/versions/ tests/unit/test_egress_ref_model.py
 git commit -m "feat(egress): EgressRef model + migration"
 ```
 
@@ -220,12 +220,12 @@ git commit -m "feat(egress): EgressRef model + migration"
 ## Task 3: `EgressRefRepository`
 
 **Files:**
-- Create: `cubebox/repositories/egress_ref.py`
+- Create: `cubeplex/repositories/egress_ref.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# cubebox/repositories/egress_ref.py
+# cubeplex/repositories/egress_ref.py
 """Repository for EgressRef. Lookups by ref_hash are global (the exchange
 caller is a sidecar, not an org-scoped user); writes/revokes are by sandbox."""
 
@@ -234,7 +234,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import EgressRef
+from cubeplex.models import EgressRef
 
 
 class EgressRefRepository:
@@ -272,7 +272,7 @@ class EgressRefRepository:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add cubebox/repositories/egress_ref.py
+git add cubeplex/repositories/egress_ref.py
 git commit -m "feat(egress): EgressRefRepository"
 ```
 
@@ -283,16 +283,16 @@ git commit -m "feat(egress): EgressRefRepository"
 Turns Plan 1's `list[ResolvedEnv]` into `(env_vars, network_policy, ref_bindings)`. Secrets → placeholder env + binding + allow-list host(s); plain → literal env. Always adds the exchange host to the allow-list. Pure function of inputs (no DB, no sandbox_id yet) so it can run before `Sandbox.create`.
 
 **Files:**
-- Create: `cubebox/sandbox_env/injector.py`
+- Create: `cubeplex/sandbox_env/injector.py`
 - Test: `tests/unit/test_egress_injector.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/unit/test_egress_injector.py
-from cubebox.sandbox_env.injector import SandboxEnvInjector
-from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE
-from cubebox.services.sandbox_env import ResolvedEnv
+from cubeplex.sandbox_env.injector import SandboxEnvInjector
+from cubeplex.sandbox_env.placeholder import PLACEHOLDER_RE
+from cubeplex.services.sandbox_env import ResolvedEnv
 
 
 def test_secret_becomes_placeholder_plain_passes_through():
@@ -324,12 +324,12 @@ def test_wildcard_host_maps_to_allowlist_rule():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_egress_injector.py -v`
-Expected: FAIL `ModuleNotFoundError: cubebox.sandbox_env.injector`
+Expected: FAIL `ModuleNotFoundError: cubeplex.sandbox_env.injector`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/sandbox_env/injector.py
+# cubeplex/sandbox_env/injector.py
 """Build sandbox env + egress network policy + ref bindings from resolved env."""
 
 from __future__ import annotations
@@ -344,8 +344,8 @@ from opensandbox.models.sandboxes import (
     NetworkRuleAction,
 )
 
-from cubebox.sandbox_env.placeholder import hash_placeholder, mint_placeholder
-from cubebox.services.sandbox_env import ResolvedEnv
+from cubeplex.sandbox_env.placeholder import hash_placeholder, mint_placeholder
+from cubeplex.services.sandbox_env import ResolvedEnv
 
 # Regex host patterns ("/.../" ) cannot be expressed as an egress allow-list
 # rule (FQDN/wildcard only). Plan 1 guarantees a secret with a regex host also
@@ -406,7 +406,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/sandbox_env/injector.py tests/unit/test_egress_injector.py
+git add cubeplex/sandbox_env/injector.py tests/unit/test_egress_injector.py
 git commit -m "feat(egress): SandboxEnvInjector (env + policy + bindings)"
 ```
 
@@ -415,7 +415,7 @@ git commit -m "feat(egress): SandboxEnvInjector (env + policy + bindings)"
 ## Task 5: `SidecarAuthenticator` (pluggable, config-selected)
 
 **Files:**
-- Create: `cubebox/sandbox_env/exchange_auth.py`
+- Create: `cubeplex/sandbox_env/exchange_auth.py`
 - Test: `tests/unit/test_egress_exchange_auth.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -424,7 +424,7 @@ git commit -m "feat(egress): SandboxEnvInjector (env + policy + bindings)"
 # tests/unit/test_egress_exchange_auth.py
 import pytest
 
-from cubebox.sandbox_env.exchange_auth import (
+from cubeplex.sandbox_env.exchange_auth import (
     DevSharedSecretAuthenticator,
     SidecarIdentity,
     build_sidecar_authenticator,
@@ -464,7 +464,7 @@ Expected: FAIL `ModuleNotFoundError`
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/sandbox_env/exchange_auth.py
+# cubeplex/sandbox_env/exchange_auth.py
 """Sidecar identity verification for the egress exchange endpoint.
 
 Pluggable so the same endpoint works in production (mTLS, per-sandbox client
@@ -553,7 +553,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/sandbox_env/exchange_auth.py tests/unit/test_egress_exchange_auth.py
+git add cubeplex/sandbox_env/exchange_auth.py tests/unit/test_egress_exchange_auth.py
 git commit -m "feat(egress): pluggable sidecar authenticator (mtls + dev)"
 ```
 
@@ -562,7 +562,7 @@ git commit -m "feat(egress): pluggable sidecar authenticator (mtls + dev)"
 ## Task 6: `EgressExchangeService`
 
 **Files:**
-- Create: `cubebox/services/egress_exchange.py`
+- Create: `cubeplex/services/egress_exchange.py`
 - Test: `tests/unit/test_egress_exchange_service.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -576,18 +576,18 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import EgressRef
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.sandbox_env.exchange_auth import SidecarIdentity
-from cubebox.sandbox_env.placeholder import hash_placeholder, mint_placeholder
-from cubebox.services.credential import CredentialService
-from cubebox.services.egress_exchange import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import EgressRef
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.sandbox_env.exchange_auth import SidecarIdentity
+from cubeplex.sandbox_env.placeholder import hash_placeholder, mint_placeholder
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.egress_exchange import (
     EgressExchangeError,
     EgressExchangeService,
 )
-from cubebox.services.sandbox_env import SANDBOX_ENV_KIND
+from cubeplex.services.sandbox_env import SANDBOX_ENV_KIND
 
 
 @pytest.fixture
@@ -662,19 +662,19 @@ Expected: FAIL `ModuleNotFoundError`
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/services/egress_exchange.py
+# cubeplex/services/egress_exchange.py
 """Exchange a placeholder for its real secret, for a verified sidecar only."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.sandbox_env.exchange_auth import SidecarIdentity
-from cubebox.sandbox_env.host_rules import host_matches
-from cubebox.sandbox_env.placeholder import hash_placeholder
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SANDBOX_ENV_KIND
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.sandbox_env.exchange_auth import SidecarIdentity
+from cubeplex.sandbox_env.host_rules import host_matches
+from cubeplex.sandbox_env.placeholder import hash_placeholder
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SANDBOX_ENV_KIND
 
 
 class EgressExchangeError(Exception):
@@ -719,7 +719,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/services/egress_exchange.py tests/unit/test_egress_exchange_service.py
+git add cubeplex/services/egress_exchange.py tests/unit/test_egress_exchange_service.py
 git commit -m "feat(egress): EgressExchangeService (verify + host match + decrypt)"
 ```
 
@@ -730,14 +730,14 @@ git commit -m "feat(egress): EgressExchangeService (verify + host match + decryp
 A standalone control-plane router (NOT under `/api/v1/ws` or `/admin`). Authenticated by the `SidecarAuthenticator`, not a user session.
 
 **Files:**
-- Create: `cubebox/api/routes/internal_egress.py`
-- Modify: `cubebox/api/app.py`
+- Create: `cubeplex/api/routes/internal_egress.py`
+- Modify: `cubeplex/api/app.py`
 - Test: `tests/e2e/test_internal_egress_route.py`
 
 - [ ] **Step 1: Implement the router**
 
 ```python
-# cubebox/api/routes/internal_egress.py
+# cubeplex/api/routes/internal_egress.py
 """Internal egress secret-exchange endpoint (sidecar-authenticated)."""
 
 from typing import Annotated
@@ -746,14 +746,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.credentials.dependencies import get_encryption_backend
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.db import get_session
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.sandbox_env.exchange_auth import SidecarAuthenticator
-from cubebox.services.credential import CredentialService
-from cubebox.services.egress_exchange import EgressExchangeError, EgressExchangeService
+from cubeplex.credentials.dependencies import get_encryption_backend
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.db import get_session
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.sandbox_env.exchange_auth import SidecarAuthenticator
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.egress_exchange import EgressExchangeError, EgressExchangeService
 
 router = APIRouter(prefix="/internal/egress", tags=["internal-egress"])
 
@@ -804,11 +804,11 @@ async def exchange(
 
 - [ ] **Step 2: Wire authenticator + router in `app.py`**
 
-In `cubebox/api/app.py`, during app construction build the authenticator from config and stash it, then include the router:
+In `cubeplex/api/app.py`, during app construction build the authenticator from config and stash it, then include the router:
 
 ```python
-from cubebox.sandbox_env.exchange_auth import build_sidecar_authenticator
-from cubebox.api.routes import internal_egress
+from cubeplex.sandbox_env.exchange_auth import build_sidecar_authenticator
+from cubeplex.api.routes import internal_egress
 
 app.state.sidecar_authenticator = build_sidecar_authenticator(
     config.get("egress_exchange.auth", {}),
@@ -817,7 +817,7 @@ app.state.sidecar_authenticator = build_sidecar_authenticator(
 app.include_router(internal_egress.router, prefix="/api/v1")
 ```
 
-> NOTE for implementer: match the real config accessor (`config.get(...)` style used elsewhere in app.py) and the real deployment-mode key (grep `single_tenant`/`multi_tenant`/`deployment` in `cubebox/config*`). The guardrail in `build_sidecar_authenticator` will raise at startup if `dev` is configured under a production mode — that is intended.
+> NOTE for implementer: match the real config accessor (`config.get(...)` style used elsewhere in app.py) and the real deployment-mode key (grep `single_tenant`/`multi_tenant`/`deployment` in `cubeplex/config*`). The guardrail in `build_sidecar_authenticator` will raise at startup if `dev` is configured under a production mode — that is intended.
 
 - [ ] **Step 3: e2e test (dev authenticator path)**
 
@@ -839,7 +839,7 @@ app.include_router(internal_egress.router, prefix="/api/v1")
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/api/routes/internal_egress.py cubebox/api/app.py tests/e2e/test_internal_egress_route.py
+git add cubeplex/api/routes/internal_egress.py cubeplex/api/app.py tests/e2e/test_internal_egress_route.py
 git commit -m "feat(egress): internal sidecar-authenticated exchange endpoint"
 ```
 
@@ -850,7 +850,7 @@ git commit -m "feat(egress): internal sidecar-authenticated exchange endpoint"
 Build env + policy + bindings before `Sandbox.create`; persist `EgressRef` (with the now-known `sandbox_id`) after; revoke prior refs when recreating.
 
 **Files:**
-- Modify: `cubebox/sandbox/manager.py` (the create path, ~lines 145-181)
+- Modify: `cubeplex/sandbox/manager.py` (the create path, ~lines 145-181)
 - Test: covered by Plan 3 cluster E2E + a targeted unit test of the assembly helper (Task 4 already covers `build`). Add one manager-level test that asserts `Sandbox.create` is called with env+policy and an `EgressRef` is persisted (mock the SDK).
 
 - [ ] **Step 1: Write the failing test**
@@ -878,16 +878,16 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement the wiring**
 
-In `cubebox/sandbox/manager.py`, inside `get_or_create` just before the `opensandbox.Sandbox.create(...)` call (the create-new path), resolve + build:
+In `cubeplex/sandbox/manager.py`, inside `get_or_create` just before the `opensandbox.Sandbox.create(...)` call (the create-new path), resolve + build:
 
 ```python
 from datetime import UTC, datetime, timedelta  # timedelta likely already imported at top
 
-from cubebox.models import EgressRef
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.injector import SandboxEnvInjector
-from cubebox.services.sandbox_env import SandboxEnvResolver
+from cubeplex.models import EgressRef
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.injector import SandboxEnvInjector
+from cubeplex.services.sandbox_env import SandboxEnvResolver
 
 # ... within the create-new branch, with `session`, `repo` already in scope:
 resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
@@ -942,11 +942,11 @@ Expected: PASS.
 
 - [ ] **Step 5: Full check + commit**
 
-Run: `uv run pytest tests/unit/test_egress_*.py tests/e2e/test_internal_egress_route.py -v && uv run mypy cubebox/ && uv run ruff check cubebox/`
+Run: `uv run pytest tests/unit/test_egress_*.py tests/e2e/test_internal_egress_route.py -v && uv run mypy cubeplex/ && uv run ruff check cubeplex/`
 Expected: all PASS, no type/lint issues.
 
 ```bash
-git add cubebox/sandbox/manager.py tests/unit/test_manager_egress_injection.py
+git add cubeplex/sandbox/manager.py tests/unit/test_manager_egress_injection.py
 git commit -m "feat(egress): inject env vault + policy + refs at sandbox creation"
 ```
 
@@ -961,4 +961,4 @@ git commit -m "feat(egress): inject env vault + policy + refs at sandbox creatio
 
 ## Next
 
-Plan 3 (`docs/dev/plans/2026-05-25-egress-k8s-bundle.md`): the cubebox-owned K8s bundle — mutating webhook (per-sandbox mTLS mint + initContainer CA + addon mount), fixed-CA Secret, the `inject.py` mitmproxy addon (token scan + header_names + host match calling this exchange endpoint), and the real-cluster E2E.
+Plan 3 (`docs/dev/plans/2026-05-25-egress-k8s-bundle.md`): the cubeplex-owned K8s bundle — mutating webhook (per-sandbox mTLS mint + initContainer CA + addon mount), fixed-CA Secret, the `inject.py` mitmproxy addon (token scan + header_names + host match calling this exchange endpoint), and the real-cluster E2E.

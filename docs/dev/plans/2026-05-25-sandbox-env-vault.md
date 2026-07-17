@@ -16,16 +16,16 @@
 
 ## File Structure
 
-- Create `cubebox/models/sandbox_env.py` — `SandboxEnvVar` model + `__table_args__` (CHECK + partial unique indexes).
-- Modify `cubebox/models/__init__.py` — export `SandboxEnvVar`.
-- Create `cubebox/sandbox_env/__init__.py` — package marker.
-- Create `cubebox/sandbox_env/host_rules.py` — host-pattern validation (eTLD+1 boundary, anchored regex) + runtime host matching.
-- Create `cubebox/repositories/sandbox_env.py` — `SandboxEnvRepository` (org-scoped, nullable workspace/user).
-- Create `cubebox/services/sandbox_env.py` — `SandboxEnvService` (CRUD + validation, uses `CredentialService`) and `SandboxEnvResolver` (precedence).
-- Create `cubebox/api/schemas/sandbox_env.py` — request/response models.
-- Create `cubebox/api/routes/v1/admin_sandbox_env.py` — org-scope routes (`/admin/sandbox-env`).
-- Create `cubebox/api/routes/v1/ws_sandbox_env.py` — workspace/user-scope routes (`/ws/{workspace_id}/sandbox-env`).
-- Modify `cubebox/api/app.py` — register both routers.
+- Create `cubeplex/models/sandbox_env.py` — `SandboxEnvVar` model + `__table_args__` (CHECK + partial unique indexes).
+- Modify `cubeplex/models/__init__.py` — export `SandboxEnvVar`.
+- Create `cubeplex/sandbox_env/__init__.py` — package marker.
+- Create `cubeplex/sandbox_env/host_rules.py` — host-pattern validation (eTLD+1 boundary, anchored regex) + runtime host matching.
+- Create `cubeplex/repositories/sandbox_env.py` — `SandboxEnvRepository` (org-scoped, nullable workspace/user).
+- Create `cubeplex/services/sandbox_env.py` — `SandboxEnvService` (CRUD + validation, uses `CredentialService`) and `SandboxEnvResolver` (precedence).
+- Create `cubeplex/api/schemas/sandbox_env.py` — request/response models.
+- Create `cubeplex/api/routes/v1/admin_sandbox_env.py` — org-scope routes (`/admin/sandbox-env`).
+- Create `cubeplex/api/routes/v1/ws_sandbox_env.py` — workspace/user-scope routes (`/ws/{workspace_id}/sandbox-env`).
+- Modify `cubeplex/api/app.py` — register both routers.
 - Tests: `tests/unit/test_sandbox_env_host_rules.py`, `tests/unit/test_sandbox_env_model.py`, `tests/unit/test_sandbox_env_service.py`, `tests/unit/test_sandbox_env_resolver.py`, `tests/e2e/test_sandbox_env_routes.py`.
 
 ---
@@ -59,8 +59,8 @@ git commit -m "build: add tldextract for sandbox env host validation"
 The `hosts` field accepts exact FQDNs, wildcards (`*.example.com`), and anchored regexes (`/^.../$/`). Validation: a pattern must resolve within a single registrable domain (eTLD+1); regexes must be anchored. Also provide a runtime matcher used later by the exchange (Plan 2) and addon (Plan 3).
 
 **Files:**
-- Create: `cubebox/sandbox_env/__init__.py`
-- Create: `cubebox/sandbox_env/host_rules.py`
+- Create: `cubeplex/sandbox_env/__init__.py`
+- Create: `cubeplex/sandbox_env/host_rules.py`
 - Test: `tests/unit/test_sandbox_env_host_rules.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -69,7 +69,7 @@ The `hosts` field accepts exact FQDNs, wildcards (`*.example.com`), and anchored
 # tests/unit/test_sandbox_env_host_rules.py
 import pytest
 
-from cubebox.sandbox_env.host_rules import (
+from cubeplex.sandbox_env.host_rules import (
     HostPatternError,
     host_matches,
     validate_host_pattern,
@@ -103,7 +103,7 @@ def test_invalid_patterns_rejected(pattern):
 
 
 def test_regex_only_list_rejected():
-    from cubebox.sandbox_env.host_rules import validate_hosts
+    from cubeplex.sandbox_env.host_rules import validate_hosts
 
     with pytest.raises(HostPatternError):
         validate_hosts([r"/^api[0-9]+\.foo\.com$/"])  # no FQDN/wildcard companion
@@ -130,17 +130,17 @@ def test_anchored_regex_does_not_overmatch():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_sandbox_env_host_rules.py -v`
-Expected: FAIL with `ModuleNotFoundError: cubebox.sandbox_env.host_rules`
+Expected: FAIL with `ModuleNotFoundError: cubeplex.sandbox_env.host_rules`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/sandbox_env/__init__.py
+# cubeplex/sandbox_env/__init__.py
 """Sandbox env vault: host rules, validation, resolution helpers."""
 ```
 
 ```python
-# cubebox/sandbox_env/host_rules.py
+# cubeplex/sandbox_env/host_rules.py
 """Validation + matching for env-vault host patterns.
 
 A pattern is one of:
@@ -263,7 +263,7 @@ Expected: PASS (all cases)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/sandbox_env/__init__.py cubebox/sandbox_env/host_rules.py tests/unit/test_sandbox_env_host_rules.py
+git add cubeplex/sandbox_env/__init__.py cubeplex/sandbox_env/host_rules.py tests/unit/test_sandbox_env_host_rules.py
 git commit -m "feat(sandbox-env): host pattern validation and matching"
 ```
 
@@ -274,15 +274,15 @@ git commit -m "feat(sandbox-env): host pattern validation and matching"
 Mirrors `MCPCredentialGrant`: own nullable scope FKs, CHECK constraints for scope shape + value shape, partial unique indexes per scope so NULL columns collide correctly.
 
 **Files:**
-- Create: `cubebox/models/sandbox_env.py`
-- Modify: `cubebox/models/__init__.py`
+- Create: `cubeplex/models/sandbox_env.py`
+- Modify: `cubeplex/models/__init__.py`
 - Test: `tests/unit/test_sandbox_env_model.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/unit/test_sandbox_env_model.py
-from cubebox.models import SandboxEnvVar
+from cubeplex.models import SandboxEnvVar
 
 
 def test_public_id_prefix():
@@ -318,7 +318,7 @@ Expected: FAIL with `ImportError: cannot import name 'SandboxEnvVar'`
 - [ ] **Step 3: Implement the model**
 
 ```python
-# cubebox/models/sandbox_env.py
+# cubeplex/models/sandbox_env.py
 """Sandbox Env Vault entry.
 
 One entry per (env_name, scope). Secret entries carry hosts + a credential_id
@@ -333,10 +333,10 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, CheckConstraint, Column, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase
+from cubeplex.models.mixins import CubeplexBase
 
 
-class SandboxEnvVar(CubeboxBase, table=True):
+class SandboxEnvVar(CubeplexBase, table=True):
     _PREFIX: ClassVar[str] = "senv"
     __tablename__ = "sandbox_env_vars"
     __table_args__ = (
@@ -405,10 +405,10 @@ class SandboxEnvVar(CubeboxBase, table=True):
 
 - [ ] **Step 4: Export the model**
 
-In `cubebox/models/__init__.py`, add `SandboxEnvVar` to the imports and `__all__` (follow the existing alphabetical/grouped style used for `Credential`, `MCPCredentialGrant`):
+In `cubeplex/models/__init__.py`, add `SandboxEnvVar` to the imports and `__all__` (follow the existing alphabetical/grouped style used for `Credential`, `MCPCredentialGrant`):
 
 ```python
-from cubebox.models.sandbox_env import SandboxEnvVar  # noqa: F401
+from cubeplex.models.sandbox_env import SandboxEnvVar  # noqa: F401
 ```
 and add `"SandboxEnvVar",` to `__all__`.
 
@@ -420,7 +420,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/models/sandbox_env.py cubebox/models/__init__.py tests/unit/test_sandbox_env_model.py
+git add cubeplex/models/sandbox_env.py cubeplex/models/__init__.py tests/unit/test_sandbox_env_model.py
 git commit -m "feat(sandbox-env): SandboxEnvVar model with scope/value constraints"
 ```
 
@@ -464,13 +464,13 @@ git commit -m "feat(sandbox-env): migration for sandbox_env_vars table"
 Org-scoped with nullable workspace/user (cannot use `ScopedRepository`, which requires non-null workspace). Modeled on `CredentialRepository`.
 
 **Files:**
-- Create: `cubebox/repositories/sandbox_env.py`
+- Create: `cubeplex/repositories/sandbox_env.py`
 - Test: covered via service tests (Task 6) — no separate test file.
 
 - [ ] **Step 1: Implement**
 
 ```python
-# cubebox/repositories/sandbox_env.py
+# cubeplex/repositories/sandbox_env.py
 """Repository for SandboxEnvVar — org-scoped, nullable workspace/user."""
 
 from datetime import UTC, datetime
@@ -478,7 +478,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import SandboxEnvVar
+from cubeplex.models import SandboxEnvVar
 
 
 class SandboxEnvRepository:
@@ -539,7 +539,7 @@ class SandboxEnvRepository:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add cubebox/repositories/sandbox_env.py
+git add cubeplex/repositories/sandbox_env.py
 git commit -m "feat(sandbox-env): SandboxEnvRepository"
 ```
 
@@ -550,7 +550,7 @@ git commit -m "feat(sandbox-env): SandboxEnvRepository"
 Validates scope shape, value shape, and host patterns; stores secret values via `CredentialService` (kind `sandbox_env`); creates/updates/deletes entries.
 
 **Files:**
-- Create: `cubebox/services/sandbox_env.py`
+- Create: `cubeplex/services/sandbox_env.py`
 - Test: `tests/unit/test_sandbox_env_service.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -564,12 +564,12 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.host_rules import HostPatternError
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.host_rules import HostPatternError
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
 
 
 # Self-contained in-memory session — the unit-test convention used by
@@ -667,22 +667,22 @@ async def test_bad_host_rejected(service):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_sandbox_env_service.py -v`
-Expected: FAIL with `ModuleNotFoundError: cubebox.services.sandbox_env`
+Expected: FAIL with `ModuleNotFoundError: cubeplex.services.sandbox_env`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/services/sandbox_env.py
+# cubeplex/services/sandbox_env.py
 """Sandbox Env Vault service: CRUD + validation + scope-precedence resolution."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cubebox.models import SandboxEnvVar
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.host_rules import validate_hosts
-from cubebox.services.credential import CredentialService
+from cubeplex.models import SandboxEnvVar
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.host_rules import validate_hosts
+from cubeplex.services.credential import CredentialService
 
 SANDBOX_ENV_KIND = "sandbox_env"
 _SCOPE_RANK = {"user": 3, "workspace": 2, "org": 1}
@@ -824,10 +824,10 @@ Expected: PASS
 
 - [ ] **Step 5: Guard credential deletion against env-var references**
 
-In `cubebox/services/credential.py`, extend `CredentialService._guard_references` to also reject deleting a credential still referenced by a `SandboxEnvVar` (same pattern as the existing `Provider` check):
+In `cubeplex/services/credential.py`, extend `CredentialService._guard_references` to also reject deleting a credential still referenced by a `SandboxEnvVar` (same pattern as the existing `Provider` check):
 
 ```python
-from cubebox.models import SandboxEnvVar
+from cubeplex.models import SandboxEnvVar
 # ... inside _guard_references, after the Provider check:
 env_refs = (
     (
@@ -851,7 +851,7 @@ Note: `SandboxEnvService.delete_entry` deletes the env row *before* the credenti
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/services/sandbox_env.py cubebox/services/credential.py tests/unit/test_sandbox_env_service.py
+git add cubeplex/services/sandbox_env.py cubeplex/services/credential.py tests/unit/test_sandbox_env_service.py
 git commit -m "feat(sandbox-env): SandboxEnvService CRUD with validation"
 ```
 
@@ -862,7 +862,7 @@ git commit -m "feat(sandbox-env): SandboxEnvService CRUD with validation"
 Produces the effective env set for a sandbox (user > workspace > org), used by Plan 2's run-start injection.
 
 **Files:**
-- Modify: `cubebox/services/sandbox_env.py` (add `SandboxEnvResolver`)
+- Modify: `cubeplex/services/sandbox_env.py` (add `SandboxEnvResolver`)
 - Test: `tests/unit/test_sandbox_env_resolver.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -876,11 +876,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvResolver, SandboxEnvService
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SandboxEnvResolver, SandboxEnvService
 
 
 @pytest.fixture
@@ -947,7 +947,7 @@ async def test_other_user_gets_org(seeded):
 Run: `uv run pytest tests/unit/test_sandbox_env_resolver.py -v`
 Expected: FAIL with `ImportError: cannot import name 'SandboxEnvResolver'`
 
-- [ ] **Step 3: Implement (append to `cubebox/services/sandbox_env.py`)**
+- [ ] **Step 3: Implement (append to `cubeplex/services/sandbox_env.py`)**
 
 ```python
 class SandboxEnvResolver:
@@ -986,7 +986,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/services/sandbox_env.py tests/unit/test_sandbox_env_resolver.py
+git add cubeplex/services/sandbox_env.py tests/unit/test_sandbox_env_resolver.py
 git commit -m "feat(sandbox-env): scope-precedence resolver"
 ```
 
@@ -995,12 +995,12 @@ git commit -m "feat(sandbox-env): scope-precedence resolver"
 ## Task 8: Request/response schemas
 
 **Files:**
-- Create: `cubebox/api/schemas/sandbox_env.py`
+- Create: `cubeplex/api/schemas/sandbox_env.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# cubebox/api/schemas/sandbox_env.py
+# cubeplex/api/schemas/sandbox_env.py
 """Schemas for sandbox env vault routes."""
 
 from pydantic import BaseModel, Field
@@ -1043,7 +1043,7 @@ class EnvEntryListOut(BaseModel):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add cubebox/api/schemas/sandbox_env.py
+git add cubeplex/api/schemas/sandbox_env.py
 git commit -m "feat(sandbox-env): API schemas"
 ```
 
@@ -1054,13 +1054,13 @@ git commit -m "feat(sandbox-env): API schemas"
 Scope-isolated: org-scope entries managed only via `/admin/...`, gated by `get_admin_request_context`.
 
 **Files:**
-- Create: `cubebox/api/routes/v1/admin_sandbox_env.py`
+- Create: `cubeplex/api/routes/v1/admin_sandbox_env.py`
 - Test: `tests/e2e/test_sandbox_env_routes.py` (org cases)
 
 - [ ] **Step 1: Implement the router**
 
 ```python
-# cubebox/api/routes/v1/admin_sandbox_env.py
+# cubeplex/api/routes/v1/admin_sandbox_env.py
 """Org-scope sandbox env vault routes (org admins only)."""
 
 from typing import Annotated
@@ -1068,17 +1068,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.sandbox_env import CreateOrgEnvIn, EnvEntryListOut, EnvEntryOut
-from cubebox.auth.context import RequestContext
-from cubebox.credentials.dependencies import get_encryption_backend
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.mcp.dependencies import get_admin_request_context
-from cubebox.db import get_session
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.host_rules import HostPatternError
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
+from cubeplex.api.schemas.sandbox_env import CreateOrgEnvIn, EnvEntryListOut, EnvEntryOut
+from cubeplex.auth.context import RequestContext
+from cubeplex.credentials.dependencies import get_encryption_backend
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.mcp.dependencies import get_admin_request_context
+from cubeplex.db import get_session
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.host_rules import HostPatternError
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
 
 router = APIRouter(prefix="/admin/sandbox-env", tags=["admin-sandbox-env"])
 
@@ -1138,7 +1138,7 @@ async def delete_org_env(
     await _service(session, backend, ctx).delete_entry(entry_id=entry_id)
 ```
 
-> NOTE for implementer: verify the exact import paths for `get_session` (likely `cubebox.db` or `cubebox.api.deps`), `get_encryption_backend`, and `get_admin_request_context` by grepping `admin_mcp.py`'s imports — copy them verbatim. The handler shape above matches the MCP admin routes.
+> NOTE for implementer: verify the exact import paths for `get_session` (likely `cubeplex.db` or `cubeplex.api.deps`), `get_encryption_backend`, and `get_admin_request_context` by grepping `admin_mcp.py`'s imports — copy them verbatim. The handler shape above matches the MCP admin routes.
 
 - [ ] **Step 2: Write the e2e test (org cases)**
 
@@ -1180,7 +1180,7 @@ async def test_admin_rejects_bad_host(admin_client):
 - [ ] **Step 3: Commit (router wired in Task 11 before running e2e)**
 
 ```bash
-git add cubebox/api/routes/v1/admin_sandbox_env.py tests/e2e/test_sandbox_env_routes.py
+git add cubeplex/api/routes/v1/admin_sandbox_env.py tests/e2e/test_sandbox_env_routes.py
 git commit -m "feat(sandbox-env): org-scope admin routes"
 ```
 
@@ -1191,13 +1191,13 @@ git commit -m "feat(sandbox-env): org-scope admin routes"
 Scope-isolated: workspace- and user-scope entries via `/ws/{workspace_id}/...`. Workspace-scope requires `require_admin`; user-scope (`/me`) open to `require_member` and pins `user_id = ctx.user.id`.
 
 **Files:**
-- Create: `cubebox/api/routes/v1/ws_sandbox_env.py`
+- Create: `cubeplex/api/routes/v1/ws_sandbox_env.py`
 - Test: extend `tests/e2e/test_sandbox_env_routes.py` (ws/user cases)
 
 - [ ] **Step 1: Implement the router**
 
 ```python
-# cubebox/api/routes/v1/ws_sandbox_env.py
+# cubeplex/api/routes/v1/ws_sandbox_env.py
 """Workspace- and user-scope sandbox env vault routes."""
 
 from typing import Annotated
@@ -1205,17 +1205,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.sandbox_env import CreateUserEnvIn, CreateWorkspaceEnvIn, EnvEntryOut
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_admin, require_member
-from cubebox.credentials.dependencies import get_encryption_backend
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.db import get_session
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.host_rules import HostPatternError
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
+from cubeplex.api.schemas.sandbox_env import CreateUserEnvIn, CreateWorkspaceEnvIn, EnvEntryOut
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_admin, require_member
+from cubeplex.credentials.dependencies import get_encryption_backend
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.db import get_session
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.host_rules import HostPatternError
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox-env", tags=["ws-sandbox-env"])
 
@@ -1308,7 +1308,7 @@ async def test_member_cannot_set_workspace_env(member_client):
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/ws_sandbox_env.py tests/e2e/test_sandbox_env_routes.py
+git add cubeplex/api/routes/v1/ws_sandbox_env.py tests/e2e/test_sandbox_env_routes.py
 git commit -m "feat(sandbox-env): workspace/user-scope routes"
 ```
 
@@ -1317,19 +1317,19 @@ git commit -m "feat(sandbox-env): workspace/user-scope routes"
 ## Task 11: Register routers
 
 **Files:**
-- Modify: `cubebox/api/routes/v1/__init__.py` (add to the module import block + `__all__`)
-- Modify: `cubebox/api/app.py` (near the existing `admin_mcp` / `ws_mcp` includes, ~lines 410-430)
+- Modify: `cubeplex/api/routes/v1/__init__.py` (add to the module import block + `__all__`)
+- Modify: `cubeplex/api/app.py` (near the existing `admin_mcp` / `ws_mcp` includes, ~lines 410-430)
 
 - [ ] **Step 1: Export the new modules**
 
-In `cubebox/api/routes/v1/__init__.py`, add `admin_sandbox_env` and `ws_sandbox_env` to the `from cubebox.api.routes.v1 import (...)` block and to `__all__` (alongside `admin_mcp`, `ws_mcp`).
+In `cubeplex/api/routes/v1/__init__.py`, add `admin_sandbox_env` and `ws_sandbox_env` to the `from cubeplex.api.routes.v1 import (...)` block and to `__all__` (alongside `admin_mcp`, `ws_mcp`).
 
 - [ ] **Step 2: Import and include in app.py**
 
 Add to the imports block alongside `admin_mcp, ws_mcp`:
 
 ```python
-from cubebox.api.routes.v1 import admin_sandbox_env, ws_sandbox_env
+from cubeplex.api.routes.v1 import admin_sandbox_env, ws_sandbox_env
 ```
 
 Add alongside the existing `app.include_router(... admin_mcp ...)` calls:
@@ -1346,13 +1346,13 @@ Expected: all PASS.
 
 - [ ] **Step 4: Type-check and lint**
 
-Run: `uv run mypy cubebox/ && uv run ruff check cubebox/`
+Run: `uv run mypy cubeplex/ && uv run ruff check cubeplex/`
 Expected: no issues.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/api/app.py
+git add cubeplex/api/app.py
 git commit -m "feat(sandbox-env): register admin + workspace routers"
 ```
 
@@ -1365,9 +1365,9 @@ git commit -m "feat(sandbox-env): register admin + workspace routers"
 - **Resolved against the real repo (Codex review rev 2):** unit tests use a
   self-contained in-file `session` fixture (not `db_session`); e2e `admin_client`/
   `member_client` yield `(client, workspace_id)` tuples (unpacked); `session`
-  import paths (`get_admin_request_context` → `cubebox.mcp.dependencies`,
-  `get_session` → `cubebox.db`, `get_encryption_backend` →
-  `cubebox.credentials.dependencies`) verified; encryption backend is
+  import paths (`get_admin_request_context` → `cubeplex.mcp.dependencies`,
+  `get_session` → `cubeplex.db`, `get_encryption_backend` →
+  `cubeplex.credentials.dependencies`) verified; encryption backend is
   `FernetBackend([Fernet.generate_key()])`.
 
 ---

@@ -4,13 +4,13 @@
 
 **Goal:** 让模型在对话中调 `generate_image` 工具生成/编辑图片,产物作为 image artifact 持久化并在右侧面板渲染。
 
-**Architecture:** 生图能力放 cubepi 新建 `providers/images/` 子系统(和 chat provider 平行,封装 OpenAI gpt-image-1 专用端点);cubebox 加一个 sandbox-gated 的 `generate_image` 工具,生成图写进 sandbox 后复用抽出的 `register_artifact_from_sandbox` helper 注册为 artifact,降采样 JPEG 回传给模型。
+**Architecture:** 生图能力放 cubepi 新建 `providers/images/` 子系统(和 chat provider 平行,封装 OpenAI gpt-image-1 专用端点);cubeplex 加一个 sandbox-gated 的 `generate_image` 工具,生成图写进 sandbox 后复用抽出的 `register_artifact_from_sandbox` helper 注册为 artifact,降采样 JPEG 回传给模型。
 
 **Tech Stack:** Python 3.13 / cubepi (Provider 抽象) / OpenAI SDK (`images.generate` + `images.edit`) / FastAPI / SQLModel / Pillow(已有 `resize_to_long_edge`)/ Next.js(渲染复用,基本零改).
 
 **两阶段 / 两 PR:**
 - **Phase A** — 在 `~/cubepi` 仓实现 `providers/images/` 子系统,单测覆盖,出 **cubepi PR**。
-- **Phase B** — cubepi PR 合并后,在本 worktree bump cubepi rev,实现 cubebox 工具 + 接线 + E2E,出 **cubebox PR**。
+- **Phase B** — cubepi PR 合并后,在本 worktree bump cubepi rev,实现 cubeplex 工具 + 接线 + E2E,出 **cubeplex PR**。
 
 参考实现:`~/pi/packages/ai/src/{images.ts,images-api-registry.ts,types.ts,providers/images/}`。
 设计依据:`docs/dev/specs/2026-05-20-conversation-image-generation-design.md`。
@@ -553,9 +553,9 @@ cd ~/cubepi && pytest tests/providers/images/ -q && \
 
 ---
 
-## Phase B — cubebox(本 worktree:`feat/conversation-image-gen`,端口 8021/3021)
+## Phase B — cubeplex(本 worktree:`feat/conversation-image-gen`,端口 8021/3021)
 
-> 全部命令在 `/home/chris/cubebox/.worktrees/feat/conversation-image-gen/backend` 下。
+> 全部命令在 `/home/chris/cubeplex/.worktrees/feat/conversation-image-gen/backend` 下。
 > 测试目录约定:工具单测 → `tests/unit/`;E2E → `tests/e2e/`(marker 自动)。
 
 ### Task B0: bump cubepi rev
@@ -572,8 +572,8 @@ cd ~/cubepi && pytest tests/providers/images/ -q && \
 ### Task B1: 抽出 `register_artifact_from_sandbox` 共享 helper(重构,行为不变)
 
 **Files:**
-- Create: `backend/cubebox/services/artifact_registration.py`
-- Modify: `backend/cubebox/middleware/artifacts.py:97-186`(改为调用 helper)
+- Create: `backend/cubeplex/services/artifact_registration.py`
+- Modify: `backend/cubeplex/middleware/artifacts.py:97-186`(改为调用 helper)
 - Test: 现有 `tests/unit/` 中 save_artifact 相关测试必须保持绿;新增 `tests/unit/services/test_artifact_registration.py`
 
 helper 封装现 `_make_save_artifact_tool._execute` 的第 2–4 步:guess mime → DB 写入(`find_by_path` 自动匹配 → `update`(升版本)或 `create`)+ version 快照 → `upload_from_sandbox`。**保留** auto-match、版本递增、上传失败非致命的语义。
@@ -584,7 +584,7 @@ helper 封装现 `_make_save_artifact_tool._execute` 的第 2–4 步:guess mime
 # tests/unit/services/test_artifact_registration.py
 import pytest
 
-from cubebox.services.artifact_registration import register_artifact_from_sandbox
+from cubeplex.services.artifact_registration import register_artifact_from_sandbox
 
 
 @pytest.mark.asyncio
@@ -614,15 +614,15 @@ async def test_register_creates_then_versions(fake_sandbox, db_session_maker, mo
 - [ ] **Step 3: 实现 helper**
 
 ```python
-# backend/cubebox/services/artifact_registration.py
+# backend/cubeplex/services/artifact_registration.py
 from __future__ import annotations
 
 import shlex
 
 from loguru import logger
 
-from cubebox.models.artifact import Artifact
-from cubebox.sandbox.base import Sandbox
+from cubeplex.models.artifact import Artifact
+from cubeplex.sandbox.base import Sandbox
 
 
 async def register_artifact_from_sandbox(
@@ -652,8 +652,8 @@ async def register_artifact_from_sandbox(
         target = entry_file if entry_file else path
         mime_type, _ = mimetypes.guess_type(target)
 
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories import ArtifactRepository, ArtifactVersionRepository
 
     async with async_session_maker() as session:
         repo = ArtifactRepository(session, org_id=org_id, workspace_id=workspace_id)
@@ -683,7 +683,7 @@ async def register_artifact_from_sandbox(
         )
 
     try:
-        from cubebox.objectstore import get_objectstore_client
+        from cubeplex.objectstore import get_objectstore_client
 
         store = get_objectstore_client()
         key_prefix = f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
@@ -705,7 +705,7 @@ async def register_artifact_from_sandbox(
 ### Task B2: `generate_image` 工具
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/generate_image.py`
+- Create: `backend/cubeplex/tools/builtin/generate_image.py`
 - Test: `tests/unit/test_generate_image_tool.py`
 
 工厂 `make_generate_image_tool(*, org_id, workspace_id, conversation_id, sandbox, objectstore, images_model, api_key)` → `AgentTool[GenerateImageInput]`,沿用 `view_images` 的工厂+DI 模式。
@@ -718,7 +718,7 @@ import base64
 import pytest
 
 from cubepi.providers.images.faux import register_faux_images
-from cubebox.tools.builtin.generate_image import make_generate_image_tool, GenerateImageInput
+from cubeplex.tools.builtin.generate_image import make_generate_image_tool, GenerateImageInput
 
 
 @pytest.mark.asyncio
@@ -732,10 +732,10 @@ async def test_generate_image_creates_artifact(fake_sandbox, monkeypatch):
         return SimpleNamespace(id="art_1", version=1, name=kw["name"])
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox", _fake_register
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox", _fake_register
     )
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        "cubeplex.tools.builtin.generate_image.resize_to_long_edge",
         lambda data, *, target, jpeg_quality: b"SMALLJPEG",
     )
 
@@ -773,7 +773,7 @@ async def test_generate_image_provider_error_no_artifact(fake_sandbox, monkeypat
     async def _fake_register(**kw):
         called["n"] += 1
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox", _fake_register
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox", _fake_register
     )
     tool = make_generate_image_tool(
         org_id="o", workspace_id="w", conversation_id="c", sandbox=fake_sandbox,
@@ -792,7 +792,7 @@ async def test_generate_image_provider_error_no_artifact(fake_sandbox, monkeypat
 - [ ] **Step 3: 实现工具**
 
 ```python
-# backend/cubebox/tools/builtin/generate_image.py
+# backend/cubeplex/tools/builtin/generate_image.py
 from __future__ import annotations
 
 import base64
@@ -805,9 +805,9 @@ from cubepi.providers.images.openai_images import register_openai_images
 from cubepi.providers.images.types import ImagesContext, ImagesModel
 from pydantic import BaseModel, Field
 
-from cubebox.sandbox.base import Sandbox
-from cubebox.services.artifact_registration import register_artifact_from_sandbox
-from cubebox.services.attachments import resize_to_long_edge
+from cubeplex.sandbox.base import Sandbox
+from cubeplex.services.artifact_registration import register_artifact_from_sandbox
+from cubeplex.services.attachments import resize_to_long_edge
 
 
 class GenerateImageInput(BaseModel):
@@ -901,7 +901,7 @@ def make_generate_image_tool(
 
 ### Task B3: 接入 run_manager(sandbox-gated,view_images 后 / MCP 前)
 
-**Files:** Modify: `backend/cubebox/streams/run_manager.py`(view_images 装配块之后、MCP 之前)
+**Files:** Modify: `backend/cubeplex/streams/run_manager.py`(view_images 装配块之后、MCP 之前)
 
 - [ ] **Step 1:** 在 view_images 追加之后,加一段:仅当本次 run 有 sandbox(`sandbox is not None`)时,解析 openai key(`factory` 的 openai provider config,见 `llm/factory.py:353-362`),构造 `ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")`,调 `make_generate_image_tool(...)` 并 append 到 `_builtin_tools`。失败用 `logger.warning` 包住(和 view_images 一致),不阻断 run。
 
@@ -910,8 +910,8 @@ def make_generate_image_tool(
 try:
     if sandbox is not None:
         from cubepi.providers.images.types import ImagesModel
-        from cubebox.objectstore import get_objectstore_client
-        from cubebox.tools.builtin.generate_image import make_generate_image_tool
+        from cubeplex.objectstore import get_objectstore_client
+        from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
         openai_key = factory.openai_api_key()  # helper resolving the openai provider api_key
         _builtin_tools.append(
@@ -949,14 +949,14 @@ except Exception as _exc:  # noqa: BLE001
 
 ### Task B5: 前端验证(预期零/极小改动)
 
-- [ ] **Step 1:** 在本 worktree 起 backend(`PORT`/`CUBEBOX_API__PORT=8021`)+ 前端(`pnpm dev`,经 with-worktree-env,端口 3021,绑 0.0.0.0 给远程可看)。
+- [ ] **Step 1:** 在本 worktree 起 backend(`PORT`/`CUBEPLEX_API__PORT=8021`)+ 前端(`pnpm dev`,经 with-worktree-env,端口 3021,绑 0.0.0.0 给远程可看)。
 - [ ] **Step 2:** 浏览器发"画一只猫",确认右侧 `ArtifactPanel` 用 `ImagePreview` 渲染出图、消息里有 `ArtifactCard` 可点开。
 - [ ] **Step 3:** 若卡片文案/图标在生图场景需要微调,改 `components/chat/ArtifactCard.tsx` / `artifactIcons.ts`;否则记录"无需改动"。
 - [ ] **Step 4:**(如有改动)提交 `feat(web): tweak artifact card for generated images`。
 
 ---
 
-### Task B6: cubebox PR + review loop
+### Task B6: cubeplex PR + review loop
 
 - [ ] **Step 1:** Pre-PR 全量 sweep:`make test`(后端)+ 相关前端检查。
 - [ ] **Step 2:** push,`gh pr create`,跑 `/pr-codex-review-loop` 直到 clean。

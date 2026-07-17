@@ -1,6 +1,6 @@
 # Conversational Skill Discovery & Install Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Work from the worktree `/home/chris/cubebox/.worktrees/feat/skill-discovery-install` on branch `feat/skill-discovery-install`; `cat .worktree.env` first — the backend runs on the per-slot port, never 8000.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Work from the worktree `/home/chris/cubeplex/.worktrees/feat/skill-discovery-install` on branch `feat/skill-discovery-install`; `cat .worktree.env` first — the backend runs on the per-slot port, never 8000.
 
 **Goal:** Let a user describe a need in plain language → the agent calls a read-only `find_skills` tool that searches the local catalog (own-org-visible, not-yet-enabled skills) and one config-driven remote registry → returns ranked candidates with descriptions and a `candidate_id` + `canonical_name` → the user confirms via an authenticated workspace route → the chosen skill installs workspace-private (importing remote files when needed, minting `Skill.name = <org-slug>:<skill-slug>`) → it becomes loadable by `load_skill(canonical_name)` in the same conversation through the existing `SkillsMiddleware` path.
 
@@ -16,23 +16,23 @@
 
 ## File Structure
 
-- Create `cubebox/skills/sources/__init__.py` — package marker + re-exports.
-- Create `cubebox/skills/sources/base.py` — `SkillCandidate` dataclass, `TrustTier` enum, `SkillSource` Protocol, `encode_candidate_id` / `decode_candidate_id`.
-- Create `cubebox/skills/sources/local.py` — `LocalCatalogSource`.
-- Create `cubebox/skills/sources/remote.py` — `RemoteRegistrySource` (httpx client, registry metadata parse, subpath fetch).
-- Create `cubebox/skills/sources/registry.py` — `SkillSourceRegistry` (build from DB + always-on local).
-- Create `cubebox/skills/discovery.py` — `SkillDiscoveryService` (fan-out, merge, dedupe, rank) + `SkillInstallService` (local + remote install).
-- Create `cubebox/models/skill_source.py` — `SkillSource` table (remote-source config row).
-- Modify `cubebox/models/__init__.py` — export `SkillSource`.
-- Modify `cubebox/models/public_id.py` — add `PREFIX_SKILL_SOURCE = "sksrc"`.
-- Create `cubebox/repositories/skill_source.py` — `SkillSourceRepository`.
+- Create `cubeplex/skills/sources/__init__.py` — package marker + re-exports.
+- Create `cubeplex/skills/sources/base.py` — `SkillCandidate` dataclass, `TrustTier` enum, `SkillSource` Protocol, `encode_candidate_id` / `decode_candidate_id`.
+- Create `cubeplex/skills/sources/local.py` — `LocalCatalogSource`.
+- Create `cubeplex/skills/sources/remote.py` — `RemoteRegistrySource` (httpx client, registry metadata parse, subpath fetch).
+- Create `cubeplex/skills/sources/registry.py` — `SkillSourceRegistry` (build from DB + always-on local).
+- Create `cubeplex/skills/discovery.py` — `SkillDiscoveryService` (fan-out, merge, dedupe, rank) + `SkillInstallService` (local + remote install).
+- Create `cubeplex/models/skill_source.py` — `SkillSource` table (remote-source config row).
+- Modify `cubeplex/models/__init__.py` — export `SkillSource`.
+- Modify `cubeplex/models/public_id.py` — add `PREFIX_SKILL_SOURCE = "sksrc"`.
+- Create `cubeplex/repositories/skill_source.py` — `SkillSourceRepository`.
 - Create Alembic migration (autogenerate) for `skill_sources`.
-- Create `cubebox/tools/builtin/find_skills.py` — `create_find_skills_tool` factory (mirrors `load_skill.py` shape).
-- Modify `cubebox/streams/run_manager.py` — register `find_skills` next to `load_skill`; recompute enabled-skills suffix after install (already-present `list_enabled_for_workspace` call is per-turn, so no change needed there — see Task 8).
-- Create `cubebox/api/schemas/skill_discovery.py` — `SkillCandidateResponse`, `InstallCandidateRequest`, `InstallCandidateResponse`, `SkillSourceResponse`, `CreateSkillSourceRequest`.
-- Modify `cubebox/api/routes/v1/ws_skills.py` — add `GET …/discover`, `GET …/discover/preview`, `POST …/install`.
-- Create `cubebox/api/routes/v1/admin_skill_sources.py` — `/admin/skill-sources` CRUD.
-- Modify `cubebox/api/routes/v1/__init__.py` + `cubebox/api/app.py` — register the admin router.
+- Create `cubeplex/tools/builtin/find_skills.py` — `create_find_skills_tool` factory (mirrors `load_skill.py` shape).
+- Modify `cubeplex/streams/run_manager.py` — register `find_skills` next to `load_skill`; recompute enabled-skills suffix after install (already-present `list_enabled_for_workspace` call is per-turn, so no change needed there — see Task 8).
+- Create `cubeplex/api/schemas/skill_discovery.py` — `SkillCandidateResponse`, `InstallCandidateRequest`, `InstallCandidateResponse`, `SkillSourceResponse`, `CreateSkillSourceRequest`.
+- Modify `cubeplex/api/routes/v1/ws_skills.py` — add `GET …/discover`, `GET …/discover/preview`, `POST …/install`.
+- Create `cubeplex/api/routes/v1/admin_skill_sources.py` — `/admin/skill-sources` CRUD.
+- Modify `cubeplex/api/routes/v1/__init__.py` + `cubeplex/api/app.py` — register the admin router.
 - Tests: `tests/unit/test_skill_candidate_id.py`, `tests/unit/test_skill_discovery_ranking.py`, `tests/unit/test_remote_registry_source.py`, `tests/e2e/test_skill_discovery_local.py`, `tests/e2e/test_skill_discovery_remote.py`, `tests/e2e/test_skill_sources_admin.py`, `tests/e2e/test_find_skills_tool.py`.
 
 ---
@@ -42,8 +42,8 @@
 The candidate is the one normalized shape every source returns and every route/tool speaks. `candidate_id` must round-trip `(source_kind, source_id, source_ref)` with no slashes (remote `source_ref` is e.g. `vercel-labs/skills/tree/main/skills/find-skills`; `source_id` is the registered `SkillSource` row id, empty for local). Use URL-safe base64 over a `kind|source_id|ref` payload — stateless, no DB lookup, no expiry/GC.
 
 **Files:**
-- Create: `cubebox/skills/sources/__init__.py`
-- Create: `cubebox/skills/sources/base.py`
+- Create: `cubeplex/skills/sources/__init__.py`
+- Create: `cubeplex/skills/sources/base.py`
 - Test: `tests/unit/test_skill_candidate_id.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -52,7 +52,7 @@ The candidate is the one normalized shape every source returns and every route/t
 # tests/unit/test_skill_candidate_id.py
 import pytest
 
-from cubebox.skills.sources.base import (
+from cubeplex.skills.sources.base import (
     CandidateIdError,
     decode_candidate_id,
     encode_candidate_id,
@@ -83,17 +83,17 @@ def test_decode_rejects_garbage():
 - [ ] **Step 2: Run to confirm it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py -q`
-Expected: FAIL with `ModuleNotFoundError: cubebox.skills.sources.base`.
+Expected: FAIL with `ModuleNotFoundError: cubeplex.skills.sources.base`.
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/skills/sources/__init__.py
+# cubeplex/skills/sources/__init__.py
 """Skill discovery sources: local catalog + remote registry behind one interface."""
 ```
 
 ```python
-# cubebox/skills/sources/base.py
+# cubeplex/skills/sources/base.py
 """Candidate shape, trust tiers, the SkillSource protocol, and the opaque
 candidate-id codec.
 
@@ -189,13 +189,13 @@ class SkillSource(Protocol):
 
 - [ ] **Step 4: Run to confirm pass + lint**
 
-Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py -q && uv run ruff check cubebox/skills/sources/`
+Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py -q && uv run ruff check cubeplex/skills/sources/`
 Expected: 3 passed; ruff clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/__init__.py backend/cubebox/skills/sources/base.py backend/tests/unit/test_skill_candidate_id.py
+git add backend/cubeplex/skills/sources/__init__.py backend/cubeplex/skills/sources/base.py backend/tests/unit/test_skill_candidate_id.py
 git commit -m "feat(skills): candidate shape + opaque candidate_id codec"
 ```
 
@@ -206,15 +206,15 @@ git commit -m "feat(skills): candidate shape + opaque candidate_id codec"
 Remote sources are DB/config-driven, never hardcoded. One row per registered remote source.
 
 **Files:**
-- Create: `cubebox/models/skill_source.py`
-- Modify: `cubebox/models/__init__.py`
-- Modify: `cubebox/models/public_id.py`
-- Create: `cubebox/repositories/skill_source.py`
+- Create: `cubeplex/models/skill_source.py`
+- Modify: `cubeplex/models/__init__.py`
+- Modify: `cubeplex/models/public_id.py`
+- Create: `cubeplex/repositories/skill_source.py`
 - Migration: autogenerated
 
 - [ ] **Step 1: Add the prefix**
 
-In `cubebox/models/public_id.py`, after `PREFIX_EGRESS_REF`:
+In `cubeplex/models/public_id.py`, after `PREFIX_EGRESS_REF`:
 
 ```python
 PREFIX_SKILL_SOURCE: str = "sksrc"
@@ -223,17 +223,17 @@ PREFIX_SKILL_SOURCE: str = "sksrc"
 - [ ] **Step 2: Model**
 
 ```python
-# cubebox/models/skill_source.py
+# cubeplex/models/skill_source.py
 """Registered remote skill registries (org-scoped admin config)."""
 
 from typing import ClassVar
 
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase
+from cubeplex.models.mixins import CubeplexBase
 
 
-class SkillSource(CubeboxBase, table=True):
+class SkillSource(CubeplexBase, table=True):
     """A remote registry an org admin registered for discovery.
 
     The built-in local catalog source is implicit (always present) and has no
@@ -253,12 +253,12 @@ class SkillSource(CubeboxBase, table=True):
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 ```
 
-In `cubebox/models/__init__.py` add `SkillSource` to the skill-model import block and `__all__`.
+In `cubeplex/models/__init__.py` add `SkillSource` to the skill-model import block and `__all__`.
 
 - [ ] **Step 3: Repository**
 
 ```python
-# cubebox/repositories/skill_source.py
+# cubeplex/repositories/skill_source.py
 """Repository for registered remote skill sources."""
 
 from __future__ import annotations
@@ -266,7 +266,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import SkillSource
+from cubeplex.models import SkillSource
 
 
 class SkillSourceRepository:
@@ -333,13 +333,13 @@ Expected: a new file under `alembic/versions/` creating `skill_sources` with the
 
 - [ ] **Step 5: Apply + verify**
 
-Run: `cd backend && uv run alembic upgrade head && uv run python -c "from cubebox.models import SkillSource; print(SkillSource.__tablename__)"`
+Run: `cd backend && uv run alembic upgrade head && uv run python -c "from cubeplex.models import SkillSource; print(SkillSource.__tablename__)"`
 Expected: prints `skill_sources`; no error.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/skill_source.py backend/cubebox/models/__init__.py backend/cubebox/models/public_id.py backend/cubebox/repositories/skill_source.py backend/alembic/versions/
+git add backend/cubeplex/models/skill_source.py backend/cubeplex/models/__init__.py backend/cubeplex/models/public_id.py backend/cubeplex/repositories/skill_source.py backend/alembic/versions/
 git commit -m "feat(skills): SkillSource config table + repository + migration"
 ```
 
@@ -350,22 +350,22 @@ git commit -m "feat(skills): SkillSource config table + repository + migration"
 Wraps `SkillRepository.list_visible_for_org` scoped to the asking org; candidates are catalog rows **not yet enabled in the asking workspace**. `fetch` is a no-op (files already in our store; install just creates the install row). `install_state` distinguishes already-enabled (`enabled`) from in-catalog-but-not-enabled (`in_catalog`).
 
 **Files:**
-- Create: `cubebox/skills/sources/local.py`
+- Create: `cubeplex/skills/sources/local.py`
 - (covered by Task 6 ranking unit test + Task 7 e2e)
 
 - [ ] **Step 1: Implement**
 
 ```python
-# cubebox/skills/sources/local.py
+# cubeplex/skills/sources/local.py
 """Local catalog as a SkillSource: own-org-visible skills, not yet enabled here."""
 
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import SkillRepository
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.base import (
+from cubeplex.repositories.skill import SkillRepository
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.base import (
     SkillCandidate,
     SourceKind,
     TrustTier,
@@ -421,13 +421,13 @@ class LocalCatalogSource:
 
 - [ ] **Step 2: Lint + import check**
 
-Run: `cd backend && uv run ruff check cubebox/skills/sources/local.py && uv run python -c "from cubebox.skills.sources.local import LocalCatalogSource"`
+Run: `cd backend && uv run ruff check cubeplex/skills/sources/local.py && uv run python -c "from cubeplex.skills.sources.local import LocalCatalogSource"`
 Expected: clean; no import error.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/local.py
+git add backend/cubeplex/skills/sources/local.py
 git commit -m "feat(skills): LocalCatalogSource over list_visible_for_org"
 ```
 
@@ -438,8 +438,8 @@ git commit -m "feat(skills): LocalCatalogSource over list_visible_for_org"
 Talks to a GitHub-backed registry the `npx skills` shape. `search` GETs the directory query endpoint and parses skill metadata. `fetch` lists the chosen skill's subpath **tree** (so it imports the real skill — `references/`, `scripts/`, assets — not just `SKILL.md` + a hardcoded handful), then downloads every safe file under that one pinned subpath (the `npx skills` subpath footgun — issue #1015 — means we pin the subpath, not pull the whole repo). `canonical_name` is computed up front from the installing org slug. This task also extracts the zip-path size/traversal guards into a shared `validate_skill_files` so the remote path enforces the same limits (Task 7 calls it).
 
 **Files:**
-- Create: `cubebox/skills/sources/remote.py`
-- Modify: `cubebox/skills/service.py` — extract `validate_skill_files(files)` from `_extract_zip`.
+- Create: `cubeplex/skills/sources/remote.py`
+- Modify: `cubeplex/skills/service.py` — extract `validate_skill_files(files)` from `_extract_zip`.
 - Test: `tests/unit/test_remote_registry_source.py`
 
 - [ ] **Step 1: Write the failing test (against a faithful in-test HTTP stub)**
@@ -449,8 +449,8 @@ Talks to a GitHub-backed registry the `npx skills` shape. `search` GETs the dire
 import httpx
 import pytest
 
-from cubebox.skills.sources.base import TrustTier
-from cubebox.skills.sources.remote import RemoteRegistrySource
+from cubeplex.skills.sources.base import TrustTier
+from cubeplex.skills.sources.remote import RemoteRegistrySource
 
 
 def _registry_app() -> httpx.MockTransport:
@@ -511,7 +511,7 @@ async def test_search_normalizes_and_computes_canonical_name():
     assert c.stars == 1200
     # candidate_id carries the originating source id so preview/install pick the
     # exact source even with multiple remote sources registered.
-    from cubebox.skills.sources.base import decode_candidate_id
+    from cubeplex.skills.sources.base import decode_candidate_id
 
     assert decode_candidate_id(c.candidate_id) == (
         "remote", "sksrc-1", "acme/skills/tree/main/skills/slide-deck",
@@ -538,12 +538,12 @@ async def test_fetch_imports_whole_subpath_tree_not_just_skill_md():
 - [ ] **Step 2: Run to confirm it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_remote_registry_source.py -q`
-Expected: FAIL with `ModuleNotFoundError: cubebox.skills.sources.remote`.
+Expected: FAIL with `ModuleNotFoundError: cubeplex.skills.sources.remote`.
 
 - [ ] **Step 3: Implement**
 
 ```python
-# cubebox/skills/sources/remote.py
+# cubeplex/skills/sources/remote.py
 """Remote GitHub-backed skill registry as a SkillSource.
 
 search() hits the registry directory; fetch() lists the chosen skill's subpath
@@ -559,7 +559,7 @@ from pathlib import PurePosixPath
 
 import httpx
 
-from cubebox.skills.sources.base import (
+from cubeplex.skills.sources.base import (
     SkillCandidate,
     SourceKind,
     TrustTier,
@@ -669,7 +669,7 @@ zip path is unchanged AND the remote import path (Task 7) can call the same func
 limits — reuse `MAX_FILE_BYTES` / `MAX_TOTAL_BYTES`.
 
 ```python
-# cubebox/skills/service.py — new module-level helper, called by _extract_zip and remote install
+# cubeplex/skills/service.py — new module-level helper, called by _extract_zip and remote install
 def validate_skill_files(files: dict[str, bytes]) -> None:
     """Enforce path-traversal + per-file + total-size limits on a skill bundle.
 
@@ -694,13 +694,13 @@ size; `validate_skill_files` checks the read bytes — equivalent for our purpos
 
 - [ ] **Step 5: Run to confirm pass + lint**
 
-Run: `cd backend && uv run pytest tests/unit/test_remote_registry_source.py -q && uv run ruff check cubebox/skills/sources/remote.py cubebox/skills/service.py`
+Run: `cd backend && uv run pytest tests/unit/test_remote_registry_source.py -q && uv run ruff check cubeplex/skills/sources/remote.py cubeplex/skills/service.py`
 Expected: 2 passed; ruff clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/remote.py backend/cubebox/skills/service.py backend/tests/unit/test_remote_registry_source.py
+git add backend/cubeplex/skills/sources/remote.py backend/cubeplex/skills/service.py backend/tests/unit/test_remote_registry_source.py
 git commit -m "feat(skills): RemoteRegistrySource whole-subpath fetch + shared file validator"
 ```
 
@@ -711,23 +711,23 @@ git commit -m "feat(skills): RemoteRegistrySource whole-subpath fetch + shared f
 Builds the live source set for one (org, workspace): the always-on local source + every enabled remote `SkillSource` row, each wrapped in a `RemoteRegistrySource`.
 
 **Files:**
-- Create: `cubebox/skills/sources/registry.py`
+- Create: `cubeplex/skills/sources/registry.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# cubebox/skills/sources/registry.py
+# cubeplex/skills/sources/registry.py
 """Assembles the live SkillSource set for an (org, workspace)."""
 
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill_source import SkillSourceRepository
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.base import SkillSource, TrustTier
-from cubebox.skills.sources.local import LocalCatalogSource
-from cubebox.skills.sources.remote import RemoteRegistrySource
+from cubeplex.repositories.skill_source import SkillSourceRepository
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.base import SkillSource, TrustTier
+from cubeplex.skills.sources.local import LocalCatalogSource
+from cubeplex.skills.sources.remote import RemoteRegistrySource
 
 
 class SkillSourceRegistry:
@@ -783,13 +783,13 @@ class SkillSourceRegistry:
 
 - [ ] **Step 2: Import check**
 
-Run: `cd backend && uv run python -c "from cubebox.skills.sources.registry import SkillSourceRegistry" && uv run ruff check cubebox/skills/sources/registry.py`
+Run: `cd backend && uv run python -c "from cubeplex.skills.sources.registry import SkillSourceRegistry" && uv run ruff check cubeplex/skills/sources/registry.py`
 Expected: clean.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/registry.py
+git add backend/cubeplex/skills/sources/registry.py
 git commit -m "feat(skills): SkillSourceRegistry (always-on local + enabled remotes)"
 ```
 
@@ -800,7 +800,7 @@ git commit -m "feat(skills): SkillSourceRegistry (always-on local + enabled remo
 Pure logic worth a focused unit test: exact > keyword > trust > popularity; the same skill across sources collapses on its **normalized display slug** (not `canonical_name`, which differs — local `slug` vs remote `<org>:slug`), with local winning.
 
 **Files:**
-- Create: `cubebox/skills/discovery.py` (discovery half; install half lands in Task 7)
+- Create: `cubeplex/skills/discovery.py` (discovery half; install half lands in Task 7)
 - Test: `tests/unit/test_skill_discovery_ranking.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -809,8 +809,8 @@ Pure logic worth a focused unit test: exact > keyword > trust > popularity; the 
 # tests/unit/test_skill_discovery_ranking.py
 import pytest
 
-from cubebox.skills.discovery import rank_candidates
-from cubebox.skills.sources.base import SkillCandidate, TrustTier
+from cubeplex.skills.discovery import rank_candidates
+from cubeplex.skills.sources.base import SkillCandidate, TrustTier
 
 
 def _c(name, *, desc="", trust=TrustTier.untrusted, stars=None, kind="remote", keywords=None):
@@ -881,20 +881,20 @@ def test_single_keyword_token_matches():
 - [ ] **Step 2: Run to confirm it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_skill_discovery_ranking.py -q`
-Expected: FAIL with `ModuleNotFoundError: cubebox.skills.discovery`.
+Expected: FAIL with `ModuleNotFoundError: cubeplex.skills.discovery`.
 
 - [ ] **Step 3: Implement the discovery half**
 
 ```python
-# cubebox/skills/discovery.py
+# cubeplex/skills/discovery.py
 """Discovery (fan-out + rank) and install services for conversational skills."""
 
 from __future__ import annotations
 
 import re
 
-from cubebox.skills.sources.base import SkillCandidate, TrustTier
-from cubebox.skills.sources.registry import SkillSourceRegistry
+from cubeplex.skills.sources.base import SkillCandidate, TrustTier
+from cubeplex.skills.sources.registry import SkillSourceRegistry
 
 _TRUST_RANK = {TrustTier.official: 0, TrustTier.community: 1, TrustTier.untrusted: 2}
 
@@ -977,13 +977,13 @@ class SkillDiscoveryService:
 
 - [ ] **Step 4: Run to confirm pass + lint**
 
-Run: `cd backend && uv run pytest tests/unit/test_skill_discovery_ranking.py -q && uv run ruff check cubebox/skills/discovery.py`
+Run: `cd backend && uv run pytest tests/unit/test_skill_discovery_ranking.py -q && uv run ruff check cubeplex/skills/discovery.py`
 Expected: 4 passed; ruff clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/discovery.py backend/tests/unit/test_skill_discovery_ranking.py
+git add backend/cubeplex/skills/discovery.py backend/tests/unit/test_skill_discovery_ranking.py
 git commit -m "feat(skills): SkillDiscoveryService fan-out + ranking"
 ```
 
@@ -994,7 +994,7 @@ git commit -m "feat(skills): SkillDiscoveryService fan-out + ranking"
 Install decodes the `candidate_id`, then: **local** → `OrgSkillInstallRepository.create_for_workspace` against the catalog row; **remote** → `source.fetch(source_ref)` → `SkillPublishService._publish_from_files(..., workspace_id=ws)` which mints `<org-slug>:<skill-slug>` and creates the workspace-private install. Both return the **canonical name** that `load_skill` resolves. Drive it end-to-end against a real DB + object store (local path) — that's the spec's primary E2E.
 
 **Files:**
-- Modify: `cubebox/skills/discovery.py` (add `SkillInstallService` + `InstallResult`)
+- Modify: `cubeplex/skills/discovery.py` (add `SkillInstallService` + `InstallResult`)
 - Test: `tests/e2e/test_skill_discovery_local.py`
 
 - [ ] **Step 1: Write the failing E2E (local catalog round-trip via routes)**
@@ -1065,14 +1065,14 @@ Expected: FAIL — 404 on `/discover` (routes not yet added in Task 8).
 - [ ] **Step 3: Implement `SkillInstallService`**
 
 ```python
-# append to cubebox/skills/discovery.py
+# append to cubeplex/skills/discovery.py
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
-from cubebox.skills.service import SkillPublishService, validate_skill_files
-from cubebox.skills.sources.base import decode_candidate_id
+from cubeplex.repositories.skill import OrgSkillInstallRepository, SkillRepository
+from cubeplex.skills.service import SkillPublishService, validate_skill_files
+from cubeplex.skills.sources.base import decode_candidate_id
 
 
 class SkillInstallError(ValueError):
@@ -1181,13 +1181,13 @@ class SkillInstallService:
 
 - [ ] **Step 4: Re-run after Task 8 wires the routes** (the e2e goes green once routes exist). For now confirm import + lint:
 
-Run: `cd backend && uv run python -c "from cubebox.skills.discovery import SkillInstallService" && uv run ruff check cubebox/skills/discovery.py`
+Run: `cd backend && uv run python -c "from cubeplex.skills.discovery import SkillInstallService" && uv run ruff check cubeplex/skills/discovery.py`
 Expected: clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/skills/discovery.py backend/tests/e2e/test_skill_discovery_local.py backend/tests/e2e/conftest.py
+git add backend/cubeplex/skills/discovery.py backend/tests/e2e/test_skill_discovery_local.py backend/tests/e2e/conftest.py
 git commit -m "feat(skills): SkillInstallService (local + remote workspace-private)"
 ```
 
@@ -1198,14 +1198,14 @@ git commit -m "feat(skills): SkillInstallService (local + remote workspace-priva
 Scope-isolated member routes on the existing `ws_skills.py` router. The authenticated `POST …/install` **is** the user confirmation (trust boundary at the human). `candidate_id` rides the query string (preview) and JSON body (install), never the path.
 
 **Files:**
-- Create: `cubebox/api/schemas/skill_discovery.py`
-- Modify: `cubebox/api/routes/v1/ws_skills.py`
+- Create: `cubeplex/api/schemas/skill_discovery.py`
+- Modify: `cubeplex/api/routes/v1/ws_skills.py`
 - Tests: `tests/e2e/test_skill_discovery_local.py` (from Task 7) goes green here.
 
 - [ ] **Step 1: Schemas**
 
 ```python
-# cubebox/api/schemas/skill_discovery.py
+# cubeplex/api/schemas/skill_discovery.py
 """Request/response models for conversational skill discovery + install."""
 
 from __future__ import annotations
@@ -1377,13 +1377,13 @@ Expected: all PASS.
 
 - [ ] **Step 4: Type-check + lint changed files**
 
-Run: `cd backend && uv run mypy cubebox/skills cubebox/api/routes/v1/ws_skills.py && uv run ruff check cubebox/skills cubebox/api/routes/v1/ws_skills.py cubebox/api/schemas/skill_discovery.py`
+Run: `cd backend && uv run mypy cubeplex/skills cubeplex/api/routes/v1/ws_skills.py && uv run ruff check cubeplex/skills cubeplex/api/routes/v1/ws_skills.py cubeplex/api/schemas/skill_discovery.py`
 Expected: no issues.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/skill_discovery.py backend/cubebox/api/routes/v1/ws_skills.py
+git add backend/cubeplex/api/schemas/skill_discovery.py backend/cubeplex/api/routes/v1/ws_skills.py
 git commit -m "feat(skills): member discover/preview/install routes"
 ```
 
@@ -1394,8 +1394,8 @@ git commit -m "feat(skills): member discover/preview/install routes"
 Read-only agent tool sitting next to `load_skill`. It calls `SkillDiscoveryService` in-process and returns descriptions-only candidates plus the opaque `candidate_id` and `canonical_name`. It never installs; for already-enabled candidates it tells the agent to `load_skill(canonical_name)`.
 
 **Files:**
-- Create: `cubebox/tools/builtin/find_skills.py`
-- Modify: `cubebox/streams/run_manager.py`
+- Create: `cubeplex/tools/builtin/find_skills.py`
+- Modify: `cubeplex/streams/run_manager.py`
 - Test: `tests/e2e/test_find_skills_tool.py`
 
 - [ ] **Step 1: Write the failing E2E (tool executes against a real catalog)**
@@ -1404,11 +1404,11 @@ Read-only agent tool sitting next to `load_skill`. It calls `SkillDiscoveryServi
 # tests/e2e/test_find_skills_tool.py
 import pytest
 
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.registry import SkillSourceRegistry
-from cubebox.skills.discovery import SkillDiscoveryService
-from cubebox.tools.builtin.find_skills import FindSkillsInput, create_find_skills_tool
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.registry import SkillSourceRegistry
+from cubeplex.skills.discovery import SkillDiscoveryService
+from cubeplex.tools.builtin.find_skills import FindSkillsInput, create_find_skills_tool
 
 
 @pytest.mark.asyncio
@@ -1431,12 +1431,12 @@ async def test_find_skills_tool_returns_local_candidate(seeded_session_org_ws):
 - [ ] **Step 2: Run to confirm it fails**
 
 Run: `cd backend && uv run pytest tests/e2e/test_find_skills_tool.py -q`
-Expected: FAIL with `ModuleNotFoundError: cubebox.tools.builtin.find_skills`.
+Expected: FAIL with `ModuleNotFoundError: cubeplex.tools.builtin.find_skills`.
 
 - [ ] **Step 3: Implement the tool**
 
 ```python
-# cubebox/tools/builtin/find_skills.py
+# cubeplex/tools/builtin/find_skills.py
 """find_skills tool — read-only conversational skill discovery (cubepi AgentTool).
 
 Mirrors load_skill.py's wrapper shape. Returns ranked candidates as JSON
@@ -1451,7 +1451,7 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.skills.discovery import SkillDiscoveryService
+from cubeplex.skills.discovery import SkillDiscoveryService
 
 
 class FindSkillsInput(BaseModel):
@@ -1518,10 +1518,10 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
         # None when the catalog DB was unavailable at run start).
         if skill_catalog is not None and catalog_session is not None:
             try:
-                from cubebox.repositories.organization import OrganizationRepository
-                from cubebox.skills.discovery import SkillDiscoveryService
-                from cubebox.skills.sources.registry import SkillSourceRegistry
-                from cubebox.tools.builtin.find_skills import create_find_skills_tool
+                from cubeplex.repositories.organization import OrganizationRepository
+                from cubeplex.skills.discovery import SkillDiscoveryService
+                from cubeplex.skills.sources.registry import SkillSourceRegistry
+                from cubeplex.tools.builtin.find_skills import create_find_skills_tool
 
                 _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
@@ -1542,13 +1542,13 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
 
 - [ ] **Step 5: Run the tool E2E + lint**
 
-Run: `cd backend && uv run pytest tests/e2e/test_find_skills_tool.py -q && uv run ruff check cubebox/tools/builtin/find_skills.py`
+Run: `cd backend && uv run pytest tests/e2e/test_find_skills_tool.py -q && uv run ruff check cubeplex/tools/builtin/find_skills.py`
 Expected: PASS; ruff clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/tools/builtin/find_skills.py backend/cubebox/streams/run_manager.py backend/tests/e2e/test_find_skills_tool.py backend/tests/e2e/conftest.py
+git add backend/cubeplex/tools/builtin/find_skills.py backend/cubeplex/streams/run_manager.py backend/tests/e2e/test_find_skills_tool.py backend/tests/e2e/conftest.py
 git commit -m "feat(skills): find_skills builtin tool + run_manager wiring"
 ```
 
@@ -1578,8 +1578,8 @@ async def test_installed_skill_resolves_via_find_enabled_by_name(
     )
     name = inst.json()["canonical_name"]
 
-    from cubebox.skills.cache import SkillCache
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
 
     catalog = SkillCatalogService(session=session, cache=SkillCache(cache_root="skills_cache"))
     resolved = await catalog.find_enabled_by_name(ws_id, org_id=org_id, name=name)
@@ -1594,7 +1594,7 @@ Expected: all PASS. If it fails because the suffix is cached per-conversation, i
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/e2e/test_skill_discovery_local.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/e2e/test_skill_discovery_local.py
 git commit -m "test(skills): verify installed skill is loadable in same conversation"
 ```
 
@@ -1605,8 +1605,8 @@ git commit -m "test(skills): verify installed skill is loadable in same conversa
 Scope-isolated admin router for registering/listing/enabling/disabling remote sources and pinning trust tier. Members never touch source config (spec §4: only org admins register remote sources).
 
 **Files:**
-- Create: `cubebox/api/routes/v1/admin_skill_sources.py`
-- Modify: `cubebox/api/routes/v1/__init__.py`, `cubebox/api/app.py`
+- Create: `cubeplex/api/routes/v1/admin_skill_sources.py`
+- Modify: `cubeplex/api/routes/v1/__init__.py`, `cubeplex/api/app.py`
 - Test: `tests/e2e/test_skill_sources_admin.py`
 
 - [ ] **Step 1: Write the failing E2E**
@@ -1654,10 +1654,10 @@ async def test_member_cannot_reach_admin_source_routes(
 Run: `cd backend && uv run pytest tests/e2e/test_skill_sources_admin.py -q`
 Expected: FAIL — 404 (router not registered).
 
-- [ ] **Step 3: Implement the admin router** (uses `get_admin_request_context` from `cubebox.mcp.dependencies`, the org-admin dependency used by other admin routes)
+- [ ] **Step 3: Implement the admin router** (uses `get_admin_request_context` from `cubeplex.mcp.dependencies`, the org-admin dependency used by other admin routes)
 
 ```python
-# cubebox/api/routes/v1/admin_skill_sources.py
+# cubeplex/api/routes/v1/admin_skill_sources.py
 """Org-admin management of remote skill sources (/admin/skill-sources)."""
 
 from __future__ import annotations
@@ -1668,11 +1668,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.db import get_session
-from cubebox.mcp.dependencies import get_admin_request_context
-from cubebox.models import SkillSource
-from cubebox.repositories.skill_source import SkillSourceRepository
+from cubeplex.auth.context import RequestContext
+from cubeplex.db import get_session
+from cubeplex.mcp.dependencies import get_admin_request_context
+from cubeplex.models import SkillSource
+from cubeplex.repositories.skill_source import SkillSourceRepository
 
 router = APIRouter(prefix="/admin/skill-sources", tags=["admin-skill-sources"])
 
@@ -1759,7 +1759,7 @@ async def patch_source(
 
 - [ ] **Step 4: Register the router**
 
-In `cubebox/api/routes/v1/__init__.py` add `admin_skill_sources` to the import block + `__all__`. In `cubebox/api/app.py`, alongside the existing `admin_skills` include:
+In `cubeplex/api/routes/v1/__init__.py` add `admin_skill_sources` to the import block + `__all__`. In `cubeplex/api/app.py`, alongside the existing `admin_skills` include:
 
 ```python
     app.include_router(admin_skill_sources.router, prefix="/api/v1")
@@ -1767,13 +1767,13 @@ In `cubebox/api/routes/v1/__init__.py` add `admin_skill_sources` to the import b
 
 - [ ] **Step 5: Run the admin E2E + lint/type**
 
-Run: `cd backend && uv run pytest tests/e2e/test_skill_sources_admin.py -q && uv run mypy cubebox/api/routes/v1/admin_skill_sources.py && uv run ruff check cubebox/api/routes/v1/admin_skill_sources.py`
+Run: `cd backend && uv run pytest tests/e2e/test_skill_sources_admin.py -q && uv run mypy cubeplex/api/routes/v1/admin_skill_sources.py && uv run ruff check cubeplex/api/routes/v1/admin_skill_sources.py`
 Expected: PASS; clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_skill_sources.py backend/cubebox/api/routes/v1/__init__.py backend/cubebox/api/app.py backend/tests/e2e/test_skill_sources_admin.py
+git add backend/cubeplex/api/routes/v1/admin_skill_sources.py backend/cubeplex/api/routes/v1/__init__.py backend/cubeplex/api/app.py backend/tests/e2e/test_skill_sources_admin.py
 git commit -m "feat(skills): admin remote-source management routes"
 ```
 
@@ -1889,11 +1889,11 @@ Source allowlist + content-scan + admin approval queue are deferred to a future 
 
 ## Task 14: Workspace skills page — discover panel + install button + check-for-update + chat-fallback
 
-Build the user-facing skills surface in the workspace. Mirrors the spec §7 v1 inclusion of the workspace skills page and the OQ-5 two-surface confirm decision. The chat fallback parses `install <canonical_name>` from a user message **server-side in the conversation route** (not as a frontend UI confirm card) — see the "Chat-fallback design choice" subsection below. All three new HTTP surfaces — discover, install, refresh — are existing backend endpoints from Tasks 8 and 12; this task wires up the proxy routes, the page, the module components, the `@cubebox/core` types, and the Playwright smoke.
+Build the user-facing skills surface in the workspace. Mirrors the spec §7 v1 inclusion of the workspace skills page and the OQ-5 two-surface confirm decision. The chat fallback parses `install <canonical_name>` from a user message **server-side in the conversation route** (not as a frontend UI confirm card) — see the "Chat-fallback design choice" subsection below. All three new HTTP surfaces — discover, install, refresh — are existing backend endpoints from Tasks 8 and 12; this task wires up the proxy routes, the page, the module components, the `@cubeplex/core` types, and the Playwright smoke.
 
 > **Workspace-port reminder:** inside this worktree the frontend port is allocated in `.worktree.env`, NEVER 3000. `cat .worktree.env` before `pnpm dev` — the wrapper at `frontend/scripts/with-worktree-env.mjs` reads it.
 
-**Chat-fallback design choice — server-side message parser (not a UI confirm card).** The fallback's whole point is "pure-chat clients still work." A UI confirm card requires a UI client to render it; a server-side parser works in any client that sends a user message. The conversation route (`backend/cubebox/api/routes/v1/ws_conversations.py` — the existing user-message ingest) gets a small detector that, on a user message matching `^install <canonical_name>\s*$` (case-sensitive, single-line), looks up the candidate by `canonical_name` in the workspace's catalog + enabled-remote candidates, calls the same `SkillInstallService.install` the HTTP route calls, and rewrites the message before the agent loop sees it (e.g. replaces with an assistant-shaped system note: "Installed `<name>` (v<version>). Use `load_skill('<canonical_name>')`."). Single source of truth = `SkillInstallService.install`. The UI button on the candidate card is the primary path; the parser is the strict fallback. (Frontend does NOT render a confirm card; the candidate card itself IS the confirmation — clicking Install is the confirm.)
+**Chat-fallback design choice — server-side message parser (not a UI confirm card).** The fallback's whole point is "pure-chat clients still work." A UI confirm card requires a UI client to render it; a server-side parser works in any client that sends a user message. The conversation route (`backend/cubeplex/api/routes/v1/ws_conversations.py` — the existing user-message ingest) gets a small detector that, on a user message matching `^install <canonical_name>\s*$` (case-sensitive, single-line), looks up the candidate by `canonical_name` in the workspace's catalog + enabled-remote candidates, calls the same `SkillInstallService.install` the HTTP route calls, and rewrites the message before the agent loop sees it (e.g. replaces with an assistant-shaped system note: "Installed `<name>` (v<version>). Use `load_skill('<canonical_name>')`."). Single source of truth = `SkillInstallService.install`. The UI button on the candidate card is the primary path; the parser is the strict fallback. (Frontend does NOT render a confirm card; the candidate card itself IS the confirmation — clicking Install is the confirm.)
 
 **Files:**
 - Create: `frontend/packages/core/src/api/skills.ts` — discover/install/refresh client + types.
@@ -1907,7 +1907,7 @@ Build the user-facing skills surface in the workspace. Mirrors the spec §7 v1 i
 - Create: `frontend/packages/web/components/skills/DiscoverPanel.tsx` — search input + ranked candidate cards + Install button.
 - Create: `frontend/packages/web/components/skills/SkillCandidateCard.tsx` — single card (name, canonical_name, source, repo, trust badges, description, Install).
 - Modify: `frontend/packages/web/components/layout/WorkspaceNav.tsx` (or the existing workspace-sidebar component) — add "Skills" nav item linking to `/w/[wsId]/skills`.
-- Modify: `backend/cubebox/api/routes/v1/ws_conversations.py` — add the `install <canonical_name>` parser BEFORE the agent-loop kickoff; uses the existing `SkillInstallService` already wired in Task 8.
+- Modify: `backend/cubeplex/api/routes/v1/ws_conversations.py` — add the `install <canonical_name>` parser BEFORE the agent-loop kickoff; uses the existing `SkillInstallService` already wired in Task 8.
 - Test: `frontend/packages/web/e2e/skills-discover-install.spec.ts` — Playwright smoke.
 
 - [ ] **Step 1: Write the failing Playwright smoke**
@@ -1976,7 +1976,7 @@ test("Check for update no-op on a remote-imported skill", async ({ page }) => {
 Run: `cd frontend && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
 Expected: FAIL — `/w/[wsId]/skills` 404s (page not yet created).
 
-- [ ] **Step 3: `@cubebox/core` types + API module**
+- [ ] **Step 3: `@cubeplex/core` types + API module**
 
 ```ts
 // frontend/packages/core/src/api/skills.ts
@@ -2103,7 +2103,7 @@ export * from "./api/skills";
 export { useSkillsStore } from "./stores/skillsStore";
 ```
 
-Run: `cd frontend && pnpm build --filter @cubebox/core`
+Run: `cd frontend && pnpm build --filter @cubeplex/core`
 Expected: clean build, types emitted.
 
 - [ ] **Step 4: Next proxy routes**
@@ -2170,7 +2170,7 @@ export default function WorkspaceSkillsPage() {
 "use client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useSkillsStore, type SkillCandidateOut } from "@cubebox/core";
+import { useSkillsStore, type SkillCandidateOut } from "@cubeplex/core";
 
 export function SkillCandidateCard({
   wsId,
@@ -2214,7 +2214,7 @@ export function SkillCandidateCard({
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useSkillsStore } from "@cubebox/core";
+import { useSkillsStore } from "@cubeplex/core";
 import { SkillCandidateCard } from "./SkillCandidateCard";
 
 export function DiscoverPanel({ wsId }: { wsId: string }) {
@@ -2258,7 +2258,7 @@ export function DiscoverPanel({ wsId }: { wsId: string }) {
 // endpoint (`GET /api/v1/ws/{ws}/skills?scope=workspace`) — already proxied —
 // so this module just lists; per-row "Check for update" calls refreshSkill.
 import { useEffect, useState } from "react";
-import { useSkillsStore } from "@cubebox/core";
+import { useSkillsStore } from "@cubeplex/core";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -2336,7 +2336,7 @@ Pick an icon already in the project's icon set (`Sparkles` / `BookOpen` work). K
 
 - [ ] **Step 7: Chat-fallback parser in the conversation route**
 
-In `backend/cubebox/api/routes/v1/ws_conversations.py`, in the user-message ingest handler, BEFORE the agent loop kicks off:
+In `backend/cubeplex/api/routes/v1/ws_conversations.py`, in the user-message ingest handler, BEFORE the agent loop kicks off:
 
 ```python
 import re
@@ -2388,7 +2388,7 @@ Call `_maybe_install_from_user_message(...)` once per user message; if it return
 
 - [ ] **Step 8: Run frontend build + lint + type-check**
 
-Run: `cd frontend && pnpm build --filter @cubebox/core && pnpm lint --filter @cubebox/web && pnpm type-check --filter @cubebox/web`
+Run: `cd frontend && pnpm build --filter @cubeplex/core && pnpm lint --filter @cubeplex/web && pnpm type-check --filter @cubeplex/web`
 Expected: all clean.
 
 - [ ] **Step 9: Run the Playwright smoke**
@@ -2434,7 +2434,7 @@ git add frontend/packages/core/src/api/skills.ts frontend/packages/core/src/stor
 git add frontend/packages/web/app/api/v1/ws/\[wsId\]/skills/ frontend/packages/web/app/\(app\)/w/\[wsId\]/skills/
 git add frontend/packages/web/components/skills/ frontend/packages/web/components/layout/WorkspaceNav.tsx
 git add frontend/packages/web/e2e/skills-discover-install.spec.ts
-git add backend/cubebox/api/routes/v1/ws_conversations.py backend/tests/e2e/test_chat_install_fallback.py
+git add backend/cubeplex/api/routes/v1/ws_conversations.py backend/tests/e2e/test_chat_install_fallback.py
 git commit -m "feat(skills): workspace skills page + chat-install fallback parser"
 ```
 
@@ -2451,12 +2451,12 @@ Expected: all PASS. `test_prompt_cache.py` is included because Task 9 adds `find
 
 - [ ] **Step 2: Backend type + lint across new + touched modules**
 
-Run: `cd backend && uv run mypy cubebox/skills cubebox/tools/builtin/find_skills.py cubebox/api/routes/v1/admin_skill_sources.py cubebox/api/routes/v1/ws_skills.py cubebox/api/routes/v1/ws_conversations.py cubebox/repositories/skill_source.py cubebox/models/skill_source.py cubebox/streams/run_manager.py && uv run ruff check cubebox/`
+Run: `cd backend && uv run mypy cubeplex/skills cubeplex/tools/builtin/find_skills.py cubeplex/api/routes/v1/admin_skill_sources.py cubeplex/api/routes/v1/ws_skills.py cubeplex/api/routes/v1/ws_conversations.py cubeplex/repositories/skill_source.py cubeplex/models/skill_source.py cubeplex/streams/run_manager.py && uv run ruff check cubeplex/`
 Expected: no issues.
 
 - [ ] **Step 3: Frontend build + lint + type-check + Playwright**
 
-Run: `cd frontend && pnpm build --filter @cubebox/core && pnpm lint && pnpm type-check && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
+Run: `cd frontend && pnpm build --filter @cubeplex/core && pnpm lint && pnpm type-check && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
 Expected: clean across the board; Playwright smoke green.
 
 - [ ] **Step 4: Migration sanity (no drift)**
@@ -2477,7 +2477,7 @@ Expected: head applied; `alembic check` reports no new pending autogenerate diff
   - §7 v1 scope matches Tasks 1–14: backend (1–12) + workspace skills page + chat fallback (14). Trust *enforcement* deferred to a future security/gating module (Task 13 is a note, no code) per OQ-1 resolution; semantic search, personal scope, auto-update polling, and agent-initiated install via HITL stay deferred per Future Work.
 - **Type consistency:** `SkillCandidate` fields are identical wherever constructed (base, local, remote, ranking test). `InstallResult.canonical_name` ↔ `InstallCandidateResponse.canonical_name` ↔ test assertions. `decode_candidate_id` returns the 3-tuple `(kind, source_id, source_ref)`, unpacked identically in install + preview, and both resolve the remote source via `registry.remote_source_by_id(source_id)` (never "first remote"). `SkillSourceRegistry.build(...)` signature identical across run_manager + all three routes.
 - **Reuse, not re-route:** install reuses `OrgSkillInstallRepository.create_for_workspace` (local) and `SkillPublishService._publish_from_files` (remote) — the exact existing publish path; load reuses `find_enabled_by_name` + `SkillsMiddleware` untouched.
-- **Resolved against the real repo:** `require_member` (`cubebox.auth.dependencies`) and `get_admin_request_context` (`cubebox.mcp.dependencies`) are the existing member/admin deps; e2e clients yield `(client, workspace_id)` / `(client, _)` tuples per `test_skills_marketplace.py` / `test_skills_artifact_flow.py`; `_publish_from_files` already accepts `workspace_id`; `list_visible_for_org` already excludes deprecated + scopes to own-org uploaded + preinstalled.
+- **Resolved against the real repo:** `require_member` (`cubeplex.auth.dependencies`) and `get_admin_request_context` (`cubeplex.mcp.dependencies`) are the existing member/admin deps; e2e clients yield `(client, workspace_id)` / `(client, _)` tuples per `test_skills_marketplace.py` / `test_skills_artifact_flow.py`; `_publish_from_files` already accepts `workspace_id`; `list_visible_for_org` already excludes deprecated + scopes to own-org uploaded + preinstalled.
 
 ---
 

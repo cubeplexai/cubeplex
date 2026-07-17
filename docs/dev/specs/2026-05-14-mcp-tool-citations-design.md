@@ -57,7 +57,7 @@ load_workspace_mcp_tools_for_cubepi → (tools, citation_configs)
 ```
 
 Tool name namespacing happens in
-`cubebox/mcp/cubepi_runtime.load_workspace_mcp_tools_for_cubepi`: after
+`cubeplex/mcp/cubepi_runtime.load_workspace_mcp_tools_for_cubepi`: after
 cubepi returns `list[AgentTool]` for each server, each tool's `name` is
 mutated to `f"{server.name}__{tool.name}"`. The same function emits the
 matching `dict[namespaced_name, CitationConfig]` for the middleware.
@@ -88,7 +88,7 @@ Add column with identical shape and default. Independent column (not
 nested in `tools_cache`) so the discovery refresh that rewrites
 `tools_cache` does not clobber user-edited citation mapping.
 
-### `CitationConfig` (`cubebox/middleware/citations/config.py`)
+### `CitationConfig` (`cubeplex/middleware/citations/config.py`)
 
 Add `content_type: Literal["json", "text"] = "json"`. The chunker already
 assumes JSON; this flag makes the text path explicit (needed for
@@ -115,7 +115,7 @@ Final shape of one entry:
 Empty `{}` on `tool_citations` = no tool from this server produces
 citations; same effect as today's default behavior.
 
-### `CatalogSeedEntry` (`cubebox/mcp/catalog_seed.py`)
+### `CatalogSeedEntry` (`cubeplex/mcp/catalog_seed.py`)
 
 Add `tool_citations: dict[str, dict[str, Any]] = field(default_factory=dict)`.
 Seed the field for known connectors (`webtools`: `web_search` + `web_fetch`
@@ -125,7 +125,7 @@ to start; others left empty until their citation shape is needed).
 
 ### Seed (deploy time, one-off)
 
-`python -m cubebox.cli seed-mcp-catalog` upserts each
+`python -m cubeplex.cli seed-mcp-catalog` upserts each
 `CatalogSeedEntry.tool_citations` into
 `mcp_catalog_connectors.tool_citations`. Repeating the command after a seed
 change updates the catalog row in place; it does **not** propagate to
@@ -164,7 +164,7 @@ This makes refresh idempotent and friendly to user edits.
 ### Per-run load (every agent run)
 
 `load_workspace_mcp_tools_for_cubepi`
-(`cubebox/mcp/cubepi_runtime.py`) is rewritten to return both tools and
+(`cubeplex/mcp/cubepi_runtime.py`) is rewritten to return both tools and
 citation configs:
 
 ```python
@@ -413,7 +413,7 @@ unchanged for any install that doesn't subsequently get edits.
 ### Deploy order
 
 1. `alembic upgrade head`
-2. `python -m cubebox.cli seed-mcp-catalog`
+2. `python -m cubeplex.cli seed-mcp-catalog`
 
 No automated backfill of existing `mcp_servers` rows from the freshly
 seeded catalog. Users who want catalog defaults applied to an existing
@@ -476,26 +476,26 @@ one-line bridge in the system prompt is the fallback.
 Backend:
 
 1. `backend/alembic/versions/<ts>_add_tool_citations_to_mcp_tables.py` — new.
-2. `backend/cubebox/models/mcp.py` — add column on both models.
-3. `backend/cubebox/repositories/mcp_catalog.py` — `upsert_by_slug` accepts
+2. `backend/cubeplex/models/mcp.py` — add column on both models.
+3. `backend/cubeplex/repositories/mcp_catalog.py` — `upsert_by_slug` accepts
    `tool_citations`.
-4. `backend/cubebox/services/mcp_catalog.py` — install copies
+4. `backend/cubeplex/services/mcp_catalog.py` — install copies
    `catalog.tool_citations` into new `MCPServer` row.
-5. `backend/cubebox/mcp/catalog_seed.py` — extend `CatalogSeedEntry`; fill
+5. `backend/cubeplex/mcp/catalog_seed.py` — extend `CatalogSeedEntry`; fill
    `webtools` (and any other known) entries; seed_catalog passes the field
    through.
-6. `backend/cubebox/middleware/citations/config.py` — add `content_type`;
+6. `backend/cubeplex/middleware/citations/config.py` — add `content_type`;
    reuse `load_citation_configs` (rewritten if its input shape changes).
-7. `backend/cubebox/mcp/cubepi_runtime.py` — namespace tool names, emit
+7. `backend/cubeplex/mcp/cubepi_runtime.py` — namespace tool names, emit
    citation configs, change return signature.
-8. `backend/cubebox/mcp/cubepi_discovery.py` — surface `tool_citations` on
+8. `backend/cubeplex/mcp/cubepi_discovery.py` — surface `tool_citations` on
    `ServerSpec` if not already present.
-9. `backend/cubebox/streams/run_manager.py:712-720` — replace
+9. `backend/cubeplex/streams/run_manager.py:712-720` — replace
    `citation_configs={}` with the loader's emitted dict.
-10. `backend/cubebox/api/routes/v1/ws_mcp.py` — add the two
+10. `backend/cubeplex/api/routes/v1/ws_mcp.py` — add the two
     per-server endpoints (`GET` + `PATCH`
     `/ws/{wsId}/mcp/servers/{serverId}/tool-citations`).
-11. `backend/cubebox/api/routes/v1/mcp_catalog.py` — add the catalog
+11. `backend/cubeplex/api/routes/v1/mcp_catalog.py` — add the catalog
     read endpoint
     (`GET /ws/{wsId}/mcp/catalog/{slug}/tool-citations`) on the existing
     `catalog_member_router`.

@@ -5,7 +5,7 @@ metadata:
   namespace: opensandbox
   labels:
     app: egress-webhook
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 spec:
   replicas: 1
   selector:
@@ -15,13 +15,13 @@ spec:
     metadata:
       labels:
         app: egress-webhook
-        app.kubernetes.io/part-of: cubebox-egress
+        app.kubernetes.io/part-of: cubeplex-egress
     spec:
       serviceAccountName: egress-webhook
       containers:
         - name: webhook
           # Replace with the actual image built from deploy/kubernetes/egress-bundle/webhook/Dockerfile.
-          image: REGISTRY_PLACEHOLDER/cubebox-egress-webhook:latest
+          image: REGISTRY_PLACEHOLDER/cubeplex-egress-webhook:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8443
@@ -33,10 +33,10 @@ spec:
             # server's configured egress.image value exactly.
             - name: EGRESS_IMAGE
               value: "EGRESS_IMAGE_PLACEHOLDER"
-            # Full URL of the cubebox exchange endpoint.  Injected into each
+            # Full URL of the cubeplex exchange endpoint.  Injected into each
             # patched sidecar container so inject.py can reach the endpoint.
             - name: EGRESS_EXCHANGE_URL
-              value: "https://egress-exchange.cubebox.internal/api/v1/internal/egress/exchange"
+              value: "https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange"
             # TTL for per-sandbox mTLS client certs (minutes).  Must be longer
             # than the maximum expected sandbox lifetime.
             - name: CLIENT_CERT_TTL_MINUTES

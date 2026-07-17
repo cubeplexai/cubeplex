@@ -1,8 +1,8 @@
 'use client'
 
 import { useRef } from 'react'
-import { useMessageStore } from '@cubebox/core'
-import type { AgentStream, Message, MessageStore } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
+import type { AgentStream, Message, MessageStore } from '@cubeplex/core'
 
 // Stable empties returned by selectors when the asked-for slice is absent or
 // inactive. Without these, every selector with a `?? []` / `?? {}` fallback

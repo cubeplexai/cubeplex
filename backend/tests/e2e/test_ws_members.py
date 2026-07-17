@@ -7,9 +7,9 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager
-from cubebox.models import OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.auth.users import UserManager
+from cubeplex.models import OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -190,5 +190,8 @@ async def test_can_demote_self_when_another_admin_exists(admin_client, session_f
 
 async def test_member_cannot_manage_workspace_members(member_client):
     client, ws_id = member_client
-    resp = await client.get(f"/api/v1/ws/{ws_id}/members")
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/members",
+        json={"user_id": "usr-nonexistent", "role": "member"},
+    )
     assert resp.status_code == 403

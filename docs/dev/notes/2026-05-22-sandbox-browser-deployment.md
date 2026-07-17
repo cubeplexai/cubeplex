@@ -13,7 +13,7 @@ they default to test-cluster values; override per environment.
 
 - Each sandbox pod runs a **headful Chromium** on a virtual X display, streamed
   over WebRTC by **Neko** (HTTP/WS on port 8080 inside the pod).
-- The cubebox backend exposes the stream through OpenSandbox's signed proxy as
+- The cubeplex backend exposes the stream through OpenSandbox's signed proxy as
   an iframe URL (`/api/v1/ws/{ws}/browser/live-view`); the frontend panel embeds
   it and the user can **take over** (move mouse / type).
 - The **agent** drives that same Chromium with the `agent-browser` CLI over CDP
@@ -33,8 +33,8 @@ image: the Neko server binary, its HTML5 client (`/var/www`), the custom Xorg
 dummy-video + `neko` input driver, plus `xclip` (clipboard), `agent-browser`
 (`npm i -g`), and the supervisord program + launch scripts under `neko/`.
 
-Tag scheme: `hub.sensedeal.vip/library/cubebox-sandbox:24.04-YYYYMMDD-nekoN`.
-Point the backend at the tag with `CUBEBOX_SANDBOX__IMAGE` (env or config).
+Tag scheme: `hub.sensedeal.vip/library/cubeplex-sandbox:24.04-YYYYMMDD-nekoN`.
+Point the backend at the tag with `CUBEPLEX_SANDBOX__IMAGE` (env or config).
 
 ### Building in the test cluster (workaround notes)
 
@@ -64,7 +64,7 @@ fixes this. In the test cluster it runs as a `hostNetwork` pod `coturn`:
 ```
 turnserver -n --listening-port=3478 \
   --listening-ip=192.168.1.208 --relay-ip=192.168.1.208 --external-ip=192.168.1.208 \
-  --realm=cubebox --fingerprint --lt-cred-mech --user=neko:neko \
+  --realm=cubeplex --fingerprint --lt-cred-mech --user=neko:neko \
   --min-port=49160 --max-port=49200 --no-tls --no-dtls --log-file=stdout
 ```
 
@@ -128,7 +128,7 @@ aborting the run. `backend/pyproject.toml` pins cubepi at that SHA.
   panel pings `/keepalive` every 30s. Closing the panel with no agent activity
   lets it expire.
 - **Profile persistence**: Chromium runs with
-  `--user-data-dir=/workspace/.cubebox-browser-profile`. `/workspace` is the
+  `--user-data-dir=/workspace/.cubeplex-browser-profile`. `/workspace` is the
   per-user NFS PVC, so cookies / logins survive sandbox restarts. Open tabs are
   **not** restored (Chromium starts at `about:blank`; no `--restore-last-session`).
 - **Crash prompts**: a TTL kill closes Chromium non-gracefully, leaving

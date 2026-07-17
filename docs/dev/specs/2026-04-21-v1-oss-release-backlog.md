@@ -10,7 +10,7 @@
 
 - **License**: Apache-2.0
 - **商业模式**: 开源核心免费不限 seat；EE 插件闭源按 seat 授权
-- **代码边界**: CE 主仓 + `cubebox-ee` 独立插件仓（**非** GitLab 单仓 `ee/` 方案）
+- **代码边界**: CE 主仓 + `cubeplex-ee` 独立插件仓（**非** GitLab 单仓 `ee/` 方案）
 - **扩展入口**: 约 5-6 个 `Protocol` 接口 + `pip entry_points` 发现
 - **一次性原则**: 边界必须 day-1 定死，后续不允许"先开源再闭源"任何模块
 
@@ -46,7 +46,7 @@
 **Scope (v1)**:
 - 接口定义（Protocol）：`AuthProvider`、`PermissionChecker`、`AuditSink`、`UserDirectorySyncer`、`AdminPanelExtension`（后者允许 EE 注入管理后台页面）
 - `entry_points` 发现 + fallback 到内置实现
-- `cubebox-ee` 独立仓骨架（占位，真实 EE 功能后续迭代）
+- `cubeplex-ee` 独立仓骨架（占位，真实 EE 功能后续迭代）
 - CI 作业 `test-ee-compat`：每次 CE 改动跑 EE 测试套件
 - 接口 semver 版本化；未来破坏性变更走 deprecation 流程
 **关键决定**:
@@ -73,7 +73,7 @@
 - **复用 `~/cubemanus/src/tracing/`**：span_exporter / traceloop_integration / ES client / ILM manager 等已成熟的 OTLP 基础设施
 - **复用 cubetrace viewer**（cubemanus 侧已有的 trace viewer 前端）作为 README demo 的 trace 可视化
 - OTLP exporter 可对接任意 OTel 后端（Jaeger / Tempo / Datadog / Honeycomb）作为差异化卖点
-- **决定**: 是 v1 最大"哇"点；不从零做，移植现成组件到 cubebox
+- **决定**: 是 v1 最大"哇"点；不从零做，移植现成组件到 cubeplex
 - **依赖**: cubemanus tracing 代码许可与迁移
 
 ### M1-E3 · Policy Engine · P0
@@ -176,7 +176,7 @@
 **合并路径**:
 - **frontmatter 解析器扩展**（`SkillSpec` dataclass 扩字段 + `yaml.safe_load` 替换正则解析 + `metadata.openclaw` / `clawdbot` / `clawdis` alias 合并 + `raw_metadata` 保留未知字段）→ 随 **M3 skills 市场** spec 定义并实现（市场 UI 直接消费这些字段，天然同处一个 spec）
 - **`requires.env` / `requires.bins` 校验**（判断 skill 当前是否可用）→ 留给未来 **sandbox egress / env 代理** spec
-- **`install[]` 执行** → 不计划做（Openclaw 自己的 lazy-install 模型是"agent 遇错再装"，LLM 驱动而非 loader 驱动，不是 cubebox 的独立设计问题）
+- **`install[]` 执行** → 不计划做（Openclaw 自己的 lazy-install 模型是"agent 遇错再装"，LLM 驱动而非 loader 驱动，不是 cubeplex 的独立设计问题）
 
 **兼容承诺**: 用户上传 Openclaw 包，系统能加载、使用；特有字段保留下来供市场 UI 展示。向下兼容 Claude Code / Codex 的 Agent Skills 基底（他们无 `requires`/`install`，是 Openclaw 的子集）。
 
@@ -192,11 +192,11 @@
 **Scope (v1)** — **硬编码工具**（非 skill）:
 - 输出 discriminated union（v1 共 5 种 kind）：`text` / `notebook` / `unsupported` / `unchanged` / `error`
 - **主方案**: 独立 **docling-serve** 服务（CPU 镜像 4.4 GB，HTTP API），不把 heavy 依赖引入核心库
-- **架构**: `Sandbox.file_read()` 抽象方法 + `cubebox.parsers` 后台共享库（FileParser Protocol + entry_points 插件机制）
+- **架构**: `Sandbox.file_read()` 抽象方法 + `cubeplex.parsers` 后台共享库（FileParser Protocol + entry_points 插件机制）
 - **v1 三个内置 plugin**: `TextParser`（文本/代码）+ `NotebookParser`（.ipynb）+ `DoclingParser`（PDF/DOCX/PPTX/XLSX/EPUB/图像 OCR）
 - **去重**: conversation 级 SHA-256 hash cache，无副作用 invalidation
 **关键决定**:
-- Parser 跑 backend，sandbox 只暴露文件；`cubebox.parsers` 后续给 filebox（workspace RAG）复用
+- Parser 跑 backend，sandbox 只暴露文件；`cubeplex.parsers` 后续给 filebox（workspace RAG）复用
 - 走插件架构（参考 MarkItDown converter registry）：用户后续可发 wheel 注册自定义 parser
 - 明确**拒绝** 视频 / 音频 / 可执行 / 归档；HTML 走文本不走 docling（因 agent 常读写 HTML artifacts）
 - v1 砍掉 backlog 原列的 `image` / `pdf` / `office_markdown` / `parts` 这些无下游消费者的 kind（待 vision 管线接通后非破坏性扩展）
@@ -298,7 +298,7 @@
 - GitHub Actions：lint / type-check / unit / e2e / `test-ee-compat`（见 M0）
 - Issue 模板 / PR 模板 / branch protection 建议配置
 - Release 流程：tag → changelog → GitHub Release
-- 仓库名最终定：暂用 `cubebox`，后续可能改 `cubeplex` 等（发布前最终决定）
+- 仓库名最终定：暂用 `cubeplex`，后续可能改 `cubeplex` 等（发布前最终决定）
 - **生产 CSP 收紧**：M2 batch 1 的 `frame-src 'self'` 安全目标已达成；但 `default-src` 仍开 `'unsafe-inline'` / `'unsafe-eval'`（Next.js dev 需要）。生产模式应改为 `script-src 'self' 'nonce-{x}'` + 删 unsafe-eval；按 NODE_ENV 动态生成 CSP；配合 `SECURITY.md` 一起做
 **关键决定**:
 - 所有 CI 作业必须在公开状态下通过（不依赖内部凭证）
@@ -329,10 +329,10 @@
 
 ## 待决事项（发布前需要拍板）
 
-- [ ] 最终仓库名：`cubebox` / `cubeplex` / 其他
+- [ ] 最终仓库名：`cubeplex` / `cubeplex` / 其他
 - [ ] 预装 skills 清单（实现 M3 时结合社区内容确定）
 - [ ] sandbox 默认镜像选型（实现 M2 时定）
-- [ ] `cubebox-ee` 仓的首个真实 EE 功能（发布后迭代选 1-2 项）
+- [ ] `cubeplex-ee` 仓的首个真实 EE 功能（发布后迭代选 1-2 项）
 - [ ] M9 单租户 UX 的具体交互细节（进 spec 阶段确认）
 - [ ] cubemanus tracing 代码迁移许可与边界（M1-E2 开工前确认）
 - [ ] M6 是否需要 Docling 作为可选 skill 先行发布（或留到开源后）

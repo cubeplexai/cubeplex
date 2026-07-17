@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import type { PendingAsk, AskQuestion } from '@cubebox/core'
+import type { PendingAsk, AskQuestion } from '@cubeplex/core'
 
 interface AskUserCardProps {
   pending: PendingAsk

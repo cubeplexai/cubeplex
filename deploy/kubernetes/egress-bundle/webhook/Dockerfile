@@ -34,7 +34,7 @@ COPY deploy/kubernetes/egress-bundle/webhook/ ./webhook/
 # Webhook HTTPS serving cert is mounted at /etc/webhook-tls/ by the chart's
 # egress-webhook Deployment, separately from the per-sandbox mTLS certs the
 # webhook mints (which use the MITM CA at /etc/egress-mitm-ca/). See
-# deploy/kubernetes/charts/cubebox/templates/egress-*.yaml for the wiring.
+# deploy/kubernetes/charts/cubeplex/templates/egress-*.yaml for the wiring.
 CMD ["uvicorn", "webhook.app:app", \
      "--host", "0.0.0.0", "--port", "8443", \
      "--ssl-certfile", "/etc/webhook-tls/tls.crt", "--ssl-keyfile", "/etc/webhook-tls/tls.key"]

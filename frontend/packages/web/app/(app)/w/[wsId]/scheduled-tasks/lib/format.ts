@@ -1,4 +1,4 @@
-import type { ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 
 import { parseSchedulePayload } from './schedulePayload'
 

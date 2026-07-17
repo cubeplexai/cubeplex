@@ -1,6 +1,6 @@
 """Tests for optimize_markdown_style — Feishu CardKit markdown sanitization."""
 
-from cubebox.im.feishu.card_renderer import optimize_markdown_style
+from cubeplex.im.feishu.card_renderer import optimize_markdown_style
 
 
 def test_h1_demotes_to_h4() -> None:

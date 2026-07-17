@@ -6,16 +6,16 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import (
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 async def _seed_org_ws_user(
@@ -85,6 +85,7 @@ async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
     install = await installs.upsert(
         org_id=org_id,
@@ -103,6 +104,9 @@ async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
     assert len(resolved) == 1
     assert resolved[0].name == skill_name
     assert resolved[0].version == "1.0.0"
+    # Guard the SELECT → ResolvedSkill projection: if content_hash is dropped
+    # from the constructor call in service.py this assertion catches it.
+    assert resolved[0].content_hash == ""
 
 
 @pytest.mark.asyncio
@@ -125,6 +129,7 @@ async def test_fetch_skill_md_returns_content(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
 
     catalog = SkillCatalogService(
@@ -163,6 +168,7 @@ async def test_find_enabled_by_name(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
     install = await installs.upsert(
         org_id=org_id,

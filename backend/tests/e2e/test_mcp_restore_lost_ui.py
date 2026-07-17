@@ -1,7 +1,20 @@
-"""E2E coverage for the lost-UI restoration features."""
+"""E2E coverage for the lost-UI restoration features.
+
+Removed in Task 9 template-centric cutover:
+- test_admin_create_custom_install_for_org: POST /admin/mcp/installs removed
+- test_admin_create_custom_install_rejects_credential_plaintext_with_scoped_policy: same
+- test_promote_install_writes_org_scope_and_excludes_source: promote-to-org removed
+- test_ws_active_tools_returns_namespaced_tools_with_icons: ws_mcp rewritten in Task 10
+- test_ws_invoke_tool_returns_result: ws_mcp rewritten in Task 10
+
+Fixtures that used direct MCPConnector inserts with template_id=None have been
+rewritten to use POST /admin/mcp/templates + distribute so template_id FK is
+satisfied by a real row.
+"""
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
@@ -11,7 +24,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,58 +58,85 @@ async def _resolve_org_user_for_client(
     return org_id, user_id
 
 
+async def _create_and_distribute_template(
+    client: httpx.AsyncClient,
+    *,
+    name_suffix: str,
+    auth_method: str = "none",
+    default_credential_policy: str = "none",
+) -> tuple[str, str]:
+    """Create an org-custom template and distribute it.
+
+    Returns ``(template_id, connector_id)``.
+    """
+    tpl_resp = await client.post(
+        "/api/v1/admin/mcp/templates",
+        json={
+            "name": f"Restore UI Test {name_suffix}",
+            "server_url": f"https://restore-ui-{name_suffix}.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": auth_method,
+            "default_credential_policy": default_credential_policy,
+        },
+    )
+    assert tpl_resp.status_code == 201, tpl_resp.text
+    template_id = tpl_resp.json()["template_id"]
+
+    dist_resp = await client.post(
+        f"/api/v1/admin/mcp/templates/{template_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist_resp.status_code == 200, dist_resp.text
+    connector_id = dist_resp.json()["connector"]["connector_id"]
+    return template_id, connector_id
+
+
 @pytest_asyncio.fixture
 async def seeded_static_org_install_with_tools_cache(
     admin_client: tuple[httpx.AsyncClient, str],
     db_session_maker: async_sessionmaker[AsyncSession],
 ) -> str:
-    """Org-scope static install pre-populated with two fake tools and a
-    citation mapping for one of them."""
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+    """Org-scope connector pre-populated with two fake tools and a
+    citation mapping for one of them.
 
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="seeded-with-tools",
-            server_url="https://seeded.example.com/mcp",
-            server_url_hash=server_url_hash("https://seeded.example.com/mcp"),
-            transport="streamable_http",
-            auth_method="static",
-            default_credential_policy="org",
-            auth_status="pending",
-            install_state="active",
-            tools_cache=[
-                {
-                    "name": "ping",
-                    "description": "say hi",
-                    "input_schema": {"type": "object"},
-                },
-                {
-                    "name": "pong",
-                    "description": "say bye",
-                    "input_schema": {"type": "object"},
-                },
-            ],
-            tool_citations={
-                "ping": {
-                    "content_type": "json",
-                    "source_type": "api",
-                    "content_field": None,
-                    "mapping": {"snippet": ""},
-                }
+    Uses the template-centric flow: create template → distribute → patch
+    tools_cache directly so tests can exercise the DTO field exposure.
+    """
+    client, _ws_id = admin_client
+    suffix = secrets.token_hex(4)
+    _template_id, connector_id = await _create_and_distribute_template(
+        client,
+        name_suffix=f"static-tools-{suffix}",
+        auth_method="none",
+        default_credential_policy="none",
+    )
+    async with db_session_maker() as session:
+        from cubeplex.models.mcp import MCPConnector
+
+        connector = await session.get(MCPConnector, connector_id)
+        assert connector is not None
+        connector.tools_cache = [
+            {
+                "name": "ping",
+                "description": "say hi",
+                "input_schema": {"type": "object"},
             },
-            created_by_user_id=user_id,
-        )
-        session.add(install)
+            {
+                "name": "pong",
+                "description": "say bye",
+                "input_schema": {"type": "object"},
+            },
+        ]
+        connector.tool_citations = {
+            "ping": {
+                "content_type": "json",
+                "source_type": "api",
+                "content_field": None,
+                "mapping": {"snippet": ""},
+            }
+        }
         await session.commit()
-        await session.refresh(install)
-        return install.id
+    return connector_id
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +148,7 @@ async def test_install_dto_exposes_tools_and_tool_citations(
     admin_client: tuple[httpx.AsyncClient, str],
     seeded_static_org_install_with_tools_cache: str,
 ) -> None:
-    """``MCPConnectorInstallOut`` must expose the tools list (not just
+    """``MCPConnectorOut`` must expose the tools list (not just
     tool_count) and tool_citations dict (for org admin callers)."""
     client, _ws = admin_client
     install_id = seeded_static_org_install_with_tools_cache
@@ -136,34 +176,19 @@ async def test_discover_tools_for_install_writes_tools_cache(
 ) -> None:
     """Discovery service should fetch tools via cubepi and persist
     the result into install.tools_cache / .discovery_status."""
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
+    client, _ws_id = admin_client
+    suffix = secrets.token_hex(4)
+    _template_id, connector_id = await _create_and_distribute_template(
+        client, name_suffix=f"disc-test-{suffix}"
+    )
 
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="disc-test",
-            server_url="https://disc.example.com/mcp",
-            server_url_hash=server_url_hash("https://disc.example.com/mcp"),
-            transport="streamable_http",
-            auth_method="none",
-            default_credential_policy="none",
-            auth_status="not_required",
-            install_state="active",
-            tools_cache=[],
-            tool_citations={},
-            created_by_user_id=user_id,
-        )
-        session.add(install)
-        await session.commit()
-        await session.refresh(install)
-        install_id = install.id
+    # Resolve org_id + user_id for service calls.
+    me_resp = await client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200, me_resp.text
+    user_id = me_resp.json()["id"]
+    ws_resp = await client.get("/api/v1/workspaces")
+    assert ws_resp.status_code == 200, ws_resp.text
+    org_id = ws_resp.json()[0]["org_id"]
 
     # Stub the cubepi helper used inside discover_tools_for_install.
     async def fake_load(*args: object, **kwargs: object) -> object:
@@ -185,12 +210,12 @@ async def test_discover_tools_for_install_writes_tools_cache(
             init_result=SimpleNamespace(serverInfo=None),
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
-    from cubebox.credentials.dependencies import build_credential_service
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.mcp.dependencies import build_user_token_signer
-    from cubebox.services.mcp_discovery import discover_tools_for_install
+    from cubeplex.credentials.dependencies import build_credential_service
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.mcp.dependencies import build_user_token_signer
+    from cubeplex.services.mcp_discovery import discover_tools_for_install
 
     backend = FernetBackend([_test_fernet_key().encode()])
     async with db_session_maker() as session:
@@ -199,7 +224,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
         )
         signer = build_user_token_signer()
         result = await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=connector_id,
             workspace_id=None,
             actor_user_id=user_id,
             session=session,
@@ -231,34 +256,18 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
     Tools with no icons are omitted from ``tool_icons`` rather than
     stored as empty lists, to keep the JSON compact.
     """
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
+    client, _ws_id = admin_client
+    suffix = secrets.token_hex(4)
+    _template_id, connector_id = await _create_and_distribute_template(
+        client, name_suffix=f"disc-icons-{suffix}"
+    )
 
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="disc-icons",
-            server_url="https://icons.example.com/mcp",
-            server_url_hash=server_url_hash("https://icons.example.com/mcp"),
-            transport="streamable_http",
-            auth_method="none",
-            default_credential_policy="none",
-            auth_status="not_required",
-            install_state="active",
-            tools_cache=[],
-            tool_citations={},
-            created_by_user_id=user_id,
-        )
-        session.add(install)
-        await session.commit()
-        await session.refresh(install)
-        install_id = install.id
+    me_resp = await client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200, me_resp.text
+    user_id = me_resp.json()["id"]
+    ws_resp = await client.get("/api/v1/workspaces")
+    assert ws_resp.status_code == 200, ws_resp.text
+    org_id = ws_resp.json()[0]["org_id"]
 
     init_result = SimpleNamespace(
         serverInfo=SimpleNamespace(
@@ -302,13 +311,16 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
             init_result=init_result,
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    # Deterministic: do not outbound-fetch the fixture URL during this test.
+    # Materialisation is covered by unit tests with respx.
+    monkeypatch.setattr("cubeplex.mcp.icons.icons_fetch_remote_enabled", lambda: False)
 
-    from cubebox.credentials.dependencies import build_credential_service
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.mcp.dependencies import build_user_token_signer
-    from cubebox.repositories.mcp import MCPConnectorInstallRepository
-    from cubebox.services.mcp_discovery import discover_tools_for_install
+    from cubeplex.credentials.dependencies import build_credential_service
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.mcp.dependencies import build_user_token_signer
+    from cubeplex.repositories.mcp import MCPConnectorRepository
+    from cubeplex.services.mcp_discovery import discover_tools_for_install
 
     backend = FernetBackend([_test_fernet_key().encode()])
     async with db_session_maker() as session:
@@ -317,7 +329,7 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
         )
         signer = build_user_token_signer()
         result = await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=connector_id,
             workspace_id=None,
             actor_user_id=user_id,
             session=session,
@@ -328,8 +340,8 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
         assert result.discovery_status == "ok"
 
     async with db_session_maker() as session:
-        repo = MCPConnectorInstallRepository(session, org_id=org_id)
-        refreshed = await repo.get(install_id)
+        repo = MCPConnectorRepository(session, org_id=org_id)
+        refreshed = await repo.get(connector_id)
         assert refreshed is not None
         meta = refreshed.discovery_metadata
 
@@ -358,128 +370,6 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
     }
 
 
-async def test_ws_active_tools_returns_namespaced_tools_with_icons(
-    admin_client: tuple[httpx.AsyncClient, str],
-    db_session_maker: async_sessionmaker[AsyncSession],
-) -> None:
-    """``GET /ws/{wsId}/mcp/active-tools`` flattens usable installs into
-    one tool entry per cached tool with namespaced_name + server name +
-    server / tool icons sourced from ``discovery_metadata``.
-
-    The namespaced_name must match what the runtime exposes to the LLM
-    (``{slug}__{tool_name}`` capped at 64 chars), so the frontend can key
-    its tool registry by the ``tool_call.name`` it sees on SSE.
-    """
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
-
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        # Use an auth_method='none' org install — automatically usable for
-        # any workspace in this org per the effective service rules
-        # (no grant required).
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="Linear",
-            server_url="https://active-tools.example.com/mcp",
-            server_url_hash=server_url_hash("https://active-tools.example.com/mcp"),
-            transport="streamable_http",
-            auth_method="none",
-            default_credential_policy="none",
-            auth_status="not_required",
-            install_state="active",
-            tools_cache=[
-                {"name": "create_issue", "description": "Create an issue", "input_schema": {}},
-                {"name": "list_issues", "description": "List issues", "input_schema": {}},
-            ],
-            tool_citations={},
-            discovery_metadata={
-                "server": {
-                    "name": "Linear",
-                    "version": "1.4.2",
-                    "website_url": "https://linear.app",
-                    "icons": [
-                        {
-                            "src": "https://linear.app/favicon.svg",
-                            "mime_type": "image/svg+xml",
-                            "sizes": None,
-                            "theme": None,
-                        }
-                    ],
-                },
-                "tool_icons": {
-                    "create_issue": [
-                        {
-                            "src": "data:image/svg+xml;base64,abc",
-                            "mime_type": "image/svg+xml",
-                            "sizes": None,
-                            "theme": None,
-                        }
-                    ]
-                },
-            },
-            created_by_user_id=user_id,
-        )
-        session.add(install)
-        await session.commit()
-        await session.refresh(install)
-        # Org installs are invisible to a workspace unless that workspace
-        # has an MCPWorkspaceConnectorState row — the effective service
-        # uses it to scope the workspace lens.
-        from cubebox.models.mcp import MCPWorkspaceConnectorState
-
-        session.add(
-            MCPWorkspaceConnectorState(
-                org_id=org_id,
-                workspace_id=ws_id,
-                install_id=install.id,
-                enabled=True,
-                credential_policy="none",
-                enablement_source="auto",
-                updated_by_user_id=user_id,
-            )
-        )
-        await session.commit()
-
-    res = await client.get(f"/api/v1/ws/{ws_id}/mcp/active-tools")
-    assert res.status_code == 200, res.text
-    body = res.json()
-    items = body["items"]
-    by_namespaced = {it["namespaced_name"]: it for it in items}
-
-    assert "Linear__create_issue" in by_namespaced
-    assert "Linear__list_issues" in by_namespaced
-
-    create = by_namespaced["Linear__create_issue"]
-    assert create["bare_name"] == "create_issue"
-    assert create["server_name"] == "Linear"
-    assert create["server_icons"] == [
-        {
-            "src": "https://linear.app/favicon.svg",
-            "mime_type": "image/svg+xml",
-            "sizes": None,
-            "theme": None,
-        }
-    ]
-    assert create["tool_icons"] == [
-        {
-            "src": "data:image/svg+xml;base64,abc",
-            "mime_type": "image/svg+xml",
-            "sizes": None,
-            "theme": None,
-        }
-    ]
-
-    listt = by_namespaced["Linear__list_issues"]
-    assert listt["tool_icons"] == []
-    assert listt["server_icons"] == create["server_icons"]
-
-
 def _test_fernet_key() -> str:
     """Return a deterministic Fernet key for tests."""
     from cryptography.fernet import Fernet
@@ -490,75 +380,31 @@ def _test_fernet_key() -> str:
 @pytest_asyncio.fixture
 async def seeded_static_org_install_no_grant(
     admin_client: tuple[httpx.AsyncClient, str],
-    db_session_maker: async_sessionmaker[AsyncSession],
 ) -> str:
-    """Org-scope ``auth_method='none'`` install — usable without any grant."""
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        url = f"https://no-grant-{ws_id}.example.com/mcp"
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="no-grant",
-            server_url=url,
-            server_url_hash=server_url_hash(url),
-            transport="streamable_http",
-            auth_method="none",
-            default_credential_policy="none",
-            auth_status="not_required",
-            install_state="active",
-            tools_cache=[],
-            tool_citations={},
-            created_by_user_id=user_id,
-        )
-        session.add(install)
-        await session.commit()
-        await session.refresh(install)
-        return install.id
+    """Connector with ``default_credential_policy='none'`` — usable without any grant."""
+    client, _ws_id = admin_client
+    suffix = secrets.token_hex(4)
+    _template_id, connector_id = await _create_and_distribute_template(
+        client, name_suffix=f"no-grant-{suffix}"
+    )
+    return connector_id
 
 
 @pytest_asyncio.fixture
 async def seeded_oauth_user_policy_install(
     admin_client: tuple[httpx.AsyncClient, str],
-    db_session_maker: async_sessionmaker[AsyncSession],
 ) -> str:
-    """Org-scope OAuth install with ``default_credential_policy='user'`` —
-    refresh-discovery against this requires ``workspace_id`` because the
-    grant is per-user-per-workspace."""
-    client, ws_id = admin_client
-    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
-    async with db_session_maker() as session:
-        from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        url = f"https://oauth-user-{ws_id}.example.com/mcp"
-        install = MCPConnectorInstall(
-            org_id=org_id,
-            template_id=None,
-            install_scope="org",
-            workspace_id=None,
-            name="oauth-user",
-            server_url=url,
-            server_url_hash=server_url_hash(url),
-            transport="streamable_http",
-            auth_method="oauth",
-            default_credential_policy="user",
-            auth_status="pending",
-            install_state="active",
-            tools_cache=[],
-            tool_citations={},
-            created_by_user_id=user_id,
-        )
-        session.add(install)
-        await session.commit()
-        await session.refresh(install)
-        return install.id
+    """Connector with ``default_credential_policy='user'`` — refresh-discovery
+    against this requires ``workspace_id`` because the grant is per-user-per-workspace."""
+    client, _ws_id = admin_client
+    suffix = secrets.token_hex(4)
+    _template_id, connector_id = await _create_and_distribute_template(
+        client,
+        name_suffix=f"oauth-user-{suffix}",
+        auth_method="oauth",
+        default_credential_policy="user",
+    )
+    return connector_id
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +426,7 @@ async def test_admin_refresh_discovery_writes_install(
             init_result=SimpleNamespace(serverInfo=None),
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
     res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
     assert res.status_code == 200, res.text
@@ -622,7 +468,7 @@ async def test_admin_test_connection_returns_tool_count(
             tool_infos=[],
         )
 
-    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
 
     res = await client.post(
         "/api/v1/admin/mcp/test-connection",
@@ -654,138 +500,109 @@ async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
     assert res.status_code == 422, res.text
 
 
-# ---------------------------------------------------------------------------
-# Task 5 — Custom connector creation.
-# ---------------------------------------------------------------------------
-
-
-async def test_admin_create_custom_install_for_org(
+async def test_admin_test_connection_oauth_probes_protected_resource(
     admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """OAuth servers reject anonymous MCP requests with 401. The probe must
+    instead succeed by fetching RFC 9728 protected-resource metadata."""
     client, _ws = admin_client
+
+    calls: list[str] = []
+
+    async def fake_fetch_pr(self: object, base_url: str) -> object:
+        calls.append(base_url)
+        return SimpleNamespace(
+            resource=base_url,
+            authorization_servers=["https://issuer.example.com"],
+            scopes_supported=None,
+        )
+
+    async def fail_load(*args: object, **kwargs: object) -> object:
+        raise AssertionError("load_mcp_tools_http must not be called for OAuth probes")
+
+    monkeypatch.setattr(
+        "cubeplex.mcp.oauth.metadata.OAuthMetadataDiscovery.fetch_protected_resource",
+        fake_fetch_pr,
+    )
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fail_load)
+
     res = await client.post(
-        "/api/v1/admin/mcp/installs",
+        "/api/v1/admin/mcp/test-connection",
         json={
-            "template_id": None,
-            "install_scope": "org",
-            "name": "My internal MCP",
-            "server_url": "https://internal.corp/mcp",
+            "server_url": "https://oauth.example.com/mcp",
             "transport": "streamable_http",
-            "auth_method": "none",
-            "default_credential_policy": "none",
-            "auto_enable": {"mode": "none"},
+            "auth_method": "oauth",
         },
-    )
-    assert res.status_code == 201, res.text
-    body = res.json()
-    assert body["template_id"] is None
-    assert body["name"] == "My internal MCP"
-    assert body["install_scope"] == "org"
-
-
-async def test_admin_create_custom_install_rejects_credential_plaintext_with_scoped_policy(
-    admin_client: tuple[httpx.AsyncClient, str],
-) -> None:
-    client, _ws = admin_client
-    res = await client.post(
-        "/api/v1/admin/mcp/installs",
-        json={
-            "template_id": None,
-            "install_scope": "org",
-            "name": "scoped-fail",
-            "server_url": "https://scoped-fail.example.com/mcp",
-            "transport": "streamable_http",
-            "auth_method": "static",
-            "default_credential_policy": "user",
-            "auto_enable": {"mode": "none"},
-            "credential_plaintext": "should-fail",
-        },
-    )
-    assert res.status_code == 422, res.text
-    assert "credential_plaintext_only_valid_for_org_policy" in res.text
-
-
-# ---------------------------------------------------------------------------
-# Task 6 — Promote ws → org.
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def seeded_workspace_install_with_state(
-    admin_client: tuple[httpx.AsyncClient, str],
-    noauth_template_id: str,
-) -> tuple[str, str, str]:
-    """Admin installs a no-auth template into their workspace.
-
-    Returns ``(install_id, source_workspace_id, source_policy)``.
-    """
-    client, workspace_id = admin_client
-    res = await client.post(
-        f"/api/v1/ws/{workspace_id}/mcp/installs",
-        json={
-            "template_id": noauth_template_id,
-            "install_scope": "workspace",
-            "auth_method": "none",
-            "default_credential_policy": "none",
-        },
-    )
-    assert res.status_code == 201, res.text
-    body = res.json()
-    return body["install_id"], workspace_id, body["default_credential_policy"]
-
-
-@pytest_asyncio.fixture
-async def extra_workspace_id(admin_client: tuple[httpx.AsyncClient, str]) -> str:
-    """Create a second workspace inside the admin's org and return its id."""
-    client, ws_id = admin_client
-    org_id, _user_id = await _resolve_org_user_for_client(client, ws_id)
-    res = await client.post(
-        "/api/v1/workspaces",
-        json={"name": "promote-extra", "org_id": org_id},
-    )
-    assert res.status_code == 201, res.text
-    return res.json()["id"]
-
-
-async def test_promote_install_writes_org_scope_and_excludes_source(
-    admin_client: tuple[httpx.AsyncClient, str],
-    seeded_workspace_install_with_state: tuple[str, str, str],
-    extra_workspace_id: str,
-) -> None:
-    """Promote a workspace install to org with mode='all' must:
-
-    * flip ``install_scope`` to ``'org'``
-    * clear ``install.workspace_id``
-    * upsert state rows in OTHER workspaces
-    * NOT overwrite the source workspace's existing state row
-    * set ``auto_enroll_new_workspaces=true``
-    """
-    client, _ws = admin_client
-    install_id, source_ws, source_state_policy = seeded_workspace_install_with_state
-    other_ws = extra_workspace_id
-
-    res = await client.post(
-        f"/api/v1/admin/mcp/installs/{install_id}/promote-to-org",
-        json={"distribution": {"mode": "all"}},
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["install_scope"] == "org"
-    assert body["workspace_id"] is None
-    assert body["auto_enroll_new_workspaces"] is True
+    assert body["ok"] is True
+    assert body["tool_count"] == 0
+    assert calls == ["https://oauth.example.com/mcp"]
 
-    # Source workspace's state row preserved untouched.
-    state_res = await client.get(f"/api/v1/ws/{source_ws}/mcp/connectors")
-    assert state_res.status_code == 200, state_res.text
-    sources = [c for c in state_res.json()["items"] if c["install"]["install_id"] == install_id]
-    assert len(sources) == 1
-    assert sources[0]["workspace_state"]["credential_policy"] == source_state_policy
 
-    # Other workspace got a state row.
-    other_res = await client.get(f"/api/v1/ws/{other_ws}/mcp/connectors")
-    assert other_res.status_code == 200, other_res.text
-    others = [c for c in other_res.json()["items"] if c["install"]["install_id"] == install_id]
-    assert len(others) == 1
+async def test_admin_test_connection_oauth_reports_metadata_failure(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When PR metadata is missing, surface a concrete error, not the raw 401."""
+    client, _ws = admin_client
+
+    async def fake_fetch_pr(self: object, base_url: str) -> object:
+        raise ConnectionError("well-known endpoint not reachable")
+
+    monkeypatch.setattr(
+        "cubeplex.mcp.oauth.metadata.OAuthMetadataDiscovery.fetch_protected_resource",
+        fake_fetch_pr,
+    )
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://oauth-broken.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "oauth",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "ConnectionError"
+    assert "well-known" in body["error_message"]
+
+
+async def test_admin_test_connection_unwraps_exception_group(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP client raises BaseExceptionGroup wrapping the real cause; the
+    endpoint must surface the underlying error, not 'unhandled errors in a
+    TaskGroup (1 sub-exception)'."""
+    client, _ws = admin_client
+
+    async def fake_load(*args: object, **kwargs: object) -> object:
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionError("dns lookup failed for probe.example.com")],
+        )
+
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://probe.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "ConnectionError"
+    assert "dns lookup failed" in body["error_message"]
+    assert "TaskGroup" not in body["error_message"]
 
 
 # ---------------------------------------------------------------------------
@@ -832,62 +649,8 @@ async def test_admin_clear_tool_citation_with_null_config(
 
 
 # ---------------------------------------------------------------------------
-# Task 8 — Try It routes (admin + ws).
+# Task 8 — Try It routes (admin invoke).
 # ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def seeded_none_auth_install_with_state(
-    admin_client: tuple[httpx.AsyncClient, str],
-    noauth_template_id: str,
-    db_session_maker: async_sessionmaker[AsyncSession],
-) -> tuple[str, str]:
-    client, workspace_id = admin_client
-    res = await client.post(
-        f"/api/v1/ws/{workspace_id}/mcp/installs",
-        json={
-            "template_id": noauth_template_id,
-            "install_scope": "workspace",
-            "auth_method": "none",
-            "default_credential_policy": "none",
-        },
-    )
-    assert res.status_code == 201, res.text
-    install_id = res.json()["install_id"]
-    async with db_session_maker() as session:
-        from cubebox.models.mcp import MCPConnectorInstall
-
-        install = await session.get(MCPConnectorInstall, install_id)
-        assert install is not None
-        install.tools_cache = [
-            {"name": "ping", "description": "say hi", "input_schema": {"type": "object"}}
-        ]
-        await session.commit()
-    return install_id, workspace_id
-
-
-async def test_ws_invoke_tool_returns_result(
-    admin_client: tuple[httpx.AsyncClient, str],
-    seeded_none_auth_install_with_state: tuple[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, _ws = admin_client
-    install_id, ws_id = seeded_none_auth_install_with_state
-
-    async def fake_invoke(server_url, tool_name, arguments, *, headers, timeout, transport):
-        return {"echo": arguments, "tool": tool_name}
-
-    monkeypatch.setattr("cubebox.api.routes.v1.ws_mcp._invoke_tool_via_cubepi", fake_invoke)
-
-    res = await client.post(
-        f"/api/v1/ws/{ws_id}/mcp/installs/{install_id}/tools/ping/invoke",
-        json={"arguments": {"x": 1}},
-    )
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["ok"] is True
-    assert body["result"]["echo"] == {"x": 1}
-    assert "duration_ms" in body
 
 
 async def test_admin_invoke_requires_workspace_id_for_scoped_policy(

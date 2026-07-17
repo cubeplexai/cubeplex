@@ -81,11 +81,11 @@ Three independent pieces:
 The reflection run is just a regular cubepi `Agent`, constructed and called
 inside a background `asyncio.Task` — no cubepi changes needed. The
 `on_run_end` hook from v1 stays in cubepi (still a useful general-purpose
-hook) but cubebox no longer uses it.
+hook) but cubeplex no longer uses it.
 
 ## Component 1: ReflectionRunner
 
-**Location:** `backend/cubebox/services/reflection_runner.py`
+**Location:** `backend/cubeplex/services/reflection_runner.py`
 
 A service owned by `RunManager`. Triggered after each main-conversation
 run completes successfully.
@@ -141,8 +141,8 @@ existing items.
 - **Tools:** only `memory_search`, `memory_save`, `memory_update`. No
   conversation tools, no sandbox, no MCP.
 - **System prompt:** memory-snapshot + a focused reflection instruction
-  (move `REFLECTION_PROMPT` from `cubebox/prompts/reflection.py` to
-  `cubebox/prompts/reflection_system.py`, expand to set context).
+  (move `REFLECTION_PROMPT` from `cubeplex/prompts/reflection.py` to
+  `cubeplex/prompts/reflection_system.py`, expand to set context).
 - **No checkpointer.** Reflection has no resume semantics.
 - **No subscriber.** No streaming UI; we only care about the tool calls
   it makes.
@@ -211,7 +211,7 @@ the main agent ever claiming to be reflection-sourced.
 ### Table: `user_events`
 
 ```python
-class UserEvent(CubeboxBase, table=True):
+class UserEvent(CubeplexBase, table=True):
     _PREFIX: ClassVar[str] = PREFIX_USER_EVENT  # "uev_"
     __tablename__ = "user_events"
     __table_args__ = (
@@ -242,7 +242,7 @@ need it. For memory markers, the frontend can mark read on render.
   `last_seen_id` (passed from the SSE request) so reconnects don't
   drop events.
 
-Pubsub is in-process: cubebox is single-instance for now. When we move
+Pubsub is in-process: cubeplex is single-instance for now. When we move
 to multi-instance, swap the bus for Redis pub/sub behind the same
 interface — no caller changes.
 
@@ -296,13 +296,13 @@ the implementation plan with the frontend-design skill.
 ## Migration from v1
 
 The v1 PR (#187) already merged the `on_run_end` hook into cubepi. v2
-**removes the cubebox side** of v1:
+**removes the cubeplex side** of v1:
 
-- Delete `backend/cubebox/middleware/reflection.py` (the
+- Delete `backend/cubeplex/middleware/reflection.py` (the
   `ReflectionMiddleware` class).
 - Delete the `ReflectionMiddleware()` instance from the run_manager
   middleware list.
-- Move `REFLECTION_PROMPT` from `cubebox/prompts/reflection.py` and
+- Move `REFLECTION_PROMPT` from `cubeplex/prompts/reflection.py` and
   expand into a system-prompt-style instruction for the new reflection
   agent.
 - Delete `backend/tests/unit/test_reflection_middleware.py`.
@@ -340,7 +340,7 @@ audit logging). v2 just doesn't use it.
   personal-scope memories unless the user explicitly opted in for sharing
   (same as v1 behavior).
 - **Multi-instance event bus.** In-process pub/sub is enough for now.
-  When cubebox scales horizontally, swap `UserEventBus` impl.
+  When cubeplex scales horizontally, swap `UserEventBus` impl.
 - **Unified user-event notification system.** v2's chip is a permanent
   per-conversation count (refreshed by SSE events), not an unread inbox.
   The `user_events` table + SSE pipeline still produces durable events
@@ -356,7 +356,7 @@ audit logging). v2 just doesn't use it.
 
 | Layer | Change |
 |---|---|
-| `cubepi` | None (v1's `on_run_end` hook stays, just unused by cubebox) |
+| `cubepi` | None (v1's `on_run_end` hook stays, just unused by cubeplex) |
 | Backend models | New `UserEvent` model + migration; `MemoryItem.MemorySourceType.REFLECTION` enum value |
 | Backend services | New `ReflectionRunner`, `UserEventBus`, `MemoryItem.source_type` plumbing via ContextVar |
 | Backend API | New `/api/v1/user/events` SSE endpoint + `POST /api/v1/user/events/{id}/read` |

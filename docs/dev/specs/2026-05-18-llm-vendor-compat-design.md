@@ -9,13 +9,13 @@ pieces below as side-effects of the larger change.
 **Date:** 2026-05-18
 **Scope:** Two changes that came out of a single incident. The shared
 target is "make it cheap to add a new OpenAI-compatible LLM endpoint
-through the cubebox UI, including vendors that put their own private
+through the cubeplex UI, including vendors that put their own private
 fields in `extra_body` for things like reasoning toggle." Two pieces:
 
 1. **cubepi:** turn `StreamOptions.thinking` into something that works on
    the OpenAI-completions path too, via a small data-driven registry of
    per-vendor `extra_body` writers. No new Provider subclasses.
-2. **cubebox:** stop using the default chat model for conversation title
+2. **cubeplex:** stop using the default chat model for conversation title
    generation. Wire a separate `title_model` so reasoning models never
    run a 4-Chinese-character labeling task.
 
@@ -88,12 +88,12 @@ invented their own private field:
 | MiniMax | `extra_body.thinking: {budget: int}` |
 | OpenAI reasoning-effort (Responses-style on completions wire) | `reasoning_effort: "low"\|"medium"\|"high"` |
 
-Today cubebox has no way to express "this model lives behind the
+Today cubeplex has no way to express "this model lives behind the
 OpenAI-completions wire but toggles reasoning with `enable_thinking`."
 Anywhere we'd want `StreamOptions(thinking="off")` to actually disable
 reasoning, we'd have to write call-site code that mutates
 `extra_body`, per vendor. That doesn't scale — every new vendor costs a
-code change in cubebox.
+code change in cubeplex.
 
 ### 1.3 What we ruled out
 
@@ -101,7 +101,7 @@ code change in cubebox.
   vendor directories and ships a separate transformation class per
   vendor. We considered the same — `QwenProvider`, `DoubaoProvider`,
   etc. inheriting from `OpenAIProvider`. Rejected: every new vendor a
-  user wants to add through the cubebox UI would require shipping a
+  user wants to add through the cubeplex UI would require shipping a
   cubepi release. UX for "add a self-hosted Qwen endpoint" should not
   require a backend deploy.
 
@@ -111,7 +111,7 @@ code change in cubebox.
   time we add a vendor.
 
 - **Routing title gen through a frozen baked-in model**, e.g. always
-  Haiku. Doesn't work — many cubebox installs have no Anthropic
+  Haiku. Doesn't work — many cubeplex installs have no Anthropic
   credential. The choice must be per-org/per-workspace.
 
 ---
@@ -175,7 +175,7 @@ on the completions wire" idea, implemented as a registry of
 
 Add a small data table that maps a string identifier to a function
 that mutates the OpenAI-completions request payload. Plumb a single new
-field through `Model` so cubebox can opt into a particular protocol
+field through `Model` so cubeplex can opt into a particular protocol
 per model row.
 
 ```python
@@ -214,7 +214,7 @@ THINKING_PROTOCOLS: dict[str, ThinkingApplier] = {
 
 Plumbing:
 
-- `Model` (in `cubepi/providers/base.py` — the pydantic dataclass cubebox
+- `Model` (in `cubepi/providers/base.py` — the pydantic dataclass cubeplex
   already passes to `provider.stream()`) gets one new optional field:
 
   ```python
@@ -245,10 +245,10 @@ Plumbing:
   correct). The field is documented as "OpenAI-completions wire only."
 
 - `cubepi.list_thinking_protocols() -> list[str]` exposes the registry
-  keys so cubebox can render the picker dropdown without hardcoding
+  keys so cubeplex can render the picker dropdown without hardcoding
   the list.
 
-### 3.2 cubebox: schema + factory
+### 3.2 cubeplex: schema + factory
 
 ```
 -- alembic autogenerate
@@ -283,7 +283,7 @@ Model(
 )
 ```
 
-### 3.3 cubebox: title model
+### 3.3 cubeplex: title model
 
 Top-level config gains an optional `title_model: str | None`. Resolution
 order, all done in `LLMFactory`:
@@ -306,7 +306,7 @@ Independent of (3.1): when a small non-reasoning model is wired up as
 `title_model`, the title call no longer trips the 30s rewrite limit even
 without any thinking toggle.
 
-### 3.4 cubebox: UI (Provider/Model admin)
+### 3.4 cubeplex: UI (Provider/Model admin)
 
 Two changes in `components/admin/models/`.
 
@@ -338,7 +338,7 @@ falls back to default. No magic.
 
 ### 3.5 Default DB seed updates
 
-`backend/cubebox/db/seed/system_providers.py` (or equivalent — the
+`backend/cubeplex/db/seed/system_providers.py` (or equivalent — the
 seed module that creates the system Provider/Model rows) gets
 `thinking_protocol` populated for the providers we ship presets for:
 
@@ -349,7 +349,7 @@ seed module that creates the system Provider/Model rows) gets
 | openrouter | openai/gpt-* | `openai.reasoning_effort` |
 | anthropic / openai-responses paths | * | `null` (handled by their own provider) |
 
-Each cubebox install on first migration gets the right defaults; the
+Each cubeplex install on first migration gets the right defaults; the
 admin can change them in the UI later.
 
 ---
@@ -418,9 +418,9 @@ Repo: `/home/chris/cubepi`.
 
 No behavior change for callers that don't set `thinking_protocol`.
 
-### PR 2 — cubebox: schema + factory + title model
+### PR 2 — cubeplex: schema + factory + title model
 
-Repo: `/home/chris/cubebox`. Depends on PR 1 being released.
+Repo: `/home/chris/cubeplex`. Depends on PR 1 being released.
 
 1. Alembic migration (autogenerate): add
    `models.thinking_protocol VARCHAR(64) NULL`.
@@ -442,7 +442,7 @@ Repo: `/home/chris/cubebox`. Depends on PR 1 being released.
 7. E2E: title gen with a wired non-reasoning title model returns <5s;
    chat with a reasoning default model still gets reasoning.
 
-### PR 3 — cubebox: admin UI
+### PR 3 — cubeplex: admin UI
 
 1. `ModelFormDialog`: reasoning-protocol dropdown, gated by `reasoning`
    checkbox. Populated from `/admin/llm/thinking-protocols`.
@@ -456,9 +456,9 @@ Repo: `/home/chris/cubebox`. Depends on PR 1 being released.
 
 1. **Where does the protocol description text live?** The dropdown
    needs human-readable labels per protocol. Option (a) static map in
-   cubebox frontend, (b) cubepi ships labels alongside appliers, (c)
+   cubeplex frontend, (b) cubepi ships labels alongside appliers, (c)
    admin endpoint synthesizes from `THINKING_PROTOCOLS` keys + an
-   override table in cubebox. Leaning (a) — i18n already in cubebox,
+   override table in cubeplex. Leaning (a) — i18n already in cubeplex,
    no reason to span repos for translation strings.
 
 2. **Should `thinking_protocol` live on the Provider row instead of the

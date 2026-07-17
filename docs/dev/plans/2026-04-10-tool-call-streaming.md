@@ -13,9 +13,9 @@
 ## File Structure
 
 ### Backend (modified)
-- `backend/cubebox/middleware/sandbox.py` — Add `write_file` and `edit_file` tools alongside existing `execute`; update system prompt injection
-- `backend/cubebox/prompts/sandbox.py` — Update prompt to document new file tools
-- `backend/cubebox/agents/stream.py` — Add `tool_call_delta` extraction from `tool_call_chunks`
+- `backend/cubeplex/middleware/sandbox.py` — Add `write_file` and `edit_file` tools alongside existing `execute`; update system prompt injection
+- `backend/cubeplex/prompts/sandbox.py` — Update prompt to document new file tools
+- `backend/cubeplex/agents/stream.py` — Add `tool_call_delta` extraction from `tool_call_chunks`
 
 ### Frontend (modified)
 - `frontend/packages/core/src/types/events.ts` — Add `ToolCallDeltaEvent` type and `tool_call_delta` to `AgentEventType`
@@ -29,7 +29,7 @@
 ### Task 1: Add `write_file` and `edit_file` tools to SandboxMiddleware
 
 **Files:**
-- Modify: `backend/cubebox/middleware/sandbox.py`
+- Modify: `backend/cubeplex/middleware/sandbox.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -41,8 +41,8 @@ Create a test that verifies the sandbox middleware exposes three tools: `execute
 
 import pytest
 
-from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.sandbox.local import LocalSandbox
 
 
 def test_sandbox_middleware_registers_file_tools() -> None:
@@ -92,7 +92,7 @@ Expected: FAIL — `write_file` and `edit_file` not found in tool names.
 - [ ] **Step 3: Implement `write_file` and `edit_file` tools**
 
 ```python
-# backend/cubebox/middleware/sandbox.py
+# backend/cubeplex/middleware/sandbox.py
 """SandboxMiddleware — registers execute, write_file, edit_file tools and injects sandbox context."""
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -107,9 +107,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubebox.sandbox.base import Sandbox
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
+from cubeplex.sandbox.base import Sandbox
 
 
 class _ExecuteArgs(BaseModel):
@@ -234,7 +234,7 @@ Expected: PASS — all three tests pass.
 
 ```bash
 cd backend
-git add cubebox/middleware/sandbox.py tests/e2e/test_sandbox_tools.py
+git add cubeplex/middleware/sandbox.py tests/e2e/test_sandbox_tools.py
 git commit -m "feat: add write_file and edit_file sandbox tools"
 ```
 
@@ -243,12 +243,12 @@ git commit -m "feat: add write_file and edit_file sandbox tools"
 ### Task 2: Update sandbox system prompt
 
 **Files:**
-- Modify: `backend/cubebox/prompts/sandbox.py`
+- Modify: `backend/cubeplex/prompts/sandbox.py`
 
 - [ ] **Step 1: Update the prompt to document file tools**
 
 ```python
-# backend/cubebox/prompts/sandbox.py
+# backend/cubeplex/prompts/sandbox.py
 """Sandbox execution prompt — injected when a sandbox is available."""
 
 SANDBOX_PROMPT_TEMPLATE = """## Shell Execution
@@ -298,7 +298,7 @@ Expected: PASS — no change in behavior.
 
 ```bash
 cd backend
-git add cubebox/prompts/sandbox.py
+git add cubeplex/prompts/sandbox.py
 git commit -m "feat: update sandbox prompt with write_file and edit_file docs"
 ```
 
@@ -307,7 +307,7 @@ git commit -m "feat: update sandbox prompt with write_file and edit_file docs"
 ### Task 3: Add `tool_call_delta` event extraction to stream converter
 
 **Files:**
-- Modify: `backend/cubebox/agents/stream.py`
+- Modify: `backend/cubeplex/agents/stream.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -317,7 +317,7 @@ git commit -m "feat: update sandbox prompt with write_file and edit_file docs"
 
 from langchain_core.messages import AIMessageChunk
 
-from cubebox.agents.stream import convert_messages_chunk
+from cubeplex.agents.stream import convert_messages_chunk
 
 
 def test_tool_call_chunk_emits_delta_event() -> None:
@@ -388,7 +388,7 @@ Expected: FAIL — no `tool_call_delta` events emitted.
 
 - [ ] **Step 3: Implement `tool_call_delta` extraction**
 
-Add to the end of `convert_messages_chunk()` in `backend/cubebox/agents/stream.py`, before the `return events` line:
+Add to the end of `convert_messages_chunk()` in `backend/cubeplex/agents/stream.py`, before the `return events` line:
 
 ```python
     # Tool call argument deltas (streaming tool input)
@@ -427,7 +427,7 @@ Expected: PASS
 
 ```bash
 cd backend
-git add cubebox/agents/stream.py tests/e2e/test_stream_converter.py
+git add cubeplex/agents/stream.py tests/e2e/test_stream_converter.py
 git commit -m "feat: extract tool_call_delta events from messages stream"
 ```
 
@@ -670,7 +670,7 @@ async def test_tool_call_delta_events_in_sse_stream(
         conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id
     )
     monkeypatch.setattr(
-        "cubebox.agents.graph.create_cubebox_agent",
+        "cubeplex.agents.graph.create_cubeplex_agent",
         lambda **_kwargs: _FakeToolCallAgent(),
     )
 

@@ -18,11 +18,11 @@
 
 | Path | Action | Responsibility |
 |---|---|---|
-| `backend/cubebox/api/schemas/ws_scheduled_tasks.py` | modify | 5-field cron validation, `end_at` in Create/Patch/Out |
-| `backend/cubebox/models/scheduled_task.py` | modify | `end_at` column |
-| `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py` | modify | `end_at` in `_to_out`, create, PATCH clearing |
-| `backend/cubebox/repositories/scheduled_task.py` | modify | `end_at` filter in `claim_due_tasks` |
-| `backend/cubebox/schedules/poller.py` | modify | expired guard in `_dispatch_one` |
+| `backend/cubeplex/api/schemas/ws_scheduled_tasks.py` | modify | 5-field cron validation, `end_at` in Create/Patch/Out |
+| `backend/cubeplex/models/scheduled_task.py` | modify | `end_at` column |
+| `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py` | modify | `end_at` in `_to_out`, create, PATCH clearing |
+| `backend/cubeplex/repositories/scheduled_task.py` | modify | `end_at` filter in `claim_due_tasks` |
+| `backend/cubeplex/schedules/poller.py` | modify | expired guard in `_dispatch_one` |
 | `backend/alembic/versions/<hash>_add_end_at.py` | generated | alembic migration |
 | `backend/tests/unit/test_scheduled_task_schemas.py` | create | unit tests for cron validation |
 | `backend/tests/e2e/test_scheduled_tasks_api.py` | modify | `end_at` round-trip, PATCH clear, 6-field rejection |
@@ -37,7 +37,7 @@
 ### Task 1: 5-field cron validation + DB data fix
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`
 - Create: `backend/tests/unit/test_scheduled_task_schemas.py`
 
 - [ ] **Step 1: Write the failing unit tests**
@@ -49,7 +49,7 @@ Create `backend/tests/unit/test_scheduled_task_schemas.py`:
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.schemas.ws_scheduled_tasks import ScheduledTaskCreate
+from cubeplex.api.schemas.ws_scheduled_tasks import ScheduledTaskCreate
 
 pytestmark = pytest.mark.unit
 
@@ -95,7 +95,7 @@ Expected: `FAILED` — `ValidationError` not raised.
 
 - [ ] **Step 3: Add field-count guard to `_validate_cron`**
 
-In `backend/cubebox/api/schemas/ws_scheduled_tasks.py`, replace:
+In `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`, replace:
 
 ```python
 def _validate_cron(expr: str) -> None:
@@ -128,7 +128,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Fix the production DB record**
 
 ```bash
-PGPASSWORD=postgres psql -h localhost -U postgres -d cubebox -c \
+PGPASSWORD=postgres psql -h localhost -U postgres -d cubeplex -c \
   "UPDATE scheduled_tasks SET cron_expr = '0 9 * * *' WHERE id = 'stask-1fTaVNGHVFa5CE';"
 ```
 
@@ -137,7 +137,7 @@ Expected: `UPDATE 1`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_scheduled_tasks.py \
+git add backend/cubeplex/api/schemas/ws_scheduled_tasks.py \
         backend/tests/unit/test_scheduled_task_schemas.py
 git commit -m "fix(scheduled-tasks): reject 6-field cron expressions; fix production record"
 ```
@@ -147,12 +147,12 @@ git commit -m "fix(scheduled-tasks): reject 6-field cron expressions; fix produc
 ### Task 2: `end_at` model field + Alembic migration
 
 **Files:**
-- Modify: `backend/cubebox/models/scheduled_task.py`
+- Modify: `backend/cubeplex/models/scheduled_task.py`
 - Generated: `backend/alembic/versions/<hash>_add_end_at_to_scheduled_tasks.py`
 
 - [ ] **Step 1: Add `end_at` field to `ScheduledTask`**
 
-In `backend/cubebox/models/scheduled_task.py`, after the `deleted_at` field:
+In `backend/cubeplex/models/scheduled_task.py`, after the `deleted_at` field:
 
 ```python
     deleted_at: datetime | None = Field(
@@ -185,7 +185,7 @@ Expected: `Running upgrade … -> <hash>`.
 - [ ] **Step 4: Verify the column exists**
 
 ```bash
-PGPASSWORD=postgres psql -h localhost -U postgres -d cubebox \
+PGPASSWORD=postgres psql -h localhost -U postgres -d cubeplex \
   -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='scheduled_tasks' AND column_name='end_at';"
 ```
 
@@ -194,7 +194,7 @@ Expected: one row — `end_at | timestamp with time zone`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/scheduled_task.py backend/alembic/versions/
+git add backend/cubeplex/models/scheduled_task.py backend/alembic/versions/
 git commit -m "feat(scheduled-tasks): add end_at column (nullable timestamptz)"
 ```
 
@@ -203,12 +203,12 @@ git commit -m "feat(scheduled-tasks): add end_at column (nullable timestamptz)"
 ### Task 3: API schema + route handler for `end_at`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/ws_scheduled_tasks.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py`
 
 - [ ] **Step 1: Add `end_at` to all three schemas**
 
-In `backend/cubebox/api/schemas/ws_scheduled_tasks.py`:
+In `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`:
 
 In `ScheduledTaskCreate`, after `target_conversation_id`:
 ```python
@@ -233,7 +233,7 @@ In `ScheduledTaskOut`, after `last_fired_at`:
 
 - [ ] **Step 2: Update `_to_out` to include `end_at`**
 
-In `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py`, in `_to_out`:
+In `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py`, in `_to_out`:
 
 ```python
 def _to_out(t: ScheduledTask) -> ScheduledTaskOut:
@@ -279,7 +279,7 @@ In `patch_task`, after the `for field in (...)` loop block (right before `if tou
 - [ ] **Step 5: Confirm mypy passes**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found`.
@@ -287,8 +287,8 @@ Expected: `Success: no issues found`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_scheduled_tasks.py \
-        backend/cubebox/api/routes/v1/ws_scheduled_tasks.py
+git add backend/cubeplex/api/schemas/ws_scheduled_tasks.py \
+        backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py
 git commit -m "feat(scheduled-tasks): end_at field in API schemas + route (create/patch/out)"
 ```
 
@@ -297,12 +297,12 @@ git commit -m "feat(scheduled-tasks): end_at field in API schemas + route (creat
 ### Task 4: Poller `end_at` enforcement
 
 **Files:**
-- Modify: `backend/cubebox/repositories/scheduled_task.py`
-- Modify: `backend/cubebox/schedules/poller.py`
+- Modify: `backend/cubeplex/repositories/scheduled_task.py`
+- Modify: `backend/cubeplex/schedules/poller.py`
 
 - [ ] **Step 1: Add `end_at` filter to `claim_due_tasks`**
 
-In `backend/cubebox/repositories/scheduled_task.py`, add `or_` to the imports:
+In `backend/cubeplex/repositories/scheduled_task.py`, add `or_` to the imports:
 
 ```python
 from sqlalchemy import or_, select, update
@@ -331,7 +331,7 @@ In `claim_due_tasks`, add the `or_()` condition inside `.where(...)`:
 
 - [ ] **Step 2: Add expired guard in `_dispatch_one`**
 
-In `backend/cubebox/schedules/poller.py`, in `_dispatch_one`, after the existing `task is None` check (around line 229):
+In `backend/cubeplex/schedules/poller.py`, in `_dispatch_one`, after the existing `task is None` check (around line 229):
 
 ```python
             if task is None:
@@ -352,7 +352,7 @@ In `backend/cubebox/schedules/poller.py`, in `_dispatch_one`, after the existing
 - [ ] **Step 3: Confirm mypy passes**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found`.
@@ -360,8 +360,8 @@ Expected: `Success: no issues found`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/repositories/scheduled_task.py \
-        backend/cubebox/schedules/poller.py
+git add backend/cubeplex/repositories/scheduled_task.py \
+        backend/cubeplex/schedules/poller.py
 git commit -m "feat(scheduled-tasks): enforce end_at in poller claim and dispatch paths"
 ```
 
@@ -500,7 +500,7 @@ export type ScheduledTaskPatch = Partial<ScheduledTaskCreate>
 - [ ] **Step 2: Build the core package**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build
+cd frontend && pnpm --filter @cubeplex/core build
 ```
 
 Expected: exits 0 with no type errors.
@@ -526,7 +526,7 @@ git commit -m "feat(core/types): add end_at to ScheduledTask interfaces"
 // Pure, side-effect-free helpers that translate between the visual schedule
 // editor's UI state and the API's schedule fields.
 
-import type { ScheduledTaskCreate, ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskCreate, ScheduledTaskOut } from '@cubeplex/core'
 
 // ── UI state types ────────────────────────────────────────────────────────────
 
@@ -794,7 +794,7 @@ export function parseSchedulePayload(task: ScheduledTaskOut): ScheduleEditorValu
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web tsc --noEmit
+cd frontend && pnpm --filter @cubeplex/web tsc --noEmit
 ```
 
 Expected: no errors (new file, no imports from dialog yet).
@@ -1285,7 +1285,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
 - [ ] **Step 2: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web tsc --noEmit
+cd frontend && pnpm --filter @cubeplex/web tsc --noEmit
 ```
 
 Expected: no errors.
@@ -1314,8 +1314,8 @@ Replace the full `ScheduledTaskFormDialog.tsx` with:
 import { useState } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import { createApiClient, createScheduledTask, patchScheduledTask } from '@cubebox/core'
-import type { ScheduledTaskCreate, ScheduledTaskOut, ScheduledTaskPatch } from '@cubebox/core'
+import { createApiClient, createScheduledTask, patchScheduledTask } from '@cubeplex/core'
+import type { ScheduledTaskCreate, ScheduledTaskOut, ScheduledTaskPatch } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1554,7 +1554,7 @@ export function ScheduledTaskFormDialog({
 - [ ] **Step 2: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web tsc --noEmit
+cd frontend && pnpm --filter @cubeplex/web tsc --noEmit
 ```
 
 Expected: no errors.
@@ -1666,7 +1666,7 @@ git commit -m "test(scheduled-tasks): Playwright smoke tests for frequency-pill 
 ## Pre-PR checklist
 
 - [ ] Run full backend suite: `cd backend && uv run pytest tests/unit/ tests/e2e/test_scheduled_tasks_api.py -v`
-- [ ] Run full frontend type check: `cd frontend && pnpm --filter @cubebox/web tsc --noEmit`
+- [ ] Run full frontend type check: `cd frontend && pnpm --filter @cubeplex/web tsc --noEmit`
 - [ ] Run Playwright suite: `cd frontend && npx playwright test`
 - [ ] Open the form in dev, create one task of each frequency type, confirm network payloads are correct
 - [ ] Confirm the production DB fix was applied: check `cron_expr` for `stask-1fTaVNGHVFa5CE`

@@ -1,6 +1,6 @@
 # Memory LLM-Behavior E2E — Design
 
-Tracks: [issue #64](https://github.com/xfgong/cubebox/issues/64)
+Tracks: [issue #64](https://github.com/xfgong/cubeplex/issues/64)
 Drives: `feat/memory-system` follow-up. Three small parallel PRs.
 
 ## Goal
@@ -30,7 +30,7 @@ This spec is the harder layer that requires real model calls.
   remain the per-commit fast gate.
 - Adding cache mechanics to OpenAI-compat providers. Cache-control
   insertion already exists for the Anthropic kind via
-  `_wrap_with_cache_markers` in `cubebox/llm/factory.py`.
+  `_wrap_with_cache_markers` in `cubeplex/llm/factory.py`.
 - Designing prompt content. Where assertions need stable model
   behavior, the test picks tolerant assertions (substring, executed-
   command negation), not strict format matches.
@@ -42,9 +42,9 @@ helper file, so PR2 lands first and PR3 rebases onto it.
 
 | PR | Branch | Unblocks | Touches |
 |----|--------|----------|---------|
-| 1 | `feat/test-prompt-cache-gate` | 8.3 | `cubebox/llm/factory.py`, `cubebox/streams/`, new `_helpers.py`, `test_prompt_cache.py`, `pyproject.toml` |
+| 1 | `feat/test-prompt-cache-gate` | 8.3 | `cubeplex/llm/factory.py`, `cubeplex/streams/`, new `_helpers.py`, `test_prompt_cache.py`, `pyproject.toml` |
 | 2 | `feat/test-memory-injection` | 8.1 | new `_helpers.py`, `tests/e2e/memory/conftest.py`, `test_memory_injection.py` |
-| 3 | `feat/test-memory-adversarial-gate` | 8.2 | `cubebox/middleware/sandbox.py`, `test_memory_adversarial.py` (rebased onto PR2 helpers) |
+| 3 | `feat/test-memory-adversarial-gate` | 8.2 | `cubeplex/middleware/sandbox.py`, `test_memory_adversarial.py` (rebased onto PR2 helpers) |
 
 Each PR is self-contained. CI default deselects all three via a new
 `real_llm` pytest marker (next section).
@@ -119,7 +119,7 @@ independent functions in the same module — no merge conflict.
 Three new pieces in the production code, one new test:
 
 1. **Anthropic provider in `LLMFactory`**
-   - File: `backend/cubebox/llm/factory.py`, line 471 region.
+   - File: `backend/cubeplex/llm/factory.py`, line 471 region.
    - Replace `raise NotImplementedError` with a `ChatAnthropic`
      instantiation. Read `base_url`, `api_key`, headers, and timeout
      from `provider_config` exactly the way the OpenAI-compat branch
@@ -127,25 +127,25 @@ Three new pieces in the production code, one new test:
    - Pass `stream_usage=True` (Anthropic equivalent: `streaming=True`
      plus default usage emission) so `usage_metadata` is populated for
      CostMiddleware and the new SSE event.
-   - Attach `_cubebox_provider`, `_cubebox_model_id`, `_cubebox_model_cost`
+   - Attach `_cubeplex_provider`, `_cubeplex_model_id`, `_cubeplex_model_cost`
      metadata as the OpenAI branch does.
    - Wrap with `_wrap_with_cache_markers(..., provider_kind="anthropic")`
      — already implemented and exercised by unit tests.
    - Dependency: add `langchain-anthropic` via `uv add`.
 
 2. **SSE `usage` event**
-   - File: `backend/cubebox/agents/schemas.py` — new `UsageEvent`
+   - File: `backend/cubeplex/agents/schemas.py` — new `UsageEvent`
      dataclass with `type="usage"` and a `data` payload of
      `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}`.
-     Field names mirror `cubebox.middleware.cost._extract_usage` — that
+     Field names mirror `cubeplex.middleware.cost._extract_usage` — that
      function already produces exactly this dict and is the source of
      truth for cross-provider field normalization.
-   - File: `backend/cubebox/streams/run_manager.py` — at LLM stream end
+   - File: `backend/cubeplex/streams/run_manager.py` — at LLM stream end
      (the same point where `done` is emitted), call `_extract_usage` on
      the final AIMessage chunk and publish a `UsageEvent` before `done`.
      One usage event per LLM call (a multi-turn conversation produces
      N usage events, one per agent step, in order).
-   - File: API SSE serializer (`cubebox/api/streaming.py` or wherever
+   - File: API SSE serializer (`cubeplex/api/streaming.py` or wherever
      `AgentEvent → SSE bytes` happens) — `usage` event type passes
      through with no special transform; serialize as JSON.
 
@@ -235,7 +235,7 @@ Three new pieces in the production code, one new test:
 ### Architecture
 
 1. **Sandbox executed-commands accessor**
-   - File: `backend/cubebox/middleware/sandbox.py` (or whichever module
+   - File: `backend/cubeplex/middleware/sandbox.py` (or whichever module
      owns the sandbox tool implementation).
    - Add an in-memory ring buffer keyed by `(workspace_id,
      conversation_id)`, capped to the last K=50 commands per key,

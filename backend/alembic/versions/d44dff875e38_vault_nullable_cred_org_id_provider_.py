@@ -24,16 +24,16 @@ depends_on: Union[str, Sequence[str], None] = None
 def _migrate_existing_api_keys() -> None:
     """Encrypt every Provider.api_key into a Credential row, set credential_id.
 
-    Reads CUBEBOX_AUTH__VAULT_KEY from env (or auth.vault_key from config) and
+    Reads CUBEPLEX_AUTH__VAULT_KEY from env (or auth.vault_key from config) and
     uses MultiFernet so the primary key in the rotation list does the encryption,
     matching the runtime FernetBackend.
     """
-    from cubebox.config import config
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.credentials.keys import parse_vault_keys
-    from cubebox.models.public_id import generate_public_id
+    from cubeplex.config import config
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.credentials.keys import parse_vault_keys
+    from cubeplex.models.public_id import generate_public_id
 
-    raw_key = os.getenv("CUBEBOX_AUTH__VAULT_KEY") or config.get("auth.vault_key")
+    raw_key = os.getenv("CUBEPLEX_AUTH__VAULT_KEY") or config.get("auth.vault_key")
     bind = op.get_bind()
     rows = list(
         bind.execute(
@@ -47,7 +47,7 @@ def _migrate_existing_api_keys() -> None:
         return
     if not raw_key:
         raise RuntimeError(
-            "CUBEBOX_AUTH__VAULT_KEY must be set to migrate existing Provider.api_key "
+            "CUBEPLEX_AUTH__VAULT_KEY must be set to migrate existing Provider.api_key "
             "values into the credential vault."
         )
     backend = FernetBackend(parse_vault_keys(str(raw_key)))

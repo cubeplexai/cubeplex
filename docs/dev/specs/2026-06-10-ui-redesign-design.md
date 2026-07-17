@@ -249,7 +249,7 @@ level only.
 - Admin keeps its own top bar (legitimate context switch) but uses the same
   token set — no more white-bar-vs-gray-sidebar split-brain
 - Admin top bar redesigned:
-  - Left: cubebox mark + `ADMIN` as an 11px uppercase tracked label + org
+  - Left: cubeplex mark + `ADMIN` as an 11px uppercase tracked label + org
     name at 13px/500 primary, separated by `/` (path semantics)
   - Right: "Back to app" becomes a ghost button with border (← icon +
     label) as an explicit exit

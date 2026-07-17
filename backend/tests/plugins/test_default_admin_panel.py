@@ -1,5 +1,5 @@
-from cubebox.plugins import AdminPanelExtension
-from cubebox.plugins.defaults.admin_panel import DefaultAdminPanelExtension
+from cubeplex.plugins import AdminPanelExtension
+from cubeplex.plugins.defaults.admin_panel import DefaultAdminPanelExtension
 
 
 def test_default_admin_panel_satisfies_protocol() -> None:

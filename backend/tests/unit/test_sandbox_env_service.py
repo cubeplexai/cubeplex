@@ -6,13 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import Credential
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.sandbox_env.host_rules import HostPatternError
-from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import Credential
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.sandbox_env import SandboxEnvRepository
+from cubeplex.sandbox_env.host_rules import HostPatternError
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.sandbox_env import (
     SandboxEnvConflictError,
     SandboxEnvService,
     SandboxEnvShapeError,

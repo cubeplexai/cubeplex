@@ -9,7 +9,7 @@ import {
   type SandboxCommandRule,
   type SandboxNetworkRule,
   type SandboxPolicyOut,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,6 +24,9 @@ interface Draft {
   networkRules: SandboxNetworkRule[]
   commandRules: SandboxCommandRule[]
   egressProxy: string
+  resourceCpu: string
+  resourceMemory: string
+  storage: string
 }
 
 function fromServer(p: SandboxPolicyOut): Draft {
@@ -33,6 +36,9 @@ function fromServer(p: SandboxPolicyOut): Draft {
     networkRules: p.network_rules ?? [],
     commandRules: p.command_rules ?? [],
     egressProxy: p.egress_proxy ?? '',
+    resourceCpu: p.resource_cpu ?? '',
+    resourceMemory: p.resource_memory ?? '',
+    storage: p.storage ?? '',
   }
 }
 
@@ -47,6 +53,9 @@ function isDirty(a: Draft, b: Draft): boolean {
   if (!rulesEqual(a.networkRules, b.networkRules)) return true
   if (!rulesEqual(a.commandRules, b.commandRules)) return true
   if (a.egressProxy !== b.egressProxy) return true
+  if (a.resourceCpu !== b.resourceCpu) return true
+  if (a.resourceMemory !== b.resourceMemory) return true
+  if (a.storage !== b.storage) return true
   return false
 }
 
@@ -126,6 +135,21 @@ export function PolicyEditor() {
     setSavedAt(null)
     setSaveError(null)
   }
+  const setResourceCpu = (v: string) => {
+    setDraft({ ...draft, resourceCpu: v })
+    setSavedAt(null)
+    setSaveError(null)
+  }
+  const setResourceMemory = (v: string) => {
+    setDraft({ ...draft, resourceMemory: v })
+    setSavedAt(null)
+    setSaveError(null)
+  }
+  const setStorage = (v: string) => {
+    setDraft({ ...draft, storage: v })
+    setSavedAt(null)
+    setSaveError(null)
+  }
 
   const discard = () => {
     setDraft(server)
@@ -144,6 +168,9 @@ export function PolicyEditor() {
         network_rules: draft.networkRules,
         command_rules: draft.commandRules,
         egress_proxy: draft.egressProxy.trim() || null,
+        resource_cpu: draft.resourceCpu.trim() || null,
+        resource_memory: draft.resourceMemory.trim() || null,
+        storage: draft.storage.trim() || null,
       })
       const next = fromServer(updated)
       setServer(next)
@@ -184,6 +211,56 @@ export function PolicyEditor() {
             </span>
           </p>
         </div>
+      </SectionCard>
+
+      <SectionCard>
+        <SectionHeader
+          title="Resource limits"
+          subtitle="Cap the CPU, memory, and disk each sandbox gets. Use Kubernetes quantities (e.g. CPU '500m' or '2', memory '512Mi' or '2Gi', disk '10Gi'). Leave a field empty to use the system default."
+        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sandbox-resource-cpu">CPU</Label>
+            <Input
+              id="sandbox-resource-cpu"
+              data-testid="sandbox-policy-resource-cpu"
+              value={draft.resourceCpu}
+              onChange={(e) => setResourceCpu(e.target.value)}
+              placeholder="100m"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sandbox-resource-memory">Memory</Label>
+            <Input
+              id="sandbox-resource-memory"
+              data-testid="sandbox-policy-resource-memory"
+              value={draft.resourceMemory}
+              onChange={(e) => setResourceMemory(e.target.value)}
+              placeholder="100Mi"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="sandbox-storage">Storage</Label>
+            <Input
+              id="sandbox-storage"
+              data-testid="sandbox-policy-storage"
+              value={draft.storage}
+              onChange={(e) => setStorage(e.target.value)}
+              placeholder="10Gi"
+              className="font-mono text-xs"
+            />
+          </div>
+        </div>
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <Info className="mt-0.5 size-3 shrink-0" />
+          <span>
+            Applies to new sandboxes only — existing sandboxes keep their current limits until
+            restarted. Storage applies when a sandbox&apos;s volume is first provisioned; resizing
+            an existing volume is not supported.
+          </span>
+        </p>
       </SectionCard>
 
       <SectionCard>

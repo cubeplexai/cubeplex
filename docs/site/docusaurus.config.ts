@@ -5,7 +5,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 const classicOptions: ClassicOptions = {
   docs: {
     sidebarPath: './sidebars.ts',
-    editUrl: 'https://github.com/cubeplexai/cubebox/edit/main/docs/site/',
+    editUrl: 'https://github.com/cubeplexai/cubeplex/edit/main/docs/site/',
   },
   blog: false,
   theme: {
@@ -19,14 +19,15 @@ const classicOptions: ClassicOptions = {
 };
 
 const config: Config = {
-  title: 'CubeBox',
+  title: 'CubePlex',
   tagline: 'Your AI agent workspace — chat, automate, extend',
   favicon: 'img/favicon.ico',
 
-  url: 'https://docs.cubebox.ai',
+  url: 'https://docs.cubeplex.ai',
   baseUrl: '/',
+  trailingSlash: false,
   organizationName: 'cubeplexai',
-  projectName: 'cubebox',
+  projectName: 'cubeplex',
 
   onBrokenLinks: 'throw',
   onBrokenAnchors: 'throw',
@@ -53,8 +54,8 @@ const config: Config = {
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'Organization',
-        name: 'CubeBox',
-        url: 'https://cubebox.ai',
+        name: 'CubePlex',
+        url: 'https://cubeplex.ai',
       }),
     },
   ],
@@ -63,15 +64,15 @@ const config: Config = {
 
   themeConfig: {
     metadata: [
-      { name: 'keywords', content: 'CubeBox, AI agent, AI workspace, agent platform, chat AI, MCP tools, AI automation' },
+      { name: 'keywords', content: 'CubePlex, AI agent, AI workspace, agent platform, chat AI, MCP tools, AI automation' },
     ],
     navbar: {
-      title: 'CubeBox',
+      title: 'CubePlex',
       items: [
         { type: 'docSidebar', sidebarId: 'docs', label: 'Docs', position: 'left' },
         { type: 'localeDropdown', position: 'right' },
         {
-          href: 'https://github.com/cubeplexai/cubebox',
+          href: 'https://github.com/cubeplexai/cubeplex',
           position: 'right',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',

@@ -4,7 +4,7 @@
 
 **Goal:** Replace MySQL with PostgreSQL across the backend (engine, alembic, LangGraph checkpointer, worktree provisioning, CI). Use the official `langgraph-checkpoint-postgres` for thread state and `~/infra/postgresql` (postgres 18.2 on `localhost:5432`) as the dev/test cluster.
 
-**Architecture:** Single driver — `psycopg` v3 — for app, alembic, and the LangGraph checkpointer. App lifespan owns one `AsyncConnectionPool`; an `AsyncPostgresSaver` is built on top once and reused for the process lifetime. Worktree isolation continues via per-worktree databases (`cubebox_<slug>_dev|test`) on the shared cluster — same naming, different DB engine.
+**Architecture:** Single driver — `psycopg` v3 — for app, alembic, and the LangGraph checkpointer. App lifespan owns one `AsyncConnectionPool`; an `AsyncPostgresSaver` is built on top once and reused for the process lifetime. Worktree isolation continues via per-worktree databases (`cubeplex_<slug>_dev|test`) on the shared cluster — same naming, different DB engine.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2 / SQLModel, alembic, `psycopg[binary,pool]>=3.2`, `langgraph-checkpoint-postgres>=3.0.0`, postgres 18 (Docker via `~/infra/postgresql/docker-compose.yml` for dev; `postgres:18-alpine` service in CI).
 
@@ -25,14 +25,14 @@ Files this plan creates, modifies, or deletes:
 | Modify | `backend/config.test.yaml` | DB defaults for CI/test |
 | Modify | `backend/config.production.yaml` | (if it overrides DB) |
 | Modify | `backend/.env.example` | Documented env var defaults |
-| Modify | `backend/cubebox/db/engine.py` | `postgresql+psycopg://` URL, drop MySQL pool tuning |
+| Modify | `backend/cubeplex/db/engine.py` | `postgresql+psycopg://` URL, drop MySQL pool tuning |
 | Modify | `backend/alembic/env.py` | `postgresql+psycopg://` URL |
 | Delete | `backend/alembic/versions/*.py` (16 files) | Squash to fresh baseline |
 | Create | `backend/alembic/versions/<new_id>_initial_postgres_schema.py` | Single PG baseline migration |
-| Modify | `backend/cubebox/agents/checkpointer.py` | `AsyncPostgresSaver` + module-level `AsyncConnectionPool` lifecycle |
-| Modify | `backend/cubebox/api/app.py` | Replace lifespan checkpointer setup; wire pool open/close |
-| Modify | `backend/cubebox/repositories/invite_token.py` | Update MySQL-flavored comment |
-| Modify | `backend/cubebox/utils/time.py` | Update MySQL-flavored comment |
+| Modify | `backend/cubeplex/agents/checkpointer.py` | `AsyncPostgresSaver` + module-level `AsyncConnectionPool` lifecycle |
+| Modify | `backend/cubeplex/api/app.py` | Replace lifespan checkpointer setup; wire pool open/close |
+| Modify | `backend/cubeplex/repositories/invite_token.py` | Update MySQL-flavored comment |
+| Modify | `backend/cubeplex/utils/time.py` | Update MySQL-flavored comment |
 | Modify | `scripts/worktree-env` | `mysql` CLI → `psql`; PG-style `CREATE/DROP DATABASE` |
 | Modify | `.github/workflows/ci.yml` | Replace `mysql` service block with `postgres:18-alpine` |
 | Modify | `AGENTS.md` (root) | Worktree section: MySQL schemas → PG databases |
@@ -57,7 +57,7 @@ Files this plan creates, modifies, or deletes:
 
 - [ ] **Step 1: Create worktree from latest origin/main**
 
-Run from the **main repo root** (`/home/chris/cubebox`):
+Run from the **main repo root** (`/home/chris/cubeplex`):
 
 ```bash
 ./scripts/new-worktree feat/postgres-migration
@@ -84,7 +84,7 @@ git branch --show-current      # feat/postgres-migration
 cat .worktree.env              # note the allocated ports
 ```
 
-Record the slot/ports from `.worktree.env`; subsequent steps reference them as `<API_PORT>` (e.g., `8037`) and `<WEB_PORT>` (e.g., `3037`). The DB name will currently be `cubebox_feat_postgres_migration_dev` / `_test` — same identifiers we'll use on PG.
+Record the slot/ports from `.worktree.env`; subsequent steps reference them as `<API_PORT>` (e.g., `8037`) and `<WEB_PORT>` (e.g., `3037`). The DB name will currently be `cubeplex_feat_postgres_migration_dev` / `_test` — same identifiers we'll use on PG.
 
 - [ ] **Step 4: Verify ~/infra/postgresql is up**
 
@@ -168,7 +168,7 @@ Replace the existing `database:` block (currently at line ~179) with:
     port: 5432
     user: "postgres"
     password: "postgres"
-    name: "cubebox"
+    name: "cubeplex"
     pool_size: 10
     max_overflow: 20
     echo: false
@@ -184,7 +184,7 @@ Replace the existing `database:` block with:
     port: 5432
     user: "postgres"
     password: "testpass"
-    name: "cubebox_test"
+    name: "cubeplex_test"
 ```
 
 - [ ] **Step 3: Check the other two configs**
@@ -201,14 +201,14 @@ Replace the database section:
 
 ```env
 # Database Configuration
-CUBEBOX_DATABASE__HOST=localhost
-CUBEBOX_DATABASE__PORT=5432
-CUBEBOX_DATABASE__USER=postgres
-CUBEBOX_DATABASE__PASSWORD=postgres
-CUBEBOX_DATABASE__NAME=cubebox
+CUBEPLEX_DATABASE__HOST=localhost
+CUBEPLEX_DATABASE__PORT=5432
+CUBEPLEX_DATABASE__USER=postgres
+CUBEPLEX_DATABASE__PASSWORD=postgres
+CUBEPLEX_DATABASE__NAME=cubeplex
 ```
 
-Also remove the now-stale comment line `# CUBEBOX_DATABASE__URL=postgresql://user:password@localhost:5432/cubebox` (the new defaults make it redundant).
+Also remove the now-stale comment line `# CUBEPLEX_DATABASE__URL=postgresql://user:password@localhost:5432/cubeplex` (the new defaults make it redundant).
 
 - [ ] **Step 5: Commit**
 
@@ -224,7 +224,7 @@ git commit -m "chore(config): switch database defaults to PostgreSQL on port 543
 ### Task 4: Update the SQLAlchemy engine
 
 **Files:**
-- Modify: `backend/cubebox/db/engine.py`
+- Modify: `backend/cubeplex/db/engine.py`
 
 - [ ] **Step 1: Rewrite `_build_database_url`**
 
@@ -237,7 +237,7 @@ def _build_database_url() -> str:
     port = config.get("database.port", 5432)
     user = config.get("database.user", "postgres")
     password = config.get("database.password", "")
-    name = config.get("database.name", "cubebox")
+    name = config.get("database.name", "cubeplex")
     encoded_password = quote_plus(password)
     return f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
 ```
@@ -272,10 +272,10 @@ Note: `pool_recycle=280` is removed — that was a MySQL-specific guard around t
 cd backend
 PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
   -v ON_ERROR_STOP=1 \
-  -c 'CREATE DATABASE "cubebox_feat_postgres_migration_dev";' || true
+  -c 'CREATE DATABASE "cubeplex_feat_postgres_migration_dev";' || true
 PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
   -v ON_ERROR_STOP=1 \
-  -c 'CREATE DATABASE "cubebox_feat_postgres_migration_test";' || true
+  -c 'CREATE DATABASE "cubeplex_feat_postgres_migration_test";' || true
 ```
 
 (`|| true` because the DBs may not exist yet, and `IF NOT EXISTS` isn't supported on `CREATE DATABASE`. The `pg_database` pre-check goes into `worktree-env` proper at Task 8.)
@@ -283,10 +283,10 @@ PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
 Then verify the engine builds and connects:
 
 ```bash
-CUBEBOX_DATABASE__NAME=cubebox_feat_postgres_migration_dev \
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_postgres_migration_dev \
   uv run python -c "
 import asyncio
-from cubebox.db.engine import get_engine
+from cubeplex.db.engine import get_engine
 from sqlalchemy import text
 
 async def main():
@@ -305,7 +305,7 @@ Expected: `connect ok: 1`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/db/engine.py
+git add backend/cubeplex/db/engine.py
 git commit -m "refactor(db): switch SQLAlchemy engine to postgresql+psycopg"
 ```
 
@@ -328,7 +328,7 @@ def get_url() -> str:
     port = app_config.get("database.port", 5432)
     user = app_config.get("database.user", "postgres")
     password = app_config.get("database.password", "")
-    name = app_config.get("database.name", "cubebox")
+    name = app_config.get("database.name", "cubeplex")
     encoded_password = quote_plus(password)
     url = f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
     return url.replace("%", "%%")
@@ -340,7 +340,7 @@ The four-table `_CHECKPOINT_TABLES` filter and the `include_object` hook stay un
 
 ```bash
 cd backend
-CUBEBOX_DATABASE__NAME=cubebox_feat_postgres_migration_dev uv run alembic current
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_postgres_migration_dev uv run alembic current
 ```
 
 Expected: empty output (no migrations applied yet) and no traceback. Failure with `psycopg.OperationalError` means the URL is wrong; failure with import errors means a model module needs adjustment (unlikely at this stage).
@@ -366,9 +366,9 @@ git commit -m "refactor(alembic): switch env URL to postgresql+psycopg"
 PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
   -v ON_ERROR_STOP=1 \
   -c 'SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-       WHERE datname = '\''cubebox_feat_postgres_migration_dev'\'';' \
-  -c 'DROP DATABASE IF EXISTS "cubebox_feat_postgres_migration_dev";' \
-  -c 'CREATE DATABASE "cubebox_feat_postgres_migration_dev";'
+       WHERE datname = '\''cubeplex_feat_postgres_migration_dev'\'';' \
+  -c 'DROP DATABASE IF EXISTS "cubeplex_feat_postgres_migration_dev";' \
+  -c 'CREATE DATABASE "cubeplex_feat_postgres_migration_dev";'
 ```
 
 - [ ] **Step 2: Delete existing migration files**
@@ -383,7 +383,7 @@ ls alembic/versions/  # should be empty
 - [ ] **Step 3: Autogenerate the new baseline**
 
 ```bash
-CUBEBOX_DATABASE__NAME=cubebox_feat_postgres_migration_dev \
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_postgres_migration_dev \
   uv run alembic revision --autogenerate -m "initial postgres schema"
 ```
 
@@ -406,10 +406,10 @@ If anything looks wrong, fix the underlying model and regenerate (delete the fil
 ```bash
 PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
   -v ON_ERROR_STOP=1 \
-  -c 'DROP DATABASE IF EXISTS "cubebox_feat_postgres_migration_dev";' \
-  -c 'CREATE DATABASE "cubebox_feat_postgres_migration_dev";'
+  -c 'DROP DATABASE IF EXISTS "cubeplex_feat_postgres_migration_dev";' \
+  -c 'CREATE DATABASE "cubeplex_feat_postgres_migration_dev";'
 
-CUBEBOX_DATABASE__NAME=cubebox_feat_postgres_migration_dev \
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_postgres_migration_dev \
   uv run alembic upgrade head
 ```
 
@@ -418,7 +418,7 @@ Expected: `Running upgrade  -> <new_id>, initial postgres schema` and exit code 
 - [ ] **Step 6: Verify schema with a quick table count**
 
 ```bash
-PGPASSWORD=postgres psql -h localhost -U postgres -d cubebox_feat_postgres_migration_dev \
+PGPASSWORD=postgres psql -h localhost -U postgres -d cubeplex_feat_postgres_migration_dev \
   -c "SELECT count(*) FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
 ```
@@ -437,10 +437,10 @@ git commit -m "chore(alembic): squash migration history to fresh postgres baseli
 ### Task 7: Replace the LangGraph checkpointer
 
 **Files:**
-- Modify: `backend/cubebox/agents/checkpointer.py`
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/agents/checkpointer.py`
+- Modify: `backend/cubeplex/api/app.py`
 
-- [ ] **Step 1: Rewrite `cubebox/agents/checkpointer.py`**
+- [ ] **Step 1: Rewrite `cubeplex/agents/checkpointer.py`**
 
 Replace the entire file contents with:
 
@@ -455,7 +455,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 from psycopg_pool import AsyncConnectionPool
 
-from cubebox.config import config
+from cubeplex.config import config
 
 _pool: AsyncConnectionPool | None = None
 _saver: AsyncPostgresSaver | None = None
@@ -466,7 +466,7 @@ def _build_conn_string() -> str:
     port = config.get("database.port", 5432)
     user = config.get("database.user", "postgres")
     password = config.get("database.password", "")
-    name = config.get("database.name", "cubebox")
+    name = config.get("database.name", "cubeplex")
     encoded_password = quote_plus(password)
     return f"postgresql://{user}:{encoded_password}@{host}:{port}/{name}"
 
@@ -523,14 +523,14 @@ Why these choices:
 - `autocommit=True` is required for `AsyncPostgresSaver` — its DML doesn't open transactions itself.
 - The module-level singletons make `create_checkpointer()` a no-op fast path; tests that don't run the lifespan still get a working checkpointer (it'll lazy-init).
 
-- [ ] **Step 2: Rewrite the lifespan checkpointer block in `cubebox/api/app.py`**
+- [ ] **Step 2: Rewrite the lifespan checkpointer block in `cubeplex/api/app.py`**
 
 Find the block at lines 157-183 (the `try: import aiomysql ...` clause) and replace it with:
 
 ```python
     # Initialize LangGraph checkpointer (creates pool + setup tables)
     try:
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubeplex.agents.checkpointer import init_checkpointer
 
         await init_checkpointer()
         logger.info("LangGraph checkpointer initialized")
@@ -546,7 +546,7 @@ Note the change from `logger.warning(...)` to `logger.error(...)` + `raise`. The
 In the same file's shutdown block (currently around lines 249-271), insert after the `logger.info("Application shutting down")` line:
 
 ```python
-    from cubebox.agents.checkpointer import shutdown_checkpointer
+    from cubeplex.agents.checkpointer import shutdown_checkpointer
 
     await shutdown_checkpointer()
 ```
@@ -557,7 +557,7 @@ Place it before the existing `if _attachment_cleanup_task is not None: ...` bloc
 
 ```bash
 cd backend
-CUBEBOX_DATABASE__NAME=cubebox_feat_postgres_migration_test \
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_postgres_migration_test \
   uv run pytest tests/e2e/test_agents.py -v -k "checkpointer or thread" -x
 ```
 
@@ -568,7 +568,7 @@ If tests pass, the checkpointer wiring is correct. If they fail with `relation "
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/agents/checkpointer.py backend/cubebox/api/app.py
+git add backend/cubeplex/agents/checkpointer.py backend/cubeplex/api/app.py
 git commit -m "refactor(checkpointer): use AsyncPostgresSaver with shared pool"
 ```
 
@@ -587,12 +587,12 @@ Replace the function with:
 
 ```python
 def _pg_creds_from_env() -> dict[str, str]:
-    """Read PG creds from CUBEBOX_DATABASE__* env vars, with sane defaults."""
+    """Read PG creds from CUBEPLEX_DATABASE__* env vars, with sane defaults."""
     return {
-        "host": os.environ.get("CUBEBOX_DATABASE__HOST", "localhost"),
-        "port": os.environ.get("CUBEBOX_DATABASE__PORT", "5432"),
-        "user": os.environ.get("CUBEBOX_DATABASE__USER", "postgres"),
-        "password": os.environ.get("CUBEBOX_DATABASE__PASSWORD", "postgres"),
+        "host": os.environ.get("CUBEPLEX_DATABASE__HOST", "localhost"),
+        "port": os.environ.get("CUBEPLEX_DATABASE__PORT", "5432"),
+        "user": os.environ.get("CUBEPLEX_DATABASE__USER", "postgres"),
+        "password": os.environ.get("CUBEPLEX_DATABASE__PASSWORD", "postgres"),
     }
 
 
@@ -697,7 +697,7 @@ Find the two MySQL `USE` blocks and replace each with:
 Replace the `mysql` schema query and its drop loop with:
 
 ```python
-    # 3. Orphan PG databases (cubebox_* not referenced by any live entry)
+    # 3. Orphan PG databases (cubeplex_* not referenced by any live entry)
     creds = _pg_creds_from_env()
     out = subprocess.run(
         [
@@ -707,7 +707,7 @@ Replace the `mysql` schema query and its drop loop with:
             "-U", creds["user"],
             "-d", "postgres",
             "-tAc",
-            "SELECT datname FROM pg_database WHERE datname LIKE 'cubebox_%';",
+            "SELECT datname FROM pg_database WHERE datname LIKE 'cubeplex_%';",
         ],
         capture_output=True,
         text=True,
@@ -748,15 +748,15 @@ Also update the comment at line 269 (`# ----- mysql + alembic`) to `# ----- post
 - [ ] **Step 8: Smoke-test the rewrite against the current worktree**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/postgres-migration
+cd /home/chris/cubeplex/.worktrees/feat/postgres-migration
 
 # First, drop the MySQL schemas the original `new-worktree` created.
 # Use the OLD MySQL CLI here, since the script we just rewrote no longer
 # knows about MySQL. This is a one-off cleanup; after this we live in PG.
-SLUG=$(grep CUBEBOX_WORKTREE_SLUG .worktree.env | cut -d= -f2)
-mysql -h 127.0.0.1 -P 3306 -uroot -p"${CUBEBOX_DATABASE__PASSWORD:-}" \
-  -e "DROP DATABASE IF EXISTS \`cubebox_${SLUG}_dev\`; \
-      DROP DATABASE IF EXISTS \`cubebox_${SLUG}_test\`;" 2>/dev/null || true
+SLUG=$(grep CUBEPLEX_WORKTREE_SLUG .worktree.env | cut -d= -f2)
+mysql -h 127.0.0.1 -P 3306 -uroot -p"${CUBEPLEX_DATABASE__PASSWORD:-}" \
+  -e "DROP DATABASE IF EXISTS \`cubeplex_${SLUG}_dev\`; \
+      DROP DATABASE IF EXISTS \`cubeplex_${SLUG}_test\`;" 2>/dev/null || true
 
 # Now provision via the new PG path.
 ./scripts/worktree-env init
@@ -764,7 +764,7 @@ mysql -h 127.0.0.1 -P 3306 -uroot -p"${CUBEBOX_DATABASE__PASSWORD:-}" \
 
 If `mysql` CLI is unavailable or local MySQL is gone, skip the cleanup — those orphan schemas are harmless.
 
-Expected from `init`: `→ ensured PG databases: cubebox_<slug>_dev, cubebox_<slug>_test` and `.worktree.env` is rewritten with the PG defaults (port 5432, user postgres).
+Expected from `init`: `→ ensured PG databases: cubeplex_<slug>_dev, cubeplex_<slug>_test` and `.worktree.env` is rewritten with the PG defaults (port 5432, user postgres).
 
 - [ ] **Step 9: Run doctor**
 
@@ -772,7 +772,7 @@ Expected from `init`: `→ ensured PG databases: cubebox_<slug>_dev, cubebox_<sl
 ./scripts/worktree-env doctor
 ```
 
-Expected: every check is green, including `✓ PG database cubebox_<slug>_dev reachable` and `✓ PG database cubebox_<slug>_test reachable`.
+Expected: every check is green, including `✓ PG database cubeplex_<slug>_dev reachable` and `✓ PG database cubeplex_<slug>_test reachable`.
 
 - [ ] **Step 10: Run alembic against the freshly provisioned worktree DB**
 
@@ -806,7 +806,7 @@ Replace:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: testpass
-          MYSQL_DATABASE: cubebox_test
+          MYSQL_DATABASE: cubeplex_test
         ports: ['3306:3306']
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -ptestpass"
@@ -823,7 +823,7 @@ with:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: cubebox_test
+          POSTGRES_DB: cubeplex_test
         ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres"
@@ -842,9 +842,9 @@ Replace the `mysql -h 127.0.0.1 ... DROP DATABASE ... CREATE DATABASE` line with
         run: |
           PGPASSWORD=testpass psql -h 127.0.0.1 -U postgres -d postgres \
             -v ON_ERROR_STOP=1 \
-            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'cubebox_test';" \
-            -c "DROP DATABASE IF EXISTS cubebox_test;" \
-            -c "CREATE DATABASE cubebox_test;"
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'cubeplex_test';" \
+            -c "DROP DATABASE IF EXISTS cubeplex_test;" \
+            -c "CREATE DATABASE cubeplex_test;"
           make backend-migrate
 ```
 
@@ -864,12 +864,12 @@ git commit -m "ci: replace mysql service with postgres:18-alpine"
 ### Task 10: Clean up MySQL-flavored comments
 
 **Files:**
-- Modify: `backend/cubebox/repositories/invite_token.py`
-- Modify: `backend/cubebox/utils/time.py`
+- Modify: `backend/cubeplex/repositories/invite_token.py`
+- Modify: `backend/cubeplex/utils/time.py`
 
 These two files contain explanatory comments that mention MySQL's TZ-stripping behavior. The behavior is identical on PG's `timestamp without time zone` (no TZ stored), so the underlying coercion code stays. Only the comments change.
 
-- [ ] **Step 1: `backend/cubebox/repositories/invite_token.py:29`**
+- [ ] **Step 1: `backend/cubeplex/repositories/invite_token.py:29`**
 
 Replace the comment:
 
@@ -883,7 +883,7 @@ with:
         # `timestamp without time zone` columns drop tz on round-trip — coerce to UTC-aware before comparing.
 ```
 
-- [ ] **Step 2: `backend/cubebox/utils/time.py:9`**
+- [ ] **Step 2: `backend/cubeplex/utils/time.py:9`**
 
 Find the comment that references "MySQL/MariaDB DATETIME columns strip timezone info" and rewrite to:
 
@@ -896,7 +896,7 @@ Find the comment that references "MySQL/MariaDB DATETIME columns strip timezone 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/invite_token.py backend/cubebox/utils/time.py
+git add backend/cubeplex/repositories/invite_token.py backend/cubeplex/utils/time.py
 git commit -m "docs: update MySQL-flavored comments to engine-neutral wording"
 ```
 
@@ -916,23 +916,23 @@ Locate the section that currently says:
 
 Replace `MySQL schemas` with `PostgreSQL databases`.
 
-In the same section, locate the `Backend (`backend/cubebox/config.py`) ...` paragraph and the `.worktree.env` example. Update the example block from:
+In the same section, locate the `Backend (`backend/cubeplex/config.py`) ...` paragraph and the `.worktree.env` example. Update the example block from:
 
 ```
-CUBEBOX_DATABASE__PORT=...
+CUBEPLEX_DATABASE__PORT=...
 ```
 
 to a PG-shaped example showing port 5432. Concretely the example block becomes:
 
 ```
-CUBEBOX_WORKTREE_NAME=feat-m7-file-upload
-CUBEBOX_WORKTREE_SLOT=37
-CUBEBOX_API__PORT=8037
-CUBEBOX_DATABASE__PORT=5432
-CUBEBOX_DATABASE__USER=postgres
-CUBEBOX_DATABASE__NAME=cubebox_feat_m7_file_upload
-CUBEBOX_REDIS__KEY_PREFIX=cubebox-feat-m7-file-upload
-CUBEBOX_API_URL=http://localhost:8037
+CUBEPLEX_WORKTREE_NAME=feat-m7-file-upload
+CUBEPLEX_WORKTREE_SLOT=37
+CUBEPLEX_API__PORT=8037
+CUBEPLEX_DATABASE__PORT=5432
+CUBEPLEX_DATABASE__USER=postgres
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_m7_file_upload
+CUBEPLEX_REDIS__KEY_PREFIX=cubeplex-feat-m7-file-upload
+CUBEPLEX_API_URL=http://localhost:8037
 PORT=3037
 BASE_URL=http://localhost:3037
 ```
@@ -955,7 +955,7 @@ In the "Database" section under "Architecture / Quick Start" (search for "Migrat
 
 - [ ] **Step 3: `backend/CLAUDE.md` Environment Variables section**
 
-If a `MYSQL_*` variable is mentioned anywhere, swap to the `CUBEBOX_DATABASE__*` form. Quick check:
+If a `MYSQL_*` variable is mentioned anywhere, swap to the `CUBEPLEX_DATABASE__*` form. Quick check:
 
 ```bash
 grep -in "mysql\|3306" backend/CLAUDE.md
@@ -979,7 +979,7 @@ git commit -m "docs: update worktree + pytest-marker docs to PostgreSQL"
 - [ ] **Step 1: Make sure no MySQL strings remain in code**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/postgres-migration
+cd /home/chris/cubeplex/.worktrees/feat/postgres-migration
 grep -rin --include="*.py" --include="*.toml" --include="*.yaml" \
      --include="*.yml" --include="*.md" --include="*.sh" \
      "mysql\|aiomysql\|pymysql" \
@@ -1015,19 +1015,19 @@ Expected: green. Streaming + checkpointer round-trip is the canonical signal.
 - [ ] **Step 4: Worktree round-trip on a throwaway branch**
 
 ```bash
-cd /home/chris/cubebox  # main repo
+cd /home/chris/cubeplex  # main repo
 ./scripts/new-worktree feat/test-pg-rt
 cd .worktrees/feat/test-pg-rt
 ./scripts/worktree-env doctor
-cd /home/chris/cubebox
-./scripts/worktree-env destroy --slug $(grep CUBEBOX_WORKTREE_SLUG \
+cd /home/chris/cubeplex
+./scripts/worktree-env destroy --slug $(grep CUBEPLEX_WORKTREE_SLUG \
   .worktrees/feat/test-pg-rt/.worktree.env | cut -d= -f2)
 git worktree remove .worktrees/feat/test-pg-rt --force
 git branch -D feat/test-pg-rt
 
 # Verify no orphan databases
 PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
-  -c "SELECT datname FROM pg_database WHERE datname LIKE 'cubebox_test_pg_rt%';"
+  -c "SELECT datname FROM pg_database WHERE datname LIKE 'cubeplex_test_pg_rt%';"
 ```
 
 Expected: empty result set.

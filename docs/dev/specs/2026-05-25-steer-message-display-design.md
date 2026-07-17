@@ -21,9 +21,9 @@ assistant turns**, not at the top or bottom of one merged bubble. Result: the
 steer message visibly **jumps position** on refresh.
 
 Root cause of the jump: the frontend commits the steer message to a *guessed*
-transcript position before it knows the real injection point. cubebox also does
+transcript position before it knows the real injection point. cubeplex also does
 not forward any SSE event when cubepi injects the message
-(`backend/cubebox/agents/stream.py:120-153` drops `MessageStart`/`MessageEnd`
+(`backend/cubeplex/agents/stream.py:120-153` drops `MessageStart`/`MessageEnd`
 for non-assistant messages), so the frontend has no live signal of the real
 position.
 
@@ -47,7 +47,7 @@ input box.
 
 ## Non-goals
 
-- Follow-up messages (`get_follow_up_messages`) — cubebox does not use them.
+- Follow-up messages (`get_follow_up_messages`) — cubeplex does not use them.
   The backend event mechanism is generic enough to cover them later, but no UI
   is built for them now.
 - Editing a pending steer in place. Cancel + retype only.
@@ -57,17 +57,17 @@ input box.
 A client-generated `steer_id` (UUID-ish, minted when the user sends the steer)
 is the single join key across the whole flow:
 
-- Sent on the steer request; cubebox puts it in the injected
+- Sent on the steer request; cubeplex puts it in the injected
   `UserMessage.metadata["steer_id"]`. cubepi's `UserMessage` has no `id` field
   but does carry a `metadata: dict`, so this avoids a Message-schema change
-  upstream and follows the existing "cubebox extras ride in metadata"
+  upstream and follows the existing "cubeplex extras ride in metadata"
   convention.
 - The `injected_message` SSE event echoes `steer_id`, so the frontend can match
   the committed message to the pending item and remove it.
 - Cancel targets a `steer_id`; cubepi's steering queue removes the queued
   message whose `metadata["steer_id"]` matches.
 
-cubepi messages have no id and cubebox does not assign one — history is the raw
+cubepi messages have no id and cubeplex does not assign one — history is the raw
 `model_dump()` of each message (`conversations.py:602`), and the frontend
 synthesizes a React-key id locally when one is missing (`messageStore.ts:124`).
 So the live committed message id and the post-reload synthesized id will differ;
@@ -87,22 +87,22 @@ durable join key, and a reload does a full re-render from authoritative history.
 
 No change to the `UserMessage` schema. No change to drain/injection behavior.
 
-### B. cubebox backend — `injected_message` SSE event
+### B. cubeplex backend — `injected_message` SSE event
 
 There are **two** translation layers; the event must be wired through both, or
 it is silently dropped:
 
-1. `backend/cubebox/agents/stream.py` — `convert_agent_event_to_sse(evt)` turns
+1. `backend/cubeplex/agents/stream.py` — `convert_agent_event_to_sse(evt)` turns
    a cubepi `AgentEvent` into a wire dict.
-2. `backend/cubebox/streams/run_manager.py:243` — `cubepi_dict_to_agent_event(d)`
-   turns that dict into a typed cubebox `AgentEvent` (from
-   `cubebox/agents/schemas.py`) before it reaches `publish_stream_event`. It
+2. `backend/cubeplex/streams/run_manager.py:243` — `cubepi_dict_to_agent_event(d)`
+   turns that dict into a typed cubeplex `AgentEvent` (from
+   `cubeplex/agents/schemas.py`) before it reaches `publish_stream_event`. It
    returns `None` for unknown `type`, so an unhandled `injected_message` is
    dropped here.
 
 Changes:
 
-- **`cubebox/agents/schemas.py`** — add `InjectedMessageEvent` with
+- **`cubeplex/agents/schemas.py`** — add `InjectedMessageEvent` with
   `type="injected_message"` and the same `timestamp` / `data` envelope every
   other event uses (events are NOT flat — they carry `data: {...}`):
   ```json
@@ -118,7 +118,7 @@ Changes:
 - **Seed-message dedup lives in ONE place: `_on_event`** (the only layer with
   per-run state). cubepi emits `MessageStart`/`MessageEnd` for the run's seed
   prompt at loop start (`cubepi/agent/loop.py:62-64`) using the same shape as an
-  injected steer. cubebox sends exactly one seed user message per run, and the
+  injected steer. cubeplex sends exactly one seed user message per run, and the
   frontend already shows it optimistically. `_on_event` keeps a per-run
   user-message counter and **suppresses the first** user-message `MessageEnd`
   before it is converted/forwarded; subsequent ones are injected steers. (A
@@ -126,16 +126,16 @@ Changes:
   user-message event → forwarded correctly.) The pure converters do NOT do
   seed-dedup — they have no run state.
 
-### C. cubebox backend — cancel-steer endpoint + control plane
+### C. cubeplex backend — cancel-steer endpoint + control plane
 
-`backend/cubebox/api/routes/v1/conversations.py`:
+`backend/cubeplex/api/routes/v1/conversations.py`:
 
 - `SteerMessageRequest` gains `steer_id: str` (client-generated, required).
 - New route `POST /{conversation_id}/steer/cancel` with body `{steer_id}`,
   returning a status (`cancelled` | `not_found`). `not_found` = already drained
   or unknown id.
 
-`backend/cubebox/streams/run_manager.py`:
+`backend/cubeplex/streams/run_manager.py`:
 
 - `dispatch_steer` already forwards `content`; thread `steer_id` through so the
   injected `UserMessage` carries `metadata["steer_id"]`.
@@ -219,7 +219,7 @@ user types mid-run, hits Enter
   → pending chip appears above input (dimmed)
 ... agent finishes current tool batch ...
 cubepi drains steering queue → injects UserMessage(metadata.steer_id) → MessageEnd(UserMessage)
-  → cubebox _on_event (past seed) → SSE injected_message {content, steer_id}
+  → cubeplex _on_event (past seed) → SSE injected_message {content, steer_id}
   → store: commitTurnAndInject:
        finalize current main bubble → append to messages[]
        append steer user message at this point
@@ -259,7 +259,7 @@ user clicks X on a pending chip
 
 - **cubepi unit:** `_MessageQueue.remove` (match/no-match, mode=all & one);
   `Agent.cancel_steer` returns correct bool.
-- **cubebox backend unit:** `convert_agent_event_to_sse` emits the
+- **cubeplex backend unit:** `convert_agent_event_to_sse` emits the
   `injected_message` wire dict for a UserMessage `MessageEndEvent`;
   `cubepi_dict_to_agent_event` maps that dict to `InjectedMessageEvent`;
   `_on_event` suppresses the first (seed) user-message event and forwards
@@ -285,12 +285,12 @@ user clicks X on a pending chip
 | Area | File |
 |---|---|
 | cubepi | `cubepi/agent/agent.py` (`_MessageQueue.remove`, `Agent.cancel_steer`) |
-| backend | `cubebox/agents/schemas.py` (`InjectedMessageEvent`), `cubebox/agents/stream.py`, `cubebox/streams/run_manager.py` (`cubepi_dict_to_agent_event` + `_on_event`), `cubebox/api/routes/v1/conversations.py` |
+| backend | `cubeplex/agents/schemas.py` (`InjectedMessageEvent`), `cubeplex/agents/stream.py`, `cubeplex/streams/run_manager.py` (`cubepi_dict_to_agent_event` + `_on_event`), `cubeplex/api/routes/v1/conversations.py` |
 | core | `src/types`, `src/api/stream.ts`, `src/stores/messageStore.ts` |
 | web | `components/layout/InputBar.tsx` (+ new pending component), `components/chat/MessageList.tsx` (remove optimistic), tests |
 
 ## PR split
 
-cubepi change ships first (upstream), then the cubebox backend + frontend land
+cubepi change ships first (upstream), then the cubeplex backend + frontend land
 together (they are tightly coupled through the `injected_message` event and the
 cancel endpoint). Revisit at plan time.

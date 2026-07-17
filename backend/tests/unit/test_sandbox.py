@@ -11,7 +11,7 @@ import pytest
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 
-from cubebox.middleware.sandbox import (
+from cubeplex.middleware.sandbox import (
     SandboxMiddleware,
     _EditFileArgs,
     _ExecuteArgs,
@@ -22,7 +22,7 @@ from cubebox.middleware.sandbox import (
     _make_write_file_tool,
     _WriteFileArgs,
 )
-from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
+from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -352,7 +352,7 @@ async def test_file_read_returns_error_kind_when_file_missing() -> None:
 @pytest.mark.asyncio
 async def test_file_read_returns_error_kind_on_sandbox_error() -> None:
     """SandboxError (provider down etc.) also surfaces as ErrorOutput."""
-    from cubebox.sandbox.base import SandboxError
+    from cubeplex.sandbox.base import SandboxError
 
     sandbox = _make_sandbox()
     sandbox.file_read = AsyncMock(side_effect=SandboxError("provider unreachable"))
@@ -404,7 +404,7 @@ async def test_file_read_does_not_swallow_cancelled() -> None:
 
 @pytest.mark.asyncio
 async def test_file_read_passes_page_and_line_ranges() -> None:
-    from cubebox.parsers import ParseOptions
+    from cubeplex.parsers import ParseOptions
 
     sandbox = _make_sandbox()
     fake_parse_result = MagicMock()

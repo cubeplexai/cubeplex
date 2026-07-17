@@ -13,14 +13,14 @@
 ## File map
 
 **Backend — new files:**
-- `backend/cubebox/tools/builtin/preview_skill.py` — `create_preview_skill_tool` factory
-- `backend/cubebox/tools/builtin/install_skill.py` — `create_install_skill_tool` factory
+- `backend/cubeplex/tools/builtin/preview_skill.py` — `create_preview_skill_tool` factory
+- `backend/cubeplex/tools/builtin/install_skill.py` — `create_install_skill_tool` factory
 - `backend/tests/unit/test_preview_skill.py` — unit tests for preview_skill
 - `backend/tests/unit/test_install_skill.py` — unit tests for install_skill
 
 **Backend — modified files:**
-- `backend/cubebox/streams/run_manager.py` — register both tools in the `find_skills` block (~line 1134)
-- `backend/cubebox/tools/builtin/find_skills.py` — update `hint` to mention `install_skill`
+- `backend/cubeplex/streams/run_manager.py` — register both tools in the `find_skills` block (~line 1134)
+- `backend/cubeplex/tools/builtin/find_skills.py` — update `hint` to mention `install_skill`
 
 **Frontend — new files:**
 - `frontend/packages/web/app/api/v1/ws/[wsId]/skills/discover/preview/route.ts` — Next.js proxy for `GET /discover/preview?candidate_id=`
@@ -39,7 +39,7 @@
 ## Task 1: `preview_skill` backend tool
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/preview_skill.py`
+- Create: `backend/cubeplex/tools/builtin/preview_skill.py`
 - Create: `backend/tests/unit/test_preview_skill.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import json
 import pytest
-from cubebox.tools.builtin.preview_skill import create_preview_skill_tool, PreviewSkillInput
+from cubeplex.tools.builtin.preview_skill import create_preview_skill_tool, PreviewSkillInput
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ class _FakeSession:
 
 @pytest.mark.asyncio
 async def test_preview_remote_returns_skill_md() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     candidate_id = encode_candidate_id(
         "remote", "owner/repo/main/skills/my-skill", source_id="src-1"
@@ -151,7 +151,7 @@ async def test_preview_remote_returns_skill_md() -> None:
 
 @pytest.mark.asyncio
 async def test_preview_remote_no_adapter_returns_error() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     candidate_id = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-x")
     registry = _FakeRegistry(adapter=None)  # no adapter for src-x
@@ -171,7 +171,7 @@ async def test_preview_remote_no_adapter_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_preview_remote_missing_skill_md_returns_error() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     candidate_id = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
     adapter = _FakeAdapter({"README.md": b"no SKILL.md here"})
@@ -217,7 +217,7 @@ Expected: `ModuleNotFoundError` or `ImportError` — `preview_skill` does not ex
 - [ ] **Step 3: Implement `preview_skill` tool**
 
 ```python
-# backend/cubebox/tools/builtin/preview_skill.py
+# backend/cubeplex/tools/builtin/preview_skill.py
 """preview_skill tool — fetch SKILL.md content for any candidate (installed or not).
 
 Used by the agent to read a skill before recommending installation. Mirrors
@@ -235,10 +235,10 @@ from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
-from cubebox.skills.sources.registry import SkillsAdapterManager
+from cubeplex.skills.frontmatter import extract_env_vars, parse_skill_md
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.base import CandidateIdError, decode_candidate_id
+from cubeplex.skills.sources.registry import SkillsAdapterManager
 
 
 class PreviewSkillInput(BaseModel):
@@ -282,7 +282,7 @@ def create_preview_skill_tool(
             )
 
         if kind == "local":
-            from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
+            from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
 
             skill = await SkillRepository(session).get(source_ref)
             if skill is None or not (
@@ -358,7 +358,7 @@ Expected: 4 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/tools/builtin/preview_skill.py backend/tests/unit/test_preview_skill.py
+git add backend/cubeplex/tools/builtin/preview_skill.py backend/tests/unit/test_preview_skill.py
 git commit -m "feat(skills): add preview_skill agent tool"
 ```
 
@@ -367,9 +367,9 @@ git commit -m "feat(skills): add preview_skill agent tool"
 ## Task 2: `install_skill` backend tool + update `find_skills` hint
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/install_skill.py`
+- Create: `backend/cubeplex/tools/builtin/install_skill.py`
 - Create: `backend/tests/unit/test_install_skill.py`
-- Modify: `backend/cubebox/tools/builtin/find_skills.py`
+- Modify: `backend/cubeplex/tools/builtin/find_skills.py`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -381,8 +381,8 @@ from __future__ import annotations
 
 import json
 import pytest
-from cubebox.tools.builtin.install_skill import InstallSkillInput, create_install_skill_tool
-from cubebox.skills.discovery import InstallResult, SkillInstallError
+from cubeplex.tools.builtin.install_skill import InstallSkillInput, create_install_skill_tool
+from cubeplex.skills.discovery import InstallResult, SkillInstallError
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +407,7 @@ class _FakeInstallService:
 
 @pytest.mark.asyncio
 async def test_install_skill_success() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     candidate_id = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
     svc = _FakeInstallService(
@@ -430,7 +430,7 @@ async def test_install_skill_success() -> None:
 
 @pytest.mark.asyncio
 async def test_install_skill_error_propagates() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     candidate_id = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
     svc = _FakeInstallService(SkillInstallError("trust tier too low"))
@@ -463,7 +463,7 @@ Expected: `ImportError` — `install_skill` does not exist yet.
 Note: the factory accepts an `install_service_factory` callable (for testability) rather than a pre-built service. In `run_manager.py` (Task 3), the factory will close over `catalog_session`, `registry`, `catalog`, `org_id`, `org_slug`, `workspace_id`, and `actor_user_id`.
 
 ```python
-# backend/cubebox/tools/builtin/install_skill.py
+# backend/cubeplex/tools/builtin/install_skill.py
 """install_skill tool — install a skill candidate for the current workspace.
 
 Only call this when the user has explicitly requested installation in
@@ -480,8 +480,8 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.skills.discovery import SkillInstallError, SkillInstallService
-from cubebox.skills.sources.base import CandidateIdError
+from cubeplex.skills.discovery import SkillInstallError, SkillInstallService
+from cubeplex.skills.sources.base import CandidateIdError
 
 
 class InstallSkillInput(BaseModel):
@@ -547,7 +547,7 @@ Expected: 3 tests pass.
 
 - [ ] **Step 5: Update `find_skills` hint**
 
-In `backend/cubebox/tools/builtin/find_skills.py`, replace the `hint` string:
+In `backend/cubeplex/tools/builtin/find_skills.py`, replace the `hint` string:
 
 ```python
             "hint": (
@@ -569,7 +569,7 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/tools/builtin/install_skill.py backend/cubebox/tools/builtin/find_skills.py backend/tests/unit/test_install_skill.py
+git add backend/cubeplex/tools/builtin/install_skill.py backend/cubeplex/tools/builtin/find_skills.py backend/tests/unit/test_install_skill.py
 git commit -m "feat(skills): add install_skill agent tool; update find_skills hint"
 ```
 
@@ -578,19 +578,19 @@ git commit -m "feat(skills): add install_skill agent tool; update find_skills hi
 ## Task 3: Register `preview_skill` and `install_skill` in `run_manager.py`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Locate the `find_skills` registration block**
 
-Open `backend/cubebox/streams/run_manager.py`. The block to extend is around line 1134:
+Open `backend/cubeplex/streams/run_manager.py`. The block to extend is around line 1134:
 
 ```python
         if skill_catalog is not None and catalog_session is not None:
             try:
-                from cubebox.repositories.organization import OrganizationRepository
-                from cubebox.skills.discovery import SkillDiscoveryService
-                from cubebox.skills.sources.registry import SkillsAdapterManager
-                from cubebox.tools.builtin.find_skills import create_find_skills_tool
+                from cubeplex.repositories.organization import OrganizationRepository
+                from cubeplex.skills.discovery import SkillDiscoveryService
+                from cubeplex.skills.sources.registry import SkillsAdapterManager
+                from cubeplex.tools.builtin.find_skills import create_find_skills_tool
 
                 _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
@@ -615,16 +615,16 @@ Replace the entire `if skill_catalog is not None and catalog_session is not None
 ```python
         if skill_catalog is not None and catalog_session is not None:
             try:
-                from cubebox.repositories.organization import OrganizationRepository
-                from cubebox.skills.discovery import (
+                from cubeplex.repositories.organization import OrganizationRepository
+                from cubeplex.skills.discovery import (
                     SkillDiscoveryService,
                     SkillInstallService,
                 )
-                from cubebox.skills.service import SkillPublishService
-                from cubebox.skills.sources.registry import SkillsAdapterManager
-                from cubebox.tools.builtin.find_skills import create_find_skills_tool
-                from cubebox.tools.builtin.install_skill import create_install_skill_tool
-                from cubebox.tools.builtin.preview_skill import create_preview_skill_tool
+                from cubeplex.skills.service import SkillPublishService
+                from cubeplex.skills.sources.registry import SkillsAdapterManager
+                from cubeplex.tools.builtin.find_skills import create_find_skills_tool
+                from cubeplex.tools.builtin.install_skill import create_install_skill_tool
+                from cubeplex.tools.builtin.preview_skill import create_preview_skill_tool
 
                 _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
@@ -680,7 +680,7 @@ Replace the entire `if skill_catalog is not None and catalog_session is not None
 - [ ] **Step 3: Type-check**
 
 ```bash
-cd backend && uv run mypy cubebox/streams/run_manager.py cubebox/tools/builtin/preview_skill.py cubebox/tools/builtin/install_skill.py
+cd backend && uv run mypy cubeplex/streams/run_manager.py cubeplex/tools/builtin/preview_skill.py cubeplex/tools/builtin/install_skill.py
 ```
 Expected: no errors (or only pre-existing `Any` notes).
 
@@ -694,7 +694,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(skills): register preview_skill and install_skill in run_manager"
 ```
 
@@ -717,7 +717,7 @@ The `SkillCandidatePanel` (Task 6) calls `GET /api/v1/ws/{wsId}/skills/discover/
  */
 import { type NextRequest, NextResponse } from 'next/server'
 
-const BACKEND_URL = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
+const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
 
 function buildProxyHeaders(request: NextRequest): HeadersInit {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -825,10 +825,10 @@ Add to the `create<PanelStore>` implementation (after `openBrowser`):
   openSkillCandidate: (candidateId) => set({ view: { type: 'skill-candidate', candidateId } }),
 ```
 
-- [ ] **Step 2: Build `@cubebox/core` to check for type errors**
+- [ ] **Step 2: Build `@cubeplex/core` to check for type errors**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build 2>&1 | tail -10
+cd frontend && pnpm --filter @cubeplex/core build 2>&1 | tail -10
 ```
 Expected: build succeeds, no errors.
 
@@ -880,7 +880,7 @@ import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Download } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { csrfHeaders } from '@/lib/csrf'
@@ -1083,7 +1083,7 @@ Add the `skillSearch` block from above as a top-level key in `frontend/packages/
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Download } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { csrfHeaders } from '@/lib/csrf'

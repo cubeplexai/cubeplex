@@ -9,12 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 from tests.e2e.conftest import DEFAULT_WS_ID
 from tests.e2e.helpers import await_until
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.real_llm]
 
 _DEFAULT_WS = DEFAULT_WS_ID
 

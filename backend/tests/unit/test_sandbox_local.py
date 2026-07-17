@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 
 @pytest.mark.asyncio

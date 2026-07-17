@@ -112,7 +112,7 @@ def next_id_int() -> int:
 
 ### 1.5 Generator API
 
-New module: `backend/cubebox/models/public_id.py`
+New module: `backend/cubeplex/models/public_id.py`
 
 ```python
 def generate_public_id(prefix: str) -> str: ...
@@ -134,7 +134,7 @@ Implementation notes:
 
 ## §2 Prefix registry
 
-Central registry in `cubebox/models/public_id.py`:
+Central registry in `cubeplex/models/public_id.py`:
 
 ```python
 PREFIX_CONVERSATION       = "conv"
@@ -276,7 +276,7 @@ renaming, no payload version bump.
 
 ### 4.5 Frontend
 
-- `@cubebox/core` types: `id: string` unchanged. Build still required after
+- `@cubeplex/core` types: `id: string` unchanged. Build still required after
   re-exporting any updated zod schemas (none expected here).
 - URL segments (`/w/{wsId}/conversations/{convId}`): values change shape
   (shorter, prefixed). Code that builds these URLs already uses the values

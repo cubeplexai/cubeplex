@@ -1,6 +1,6 @@
 """Unit tests for the UserEvent model."""
 
-from cubebox.models.user_event import UserEvent, UserEventType
+from cubeplex.models.user_event import UserEvent, UserEventType
 
 
 def test_user_event_construct() -> None:

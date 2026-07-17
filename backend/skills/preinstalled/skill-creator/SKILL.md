@@ -1,7 +1,7 @@
 ---
 name: skill-creator
-description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to publish, upload, or share a skill with the org marketplace.
-version: 0.2.0
+description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to edit, modify, update, improve, fix, rename, or bump the version of an existing skill (preinstalled or already published), or publish a new version of one. Also use when the user wants to publish, upload, or share a skill in the current workspace.
+version: 0.3.0
 keywords:
   - skill-authoring
   - marketplace
@@ -10,20 +10,20 @@ keywords:
 
 # Skill Creator
 
-This skill guides you through building a publishable skill bundle for the cubebox marketplace.
+This skill guides you through building a publishable skill bundle and installing it into the user's current workspace.
 
 ## Workflow
 
-A cubebox skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
+A cubeplex skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
 
 1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. One paragraph of context is enough.
 
-2. **Create the bundle directory** under `/workspace/work/skills/<name>/` — `/workspace` is the user's persistent volume, so the bundle survives sandbox restarts and the user can come back and iterate. **Do not** draft under `/tmp/` (lost on restart) and **do not** write into `/.skills/...` (that's the read-only sync path for already-installed skills).
+2. **Create the bundle directory** somewhere under `/workspace/` — `/workspace` is the user's persistent volume, so the bundle survives sandbox restarts and the user can come back and iterate. **Do not** draft under `/tmp/` (lost on restart) and **do not** write into `/workspace/.skills/...` (that's the read-only sync path for already-installed skills). A recommended location is `/workspace/skills/<name>/`, but anywhere under `/workspace/` works.
 
    For a skill called `weekly-report`, a typical layout:
 
    ```
-   /workspace/work/skills/weekly-report/
+   /workspace/skills/weekly-report/
      SKILL.md                # required, at the root
      scripts/                # optional — executable helpers
        fetch_metrics.py
@@ -37,36 +37,41 @@ A cubebox skill is a **directory** containing `SKILL.md` at its root plus any si
 
 3. **Write SKILL.md** at the root of the bundle directory. See **Frontmatter Reference** and **Body Guidelines** below.
 
-4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubebox syncs the whole directory into the sandbox under `/.skills/<name>/<version>/`, so the agent can read or execute them from there at runtime.
+4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubeplex syncs the whole directory into the sandbox under `/workspace/.skills/<safe-name>/<version>/` (colons in the canonical name are normalised to `__`), so the agent can read or execute them from there at runtime — use the `path` field returned by `load_skill` rather than constructing it yourself.
 
 5. **Register as skill artifact** — Call `save_artifact` with:
 
-   - `path` = the bundle directory (e.g. `/workspace/work/skills/weekly-report`)
+   - `path` = the bundle directory (e.g. `/workspace/skills/weekly-report`)
    - `artifact_type="skill"`
    - `entry_file="SKILL.md"`
    - `name` = a human-readable name (typically the skill's `frontmatter.name`)
 
-   This packages the directory and makes it available in the **Publish** flow in the Skills tab.
+   The artifact now shows up in the conversation's artifact panel with a **Publish** button.
 
-6. **Hand off** — Tell the user the skill is ready. Remind them to open the Skills tab → Upload, or use the artifact's Publish button, to submit it to the org marketplace.
+6. **Publish to the current workspace** — A skill artifact is only registered as a draft; it does **not** appear in `load_skill` or in the available-skills list until it is published. Publishing installs it into the **current workspace** (not the org-wide marketplace; that path is admin-only via zip upload in Org Settings).
+
+   Ask the user how they want to publish:
+
+   - **The user clicks Publish themselves** — point them at the Publish button in the artifact preview panel.
+   - **You publish on their behalf** — call `platform_skills_publish_skill(artifact_id="<id from save_artifact>")`. The skill becomes loadable in this workspace immediately.
+
+   After publishing, tell the user the canonical name (e.g. `acme:weekly-report`) and that they can now invoke it by asking — `load_skill` will pick it up.
 
 ## Editing an Existing Skill
 
-When the user wants to modify a skill that is already installed (preinstalled or published), the source under `/.skills/<name>/<version>/` is read-only and gets rewritten on every sync — never edit in place.
+When the user wants to modify a skill that is already installed (preinstalled or published), the source under `/workspace/.skills/<safe-name>/<version>/` is read-only and gets rewritten on every sync — never edit in place.
 
 Instead:
 
-1. **Copy the bundle out** to a writable workspace path:
+1. **Copy the bundle out** to a writable workspace path. Use the `path` returned by `load_skill` verbatim as the source — don't reconstruct it from the canonical name, because a name like `acme:my-skill` is normalised to `acme__my-skill` on disk. For example:
 
    ```bash
-   cp -r /.skills/<name>/<version> /workspace/work/skills/<name>
+   cp -r /workspace/.skills/acme__my-skill/1.0.3 /workspace/skills/my-skill
    ```
 
-2. **Edit under `/workspace/work/skills/<name>/`** — change SKILL.md or any sibling file.
+2. **Edit under the copy** — change SKILL.md or any sibling file. Leave the `version` field in SKILL.md unset (or remove it); the server will auto-assign the next patch on publish. Only set a specific version if the user explicitly wants one.
 
-3. **Bump the version** in SKILL.md (e.g. `1.0.3` → `1.0.4`). Republishing the same version string is rejected by the server.
-
-4. **Register the edited bundle** with `save_artifact` (same arguments as step 5 above) and have the user publish it as a new version from the Skills tab.
+3. **Register the edited bundle** with `save_artifact` (same arguments as step 5 above) and then publish it the same way as step 6 — either ask the user to click Publish, or call `platform_skills_publish_skill(artifact_id=...)` yourself with their consent. Republishing the same version string is rejected, so leaving version blank is the safest default.
 
 ## Frontmatter Reference
 
@@ -102,24 +107,23 @@ The description is loaded into the agent's system prompt at startup and is what 
 
 ### Version Rules
 
-- **Format**: semver with no whitespace (e.g. `1.0.0`, `0.3.1`)
-- **Optional**: if omitted, the server auto-assigns the next patch version (first publish → `1.0.0`)
-- **Immutable**: the same version string cannot be published twice — always bump when republishing
-- **Recommendation**: omit the field and let the server assign it
+- **Recommended: omit the field.** The server auto-assigns the next patch version (first publish → `1.0.0`; each subsequent publish bumps the patch). This is the safest default and avoids `VersionCollisionError`.
+- **Format** (if you do set it): semver with no whitespace (e.g. `1.0.0`, `0.3.1`).
+- **Immutable**: the same version string cannot be published twice. Only set the field manually when the user wants a specific version number; otherwise leave it blank.
 
 ### Optional Extensions
 
-Use the `cubebox` block to declare runtime dependencies the server surfaces in the marketplace UI:
+Use the `cubeplex` block to declare runtime dependencies:
 
 ```yaml
-cubebox:
+cubeplex:
   requires:
-    env:  [MY_API_KEY, ANOTHER_VAR]   # env vars the skill needs at runtime
-    bins: [ffmpeg, node]               # binaries that must be present
-  primaryEnv: MY_API_KEY               # shown as the main credential in the UI
+    env: [MY_API_KEY, ANOTHER_VAR]   # env vars the skill needs at runtime
 ```
 
-Aliases `openclaw`, `clawdbot`, and `clawdis` are also accepted and behave identically.
+Only `requires.env` is currently consumed — preview and install surface these names so the user knows what credentials to provide. Other keys (`bins`, `primaryEnv`, …) are reserved for future use and have no effect today; don't add them unless the user asks.
+
+Aliases `openclaw`, `clawdbot`, and `clawdis` at the top level are also accepted and behave identically to `cubeplex`.
 
 ## Body Guidelines
 

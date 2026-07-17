@@ -17,8 +17,8 @@ from fastapi_users.exceptions import UserNotExists
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from cubebox.api.routes.v1.auth import login
-from cubebox.models import (
+from cubeplex.api.routes.v1.auth import login
+from cubeplex.models import (
     Organization,
     OrganizationMembership,
     OrgRole,
@@ -92,7 +92,7 @@ async def _add_org_with_user(
     slug: str,
     role: OrgRole = OrgRole.MEMBER,
 ) -> tuple[Organization, User]:
-    from cubebox.repositories import OrganizationRepository
+    from cubeplex.repositories import OrganizationRepository
 
     org = await OrganizationRepository(sso_session).create(name=f"Org {slug}", slug=slug)
     user = await _make_user(sso_session, email=email)
@@ -133,7 +133,7 @@ async def test_login_succeeds_when_user_has_no_active_sso(
     async def _fake_login(_strategy: Any, _user: User) -> Response:
         return sentinel
 
-    monkeypatch.setattr("cubebox.api.routes.v1.auth.auth_backend.login", _fake_login)
+    monkeypatch.setattr("cubeplex.api.routes.v1.auth.auth_backend.login", _fake_login)
     result = await _call_login(sso_session=sso_session, user=user)
     assert result is sentinel
 
@@ -197,7 +197,7 @@ async def test_login_not_blocked_when_sso_status_is_testing(
     async def _fake_login(_strategy: Any, _user: User) -> Response:
         return sentinel
 
-    monkeypatch.setattr("cubebox.api.routes.v1.auth.auth_backend.login", _fake_login)
+    monkeypatch.setattr("cubeplex.api.routes.v1.auth.auth_backend.login", _fake_login)
     result = await _call_login(sso_session=sso_session, user=user)
     assert result is sentinel
 

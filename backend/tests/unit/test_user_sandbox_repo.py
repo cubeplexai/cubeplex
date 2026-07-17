@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 
 @pytest.fixture

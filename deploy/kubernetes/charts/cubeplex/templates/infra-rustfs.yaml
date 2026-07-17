@@ -1,0 +1,162 @@
+{{- if .Values.rustfs.enabled -}}
+{{- $secretKey := required "rustfs.auth.secretKey must be set in values.local.yaml" .Values.rustfs.auth.secretKey -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-rustfs
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rustfs
+type: Opaque
+stringData:
+  RUSTFS_ACCESS_KEY: {{ .Values.rustfs.auth.accessKey | quote }}
+  RUSTFS_SECRET_KEY: {{ $secretKey | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-rustfs
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rustfs
+spec:
+  type: ClusterIP
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+    - name: console
+      port: 9001
+      targetPort: console
+  selector:
+    app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: rustfs
+---
+# NOTE: upgrading from the previous minio-based chart renames the PVC from
+# data-<release>-minio-0 to data-<release>-rustfs-0. Existing object data
+# must be migrated manually before upgrading if preservation is needed.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-rustfs
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rustfs
+spec:
+  replicas: 1
+  serviceName: {{ .Release.Name }}-rustfs
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: rustfs
+  template:
+    metadata:
+      labels:
+        {{- include "cubeplex.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rustfs
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: rustfs
+          image: {{ .Values.rustfs.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: ":9001"
+            - name: RUSTFS_VOLUMES
+              value: /data
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-rustfs
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: s3
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.rustfs.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.rustfs.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.rustfs.persistence.size }}
+---
+# One-shot Job that creates the default bucket using mc client.
+# mc speaks S3 so it works against rustfs's S3-compatible API.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-rustfs-bucket
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rustfs-bucket
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "cubeplex.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rustfs-bucket
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: {{ .Values.rustfs.mcImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-rustfs
+                  key: RUSTFS_ACCESS_KEY
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-rustfs
+                  key: RUSTFS_SECRET_KEY
+            - name: BUCKET
+              value: {{ .Values.rustfs.defaultBucket | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until mc alias set local http://{{ .Release.Name }}-rustfs:9000 "$RUSTFS_ACCESS_KEY" "$RUSTFS_SECRET_KEY"; do
+                echo "waiting for rustfs..."; sleep 3
+              done
+              mc mb --ignore-existing local/"$BUCKET"
+              echo "bucket $BUCKET ready"
+{{- end }}

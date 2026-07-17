@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.registry import (
+from cubeplex.im.registry import (
     get_platform,
     register_platform,
 )

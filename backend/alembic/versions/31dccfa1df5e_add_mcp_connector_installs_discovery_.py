@@ -15,7 +15,7 @@ on ``mcp_connector_installs`` / ``mcp_credential_grants``. Those are
 false positives: the model declares them migration-only because
 SQLAlchemy's reflection of ``postgresql_where`` is inconsistent.
 We intentionally omit them — see the docstring on
-``cubebox.models.mcp.MCPConnectorInstall``.
+``cubeplex.models.mcp.MCPConnectorInstall``.
 """
 
 from typing import Sequence, Union

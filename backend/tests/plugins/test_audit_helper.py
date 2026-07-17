@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.plugins import get_registry
-from cubebox.plugins.audit import audit_log
+from cubeplex.plugins import get_registry
+from cubeplex.plugins.audit import audit_log
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, resetPassword } from '@cubebox/core'
+import { createApiClient, resetPassword } from '@cubeplex/core'
 
 export default function ResetPasswordPage({
   searchParams,
@@ -62,9 +62,13 @@ export default function ResetPasswordPage({
         <span className="text-sm text-foreground/80">{t('newPassword')}</span>
         <input
           type="password"
+          name="reset-password-new"
           required
           minLength={8}
           autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -74,9 +78,13 @@ export default function ResetPasswordPage({
         <span className="text-sm text-foreground/80">{t('confirmPassword')}</span>
         <input
           type="password"
+          name="reset-password-confirm"
           required
           minLength={8}
           autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}

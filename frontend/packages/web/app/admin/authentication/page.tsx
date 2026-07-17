@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ShieldCheck } from 'lucide-react'
-import { ApiError, createApiClient, getOrgSso, type SsoConnectionResponse } from '@cubebox/core'
+import { ApiError, createApiClient, getOrgSso, type SsoConnectionResponse } from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'

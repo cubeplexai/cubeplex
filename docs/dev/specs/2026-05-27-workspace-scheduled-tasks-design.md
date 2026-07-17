@@ -71,8 +71,8 @@ names the shared seam so #152/#153 don't have to retrofit it.
 ### How a run starts today
 
 The only run-start path is `RunManager.start_run(...)`
-(`backend/cubebox/streams/run_manager.py`). It is called from the HTTP handler
-`send_message` in `backend/cubebox/api/routes/v1/conversations.py`. The flow:
+(`backend/cubeplex/streams/run_manager.py`). It is called from the HTTP handler
+`send_message` in `backend/cubeplex/api/routes/v1/conversations.py`. The flow:
 
 1. Validate the conversation exists and attachments are valid.
 2. Mark the conversation active (`_update_conversation_timestamp`).
@@ -108,7 +108,7 @@ constraint: do not fork the run-start path, feed it.
 
 ### Worker / queue / recurring-job infra
 
-There is **none today**. Grepping `backend/cubebox` for
+There is **none today**. Grepping `backend/cubeplex` for
 scheduler/cron/celery/apscheduler/recurring/background_task returns nothing. The
 only background execution is the per-run asyncio task inside `RunManager`, plus
 memory-consolidation tasks it tracks. Redis is used heavily (run event streams,
@@ -116,7 +116,7 @@ active-run locks, pub/sub control, OAuth token cache) but never as a job queue.
 
 > Note: `backend/.claude/scheduled_tasks.lock` is unrelated — it is a stray
 > Claude Code session lock file (`{"sessionId":...,"pid":...}`), not part of any
-> cubebox feature. It can be ignored / gitignored.
+> cubeplex feature. It can be ignored / gitignored.
 
 ### Deployment topology
 
@@ -130,10 +130,10 @@ replica.
 
 ### Public-ID + model conventions
 
-New business tables subclass `CubeboxBase` (+ `OrgScopedMixin` for
+New business tables subclass `CubeplexBase` (+ `OrgScopedMixin` for
 org/workspace scoping) and set a `_PREFIX` ClassVar; the PK auto-fills via
 `generate_public_id(_PREFIX)` in `model_post_init`
-(`backend/cubebox/models/mixins.py`, `public_id.py`). Shared prefixes used by
+(`backend/cubeplex/models/mixins.py`, `public_id.py`). Shared prefixes used by
 non-mixin tables live as constants in `public_id.py`; per-table prefixes live on
 the model. Conversations use `_PREFIX = "conv"`; sandboxes `"sbx"`.
 
@@ -210,7 +210,7 @@ cannot produce two runs for the same occurrence.
 
 ### Data model
 
-New table `scheduled_tasks` (`CubeboxBase` + `OrgScopedMixin`, `_PREFIX =
+New table `scheduled_tasks` (`CubeplexBase` + `OrgScopedMixin`, `_PREFIX =
 "stask"` — declared on the model the same way conversations declare `"conv"`;
 prefix is 2–5 lowercase chars per `public_id.py`):
 
@@ -256,7 +256,7 @@ prefix is 2–5 lowercase chars per `public_id.py`):
 - Index on `(status, next_fire_at)` for the poller's hot query; partial index
   on `deleted_at IS NOT NULL` for GC (mirrors conversations).
 
-New table `scheduled_task_runs` (history; `CubeboxBase` + `OrgScopedMixin`,
+New table `scheduled_task_runs` (history; `CubeplexBase` + `OrgScopedMixin`,
 `_PREFIX = "stkrn"`):
 
 - `scheduled_task_id` (FK), `org_id`, `workspace_id`.
@@ -339,7 +339,7 @@ transition.
 ### Scheduler component
 
 A new `ScheduledTaskPoller`, started in the FastAPI lifespan
-(`backend/cubebox/api/app.py`) on **every** replica, alongside `RunManager`.
+(`backend/cubeplex/api/app.py`) on **every** replica, alongside `RunManager`.
 
 Loop (every ~15–30s, jittered to avoid replica thundering-herd):
 
@@ -501,7 +501,7 @@ to run and with what prompt/identity" differs.
 ### Scope-isolated workspace routes
 
 New router `ws_scheduled_tasks.py` under
-`backend/cubebox/api/routes/v1/`, prefix `/ws/{workspace_id}/scheduled-tasks`,
+`backend/cubeplex/api/routes/v1/`, prefix `/ws/{workspace_id}/scheduled-tasks`,
 guarded by `require_member` — mirrors the existing `ws_*` routers. Reads need
 membership; mutations additionally need owner-or-admin (see Identity / permission
 below). Endpoints:
@@ -718,19 +718,19 @@ genuinely can't be simulated.
 
 ## References
 
-- `backend/cubebox/streams/run_manager.py` — `RunManager.start_run`,
+- `backend/cubeplex/streams/run_manager.py` — `RunManager.start_run`,
   `RunContext`, in-process run task model.
-- `backend/cubebox/api/routes/v1/conversations.py` — `send_message`, the sole
+- `backend/cubeplex/api/routes/v1/conversations.py` — `send_message`, the sole
   current run-start caller.
-- `backend/cubebox/api/app.py` — lifespan; where `RunManager` and the poller
+- `backend/cubeplex/api/app.py` — lifespan; where `RunManager` and the poller
   start; multi-replica startup.
 - `backend/docs/deploy-k8s-graceful-restart.md` — multi-replica, rolling
   restart, drain.
 - `docs/dev/specs/2026-05-25-multi-instance-run-control-design.md` —
   existing cross-replica run-control (Redis pub/sub) pattern.
-- `backend/cubebox/models/mixins.py`, `backend/cubebox/models/public_id.py` —
-  `CubeboxBase` / `OrgScopedMixin` / `_PREFIX` public-id convention.
-- `backend/cubebox/models/conversation.py`, `user_sandbox.py` — model + soft-
+- `backend/cubeplex/models/mixins.py`, `backend/cubeplex/models/public_id.py` —
+  `CubeplexBase` / `OrgScopedMixin` / `_PREFIX` public-id convention.
+- `backend/cubeplex/models/conversation.py`, `user_sandbox.py` — model + soft-
   delete + sandbox-ownership patterns to mirror.
 - APScheduler 4.0 user guide / migration (multiple schedulers sharing a Postgres
   datastore, `misfire_grace_time`):

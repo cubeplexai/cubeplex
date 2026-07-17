@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useWorkspaceStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 export function WorkspaceCreateForm() {

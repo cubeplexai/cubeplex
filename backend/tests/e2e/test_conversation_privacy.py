@@ -9,7 +9,7 @@ import secrets
 
 import pytest
 
-from cubebox.api.middleware.rate_limit import limiter
+from cubeplex.api.middleware.rate_limit import limiter
 from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -25,7 +25,7 @@ def _reset_rate_limiter():
 async def _seed_csrf(client) -> str:
     await client.get("/api/v1/auth/me")
     csrf = client.cookies.get(_csrf_cookie_name())
-    assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
+    assert csrf, "cubeplex_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
 
@@ -39,6 +39,7 @@ async def _login(client, email: str, password: str) -> str:
 @pytest.mark.asyncio
 async def test_conversation_invisible_to_other_member_same_workspace(
     unauthenticated_memory_client,
+    session_factory,
 ):
     """B (a member of the same workspace) cannot see A's conversation."""
     client = unauthenticated_memory_client
@@ -51,27 +52,22 @@ async def test_conversation_invisible_to_other_member_same_workspace(
         r = await client.post("/api/v1/auth/register", json={"email": email, "password": pw})
         assert r.status_code == 201, r.text
 
-    # --- A: create shared workspace, invite B, create a conversation --------
+    # --- A: onboard (creates org + workspace), create a conversation ------
     csrf_a = await _login(client, a_email, pw)
-    # Fetch A's org_id from their auto-created workspace (via on_after_register).
-    r = await client.get("/api/v1/workspaces")
-    assert r.status_code == 200, r.text
-    a_org_id = r.json()[0]["org_id"]
     r = await client.post(
-        "/api/v1/workspaces",
-        json={"name": "Shared", "org_id": a_org_id},
+        "/api/v1/onboarding",
+        json={
+            "org_name": "SharedOrg",
+            "org_slug": f"shared-{secrets.token_hex(2)}",
+            "workspace_name": "Shared",
+        },
         headers={"X-CSRF-Token": csrf_a},
     )
     assert r.status_code == 201, r.text
-    ws_id = r.json()["id"]
-
-    r = await client.post(
-        f"/api/v1/workspaces/{ws_id}/invites",
-        json={"role": "member"},
-        headers={"X-CSRF-Token": csrf_a},
-    )
-    assert r.status_code == 201, r.text
-    invite_token = r.json()["token"]
+    ws_id = r.json()["workspace_id"]
+    a_me = await client.get("/api/v1/auth/me")
+    assert a_me.status_code == 200, a_me.text
+    a_org_id = a_me.json()["org_memberships"][0]["org_id"]
 
     r = await client.post(
         f"/api/v1/ws/{ws_id}/conversations",
@@ -81,14 +77,29 @@ async def test_conversation_invisible_to_other_member_same_workspace(
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
 
-    # --- B: accept invite (legit workspace member via the HTTP flow) --------
+    # --- B: added to A's org + workspace as a member ----------------------
+    # Workspace invites were removed (org invites are the new path). This test
+    # is about conversation privacy, not invitation, so seed the membership
+    # directly: grant B org membership, then workspace membership.
     csrf_b = await _login(client, b_email, pw)
-    r = await client.post(
-        "/api/v1/workspaces/invites/accept",
-        json={"token": invite_token},
-        headers={"X-CSRF-Token": csrf_b},
+    b_me = await client.get("/api/v1/auth/me")
+    assert b_me.status_code == 200, b_me.text
+    b_user_id = b_me.json()["id"]
+
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.repositories import (
+        MembershipRepository,
+        OrganizationMembershipRepository,
     )
-    assert r.status_code == 200, r.text
+
+    async with session_factory() as session:
+        await OrganizationMembershipRepository(session).grant(
+            user_id=b_user_id, org_id=a_org_id, role=OrgRole.MEMBER
+        )
+        await MembershipRepository(session).grant(
+            user_id=b_user_id, workspace_id=ws_id, role=Role.MEMBER
+        )
+        await session.commit()
 
     # B's list must be empty — A's conversation is filtered out by creator_user_id.
     r = await client.get(f"/api/v1/ws/{ws_id}/conversations")

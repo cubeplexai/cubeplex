@@ -13,10 +13,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.auth.dependencies import resolve_unambiguous_admin_org_id
-from cubebox.llm.errors import AmbiguousOrgError
-from cubebox.models import (  # noqa: F401
-    InviteToken,
+from cubeplex.auth.dependencies import resolve_unambiguous_admin_org_id
+from cubeplex.llm.errors import AmbiguousOrgError
+from cubeplex.models import (  # noqa: F401
     Membership,
     Organization,
     OrganizationMembership,
@@ -25,7 +24,7 @@ from cubebox.models import (  # noqa: F401
     User,
     Workspace,
 )
-from cubebox.repositories import (
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,

@@ -15,18 +15,18 @@
 ## File Structure
 
 **New files:**
-- `backend/cubebox/lifecycle/__init__.py` — package marker
-- `backend/cubebox/lifecycle/drain.py` — `DrainState` class (process-level state machine)
-- `backend/cubebox/api/middleware/drain.py` — `DrainMiddleware` ASGI middleware
+- `backend/cubeplex/lifecycle/__init__.py` — package marker
+- `backend/cubeplex/lifecycle/drain.py` — `DrainState` class (process-level state machine)
+- `backend/cubeplex/api/middleware/drain.py` — `DrainMiddleware` ASGI middleware
 - `backend/tests/unit/test_drain_state.py` — `DrainState` unit tests
 - `backend/tests/e2e/test_graceful_restart.py` — drain + stale detection E2E tests
 
 **Modified backend files:**
-- `backend/cubebox/streams/run_events.py` — add `last_event_at` field, extend `_APPEND_EVENT_LUA`, add `_MARK_STALE_LUA` + `mark_run_stale()` helper, add `is_stale_meta()` predicate
-- `backend/cubebox/streams/run_manager.py` — rename `shutdown()` → `cancel_all()`, add `drain()`, maintain `_tasks_empty` event, pass `last_event_at` to `append_run_event`
-- `backend/cubebox/api/app.py` — register signal handlers in lifespan, replace `shutdown()` with `enter_draining() + drain()`, register `DrainMiddleware`, mount health router
-- `backend/cubebox/api/routes/health.py` — split `/health/live` and `/health/ready`, drop `/health`
-- `backend/cubebox/api/routes/v1/conversations.py` — bootstrap stale check + `last_run_status`; stream subscribe stale check + synthetic error event
+- `backend/cubeplex/streams/run_events.py` — add `last_event_at` field, extend `_APPEND_EVENT_LUA`, add `_MARK_STALE_LUA` + `mark_run_stale()` helper, add `is_stale_meta()` predicate
+- `backend/cubeplex/streams/run_manager.py` — rename `shutdown()` → `cancel_all()`, add `drain()`, maintain `_tasks_empty` event, pass `last_event_at` to `append_run_event`
+- `backend/cubeplex/api/app.py` — register signal handlers in lifespan, replace `shutdown()` with `enter_draining() + drain()`, register `DrainMiddleware`, mount health router
+- `backend/cubeplex/api/routes/health.py` — split `/health/live` and `/health/ready`, drop `/health`
+- `backend/cubeplex/api/routes/v1/conversations.py` — bootstrap stale check + `last_run_status`; stream subscribe stale check + synthetic error event
 - `backend/config.yaml`, `config.development.yaml`, `config.production.yaml`, `config.test.yaml` — add `lifecycle.*` keys
 
 **Modified frontend files:**
@@ -39,8 +39,8 @@
 ## Task 1: Add `last_event_at` to RunMeta and Lua heartbeat
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_events.py`
-- Modify: `backend/cubebox/streams/run_manager.py:276-286` (`_append_event`)
+- Modify: `backend/cubeplex/streams/run_events.py`
+- Modify: `backend/cubeplex/streams/run_manager.py:276-286` (`_append_event`)
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 The `last_event_at` ISO timestamp is stamped on every event append by `_APPEND_EVENT_LUA`. This enables stale detection later. Pure additive change — readers that don't know the field still work.
@@ -60,8 +60,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.config import config as _cubebox_config
-from cubebox.streams.run_events import (
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.streams.run_events import (
     append_run_event,
     create_run,
     get_run_meta,
@@ -73,7 +73,7 @@ pytestmark = pytest.mark.e2e
 @pytest.fixture
 async def redis_client():
     client = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
     )
     yield client
@@ -123,7 +123,7 @@ Expected: FAIL — `RunMeta` has no `last_event_at` attribute.
 
 - [ ] **Step 3: Add `last_event_at` to `RunMeta` dataclass and parser**
 
-In `backend/cubebox/streams/run_events.py`, modify the `RunMeta` dataclass:
+In `backend/cubeplex/streams/run_events.py`, modify the `RunMeta` dataclass:
 
 ```python
 @dataclass(slots=True)
@@ -233,7 +233,7 @@ Expected: all PASS (no regression in append behavior).
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_events.py backend/tests/e2e/test_graceful_restart.py
+git add backend/cubeplex/streams/run_events.py backend/tests/e2e/test_graceful_restart.py
 git commit -m "feat(streams): heartbeat last_event_at on run event append"
 ```
 
@@ -280,7 +280,7 @@ Inspect `backend/config.development.yaml` and `backend/config.production.yaml`. 
 
 - [ ] **Step 4: Verify config loads**
 
-Run: `cd backend && uv run python -c "from cubebox.config import config; print(config.get('lifecycle.graceful_drain_timeout_seconds')); print(config.get('lifecycle.stale_run_threshold_seconds'))"`
+Run: `cd backend && uv run python -c "from cubeplex.config import config; print(config.get('lifecycle.graceful_drain_timeout_seconds')); print(config.get('lifecycle.stale_run_threshold_seconds'))"`
 Expected: prints `3600` then `120`.
 
 - [ ] **Step 5: Commit**
@@ -295,8 +295,8 @@ git commit -m "feat(config): add lifecycle.* drain and stale-run keys"
 ## Task 3: `DrainState` lifecycle module
 
 **Files:**
-- Create: `backend/cubebox/lifecycle/__init__.py`
-- Create: `backend/cubebox/lifecycle/drain.py`
+- Create: `backend/cubeplex/lifecycle/__init__.py`
+- Create: `backend/cubeplex/lifecycle/drain.py`
 - Test: `backend/tests/unit/test_drain_state.py`
 
 Process-level state machine. Idempotent transitions. No async — purely synchronous flag flipping. The async waiting lives in `RunManager.drain()`.
@@ -309,7 +309,7 @@ Process-level state machine. Idempotent transitions. No async — purely synchro
 
 from __future__ import annotations
 
-from cubebox.lifecycle.drain import DrainState
+from cubeplex.lifecycle.drain import DrainState
 
 
 def test_initial_state_is_accepting() -> None:
@@ -339,19 +339,19 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 3: Create the package marker**
 
-Create `backend/cubebox/lifecycle/__init__.py`:
+Create `backend/cubeplex/lifecycle/__init__.py`:
 
 ```python
 """Process-level lifecycle primitives (drain, stale detection)."""
 
-from cubebox.lifecycle.drain import DrainState
+from cubeplex.lifecycle.drain import DrainState
 
 __all__ = ["DrainState"]
 ```
 
 - [ ] **Step 4: Implement `DrainState`**
 
-Create `backend/cubebox/lifecycle/drain.py`:
+Create `backend/cubeplex/lifecycle/drain.py`:
 
 ```python
 """Process-level drain state machine.
@@ -403,7 +403,7 @@ Expected: 3 PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/lifecycle/ backend/tests/unit/test_drain_state.py
+git add backend/cubeplex/lifecycle/ backend/tests/unit/test_drain_state.py
 git commit -m "feat(lifecycle): introduce DrainState"
 ```
 
@@ -412,7 +412,7 @@ git commit -m "feat(lifecycle): introduce DrainState"
 ## Task 4: `RunManager.drain()` and `cancel_all()` rename
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:222-274` (constructor + shutdown method)
+- Modify: `backend/cubeplex/streams/run_manager.py:222-274` (constructor + shutdown method)
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 Maintains an `asyncio.Event` set whenever `_tasks` becomes empty. `drain(timeout)` waits on it with a periodic 30s progress logger. Timeout falls through to the existing cancel path.
@@ -423,7 +423,7 @@ Append to `backend/tests/e2e/test_graceful_restart.py`:
 
 ```python
 from types import SimpleNamespace
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 def _make_run_manager(redis_client: Redis) -> RunManager:
@@ -486,7 +486,7 @@ Expected: FAIL — `RunManager.drain` does not exist; `_on_task_done` does not e
 
 - [ ] **Step 3: Modify `RunManager.__init__` to add the empty event and a helper**
 
-In `backend/cubebox/streams/run_manager.py`, replace the constructor block (around line 208-222) with:
+In `backend/cubeplex/streams/run_manager.py`, replace the constructor block (around line 208-222) with:
 
 ```python
     def __init__(
@@ -591,9 +591,9 @@ Expected: 3 PASS.
 
 - [ ] **Step 7: Update existing call sites of `shutdown()`**
 
-`grep -rn "run_manager.shutdown\|\.shutdown()" backend/cubebox/ backend/tests/ | grep -v node_modules`
+`grep -rn "run_manager.shutdown\|\.shutdown()" backend/cubeplex/ backend/tests/ | grep -v node_modules`
 
-The lifespan in `backend/cubebox/api/app.py:213` calls `run_manager.shutdown()`. Update to `run_manager.cancel_all()` for now — Task 7 will replace this with the proper drain call.
+The lifespan in `backend/cubeplex/api/app.py:213` calls `run_manager.shutdown()`. Update to `run_manager.cancel_all()` for now — Task 7 will replace this with the proper drain call.
 
 ```python
     if run_manager is not None:
@@ -608,7 +608,7 @@ Expected: all PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/api/app.py backend/tests/e2e/test_graceful_restart.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/api/app.py backend/tests/e2e/test_graceful_restart.py
 git commit -m "feat(run-manager): add drain() with task-empty event, rename shutdown to cancel_all"
 ```
 
@@ -617,7 +617,7 @@ git commit -m "feat(run-manager): add drain() with task-empty event, rename shut
 ## Task 5: `DrainMiddleware`
 
 **Files:**
-- Create: `backend/cubebox/api/middleware/drain.py`
+- Create: `backend/cubeplex/api/middleware/drain.py`
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 Outermost ASGI middleware. Returns 503 on `POST /api/v1/ws/{ws}/conversations/{cid}/messages` when draining. Path-based check, no regex; method + segment count + tail equality is enough.
@@ -627,8 +627,8 @@ Outermost ASGI middleware. Returns 503 on `POST /api/v1/ws/{ws}/conversations/{c
 Append to `backend/tests/e2e/test_graceful_restart.py`:
 
 ```python
-from cubebox.api.middleware.drain import DrainMiddleware
-from cubebox.lifecycle.drain import DrainState
+from cubeplex.api.middleware.drain import DrainMiddleware
+from cubeplex.lifecycle.drain import DrainState
 
 
 @pytest.mark.asyncio
@@ -725,7 +725,7 @@ Expected: FAIL — `DrainMiddleware` does not exist.
 
 - [ ] **Step 3: Implement `DrainMiddleware`**
 
-Create `backend/cubebox/api/middleware/drain.py`:
+Create `backend/cubeplex/api/middleware/drain.py`:
 
 ```python
 """Reject new run starts with 503 while the process is draining.
@@ -745,7 +745,7 @@ import json
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from cubebox.lifecycle.drain import DrainState
+from cubeplex.lifecycle.drain import DrainState
 
 _RETRY_AFTER_SECONDS = "5"
 _BLOCKED_BODY = json.dumps(
@@ -805,7 +805,7 @@ Expected: 3 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/middleware/drain.py backend/tests/e2e/test_graceful_restart.py
+git add backend/cubeplex/api/middleware/drain.py backend/tests/e2e/test_graceful_restart.py
 git commit -m "feat(api): DrainMiddleware refuses new run starts while draining"
 ```
 
@@ -814,8 +814,8 @@ git commit -m "feat(api): DrainMiddleware refuses new run starts while draining"
 ## Task 6: Health route split
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/health.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py` (add health export if missing)
+- Modify: `backend/cubeplex/api/routes/health.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py` (add health export if missing)
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 Replaces the single `/health` with `/health/live` (always 200) and `/health/ready` (503 while draining). The legacy `/health` is dropped per the design doc.
@@ -872,7 +872,7 @@ Expected: FAIL — endpoints don't exist (or `app_state_drain` fixture missing).
 
 - [ ] **Step 3: Replace the health router**
 
-Replace the entire contents of `backend/cubebox/api/routes/health.py` with:
+Replace the entire contents of `backend/cubeplex/api/routes/health.py` with:
 
 ```python
 """Health probes split for k8s.
@@ -904,12 +904,12 @@ async def readiness(request: Request, response: Response) -> dict[str, str]:
 
 - [ ] **Step 4: Export the router and mount it**
 
-Confirm `backend/cubebox/api/routes/__init__.py` does not need changes — it's just the package marker. The router is mounted directly from `app.py`.
+Confirm `backend/cubeplex/api/routes/__init__.py` does not need changes — it's just the package marker. The router is mounted directly from `app.py`.
 
-In `backend/cubebox/api/app.py`, inside `create_app`, add the import and mount near the other `include_router` calls (around line 274-285):
+In `backend/cubeplex/api/app.py`, inside `create_app`, add the import and mount near the other `include_router` calls (around line 274-285):
 
 ```python
-    from cubebox.api.routes.health import router as health_router
+    from cubeplex.api.routes.health import router as health_router
 
     app.include_router(health_router)
 ```
@@ -924,7 +924,7 @@ Expected: both PASS. The two readiness tests stay failing until Task 7 wires `ap
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/health.py backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/health.py backend/cubeplex/api/app.py
 git commit -m "feat(health): split /health/live and /health/ready, drop /health"
 ```
 
@@ -933,7 +933,7 @@ git commit -m "feat(health): split /health/live and /health/ready, drop /health"
 ## Task 7: Lifespan integration (signal handlers + drain + middleware)
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 Wires everything: install signal handlers, register `DrainMiddleware`, replace `cancel_all()` in lifespan shutdown with `enter_draining() + drain(timeout)`, expose `app.state.drain_state`.
@@ -983,10 +983,10 @@ Expected: FAIL — middleware not registered, drain_state not on app.state.
 
 - [ ] **Step 3: Create `DrainState` in `create_app` (so middleware can capture it)**
 
-In `backend/cubebox/api/app.py`, inside `create_app`, BEFORE the existing `app.add_middleware(...)` calls (around line 252), insert:
+In `backend/cubeplex/api/app.py`, inside `create_app`, BEFORE the existing `app.add_middleware(...)` calls (around line 252), insert:
 
 ```python
-    from cubebox.lifecycle.drain import DrainState
+    from cubeplex.lifecycle.drain import DrainState
 
     app.state.drain_state = DrainState()
 ```
@@ -998,7 +998,7 @@ In `backend/cubebox/api/app.py`, inside `create_app`, BEFORE the existing `app.a
 In the same `create_app`, AFTER all existing `app.add_middleware(...)` calls (around line 260), add:
 
 ```python
-    from cubebox.api.middleware.drain import DrainMiddleware
+    from cubeplex.api.middleware.drain import DrainMiddleware
 
     app.add_middleware(DrainMiddleware, drain_state=app.state.drain_state)
 ```
@@ -1077,7 +1077,7 @@ Expected: all PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py backend/tests/e2e/test_graceful_restart.py
+git add backend/cubeplex/api/app.py backend/tests/e2e/test_graceful_restart.py
 git commit -m "feat(api): wire DrainState, signal handlers, drain on lifespan shutdown"
 ```
 
@@ -1086,8 +1086,8 @@ git commit -m "feat(api): wire DrainState, signal handlers, drain on lifespan sh
 ## Task 8: Stale-run detection (backend)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_events.py` — add `_MARK_STALE_LUA`, `mark_run_stale()`, `is_stale_meta()`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` — bootstrap + stream stale handling
+- Modify: `backend/cubeplex/streams/run_events.py` — add `_MARK_STALE_LUA`, `mark_run_stale()`, `is_stale_meta()`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` — bootstrap + stream stale handling
 - Test: `backend/tests/e2e/test_graceful_restart.py`
 
 Bootstrap and stream subscribe both check `is_stale_meta`, run `mark_run_stale` (Lua-atomic), and surface the failure. Bootstrap returns `last_run_status: "stale"`; stream emits a synthetic `error` event with `error_code: "run_stale"` and closes.
@@ -1097,7 +1097,7 @@ Bootstrap and stream subscribe both check `is_stale_meta`, run `mark_run_stale` 
 Append to `backend/tests/e2e/test_graceful_restart.py`:
 
 ```python
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     is_stale_meta,
     mark_run_stale,
     set_active_run,
@@ -1108,7 +1108,7 @@ def test_is_stale_meta_detects_stale_running() -> None:
     # Helper accepts the parsed RunMeta, computes locally — no Redis.
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import RunMeta
+    from cubeplex.streams.run_events import RunMeta
 
     now = datetime.now(UTC)
     fresh = RunMeta(
@@ -1143,7 +1143,7 @@ def test_is_stale_meta_detects_stale_running() -> None:
 async def test_mark_run_stale_clears_active_and_sets_status(redis_client: Redis) -> None:
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import (
+    from cubeplex.streams.run_events import (
         create_run,
         get_active_run,
         get_run_meta,
@@ -1179,7 +1179,7 @@ async def test_mark_run_stale_clears_active_and_sets_status(redis_client: Redis)
 async def test_mark_run_stale_is_idempotent(redis_client: Redis) -> None:
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import create_run, get_run_meta
+    from cubeplex.streams.run_events import create_run, get_run_meta
 
     prefix = "test_stale_idem"
     run_id = "r-stale-2"
@@ -1213,7 +1213,7 @@ Expected: FAIL — symbols not imported.
 
 - [ ] **Step 3: Add `_MARK_STALE_LUA`, `mark_run_stale`, `is_stale_meta`**
 
-In `backend/cubebox/streams/run_events.py`, after the existing `_APPEND_EVENT_LUA` block, add:
+In `backend/cubeplex/streams/run_events.py`, after the existing `_APPEND_EVENT_LUA` block, add:
 
 ```python
 # Mark a run as stale and clear the active-run lock if it still points at it.
@@ -1290,8 +1290,8 @@ async def test_bootstrap_clears_stale_run_and_sets_last_run_status(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import _APPEND_EVENT_LUA  # noqa
-    from cubebox.streams.run_events import create_run, _active_run_key
+    from cubeplex.streams.run_events import _APPEND_EVENT_LUA  # noqa
+    from cubeplex.streams.run_events import create_run, _active_run_key
 
     create_resp = await memory_client.post(
         "/api/v1/ws/default-ws/conversations", params={"title": "stale-test"}
@@ -1340,7 +1340,7 @@ async def test_stream_subscribe_emits_stale_error_for_dead_run(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import create_run
+    from cubeplex.streams.run_events import create_run
 
     create_resp = await memory_client.post(
         "/api/v1/ws/default-ws/conversations", params={"title": "stale-stream"}
@@ -1381,12 +1381,12 @@ Expected: FAIL — bootstrap doesn't return `last_run_status`; stream doesn't em
 
 - [ ] **Step 7: Wire stale detection into bootstrap**
 
-In `backend/cubebox/api/routes/v1/conversations.py`:
+In `backend/cubeplex/api/routes/v1/conversations.py`:
 
 Add the import at the top with the other run_events imports:
 
 ```python
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     get_active_run,
     get_latest_event_id,
     get_run_meta,
@@ -1409,7 +1409,7 @@ async def get_conversation_bootstrap(
     rds: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> dict[str, object]:
     """Return history baseline plus active run metadata."""
-    from cubebox.config import config as _cfg
+    from cubeplex.config import config as _cfg
 
     conv_repo = ConversationRepository(
         session,
@@ -1476,7 +1476,7 @@ In the same file, find `stream_run` (around line 572). Locate the block that fet
 Immediately after this block, insert:
 
 ```python
-    from cubebox.config import config as _cfg
+    from cubeplex.config import config as _cfg
 
     threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
     if is_stale_meta(run_meta, threshold_seconds=threshold):
@@ -1516,7 +1516,7 @@ Expected: all PASS.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_events.py backend/cubebox/api/routes/v1/conversations.py backend/tests/e2e/test_graceful_restart.py
+git add backend/cubeplex/streams/run_events.py backend/cubeplex/api/routes/v1/conversations.py backend/tests/e2e/test_graceful_restart.py
 git commit -m "feat(streams): inline stale-run detection in bootstrap and stream"
 ```
 
@@ -1665,7 +1665,7 @@ cd backend && python main.py        # terminal 1
 cd frontend && pnpm dev              # terminal 2
 ```
 
-Send a message; in terminal 1, kill the process with `kill -9 $(pgrep -f cubebox)` immediately after the assistant starts streaming. Refresh the browser. The chat should show the stale error bubble beneath your last user message and unlock the input.
+Send a message; in terminal 1, kill the process with `kill -9 $(pgrep -f cubeplex)` immediately after the assistant starts streaming. Refresh the browser. The chat should show the stale error bubble beneath your last user message and unlock the input.
 
 - [ ] **Step 6: Commit**
 
@@ -1694,7 +1694,7 @@ Create `backend/docs/deploy-k8s-graceful-restart.md`:
 ```markdown
 # K8s Deployment — Graceful Restart
 
-The cubebox backend drains in-flight LangGraph runs on `SIGTERM` before
+The cubeplex backend drains in-flight LangGraph runs on `SIGTERM` before
 exiting. To get zero-downtime rolling restarts, pair this with a long
 termination grace period and the split health probes.
 
@@ -1709,7 +1709,7 @@ termination grace period and the split health probes.
 spec:
   terminationGracePeriodSeconds: 3600   # match lifecycle.graceful_drain_timeout_seconds
   containers:
-    - name: cubebox
+    - name: cubeplex
       readinessProbe:
         httpGet: { path: /health/ready, port: 8000 }
         periodSeconds: 5

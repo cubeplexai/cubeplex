@@ -1,5 +1,5 @@
 """
-Entry point for cubebox Backend.
+Entry point for cubeplex Backend.
 
 Starts the FastAPI application with uvicorn.
 """
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 
-from cubebox.config import config
+from cubeplex.config import config
 
 if __name__ == "__main__":
     reload_kwargs: dict[str, object] = {}
@@ -27,7 +27,11 @@ if __name__ == "__main__":
         # checkout / worktree would crash on `python main.py` before it exists.
         # mkdir it up front so the existing-dir short-circuit always applies.
         backend_dir = Path(__file__).resolve().parent
-        excluded_dirs = [backend_dir / ".venv", backend_dir / "cubepi-traces"]
+        excluded_dirs = [
+            backend_dir / ".venv",
+            backend_dir / "cubepi-traces",
+            backend_dir / "skills_cache",
+        ]
         for d in excluded_dirs:
             d.mkdir(parents=True, exist_ok=True)
         reload_kwargs = {
@@ -37,7 +41,7 @@ if __name__ == "__main__":
         }
 
     uvicorn.run(
-        "cubebox.api.app:create_app",
+        "cubeplex.api.app:create_app",
         host=config.api.host,
         port=config.api.port,
         reload=config.api.reload,

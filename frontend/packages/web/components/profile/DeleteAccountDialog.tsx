@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -98,10 +98,14 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
           <div className="mt-3">
             <input
               type="password"
+              name="delete-account-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t('passwordPlaceholder')}
-              autoComplete="current-password"
+              autoComplete="new-password"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               disabled={deleting}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               onKeyDown={(e) => {

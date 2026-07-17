@@ -1,3 +1,5 @@
+import type { Conversation } from './conversation'
+
 export interface Topic {
   id: string
   title: string
@@ -6,6 +8,7 @@ export interface Topic {
   creator_user_id: string
   is_archived: boolean
   is_pinned: boolean
+  im_platform?: string | null
   created_at: string
   updated_at: string
   last_activity_at: string
@@ -22,6 +25,8 @@ export interface TopicParticipant {
   /** Hydrated by the backend from the User row. */
   display_name?: string | null
   email?: string | null
+  avatar_url?: string | null
+  avatar_seed?: string | null
 }
 
 export interface TopicCreateResponse {
@@ -33,5 +38,5 @@ export interface TopicCreateResponse {
 export interface TopicDetailResponse {
   topic: Topic
   participants: TopicParticipant[]
-  conversations: { id: string; title: string; topic_id: string }[]
+  conversations: Conversation[]
 }

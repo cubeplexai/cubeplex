@@ -28,11 +28,11 @@ from opensandbox.config import ConnectionConfig
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 pytestmark = pytest.mark.e2e
 
@@ -59,9 +59,9 @@ async def scope(
     from fastapi_users.db import SQLAlchemyUserDatabase
     from fastapi_users.schemas import BaseUserCreate
 
-    from cubebox.auth.users import UserManager, _slugify_org_name
-    from cubebox.models import Role, User
-    from cubebox.repositories import (
+    from cubeplex.auth.users import UserManager, _slugify_org_name
+    from cubeplex.models import Role, User
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -104,6 +104,8 @@ async def test_claim_pausing_concurrent_single_winner(
         )
         row = UserSandbox(
             user_id=scope["user_id"],
+            scope_type="user",
+            scope_id=scope["user_id"],
             sandbox_id=f"sbx_{secrets.token_hex(6)}",
             image="img:latest",
             status="running",
@@ -161,6 +163,8 @@ def _make_manager() -> tuple[SandboxManager, MagicMock]:
 def _paused_record(scope: dict[str, str]) -> UserSandbox:
     return UserSandbox(
         user_id=scope["user_id"],
+        scope_type="user",
+        scope_id=scope["user_id"],
         sandbox_id="sbx_resume_target",
         image="img:latest",
         status="paused",
@@ -203,17 +207,17 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
 
     with (
         patch(
-            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
             new=AsyncMock(return_value=winner_backend),
         ) as cor,
         patch(
-            "cubebox.sandbox.manager.opensandbox.Sandbox.connect",
+            "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
             new=AsyncMock(return_value=loser_raw),
         ) as raw_connect,
         # The loser's _await_resumed_by_winner constructs a fresh repo per
         # poll iteration so the identity-map cache can't hide the winner's
         # committed status. Redirect that construction to the test's repo.
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         # Winner first; loser second. Both share the same record/session/repo.
         winner = await mgr._resume_record(
@@ -286,14 +290,14 @@ async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
 
     with (
         patch(
-            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
             new=AsyncMock(side_effect=_raise),
         ) as cor,
         patch(
-            "cubebox.sandbox.manager.opensandbox.Sandbox.connect",
+            "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
             new=AsyncMock(),
         ) as raw_connect,
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         winner = await mgr._resume_record(
             session,
@@ -336,7 +340,7 @@ async def test_await_stable_status_raises_on_timeout(scope: dict[str, str]) -> N
     ``get_or_create`` would silently provision a duplicate sandbox while the
     original lifecycle operation is still in flight (codex P2 round 3).
     """
-    from cubebox.sandbox.base import SandboxError
+    from cubeplex.sandbox.base import SandboxError
 
     mgr, _poll_session = _make_manager()
     mgr._resume_timeout = 1  # bound the wait so the test runs fast
@@ -347,7 +351,7 @@ async def test_await_stable_status_raises_on_timeout(scope: dict[str, str]) -> N
     repo = MagicMock(spec=UserSandboxRepository)
     repo.get = AsyncMock(return_value=stuck)
 
-    with patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo):
         with pytest.raises(SandboxError, match="did not settle"):
             await mgr._await_stable_status(
                 "rec-1",
@@ -389,10 +393,10 @@ async def test_await_resumed_by_winner_takes_over_on_paused_revert(
 
     with (
         patch(
-            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
             new=AsyncMock(return_value=backend),
         ) as cor,
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         result = await mgr._await_resumed_by_winner(
             paused_view.id,

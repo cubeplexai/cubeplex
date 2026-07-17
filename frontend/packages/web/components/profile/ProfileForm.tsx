@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, updateProfile, useAuthStore } from '@cubebox/core'
+import { createApiClient, updateProfile, useAuthStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
+import { AvatarEditor } from '@/components/profile/AvatarEditor'
 
 export function ProfileForm() {
   const t = useTranslations('profile')
@@ -40,6 +41,7 @@ export function ProfileForm() {
   return (
     <section className="space-y-4">
       <h2 className="text-base font-medium">{t('personalInfo')}</h2>
+      <AvatarEditor />
       <label className="block">
         <span className="text-sm text-muted-foreground">{t('displayNameLabel')}</span>
         <input

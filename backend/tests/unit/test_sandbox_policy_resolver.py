@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.services.sandbox_policy import (
+from cubeplex.services.sandbox_policy import (
     EffectivePolicy,
     SandboxPolicyResolver,
     SandboxPolicyService,
@@ -161,6 +161,96 @@ async def test_service_allows_duplicate_same_action() -> None:
         command_rules=None,
         network_default_action="allow",
     )
+
+
+async def test_resolver_passes_resource_fields_through() -> None:
+    repo = _FakeRepo()
+    repo.row = {
+        "org_id": "org-1",
+        "scope_workspace_id": None,
+        "default_image": "python:3.12",
+        "network_rules": None,
+        "command_rules": None,
+        "network_default_action": "deny",
+        "resource_cpu": "500m",
+        "resource_memory": "2Gi",
+        "storage": "10Gi",
+    }
+    eff = await SandboxPolicyResolver(repo, default_image="ubuntu:22.04").resolve()
+    assert eff.resource_cpu == "500m"
+    assert eff.resource_memory == "2Gi"
+    assert eff.storage == "10Gi"
+
+
+async def test_resolver_resource_fields_none_when_no_row() -> None:
+    eff = await SandboxPolicyResolver(_FakeRepo(), default_image="ubuntu:22.04").resolve()
+    assert eff.resource_cpu is None
+    assert eff.resource_memory is None
+    assert eff.storage is None
+
+
+async def test_upsert_persists_valid_resource_quantities() -> None:
+    repo = _FakeRepo()
+    svc = SandboxPolicyService(repo)
+    # 500m is a valid CPU quantity (half a core); exponent notation is valid
+    # for memory; binary suffix for storage.
+    await svc.upsert(
+        default_image="ubuntu:22.04",
+        network_rules=None,
+        command_rules=None,
+        network_default_action="deny",
+        resource_cpu="500m",
+        resource_memory="1e9",
+        storage="20Gi",
+    )
+    assert repo.row["resource_cpu"] == "500m"
+    assert repo.row["resource_memory"] == "1e9"
+    assert repo.row["storage"] == "20Gi"
+
+
+async def test_upsert_treats_blank_resource_as_unset() -> None:
+    repo = _FakeRepo()
+    svc = SandboxPolicyService(repo)
+    await svc.upsert(
+        default_image="ubuntu:22.04",
+        network_rules=None,
+        command_rules=None,
+        network_default_action="deny",
+        resource_cpu="  ",
+        resource_memory="",
+        storage=None,
+    )
+    assert repo.row["resource_cpu"] is None
+    assert repo.row["resource_memory"] is None
+    assert repo.row["storage"] is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("resource_cpu", "lots"),
+        ("resource_memory", "2 GB"),
+        ("storage", "10gigs"),
+        ("resource_cpu", "0"),
+        ("resource_memory", "-1Gi"),
+        # 'm' (milli) is CPU-only; k8s reads memory/storage '512m' as 0.512
+        # bytes, so it must be rejected for byte-denominated fields.
+        ("resource_memory", "512m"),
+        ("storage", "10m"),
+        # Over-length values must 400 here, not truncate at the 32-char column.
+        ("resource_memory", "9" * 40 + "Gi"),
+    ],
+)
+async def test_upsert_rejects_bad_resource_quantity(field: str, value: str) -> None:
+    svc = SandboxPolicyService(_FakeRepo())
+    with pytest.raises(SandboxPolicyValidationError, match=field):
+        await svc.upsert(
+            default_image="ubuntu:22.04",
+            network_rules=None,
+            command_rules=None,
+            network_default_action="deny",
+            **{field: value},
+        )
 
 
 async def test_upsert_normalizes_network_targets() -> None:

@@ -39,8 +39,10 @@ from cubepi.hitl.types import (
     Question,
 )
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.streams.run_events import _active_run_key, _run_meta_key, create_run
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.models.conversation import Conversation
+from cubeplex.repositories.conversation_participant import ConversationParticipantRepository
+from cubeplex.streams.run_events import _active_run_key, _run_meta_key, create_run
 
 
 def _ask_pending(question_id: str = "q-ask") -> HitlRequest:
@@ -84,6 +86,22 @@ def _approve_pending(
     )
 
 
+async def _ensure_creator_participant(conversation_id: str) -> None:
+    """Seed the participant row that a real first send would append."""
+    from cubeplex.db import async_session_maker
+
+    async with async_session_maker() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        assert conversation is not None
+        repo = ConversationParticipantRepository(
+            session,
+            org_id=conversation.org_id,
+            workspace_id=conversation.workspace_id,
+        )
+        await repo.ensure_participant(conversation_id, conversation.creator_user_id)
+        await session.commit()
+
+
 async def _seed_paused_conversation(
     client: httpx.AsyncClient,
     ws_id: str,
@@ -101,6 +119,7 @@ async def _seed_paused_conversation(
     )
     assert resp.status_code == 201, resp.text
     conv_id: str = resp.json()["id"]
+    await _ensure_creator_participant(conv_id)
     run_id = f"r-{conv_id[:8]}"
 
     # Seed cubepi_threads.pending_request + run_id atomically (v3 contract).
@@ -307,6 +326,7 @@ async def test_submit_returns_404_no_pending(
     )
     assert resp.status_code == 201
     conv_id = resp.json()["id"]
+    await _ensure_creator_participant(conv_id)
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/ask-user/q-none",

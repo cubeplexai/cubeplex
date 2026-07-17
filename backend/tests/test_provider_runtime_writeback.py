@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.llm.runtime_writeback import (
+from cubeplex.llm.runtime_writeback import (
     classify_runtime_error,
     schedule_runtime_status_writeback,
 )

@@ -38,7 +38,7 @@ share remains accessible even if the source conversation is deleted.
 
 ### Public ID prefix
 
-Add `PREFIX_SHR = "shr"` to `backend/cubebox/models/public_id.py`.
+Add `PREFIX_SHR = "shr"` to `backend/cubeplex/models/public_id.py`.
 
 ---
 
@@ -165,14 +165,14 @@ A standalone page outside the authenticated app shell:
 
 **Layout:**
 - No sidebar, no workspace context, no auth requirement
-- Top bar: cubebox logo (left) + conversation title (center) +
+- Top bar: cubeplex logo (left) + conversation title (center) +
   share metadata "Shared by {name} · {date}" (right)
 - Main: read-only MessageList (reuse existing component with
   `readOnly` prop to hide InputBar, HITL cards, streaming state)
 - Artifacts: clickable to open preview panel (reuse ArtifactPanel
   in read-only mode, fetching from public artifact endpoint)
 - Attachment chips: show file name + size, no download action
-- Bottom: subtle CTA banner "Powered by cubebox"
+- Bottom: subtle CTA banner "Powered by cubeplex"
 
 **Route:** `/share/[shrId]/page.tsx` under a `(public)` route group
 that skips auth layout.

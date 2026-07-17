@@ -65,7 +65,7 @@
 ### 3.1 表定义
 
 ```python
-# backend/cubebox/models/provider.py
+# backend/cubeplex/models/provider.py
 
 class Provider(SQLModel, table=True):
     """LLM provider — system-level (org_id=NULL) or org-specific."""
@@ -214,7 +214,7 @@ CREATE UNIQUE INDEX uq_provider_system_name ON providers (name) WHERE org_id IS 
 ### 4.1 模块布局
 
 ```
-backend/cubebox/
+backend/cubeplex/
 ├── models/
 │   ├── provider.py          # Provider, Model SQLModel
 │   ├── org_settings.py      # OrgSettings SQLModel
@@ -388,7 +388,7 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
     await session.commit()
 ```
 
-启动时在 lifespan 中调用（`backend/cubebox/api/app.py`）。
+启动时在 lifespan 中调用（`backend/cubeplex/api/app.py`）。
 
 ### 4.5 LLMFactory 改造
 
@@ -535,7 +535,7 @@ router = APIRouter(prefix="/admin", tags=["admin-providers"],
 // OrgLLMSettingsOut
 {
   "default_model": "anthropic/claude-sonnet-4-6",
-  "fallback_models": ["cubebox/qwen3.5-plus-thinking"]
+  "fallback_models": ["cubeplex/qwen3.5-plus-thinking"]
 }
 ```
 
@@ -559,7 +559,7 @@ frontend/packages/web/
 │   ├── OrgModelSettings.tsx              # 默认模型 + fallback 选择器
 │   ├── TestConnectionResult.tsx          # 测试连接结果展示
 │   └── ProviderLogo.tsx                  # logo 图片 / 首字母 fallback
-├── stores/                               # @cubebox/core
+├── stores/                               # @cubeplex/core
 │   ├── providersStore.ts
 │   ├── modelsStore.ts
 │   └── orgModelSettingsStore.ts
@@ -581,7 +581,7 @@ frontend/packages/web/
 │ [A] ArkCode    │ ┌──────────────────────────────────────┐    │
 │ 3 models · API │ │ claude-sonnet-4-6   Sonnet 4.6        │    │
 │                │ │ reasoning · text+image · 200K ctx     │    │
-│ [C] Cubebox    │ │ $3/15M input/output   [编辑] [禁用]   │    │
+│ [C] Cubeplex    │ │ $3/15M input/output   [编辑] [禁用]   │    │
 │ 2 models · 系统│ ├──────────────────────────────────────┤    │
 │                │ │ claude-opus-4-7     Opus 4.7          │    │
 │ [+ 添加]       │ │ $15/75M input/output [编辑] [禁用]    │    │
@@ -654,7 +654,7 @@ npx shadcn-ui@latest add radio-group switch combobox accordion
 ### 5.6 Stores
 
 ```ts
-// @cubebox/core/stores/providersStore.ts
+// @cubeplex/core/stores/providersStore.ts
 useProvidersStore: {
   providers: Provider[]
   selectedId: string | null
@@ -666,7 +666,7 @@ useProvidersStore: {
   testConnection(client, body): Promise<TestResult>
 }
 
-// @cubebox/core/stores/modelsStore.ts
+// @cubeplex/core/stores/modelsStore.ts
 useModelsStore: {
   models: Record<providerId, Model[]>
   fetchModels(client, providerId): void
@@ -675,7 +675,7 @@ useModelsStore: {
   deleteModel(client, providerId, modelId): void
 }
 
-// @cubebox/core/stores/orgModelSettingsStore.ts
+// @cubeplex/core/stores/orgModelSettingsStore.ts
 useOrgModelSettingsStore: {
   settings: OrgLLMSettings | null
   fetchSettings(client): void

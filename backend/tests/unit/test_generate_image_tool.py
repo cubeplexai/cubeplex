@@ -15,8 +15,8 @@ import pytest
 from cubepi.providers.base import ImageContent
 from cubepi.providers.images import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 
-from cubebox.sandbox.base import ExecuteResult
-from cubebox.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
+from cubeplex.sandbox.base import ExecuteResult
+from cubeplex.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -108,11 +108,11 @@ async def test_generate_image_success_path(monkeypatch: pytest.MonkeyPatch) -> N
         return _make_artifact()
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         fake_register,
     )
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        "cubeplex.tools.builtin.generate_image.resize_to_long_edge",
         lambda data, *, target, jpeg_quality: b"SMALLJPEG",
     )
 
@@ -194,7 +194,7 @@ async def test_generate_image_provider_error_no_artifact(
         return _make_artifact()
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         counting_register,
     )
 
@@ -236,11 +236,11 @@ async def test_generate_image_edit_branch_writes_to_source_path(
         return _make_artifact(art_id="art_edit", version=2)
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         fake_register,
     )
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        "cubeplex.tools.builtin.generate_image.resize_to_long_edge",
         lambda data, *, target, jpeg_quality: b"EDITJPEG",
     )
 
@@ -292,7 +292,7 @@ async def test_generate_image_unreadable_edit_source_fails(
         return _make_artifact()
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         counting_register,
     )
 
@@ -350,11 +350,11 @@ async def test_generate_image_size_quality_passed_via_options(
         return _make_artifact()
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         fake_register,
     )
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        "cubeplex.tools.builtin.generate_image.resize_to_long_edge",
         lambda data, *, target, jpeg_quality: b"SMALL",
     )
 
@@ -407,11 +407,11 @@ async def test_generate_image_no_options_when_size_quality_omitted(
         return _make_artifact()
 
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        "cubeplex.tools.builtin.generate_image.register_artifact_from_sandbox",
         fake_register,
     )
     monkeypatch.setattr(
-        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        "cubeplex.tools.builtin.generate_image.resize_to_long_edge",
         lambda data, *, target, jpeg_quality: b"SMALL",
     )
 

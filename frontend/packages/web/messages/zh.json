@@ -1,9 +1,10 @@
 {
   "auth": {
     "signIn": "登录",
-    "signInTitle": "登录到 cubebox",
+    "signInTitle": "欢迎回来",
+    "signInSubtitle": "进入工作区，继续处理中或等待确认的 Agent 任务。",
     "signUp": "创建账户",
-    "signUpTitle": "创建您的 cubebox 账户",
+    "signUpTitle": "创建您的 CubePlex 账户",
     "email": "邮箱",
     "password": "密码",
     "signingIn": "登录中…",
@@ -45,7 +46,29 @@
     "notAMember": "不是成员？",
     "ssoError": "SSO 登录失败",
     "backToLogin": "返回登录",
-    "loggingIn": "正在登录…"
+    "loggingIn": "正在登录…",
+    "verifyOtpTitle": "输入验证码",
+    "verifyOtpSubtitle": "我们已将 6 位验证码发送至 {email}",
+    "verifying": "验证中…",
+    "verify": "验证",
+    "resendCode": "重新发送",
+    "resendIn": "{seconds} 秒后重新发送",
+    "passwordTooWeak": "密码不符合强度要求。",
+    "verifyEmailNow": "立即验证邮箱",
+    "surfaceEyebrow": "Agent 工作区",
+    "surfaceTitle": "把 Agent、记忆、工具和审批放在同一个控制面。",
+    "surfaceSubtitle": "CubePlex 让长时间运行的 Agent 任务与模型、连接器、成果库和团队权限保持在同一个工作区里。",
+    "surfacePanelTitle": "为可控的自动化而设计",
+    "surfacePanelDescription": "登录后检查运行状态、审阅工具访问，并带着完整工作区上下文继续任务。",
+    "surfaceFeatureMemoryTitle": "记忆",
+    "surfaceFeatureMemoryDescription": "保留有用上下文，不必每次重新组织提示词。",
+    "surfaceFeatureToolsTitle": "工具",
+    "surfaceFeatureToolsDescription": "连接 MCP 服务、沙盒环境和内部系统。",
+    "surfaceFeatureControlTitle": "控制",
+    "surfaceFeatureControlDescription": "通过审批、作用域和审计记录控制任务边界。",
+    "surfaceSignalRuns": "流式运行始终归属到工作区。",
+    "surfaceSignalScopes": "组织和工作区作用域保持隔离。",
+    "surfaceSignalAudit": "成果、引用和决策过程可追溯。"
   },
   "sidebar": {
     "newChat": "新建对话",
@@ -169,7 +192,7 @@
     "new": "新建工作区"
   },
   "input": {
-    "placeholder": "描述一个任务…",
+    "placeholder": "告诉 CubePlex 你想完成什么…",
     "hint": "Enter 发送 / Shift+Enter 换行",
     "pendingHitlLock": "请先回答上方待处理的问题。"
   },
@@ -280,6 +303,8 @@
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
+    "loadEarlier": "加载更早的消息",
+    "loadingEarlier": "正在加载更早的消息…",
     "thinking": "思考中...",
     "thinkingProcess": "思考过程",
     "sandboxPreparing": "正在准备沙箱环境...",
@@ -307,12 +332,36 @@
     "thinkingLevelLow": "低",
     "thinkingLevelMedium": "中",
     "thinkingLevelHigh": "高",
-    "thinkingLevelXhigh": "超高",
+    "thinkingLevelMax": "最高",
     "modelPickerAria": "模型与思考深度",
     "modelSectionLabel": "模型",
     "effortLabel": "思考深度",
     "effortFaster": "更快",
-    "effortSmarter": "更聪明"
+    "effortSmarter": "更聪明",
+    "forkConversation": "复刻对话",
+    "forkSuccess": "已复刻到新对话",
+    "forkError": "无法复刻该对话",
+    "forkDisabled": {
+      "noRun": "此消息无法作为复刻起点",
+      "runStreaming": "请等待回复完成",
+      "groupChat": "群聊不支持复刻"
+    },
+    "copy": "复制",
+    "copied": "已复制",
+    "time": {
+      "justNow": "刚刚",
+      "minutesAgo": "{n} 分钟前",
+      "hoursAgo": "{n} 小时前",
+      "daysAgo": "{n} 天前"
+    },
+    "memoryChip": {
+      "label": "条记忆",
+      "ariaLabel": "{n} 条记忆",
+      "popoverTitle": "本对话产生的记忆",
+      "openPage": "打开记忆页",
+      "openPageAria": "跳转到记忆页面",
+      "empty": "暂无记忆"
+    }
   },
   "subagent": {
     "cluster": "Agent 集群",
@@ -320,22 +369,22 @@
     "allDone": "{count} 个任务已完成"
   },
   "home": {
-    "subtitle": "AI 智能体系统",
+    "subtitle": "工作交给 Agent，团队始终掌控。",
     "promptCards": {
-      "analyze": {
-        "title": "分析数据文件",
-        "description": "上传 CSV/Excel，清洗、统计、可视化。",
-        "prompt": "帮我分析这份数据，总结关键趋势、异常点，并产出几张可分享给团队的可视化图表。\n\n【请附上你的 CSV 或 Excel 文件】"
+      "document": {
+        "title": "制作文档或演示",
+        "description": "根据材料生成 Word 文档或演示文稿。",
+        "prompt": "请根据下面的主题和材料，制作一份完整的【Word 文档 / 演示文稿】。先针对目标受众梳理结构，再生成可编辑的文件。\n\n输出格式：\n目标受众：\n主题和材料："
       },
-      "research": {
-        "title": "调研一个主题",
-        "description": "多源搜索 + 引用核对。",
-        "prompt": "请对下面这个主题做多源调研，交叉核对关键事实，产出一份带引用的简洁报告。\n\n主题："
+      "analyze": {
+        "title": "分析数据表格",
+        "description": "清洗 Excel 或 CSV 数据，发现规律并生成图表。",
+        "prompt": "请分析附带的数据表格。清洗数据，找出关键趋势和异常点，并生成清晰的图表和一份可供团队采取行动的简明总结。\n\n【请附上 Excel 或 CSV 文件】"
       },
       "automate": {
-        "title": "自动化一个流程",
-        "description": "写脚本、定时执行、Webhook 触发。",
-        "prompt": "帮我自动化下面这个流程：先讲方案、再写代码或脚本，并建议如何定时或通过 Webhook 触发。\n\n流程："
+        "title": "自动化重复工作",
+        "description": "连接系统，在团队设定的边界内执行。",
+        "prompt": "帮我自动化下面这项重复工作。先确认需要访问哪些系统和数据、允许执行哪些操作，以及哪些步骤需要我批准。然后在这些边界内设计并执行流程。\n\n工作流程："
       }
     }
   },
@@ -393,6 +442,19 @@
     "title": "成员",
     "subtitle": "管理组织成员及其角色。",
     "addMember": "添加成员",
+    "inviteMember": "邀请成员",
+    "inviteDialog": {
+      "title": "邀请加入组织",
+      "roleLabel": "角色",
+      "description": "生成一次性邀请链接。接收者以此角色加入组织，随后创建自己的工作区。",
+      "create": "生成邀请链接",
+      "creating": "生成中…",
+      "linkReady": "邀请链接已生成。分享给被邀请的人。",
+      "copy": "复制",
+      "copied": "已复制",
+      "done": "完成",
+      "expiresNote": "链接 24 小时内有效，且只能使用一次。"
+    },
     "email": "邮箱",
     "role": "角色",
     "joined": "加入时间",
@@ -811,7 +873,7 @@
       },
       "attributeMapping": {
         "section": "属性映射",
-        "help": "将 IdP 返回的字段映射到 cubebox 账号属性。",
+        "help": "将 IdP 返回的字段映射到 CubePlex 账号属性。",
         "idKey": "外部 ID",
         "emailKey": "邮箱",
         "nameKey": "显示名称",
@@ -903,6 +965,7 @@
     "available": {
       "title": "可启用",
       "connect": "启用",
+      "orgCredentialAvailable": "组织凭证可用",
       "empty": "暂无可启用的连接器。"
     },
     "scopeBadge": {
@@ -1046,7 +1109,40 @@
       "emptyMatch": "没有匹配 \"{query}\" 的工具。"
     },
     "wsTitle": "MCP Connectors",
-    "wsSubtitle": "为该工作区接入外部工具与数据源。"
+    "wsSubtitle": "为该工作区接入外部工具与数据源。",
+    "filterEnabled": "已启用",
+    "filterDisabled": "未启用",
+    "filterAll": "全部",
+    "searchPlaceholder": "搜索连接器…",
+    "searchAriaLabel": "搜索 MCP 连接器",
+    "filterByStatus": "按状态筛选",
+    "sourceAll": "全部来源",
+    "sourceGlobal": "官方目录",
+    "sourceOrg": "组织自定义",
+    "sourceWorkspace": "工作区提交",
+    "loading": "加载中…",
+    "noConnectors": "没有连接器",
+    "noConnectorsHint": "请调整筛选条件或添加自定义连接器。",
+    "selectConnector": "选择一个连接器查看详情",
+    "disabledBadge": "已禁用",
+    "reasonTemplateDisabled": "已被组织禁用",
+    "registerCustomTemplate": "添加自定义连接器",
+    "promoteTemplateAction": "提交为组织模板",
+    "disableAction": "禁用",
+    "enableAction": "启用",
+    "purgeAction": "清除所有使用",
+    "purgeConfirmBody": "将移除所有工作区的启用、删除全部凭证、清除连接器配置。模板保留在目录中。",
+    "distributeTitle": "为工作区启用",
+    "distributeExisting": "为尚未设置的 {count} 个工作区启用",
+    "distributeAutoEnroll": "新建工作区自动启用",
+    "toastDisabledInOrg": "该连接器已被组织管理员禁用。",
+    "toastNotVisible": "该连接器已不可见，正在刷新…",
+    "toastUrlTaken": "该 URL 已被组织内的\"{other}\"占用。请删除其中一个，或改指到别的地址。",
+    "toastUrlTakenFallbackName": "另一个模板",
+    "toastTemplateInUseEdit": "该模板已有活动连接器，请让组织管理员先执行 Purge 再修改 URL 或传输方式。",
+    "toastTemplateInUseDelete": "该模板已有活动连接器，请让组织管理员先执行 Purge 再删除。",
+    "toastAdded": "已添加 {name}",
+    "filterBySource": "按来源筛选"
   },
   "mcpOAuthReturn": {
     "successTitle": "连接器已授权",
@@ -1196,6 +1292,7 @@
     "navIm": "IM",
     "navMemory": "记忆",
     "navSandboxEnv": "沙盒环境变量",
+    "navSandboxes": "沙箱",
     "memory": {
       "title": "记忆",
       "description": "AI 助手在本工作区积累的记忆。",
@@ -1322,7 +1419,8 @@
     "goHome": "返回首页",
     "joined": "加入成功！",
     "joinedDescription": "您已成功加入工作区\"{workspace}\"。",
-    "openWorkspace": "打开工作区"
+    "openWorkspace": "打开工作区",
+    "joinedOrg": "您已成功加入组织！"
   },
   "panel": {
     "header": {
@@ -1342,7 +1440,9 @@
       "loading": "加载中…",
       "loadFailed": "加载失败：{message}",
       "tooLarge": "文件过大无法内联预览（{size} MB），请下载查看。",
-      "empty": "空"
+      "empty": "空",
+      "previewFailed": "预览不可用",
+      "retry": "重试"
     },
     "fileRead": {
       "untitled": "（无标题）",
@@ -1735,6 +1835,16 @@
     "installs": "连接器安装",
     "workspaceState": "工作区状态",
     "credentialPolicy": "凭证策略",
+    "policyOrg": "组织",
+    "policyOrgDescription": "使用组织管理员维护的组织凭证。",
+    "policyWorkspace": "工作区",
+    "policyWorkspaceDescription": "为当前工作区保存一份凭证。",
+    "policyUser": "用户",
+    "policyUserDescription": "每个用户连接自己的账号。",
+    "policyNone": "无",
+    "policyNoneDescription": "仅适用于无需认证的连接器。",
+    "policyCredentialAvailableLabel": "{scope}凭证可用",
+    "orgCredentialAvailable": "组织凭证可用",
     "orgGrant": "组织授权",
     "workspaceGrant": "工作区授权",
     "myGrant": "我的授权",
@@ -1742,7 +1852,7 @@
     "ready": "可用",
     "statusPendingOAuth": "等待 OAuth",
     "statusWorkspaceDisabled": "工作区已停用",
-    "statusUninstalled": "已卸载",
+    "statusUninstalled": "未安装",
     "statusAvailable": "可用",
     "scopeOrg": "组织安装",
     "scopeWorkspace": "工作区安装",
@@ -1750,17 +1860,17 @@
     "authMethodStatic": "API Token",
     "authMethodNone": "无需认证",
     "authMethodLabel": "认证方式",
-    "installButton": "安装",
+    "installButton": "添加到组织",
     "uninstallButton": "卸载",
     "confirmUninstallLabel": "确认卸载？",
-    "templateInstallTitle": "安装连接器模板",
-    "templateInstallError": "安装失败",
-    "templateInstallNotice": "在组织级别安装该连接器，安装后每个工作区可单独启用。",
+    "templateInstallTitle": "添加连接器到组织",
+    "templateInstallError": "添加失败",
+    "templateInstallNotice": "在组织级别添加连接器身份。已有工作区凭证会保留，每个工作区仍可选择使用组织、工作区或用户凭证。",
     "distributionLabel": "工作区启用方式",
     "distributionNone": "各工作区手动启用",
     "distributionAll": "为所有工作区启用",
-    "distributionNoneHint": "仅在组织级别安装。各工作区都能看到该连接器，但只有手动启用后才生效。",
-    "distributionAllHint": "为所有现有工作区安装并启用，新建工作区也会自动启用。",
+    "distributionNoneHint": "仅在组织级别添加。各工作区都能看到该连接器，但只有手动启用后才生效。",
+    "distributionAllHint": "为所有现有工作区添加并启用，新建工作区也会自动启用。已有工作区凭证选择会保留。",
     "installAuthSummary": "认证 {auth} · 授权状态 {authStatus} · 发现状态 {discoveryStatus}",
     "authStatus": "授权状态",
     "discoveryStatus": "发现状态",
@@ -1769,6 +1879,8 @@
     "workspaceStateSummary": "已启用 {enabled} / {total} 个工作区",
     "customCreateTitle": "添加自定义 MCP 服务器",
     "customCreateSubtitle": "为整个组织登记自定义 MCP 服务器，之后可以按工作区开启。",
+    "customCreateWorkspaceTitle": "添加自定义 MCP 服务器",
+    "customCreateWorkspaceSubtitle": "为当前工作区登记自定义 MCP 服务器。",
     "customSectionServer": "服务器",
     "customSectionCredential": "凭证",
     "customFieldName": "名称",
@@ -1786,11 +1898,68 @@
     "customFieldCredNamePlaceholder": "在凭证保险库中显示的标签",
     "customFieldCredPlaintext": "凭证",
     "customSubmit": "创建服务器",
+    "customEditTitle": "编辑自定义 MCP 服务器",
+    "customEditSubtitle": "更新服务器信息。此处不可修改认证方式——如需切换认证机制，请删除后重新创建。",
+    "customEditSubmit": "保存修改",
+    "customEditCancel": "取消",
+    "customEditLockedHint": "该服务器已存在活动连接器，先执行 Purge 才能修改 URL 或传输方式。",
+    "editTemplateAction": "编辑",
+    "errorNameConflict": "组织内已有同名模板——请换一个名称。",
+    "errorUrlTaken": "该 URL 已被组织内的\"{other}\"占用。请换一个 URL，或先删除另一个模板。",
+    "errorUrlTakenFallbackName": "另一个模板",
     "customTestConnection": "测试连接",
     "customTestOk": "已连接 · {count} 个工具",
+    "customTestOkOAuth": "OAuth 元数据可达 · 授权后可列出工具",
     "customTestFailed": "连接失败",
-    "addCustomConnector": "+ 添加自定义连接器",
-    "promoteToOrg": "提升为组织级"
+    "addCustomConnector": "添加自定义连接器",
+    "workspaceAddCustomConnector": "添加自定义连接器",
+    "promoteToOrg": "提升为组织级",
+    "templateScopeGlobal": "官方目录",
+    "templateScopeOrg": "组织自定义",
+    "templateScopeWorkspace": "工作区提交",
+    "filterInUse": "使用中",
+    "filterNeedsAttention": "需要处理",
+    "filterOrgCredential": "组织凭证",
+    "filterUnused": "未使用",
+    "filterAllSources": "全部来源",
+    "sourceFilterAll": "全部",
+    "sourceFilterGlobal": "全局",
+    "sourceFilterOrg": "组织",
+    "sourceFilterWorkspace": "工作区",
+    "catalogSearchPlaceholder": "搜索连接器…",
+    "catalogSearchAriaLabel": "搜索 MCP 连接器",
+    "catalogFilterAriaLabel": "按状态筛选",
+    "catalogSourceAriaLabel": "按来源筛选",
+    "disabledBadge": "已禁用",
+    "needsAttentionBadge": "需关注",
+    "notInstalledBadge": "未安装",
+    "orgGrantValid": "组织凭证有效",
+    "orgGrantExpired": "组织凭证已过期",
+    "orgGrantDotAriaValid": "组织凭证有效",
+    "orgGrantDotAriaExpired": "组织凭证已过期",
+    "workspaceRatio": "{enabled}/{eligible} 个工作区",
+    "catalogNoConnectors": "未找到连接器",
+    "catalogNoConnectorsHint": "请尝试不同的搜索条件或筛选项",
+    "catalogLoading": "加载中…",
+    "distributeAction": "分发",
+    "disableOrgAction": "禁用",
+    "enableOrgAction": "启用",
+    "purgeTitle": "清除",
+    "purgeConfirmText": "将移除所有工作区启用记录、删除全部凭证、清除连接器配置",
+    "deleteTemplateAction": "删除模板",
+    "confirmDeleteText": "确认删除此模板？",
+    "distributeDialogTitle": "分发连接器",
+    "distributeDialogDesc": "配置 {name} 的工作区分发方式。",
+    "distributeDialogClose": "关闭",
+    "distributeEnableExisting": "启用现有工作区",
+    "distributeEnableExistingDesc": "在所有当前工作区中启用此连接器。",
+    "distributeAutoEnroll": "自动加入新工作区",
+    "distributeAutoEnrollDesc": "新创建的工作区将自动启用此连接器。",
+    "distributeCancel": "取消",
+    "distributeConfirm": "确认分发",
+    "distributeError": "分发失败",
+    "noConnectorInstalled": "此模板尚未安装连接器。点击「分发」以在工作区中启用。",
+    "overviewSource": "来源"
   },
   "skillSearch": {
     "noDescription": "暂无描述",
@@ -1868,7 +2037,10 @@
     "targetFixedHint": "运行结果始终追加到你拥有的同一个会话。",
     "targetImChannel": "IM 频道",
     "targetImChannelHint": "结果发送到已绑定 IM 平台中的会话。",
-    "targetImChannelDisabledHint": "仅可通过 IM 创建 — 请在聊天中使用斜杠命令。",
+    "targetImChannelDisabledHint": "请从 IM 创建，或编辑已绑定 IM 会话/话题的任务。",
+    "targetImChannelRetargetHint": "使用任务关联会话或话题上的 IM 绑定；找不到绑定则会失败。",
+    "targetImChannelRetargetNote": "无需选择频道 — 服务端从任务的会话或话题解析绑定。若无 IMThreadLink，保存会失败。",
+    "targetImChannelCreateOnlyFromIm": "仅当编辑带有 IM 绑定会话/话题的任务时，才能选择 IM 频道目标。",
     "targetLockedAfterCreate": "任务创建后不能更改目标。",
     "targetTopic": "话题",
     "targetTopicEmpty": "无话题 — 独立会话",
@@ -1958,7 +2130,7 @@
     "sharedBy": "由 {name} 分享",
     "notFound": "分享未找到",
     "notFoundBody": "此分享链接可能已被撤销或不存在。",
-    "poweredBy": "由 cubebox 提供"
+    "poweredBy": "由 CubePlex 提供"
   },
   "profile": {
     "title": "个人资料",
@@ -2043,8 +2215,9 @@
   },
   "verificationBanner": {
     "message": "请验证您的邮箱地址。",
-    "resend": "重新发送验证邮件",
-    "sent": "验证邮件已发送。"
+    "resend": "重新发送验证码",
+    "resendIn": "{seconds} 秒后重新发送",
+    "enterCode": "输入验证码"
   },
   "im": {
     "back": "返回",
@@ -2058,8 +2231,8 @@
     },
     "empty": {
       "workspace": {
-        "headline": "把团队 IM 接到 cubebox",
-        "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
+        "headline": "把团队 IM 接到 CubePlex",
+        "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 CubePlex 用户。",
         "cta": "连接一个 {platform} bot",
         "comingNote": "",
         "guideLink": "查看部署指南"
@@ -2186,18 +2359,32 @@
         },
         "field": {
           "appKey": "AppKey",
-          "appSecret": "AppSecret"
+          "appSecret": "AppSecret",
+          "botName": "机器人名称（在钉钉中显示的名字）",
+          "selectApp": "选择应用"
         },
+        "loadingApps": "正在获取应用列表…",
+        "selectAppPlaceholder": "选择对应的钉钉应用…",
+        "autoDetected": "已识别应用：{name}",
         "openConsole": "打开钉钉开放平台"
-      }
+      },
+      "credentials": {
+        "placeholderSelect": "请选择…"
+      },
+      "verifyBody": {
+        "verifying": "正在验证 <code>{appId}</code> 的凭据…",
+        "ready": "准备连接 <strong>{platform}</strong> bot <code>{appId}</code>。",
+        "pressConnect": "点击 <strong>连接</strong> 注入 bot 身份并建立长连接。"
+      },
+      "openExternalConsole": "在外部控制台打开"
     },
     "error": {
       "field": {
         "appIdFormat": "App ID 必须以 cli_ 开头",
-        "appSecretBad": "凭据有误，请从飞书后台重新复制。"
+        "appSecretBad": "凭据有误，请从开发者后台重新复制。"
       },
       "banner": {
-        "duplicateApp": "这个飞书应用已经被绑定过了。",
+        "duplicateApp": "这个应用已经被绑定过了。",
         "duplicateAppGoTo": "查看已有绑定",
         "hydrationFailed": "无法验证 bot 身份。请确认应用版本已发布、bot 已启用。",
         "retry": "重试",
@@ -2223,24 +2410,156 @@
         "rejected": "{count} 拒绝"
       }
     },
+    "botSettings": {
+      "section": {
+        "identity": "身份",
+        "behavior": "行为",
+        "identityGate": "身份网关 (24h)"
+      },
+      "field": {
+        "actingAs": "代理用户",
+        "botOpenId": "Bot open_id",
+        "mode": "投递模式",
+        "routing": "群聊路由",
+        "topicMode": "话题分组",
+        "sandbox": "沙盒"
+      },
+      "routing": {
+        "isolated": "独立（每人一段对话）",
+        "shared": "共享（整个群一段对话）",
+        "sharedNotSupportedSuffix": " — 不支持",
+        "platformOnlyPerPerson": "该平台仅支持按人路由。"
+      },
+      "topic": {
+        "topic": "归到一个话题下",
+        "flat": "不归话题（平铺）"
+      },
+      "sandboxMode": {
+        "dedicated": "专属沙盒",
+        "creator": "Bot 所属用户的沙盒"
+      },
+      "help": {
+        "infoAria": "查看说明",
+        "routing": {
+          "body": "只影响群聊——DM 永远是一对一。决定在群里 bot 是把每个人当独立对话处理，还是把整个群当作一段大家共享的对话。",
+          "isolated": "群里每个人跟 bot 是各自独立的对话。在 CubePlex web 端你只能看到自己跟 bot 的来往，群里其他人看不到。",
+          "shared": "整个频道共用一段 CubePlex 会话，群里所有人都能在 web 端看到别人问 bot 的内容，并能在彼此提问的基础上继续。"
+        },
+        "sandbox": {
+          "body": "只对共享（群）会话生效——选 bot 在哪个沙盒里跑代码、改文件、保存状态。DM（私信）里 bot 永远使用与之对话用户自己的沙盒。",
+          "dedicated": "这段群会话拿到一个全新的沙盒，跟其他任何工作都互相隔离。",
+          "creator": "复用「在 CubePlex 里配置了这个 IM bot 的那位用户」的个人沙盒（不是 IM 群的创建人），适合让这段群聊跟那位用户在 CubePlex 里的其他会话共享文件和状态。"
+        },
+        "topic": {
+          "body": "话题（topic）是 CubePlex 里把多个会话归到一起的容器，可以理解成聊天侧边栏里的一个文件夹。这个选项决定你在 IM 里跟 bot 发 /new 时会发生什么。",
+          "topic": "每次 /new 都开一个新会话，但都会折叠在 CubePlex 侧边栏的同一个话题下。",
+          "flat": "每个 /new 在聊天历史里都是一个独立条目，直接平铺显示，不归到话题里。"
+        }
+      },
+      "summary": {
+        "heading": "用户的实际体验",
+        "group": {
+          "label": "群聊里",
+          "routing": {
+            "isolated": "每个 IM 用户单独跟 bot 对话——群里每人只能在 CubePlex 里看到自己跟 bot 的来往，看不到其他人的。",
+            "shared": "群里所有人共享同一段对话——所有人都能在 CubePlex 里看到彼此问 bot 的内容，并能接续提问。"
+          },
+          "topic": {
+            "isolatedTopic": "在 CubePlex 里，每个 IM 用户跟 bot 的会话都收纳在他自己的话题文件夹下——这个话题只对该用户可见。",
+            "sharedTopic": "在 CubePlex 里，这个群的会话都收纳在同一个话题文件夹下——群里所有成员都能看到。",
+            "flat": "在 CubePlex 的聊天历史里，会话直接平铺、不收纳到任何话题文件夹。"
+          },
+          "sandbox": {
+            "isolated": "Bot 在每个 IM 用户对应的 CubePlex 沙盒里跑代码、改文件——不同用户之间互相隔离。",
+            "dedicated": "Bot 在这段群会话的专属沙盒里跑代码、改文件，跟其他工作完全隔离。",
+            "creator": "Bot 在 bot 所属用户的个人沙盒里跑代码、改文件，跟该用户在 CubePlex 里其他工作共享文件和状态。"
+          }
+        },
+        "dm": {
+          "label": "私信里（一对一）",
+          "base": "Bot 跟每位 IM 用户一对一对话，在该用户的个人沙盒里跑代码、改文件。",
+          "topic": {
+            "topic": "在 CubePlex 里，每位 IM 用户跟 bot 的私信会话都收纳在他自己的「{botName}」话题文件夹下——这个话题只对该用户可见。",
+            "flat": "在 CubePlex 的聊天历史里，私信会话直接平铺、不收纳到话题文件夹。"
+          }
+        }
+      },
+      "action": {
+        "save": "保存",
+        "saving": "保存中…"
+      },
+      "loading": "加载中…",
+      "saveError": "保存设置失败"
+    },
     "identityLinks": {
       "title": "已关联用户",
       "empty": "暂无关联用户。IM 用户可使用 /link 命令绑定账号。"
     },
     "deleteDialog": {
       "title": "删除这个 bot 绑定？",
-      "body": "会删除凭据并断开当前 long-connection。飞书侧的应用本身不动。",
+      "body": "会删除凭据并断开当前连接。{platform} 侧的应用本身不动。",
       "confirmGate": "输入 {botName} 以确认"
     },
     "link": {
       "title": "绑定 IM 账号",
       "verifying": "正在验证绑定链接...",
-      "success": "你的 {platform} 账号已成功绑定到 cubebox。",
+      "success": "你的 {platform} 账号已成功绑定到 CubePlex。",
       "invalidToken": "链接无效或已过期，请在 IM 中重新发送 /link 命令。",
       "emailMismatch": "请使用 /link 命令中指定的邮箱登录。",
       "notMember": "你不是该工作区的成员，请联系工作区管理员将你添加后重试。",
       "error": "绑定失败，请重试。",
-      "goToApp": "进入 cubebox"
+      "goToApp": "进入 CubePlex"
     }
+  },
+  "wsSandboxes": {
+    "title": "沙箱",
+    "subtitle": "你在此工作区的隔离沙箱环境。",
+    "empty": "暂无沙箱",
+    "emptyHint": "在此工作区开始对话后，沙箱会显示在此处。",
+    "intro": "每个沙箱都是与对话或话题绑定的隔离环境。重启会保留你的文件；删除会清除所有内容（由运维回收存储）。",
+    "lastActive": "最近活跃 {time}",
+    "lastActiveNever": "从未使用",
+    "restart": "重启",
+    "delete": "删除",
+    "restartConfirmTitle": "重启沙箱？",
+    "restartConfirmBody": "容器将被停止，下次使用时启动新容器。你的文件会被保留。",
+    "restartConfirm": "重启",
+    "restarting": "重启中…",
+    "deleteConfirmTitle": "删除沙箱？",
+    "deleteConfirmBody": "永久删除此沙箱及其容器。存储的文件将留给运维回收。此操作无法撤销。",
+    "deleteConfirm": "删除",
+    "deleting": "删除中…",
+    "cancel": "取消",
+    "restartSuccess": "沙箱正在重启",
+    "deleteSuccess": "沙箱已删除",
+    "restartFailed": "重启沙箱失败",
+    "deleteFailed": "删除沙箱失败",
+    "scope": {
+      "user": "你的工作区沙箱",
+      "conversation": "群聊：{title}",
+      "topic": "话题：{title}",
+      "deleted": "（已删除）",
+      "unknown": "沙箱（{type}）"
+    },
+    "statusRunning": "运行中",
+    "statusPaused": "已暂停",
+    "statusPausing": "暂停中",
+    "statusResuming": "恢复中",
+    "statusStarting": "启动中",
+    "statusOff": "已关闭",
+    "statusFailed": "失败",
+    "statusStopping": "停止中",
+    "statusUnknown": "未知"
+  },
+  "onboarding": {
+    "onboardingTitle": "设置你的工作区",
+    "orgName": "组织名称",
+    "orgSlug": "组织标识",
+    "workspaceName": "工作区名称",
+    "workspaceNamePlaceholder": "例如：我的工作区",
+    "defaultWorkspaceName": "{name}的工作区",
+    "createWorkspace": "创建工作区",
+    "createOrgAndWorkspace": "创建组织和空间",
+    "creating": "创建中…"
   }
 }

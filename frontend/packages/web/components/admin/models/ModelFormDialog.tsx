@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import type { Model, ModelCreate, ModelUpdate } from '@cubebox/core'
+import type { Model, ModelCreate, ModelUpdate } from '@cubeplex/core'
 import {
   Accordion,
   AccordionContent,

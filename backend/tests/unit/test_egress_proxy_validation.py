@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.services.sandbox_policy import (
+from cubeplex.services.sandbox_policy import (
     SandboxPolicyValidationError,
     _validate_egress_proxy,
 )

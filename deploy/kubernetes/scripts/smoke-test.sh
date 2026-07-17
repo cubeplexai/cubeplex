@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Post-install smoke test for cubebox.
+# Post-install smoke test for cubeplex.
 # Verifies the deployment is correct: rollout, health probes, ingress,
 # Next.js render. Does NOT exercise LLM / sandbox runtime — those have
 # their own test suites.
 #
 # Usage:
-#   HOST=cubebox.local NAMESPACE=cubebox deploy/scripts/smoke-test.sh
+#   HOST=cubeplex.local NAMESPACE=cubeplex deploy/scripts/smoke-test.sh
 #
 # When HOST is *.local the script expects /etc/hosts to point it at the
 # ingress LB IP. From inside the cluster node we curl ingress-nginx
 # directly with a Host header, no /etc/hosts dance needed.
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-cubebox}"
-RELEASE="${RELEASE:-cubebox}"
-HOST="${HOST:-cubebox.local}"
+NAMESPACE="${NAMESPACE:-cubeplex}"
+RELEASE="${RELEASE:-cubeplex}"
+HOST="${HOST:-cubeplex.local}"
 INGRESS_IP="${INGRESS_IP:-192.168.1.101}"
 INGRESS_PORT="${INGRESS_PORT:-30019}"
 
@@ -50,8 +50,8 @@ fi
 
 step "4. Backend /health/live via ingress"
 curl -fsS --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" "http://$HOST:$INGRESS_PORT/health/live" \
-  | tee /tmp/cubebox-live.json
-grep -q '"status":"ok"' /tmp/cubebox-live.json \
+  | tee /tmp/cubeplex-live.json
+grep -q '"status":"ok"' /tmp/cubeplex-live.json \
   || fail "live probe response unexpected"
 
 step "5. Frontend root page renders"

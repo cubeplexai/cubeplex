@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from cubebox.agents.stream import convert_agent_event_to_sse
+from cubeplex.agents.stream import convert_agent_event_to_sse
 
 
 def _make_hitl_request(kind: str, question_id: str = "qid-1") -> MagicMock:

@@ -11,8 +11,8 @@ import {
   resumeScheduledTask,
   useAuthStore,
   useWorkspaceStore,
-} from '@cubebox/core'
-import type { ScheduledTaskOut } from '@cubebox/core'
+} from '@cubeplex/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { PANE_CONTENT_WIDTH } from '@/components/shared/SectionHeader'

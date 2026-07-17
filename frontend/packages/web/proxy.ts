@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { AUTH_COOKIE_NAME } from '@cubebox/core'
+import { AUTH_COOKIE_NAME } from '@cubeplex/core'
 
 const PUBLIC_PATHS = ['/login', '/register']
-const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin', '/setup']
+const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin', '/onboarding']
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))
@@ -36,5 +36,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|icon.svg|favicon.ico).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|icon.png).*)'],
 }

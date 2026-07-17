@@ -1,11 +1,11 @@
-# cubebox on docker-compose
+# cubeplex on docker-compose
 
-Single-host deployment of cubebox (backend, frontend, Postgres, Redis,
+Single-host deployment of cubeplex (backend, frontend, Postgres, Redis,
 rustfs object store) with `docker compose up -d`.
 
 - **Install guide:** [INSTALL.md](INSTALL.md)
 - **Optional OpenSandbox overlay:** [OPENSANDBOX.md](OPENSANDBOX.md) — how
-  to add alibaba/OpenSandbox in docker runtime mode, and what cubebox
+  to add alibaba/OpenSandbox in docker runtime mode, and what cubeplex
   features the docker runtime cannot serve (TL;DR: `secureAccess` is
   rejected, so the current `manager.py` setting blocks sandbox creation
   until that's made conditional).

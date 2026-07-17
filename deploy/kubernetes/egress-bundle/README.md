@@ -1,6 +1,6 @@
 # Egress Bundle
 
-Kubernetes manifests and supporting code for cubebox's secret-injecting MITM egress feature.
+Kubernetes manifests and supporting code for cubeplex's secret-injecting MITM egress feature.
 
 OpenSandbox server and egress image stay **100% stock**.  This bundle adds:
 
@@ -8,7 +8,7 @@ OpenSandbox server and egress image stay **100% stock**.  This bundle adds:
   transparent MITM, mount a per-sandbox mTLS client identity and the fixed CA, and load
   the `inject.py` addon.
 - The **`inject.py` mitmproxy addon** that scans outbound headers for `cbxref_` placeholders,
-  calls the cubebox exchange endpoint over mTLS, and substitutes the real secret.
+  calls the cubeplex exchange endpoint over mTLS, and substitutes the real secret.
 - Kubernetes manifests wiring the above together.
 
 ## Directory layout
@@ -58,11 +58,11 @@ deploy/kubernetes/egress-bundle/
    kubectl apply -f k8s/mutatingwebhookconfiguration.yaml
    ```
 
-5. **Enable the exchange mTLS listener** in cubebox (Plan 2). The exchange
+5. **Enable the exchange mTLS listener** in cubeplex (Plan 2). The exchange
    endpoint is served on its own port that terminates mTLS — the sandbox's
    egress addon connects to it directly with the per-sandbox client cert, and
    the listener reads the sandbox identity from that cert's CN. There is no
-   proxy and no forwarded header. Set in cubebox config:
+   proxy and no forwarded header. Set in cubeplex config:
    - `egress_exchange.auth.mode = mtls`
    - `egress_exchange.listener.enabled = true`
    - `egress_exchange.listener.certfile/keyfile` — the listener's server cert

@@ -1,6 +1,6 @@
 """Tests for CardState — pure data shape, no IO."""
 
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
@@ -9,7 +9,7 @@ from cubebox.im.feishu.card_model import (
 
 
 def test_card_state_defaults_are_empty() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     assert state.streaming_content == ""
     assert state.tool_steps == []
     assert state.artifacts == []
@@ -58,7 +58,7 @@ def test_pending_input_question_and_choices() -> None:
 
 
 def test_card_state_advance_seq() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     assert state.advance_seq() == 0
     assert state.advance_seq() == 1
     assert state.next_seq == 2

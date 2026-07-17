@@ -4,8 +4,8 @@
 > write the test first, watch it fail, implement, watch it pass. Stay on
 > branch `feat/sandbox-pause-resume`; never switch to main or merge
 > mid-execution. Read `.worktree.env` before running anything: this slot
-> uses backend port **8058** and DB `cubebox_feat_sandbox_pause_resume`;
-> tests auto-route to `cubebox_test_feat_sandbox_pause_resume`. Run tests
+> uses backend port **8058** and DB `cubeplex_feat_sandbox_pause_resume`;
+> tests auto-route to `cubeplex_test_feat_sandbox_pause_resume`. Run tests
 > with plain `uv run pytest` from `backend/`. Do not hand-edit Alembic
 > migrations — always `alembic revision --autogenerate`. Commit per task;
 > never push, never amend, never invoke codex during execution.
@@ -103,7 +103,7 @@ to date as new findings surface.
       Example probe (adjust to your env):
 
       ```bash
-      cd /home/chris/cubebox/.worktrees/feat/sandbox-pause-resume
+      cd /home/chris/cubeplex/.worktrees/feat/sandbox-pause-resume
       uv run python - <<'PY'
       # exercise pause/resume against the real OpenSandbox configured for
       # this worktree, measuring per-step latency and printing get_info()
@@ -132,7 +132,7 @@ on resume", "G1: do not advance to `paused` synchronously").**
 ## Task 1 — Add lifecycle columns to `UserSandbox`
 
 **Files**
-- Modify: `backend/cubebox/models/user_sandbox.py`
+- Modify: `backend/cubeplex/models/user_sandbox.py`
 - Test: `backend/tests/unit/test_user_sandbox_model.py` (Create)
 
 **Steps**
@@ -141,7 +141,7 @@ on resume", "G1: do not advance to `paused` synchronously").**
 
 ```python
 # backend/tests/unit/test_user_sandbox_model.py
-from cubebox.models.user_sandbox import UserSandbox
+from cubeplex.models.user_sandbox import UserSandbox
 
 
 def test_new_lifecycle_columns_default():
@@ -252,7 +252,7 @@ git commit -m "feat(sandbox): migration for pause/resume columns"
 ## Task 3 — Repository transitions + atomic `claim_pausing`
 
 **Files**
-- Modify: `backend/cubebox/repositories/user_sandbox.py`
+- Modify: `backend/cubeplex/repositories/user_sandbox.py`
 - Test: `backend/tests/e2e/test_user_sandbox_repo_transitions.py`
   (Create — uses the real per-slot test DB so the raw UPDATE is exercised)
 
@@ -286,8 +286,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -505,10 +505,10 @@ git commit -m "feat(sandbox): repo transitions + atomic claim_pausing"
 ## Task 4 — Provider capability methods (`supports_pause` / `pause` / `connect_or_resume`)
 
 **Files**
-- Modify: `backend/cubebox/sandbox/base.py`
-- Modify: `backend/cubebox/sandbox/opensandbox.py`
-- Modify: `backend/cubebox/sandbox/local.py`
-- Modify: `backend/cubebox/sandbox/lazy.py`
+- Modify: `backend/cubeplex/sandbox/base.py`
+- Modify: `backend/cubeplex/sandbox/opensandbox.py`
+- Modify: `backend/cubeplex/sandbox/local.py`
+- Modify: `backend/cubeplex/sandbox/lazy.py`
 - Test: `backend/tests/unit/test_sandbox_pause_capability.py` (Create)
 
 **Steps**
@@ -520,8 +520,8 @@ git commit -m "feat(sandbox): repo transitions + atomic claim_pausing"
 # backend/tests/unit/test_sandbox_pause_capability.py
 import pytest
 
-from cubebox.sandbox.base import Sandbox
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.base import Sandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 
 def test_local_sandbox_does_not_support_pause():
@@ -577,7 +577,7 @@ cd backend && uv run pytest tests/unit/test_sandbox_pause_capability.py -q
    the SDK `Sandbox.resume(...)` classmethod and wraps the result in `OpenSandbox`:
 
 ```python
-# backend/cubebox/sandbox/opensandbox.py
+# backend/cubeplex/sandbox/opensandbox.py
 from datetime import timedelta
 from opensandbox.config import ConnectionConfig
 
@@ -637,7 +637,7 @@ git commit -m "feat(sandbox): supports_pause/pause/connect_or_resume on Sandbox 
 ## Task 5 — Manager: resume-on-reuse, `pause_idle`, `reap_paused` + config knobs
 
 **Files**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 - Modify: `backend/config.yaml` (or the active config template — add the
   `sandbox.*` knobs with defaults: `pause_on_idle=true`,
   `idle_ttl_seconds=1800` (30 min, OQ-1), `paused_ttl_seconds=1440` (24 min,
@@ -852,14 +852,14 @@ local enum doesn't know about (e.g. `Resuming`) — handle unknown strings
 gracefully.
 
 **Files**
-- Modify: `backend/cubebox/models/user_sandbox.py` — add a
+- Modify: `backend/cubeplex/models/user_sandbox.py` — add a
   `last_provider_check: datetime | None` column (autogen migration step).
-- Modify: `backend/cubebox/repositories/user_sandbox.py` — selection query
+- Modify: `backend/cubeplex/repositories/user_sandbox.py` — selection query
   `list_transient_for_reconcile_system` (status in (`pausing`, `resuming`)
   AND `last_provider_check` null/old).
-- Modify: `backend/cubebox/sandbox/manager.py` — `reconcile_transients()`
+- Modify: `backend/cubeplex/sandbox/manager.py` — `reconcile_transients()`
   entry point.
-- Modify: `backend/cubebox/sandbox/cleanup.py` — call `reconcile_transients`
+- Modify: `backend/cubeplex/sandbox/cleanup.py` — call `reconcile_transients`
   each loop, scan period 30 s (the existing 60 s loop is fine; the reconciler
   is idempotent and `claim_timeout`-bounded — see step 5 below).
 - Test (unit): `backend/tests/unit/test_sandbox_reconciler.py` (Create).
@@ -873,7 +873,7 @@ gracefully.
    run `alembic revision --autogenerate -m "sandbox reconciler last_provider_check"`:
 
 ```python
-# backend/cubebox/models/user_sandbox.py
+# backend/cubeplex/models/user_sandbox.py
     last_provider_check: datetime | None = Field(default=None, index=True)
 ```
 
@@ -891,7 +891,7 @@ uv run alembic downgrade -1 && uv run alembic upgrade head
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.sandbox.manager import SandboxManager
 
 
 @pytest.mark.asyncio
@@ -965,7 +965,7 @@ async def test_reconciler_explicit_trigger_runs_once():
    `last_provider_check` bump:
 
 ```python
-# backend/cubebox/sandbox/manager.py
+# backend/cubeplex/sandbox/manager.py
     async def reconcile_transients(self, *, claim_timeout: int = 60) -> None:
         """Repair rows stuck in pausing/resuming by reading provider state.
 
@@ -1030,7 +1030,7 @@ async def test_reconciler_explicit_trigger_runs_once():
    calls it directly to avoid sleeping for the loop period).
 
 ```python
-# backend/cubebox/sandbox/cleanup.py
+# backend/cubeplex/sandbox/cleanup.py
         try:
             await manager.reconcile_transients(claim_timeout=60)
             await manager.pause_idle()
@@ -1058,14 +1058,14 @@ git commit -m "feat(sandbox): reconciler for stuck pausing/resuming rows (OQ-3)"
 ## Task 6 — In-use lease around operations + cleanup-loop wiring
 
 **Files**
-- Modify: `backend/cubebox/sandbox/lazy.py` (renew lease around every op via
+- Modify: `backend/cubeplex/sandbox/lazy.py` (renew lease around every op via
   the manager, alongside the existing `touch`; release in `finally`)
-- Modify: `backend/cubebox/api/routes/v1/ws_browser.py` (`get_live_view` calls
+- Modify: `backend/cubeplex/api/routes/v1/ws_browser.py` (`get_live_view` calls
   `manager.get_or_create` + `manager.touch` *directly*, bypassing the lazy
   lease path — it must renew the lease itself for the live-view session)
-- Modify: `backend/cubebox/sandbox/manager.py` (add `renew_lease` /
+- Modify: `backend/cubeplex/sandbox/manager.py` (add `renew_lease` /
   `release_lease` wrappers that call the repo lease methods)
-- Modify: `backend/cubebox/sandbox/cleanup.py` (loop runs `pause_idle` +
+- Modify: `backend/cubeplex/sandbox/cleanup.py` (loop runs `pause_idle` +
   `reap_paused`)
 - Test: `backend/tests/unit/test_sandbox_lease.py` (Create)
 
@@ -1155,7 +1155,7 @@ idle reaper pause it mid-flight. Two rules to avoid that:
 6. Wire both reapers into the loop:
 
 ```python
-# backend/cubebox/sandbox/cleanup.py
+# backend/cubeplex/sandbox/cleanup.py
         try:
             await manager.pause_idle()
             await manager.reap_paused()
@@ -1273,7 +1273,7 @@ cd backend && uv run pytest tests/unit/test_sandbox_manager_pause.py \
   tests/e2e/test_user_sandbox_repo_transitions.py \
   tests/e2e/test_sandbox_pause_concurrency.py -q
 cd backend && uv run pytest tests/e2e/test_sandbox_pause_resume.py -m e2e -q
-cd backend && uv run mypy cubebox/sandbox cubebox/models/user_sandbox.py \
-  cubebox/repositories/user_sandbox.py
+cd backend && uv run mypy cubeplex/sandbox cubeplex/models/user_sandbox.py \
+  cubeplex/repositories/user_sandbox.py
 # EXPECTED: all green; mypy clean
 ```

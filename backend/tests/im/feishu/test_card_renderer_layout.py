@@ -1,16 +1,16 @@
 """Tests for the whole-card render() — skeleton + element conditional inclusion."""
 
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
     ToolStep,
 )
-from cubebox.im.feishu.card_renderer import render
+from cubeplex.im.feishu.card_renderer import render
 
 
 def _empty_state() -> CardState:
-    return CardState(bot_name="cubebox", run_id="run_1")
+    return CardState(bot_name="cubeplex", run_id="run_1")
 
 
 def test_empty_card_has_skeleton_and_no_panels() -> None:
@@ -72,24 +72,35 @@ def test_tool_step_omits_result_body() -> None:
     assert "42ms" in serialized
 
 
-def test_tool_panel_renders_running_step() -> None:
+def test_tool_panel_title_describes_tool_group_not_run_status() -> None:
+    """Overall status lives in the top-of-body status element; the tool
+    panel title only names the group + step count so the card doesn't show
+    two "已完成" badges (one for the run, one for the tool subset)."""
     state = _empty_state()
     state.tool_steps.append(ToolStep(id="tc_1", name="bash", args={"cmd": "ls"}))
     card = render(state)
     panel = next(e for e in card["body"]["elements"] if e.get("element_id") == "tool_panel")
     title = panel["header"]["title"]["content"]
-    assert "运行中" in title or "Running" in title
+    assert "工具调用" in title
+    assert "1 step" in title
+    # Status words must NOT leak into the panel title — they belong to the
+    # top status element.
+    for status_word in ("运行中", "已完成", "失败", "Running", "Done", "Failed"):
+        assert status_word not in title, f"unexpected {status_word!r} in {title!r}"
 
 
-def test_tool_panel_renders_failed_step_with_red_badge() -> None:
+def test_tool_panel_failed_step_surfaces_red_badge_inline() -> None:
+    """Failures are conveyed per-step with an inline ❌ badge, not via the
+    panel title (which no longer carries run-status words)."""
     state = _empty_state()
     step = ToolStep(id="tc_1", name="bash", args={"cmd": "ls"})
     step.mark_failed(error="permission denied", elapsed_ms=20)
     state.tool_steps.append(step)
     card = render(state)
     panel = next(e for e in card["body"]["elements"] if e.get("element_id") == "tool_panel")
-    title = panel["header"]["title"]["content"]
-    assert "失败" in title or "Failed" in title
+    serialized = str(panel)
+    assert "❌" in serialized
+    assert "permission denied" in serialized
 
 
 def test_artifact_image_renders_img_element() -> None:
@@ -138,6 +149,10 @@ def test_pending_input_renders_buttons_with_payload() -> None:
 def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     """The button TEXT must be the human label; the button VALUE.choice must
     carry the schema value. Otherwise users pick between machine tokens.
+
+    Buttons are direct children of the interactive_container (not wrapped in
+    column_set columns) so each gets the full card width and long labels
+    are never truncated.
     """
     state = _empty_state()
     state.pending_input = PendingInput(
@@ -150,8 +165,9 @@ def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     )
     card = render(state)
     container = next(e for e in card["body"]["elements"] if e.get("element_id") == "pending_input")
-    column_set = next(el for el in container["elements"] if el.get("tag") == "column_set")
-    buttons = [col["elements"][0] for col in column_set["columns"]]
+    # Buttons are direct children, not wrapped in column_set columns.
+    buttons = [el for el in container["elements"] if el.get("tag") == "button"]
+    assert len(buttons) == 2
     # Button TEXT carries the human-readable Chinese labels.
     button_texts = [btn["text"]["content"] for btn in buttons]
     assert button_texts == ["批准", "拒绝"]
@@ -172,33 +188,51 @@ def test_finalized_state_disables_streaming_mode() -> None:
     assert card["config"]["streaming_mode"] is False
 
 
-def test_error_state_uses_red_header() -> None:
+def _status_content(card: dict) -> str:
+    status = next(e for e in card["body"]["elements"] if e.get("element_id") == "status")
+    return status["text"]["content"]
+
+
+def test_error_state_status_is_red() -> None:
     state = _empty_state()
     state.error = "boom"
     state.finalized = True
     card = render(state)
-    assert card["header"]["template"] == "red"
+    content = _status_content(card)
+    assert "red" in content
+    assert "运行失败" in content
 
 
-def test_done_state_uses_green_header() -> None:
+def test_done_state_status_is_green() -> None:
     state = _empty_state()
     state.streaming_content = "done"
     state.finalized = True
     state.error = None
     card = render(state)
-    assert card["header"]["template"] == "green"
+    content = _status_content(card)
+    assert "green" in content
+    assert "已完成" in content
 
 
-def test_header_does_not_carry_bot_name() -> None:
+def test_card_has_no_native_header() -> None:
+    """Native Feishu card header renders large+bold; status moved into body
+    as normal-size text so the message body owns the visual weight."""
     state = _empty_state()
-    state.bot_name = "cubebox"
     card = render(state)
-    title = card["header"]["title"]["content"]
-    assert "cubebox" not in title.lower()
+    assert "header" not in card
+
+
+def test_status_element_renders_before_other_body_elements() -> None:
+    state = _empty_state()
+    state.streaming_content = "answer"
+    state.tool_steps.append(ToolStep(id="tc_1", name="bash", args={"cmd": "ls"}))
+    card = render(state)
+    ids = [e.get("element_id") for e in card["body"]["elements"]]
+    assert ids[0] == "status"
 
 
 def test_sub_agent_row_rendered_above_tool_steps() -> None:
-    from cubebox.im.feishu.card_model import SubAgentRow
+    from cubeplex.im.feishu.card_model import SubAgentRow
 
     state = _empty_state()
     state.sub_agents.append(SubAgentRow(agent_id="subagent:tc_x", name="researcher", tool_count=3))

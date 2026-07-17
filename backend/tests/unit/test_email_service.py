@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.services.email import EmailService, LogEmailBackend
+from cubeplex.services.email import EmailService, LogEmailBackend
 
 
 @pytest.mark.asyncio

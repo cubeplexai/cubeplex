@@ -6,7 +6,7 @@
 
 **Architecture:** New workspace-scoped backend handler `ws_artifacts.py` (separate from the conversation-scoped handler; reuse only at the repository layer) exposing `GET /ws/{wsId}/artifacts` (visibility-filtered, type/name filters, paginated) and `DELETE /ws/{wsId}/artifacts/{id}` (DB rows + object-store cleanup). The frontend page mounts its own `ResizablePanelGroup` (grid + `ArtifactPanel`) rather than the chat `AppShell`, seeds the global `artifactStore` so the existing panel works, and assembles new modules (`ArtifactsToolbar`, `ArtifactLibraryCard`, `ArtifactsEmptyState`).
 
-**Tech Stack:** FastAPI + SQLModel/SQLAlchemy + Postgres + S3-compatible object store (backend); Next.js 15 / React 19 + Zustand + `@cubebox/core` + next-intl + shadcn/ui (frontend); pytest (backend tests), Playwright (frontend E2E).
+**Tech Stack:** FastAPI + SQLModel/SQLAlchemy + Postgres + S3-compatible object store (backend); Next.js 15 / React 19 + Zustand + `@cubeplex/core` + next-intl + shadcn/ui (frontend); pytest (backend tests), Playwright (frontend E2E).
 
 **Spec:** `docs/dev/specs/2026-06-20-artifacts-page-design.md`
 
@@ -32,13 +32,13 @@
 - _none_ — only modifications + one new route file.
 
 **Backend (create route):**
-- `backend/cubebox/api/routes/v1/ws_artifacts.py` — workspace-scoped list + delete handler.
+- `backend/cubeplex/api/routes/v1/ws_artifacts.py` — workspace-scoped list + delete handler.
 
 **Backend (modify):**
-- `backend/cubebox/repositories/conversation.py` — add `accessible_id_subquery()`.
-- `backend/cubebox/repositories/artifact.py` — add `list_by_workspace()` + `delete_with_versions()`.
-- `backend/cubebox/api/routes/v1/__init__.py` — export `ws_artifacts_router`.
-- `backend/cubebox/api/app.py` — include `ws_artifacts_router`.
+- `backend/cubeplex/repositories/conversation.py` — add `accessible_id_subquery()`.
+- `backend/cubeplex/repositories/artifact.py` — add `list_by_workspace()` + `delete_with_versions()`.
+- `backend/cubeplex/api/routes/v1/__init__.py` — export `ws_artifacts_router`.
+- `backend/cubeplex/api/app.py` — include `ws_artifacts_router`.
 
 **Backend (tests):**
 - `backend/tests/e2e/test_ws_artifacts.py` — list filtering + visibility isolation + delete cleanup + cross-user 404.
@@ -67,7 +67,7 @@
 ## Task 1: Repository — accessible-conversation subquery
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py`
+- Modify: `backend/cubeplex/repositories/conversation.py`
 
 - [ ] **Step 1: Add `accessible_id_subquery()` to `ConversationRepository`**
 
@@ -88,13 +88,13 @@ Add this method to the `ConversationRepository` class (place it right after `_sc
 
 - [ ] **Step 2: Verify it type-checks**
 
-Run: `cd backend && uv run mypy cubebox/repositories/conversation.py`
+Run: `cd backend && uv run mypy cubeplex/repositories/conversation.py`
 Expected: `Success: no issues found`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/conversation.py
+git add backend/cubeplex/repositories/conversation.py
 git commit -m "feat(artifacts): add accessible_id_subquery to ConversationRepository"
 ```
 
@@ -103,20 +103,20 @@ git commit -m "feat(artifacts): add accessible_id_subquery to ConversationReposi
 ## Task 2: Repository — workspace artifact list + delete
 
 **Files:**
-- Modify: `backend/cubebox/repositories/artifact.py`
+- Modify: `backend/cubeplex/repositories/artifact.py`
 
 - [ ] **Step 1: Add imports**
 
-At the top of `backend/cubebox/repositories/artifact.py`, the current imports are:
+At the top of `backend/cubeplex/repositories/artifact.py`, the current imports are:
 
 ```python
 """Artifact repository."""
 
 from datetime import UTC, datetime
 
-from cubebox.models import Artifact
-from cubebox.models.artifact_version import ArtifactVersion
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models import Artifact
+from cubeplex.models.artifact_version import ArtifactVersion
+from cubeplex.repositories.base import ScopedRepository
 ```
 
 Replace with:
@@ -129,9 +129,9 @@ from typing import Any
 
 from sqlalchemy import cast, delete, func, select
 
-from cubebox.models import Artifact
-from cubebox.models.artifact_version import ArtifactVersion
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models import Artifact
+from cubeplex.models.artifact_version import ArtifactVersion
+from cubeplex.repositories.base import ScopedRepository
 ```
 
 - [ ] **Step 2: Add `list_by_workspace` to `ArtifactRepository`**
@@ -198,13 +198,13 @@ Add this method to the `ArtifactRepository` class (after `list_by_workspace`). I
 
 - [ ] **Step 4: Verify it type-checks**
 
-Run: `cd backend && uv run mypy cubebox/repositories/artifact.py`
+Run: `cd backend && uv run mypy cubeplex/repositories/artifact.py`
 Expected: `Success: no issues found`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/repositories/artifact.py
+git add backend/cubeplex/repositories/artifact.py
 git commit -m "feat(artifacts): add list_by_workspace and delete_with_versions"
 ```
 
@@ -213,9 +213,9 @@ git commit -m "feat(artifacts): add list_by_workspace and delete_with_versions"
 ## Task 3: Backend route — `ws_artifacts.py` (list + delete)
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/ws_artifacts.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_artifacts.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Test: `backend/tests/e2e/test_ws_artifacts.py`
 
 - [ ] **Step 1: Write the failing E2E test**
@@ -353,7 +353,7 @@ Expected: FAIL — 404 on `/api/v1/ws/{ws}/artifacts` (route not registered yet)
 
 - [ ] **Step 3: Create the route file**
 
-Create `backend/cubebox/api/routes/v1/ws_artifacts.py`:
+Create `backend/cubeplex/api/routes/v1/ws_artifacts.py`:
 
 ```python
 """Workspace-level artifacts API routes (list + delete).
@@ -370,11 +370,11 @@ from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db import get_session
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories import ArtifactRepository, ConversationRepository
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db import get_session
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories import ArtifactRepository, ConversationRepository
 
 router = APIRouter(prefix="/ws/{workspace_id}/artifacts", tags=["ws-artifacts"])
 
@@ -439,17 +439,17 @@ async def delete_workspace_artifact(
 
 - [ ] **Step 4: Register the router export**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add the import next to the other `from cubebox.api.routes.v1.X import router as Y` lines:
+In `backend/cubeplex/api/routes/v1/__init__.py`, add the import next to the other `from cubeplex.api.routes.v1.X import router as Y` lines:
 
 ```python
-from cubebox.api.routes.v1.ws_artifacts import router as ws_artifacts_router
+from cubeplex.api.routes.v1.ws_artifacts import router as ws_artifacts_router
 ```
 
 And add `"ws_artifacts_router",` to the `__all__` list (near `"artifacts_router",`).
 
 - [ ] **Step 5: Include the router in the app**
 
-In `backend/cubebox/api/app.py`, find the line (~547):
+In `backend/cubeplex/api/app.py`, find the line (~547):
 
 ```python
     app.include_router(artifacts_router, prefix="/api/v1")
@@ -461,7 +461,7 @@ Add immediately after it:
     app.include_router(ws_artifacts_router, prefix="/api/v1")
 ```
 
-Also add `ws_artifacts_router` to the import from `cubebox.api.routes.v1` at the top of `app.py` (find where `artifacts_router` is imported and add it alongside).
+Also add `ws_artifacts_router` to the import from `cubeplex.api.routes.v1` at the top of `app.py` (find where `artifacts_router` is imported and add it alongside).
 
 - [ ] **Step 6: Run the test to verify it passes**
 
@@ -470,15 +470,15 @@ Expected: PASS (all 5 tests). If `authed_client`/`authed_user_id` fixture names 
 
 - [ ] **Step 7: Type-check + lint**
 
-Run: `cd backend && uv run mypy cubebox/ && uv run ruff check cubebox/`
+Run: `cd backend && uv run mypy cubeplex/ && uv run ruff check cubeplex/`
 Expected: `Success` + `All checks passed!`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_artifacts.py \
-        backend/cubebox/api/routes/v1/__init__.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/api/routes/v1/ws_artifacts.py \
+        backend/cubeplex/api/routes/v1/__init__.py \
+        backend/cubeplex/api/app.py \
         backend/tests/e2e/test_ws_artifacts.py
 git commit -m "feat(artifacts): workspace-level list + delete endpoints"
 ```
@@ -540,7 +540,7 @@ export * from './artifacts'
 
 - [ ] **Step 3: Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: build succeeds (so `packages/web` can see the new exports).
 
 - [ ] **Step 4: Commit**
@@ -626,7 +626,7 @@ And add the `"artifactsPage"` namespace:
 
 - [ ] **Step 4: Verify i18n key parity**
 
-Run: `cd frontend && pnpm --filter @cubebox/web lint` (the pre-commit i18n parity hook also checks this; ensure en/zh have identical key sets).
+Run: `cd frontend && pnpm --filter @cubeplex/web lint` (the pre-commit i18n parity hook also checks this; ensure en/zh have identical key sets).
 Expected: no i18n parity errors. If a standalone parity script exists (check `package.json` scripts for `i18n`), run it instead.
 
 - [ ] **Step 5: Commit**
@@ -691,7 +691,7 @@ In the `entries: WorkspaceNavEntry[]` array, add this entry right after the `mcp
 
 - [ ] **Step 5: Type-check**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit`
 Expected: no type errors.
 
 - [ ] **Step 6: Commit**
@@ -790,7 +790,7 @@ function Chip({
 
 - [ ] **Step 2: Type-check**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit`
 Expected: no type errors.
 
 - [ ] **Step 3: Commit**
@@ -819,8 +819,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { MoreVertical, Download, ExternalLink, Trash2 } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
-import type { Artifact } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
+import type { Artifact } from '@cubeplex/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
 import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
 import {
@@ -931,7 +931,7 @@ Expected: file exists. If missing, add it with `cd frontend/packages/web && npx 
 
 - [ ] **Step 3: Type-check**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit`
 Expected: no type errors.
 
 - [ ] **Step 4: Commit**
@@ -974,7 +974,7 @@ export function ArtifactsEmptyState(): React.ReactElement {
 
 - [ ] **Step 2: Type-check**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit`
 Expected: no type errors.
 
 - [ ] **Step 3: Commit**
@@ -1010,8 +1010,8 @@ import {
   deleteArtifact,
   useArtifactStore,
   usePanelStore,
-} from '@cubebox/core'
-import type { Artifact } from '@cubebox/core'
+} from '@cubeplex/core'
+import type { Artifact } from '@cubeplex/core'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { ArtifactsToolbar } from '@/components/artifacts/ArtifactsToolbar'
@@ -1206,7 +1206,7 @@ Add an effect to close any open artifact panel on unmount so it doesn't bleed in
 
 - [ ] **Step 4: Type-check + build web**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit`
 Expected: no type errors.
 
 - [ ] **Step 5: Manual smoke (optional but recommended)**
@@ -1266,7 +1266,7 @@ test.describe('artifacts page', () => {
 - [ ] **Step 3: Run the E2E test**
 
 Run (from the worktree, using its ports — the E2E harness reads `.worktree.env`):
-`cd frontend && pnpm --filter @cubebox/web exec playwright test __tests__/e2e/artifacts/artifacts-page.spec.ts`
+`cd frontend && pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/artifacts/artifacts-page.spec.ts`
 Expected: PASS. (First run may need `npx playwright install`.)
 
 - [ ] **Step 4: Commit**
@@ -1284,17 +1284,17 @@ git commit -m "test(artifacts): E2E for artifacts page nav + empty state"
 
 - [ ] **Step 1: Backend full check**
 
-Run: `cd backend && uv run mypy cubebox/ && uv run ruff check cubebox/ && uv run pytest tests/e2e/test_ws_artifacts.py tests/unit/test_artifacts.py -v`
+Run: `cd backend && uv run mypy cubeplex/ && uv run ruff check cubeplex/ && uv run pytest tests/e2e/test_ws_artifacts.py tests/unit/test_artifacts.py -v`
 Expected: all green.
 
 - [ ] **Step 2: Frontend full check**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web exec tsc --noEmit && pnpm --filter @cubebox/web lint`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web exec tsc --noEmit && pnpm --filter @cubeplex/web lint`
 Expected: build + types + lint pass, including i18n key parity.
 
 - [ ] **Step 3: Frontend E2E**
 
-Run: `cd frontend && pnpm --filter @cubebox/web exec playwright test __tests__/e2e/artifacts/`
+Run: `cd frontend && pnpm --filter @cubeplex/web exec playwright test __tests__/e2e/artifacts/`
 Expected: PASS.
 
 - [ ] **Step 4: Review the diff**

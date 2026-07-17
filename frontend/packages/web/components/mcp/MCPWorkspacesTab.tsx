@@ -5,18 +5,15 @@ import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   listWorkspaces,
-  wsListEffectiveConnectors,
-  wsPatchConnectorState,
+  wsListCatalog,
+  wsSetTemplateState,
   type ApiClient,
-  type MCPEffectiveConnector,
   type Workspace,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 interface MCPWorkspacesTabProps {
-  installId: string
-  // Retained for prop-compatibility from callers that still pass an admin
-  // client; the per-workspace four-layer state endpoints are workspace-scoped
-  // so this is effectively informational here.
+  templateId: string
+  // Retained for prop-compatibility; not used in the new catalog API.
   client: ApiClient
 }
 
@@ -27,7 +24,7 @@ interface WsRow {
   error: string | null
 }
 
-export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTabProps) {
+export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesTabProps) {
   const t = useTranslations('mcpAdmin')
 
   const [rows, setRows] = useState<WsRow[]>([])
@@ -40,19 +37,16 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
     try {
       const orgClient = createApiClient('')
       const workspaces = await listWorkspaces(orgClient)
-      // For each workspace, fetch its effective connector state for this install
       const results = await Promise.all(
         workspaces.map(async (ws) => {
           try {
             const wsClient = createApiClient('')
             wsClient.setWorkspaceId(ws.id)
-            const list = await wsListEffectiveConnectors(wsClient, ws.id)
-            const match = list.items.find(
-              (c: MCPEffectiveConnector) => c.install.install_id === installId,
-            )
+            const catalog = await wsListCatalog(wsClient, ws.id)
+            const match = catalog.items.find((r) => r.template.template_id === templateId)
             return {
               ws,
-              enabled: match?.workspace_state?.enabled ?? false,
+              enabled: match?.enabled ?? false,
               saving: false,
               error: null,
             } satisfies WsRow
@@ -73,7 +67,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
     } finally {
       setLoading(false)
     }
-  }, [installId])
+  }, [templateId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -89,7 +83,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
     try {
       const wsClient = createApiClient('')
       wsClient.setWorkspaceId(wsId)
-      const updated = await wsPatchConnectorState(wsClient, wsId, installId, { enabled })
+      const updated = await wsSetTemplateState(wsClient, wsId, templateId, { enabled })
       patchRow(wsId, { enabled: updated.enabled, saving: false, error: null })
     } catch (err) {
       patchRow(wsId, { saving: false, error: (err as Error).message })

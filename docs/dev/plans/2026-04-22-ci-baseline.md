@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 为 cubebox 仓库建立 v1 开源发布前的基础 CI 流水线：4 个 GitHub Actions job（`backend-check` + `frontend-check` + `e2e` + `test-ee-compat`），加上 check-only 的本地 pre-commit / pre-push 钩子。
+**Goal:** 为 cubeplex 仓库建立 v1 开源发布前的基础 CI 流水线：4 个 GitHub Actions job（`backend-check` + `frontend-check` + `e2e` + `test-ee-compat`），加上 check-only 的本地 pre-commit / pre-push 钩子。
 
 **Architecture:** GitHub Actions workflow + MySQL/Redis/RustFS service containers 打真实 e2e；frontend 新增 ESLint + Prettier（仓库之前没有）；dynaconf `@format {env[...]}` 注入所有外部 endpoint/key，保证仓库内零明文。本地钩子分两档（pre-commit 快速 staged-only / pre-push 跑 CI 等价检查），**全部 check-only 零自动修复**。
 
@@ -122,7 +122,7 @@ git commit -m "test: add e2e/unit pytest markers and annotate existing e2e tests
 - [ ] **Step 2.1: 用下面的完整内容覆盖 `backend/config.test.yaml`**
 
 ```yaml
-# Test Configuration for cubebox
+# Test Configuration for cubeplex
 # Used by CI e2e and local e2e dev.
 # All endpoints, keys, model ids are injected via environment variables.
 # Real values are kept in GitHub Secrets (CI) or local .env (dev).
@@ -140,24 +140,24 @@ test:
   # LLM: provider / base_url / api_key / model id 全部通过 env 注入
   # 仓库内看不到真实 endpoint 或模型名
   llm:
-    default_model: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+    default_model: "@format e2e/{env[CUBEPLEX_E2E_LLM_MODEL_ID]}"
     fallback_models: []
     providers:
       e2e:
-        base_url: "@format {env[CUBEBOX_E2E_LLM_BASE_URL]}"
-        api_key: "@format {env[CUBEBOX_E2E_LLM_API_KEY]}"
+        base_url: "@format {env[CUBEPLEX_E2E_LLM_BASE_URL]}"
+        api_key: "@format {env[CUBEPLEX_E2E_LLM_API_KEY]}"
         api: openai-completions
         extra_body: {}
         extra_headers: {}
         models:
-          - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+          - id: "@format {env[CUBEPLEX_E2E_LLM_MODEL_ID]}"
             name: "E2E Model"
             input: ["text", "image"]
             context_window: 128000
             max_tokens: 32000
             reasoning: true
 
-  # Sandbox 复用 base config.yaml 的 @format {env[CUBEBOX_SANDBOX__*]} 模式
+  # Sandbox 复用 base config.yaml 的 @format {env[CUBEPLEX_SANDBOX__*]} 模式
   sandbox:
     enabled: true
 
@@ -167,7 +167,7 @@ test:
     port: 3306
     user: "root"
     password: "testpass"
-    name: "cubebox_test"
+    name: "cubeplex_test"
 
   # LangSmith: e2e 不上报
   langsmith:
@@ -181,7 +181,7 @@ test:
   objectstore:
     provider: "s3"
     endpoint: "http://127.0.0.1:9000"
-    bucket: "cubebox-test"
+    bucket: "cubeplex-test"
     region: "us-east-1"
     access_key: "rustfsadmin"
     access_secret: "rustfsadmin"
@@ -194,14 +194,14 @@ test:
 ```bash
 cd backend
 ENV_FOR_DYNACONF=test \
-  CUBEBOX_E2E_LLM_BASE_URL=https://example.com/v1 \
-  CUBEBOX_E2E_LLM_API_KEY=fake \
-  CUBEBOX_E2E_LLM_MODEL_ID=fake-model \
-  CUBEBOX_SANDBOX__DOMAIN=fake:9000 \
-  CUBEBOX_SANDBOX__IMAGE=fake:image \
-  CUBEBOX_SANDBOX__API_KEY=fake \
+  CUBEPLEX_E2E_LLM_BASE_URL=https://example.com/v1 \
+  CUBEPLEX_E2E_LLM_API_KEY=fake \
+  CUBEPLEX_E2E_LLM_MODEL_ID=fake-model \
+  CUBEPLEX_SANDBOX__DOMAIN=fake:9000 \
+  CUBEPLEX_SANDBOX__IMAGE=fake:image \
+  CUBEPLEX_SANDBOX__API_KEY=fake \
   uv run python -c "
-from cubebox.config import settings
+from cubeplex.config import settings
 print('default_model:', settings.llm.default_model)
 print('e2e.base_url:', settings.llm.providers.e2e.base_url)
 print('sandbox.domain:', settings.sandbox.domain)
@@ -257,9 +257,9 @@ git commit -m "test(config): rewrite config.test.yaml with env-injected secrets"
 ```makefile
 check-ci:
 	@echo "Running CI-equivalent checks..."
-	uv run ruff check cubebox/ scripts/ tests/
-	uv run ruff format --check cubebox/ scripts/ tests/
-	uv run mypy cubebox/
+	uv run ruff check cubeplex/ scripts/ tests/
+	uv run ruff format --check cubeplex/ scripts/ tests/
+	uv run mypy cubeplex/
 	uv run pytest -m "not sandbox and not e2e"
 	@echo "✓ CI-equivalent checks passed"
 ```
@@ -304,8 +304,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def test_import_cubebox() -> None:
-    import cubebox  # noqa: F401
+def test_import_cubeplex() -> None:
+    import cubeplex  # noqa: F401
 ```
 
 然后再次跑 `make check-ci` 应该能过（至少 pytest 部分）。
@@ -330,11 +330,11 @@ git commit -m "build(backend): add check-ci target and pre-commit-install-all"
 
 **Rationale on paths:**
 - Git 总是从 repo 根跑 hook。Pre-commit 从 `$(pwd)/.pre-commit-config.yaml` 读配置；若配置在 `backend/`，git 根本找不到。
-- Pre-commit 会把匹配到 `files:` pattern 的路径作为 **repo-rooted** 参数传给 hook（比如 `backend/cubebox/foo.py`）。
-- Backend 用的 `ruff-pre-commit` hook 从 repo 根跑 `ruff check backend/cubebox/foo.py`，没问题。
+- Pre-commit 会把匹配到 `files:` pattern 的路径作为 **repo-rooted** 参数传给 hook（比如 `backend/cubeplex/foo.py`）。
+- Backend 用的 `ruff-pre-commit` hook 从 repo 根跑 `ruff check backend/cubeplex/foo.py`，没问题。
 - Frontend 本地 hook 需要 `cd frontend`，但路径不好转换。**对策**：`pass_filenames: false` + `files:` pattern 触发 —— 只要有 frontend 文件变就跑全 workspace lint。慢一点（~15s），但正确。
 
-- [ ] **Step 4.1: 新建 `/home/chris/cubebox/.pre-commit-config.yaml`（repo 根）**
+- [ ] **Step 4.1: 新建 `/home/chris/cubeplex/.pre-commit-config.yaml`（repo 根）**
 
 ```yaml
 # Two-stage hooks:
@@ -429,7 +429,7 @@ rm backend/.pre-commit-config.yaml
 - [ ] **Step 4.3: 先不安装钩子，跑一次 `--all-files` 验证语法（从 repo 根）**
 
 ```bash
-cd /home/chris/cubebox
+cd /home/chris/cubeplex
 # 用 backend 的 uv env，但在 repo 根跑
 cd backend && uv run pre-commit run --all-files --config ../.pre-commit-config.yaml --hook-stage pre-commit 2>&1 | tail -20
 ```
@@ -573,7 +573,7 @@ export default [
 
 ```json
 {
-  "name": "cubebox-frontend",
+  "name": "cubeplex-frontend",
   "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@10.23.0",
@@ -679,30 +679,30 @@ git commit -m "style(frontend): apply prettier format to existing files"
 
 ## Task 6: 为 e2e CI 注入 frontend→backend URL 环境变量
 
-**Goal:** Frontend 默认把 API 代到 `localhost:8000`，但 CI 里 backend 在 `8001`。`CUBEBOX_API_URL` 已经是指定入口，CI workflow 会在 Task 10 设置它；这一步**只做验证**，确认代码里没有硬编码 `8000`。
+**Goal:** Frontend 默认把 API 代到 `localhost:8000`，但 CI 里 backend 在 `8001`。`CUBEPLEX_API_URL` 已经是指定入口，CI workflow 会在 Task 10 设置它；这一步**只做验证**，确认代码里没有硬编码 `8000`。
 
 **Files:**
 - 只检查 `frontend/packages/web/next.config.ts` / `app/page.tsx` / SSE route handler
 
-- [ ] **Step 6.1: 确认已有的三处都走 `CUBEBOX_API_URL`**
+- [ ] **Step 6.1: 确认已有的三处都走 `CUBEPLEX_API_URL`**
 
 ```bash
-grep -rn "CUBEBOX_API_URL\|localhost:8000" frontend/packages/web/
+grep -rn "CUBEPLEX_API_URL\|localhost:8000" frontend/packages/web/
 ```
 
 Expected 输出（3 处）：
 ```
-frontend/packages/web/next.config.ts:XX:  destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
-frontend/packages/web/app/page.tsx:XX:  const apiUrl = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
-frontend/packages/web/app/api/v1/ws/[wsId]/conversations/[id]/messages/route.ts:XX:const BACKEND_URL = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
+frontend/packages/web/next.config.ts:XX:  destination: `${process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
+frontend/packages/web/app/page.tsx:XX:  const apiUrl = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
+frontend/packages/web/app/api/v1/ws/[wsId]/conversations/[id]/messages/route.ts:XX:const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
 ```
 
-**如果** grep 搜到**其他**文件硬编码 `localhost:8000`（或 `127.0.0.1:8000`），列出来并修成 `process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'`。
+**如果** grep 搜到**其他**文件硬编码 `localhost:8000`（或 `127.0.0.1:8000`），列出来并修成 `process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'`。
 
 - [ ] **Step 6.2: 如果没变更，跳过 commit；有变更则 commit**
 
 ```bash
-git diff --quiet frontend/ && echo "no changes" || (git add frontend/ && git commit -m "refactor(web): route all backend URLs through CUBEBOX_API_URL env")
+git diff --quiet frontend/ && echo "no changes" || (git add frontend/ && git commit -m "refactor(web): route all backend URLs through CUBEPLEX_API_URL env")
 ```
 
 ---
@@ -755,13 +755,13 @@ jobs:
         run: uv sync --all-extras
       - name: Ruff check
         working-directory: backend
-        run: uv run ruff check cubebox/ scripts/ tests/
+        run: uv run ruff check cubeplex/ scripts/ tests/
       - name: Ruff format check
         working-directory: backend
-        run: uv run ruff format --check cubebox/ scripts/ tests/
+        run: uv run ruff format --check cubeplex/ scripts/ tests/
       - name: Mypy (strict)
         working-directory: backend
-        run: uv run mypy cubebox/
+        run: uv run mypy cubeplex/
       - name: Pytest unit
         working-directory: backend
         run: uv run pytest -m "not sandbox and not e2e" --cov-report=xml
@@ -859,25 +859,25 @@ gh pr create --title "chore: bootstrap CI" --body "See spec docs/superpowers/spe
 - [ ] **Step 8.1: 收集本地 `.env` 和 `config.development.local.yaml` 里的值**
 
 ```bash
-cat backend/.env 2>/dev/null | grep -E 'CUBEBOX_SANDBOX__(DOMAIN|IMAGE|API_KEY)'
+cat backend/.env 2>/dev/null | grep -E 'CUBEPLEX_SANDBOX__(DOMAIN|IMAGE|API_KEY)'
 grep -A 3 'sensedeal:' backend/config.development.local.yaml | head -10
 ```
 
 记录下：
-- `CUBEBOX_E2E_LLM_BASE_URL`：来自 `config.development.local.yaml` 里 `sensedeal.base_url` → `https://gateway.chat.sensedeal.vip/v1`
-- `CUBEBOX_E2E_LLM_API_KEY`：来自同文件 `sensedeal.api_key`
-- `CUBEBOX_E2E_LLM_MODEL_ID`：`gemma-4-e4b-it`
-- `CUBEBOX_SANDBOX__DOMAIN` / `CUBEBOX_SANDBOX__IMAGE` / `CUBEBOX_SANDBOX__API_KEY`：`.env` 里的对应值
+- `CUBEPLEX_E2E_LLM_BASE_URL`：来自 `config.development.local.yaml` 里 `sensedeal.base_url` → `https://gateway.chat.sensedeal.vip/v1`
+- `CUBEPLEX_E2E_LLM_API_KEY`：来自同文件 `sensedeal.api_key`
+- `CUBEPLEX_E2E_LLM_MODEL_ID`：`gemma-4-e4b-it`
+- `CUBEPLEX_SANDBOX__DOMAIN` / `CUBEPLEX_SANDBOX__IMAGE` / `CUBEPLEX_SANDBOX__API_KEY`：`.env` 里的对应值
 
 - [ ] **Step 8.2: 用 `gh` CLI 写入 Secrets**
 
 ```bash
-gh secret set CUBEBOX_E2E_LLM_BASE_URL --body 'https://gateway.chat.sensedeal.vip/v1'
-gh secret set CUBEBOX_E2E_LLM_API_KEY --body '<paste from local config>'
-gh secret set CUBEBOX_E2E_LLM_MODEL_ID --body 'gemma-4-e4b-it'
-gh secret set CUBEBOX_SANDBOX__DOMAIN --body '<paste from .env>'
-gh secret set CUBEBOX_SANDBOX__IMAGE --body '<paste from .env>'
-gh secret set CUBEBOX_SANDBOX__API_KEY --body '<paste from .env>'
+gh secret set CUBEPLEX_E2E_LLM_BASE_URL --body 'https://gateway.chat.sensedeal.vip/v1'
+gh secret set CUBEPLEX_E2E_LLM_API_KEY --body '<paste from local config>'
+gh secret set CUBEPLEX_E2E_LLM_MODEL_ID --body 'gemma-4-e4b-it'
+gh secret set CUBEPLEX_SANDBOX__DOMAIN --body '<paste from .env>'
+gh secret set CUBEPLEX_SANDBOX__IMAGE --body '<paste from .env>'
+gh secret set CUBEPLEX_SANDBOX__API_KEY --body '<paste from .env>'
 ```
 
 - [ ] **Step 8.3: 验证 6 个 secret 都在**
@@ -906,20 +906,20 @@ Expected: 列表里看到 6 个（名字对上）。
     timeout-minutes: 25
     env:
       ENV_FOR_DYNACONF: test
-      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
-      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
-      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
-      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
-      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
-      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
       # Frontend 代到本地 backend:8001（与 config.test.yaml 对齐）
-      CUBEBOX_API_URL: http://127.0.0.1:8001
+      CUBEPLEX_API_URL: http://127.0.0.1:8001
     services:
       mysql:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: testpass
-          MYSQL_DATABASE: cubebox_test
+          MYSQL_DATABASE: cubeplex_test
         ports: ['3306:3306']
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -ptestpass"
@@ -988,7 +988,7 @@ Expected: 列表里看到 6 个（名字对上）。
         # pytest 可能留下数据；drop + recreate + migrate 保证 playwright 起点干净
         run: |
           mysql -h 127.0.0.1 -P 3306 -uroot -ptestpass \
-            -e "DROP DATABASE cubebox_test; CREATE DATABASE cubebox_test;"
+            -e "DROP DATABASE cubeplex_test; CREATE DATABASE cubeplex_test;"
           cd backend && uv run alembic upgrade head
 
       - name: Start backend in background
@@ -1148,7 +1148,7 @@ ls -la ../.git/hooks/pre-commit ../.git/hooks/pre-push
 - [ ] **Step 11.2: 跑 pre-commit smoke（显式指向 repo 根的 config）**
 
 ```bash
-cd /home/chris/cubebox/backend
+cd /home/chris/cubeplex/backend
 uv run pre-commit run --all-files --config ../.pre-commit-config.yaml --hook-stage pre-commit
 ```
 
@@ -1176,7 +1176,7 @@ uv run pre-commit run --all-files --config ../.pre-commit-config.yaml --hook-sta
 - [ ] **Step 12.1: 新建 `CONTRIBUTING.md`**
 
 ```markdown
-# Contributing to cubebox
+# Contributing to cubeplex
 
 Thanks for your interest! This doc covers how to set up your local environment so commits and pushes pass CI on the first try.
 
@@ -1190,8 +1190,8 @@ Thanks for your interest! This doc covers how to set up your local environment s
 ## First-time setup
 
 ```bash
-git clone https://github.com/xfgong/cubebox.git
-cd cubebox
+git clone https://github.com/xfgong/cubeplex.git
+cd cubeplex
 
 # Backend
 cd backend
@@ -1271,7 +1271,7 @@ git commit -m "docs: add CONTRIBUTING.md with hook setup instructions"
 
 **Files:** 无（GitHub 仓库 Settings → Branches 配置）
 
-- [ ] **Step 13.1: 打开 `https://github.com/xfgong/cubebox/settings/branches`**
+- [ ] **Step 13.1: 打开 `https://github.com/xfgong/cubeplex/settings/branches`**
 
 新建 / 编辑 `main` 的 branch protection rule，勾选：
 

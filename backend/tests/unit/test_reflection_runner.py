@@ -14,8 +14,8 @@ import pytest
 from cubepi.agent.types import AgentToolResult, ToolExecutionEndEvent
 from cubepi.providers.base import TextContent
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.reflection_runner import (
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.reflection_runner import (
     AgentFactory,
     ReflectionInput,
     ReflectionRunner,

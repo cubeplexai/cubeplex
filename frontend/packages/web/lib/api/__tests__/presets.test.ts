@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { CSRF_COOKIE_NAME } from '@cubebox/core'
+import { CSRF_COOKIE_NAME } from '@cubeplex/core'
 import {
   fetchAdminModelPresets,
   putAdminModelPresets,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/core'
+import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubeplex/core'
 
 import { Label } from '@/components/ui/label'
 import {
@@ -15,7 +15,7 @@ import {
 import { TryItForm } from './TryItForm'
 
 export interface AdminTryItViewProps {
-  installId: string
+  connectorId: string
   toolName: string
   inputSchema: Record<string, unknown> | null
   client: ApiClient
@@ -36,7 +36,7 @@ export interface AdminTryItViewProps {
 }
 
 export function AdminTryItView({
-  installId,
+  connectorId,
   toolName,
   inputSchema,
   client,
@@ -66,7 +66,7 @@ export function AdminTryItView({
     } else {
       lens = null
     }
-    return adminInvokeTool(client, installId, toolName, args, lens)
+    return adminInvokeTool(client, connectorId, toolName, args, lens)
   }
 
   const showPicker = requiresWorkspacePicker === true && !!adminWorkspaceOptions

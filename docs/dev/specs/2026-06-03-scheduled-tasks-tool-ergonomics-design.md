@@ -44,7 +44,7 @@ abstractions, no MCP, no tool splitting.
 
 ### 1. Operation descriptions get a minimal example payload
 
-Each `AgentOperation.description` in `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py`
+Each `AgentOperation.description` in `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py`
 gets a one-line canonical input. The model can copy these without parsing
 the discriminated-union JSON Schema.
 
@@ -79,7 +79,7 @@ Confirmed during planning: pydantic validation runs upstream of our
 capability builder, inside cubepi at `cubepi/cubepi/agent/tools.py:114-117`,
 which wraps `str(exc)` and returns it as the tool result. The friendly
 translation therefore belongs in cubepi (per the project rule
-"cubepi upstream-first"), not in `backend/cubebox/agents/actions/builder.py`.
+"cubepi upstream-first"), not in `backend/cubeplex/agents/actions/builder.py`.
 
 Because all three failure modes in the trace above are also fixed by changes
 1, 3, 4 (clearer per-op descriptions + nested schedule union), the
@@ -166,7 +166,7 @@ for one.
 
 ### 5. Same example treatment for the other multi-operation capabilities
 
-Whatever other `AgentCapability` definitions ship with cubebox today get a
+Whatever other `AgentCapability` definitions ship with cubeplex today get a
 one-line example added to each operation description as we touch them.
 Scope of this PR: only `scheduled_tasks`. Other capabilities are a separate
 follow-up so this PR stays reviewable.
@@ -213,7 +213,7 @@ follow-up so this PR stays reviewable.
 - **Cubepi-side ValidationError translation.** Format pydantic errors
   inside `cubepi/cubepi/agent/tools.py:114-117` (field paths,
   discriminator + allowed values) before returning to the LLM. Separate
-  cubepi PR, then bump the cubepi pin in cubebox. See change #2 above.
+  cubepi PR, then bump the cubepi pin in cubeplex. See change #2 above.
 - Progressive schema disclosure for capability tools (shared design with
   MCP). Tracked separately.
 - Same description treatment for other capabilities

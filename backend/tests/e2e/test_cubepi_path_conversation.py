@@ -1,12 +1,12 @@
 """E2E smoke test for the cubepi runtime path (M1.6).
 
-Sends one conversation turn through cubebox's public API with the cubepi
+Sends one conversation turn through cubeplex's public API with the cubepi
 runtime active. Verifies the SSE stream emits at least one text_delta and a
 final done — confirming end-to-end wiring through:
 
   ProviderConfig → cubepi.AnthropicProvider/OpenAIProvider →
-  cubepi.Agent (no cubebox middleware in M1) → AgentEvent stream →
-  convert_agent_event_to_sse → cubebox SSE.
+  cubepi.Agent (no cubeplex middleware in M1) → AgentEvent stream →
+  convert_agent_event_to_sse → cubeplex SSE.
 
 The test environment (config.test.yaml) already sets agents.runtime = "cubepi"
 so no app.state override is needed here — the route is active for all E2E

@@ -13,7 +13,7 @@ import {
   toggleWorkspaceSkill,
   type SkillContent,
   type SkillVersionDetail,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/components/ui/badge'

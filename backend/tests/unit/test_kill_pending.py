@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from opensandbox.exceptions import SandboxApiException
 
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.sandbox.manager import SandboxManager
 
 
 def _make_manager() -> SandboxManager:
     factory = MagicMock()
     encryption = MagicMock()
-    with patch("cubebox.sandbox.manager.config") as mock_config:
+    with patch("cubeplex.sandbox.manager.config") as mock_config:
         mock_config.get.side_effect = lambda key, default=None: {
             "sandbox.domain": "localhost:8090",
             "sandbox.image": "ubuntu:22.04",
@@ -28,7 +28,7 @@ def _make_manager() -> SandboxManager:
             "sandbox.resource.memory": "100Mi",
             "sandbox.volume.enabled": False,
             "sandbox.volume.mount_path": "/workspace",
-            "sandbox.volume.pvc_prefix": "cubebox-user",
+            "sandbox.volume.pvc_prefix": "cubeplex-user",
             "sandbox.egress_exchange_host": "",
             "sandbox.pause_on_idle": True,
             "sandbox.idle_ttl_seconds": 1800,
@@ -74,10 +74,10 @@ async def test_kill_success_marks_terminated() -> None:
 
     conn_config = mgr._build_connection_config()
 
-    with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
+    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
         await mgr._kill_record(session, repo, record, conn_config)
 
-    repo.mark_terminated.assert_called_once_with(record.id)
+    repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
 
 
@@ -95,7 +95,7 @@ async def test_kill_failure_marks_kill_pending() -> None:
 
     conn_config = mgr._build_connection_config()
 
-    with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
+    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
         await mgr._kill_record(session, repo, record, conn_config)
 
     repo.mark_kill_pending.assert_called_once_with(record.id)
@@ -113,7 +113,7 @@ async def test_kill_connect_failure_marks_kill_pending() -> None:
     conn_config = mgr._build_connection_config()
 
     with patch(
-        "cubebox.sandbox.manager.opensandbox.Sandbox.connect",
+        "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
         side_effect=Exception("DNS resolution failed"),
     ):
         await mgr._kill_record(session, repo, record, conn_config)
@@ -138,8 +138,8 @@ async def test_kill_404_marks_terminated() -> None:
 
     conn_config = mgr._build_connection_config()
 
-    with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
+    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
         await mgr._kill_record(session, repo, record, conn_config)
 
-    repo.mark_terminated.assert_called_once_with(record.id)
+    repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()

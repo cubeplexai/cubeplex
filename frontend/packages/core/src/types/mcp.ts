@@ -1,11 +1,13 @@
-// Four-layer MCP types (templates / installs / state / effective + grants).
+// Four-layer MCP types — template-centric semantics (post-T9/T10).
 //
-// The endpoints live under `/api/v1/ws/{ws}/mcp/templates`, `/installs`,
-// `/connectors`, `/connectors/{installId}/state`, and `/admin/mcp/...`.
+// Catalog endpoints: /api/v1/admin/mcp/catalog, /api/v1/ws/{ws}/mcp/catalog.
+// Connector-level paths remain /installs/{connector_id}/... for grants/invoke/discovery.
 
 export type MCPTransport = 'streamable_http' | 'sse'
 export type MCPAuthMethod = 'static' | 'oauth' | 'none'
 export type MCPCredentialScope = 'org' | 'workspace' | 'user' | 'none'
+export type MCPTemplateScope = 'global' | 'org' | 'workspace'
+export type AdminCatalogFilter = 'in_use' | 'needs_attention' | 'org_credential' | 'unused' | 'all'
 
 export interface MCPToolEntry {
   name: string
@@ -32,7 +34,85 @@ export interface CitationConfigJSON {
   discriminator_values?: string[] | null
 }
 
-// ---------------- Four-layer connector model ---------------- //
+// ---------------- Template (catalog-level record) ---------------- //
+
+export interface MCPTemplate {
+  template_id: string
+  slug: string
+  name: string
+  provider: string
+  description: string
+  scope: MCPTemplateScope
+  workspace_id: string | null
+  server_url: string
+  transport: string
+  supported_auth_methods: string[]
+  default_credential_policy: string
+  status: string
+  /** Catalog brand key → frontend `/mcp-icons/{icon}.svg`. */
+  icon?: string | null
+}
+
+// ---------------- Connector facts (install-level, child of catalog row) ---------------- //
+
+export interface MCPConnectorFacts {
+  connector_id: string
+  default_credential_policy: string
+  discovery_status: string
+  tool_count: number
+  tools: MCPToolEntry[]
+  tool_citations: Record<string, Record<string, unknown>>
+  last_error: string | null
+  auto_enroll_new_workspaces: boolean
+  /** Auth method used when the org grant was minted; null when no org grant exists. Admin-only. */
+  org_grant_auth_method: 'oauth' | 'static' | null
+  /** Server icons from discovery_metadata (may include cached_src). */
+  server_icons?: MCPIcon[]
+}
+
+// ---------------- Catalog rows ---------------- //
+
+export interface AdminCatalogRow {
+  template: MCPTemplate
+  connector: MCPConnectorFacts | null
+  disabled: boolean
+  in_use: boolean
+  needs_attention: boolean
+  enabled_workspace_count: number
+  eligible_workspace_count: number
+  org_grant_status: 'valid' | 'expired' | null
+}
+
+export interface WorkspaceCatalogRow {
+  template: MCPTemplate
+  connector: MCPConnectorFacts | null
+  enabled: boolean
+  usable: boolean | null
+  reason: string | null
+  credential_availability_by_scope: Record<'org' | 'workspace' | 'user', boolean>
+  /** Workspace-level credential policy override. Null when the workspace has
+   * never enabled this template; consumers should fall back to
+   * `connector.default_credential_policy` in that case. */
+  credential_policy: MCPCredentialScope | null
+}
+
+// ---------------- Legacy four-layer connector model (kept for WsAuthBand / effectiveAuthState) ---------------- //
+
+// MCPConnectorTemplate and MCPConnector are kept for:
+// - WsAuthBand / effectiveAuthState (MCPEffectiveConnector)
+// - MCPWorkspacesTab (wsListEffectiveConnectors returns MCPEffectiveConnector[])
+// - AdminAuthBand (synthesizes MCPEffectiveConnector from AdminCatalogRow)
+// - MCPCitationsTab (consume MCPConnector for install-level tool_citations)
+
+/** One MCP Icon (spec) + optional discovery-time materialised cache. */
+export interface MCPIcon {
+  src: string
+  mime_type?: string | null
+  sizes?: string[] | null
+  theme?: string | null
+  /** data: URI when discovery fetched a remote https icon successfully. */
+  cached_src?: string | null
+}
 
 export interface MCPConnectorTemplate {
   template_id: string
@@ -47,10 +127,12 @@ export interface MCPConnectorTemplate {
   static_form_schema: unknown[] | null
   status: 'active' | 'deprecated' | 'disabled'
   install_summary?: Record<string, unknown> | null
+  /** Catalog brand key → frontend `/mcp-icons/{icon}.svg`. */
+  icon?: string | null
 }
 
-export interface MCPConnectorInstall {
-  install_id: string
+export interface MCPConnector {
+  connector_id: string
   template_id: string | null
   install_scope: 'org' | 'workspace'
   workspace_id: string | null
@@ -67,11 +149,13 @@ export interface MCPConnectorInstall {
   tool_citations: Record<string, CitationConfigJSON>
   last_error: string | null
   auto_enroll_new_workspaces: boolean
+  /** Server icons from discovery_metadata (may include cached_src). */
+  server_icons?: MCPIcon[]
 }
 
 export interface MCPWorkspaceConnectorState {
   workspace_id: string
-  install_id: string
+  connector_id: string
   enabled: boolean
   credential_policy: MCPCredentialScope
   enablement_source?: string
@@ -79,20 +163,19 @@ export interface MCPWorkspaceConnectorState {
 
 export interface MCPEffectiveConnector {
   template: MCPConnectorTemplate | null
-  install: MCPConnectorInstall
+  install: MCPConnector
   workspace_state: MCPWorkspaceConnectorState | null
   credential_policy: MCPCredentialScope
   required_grant_scope?: string | null
   credential_availability: 'available' | 'missing' | 'not_required'
   credential_source: 'org' | 'workspace' | 'user' | null
+  credential_availability_by_scope: Record<'org' | 'workspace' | 'user', boolean>
   usable: boolean
   reason: string
 }
 
-export type MCPConnectorFilter = 'all' | 'installed' | 'available' | 'custom'
-
 export interface MCPCredentialGrantStatus {
-  install_id: string
+  connector_id: string
   grant_scope: 'org' | 'workspace' | 'user'
   workspace_id: string | null
   user_id: string | null

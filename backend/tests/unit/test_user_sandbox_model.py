@@ -1,4 +1,4 @@
-from cubebox.models.user_sandbox import UserSandbox
+from cubeplex.models.user_sandbox import UserSandbox
 
 
 def test_new_lifecycle_columns_default():

@@ -4,8 +4,8 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { useTranslations } from 'next-intl'
 import { Check, X } from 'lucide-react'
-import { createApiClient, listWorkspaces, type Workspace } from '@cubebox/core'
-import type { SkillSummary, WorkspaceBindingState } from '@cubebox/core'
+import { createApiClient, listWorkspaces, type Workspace } from '@cubeplex/core'
+import type { SkillSummary, WorkspaceBindingState } from '@cubeplex/core'
 import { csrfHeaders, jsonHeaders, readApiError } from '@/lib/csrf'
 
 interface WorkspaceBindingsTableProps {

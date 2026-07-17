@@ -3,11 +3,11 @@
 import pytest
 from sqlalchemy import text as sql_text
 
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.conversation_chunk import ConversationChunkRepository
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
-from cubebox.services.conversation_search.worker import EmbeddingWorker
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.worker import EmbeddingWorker
 
 
 class _FakeProvider(EmbeddingProvider):
@@ -88,7 +88,7 @@ async def test_reap_stuck_returns_running_to_pending(
 
     from sqlalchemy import select, update
 
-    from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
+    from cubeplex.models.embedding_job import EmbeddingJob, EmbeddingJobState
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as session:

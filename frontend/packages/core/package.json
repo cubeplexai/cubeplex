@@ -1,6 +1,6 @@
 {
-  "name": "@cubebox/core",
-  "version": "0.0.1",
+  "name": "@cubeplex/core",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -15,6 +15,12 @@
       "source": "./src/api/index.ts",
       "import": "./src/api/index.ts",
       "default": "./src/api/index.ts"
+    },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "source": "./src/auth/index.ts",
+      "import": "./src/auth/index.ts",
+      "default": "./src/auth/index.ts"
     },
     "./stores": {
       "types": "./src/stores/index.ts",

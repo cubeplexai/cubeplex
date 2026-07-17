@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Topic containers and multi-user group chat to cubebox — new tables, repository access control, RunContext changes, HITL multi-responder, and full frontend UI.
+**Goal:** Add Topic containers and multi-user group chat to cubeplex — new tables, repository access control, RunContext changes, HITL multi-responder, and full frontend UI.
 
 **Architecture:** Topic is a container model grouping related conversations. Group chat is a derived state (participant count > 1). The existing single-user conversation flow is untouched for `topic_id IS NULL` rows; topic conversations use a participant subquery in `_scoped_select()`. RunContext gains `topic_id`, `is_group_chat`, `participant_ids` to drive sender attribution, memory isolation, and HITL responder validation.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/dev/specs/2026-06-17-group-chat-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2026-06-17-group-chat` (ports 8050/3050)
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2026-06-17-group-chat` (ports 8050/3050)
 
 ---
 
@@ -20,10 +20,10 @@
 
 | File | Purpose |
 |---|---|
-| `backend/cubebox/models/topic.py` | `Topic` + `TopicParticipant` SQLModel models |
-| `backend/cubebox/repositories/topic.py` | `TopicRepository` — CRUD, participant management |
-| `backend/cubebox/api/schemas/ws_topics.py` | Pydantic request/response schemas for topic routes |
-| `backend/cubebox/api/routes/v1/ws_topics.py` | Topic CRUD + participant + upgrade routes |
+| `backend/cubeplex/models/topic.py` | `Topic` + `TopicParticipant` SQLModel models |
+| `backend/cubeplex/repositories/topic.py` | `TopicRepository` — CRUD, participant management |
+| `backend/cubeplex/api/schemas/ws_topics.py` | Pydantic request/response schemas for topic routes |
+| `backend/cubeplex/api/routes/v1/ws_topics.py` | Topic CRUD + participant + upgrade routes |
 | `backend/tests/e2e/test_topics.py` | Topic lifecycle + access control E2E |
 | `backend/tests/e2e/test_group_chat.py` | Group chat messaging, sender attribution, memory isolation E2E |
 
@@ -31,17 +31,17 @@
 
 | File | Change |
 |---|---|
-| `backend/cubebox/models/public_id.py:50` | Add `PREFIX_TOP`, `PREFIX_TPM` |
-| `backend/cubebox/models/conversation.py:38` | Add `topic_id` FK + index |
-| `backend/cubebox/models/__init__.py` | Export `Topic`, `TopicParticipant` |
-| `backend/cubebox/repositories/conversation.py:32-40` | Extend `_scoped_select` with topic participant OR |
-| `backend/cubebox/repositories/__init__.py` | Export `TopicRepository` |
-| `backend/cubebox/streams/run_manager.py:37-43` | Extend `RunContext` with `topic_id`, `is_group_chat`, `participant_ids` |
-| `backend/cubebox/streams/run_manager.py:1522-1553` | Sender prefix + metadata on user message, memory skip |
-| `backend/cubebox/api/routes/v1/__init__.py` | Import `ws_topics` |
-| `backend/cubebox/api/app.py:546` | Mount `ws_topics.router` |
-| `backend/cubebox/api/routes/v1/conversations.py:891` | Populate RunContext topic fields at send_message |
-| `backend/cubebox/api/routes/v1/conversations.py:1342` | Sender prefix on steering messages |
+| `backend/cubeplex/models/public_id.py:50` | Add `PREFIX_TOP`, `PREFIX_TPM` |
+| `backend/cubeplex/models/conversation.py:38` | Add `topic_id` FK + index |
+| `backend/cubeplex/models/__init__.py` | Export `Topic`, `TopicParticipant` |
+| `backend/cubeplex/repositories/conversation.py:32-40` | Extend `_scoped_select` with topic participant OR |
+| `backend/cubeplex/repositories/__init__.py` | Export `TopicRepository` |
+| `backend/cubeplex/streams/run_manager.py:37-43` | Extend `RunContext` with `topic_id`, `is_group_chat`, `participant_ids` |
+| `backend/cubeplex/streams/run_manager.py:1522-1553` | Sender prefix + metadata on user message, memory skip |
+| `backend/cubeplex/api/routes/v1/__init__.py` | Import `ws_topics` |
+| `backend/cubeplex/api/app.py:546` | Mount `ws_topics.router` |
+| `backend/cubeplex/api/routes/v1/conversations.py:891` | Populate RunContext topic fields at send_message |
+| `backend/cubeplex/api/routes/v1/conversations.py:1342` | Sender prefix on steering messages |
 
 ### Frontend — new files
 
@@ -77,13 +77,13 @@
 ### Task 1: Public ID prefixes + Topic models
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py:50`
-- Create: `backend/cubebox/models/topic.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Modify: `backend/cubeplex/models/public_id.py:50`
+- Create: `backend/cubeplex/models/topic.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Add public ID prefixes**
 
-In `backend/cubebox/models/public_id.py`, after line 50 (`PREFIX_IM_RUN_QUEUE_ITEM`):
+In `backend/cubeplex/models/public_id.py`, after line 50 (`PREFIX_IM_RUN_QUEUE_ITEM`):
 
 ```python
 PREFIX_TOP: str = "top"
@@ -92,7 +92,7 @@ PREFIX_TPM: str = "tpm"
 
 - [ ] **Step 2: Create topic models**
 
-Create `backend/cubebox/models/topic.py`:
+Create `backend/cubeplex/models/topic.py`:
 
 ```python
 """Topic and TopicParticipant models."""
@@ -103,10 +103,10 @@ from typing import ClassVar
 from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin, org_scope_index
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
 
 
-class Topic(CubeboxBase, OrgScopedMixin, table=True):
+class Topic(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "top"
     __tablename__ = "topics"
     __table_args__ = (
@@ -135,7 +135,7 @@ class Topic(CubeboxBase, OrgScopedMixin, table=True):
     )
 
 
-class TopicParticipant(CubeboxBase, table=True):
+class TopicParticipant(CubeplexBase, table=True):
     _PREFIX: ClassVar[str] = "tpm"
     __tablename__ = "topic_participants"
     __table_args__ = (
@@ -154,7 +154,7 @@ class TopicParticipant(CubeboxBase, table=True):
 
 - [ ] **Step 3: Add `topic_id` FK to Conversation model**
 
-In `backend/cubebox/models/conversation.py`, add after `creator_user_id` field (line 38):
+In `backend/cubeplex/models/conversation.py`, add after `creator_user_id` field (line 38):
 
 ```python
 topic_id: str | None = Field(default=None, foreign_key="topics.id", max_length=20)
@@ -168,10 +168,10 @@ Index("ix_conversations_topic", "topic_id"),
 
 - [ ] **Step 4: Export new models**
 
-In `backend/cubebox/models/__init__.py`, add import:
+In `backend/cubeplex/models/__init__.py`, add import:
 
 ```python
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.models.topic import Topic, TopicParticipant
 ```
 
 Add `"Topic"` and `"TopicParticipant"` to `__all__` list (alphabetical order, after `"Trigger"` entries).
@@ -191,8 +191,8 @@ Expected: migration applies cleanly with no errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/models/topic.py backend/cubebox/models/public_id.py \
-  backend/cubebox/models/conversation.py backend/cubebox/models/__init__.py \
+git add backend/cubeplex/models/topic.py backend/cubeplex/models/public_id.py \
+  backend/cubeplex/models/conversation.py backend/cubeplex/models/__init__.py \
   backend/alembic/versions/
 git commit -m "$(cat <<'EOF'
 feat(models): add Topic, TopicParticipant tables and conversation.topic_id FK
@@ -208,12 +208,12 @@ EOF
 ### Task 2: TopicRepository
 
 **Files:**
-- Create: `backend/cubebox/repositories/topic.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/topic.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Create TopicRepository**
 
-Create `backend/cubebox/repositories/topic.py`:
+Create `backend/cubeplex/repositories/topic.py`:
 
 ```python
 """Topic repository — scoped by workspace, filtered by participant membership."""
@@ -223,8 +223,8 @@ from typing import Any, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.topic import Topic, TopicParticipant
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.topic import Topic, TopicParticipant
+from cubeplex.repositories.base import ScopedRepository
 
 
 class TopicRepository(ScopedRepository[Topic]):
@@ -326,7 +326,7 @@ class TopicRepository(ScopedRepository[Topic]):
                 f"(current: {current_count})"
             )
 
-        from cubebox.repositories import MembershipRepository
+        from cubeplex.repositories import MembershipRepository
 
         membership_repo = MembershipRepository(self.session)
         for uid in to_add:
@@ -432,10 +432,10 @@ class TopicRepository(ScopedRepository[Topic]):
 
 - [ ] **Step 2: Export TopicRepository**
 
-In `backend/cubebox/repositories/__init__.py`, add import:
+In `backend/cubeplex/repositories/__init__.py`, add import:
 
 ```python
-from cubebox.repositories.topic import TopicRepository
+from cubeplex.repositories.topic import TopicRepository
 ```
 
 Add `"TopicRepository"` to `__all__` list.
@@ -443,7 +443,7 @@ Add `"TopicRepository"` to `__all__` list.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/topic.py backend/cubebox/repositories/__init__.py
+git add backend/cubeplex/repositories/topic.py backend/cubeplex/repositories/__init__.py
 git commit -m "$(cat <<'EOF'
 feat(repo): add TopicRepository with participant management
 
@@ -461,14 +461,14 @@ EOF
 **Goal:** Add nullable `topic_id` to `UserSandbox` plus a second partial unique index so dedicated topic sandboxes can coexist with personal sandboxes without colliding on the existing `uq_user_sandbox_active(org_id, workspace_id, user_id)` key. Without this task, "dedicated" sandbox mode (Task 6 Step 6) silently collapses to "creator" mode and group-chat files leak into the topic creator's personal `/workspace`.
 
 **Files:**
-- Modify: `backend/cubebox/models/user_sandbox.py`
-- Modify: `backend/cubebox/repositories/user_sandbox.py`
-- Modify: `backend/cubebox/sandbox/manager.py` (LazySandbox + SandboxManager)
+- Modify: `backend/cubeplex/models/user_sandbox.py`
+- Modify: `backend/cubeplex/repositories/user_sandbox.py`
+- Modify: `backend/cubeplex/sandbox/manager.py` (LazySandbox + SandboxManager)
 - Create: alembic migration via `--autogenerate`
 
 - [ ] **Step 1: Add `topic_id` column + second partial unique index**
 
-In `backend/cubebox/models/user_sandbox.py`, add to fields. **Use `sa_column` to specify `ondelete`** — SQLModel's `foreign_key=` shorthand does NOT accept ondelete, and the default RESTRICT means any topic with a once-provisioned sandbox row becomes permanently undeletable:
+In `backend/cubeplex/models/user_sandbox.py`, add to fields. **Use `sa_column` to specify `ondelete`** — SQLModel's `foreign_key=` shorthand does NOT accept ondelete, and the default RESTRICT means any topic with a once-provisioned sandbox row becomes permanently undeletable:
 
 ```python
     topic_id: str | None = Field(
@@ -525,7 +525,7 @@ After this, the two partial unique indexes carve the active rows into disjoint s
 
 - [ ] **Step 2: Add topic-keyed repo lookups + thread `topic_id` into `reserve()`**
 
-In `backend/cubebox/repositories/user_sandbox.py`:
+In `backend/cubeplex/repositories/user_sandbox.py`:
 
 ```python
 async def get_active_by_topic(self, topic_id: str) -> UserSandbox | None:
@@ -557,7 +557,7 @@ async def get_resumable_by_topic(self, topic_id: str) -> UserSandbox | None:
 
 - [ ] **Step 3: Thread `topic_id` through LazySandbox + SandboxManager via a single scope-aware lookup**
 
-In `backend/cubebox/repositories/user_sandbox.py`, add two methods that pick the correct lookup by scope. This avoids duplicating `if topic_id is not None: ... else: ...` at every callsite (6+ today, growing):
+In `backend/cubeplex/repositories/user_sandbox.py`, add two methods that pick the correct lookup by scope. This avoids duplicating `if topic_id is not None: ... else: ...` at every callsite (6+ today, growing):
 
 ```python
 async def get_active_for_scope(
@@ -575,13 +575,13 @@ async def get_resumable_for_scope(
     return await self.get_resumable_by_user(user_id)
 ```
 
-In `backend/cubebox/sandbox/manager.py`, add `topic_id: str | None = None` to `LazySandbox.__init__` and store it. The manager's `get_or_create_for(...)` (or equivalent entry point) gains a `topic_id` parameter, threaded into:
+In `backend/cubeplex/sandbox/manager.py`, add `topic_id: str | None = None` to `LazySandbox.__init__` and store it. The manager's `get_or_create_for(...)` (or equivalent entry point) gains a `topic_id` parameter, threaded into:
 
 1. Every lookup callsite — `repo.get_active_for_scope(user_id=..., topic_id=topic_id)` / `repo.get_resumable_for_scope(...)`. Audit: lines 335, 361, 395, 731 (and any other `_by_user` callsite — grep `_by_user` to confirm full set).
 2. The **race-loss poll** at lines 477 and 485. Today: when `reserve()` raises IntegrityError because another concurrent run won, the recovery polls `get_active_by_user(user_id)` to attach to the winner. In topic mode the winner row may have a different `user_id` (the other participant), and only its `topic_id` matches. Replace with `get_active_for_scope(user_id=..., topic_id=topic_id)` so the loser correctly attaches to the topic's winner instead of timing out with `SandboxError`.
 3. The `reserve()` invocation — forward `topic_id` so the row is inserted with the correct partitioning key (Step 2 added the parameter on the repo method).
 
-**Additional callsite missed by the original audit:** `backend/cubebox/api/routes/v1/ws_sandbox.py:53` — the `GET /ws/{ws}/sandbox` endpoint feeding the frontend sandbox panel (files / terminal / browser-live-view) still calls `repo.get_active_by_user(ctx.user.id)`. When a participant has an open topic conversation, the panel must show the *topic's* sandbox, not their personal one. Either:
+**Additional callsite missed by the original audit:** `backend/cubeplex/api/routes/v1/ws_sandbox.py:53` — the `GET /ws/{ws}/sandbox` endpoint feeding the frontend sandbox panel (files / terminal / browser-live-view) still calls `repo.get_active_by_user(ctx.user.id)`. When a participant has an open topic conversation, the panel must show the *topic's* sandbox, not their personal one. Either:
 
 - Add a `?topic_id=` query parameter to the route, default to the personal sandbox when absent, and have the frontend pass the current conversation's `topic_id` when rendering the panel; or
 - Have the frontend call a new sibling route `GET /ws/{ws}/topics/{topic_id}/sandbox` for topic conversations.
@@ -647,7 +647,7 @@ DROP + CREATE on the same partial unique runs inside the migration's single tran
 
 ```bash
 cd backend && uv run alembic upgrade head
-uv run python -m cubebox.scripts.dev.check_sandbox_invariants  # if exists, else psql query
+uv run python -m cubeplex.scripts.dev.check_sandbox_invariants  # if exists, else psql query
 ```
 
 Expected: existing `user_sandboxes` rows still satisfy the new partial unique on personal sandboxes (because they all have `topic_id IS NULL`), no FK violation.
@@ -690,9 +690,9 @@ This is the gate that proves the spec's "dedicated mode = isolated environment" 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/models/user_sandbox.py \
-  backend/cubebox/repositories/user_sandbox.py \
-  backend/cubebox/sandbox/manager.py \
+git add backend/cubeplex/models/user_sandbox.py \
+  backend/cubeplex/repositories/user_sandbox.py \
+  backend/cubeplex/sandbox/manager.py \
   backend/alembic/versions/*_user_sandbox_topic_id_partial_unique_split.py \
   backend/tests/unit/repositories/test_user_sandbox_repository.py
 git commit -m "$(cat <<'EOF'
@@ -713,7 +713,7 @@ EOF
 ### Task 3: ConversationRepository access control change
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py:32-40`
+- Modify: `backend/cubeplex/repositories/conversation.py:32-40`
 
 This is the single most critical change — it gates visibility for all conversation queries.
 
@@ -823,7 +823,7 @@ Expected: FAIL — topic routes don't exist yet (404 on POST /topics), or conver
 
 - [ ] **Step 3: Modify `_scoped_select` in ConversationRepository**
 
-In `backend/cubebox/repositories/conversation.py`, replace lines 32-40:
+In `backend/cubeplex/repositories/conversation.py`, replace lines 32-40:
 
 ```python
 def _scoped_select(self) -> Any:
@@ -843,7 +843,7 @@ with:
 def _scoped_select(self) -> Any:
     from sqlalchemy import and_, or_
 
-    from cubebox.models.topic import TopicParticipant
+    from cubeplex.models.topic import TopicParticipant
 
     return (
         super()
@@ -886,7 +886,7 @@ Also fix `update_title_if_current` (around line 109) — it hardcodes `creator_u
 
 ```python
 from sqlalchemy import or_, and_, select
-from cubebox.models.topic import TopicParticipant
+from cubeplex.models.topic import TopicParticipant
 
 stmt = (
     update(Conversation)
@@ -912,7 +912,7 @@ Mirrors the `_scoped_select` OR logic so any participant can trigger auto-title 
 
 - [ ] **Step 3c: Add topic_id to existing _serialize_conversation in conversations.py**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, find `_serialize_conversation` (around line 64). Add `"topic_id": conv.topic_id` to the returned dict. Without this, the main conversation list endpoint omits `topic_id` and the frontend cannot group conversations under topics.
+In `backend/cubeplex/api/routes/v1/conversations.py`, find `_serialize_conversation` (around line 64). Add `"topic_id": conv.topic_id` to the returned dict. Without this, the main conversation list endpoint omits `topic_id` and the frontend cannot group conversations under topics.
 
 - [ ] **Step 3d: Add topic-owner-only enforcement on conversation PATCH/DELETE**
 
@@ -959,7 +959,7 @@ async def _require_topic_owner_if_topic(
 Extend the OR clause's topic branch to require an unarchived topic. Reuse the existing `Topic` import in the same file:
 
 ```python
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.models.topic import Topic, TopicParticipant
 
 # topic-conversation branch becomes:
 and_(
@@ -986,7 +986,7 @@ Expected: all existing tests PASS — the OR branch only activates when `topic_i
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/repositories/conversation.py backend/tests/e2e/test_topics.py
+git add backend/cubeplex/repositories/conversation.py backend/tests/e2e/test_topics.py
 git commit -m "$(cat <<'EOF'
 feat(repo): extend conversation scoping for topic participants
 
@@ -1002,14 +1002,14 @@ EOF
 ### Task 4: Topic API routes + schemas
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/ws_topics.py`
-- Create: `backend/cubebox/api/routes/v1/ws_topics.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/schemas/ws_topics.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_topics.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Create request/response schemas**
 
-Create `backend/cubebox/api/schemas/ws_topics.py`:
+Create `backend/cubeplex/api/schemas/ws_topics.py`:
 
 ```python
 """Topic API schemas."""
@@ -1047,7 +1047,7 @@ class TopicConversationCreateRequest(BaseModel):
 
 - [ ] **Step 2: Create topic routes**
 
-Create `backend/cubebox/api/routes/v1/ws_topics.py`:
+Create `backend/cubeplex/api/routes/v1/ws_topics.py`:
 
 ```python
 """Workspace topic routes — CRUD, participants, upgrade, topic-scoped conversations."""
@@ -1059,10 +1059,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db.session import get_session
-from cubebox.api.schemas.ws_topics import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db.session import get_session
+from cubeplex.api.schemas.ws_topics import (
     TopicConversationCreateRequest,
     TopicCreateRequest,
     TopicParticipantAddRequest,
@@ -1070,9 +1070,9 @@ from cubebox.api.schemas.ws_topics import (
     TopicPatchRequest,
     UpgradeToTopicRequest,
 )
-from cubebox.models.conversation import Conversation
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.topic import TopicRepository
+from cubeplex.models.conversation import Conversation
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.topic import TopicRepository
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/topics",
@@ -1103,7 +1103,7 @@ def _conv_repo(
 
 
 def _serialize_topic(topic: Any) -> dict[str, Any]:
-    from cubebox.utils.time import utc_isoformat
+    from cubeplex.utils.time import utc_isoformat
 
     return {
         "id": topic.id,
@@ -1118,7 +1118,7 @@ def _serialize_topic(topic: Any) -> dict[str, Any]:
 
 
 def _serialize_participant(p: Any) -> dict[str, Any]:
-    from cubebox.utils.time import utc_isoformat
+    from cubeplex.utils.time import utc_isoformat
 
     return {
         "id": p.id,
@@ -1130,7 +1130,7 @@ def _serialize_participant(p: Any) -> dict[str, Any]:
 
 
 def _serialize_conversation(conv: Any) -> dict[str, Any]:
-    from cubebox.utils.time import utc_isoformat
+    from cubeplex.utils.time import utc_isoformat
 
     return {
         "id": conv.id,
@@ -1460,7 +1460,7 @@ async def upgrade_to_topic(
 
 - [ ] **Step 3: Add `list_by_topic` to ConversationRepository**
 
-In `backend/cubebox/repositories/conversation.py`, add a new method after `list_all`:
+In `backend/cubeplex/repositories/conversation.py`, add a new method after `list_all`:
 
 ```python
 async def list_by_topic(self, topic_id: str) -> list[Conversation]:
@@ -1475,7 +1475,7 @@ async def list_by_topic(self, topic_id: str) -> list[Conversation]:
 
 - [ ] **Step 4: Register routes in `__init__.py` and `app.py`**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add to the import block:
+In `backend/cubeplex/api/routes/v1/__init__.py`, add to the import block:
 
 ```python
 ws_topics,
@@ -1483,7 +1483,7 @@ ws_topics,
 
 And add `"ws_topics"` to `__all__`.
 
-In `backend/cubebox/api/app.py`, after the `ws_im` block (around line 546), add:
+In `backend/cubeplex/api/app.py`, after the `ws_im` block (around line 546), add:
 
 ```python
 app.include_router(ws_topics.router, prefix="/api/v1")
@@ -1499,11 +1499,11 @@ Expected: all three access control tests PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_topics.py \
-  backend/cubebox/api/routes/v1/ws_topics.py \
-  backend/cubebox/api/routes/v1/__init__.py \
-  backend/cubebox/api/app.py \
-  backend/cubebox/repositories/conversation.py
+git add backend/cubeplex/api/schemas/ws_topics.py \
+  backend/cubeplex/api/routes/v1/ws_topics.py \
+  backend/cubeplex/api/routes/v1/__init__.py \
+  backend/cubeplex/api/app.py \
+  backend/cubeplex/repositories/conversation.py
 git commit -m "$(cat <<'EOF'
 feat(api): add topic CRUD, participant management, and upgrade routes
 
@@ -1820,13 +1820,13 @@ EOF
 ### Task 6: RunContext extension + sender attribution + memory isolation
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:37-43` (RunContext)
-- Modify: `backend/cubebox/streams/run_manager.py:1522-1553` (message building + memory)
-- Modify: `backend/cubebox/api/routes/v1/conversations.py:891` (RunContext construction)
+- Modify: `backend/cubeplex/streams/run_manager.py:37-43` (RunContext)
+- Modify: `backend/cubeplex/streams/run_manager.py:1522-1553` (message building + memory)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py:891` (RunContext construction)
 
 - [ ] **Step 1: Extend RunContext**
 
-In `backend/cubebox/streams/run_manager.py`, replace lines 37-43:
+In `backend/cubeplex/streams/run_manager.py`, replace lines 37-43:
 
 ```python
 @dataclass(slots=True)
@@ -1860,7 +1860,7 @@ class RunContext:
 
 - [ ] **Step 2: Populate RunContext in send_message**
 
-In `backend/cubebox/api/routes/v1/conversations.py`, find the `run_ctx = RunContext(...)` block around line 891. Replace:
+In `backend/cubeplex/api/routes/v1/conversations.py`, find the `run_ctx = RunContext(...)` block around line 891. Replace:
 
 ```python
     run_ctx = RunContext(
@@ -1882,7 +1882,7 @@ with:
     topic_creator_user_id: str | None = None
 
     if topic_id is not None:
-        from cubebox.repositories.topic import TopicRepository
+        from cubeplex.repositories.topic import TopicRepository
 
         async with async_session_maker() as topic_session:
             topic_repo = TopicRepository(
@@ -1919,7 +1919,7 @@ Note: `ctx.user` should have `display_name` or `email`. Check the actual User mo
 
 - [ ] **Step 3: Add sender metadata on user message (no content mutation)**
 
-Sender attribution is rendered at cubepi's provider boundary from message metadata (see cubepi PR + pin bump referenced in the commit history for this branch). Cubebox only writes the metadata fields; cubepi templates the visible prefix when sending to the model. This altitude lets us:
+Sender attribution is rendered at cubepi's provider boundary from message metadata (see cubepi PR + pin bump referenced in the commit history for this branch). Cubeplex only writes the metadata fields; cubepi templates the visible prefix when sending to the model. This altitude lets us:
 
 - Survive name changes (the template re-renders from current `display_name` at prompt time, not from a baked-in string at write time)
 - Handle attachment-only messages (empty `content` stays empty; template omits the prefix when content is empty)
@@ -1949,7 +1949,7 @@ Replace with:
             )
 ```
 
-Cubebox no longer concatenates `[Name]: ` into `content`. The cubepi-side template reads `metadata.sender_display_name` and renders the prefix into the prompt at provider call time.
+Cubeplex no longer concatenates `[Name]: ` into `content`. The cubepi-side template reads `metadata.sender_display_name` and renders the prefix into the prompt at provider call time.
 
 - [ ] **Step 3b: Bump `Topic.last_activity_at` on message insert**
 
@@ -1957,7 +1957,7 @@ After the user message is persisted (around the same block in `run_manager.py`),
 
 ```python
             if ctx.is_group_chat and ctx.topic_id is not None:
-                from cubebox.repositories.topic import TopicRepository
+                from cubeplex.repositories.topic import TopicRepository
 
                 async with async_session_maker() as bump_session:
                     bump_repo = TopicRepository(
@@ -2018,7 +2018,7 @@ Replace with:
 ```python
     steer_metadata: dict[str, Any] = {}
     if conversation.topic_id is not None:
-        from cubebox.repositories.topic import TopicRepository
+        from cubeplex.repositories.topic import TopicRepository
 
         async with async_session_maker() as steer_session:
             topic_repo = TopicRepository(
@@ -2135,10 +2135,10 @@ Apply the helper in `send_message`, `steer_active_run`, `submit_sandbox_confirm`
 
 `RunContext(...)` is also constructed in four non-`conversations.py` places that drive runs:
 
-- `backend/cubebox/im/resume.py` — IM-message-driven resume
-- `backend/cubebox/im/worker.py` — IM run worker
-- `backend/cubebox/triggers/pipeline.py` — webhook/trigger pipeline
-- `backend/cubebox/schedules/dispatch.py` — scheduled task dispatcher
+- `backend/cubeplex/im/resume.py` — IM-message-driven resume
+- `backend/cubeplex/im/worker.py` — IM run worker
+- `backend/cubeplex/triggers/pipeline.py` — webhook/trigger pipeline
+- `backend/cubeplex/schedules/dispatch.py` — scheduled task dispatcher
 
 **Two-layer fix.**
 
@@ -2184,8 +2184,8 @@ Expected: all existing tests PASS — group chat branches don't activate for `to
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py \
-  backend/cubebox/api/routes/v1/conversations.py
+git add backend/cubeplex/streams/run_manager.py \
+  backend/cubeplex/api/routes/v1/conversations.py
 git commit -m "$(cat <<'EOF'
 feat(runtime): RunContext topic fields, sender attribution, memory isolation, sandbox resolution
 
@@ -2381,7 +2381,7 @@ export * from './topics'
 
 - [ ] **Step 6: Build core package**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 
 Expected: build succeeds with no type errors.
 
@@ -2528,7 +2528,7 @@ export { useTopicStore, type TopicStore, type TopicWithParticipants } from './to
 
 - [ ] **Step 3: Build core package**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 
 Expected: build succeeds.
 
@@ -2568,7 +2568,7 @@ Follow the existing `ConversationRow` pattern in `Sidebar.tsx` for styling — m
 
 In `frontend/packages/web/components/layout/Sidebar.tsx`:
 
-1. Import `useTopicStore` from `@cubebox/core` and `TopicNode` from `./TopicNode`.
+1. Import `useTopicStore` from `@cubeplex/core` and `TopicNode` from `./TopicNode`.
 2. In the sidebar body (where conversations are rendered in a scroll area), fetch topics alongside conversations.
 3. Build a mixed list: group conversations by `topic_id`. Conversations with `topic_id === undefined` render as flat rows. Topics render as `TopicNode` with their grouped conversations.
 4. Sort the mixed list by most recent `updated_at` across the group.
@@ -2949,7 +2949,7 @@ EOF
 
 - [ ] **Step 1: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/ --strict`
+Run: `cd backend && uv run mypy cubeplex/ --strict`
 
 Expected: no new errors.
 
@@ -2961,7 +2961,7 @@ Expected: all tests pass, including existing conversation privacy tests.
 
 - [ ] **Step 3: Run frontend type check**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter web typecheck`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter web typecheck`
 
 Expected: no type errors.
 
@@ -2979,7 +2979,7 @@ Only if there were fixes needed. Then the branch is ready for PR.
 
 These were flagged in round-2 review as cross-cutting impacts of group chat that the v1 spec doesn't cover. Each becomes its own design issue after this PR ships; do **not** attempt them inside the group-chat PR.
 
-1. **User-deletion sweep ignores topic conversations.** `backend/cubebox/auth/...` (sweep code paths around the previously-flagged lines) DELETEs `conversations WHERE creator_user_id = deleted_user.id`. If the deleted user created a topic, every remaining participant loses access — `TopicParticipant` rows point at orphaned conversation rows and GET returns 404. Follow-up: either rewrite the sweep to skip rows with `topic_id IS NOT NULL` and run topic-succession on the affected topics, or hard-block deletion of users who own active topics.
+1. **User-deletion sweep ignores topic conversations.** `backend/cubeplex/auth/...` (sweep code paths around the previously-flagged lines) DELETEs `conversations WHERE creator_user_id = deleted_user.id`. If the deleted user created a topic, every remaining participant loses access — `TopicParticipant` rows point at orphaned conversation rows and GET returns 404. Follow-up: either rewrite the sweep to skip rows with `topic_id IS NOT NULL` and run topic-succession on the affected topics, or hard-block deletion of users who own active topics.
 
 2. **Conversation search filters by chunk writer.** `services/conversation_search/...` (vector and pg_bigm / pgroonga lexical legs) ANDs `cc.creator_user_id = :user_id` where `creator_user_id` is the chunk WRITER, not the conversation creator. In a group chat, search results hide every chunk written by other participants. Follow-up: drop the chunk-writer filter for topic conversations and rely on the conversation-level `_scoped_select` access check, or reshape search to walk the participant set.
 
@@ -2987,6 +2987,6 @@ These were flagged in round-2 review as cross-cutting impacts of group chat that
 
 4. **HITL responder identity in stored answer metadata.** When any participant answers an AskUser/SandboxConfirm in a group chat, the message metadata should record `responded_by_user_id`. The plan resumes the run correctly but does not persist who answered; frontend cannot show "Alice responded: …". Follow-up: extend the HITL answer schema with `responded_by_user_id` and surface it in the message bubble.
 
-5. **Sender attribution at the right altitude — handled by a cubepi PR.** Sender attribution is now implemented as `metadata.sender_display_name` on the user message and templated at cubepi's provider boundary (separate cubepi PR + pin bump). Cubebox no longer mutates the user message `content` to inject `[Name]:`. See Task 6 Step 3 for the cubebox-side change after the pin bump.
+5. **Sender attribution at the right altitude — handled by a cubepi PR.** Sender attribution is now implemented as `metadata.sender_display_name` on the user message and templated at cubepi's provider boundary (separate cubepi PR + pin bump). Cubeplex no longer mutates the user message `content` to inject `[Name]:`. See Task 6 Step 3 for the cubeplex-side change after the pin bump.
 
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { CostSummaryResponse, TimeseriesResponse } from '@cubebox/core'
+import type { CostSummaryResponse, TimeseriesResponse } from '@cubeplex/core'
 import { RateChart, type RateSeries } from './RateChart'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
-from cubebox.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.sandbox import SandboxMiddleware
 
 
 class _ToolCall:

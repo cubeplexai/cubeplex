@@ -1,4 +1,4 @@
-"""Tests for the cubebox error code mapper.
+"""Tests for the cubeplex error code mapper.
 
 Detection (regex patterns, status-code routing, the Volcano-opaque
 InvalidParameter heuristic) is tested upstream in cubepi. This file just
@@ -16,7 +16,7 @@ from cubepi.errors import (
     RateLimited,
 )
 
-from cubebox.errors import ErrorCode, classify_exception, english_fallback
+from cubeplex.errors import ErrorCode, classify_exception, english_fallback
 
 
 def test_context_length_exceeded_maps_with_token_params() -> None:

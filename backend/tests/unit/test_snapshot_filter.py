@@ -1,6 +1,6 @@
 """Tests for snapshot message filtering."""
 
-from cubebox.services.conversation_sharing import filter_messages_for_snapshot
+from cubeplex.services.conversation_sharing import filter_messages_for_snapshot
 
 
 def _user_msg(text: str, **metadata: object) -> dict[str, object]:

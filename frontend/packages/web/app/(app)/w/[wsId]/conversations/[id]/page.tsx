@@ -7,15 +7,16 @@ import {
   type Conversation,
   useArtifactStore,
   useConversationStore,
+  useMessageStore,
   usePanelStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
+import { thinkingFromReasoning } from '@/lib/reasoning-control'
 import {
   consumeLocallyCreatedConversation,
   getPresetSelectionStore,
 } from '@/lib/stores/preset-selection'
-import type { ThinkingLevel } from '@/lib/types/presets'
 
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
@@ -27,6 +28,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const t = useTranslations('conversationPage')
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
+  const setActiveTopic = useConversationStore((s) => s.setActiveTopic)
   const conversations = useConversationStore((s) => s.conversations)
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
   const focusArtifactId = useSearchParams().get('artifact')
@@ -49,6 +51,10 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   useEffect(() => {
     usePanelStore.getState().close()
     setActive(conversationId)
+    // Clear the previous conversation's topic anchor until this one's
+    // metadata resolves below — avoids the sidebar auto-expanding the wrong
+    // topic during a switch.
+    setActiveTopic(null)
     // Snapshot the composer selection at open time. A late response (the user
     // switched conversations before this fetch resolved) is dropped via
     // `cancelled`; an edit the user made while the fetch was in flight is
@@ -57,6 +63,12 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     let cancelled = false
     const opened = getPresetSelectionStore(wsId).getState()
     const before = { modelKey: opened.modelKey, thinking: opened.thinking }
+    // Kick off all three initial loads in parallel — the conversation
+    // metadata fetch, the artifacts list, and the messages bootstrap.
+    // Previously the bootstrap (the largest payload by far) didn't start
+    // until <MessageList> mounted in its own useEffect.
+    void useMessageStore.getState().loadMessages(client, conversationId)
+    loadArtifacts(client, conversationId)
     ;(async () => {
       const res = await client.get(`/api/v1/conversations/${conversationId}`)
       if (cancelled) return
@@ -72,11 +84,14 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
         try {
           const convo = (await res.json()) as Conversation
           if (cancelled) return
+          // Anchor the sidebar to this conversation's topic so it can
+          // auto-expand even when the conversation is outside the flat list.
+          setActiveTopic(convo.topic_id ?? null)
           if (!consumeLocallyCreatedConversation(conversationId)) {
             const store = getPresetSelectionStore(wsId).getState()
             if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
               store.setModelKey(convo.model_key ?? null)
-              store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+              store.setThinking(thinkingFromReasoning(convo.reasoning))
             }
           }
         } catch {
@@ -86,11 +101,10 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
         }
       } else setStatus('notfound')
     })()
-    loadArtifacts(client, conversationId)
     return () => {
       cancelled = true
     }
-  }, [conversationId, client, wsId, setActive, loadArtifacts])
+  }, [conversationId, client, wsId, setActive, setActiveTopic, loadArtifacts])
 
   // Arriving from the artifacts library with `?artifact=<id>` auto-opens that
   // artifact's preview. Runs after the reset effect above (declaration order),

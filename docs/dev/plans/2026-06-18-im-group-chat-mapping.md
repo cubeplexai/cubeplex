@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bridge IM group chats to cubebox topics via per-channel binding configuration, so multiple users in a Slack/Feishu/Discord channel share a single topic with thread-scoped conversations.
+**Goal:** Bridge IM group chats to cubeplex topics via per-channel binding configuration, so multiple users in a Slack/Feishu/Discord channel share a single topic with thread-scoped conversations.
 
 **Architecture:** A new `im_channel_bindings` table stores admin-configured per-channel mode (`isolated`/`shared`). In shared mode, inbound events use channel/thread scope keys instead of per-user, and lazily create topics + conversations + participants. Worker/resume guards are relaxed for IM-bound topic conversations.
 
@@ -14,20 +14,20 @@
 
 | Action | File | Responsibility |
 |---|---|---|
-| Create | `cubebox/models/im_channel_binding.py` | `IMChannelBinding` SQLModel + table definition |
-| Modify | `cubebox/models/public_id.py` | Add `PREFIX_IM_CHANNEL_BINDING = "icb"` |
+| Create | `cubeplex/models/im_channel_binding.py` | `IMChannelBinding` SQLModel + table definition |
+| Modify | `cubeplex/models/public_id.py` | Add `PREFIX_IM_CHANNEL_BINDING = "icb"` |
 | Create | `alembic/versions/XXXX_add_im_channel_bindings.py` | Migration for new table |
-| Create | `cubebox/repositories/im_channel_binding.py` | Binding CRUD + lookup helpers |
-| Modify | `cubebox/im/types.py` | Add `BindingMode` literals, no new scope helpers needed |
-| Modify | `cubebox/im/slack/connector.py` | Accept binding mode, switch scope key strategy |
-| Modify | `cubebox/im/feishu/connector.py` | Accept binding mode, switch scope key strategy |
-| Modify | `cubebox/im/discord/connector.py` | Accept binding mode, switch scope key strategy |
-| Modify | `cubebox/im/inbound.py` | Shared-mode topic/conversation/participant creation |
-| Modify | `cubebox/im/worker.py` | Relax topic/group-chat guard for IM shared mode |
-| Modify | `cubebox/im/resume.py` | Relax topic/group-chat guard for IM shared mode |
-| Modify | `cubebox/im/outbound.py` | Skip `awaiting_responder` gate in shared mode |
-| Create | `cubebox/api/schemas/im_channel_binding.py` | Pydantic schemas for binding CRUD |
-| Modify | `cubebox/api/routes/v1/ws_im.py` | Channel binding CRUD routes |
+| Create | `cubeplex/repositories/im_channel_binding.py` | Binding CRUD + lookup helpers |
+| Modify | `cubeplex/im/types.py` | Add `BindingMode` literals, no new scope helpers needed |
+| Modify | `cubeplex/im/slack/connector.py` | Accept binding mode, switch scope key strategy |
+| Modify | `cubeplex/im/feishu/connector.py` | Accept binding mode, switch scope key strategy |
+| Modify | `cubeplex/im/discord/connector.py` | Accept binding mode, switch scope key strategy |
+| Modify | `cubeplex/im/inbound.py` | Shared-mode topic/conversation/participant creation |
+| Modify | `cubeplex/im/worker.py` | Relax topic/group-chat guard for IM shared mode |
+| Modify | `cubeplex/im/resume.py` | Relax topic/group-chat guard for IM shared mode |
+| Modify | `cubeplex/im/outbound.py` | Skip `awaiting_responder` gate in shared mode |
+| Create | `cubeplex/api/schemas/im_channel_binding.py` | Pydantic schemas for binding CRUD |
+| Modify | `cubeplex/api/routes/v1/ws_im.py` | Channel binding CRUD routes |
 | Create | `tests/e2e/test_im_channel_binding_crud.py` | E2E: binding API CRUD |
 | Create | `tests/e2e/test_im_shared_mode_ingest.py` | E2E: shared-mode inbound lifecycle |
 | Create | `tests/unit/test_im_scope_key_selection.py` | Unit: scope key selection logic |
@@ -37,12 +37,12 @@
 ### Task 1: Model + Public ID Prefix
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py:50` (after `PREFIX_IM_RUN_QUEUE_ITEM`)
-- Create: `backend/cubebox/models/im_channel_binding.py`
+- Modify: `backend/cubeplex/models/public_id.py:50` (after `PREFIX_IM_RUN_QUEUE_ITEM`)
+- Create: `backend/cubeplex/models/im_channel_binding.py`
 
 - [ ] **Step 1: Add public ID prefix**
 
-In `cubebox/models/public_id.py`, add the new prefix constant after line 50 (`PREFIX_IM_RUN_QUEUE_ITEM`):
+In `cubeplex/models/public_id.py`, add the new prefix constant after line 50 (`PREFIX_IM_RUN_QUEUE_ITEM`):
 
 ```python
 PREFIX_IM_CHANNEL_BINDING: str = "icb"
@@ -50,7 +50,7 @@ PREFIX_IM_CHANNEL_BINDING: str = "icb"
 
 - [ ] **Step 2: Create the IMChannelBinding model**
 
-Create `cubebox/models/im_channel_binding.py`:
+Create `cubeplex/models/im_channel_binding.py`:
 
 ```python
 """IM channel binding: per-channel mapping mode configuration."""
@@ -61,11 +61,11 @@ from typing import ClassVar
 from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
-from cubebox.models.public_id import PREFIX_IM_CHANNEL_BINDING
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
+from cubeplex.models.public_id import PREFIX_IM_CHANNEL_BINDING
 
 
-class IMChannelBinding(CubeboxBase, OrgScopedMixin, table=True):
+class IMChannelBinding(CubeplexBase, OrgScopedMixin, table=True):
     """Admin-configured mapping for one (account, channel) pair.
 
     mode="isolated" preserves current per-user behavior.
@@ -103,10 +103,10 @@ class IMChannelBinding(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 3: Register the model in the models package**
 
-Check `cubebox/models/__init__.py` — if IM models are imported there for Alembic discovery, add:
+Check `cubeplex/models/__init__.py` — if IM models are imported there for Alembic discovery, add:
 
 ```python
-from cubebox.models.im_channel_binding import IMChannelBinding  # noqa: F401
+from cubeplex.models.im_channel_binding import IMChannelBinding  # noqa: F401
 ```
 
 - [ ] **Step 4: Generate the Alembic migration**
@@ -114,7 +114,7 @@ from cubebox.models.im_channel_binding import IMChannelBinding  # noqa: F401
 Run from `backend/`:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run alembic revision --autogenerate -m "add im_channel_bindings table"
 ```
 
@@ -123,14 +123,14 @@ Verify the generated migration creates the `im_channel_bindings` table with the 
 - [ ] **Step 5: Run the migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run alembic upgrade head
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/models/public_id.py cubebox/models/im_channel_binding.py cubebox/models/__init__.py alembic/versions/*im_channel_bindings*
+git add cubeplex/models/public_id.py cubeplex/models/im_channel_binding.py cubeplex/models/__init__.py alembic/versions/*im_channel_bindings*
 git commit -m "feat(im): add IMChannelBinding model and migration"
 ```
 
@@ -139,7 +139,7 @@ git commit -m "feat(im): add IMChannelBinding model and migration"
 ### Task 2: Channel Binding Repository
 
 **Files:**
-- Create: `backend/cubebox/repositories/im_channel_binding.py`
+- Create: `backend/cubeplex/repositories/im_channel_binding.py`
 
 - [ ] **Step 1: Write the E2E test for binding CRUD**
 
@@ -151,8 +151,8 @@ Create `backend/tests/e2e/test_im_channel_binding_crud.py`:
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.repositories.im_channel_binding import IMChannelBindingRepository
 
 
 @pytest.fixture
@@ -280,7 +280,7 @@ Note: The `im_account` fixture needs to be created (or adapted from existing IM 
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/test_im_channel_binding_crud.py -v
 ```
 
@@ -288,7 +288,7 @@ Expected: ImportError — `IMChannelBindingRepository` does not exist yet.
 
 - [ ] **Step 3: Implement the repository**
 
-Create `cubebox/repositories/im_channel_binding.py`:
+Create `cubeplex/repositories/im_channel_binding.py`:
 
 ```python
 """IM channel binding repository — CRUD + lookup for channel→mode mapping."""
@@ -301,8 +301,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.repositories.base import ScopedRepository
 
 
 class IMChannelBindingRepository(ScopedRepository[IMChannelBinding]):
@@ -417,7 +417,7 @@ class IMChannelBindingRepository(ScopedRepository[IMChannelBinding]):
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/test_im_channel_binding_crud.py -v
 ```
 
@@ -426,7 +426,7 @@ Expected: All 5 tests pass. If fixtures are missing (`db_session`, `test_org_id`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/repositories/im_channel_binding.py tests/e2e/test_im_channel_binding_crud.py
+git add cubeplex/repositories/im_channel_binding.py tests/e2e/test_im_channel_binding_crud.py
 git commit -m "feat(im): add IMChannelBinding repository with CRUD"
 ```
 
@@ -435,15 +435,15 @@ git commit -m "feat(im): add IMChannelBinding repository with CRUD"
 ### Task 3: Scope Key Selection in Connectors
 
 **Files:**
-- Modify: `backend/cubebox/im/types.py:17` (add type literals)
-- Modify: `backend/cubebox/im/slack/connector.py:57` (`parse_inbound`)
-- Modify: `backend/cubebox/im/feishu/connector.py:91` (`parse_inbound`)
-- Modify: `backend/cubebox/im/discord/connector.py:81` (`parse_inbound`)
+- Modify: `backend/cubeplex/im/types.py:17` (add type literals)
+- Modify: `backend/cubeplex/im/slack/connector.py:57` (`parse_inbound`)
+- Modify: `backend/cubeplex/im/feishu/connector.py:91` (`parse_inbound`)
+- Modify: `backend/cubeplex/im/discord/connector.py:81` (`parse_inbound`)
 - Create: `backend/tests/unit/test_im_scope_key_selection.py`
 
 - [ ] **Step 1: Add binding mode type to types.py**
 
-In `cubebox/im/types.py`, add after the imports (before line 17):
+In `cubeplex/im/types.py`, add after the imports (before line 17):
 
 ```python
 from typing import Literal
@@ -458,8 +458,8 @@ Create `backend/tests/unit/test_im_scope_key_selection.py`:
 ```python
 """Unit tests for scope key selection based on binding mode."""
 
-from cubebox.im.slack.connector import SlackConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.slack.connector import SlackConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _make_slack_event(
@@ -549,7 +549,7 @@ class TestSlackScopeKeySelection:
 - [ ] **Step 3: Run tests to verify they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/unit/test_im_scope_key_selection.py -v
 ```
 
@@ -557,11 +557,11 @@ Expected: FAIL — `parse_inbound` doesn't accept `binding_mode`.
 
 - [ ] **Step 4: Modify SlackConnector.parse_inbound**
 
-In `cubebox/im/slack/connector.py`:
+In `cubeplex/im/slack/connector.py`:
 
 1. Add import at the top:
 ```python
-from cubebox.im.types import (
+from cubeplex.im.types import (
     BindingMode,
     DM_SCOPE_KEY,
     InboundEvent,
@@ -629,11 +629,11 @@ if event_type == "app_mention":
 
 - [ ] **Step 5: Modify FeishuConnector.parse_inbound**
 
-In `cubebox/im/feishu/connector.py`:
+In `cubeplex/im/feishu/connector.py`:
 
 1. Add imports:
 ```python
-from cubebox.im.types import (
+from cubeplex.im.types import (
     BindingMode,
     DM_SCOPE_KEY,
     InboundEvent,
@@ -670,7 +670,7 @@ Note: Feishu doesn't have thread_ts-style threading in group chats (replies go t
 
 - [ ] **Step 6: Modify DiscordConnector.parse_inbound**
 
-In `cubebox/im/discord/connector.py`:
+In `cubeplex/im/discord/connector.py`:
 
 1. Add imports (add `BindingMode`, `make_channel_scope`, `make_thread_scope`).
 
@@ -686,7 +686,7 @@ def parse_inbound(
 - [ ] **Step 7: Run unit tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/unit/test_im_scope_key_selection.py -v
 ```
 
@@ -695,7 +695,7 @@ Expected: All 6 tests pass.
 - [ ] **Step 8: Run existing IM tests to verify no regression**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -k "im" -v --timeout=60
 ```
 
@@ -704,7 +704,7 @@ Expected: All existing tests pass (the default `binding_mode="isolated"` preserv
 - [ ] **Step 9: Commit**
 
 ```bash
-git add cubebox/im/types.py cubebox/im/slack/connector.py cubebox/im/feishu/connector.py cubebox/im/discord/connector.py tests/unit/test_im_scope_key_selection.py
+git add cubeplex/im/types.py cubeplex/im/slack/connector.py cubeplex/im/feishu/connector.py cubeplex/im/discord/connector.py tests/unit/test_im_scope_key_selection.py
 git commit -m "feat(im): scope key selection based on channel binding mode"
 ```
 
@@ -713,7 +713,7 @@ git commit -m "feat(im): scope key selection based on channel binding mode"
 ### Task 4: Shared-Mode Inbound — Topic, Conversation & Participant Lifecycle
 
 **Files:**
-- Modify: `backend/cubebox/im/inbound.py:72` (`ingest_inbound_event`)
+- Modify: `backend/cubeplex/im/inbound.py:72` (`ingest_inbound_event`)
 - Create: `backend/tests/e2e/test_im_shared_mode_ingest.py`
 
 This is the core task. `ingest_inbound_event` must:
@@ -733,13 +733,13 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.im.inbound import IngestResult, ingest_inbound_event
-from cubebox.im.types import InboundEvent, make_channel_scope, make_thread_scope
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.im.inbound import IngestResult, ingest_inbound_event
+from cubeplex.im.types import InboundEvent, make_channel_scope, make_thread_scope
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubeplex.models.topic import Topic, TopicParticipant
 
 
 @pytest.mark.asyncio
@@ -912,7 +912,7 @@ Note: The fixtures `shared_binding`, `shared_binding_with_topic`, `isolated_bind
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/test_im_shared_mode_ingest.py -v
 ```
 
@@ -920,14 +920,14 @@ Expected: FAIL — `ingest_inbound_event` doesn't handle shared mode yet.
 
 - [ ] **Step 3: Modify ingest_inbound_event**
 
-In `cubebox/im/inbound.py`, the key changes:
+In `cubeplex/im/inbound.py`, the key changes:
 
 1. Add imports at the top:
 ```python
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.topic import Topic, TopicParticipant
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.models.topic import Topic, TopicParticipant
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.repositories.im_channel_binding import IMChannelBindingRepository
 ```
 
 2. After the identity resolution block (after line 145), add the binding lookup and shared-mode logic:
@@ -1073,7 +1073,7 @@ from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
 - [ ] **Step 4: Run E2E tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/test_im_shared_mode_ingest.py -v
 ```
 
@@ -1082,7 +1082,7 @@ Expected: All 4 tests pass.
 - [ ] **Step 5: Run existing IM inbound tests to verify no regression**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/ -k "im" -v --timeout=60
 ```
 
@@ -1091,7 +1091,7 @@ Expected: All pass (isolated-mode paths unchanged because `binding` is None for 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/im/inbound.py tests/e2e/test_im_shared_mode_ingest.py
+git add cubeplex/im/inbound.py tests/e2e/test_im_shared_mode_ingest.py
 git commit -m "feat(im): shared-mode topic/conversation lifecycle in ingest"
 ```
 
@@ -1100,7 +1100,7 @@ git commit -m "feat(im): shared-mode topic/conversation lifecycle in ingest"
 ### Task 5: Worker Guard Relaxation
 
 **Files:**
-- Modify: `backend/cubebox/im/worker.py:104-129`
+- Modify: `backend/cubeplex/im/worker.py:104-129`
 
 - [ ] **Step 1: Understand the current guard**
 
@@ -1111,7 +1111,7 @@ Lines 104-129 of `worker.py` refuse to dispatch runs where the conversation has 
 Replace the guard block (lines 104-129) with:
 
 ```python
-        from cubebox.models.conversation import Conversation
+        from cubeplex.models.conversation import Conversation
 
         conv_row = (
             await session.execute(
@@ -1122,7 +1122,7 @@ Replace the guard block (lines 104-129) with:
         ).scalar_one_or_none()
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):
             # Check if this is an IM-bound shared-mode topic — those are allowed
-            from cubebox.models.im_channel_binding import IMChannelBinding
+            from cubeplex.models.im_channel_binding import IMChannelBinding
 
             im_bound = False
             if conv_row.topic_id is not None:
@@ -1150,7 +1150,7 @@ Replace the guard block (lines 104-129) with:
 - [ ] **Step 3: Run existing IM tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -k "im" -v --timeout=60
 ```
 
@@ -1159,7 +1159,7 @@ Expected: All pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/im/worker.py
+git add cubeplex/im/worker.py
 git commit -m "feat(im): relax worker guard for shared-mode IM topic conversations"
 ```
 
@@ -1168,7 +1168,7 @@ git commit -m "feat(im): relax worker guard for shared-mode IM topic conversatio
 ### Task 6: Resume Guard Relaxation
 
 **Files:**
-- Modify: `backend/cubebox/im/resume.py:101-109`
+- Modify: `backend/cubeplex/im/resume.py:101-109`
 
 - [ ] **Step 1: Modify the resume guard**
 
@@ -1177,8 +1177,8 @@ Replace the guard block at lines 101-109 with the same IM-binding check pattern:
 ```python
     if topic_id is not None or is_group_chat:
         from sqlalchemy import select
-        from cubebox.db.engine import async_session_maker as _sm
-        from cubebox.models.im_channel_binding import IMChannelBinding
+        from cubeplex.db.engine import async_session_maker as _sm
+        from cubeplex.models.im_channel_binding import IMChannelBinding
 
         im_bound = False
         if topic_id is not None:
@@ -1204,7 +1204,7 @@ Replace the guard block at lines 101-109 with the same IM-binding check pattern:
 - [ ] **Step 2: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -k "im" -v --timeout=60
 ```
 
@@ -1213,7 +1213,7 @@ Expected: All pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/im/resume.py
+git add cubeplex/im/resume.py
 git commit -m "feat(im): relax resume guard for shared-mode IM topic conversations"
 ```
 
@@ -1222,7 +1222,7 @@ git commit -m "feat(im): relax resume guard for shared-mode IM topic conversatio
 ### Task 7: HITL — Skip awaiting_responder in Shared Mode
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py:476-525` (`maybe_register_awaiting_responder`)
+- Modify: `backend/cubeplex/im/outbound.py:476-525` (`maybe_register_awaiting_responder`)
 
 The `awaiting_responder` Redis gate locks HITL to one `open_id`. In shared mode, any channel participant should be able to answer.
 
@@ -1261,14 +1261,14 @@ Find where `OutboundRunTailer` is instantiated for IM runs (this is in the gatew
 
 Search for the tailer construction site:
 ```bash
-grep -rn "OutboundRunTailer(" cubebox/im/
+grep -rn "OutboundRunTailer(" cubeplex/im/
 ```
 
 At each construction site, add logic to determine `shared_mode`:
 
 ```python
 # Determine if this run is in shared mode
-from cubebox.models.im_channel_binding import IMChannelBinding
+from cubeplex.models.im_channel_binding import IMChannelBinding
 binding = (
     await session.execute(
         select(IMChannelBinding).where(
@@ -1286,7 +1286,7 @@ Pass `shared_mode=shared_mode` to the `OutboundRunTailer` constructor.
 - [ ] **Step 4: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -k "im" -v --timeout=60
 ```
 
@@ -1295,7 +1295,7 @@ Expected: All pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/im/outbound.py
+git add cubeplex/im/outbound.py
 git commit -m "feat(im): skip awaiting_responder gate in shared mode"
 ```
 
@@ -1304,12 +1304,12 @@ git commit -m "feat(im): skip awaiting_responder gate in shared mode"
 ### Task 8: Channel Binding API Routes
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/im_channel_binding.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_im.py`
+- Create: `backend/cubeplex/api/schemas/im_channel_binding.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_im.py`
 
 - [ ] **Step 1: Create Pydantic schemas**
 
-Create `cubebox/api/schemas/im_channel_binding.py`:
+Create `cubeplex/api/schemas/im_channel_binding.py`:
 
 ```python
 """Pydantic schemas for IM channel binding CRUD."""
@@ -1352,18 +1352,18 @@ class ChannelBindingListOut(BaseModel):
 
 - [ ] **Step 2: Add CRUD routes to ws_im.py**
 
-In `cubebox/api/routes/v1/ws_im.py`, add the channel binding routes:
+In `cubeplex/api/routes/v1/ws_im.py`, add the channel binding routes:
 
 ```python
-from cubebox.api.schemas.im_channel_binding import (
+from cubeplex.api.schemas.im_channel_binding import (
     ChannelBindingCreateIn,
     ChannelBindingListOut,
     ChannelBindingOut,
     ChannelBindingUpdateIn,
 )
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
-from cubebox.utils.time import utc_isoformat
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.repositories.im_channel_binding import IMChannelBindingRepository
+from cubeplex.utils.time import utc_isoformat
 
 
 def _binding_to_out(b: IMChannelBinding) -> ChannelBindingOut:
@@ -1489,8 +1489,8 @@ async def delete_channel_binding(
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
-uv run mypy cubebox/api/routes/v1/ws_im.py cubebox/api/schemas/im_channel_binding.py cubebox/repositories/im_channel_binding.py --strict
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+uv run mypy cubeplex/api/routes/v1/ws_im.py cubeplex/api/schemas/im_channel_binding.py cubeplex/repositories/im_channel_binding.py --strict
 ```
 
 Expected: No errors.
@@ -1498,7 +1498,7 @@ Expected: No errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/api/schemas/im_channel_binding.py cubebox/api/routes/v1/ws_im.py
+git add cubeplex/api/schemas/im_channel_binding.py cubeplex/api/routes/v1/ws_im.py
 git commit -m "feat(im): channel binding CRUD API routes"
 ```
 
@@ -1517,7 +1517,7 @@ The spec defines sandbox scoping:
 - [ ] **Step 1: Find the sandbox resolution code**
 
 ```bash
-grep -rn "scope_type\|scope_id\|SandboxScope\|sandbox_scope" cubebox/im/worker.py cubebox/streams/run_manager.py cubebox/sandbox/ | head -30
+grep -rn "scope_type\|scope_id\|SandboxScope\|sandbox_scope" cubeplex/im/worker.py cubeplex/streams/run_manager.py cubeplex/sandbox/ | head -30
 ```
 
 The sandbox scope is determined in the `RunContext` passed to `start_run`. Look at how it's built in `worker.py` around lines 142-150.
@@ -1551,7 +1551,7 @@ Then pass these to the `RunContext`. Check the `RunContext` dataclass to see if 
 - [ ] **Step 3: Run tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/e2e/test_sandbox_topic_isolation.py -v
 ```
 
@@ -1560,7 +1560,7 @@ Expected: Existing sandbox tests still pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/im/worker.py
+git add cubeplex/im/worker.py
 git commit -m "feat(im): sandbox scope resolution for shared-mode IM"
 ```
 
@@ -1576,7 +1576,7 @@ The connector `parse_inbound` methods now accept `binding_mode`, but the callers
 - [ ] **Step 1: Find all parse_inbound call sites**
 
 ```bash
-grep -rn "parse_inbound\b" cubebox/im/ --include="*.py" | grep -v "def parse_inbound" | grep -v test
+grep -rn "parse_inbound\b" cubeplex/im/ --include="*.py" | grep -v "def parse_inbound" | grep -v test
 ```
 
 - [ ] **Step 2: At each call site, look up the binding mode**
@@ -1594,7 +1594,7 @@ For performance: the binding can be cached in-process per account (as noted in t
 - [ ] **Step 3: Run full IM test suite**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -k "im" -v --timeout=120
 ```
 
@@ -1603,7 +1603,7 @@ Expected: All pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/im/
+git add cubeplex/im/
 git commit -m "feat(im): pass binding mode to connector parse_inbound at gateway/webhook sites"
 ```
 
@@ -1620,14 +1620,14 @@ The spec includes a "Channel Bindings" tab in the bot account detail panel. This
 - [ ] **Step 1: Run mypy on entire backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
-uv run mypy cubebox/ --strict
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+uv run mypy cubeplex/ --strict
 ```
 
 - [ ] **Step 2: Run full test suite**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-18-im-group-chat-mapping/backend
 uv run pytest tests/ -v --timeout=120
 ```
 

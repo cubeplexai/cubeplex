@@ -55,7 +55,7 @@ sys.path.insert(0, sys.argv[2])
 from cert_minter import generate_ca  # type: ignore[import-untyped]
 
 out = sys.argv[1]
-key_pem, cert_pem = generate_ca("cubebox-egress-mitm-ca")
+key_pem, cert_pem = generate_ca("cubeplex-egress-mitm-ca")
 with open(os.path.join(out, "mitmproxy-ca.pem"), "wb") as f:
     f.write(key_pem)
 with open(os.path.join(out, "mitmproxy-ca-cert.pem"), "wb") as f:
@@ -79,7 +79,7 @@ metadata:
   name: ${SECRET_NAME}
   namespace: ${NAMESPACE}
   labels:
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 type: Opaque
 data:
   # RSA/EC private key for the MITM CA (used by the webhook to sign per-sandbox

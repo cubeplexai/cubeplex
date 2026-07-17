@@ -1,4 +1,4 @@
-import type { ApiClient } from './client'
+import { toApiError, type ApiClient } from './client'
 import type { SandboxStatusOut } from './sandboxPolicy'
 import type {
   Topic,
@@ -12,16 +12,19 @@ export async function createTopic(
   body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
 ): Promise<TopicCreateResponse> {
   const res = await client.post('/api/v1/topics', body)
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
 export async function listTopics(client: ApiClient): Promise<{ items: Topic[] }> {
   const res = await client.get('/api/v1/topics')
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
 export async function getTopic(client: ApiClient, topicId: string): Promise<TopicDetailResponse> {
   const res = await client.get(`/api/v1/topics/${topicId}`)
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -31,6 +34,7 @@ export async function updateTopic(
   body: { title?: string },
 ): Promise<{ topic: Topic }> {
   const res = await client.patch(`/api/v1/topics/${topicId}`, body)
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -44,6 +48,7 @@ export async function setTopicPin(
   isPinned: boolean,
 ): Promise<{ topic: Topic }> {
   const res = await client.patch(`/api/v1/topics/${topicId}/pin`, { is_pinned: isPinned })
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -55,6 +60,7 @@ export async function addTopicParticipants(
   const res = await client.post(`/api/v1/topics/${topicId}/participants`, {
     user_ids: userIds,
   })
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -73,6 +79,7 @@ export async function updateParticipantRole(
   role: 'owner' | 'member',
 ): Promise<{ participant: TopicParticipant }> {
   const res = await client.patch(`/api/v1/topics/${topicId}/participants/${userId}`, { role })
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -84,6 +91,7 @@ export async function createTopicConversation(
   const res = await client.post(`/api/v1/topics/${topicId}/conversations`, {
     title: title ?? null,
   })
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -93,6 +101,7 @@ export async function upgradeToTopic(
   body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
 ): Promise<TopicCreateResponse> {
   const res = await client.post(`/api/v1/conversations/${conversationId}/upgrade-to-topic`, body)
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
 
@@ -101,5 +110,6 @@ export async function getTopicSandbox(
   topicId: string,
 ): Promise<SandboxStatusOut> {
   const res = await client.get(`/api/v1/topics/${topicId}/sandbox`)
+  if (!res.ok) throw await toApiError(res)
   return await res.json()
 }
