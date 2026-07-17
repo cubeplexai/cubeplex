@@ -12,7 +12,7 @@ test('register → onboarding wizard → land in personal workspace', async ({ p
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: /create account/i }).click()
   await completeOnboarding(page)
-  await expect(page.getByRole('heading', { name: 'CubePlex' })).toBeVisible()
+  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeVisible()
 })
 
 test('login → redirect to workspace; logout → redirect to login', async ({ page, context }) => {

@@ -46,7 +46,7 @@ async def test_workspace_connect_list_delete_feishu_account(
             "encrypt_key": "ek",
             "verification_token": "vt",
             "domain": "feishu",
-            "delivery_mode": "long_connection",
+            "delivery_mode": "webhook",
             "acting_user_id": "self",
         },
     )
@@ -97,7 +97,7 @@ async def test_admin_can_list_and_toggle_enabled(
             "encrypt_key": "ek",
             "verification_token": "vt",
             "domain": "feishu",
-            "delivery_mode": "long_connection",
+            "delivery_mode": "webhook",
             "acting_user_id": "self",
         },
     )
@@ -152,7 +152,7 @@ async def test_workspace_delete_refuses_account_from_sibling_workspace(
             "encrypt_key": "ek",
             "verification_token": "vt",
             "domain": "feishu",
-            "delivery_mode": "long_connection",
+            "delivery_mode": "webhook",
             "acting_user_id": "self",
         },
     )

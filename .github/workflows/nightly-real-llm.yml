@@ -1,6 +1,6 @@
 name: Nightly real-LLM E2E
 
-# Runs the 10 tests marked `@pytest.mark.real_llm` against the live LLM
+# Runs tests marked `@pytest.mark.real_llm` against the live LLM
 # gateway. These are intentionally deselected from the PR-trigger backend-e2e
 # lane (`make backend-test-e2e` -> `pytest -m "not real_llm"`) because they
 # burn vendor tokens and take ~5-10× longer than mock-path tests. They still

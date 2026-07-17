@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-import { registerAndLand } from './_helpers/auth'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test.describe('M7 attachments happy path', () => {
   // This test exercises the full attachment upload + send cycle including LLM response.
@@ -9,6 +9,7 @@ test.describe('M7 attachments happy path', () => {
   test.setTimeout(180_000)
 
   test('upload image, send, see attachment in history', async ({ page }) => {
+    skipWithoutRealLlm()
     await registerAndLand(page)
 
     // The workspace home InputBar has no conversationId — the attach button is disabled.
@@ -117,6 +118,7 @@ test.describe('M7 attachments — home page eager-create flow', () => {
   })
 
   test('uploads on the home page and sends with attachment above the bubble', async ({ page }) => {
+    skipWithoutRealLlm()
     await registerAndLand(page)
 
     // Write a tiny valid PNG inline (re-use the same trick as the existing test).

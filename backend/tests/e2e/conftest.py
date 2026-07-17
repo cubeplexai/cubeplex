@@ -1386,6 +1386,9 @@ class _FakeRaw:
         self.commands = _FakeCommands()
         self.files = _FakeFiles()
 
+    async def check_ready(self, timeout: object, polling_interval: object) -> None:
+        del timeout, polling_interval
+
     async def is_healthy(self) -> bool:
         return True
 

@@ -7,7 +7,7 @@ test.describe('M2 Model Management', () => {
     await page.goto('/admin/models')
 
     // Header
-    await expect(page.getByRole('heading', { name: /Models|模型/ })).toBeVisible({
+    await expect(page.getByRole('heading', { name: /Model Providers|模型提供商/ })).toBeVisible({
       timeout: 10_000,
     })
 

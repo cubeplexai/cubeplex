@@ -71,6 +71,7 @@ async def test_explicit_conversation_listed_immediately(member_client_org_a) -> 
     assert convo_id in ids
 
 
+@pytest.mark.real_llm
 async def test_draft_conversation_listed_after_first_message(member_client_org_a) -> None:
     client, ws = member_client_org_a
     convo_id = await _make_conv(client, ws, "hi", draft=True)

@@ -246,7 +246,8 @@ class TestConversationsMessages:
         assert response.status_code == 200
         data = response.json()
         assert data["messages"] == []
-        assert data["total"] == 0
+        assert data["oldest_seq"] is None
+        assert data["has_more"] is False
 
     def test_list_messages_not_found(self, client: TestClient) -> None:
         """List messages for non-existent conversation returns 404."""
@@ -254,6 +255,7 @@ class TestConversationsMessages:
         assert response.status_code == 404
 
 
+@pytest.mark.real_llm
 @pytest.mark.slow
 class TestSendMessage:
     """Message send (SSE streaming) tests — requires real LLM API access."""

@@ -61,13 +61,12 @@ test.describe('Triggers', () => {
     // run_as_user defaults to the first member (the registered user) — just submit
     await page.getByTestId('create-trigger-submit').click()
 
-    // Should redirect to detail page
-    await expect(page).toHaveURL(/\/triggers\/[^/]+$/, { timeout: 15_000 })
-    const triggerIdMatch = page.url().match(/\/triggers\/([^/?#]+)/)
-    if (!triggerIdMatch) throw new Error(`Could not parse triggerId from URL: ${page.url()}`)
-    const triggerId = triggerIdMatch[1]
+    // The list/detail layout opens the new trigger inline without changing the URL.
+    await expect(page.getByRole('heading', { name: triggerName })).toBeVisible({
+      timeout: 15_000,
+    })
 
-    // Step 3: Copy ingest URL and verify clipboard
+    // Step 3: Copy ingest URL, verify clipboard, and recover the new trigger ID.
     // Grant clipboard permissions so the test can read clipboard
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.getByTestId('copy-ingest-url').click()
@@ -76,7 +75,10 @@ test.describe('Triggers', () => {
     await page.waitForTimeout(500)
 
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText())
-    expect(clipboardText).toMatch(new RegExp(`/api/v1/ws/${wsId}/triggers/${triggerId}/ingest`))
+    const triggerIdMatch = clipboardText.match(/\/triggers\/([^/?#]+)\/ingest/)
+    if (!triggerIdMatch) throw new Error(`Could not parse triggerId from URL: ${clipboardText}`)
+    const triggerId = triggerIdMatch[1]
+    expect(clipboardText).toContain(`/api/v1/ws/${wsId}/triggers/${triggerId}/ingest`)
 
     // Step 4: Fire a test webhook from the test runner (not via the browser)
     const eventBody = JSON.stringify({ event: { action: 'opened' } })

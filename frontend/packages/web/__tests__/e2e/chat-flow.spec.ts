@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLand } from './_helpers/auth'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test('can send a message and see a response', async ({ page }) => {
+  skipWithoutRealLlm()
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
@@ -24,6 +25,7 @@ test('can send a message and see a response', async ({ page }) => {
 })
 
 test('conversation history persists after page reload', async ({ page }) => {
+  skipWithoutRealLlm()
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')

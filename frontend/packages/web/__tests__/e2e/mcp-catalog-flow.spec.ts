@@ -21,6 +21,7 @@ interface RegisterResult {
   wsId: string
   /** Session cookie header, extracted from browser context for direct API calls. */
   cookies: string
+  csrf: string
 }
 
 async function registerAndExtractSession(page: Page): Promise<RegisterResult> {
@@ -30,7 +31,8 @@ async function registerAndExtractSession(page: Page): Promise<RegisterResult> {
   // direct API calls for setup/teardown without opening new pages.
   const allCookies = await page.context().cookies()
   const cookieHeader = allCookies.map((c) => `${c.name}=${c.value}`).join('; ')
-  return { wsId, cookies: cookieHeader }
+  const csrf = allCookies.find((cookie) => cookie.name.startsWith('cubeplex_csrf'))?.value ?? ''
+  return { wsId, cookies: cookieHeader, csrf }
 }
 
 /**
@@ -38,12 +40,13 @@ async function registerAndExtractSession(page: Page): Promise<RegisterResult> {
  * Uses a static-token, no-auth server URL (the test doesn't need a live MCP
  * server — the template just needs to exist in the catalog).
  */
-async function seedTemplate(cookies: string, name: string): Promise<string> {
+async function seedTemplate(cookies: string, csrf: string, name: string): Promise<string> {
   const res = await fetch(`${BACKEND_URL}/api/v1/admin/mcp/templates`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Cookie: cookies,
+      'X-CSRF-Token': csrf,
     },
     body: JSON.stringify({
       name,
@@ -65,12 +68,17 @@ async function seedTemplate(cookies: string, name: string): Promise<string> {
 /**
  * Distribute a template to all workspaces (enable_existing=true, auto_enroll=true).
  */
-async function distributeTemplate(cookies: string, templateId: string): Promise<void> {
+async function distributeTemplate(
+  cookies: string,
+  csrf: string,
+  templateId: string,
+): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/api/v1/admin/mcp/templates/${templateId}/distribute`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Cookie: cookies,
+      'X-CSRF-Token': csrf,
     },
     body: JSON.stringify({ enable_existing: true, auto_enroll: true }),
   })
@@ -83,12 +91,13 @@ async function distributeTemplate(cookies: string, templateId: string): Promise<
 /**
  * Disable a template in the org.
  */
-async function disableTemplate(cookies: string, templateId: string): Promise<void> {
+async function disableTemplate(cookies: string, csrf: string, templateId: string): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/api/v1/admin/mcp/templates/${templateId}/disable`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       Cookie: cookies,
+      'X-CSRF-Token': csrf,
     },
     body: JSON.stringify({}),
   })
@@ -103,6 +112,7 @@ async function disableTemplate(cookies: string, templateId: string): Promise<voi
  */
 async function wsSetEnabled(
   cookies: string,
+  csrf: string,
   wsId: string,
   templateId: string,
   enabled: boolean,
@@ -112,6 +122,7 @@ async function wsSetEnabled(
     headers: {
       'Content-Type': 'application/json',
       Cookie: cookies,
+      'X-CSRF-Token': csrf,
     },
     body: JSON.stringify({ enabled }),
   })
@@ -126,14 +137,14 @@ test.describe('MCP catalog flow', () => {
     page,
   }) => {
     // 1. Register a user (single-tenant → becomes org-admin automatically).
-    const { wsId, cookies } = await registerAndExtractSession(page)
+    const { wsId, cookies, csrf } = await registerAndExtractSession(page)
 
     // 2. Seed an org-custom template via API (avoid browser overhead for setup).
     const templateName = `e2e-mcp-${Date.now()}`
-    const templateId = await seedTemplate(cookies, templateName)
+    const templateId = await seedTemplate(cookies, csrf, templateName)
 
     // 3. Distribute to existing workspaces (enable_existing=true, auto_enroll=true).
-    await distributeTemplate(cookies, templateId)
+    await distributeTemplate(cookies, csrf, templateId)
 
     // 4. Navigate to workspace MCP settings page — template should be visible and enabled.
     await page.goto(`/w/${wsId}/mcp`)
@@ -146,7 +157,7 @@ test.describe('MCP catalog flow', () => {
     await expect(toggle).toBeChecked({ timeout: 10_000 })
 
     // 5. Admin disables the template in the org via API.
-    await disableTemplate(cookies, templateId)
+    await disableTemplate(cookies, csrf, templateId)
 
     // 6. Reload workspace MCP page — backend excludes org-disabled templates entirely
     //    from the workspace catalog, so the row should disappear.
@@ -161,12 +172,12 @@ test.describe('MCP catalog flow', () => {
 
   test('workspace can toggle individual template enabled state', async ({ page }) => {
     // 1. Register.
-    const { wsId, cookies } = await registerAndExtractSession(page)
+    const { wsId, cookies, csrf } = await registerAndExtractSession(page)
 
     // 2. Seed + distribute a template (starts enabled in workspace).
     const templateName = `e2e-mcp-toggle-${Date.now()}`
-    const templateId = await seedTemplate(cookies, templateName)
-    await distributeTemplate(cookies, templateId)
+    const templateId = await seedTemplate(cookies, csrf, templateName)
+    await distributeTemplate(cookies, csrf, templateId)
 
     // 3. Navigate to workspace MCP page.
     await page.goto(`/w/${wsId}/mcp`)
@@ -175,7 +186,7 @@ test.describe('MCP catalog flow', () => {
     })
 
     // 4. Disable it at the workspace level.
-    await wsSetEnabled(cookies, wsId, templateId, false)
+    await wsSetEnabled(cookies, csrf, wsId, templateId, false)
 
     // 5. Reload and check the filter works — switch to "Enabled" filter.
     await page.reload()

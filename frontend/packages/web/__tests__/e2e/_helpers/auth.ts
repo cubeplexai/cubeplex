@@ -1,9 +1,16 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 export const PASSWORD = 'Str0ng!Passw0rd'
 
 export function uniqueEmail(prefix = 'u'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`
+}
+
+export function skipWithoutRealLlm(): void {
+  test.skip(
+    process.env.CUBEPLEX_E2E_REAL_LLM !== 'true',
+    'requires external LLM credentials',
+  )
 }
 
 export async function completeOnboarding(page: Page): Promise<string> {
