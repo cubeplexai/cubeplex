@@ -420,13 +420,14 @@ async def exec_in_sandbox(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         result = await sandbox.execute(body.command, timeout=body.timeout, envs=body.envs)
         await manager.touch(
             sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
@@ -460,13 +461,14 @@ async def upload_sandbox_file(
     )
     content = await file.read()
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         await sandbox.upload([(normalized, content)])
         await manager.touch(
             sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True

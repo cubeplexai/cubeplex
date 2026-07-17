@@ -34,10 +34,10 @@ WCB = HERE.parent
 # (web fetch via WebTools MCP + file ops). WebTools now on shard-0.
 # Run with: --out runs/batch3 --max-agent-seconds 1200
 SUBSET: list[tuple[str, str]] = [
-    ("04_Search_Retrieval", "task_5_fuzzy_search"),            # find 2025 R1-vision paper, Liu, >2k stars -> results.md
-    ("04_Search_Retrieval", "task_11_fuzzy_repo_search"),      # find 2023-24 C/C++ local-LLM project -> results.md
-    ("01_Productivity_Flow", "task_2_table_tex_download"),     # recover LaTeX table from one arXiv PDF
-    ("05_Creative_Synthesis", "task_9_repo_to_slides"),        # SAM3 8-page PDF slides (v1.4 has tooling)
+    ("01_Productivity_Flow", "task_6_calendar_scheduling"),    # read ics+json+yaml, resolve conflicts -> scheduled.ics/unscheduled.json
+    ("04_Search_Retrieval", "task_3_constraint_search"),       # 7-constraint phone search; no full match -> recommend close -> results.md
+    ("04_Search_Retrieval", "task_2_conflicting_handling"),    # local laws + web verify statute of limitations, resolve conflict -> results.md
+    ("04_Search_Retrieval", "task_6_excel_with_search"),       # parse 2 Excel files + focused web lookup -> results.md
 ]
 
 
