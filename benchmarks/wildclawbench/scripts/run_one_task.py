@@ -128,7 +128,7 @@ class Cube:
         with requests.post(
             f"{self.base}/api/v1/ws/{self.ws}/conversations/{cid}/messages",
             headers={**self.h, "Accept": "text/event-stream"},
-            json={"content": prompt, "thinking": "off", "model_key": model_key},
+            json={"content": prompt, "reasoning": {"mode": "off"}, "model_key": model_key},
             stream=True,
             timeout=max_seconds + 120,
         ) as resp:
