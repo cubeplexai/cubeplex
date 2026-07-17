@@ -80,7 +80,7 @@ class _TempLocalSandbox(Sandbox):
 
     @property
     def workdir(self) -> str:
-        return self._tmpdir
+        return "/work"
 
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         # Remap path arguments in shell commands (base64, test -e, etc.)

@@ -104,6 +104,8 @@ async def test_claim_pausing_concurrent_single_winner(
         )
         row = UserSandbox(
             user_id=scope["user_id"],
+            scope_type="user",
+            scope_id=scope["user_id"],
             sandbox_id=f"sbx_{secrets.token_hex(6)}",
             image="img:latest",
             status="running",
@@ -161,6 +163,8 @@ def _make_manager() -> tuple[SandboxManager, MagicMock]:
 def _paused_record(scope: dict[str, str]) -> UserSandbox:
     return UserSandbox(
         user_id=scope["user_id"],
+        scope_type="user",
+        scope_id=scope["user_id"],
         sandbox_id="sbx_resume_target",
         image="img:latest",
         status="paused",

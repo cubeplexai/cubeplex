@@ -32,13 +32,16 @@ test.describe('avatar editor', () => {
         'base64',
       ),
     })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
 
-    const avatarImg = page.locator('img').first()
-    await expect(avatarImg).toHaveAttribute('src', /\.png/, { timeout: 15_000 })
+    const avatarImg = page
+      .getByRole('button', { name: 'Change profile picture' })
+      .locator('img[src*="/api/v1/avatar/"]')
+    await expect(avatarImg).toHaveCount(1, { timeout: 15_000 })
 
     await page.reload()
     await page.waitForSelector('text=Profile')
-    await expect(avatarImg).toHaveAttribute('src', /\.png/, { timeout: 15_000 })
+    await expect(avatarImg).toHaveCount(1, { timeout: 15_000 })
   })
 
   test('shuffle picks a generated avatar that persists', async ({ page }) => {
@@ -58,12 +61,15 @@ test.describe('avatar editor', () => {
     await expect(galleryButtons.first()).toBeVisible({ timeout: 5_000 })
 
     await galleryButtons.first().click()
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
 
-    const avatarImg = page.locator('img').first()
-    await expect(avatarImg).toHaveAttribute('src', /\.png/, { timeout: 15_000 })
+    const avatarImg = page
+      .getByRole('button', { name: 'Change profile picture' })
+      .locator('img[src*="/api/v1/avatar/"]')
+    await expect(avatarImg).toHaveCount(1, { timeout: 15_000 })
 
     await page.reload()
     await page.waitForSelector('text=Profile')
-    await expect(avatarImg).toHaveAttribute('src', /\.png/, { timeout: 15_000 })
+    await expect(avatarImg).toHaveCount(1, { timeout: 15_000 })
   })
 })

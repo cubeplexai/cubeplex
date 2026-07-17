@@ -82,11 +82,10 @@ async def _make_non_workspace_user() -> str:
 
 async def _insert_scheduled_task_binding(
     *, org_id: str, workspace_id: str, owner_user_id: str, conversation_id: str
-) -> None:
+) -> str:
     """Insert a ScheduledTask row pointing at ``conversation_id``.
 
-    Used to verify upgrade-to-topic rejects conversations bound to a
-    scheduler target (the external binding guard).
+    Used to verify upgrade-to-topic preserves a scheduler's fixed target.
     """
     from cubeplex.models.scheduled_task import ScheduledTask
 
@@ -107,6 +106,7 @@ async def _insert_scheduled_task_binding(
             )
             session.add(task)
             await session.commit()
+            return task.id
     finally:
         await test_engine.dispose()
 
@@ -661,7 +661,7 @@ class TestUpgradeToTopic:
         assert resp.status_code == 409, resp.text
 
     @pytest.mark.anyio
-    async def test_upgrade_blocked_when_bound_to_scheduled_task(
+    async def test_upgrade_preserves_scheduled_task_target(
         self, four_layer_admin_and_member: FourLayerFixture
     ) -> None:
         (admin_c, ws_id, admin_uid), _ = four_layer_admin_and_member
@@ -688,17 +688,30 @@ class TestUpgradeToTopic:
         )
         conv_id = conv_resp.json()["id"]
 
-        await _insert_scheduled_task_binding(
+        task_id = await _insert_scheduled_task_binding(
             org_id=org_id,
             workspace_id=ws_id,
             owner_user_id=admin_uid,
             conversation_id=conv_id,
         )
 
-        # Upgrade is blocked because of the scheduler binding (round-3 fix).
+        # A fixed scheduled task can keep targeting the conversation after it
+        # becomes a topic conversation.
         resp = await admin_c.post(
             f"/api/v1/ws/{ws_id}/conversations/{conv_id}/upgrade-to-topic",
             json={"title": "Try"},
         )
-        assert resp.status_code == 409, resp.text
-        assert "binding" in resp.text.lower()
+        assert resp.status_code == 201, resp.text
+
+        from cubeplex.models.scheduled_task import ScheduledTask
+
+        engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+        try:
+            async with async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )() as session:
+                task = await session.get(ScheduledTask, task_id)
+                assert task is not None
+                assert task.target_conversation_id == conv_id
+        finally:
+            await engine.dispose()
