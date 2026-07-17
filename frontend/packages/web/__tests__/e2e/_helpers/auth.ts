@@ -7,10 +7,7 @@ export function uniqueEmail(prefix = 'u'): string {
 }
 
 export function skipWithoutRealLlm(): void {
-  test.skip(
-    process.env.CUBEPLEX_E2E_REAL_LLM !== 'true',
-    'requires external LLM credentials',
-  )
+  test.skip(process.env.CUBEPLEX_E2E_REAL_LLM !== 'true', 'requires external LLM credentials')
 }
 
 export async function completeOnboarding(page: Page): Promise<string> {
