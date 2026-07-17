@@ -98,7 +98,7 @@ jobs:
           CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-check-ci
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-coverage
@@ -368,7 +368,7 @@ jobs:
 
       - name: Upload backend logs on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-log
           path: |
@@ -377,7 +377,7 @@ jobs:
 
       - name: Upload playwright traces on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: |
