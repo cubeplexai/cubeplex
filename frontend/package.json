@@ -21,7 +21,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9.15.0",
     "eslint-config-next": "16.2.10",
-    "globals": "^16.4.0",
+    "globals": "^17.7.0",
     "prettier": "^3.9.5",
     "typescript": "^6.0.3"
   }
