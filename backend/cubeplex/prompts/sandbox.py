@@ -15,7 +15,16 @@ Files and packages saved here remain available across conversations. Everything 
 `{workdir}` (including `/tmp`, `/opt`, other users' home directories) is ephemeral and \
 lost when the sandbox is recreated. `pip install` and `npm install -g` already default \
 to `{workdir}`, so user-installed packages persist automatically — check whether a \
-package is already available before reinstalling.
+package is already available before reinstalling. Don't create a virtualenv just to \
+install packages; bare `pip install` is the persistent default.
+
+**Isolated Python environments:** when a project or skill genuinely needs its own \
+environment (conflicting versions, a different Python), creating one is fine — \
+`python -m venv` and `uv` both work normally. Create envs under `{workdir}` \
+(e.g. inside the project directory) so they persist. Each `execute` call is a fresh \
+shell: `source .venv/bin/activate`, `cd`, and exported variables do NOT carry over to \
+the next call. Either chain within one command (`source .venv/bin/activate && ...`) or \
+invoke the env's interpreter by absolute path (`.venv/bin/python`, `.venv/bin/pip`).
 
 ## File Tools
 

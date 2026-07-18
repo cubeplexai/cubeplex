@@ -19,7 +19,7 @@ development:
   sandbox:
     enabled: true
     domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260616c"
+    image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260718"
 
   # Auth (development overrides)
   auth:
