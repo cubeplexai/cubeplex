@@ -1,17 +1,8 @@
-import { test, expect, type Page } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { test, expect } from '@playwright/test'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test('can send a message and see a response', async ({ page }) => {
+  skipWithoutRealLlm()
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
@@ -34,6 +25,7 @@ test('can send a message and see a response', async ({ page }) => {
 })
 
 test('conversation history persists after page reload', async ({ page }) => {
+  skipWithoutRealLlm()
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')

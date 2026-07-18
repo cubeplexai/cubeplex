@@ -35,8 +35,20 @@ async def test_same_user_two_workspaces_distinct_active_rows(
     del fake_opensandbox  # autouse via parameter
     org_id, ws_a, ws_b, user_id = seeded_org_ws_user
     mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_b)
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_b,
+    )
     async with session_factory() as s:
         rows = (
             await s.execute(
@@ -62,8 +74,20 @@ async def test_concurrent_create_reuses_not_duplicates(
     del fake_opensandbox
     org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
     mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
     async with session_factory() as s:
         count = (
             await s.execute(
@@ -154,7 +178,13 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
         )
 
     mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
     async with session_factory() as s:
         img1 = (
             await s.execute(
@@ -176,7 +206,13 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
             command_rules=None,
             network_default_action="deny",
         )
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
     async with session_factory() as s:
         still_running = (
             await s.execute(
@@ -200,7 +236,13 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
     assert terminated == 0  # nothing demoted by the policy change
 
     # A brand-new sandbox (different workspace, same user) picks up the new image.
-    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_b)
+    await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_b,
+    )
     async with session_factory() as s:
         img_new = (
             await s.execute(

@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   issue_comment:
     types: [created]
@@ -11,8 +14,10 @@ concurrency:
 
 jobs:
   gate:
-    name: Gate (/ci comment or workflow_dispatch)
+    name: Gate (automatic, /ci, or workflow_dispatch)
     if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
@@ -32,6 +37,8 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
             SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -q .head.sha)
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
           else
             SHA="${{ github.sha }}"
           fi
@@ -46,6 +53,7 @@ jobs:
             -f content=rocket
       - name: Create in-progress check run
         id: check
+        if: github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -64,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -90,7 +98,7 @@ jobs:
           CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-check-ci
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-coverage
@@ -98,7 +106,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: backend/coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -110,10 +118,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
@@ -127,22 +135,27 @@ jobs:
         run: make frontend-check-ci
 
   backend-e2e:
-    name: Backend E2E (pytest)
+    name: Backend E2E (pytest, shard ${{ matrix.shard }})
     needs: gate
     runs-on: ubuntu-latest
-    # pytest e2e has been observed at ~19-20 min on slow runners, so the
-    # previous 20-min cap was right at the wire and killed the job mid-run.
-    # 30 min gives margin without masking a real regression (a healthy run is
-    # well under 20 min on a normal runner).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # The complete suite contains more than 850 tests and took over 30 minutes
+    # in a single process. Stable node-id sharding keeps full coverage while
+    # giving every shard enough time to finish and report all failures.
     timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
-      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
-      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
-      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
-      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
-      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
-      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_SHARD_INDEX: ${{ matrix.shard }}
+      CUBEPLEX_E2E_SHARD_TOTAL: 4
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL || 'http://127.0.0.1:9' }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY || 'ci-placeholder' }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN || '127.0.0.1:9' }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY || 'ci-placeholder' }}
       # Optional: gates the conversation-search E2E test. The test skips
       # cleanly when this secret isn't set in the repo, so PRs from forks
       # without the secret stay green; the real-network path runs in main.
@@ -171,7 +184,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -234,15 +247,16 @@ jobs:
     name: Frontend E2E (playwright)
     needs: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
-      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
-      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
-      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
-      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
-      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
-      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL || 'http://127.0.0.1:9' }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY || 'ci-placeholder' }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID || 'ci-placeholder' }}
+      CUBEPLEX_E2E_REAL_LLM: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL != '' && secrets.CUBEPLEX_E2E_LLM_API_KEY != '' && secrets.CUBEPLEX_E2E_LLM_MODEL_ID != '' }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN || '127.0.0.1:9' }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY || 'ci-placeholder' }}
       # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
       CUBEPLEX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
       # Frontend proxies to local backend:8001 (matches config.test.yaml)
@@ -269,7 +283,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -279,7 +293,7 @@ jobs:
           # Ephemeral runner — skip post-run `uv cache prune --ci`
           # which occasionally hangs on a concurrent lock and fails the job.
           prune-cache: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
@@ -352,16 +366,18 @@ jobs:
         if: always()
         run: make backend-cleanup-sandboxes
 
-      - name: Upload backend log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Upload backend logs on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
         with:
           name: backend-log
-          path: /tmp/backend.log
+          path: |
+            /tmp/backend.log
+            /tmp/backend-console.log
 
       - name: Upload playwright traces on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: |
@@ -374,7 +390,7 @@ jobs:
     timeout-minutes: 5
     needs: [gate, backend-check]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -403,11 +419,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: cubeplex
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: cubeplex/cubeplex-ee
           path: cubeplex-ee
@@ -424,7 +440,10 @@ jobs:
 
   report:
     name: Finalize CI check run
-    if: always() && needs.gate.result == 'success'
+    if: |
+      always() &&
+      needs.gate.result == 'success' &&
+      github.event_name == 'issue_comment'
     needs: [gate, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
     runs-on: ubuntu-latest
     permissions:

@@ -203,6 +203,8 @@ async def _insert_record(
         repo = UserSandboxRepository(session, org_id=_ORG_ID, workspace_id=_WS_ID)
         record = await repo.create(
             user_id=_USER_ID,
+            scope_type="user",
+            scope_id=_USER_ID,
             sandbox_id=sandbox_id,
             image=config.get("sandbox.image"),
             ttl_seconds=ttl_seconds,
@@ -295,7 +297,13 @@ async def test_pause_resume_roundtrip_preserves_memory(
         assert record.paused_at is not None
 
         # Re-enter via the manager — this should trigger resume-on-reuse.
-        backend = await manager.get_or_create(_USER_ID, org_id=_ORG_ID, workspace_id=_WS_ID)
+        backend = await manager.get_or_create(
+            scope_type="user",
+            scope_id=_USER_ID,
+            user_id=_USER_ID,
+            org_id=_ORG_ID,
+            workspace_id=_WS_ID,
+        )
         try:
             # Both files must survive native pause + resume.
             results = await backend.download(["/workspace/keep.txt", "/tmp/ephemeral.txt"])
@@ -357,7 +365,13 @@ async def test_browser_endpoint_after_resume(
                 "browser-endpoint-after-resume only meaningful on a pause-capable backend"
             )
 
-        backend = await manager.get_or_create(_USER_ID, org_id=_ORG_ID, workspace_id=_WS_ID)
+        backend = await manager.get_or_create(
+            scope_type="user",
+            scope_id=_USER_ID,
+            user_id=_USER_ID,
+            org_id=_ORG_ID,
+            workspace_id=_WS_ID,
+        )
         try:
             # Restart browser (idempotent) then fetch the endpoint.
             await backend.start_browser()

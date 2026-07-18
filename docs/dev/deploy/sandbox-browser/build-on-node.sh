@@ -4,8 +4,8 @@
 # Use this when the dev host can't reach the registry directly (and ghcr.io —
 # the Neko base — is throttled). It runs a docker:cli pod on a node, mounts the
 # node's docker.sock, copies the build context in, and builds + pushes there.
-# If your local docker CAN reach the registry, just run misc/sandbox-image/
-# build.sh instead — this script is the in-cluster fallback.
+# If your local docker CAN reach the registry, just run
+# deploy/images/sandbox/build.sh instead — this script is the in-cluster fallback.
 #
 # Usage:
 #   TAG=hub.sensedeal.vip/library/cubeplex-sandbox:24.04-$(date +%Y%m%d)-nekoN \
@@ -19,7 +19,7 @@ set -euo pipefail
 
 TAG="${TAG:?set TAG to the full image ref}"
 NODE="${NODE:?set NODE to a build node name}"
-CONTEXT="${CONTEXT:-$(git rev-parse --show-toplevel)/misc/sandbox-image}"
+CONTEXT="${CONTEXT:-$(git rev-parse --show-toplevel)/deploy/images/sandbox}"
 REGISTRY="${REGISTRY:-hub.sensedeal.vip}"
 TURN_URL="${TURN_URL:-turn:192.168.1.208:3478}"
 TURN_USER="${TURN_USER:-neko}"

@@ -15,7 +15,7 @@ a CJK face), and a profile that says what it's for. Pick one theme for the deck.
 Each *archetype* method composes one slide with consistent spacing/contrast so
 the result passes the checker.
 
-Fonts in the image (see misc/sandbox-image/stage-fonts.sh):
+Fonts in the image (see deploy/images/sandbox/stage-fonts.sh):
   Latin : Inter, Barlow, Anton, Oranienbaum, Unna, Liter, Sorts Mill Goudy,
           Quattrocento Sans
   CJK   : Noto Sans CJK SC, LXGW WenKai (霞鹜文楷), Smiley Sans (得意黑),

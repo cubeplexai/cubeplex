@@ -27,6 +27,7 @@ carry ``input_schema``, so the helper accepts either shape.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -37,7 +38,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.mcp._constants import slugify_for_namespace
 from cubeplex.mcp.cubepi_runtime import MCPTransport
 from cubeplex.mcp.effective import MCPEffectiveConnectorService
-from cubeplex.mcp.exceptions import MCPDiscoveryFailed
+from cubeplex.mcp.exceptions import (
+    MCPDiscoveryFailed,
+    OAuthRefreshFailed,
+    is_unauthorized_error,
+)
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
 from cubeplex.mcp.user_token import MCPUserTokenSigner
 from cubeplex.repositories.mcp import (
@@ -438,21 +443,9 @@ async def discover_tools_for_install(
         )
     headers, server_url = resolved
 
-    try:
-        discovered = await asyncio.wait_for(
-            _list_raw_mcp_tools(
-                server_url,
-                headers=headers or None,
-                timeout=install.timeout,
-                transport=cast(MCPTransport, install.transport),
-            ),
-            timeout=_DISCOVERY_TIMEOUT_SECONDS,
-        )
-    except Exception as exc:  # noqa: BLE001
-        formatted = _format_discovery_error(exc)
-        logger.warning("MCP discovery failed for {}: {}", connector_id, formatted)
+    async def _persist_error(message: str) -> DiscoveryResult:
         install.discovery_status = "error"
-        install.last_error = formatted[:2048]
+        install.last_error = message[:2048]
         if connector is not None:
             connector.discovery_status = install.discovery_status
             connector.last_error = install.last_error
@@ -465,6 +458,64 @@ async def discover_tools_for_install(
             tools_cache_raw=list(install.tools_cache or []),
             last_error=install.last_error,
         )
+
+    async def _attempt() -> _DiscoveredRaw:
+        return await asyncio.wait_for(
+            _list_raw_mcp_tools(
+                server_url,
+                headers=headers or None,
+                timeout=install.timeout,
+                transport=cast(MCPTransport, install.transport),
+            ),
+            timeout=_DISCOVERY_TIMEOUT_SECONDS,
+        )
+
+    try:
+        discovered = await _attempt()
+    except Exception as exc:  # noqa: BLE001
+        formatted = _format_discovery_error(exc)
+        logger.warning("MCP discovery failed for {}: {}", connector_id, formatted)
+        # A 401 against an OAuth grant that still looks valid means the
+        # provider revoked the token before its recorded expiry (providers
+        # may; expires_in is a hint, not a contract). Force one refresh and
+        # retry before persisting the failure.
+        refreshable = (
+            is_unauthorized_error(exc)
+            and grant is not None
+            and grant.auth_method == "oauth"
+            and grant.refresh_credential_id is not None
+            and token_mgr is not None
+        )
+        if not refreshable:
+            return await _persist_error(formatted)
+        assert grant is not None  # narrowed by `refreshable`
+        try:
+            fresh_token = await token_mgr.get_access_token_for_grant(
+                grant=grant,
+                grant_repo=grant_repo,
+                server_url=install.server_url,
+                oauth_client_config=dict(install.oauth_client_config or {}),
+                force_refresh=True,
+            )
+        except Exception as refresh_exc:  # noqa: BLE001
+            # OAuthRefreshFailed already flipped the grant to 'expired';
+            # surface the reauthorization need instead of the raw 401.
+            prefix = (
+                "oauth_reauthorization_required"
+                if isinstance(refresh_exc, OAuthRefreshFailed)
+                else "credential_resolution_failed"
+            )
+            return await _persist_error(f"{prefix}: {_format_discovery_error(refresh_exc)}")
+        headers = {**(headers or {}), "Authorization": f"Bearer {fresh_token}"}
+        try:
+            discovered = await _attempt()
+        except Exception as retry_exc:  # noqa: BLE001
+            if is_unauthorized_error(retry_exc):
+                # Even a freshly-minted token is rejected — reauthorize.
+                with suppress(Exception):
+                    grant.grant_status = "expired"
+                    await grant_repo.update(grant)
+            return await _persist_error(_format_discovery_error(retry_exc))
 
     tools_cache_raw: list[dict[str, Any]] = [_tool_to_dict(t) for t in discovered.tools]
     # Strip orphan citation mapping keys whose tool no longer exists in

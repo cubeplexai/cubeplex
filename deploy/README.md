@@ -20,7 +20,8 @@ deploy/
 ├── README.md                  # this file
 ├── images/                    # shared Dockerfiles
 │   ├── backend/Dockerfile
-│   └── frontend/Dockerfile
+│   ├── frontend/Dockerfile
+│   └── sandbox/               # agent sandbox image (Dockerfile + neko browser + fonts)
 ├── kubernetes/                # Helm chart + scripts + docs
 │   ├── README.md
 │   ├── INSTALL.md             # English install guide
@@ -29,12 +30,15 @@ deploy/
 │   ├── scripts/
 │   └── egress-bundle/         # MITM webhook source (integrated into
 │                              # the chart as an opt-in subsystem)
-└── docker-compose/            # single-host compose deployment
-    ├── README.md
-    ├── INSTALL.md
-    ├── compose.yaml
-    ├── config/
-    └── scripts/
+├── docker-compose/            # single-host compose deployment
+│   ├── README.md
+│   ├── INSTALL.md
+│   ├── compose.yaml
+│   ├── config/
+│   └── scripts/
+└── docling-serve/             # standalone docling document-conversion service
+    ├── docker-compose.yml
+    └── install.sh
 ```
 
 The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,

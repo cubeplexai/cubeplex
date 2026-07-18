@@ -1,0 +1,87 @@
+services:
+  docling-models:
+    image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cpu:${DOCLING_CPU_TAG:-v1.16.1}
+    container_name: docling-models
+    restart: "no"
+    command:
+      - sh
+      - -lc
+      - >-
+        set -eu;
+        ready_flag=/models/.docling-models-ready-${DOCLING_CPU_TAG:-v1.16.1}-2;
+        if [ -f "$$ready_flag" ]; then
+          echo "Docling models already downloaded ($$ready_flag)";
+          exit 0;
+        fi;
+        docling-tools models download --output-dir /models
+        layout tableformer code_formula picture_classifier rapidocr easyocr
+        smolvlm granitedocling;
+        touch "$$ready_flag"
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - /opt/docling-serve/models:/models
+
+  docling-serve-cpu:
+    profiles: ["cpu"]
+    image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cpu:${DOCLING_CPU_TAG:-v1.16.1}
+    container_name: docling-serve-cpu
+    restart: unless-stopped
+    command:
+      - docling-serve
+      - run
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5001"
+      - --workers
+      - "1"
+    depends_on:
+      docling-models:
+        condition: service_completed_successfully
+    ports:
+      - "${DOCLING_CPU_PORT:-5001}:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "true"
+      DOCLING_SERVE_ARTIFACTS_PATH: /models
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "true"
+      DOCLING_SERVE_ALLOW_CUSTOM_VLM_CONFIG: "true"
+      DOCLING_SERVE_ALLOWED_VLM_ENGINES: '["api","api_openai","api_ollama","api_lmstudio"]'
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    volumes:
+      - /opt/docling-serve/models:/models
+      - /opt/docling-serve/cpu/cache:/opt/app-root/src/.cache
+
+  docling-serve-cu130:
+    profiles: ["gpu"]
+    image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cu130:${DOCLING_CU130_TAG:-v1.16.1}
+    container_name: docling-serve-cu130
+    restart: unless-stopped
+    command:
+      - docling-serve
+      - run
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5001"
+      - --workers
+      - "1"
+    depends_on:
+      docling-models:
+        condition: service_completed_successfully
+    ports:
+      - "${DOCLING_CU130_PORT:-5002}:5001"
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "true"
+      DOCLING_SERVE_ARTIFACTS_PATH: /models
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "true"
+      DOCLING_SERVE_ALLOW_CUSTOM_VLM_CONFIG: "true"
+      DOCLING_SERVE_ALLOWED_VLM_ENGINES: '["api","api_openai","api_ollama","api_lmstudio"]'
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
+      NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
+    volumes:
+      - /opt/docling-serve/models:/models
+      - /opt/docling-serve/cu130/cache:/opt/app-root/src/.cache
+    runtime: nvidia

@@ -10,6 +10,7 @@ import asyncio
 import dataclasses
 import logging
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -28,6 +29,7 @@ from cubeplex.mcp.exceptions import (
     OAuthInvalidServerState,
     OAuthRefreshContention,
     OAuthRefreshFailed,
+    is_unauthorized_error,
 )
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
 from cubeplex.mcp.user_token import MCPUserTokenSigner
@@ -123,11 +125,83 @@ async def load_workspace_mcp_tools_for_cubepi(
     )
 
 
+def _make_refresh_auth_callback(
+    *,
+    spec: MCPRuntimeConnectorSpec,
+    token_manager: OAuthTokenManager,
+) -> Callable[[], Awaitable[str | None]] | None:
+    """Build the 401-recovery callback for one OAuth spec, or None.
+
+    Tool calls run long after the loader's request session has closed, so
+    the callback opens its own short-lived session (same reason
+    ``_load_tools_for_specs_deferred`` exists) and rebinds the token
+    manager's credential repo to it. Returns a fresh access token, or
+    None when the refresh fails — callers then surface the original 401.
+    """
+    grant = spec.grant
+    if spec.auth_method != "oauth" or grant is None or grant.refresh_credential_id is None:
+        return None
+
+    async def _refresh_auth() -> str | None:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.credential import CredentialRepository
+
+        try:
+            async with async_session_maker() as session:
+                grant_repo = MCPCredentialGrantRepository(session, org_id=spec.org_id)
+                manager = token_manager.with_credential_repo(
+                    CredentialRepository(session, org_id=spec.org_id)
+                )
+                token = await manager.get_access_token_for_grant(
+                    grant=grant,
+                    grant_repo=grant_repo,
+                    server_url=spec.server_url,
+                    oauth_client_config=spec.oauth_client_config,
+                    force_refresh=True,
+                )
+                await session.commit()
+                return token
+        except Exception as exc:  # noqa: BLE001 — recovery is best-effort
+            logger.warning(
+                "MCP install '%s' forced token refresh after 401 failed: %s",
+                spec.name,
+                exc,
+            )
+            return None
+
+    return _refresh_auth
+
+
+async def _mark_grant_expired_for_spec(spec: MCPRuntimeConnectorSpec) -> None:
+    """Best-effort: flip the spec's grant to 'expired' in its own session.
+
+    Called when the MCP server rejects even a freshly-refreshed token —
+    reauthorization is needed and the UI must surface Reconnect instead
+    of a grant that still claims to be valid.
+    """
+    grant = spec.grant
+    if grant is None:
+        return
+    from contextlib import suppress
+
+    from cubeplex.db.engine import async_session_maker
+
+    with suppress(Exception):
+        async with async_session_maker() as session:
+            grant_repo = MCPCredentialGrantRepository(session, org_id=spec.org_id)
+            fresh = await session.get(type(grant), grant.id)
+            if fresh is not None:
+                fresh.grant_status = "expired"
+                await grant_repo.update(fresh)
+                await session.commit()
+
+
 def _build_tools_from_cache(
     *,
     spec: MCPRuntimeConnectorSpec,
     headers: dict[str, str],
     server_url: str,
+    refresh_auth: Callable[[], Awaitable[str | None]] | None = None,
 ) -> list[AgentTool[Any]] | None:
     """Build executable AgentTools from the install's persisted ``tools_cache``.
 
@@ -136,6 +210,11 @@ def _build_tools_from_cache(
     descriptor (name / description / input_schema), and cubepi MCP tools
     open a fresh session per ``tools/call`` anyway, so execution is
     identical to a live-discovered tool.
+
+    ``refresh_auth`` (OAuth specs only) recovers from a server-side token
+    revocation: on a 401 the call forces one token refresh, updates the
+    shared ``headers`` dict in place (so every tool of this spec reuses
+    the new token), and retries once.
 
     Returns None when the cache is unusable (empty, or cubepi's private
     helpers moved) — callers fall back to the live loader.
@@ -161,7 +240,7 @@ def _build_tools_from_cache(
     timeout = spec.timeout
     transport = cast(MCPTransport, spec.transport)
 
-    async def _call_remote(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def _call_once(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         # Mirrors cubepi.mcp.http_loader's per-call session semantics,
         # including W3C traceparent propagation into the MCP server.
         from cubepi.mcp._tracing import current_traceparent
@@ -176,6 +255,32 @@ def _build_tools_from_cache(
             await asyncio.wait_for(session.initialize(), timeout=timeout)
             resp = await asyncio.wait_for(session.call_tool(tool_name, args), timeout=timeout)
             return _serialize_call_tool_response(resp)
+
+    async def _call_remote(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await _call_once(tool_name, args)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            if refresh_auth is None or not is_unauthorized_error(exc):
+                raise
+            try:
+                fresh_token = await refresh_auth()
+            except Exception:  # noqa: BLE001 — never mask the original 401
+                logger.exception("MCP install '%s' refresh_auth raised", spec.name)
+                raise exc from None
+            if fresh_token is None:
+                raise
+            headers["Authorization"] = f"Bearer {fresh_token}"
+            try:
+                return await _call_once(tool_name, args)
+            except asyncio.CancelledError:
+                raise
+            except BaseException as retry_exc:
+                if is_unauthorized_error(retry_exc):
+                    # Fresh token also rejected — reauthorization needed.
+                    await _mark_grant_expired_for_spec(spec)
+                raise
 
     address, port = _split_address(server_url)
     tools: list[AgentTool[Any]] = []
@@ -286,6 +391,38 @@ def schedule_tools_cache_refresh(
         del task
 
 
+async def _load_live_tools_with_401_retry(
+    *,
+    spec: MCPRuntimeConnectorSpec,
+    headers: dict[str, str],
+    server_url: str,
+    refresh_auth: Callable[[], Awaitable[str | None]] | None,
+) -> list[AgentTool[Any]]:
+    """Live discovery with the same single 401-recovery as tool calls."""
+
+    async def _load_once() -> list[AgentTool[Any]]:
+        discovery = await load_mcp_tools_http(
+            server_url,
+            headers=headers or None,
+            timeout=spec.timeout,
+            transport=cast(MCPTransport, spec.transport),
+        )
+        return discovery.tools
+
+    try:
+        return await _load_once()
+    except asyncio.CancelledError:
+        raise
+    except BaseException as exc:
+        if refresh_auth is None or not is_unauthorized_error(exc):
+            raise
+        fresh_token = await refresh_auth()
+        if fresh_token is None:
+            raise
+        headers["Authorization"] = f"Bearer {fresh_token}"
+        return await _load_once()
+
+
 async def _load_tools_for_specs(
     *,
     specs: list[MCPRuntimeConnectorSpec],
@@ -349,20 +486,23 @@ async def _load_tools_for_specs(
             )
             continue
 
+        refresh_auth = _make_refresh_auth_callback(spec=spec, token_manager=token_manager)
+
         # Cache-first: build tools from the persisted tools_cache and skip
         # the live initialize+tools/list round trip. Falls back to live
         # discovery when the cache is empty/unusable (e.g. first run before
         # discovery persisted, or cubepi internals drifted).
-        tools = _build_tools_from_cache(spec=spec, headers=headers, server_url=server_url)
+        tools = _build_tools_from_cache(
+            spec=spec, headers=headers, server_url=server_url, refresh_auth=refresh_auth
+        )
         if tools is None:
             try:
-                discovery = await load_mcp_tools_http(
-                    server_url,
-                    headers=headers or None,
-                    timeout=spec.timeout,
-                    transport=cast(MCPTransport, spec.transport),
+                tools = await _load_live_tools_with_401_retry(
+                    spec=spec,
+                    headers=headers,
+                    server_url=server_url,
+                    refresh_auth=refresh_auth,
                 )
-                tools = discovery.tools
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

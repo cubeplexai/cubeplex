@@ -32,7 +32,7 @@ async def _create_account(client: httpx.AsyncClient, ws_id: str, tag: str) -> st
             "encrypt_key": "ek",
             "verification_token": "vt",
             "domain": "feishu",
-            "delivery_mode": "long_connection",
+            "delivery_mode": "webhook",
             "acting_user_id": "self",
         },
     )

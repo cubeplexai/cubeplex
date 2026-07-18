@@ -93,7 +93,9 @@ test.describe('/login — SSO + Google buttons', () => {
       route.fulfill({ status: 200, contentType: 'text/html', body: '<html>idp</html>' }),
     )
 
+    const systemInfo = page.waitForResponse('**/api/v1/system/info')
     await page.goto('/login')
+    await systemInfo
     await page.getByRole('button', { name: /sso login/i }).click()
 
     const slugInput = page.getByPlaceholder(/organization identifier/i)
@@ -111,7 +113,9 @@ test.describe('/login — SSO + Google buttons', () => {
       route.fulfill({ status: 200, contentType: 'text/html', body: '<html>idp</html>' }),
     )
 
+    const systemInfo = page.waitForResponse('**/api/v1/system/info')
     await page.goto('/login')
+    await systemInfo
     await page.getByRole('button', { name: /sso login/i }).click()
     await page.waitForURL(SSO_AUTHORIZE_URL, { timeout: 5_000 })
   })

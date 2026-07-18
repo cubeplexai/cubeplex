@@ -59,3 +59,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "cubeplex.rustfs.host" -}}
 {{- printf "%s-rustfs" .Release.Name -}}
 {{- end -}}
+
+{{- define "cubeplex.docling.host" -}}
+{{- printf "%s-docling" .Release.Name -}}
+{{- end -}}

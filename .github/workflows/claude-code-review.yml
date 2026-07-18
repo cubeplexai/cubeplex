@@ -41,7 +41,7 @@ jobs:
           echo "Reviewing PR #$PR_NUMBER at $HEAD_SHA"
 
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 1

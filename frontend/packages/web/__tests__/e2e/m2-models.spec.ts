@@ -1,27 +1,13 @@
 import { test, expect } from '@playwright/test'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function register(page: import('@playwright/test').Page): Promise<void> {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { registerAndLand } from './_helpers/auth'
 
 test.describe('M2 Model Management', () => {
   test('admin sees provider list with seeded system provider', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await page.goto('/admin/models')
 
     // Header
-    await expect(page.getByRole('heading', { name: /Models|模型/ })).toBeVisible({
+    await expect(page.getByRole('heading', { name: /Model Providers|模型提供商/ })).toBeVisible({
       timeout: 10_000,
     })
 
@@ -30,7 +16,7 @@ test.describe('M2 Model Management', () => {
   })
 
   test('admin can create, view, and delete a custom provider', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await page.goto('/admin/models')
 
     await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
@@ -74,7 +60,7 @@ test.describe('M2 Model Management', () => {
   })
 
   test('provider create form offers only API key / None — no OAuth', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await page.goto('/admin/models')
 
     await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
@@ -92,7 +78,7 @@ test.describe('M2 Model Management', () => {
   })
 
   test('filter pills narrow provider list', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await page.goto('/admin/models')
 
     await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })

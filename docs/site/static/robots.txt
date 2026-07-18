@@ -1,7 +1,10 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://docs.cubeplex.ai/sitemap.xml
+# Canonical host is cubeplex.ai/docs (EN + zh-Hans sitemaps).
+Sitemap: https://cubeplex.ai/docs/sitemap.xml
+Sitemap: https://cubeplex.ai/docs/zh-Hans/sitemap.xml
+Sitemap: https://cubeplex.ai/docs/sitemap-index.xml
 
 User-agent: GPTBot
 Allow: /

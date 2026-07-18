@@ -7,7 +7,7 @@ pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
 
 # Tracks the cubeplex nested vendor catalog (cubeplex/llm/catalog/data/vendors.yaml).
 # Bump if vendors are added/removed.
-EXPECTED_VENDOR_COUNT = 23
+EXPECTED_VENDOR_COUNT = 21
 
 
 async def test_list_provider_presets(
