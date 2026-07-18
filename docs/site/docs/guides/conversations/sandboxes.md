@@ -77,6 +77,17 @@ Everything under the sandbox's working directory (`/workspace`) lives on its per
 - **Isolated environments work normally.** If a project or skill needs its own Python environment (a conflicting dependency set, a different Python version), the agent can create one with `python -m venv` or `uv`. Environments created under the working directory survive restarts and recreation like any other file.
 - **Everything outside the working directory is temporary.** System locations (`/tmp`, `/opt`, …) are reset when the sandbox is recreated.
 
+## How the agent organizes files
+
+The sandbox working directory is long-lived — files stay across conversations, like a second computer. To keep it browsable, the agent follows a standard layout:
+
+- `projects/<name>/` — one folder per deliverable or ongoing effort, named after its content (e.g. `sales-report-2026q2`), not per conversation. Later sessions on the same work continue in the same folder.
+- `WORKSPACE.md` — an index at the root, one line per project. Skim it to see what's in the sandbox.
+- `tmp/` — scratch space for throwaway files; contents may be cleared at any time.
+- `uploads/` — files you attach in chat land here; the agent copies a file into a project folder when it becomes part of the work.
+
+The agent will not silently overwrite an existing file (replacing one has to be an explicit decision), and it will not reorganize or delete your existing files unless you ask.
+
 ## Tips
 
 - **Restart before Delete.** If a sandbox is misbehaving but you want to keep its files, Restart it. Reach for Delete only when you genuinely want a clean slate.
