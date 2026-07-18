@@ -1,6 +1,11 @@
 """Unit tests for admin MCP route registration (four-layer surface only)."""
 
+from types import SimpleNamespace
+
+from sqlalchemy.exc import IntegrityError
+
 from cubeplex.api.app import create_app
+from cubeplex.api.routes.v1.admin_mcp import _is_connector_slug_unique_violation
 
 
 def _route_pairs(app: object) -> set[tuple[str, str]]:
@@ -39,3 +44,20 @@ def test_admin_mcp_four_layer_routes_are_registered() -> None:
     ]
     for method, path in expected:
         assert (method, path) in pairs, f"missing route: {method} {path}"
+
+
+def test_connector_slug_unique_violation_is_classified() -> None:
+    """Only the connector slug constraint maps to the name-conflict response."""
+    slug_error = IntegrityError(
+        "UPDATE mcp_connectors",
+        {},
+        SimpleNamespace(diag=SimpleNamespace(constraint_name="uq_mcp_connector_slug_per_org")),
+    )
+    other_error = IntegrityError(
+        "UPDATE mcp_connectors",
+        {},
+        SimpleNamespace(diag=SimpleNamespace(constraint_name="some_other_constraint")),
+    )
+
+    assert _is_connector_slug_unique_violation(slug_error)
+    assert not _is_connector_slug_unique_violation(other_error)
