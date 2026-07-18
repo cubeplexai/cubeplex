@@ -88,10 +88,7 @@ function mapErrorCode(code: string | null): KnownErrorKey | null {
 }
 
 type NameIdLabelKey =
-  | 'saml.nameIdEmail'
-  | 'saml.nameIdPersistent'
-  | 'saml.nameIdTransient'
-  | 'saml.nameIdUnspecified'
+  'saml.nameIdEmail' | 'saml.nameIdPersistent' | 'saml.nameIdTransient' | 'saml.nameIdUnspecified'
 
 const SAML_NAMEID_FORMATS: { value: string; labelKey: NameIdLabelKey }[] = [
   {

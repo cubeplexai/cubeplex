@@ -1,13 +1,7 @@
 export type WireApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
 export type Readiness =
-  | 'ready'
-  | 'degraded'
-  | 'stale'
-  | 'provider_error'
-  | 'auth_error'
-  | 'model_error'
-  | 'unavailable'
+  'ready' | 'degraded' | 'stale' | 'provider_error' | 'auth_error' | 'model_error' | 'unavailable'
 
 export interface AuthSpec {
   mode: 'api_key' | 'bearer' | 'none' | 'oauth' | 'iam'

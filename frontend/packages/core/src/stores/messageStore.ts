@@ -408,9 +408,7 @@ function hydrateCitationsFromHistory(conversationId: string, messages: Message[]
     // (cubeplex/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
     // metadata.citations only exists for in-memory finalized messages.
     const details = msg.details as
-      | { citations?: import('../types').CitationData[] }
-      | null
-      | undefined
+      { citations?: import('../types').CitationData[] } | null | undefined
     const citations = details?.citations ?? msg.metadata?.citations
     if (citations && citations.length > 0) {
       useCitationStore.getState().loadCitations(conversationId, citations)
@@ -1087,8 +1085,7 @@ async function consumeRunStream(
         break
       } else if (event.type === 'done') {
         const usage = (event.data as Record<string, unknown>).usage as
-          | import('../types').UsageSummary
-          | undefined
+          import('../types').UsageSummary | undefined
         const paused = (event.data as Record<string, unknown>).paused === true
         const usageUpdate: Partial<MessageStore> = {
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
@@ -1232,8 +1229,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const newSessionUsage = {
           ...get().sessionUsage,
           [conversationId]: (usageSummary?.session ?? null) as
-            | import('../types').SessionUsage
-            | null,
+            import('../types').SessionUsage | null,
         }
         const newContextWindow = {
           ...get().contextWindow,
@@ -1356,8 +1352,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             data: {
               error_code: bootstrap.last_run_error.error_code,
               params: (bootstrap.last_run_error.error_params ?? undefined) as
-                | Record<string, unknown>
-                | undefined,
+                Record<string, unknown> | undefined,
               message: bootstrap.last_run_error.error_message,
             },
           }
@@ -1685,8 +1680,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             break outer
           } else if (event.type === 'done') {
             const usage = (event.data as Record<string, unknown>).usage as
-              | import('../types').UsageSummary
-              | undefined
+              import('../types').UsageSummary | undefined
             const paused = (event.data as Record<string, unknown>).paused === true
             const usageUpdate: Partial<MessageStore> = {
               lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
