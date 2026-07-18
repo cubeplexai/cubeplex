@@ -1,12 +1,7 @@
 export type MemoryScope = 'personal' | 'workspace' | 'org'
 
 export type MemoryType =
-  | 'preference'
-  | 'project_fact'
-  | 'procedure'
-  | 'correction'
-  | 'decision'
-  | 'org_policy'
+  'preference' | 'project_fact' | 'procedure' | 'correction' | 'decision' | 'org_policy'
 
 export type MemoryStatus = 'active' | 'archived'
 
