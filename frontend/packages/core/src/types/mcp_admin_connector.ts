@@ -1,11 +1,7 @@
 import type { MCPConnector, MCPConnectorTemplate } from './mcp'
 
 export type AdminOrgReason =
-  | 'usable'
-  | 'missing_org_grant'
-  | 'pending_oauth'
-  | 'grant_expired'
-  | 'discovery_failed'
+  'usable' | 'missing_org_grant' | 'pending_oauth' | 'grant_expired' | 'discovery_failed'
 
 export type AdminOrgCredentialAvailability = 'available' | 'missing' | 'not_required'
 
