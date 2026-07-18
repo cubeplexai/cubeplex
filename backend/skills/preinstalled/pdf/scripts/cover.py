@@ -1529,11 +1529,29 @@ PATTERNS = {
 }
 
 
+def _chain_cjk(tokens: dict) -> dict:
+    """Append the locally installed CJK face to the Latin cover faces.
+
+    Every pattern template interpolates the token inside single quotes
+    ('{t['font_display']}'), so a value of "A', 'B" rides those quotes and
+    becomes a two-family CSS chain — one injection point instead of editing
+    every font-family site. The Google Fonts faces carry no CJK glyphs, so
+    without this chain Chinese cover text falls back to Chromium's default.
+    """
+    t = dict(tokens)
+    for key, cjk_key in (("font_display", "font_display_cjk"),
+                         ("font_body", "font_body_cjk")):
+        cjk = t.get(cjk_key, "")
+        if cjk and t.get(key) and cjk not in t[key]:
+            t[key] = f"{t[key]}', '{cjk}"
+    return t
+
+
 def render(tokens: dict) -> str:
     """Dispatch to the cover pattern function and return the HTML string."""
     pattern = tokens.get("cover_pattern", "fullbleed")
     fn = PATTERNS.get(pattern, _pattern_fullbleed)
-    return fn(tokens)
+    return fn(_chain_cjk(tokens))
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

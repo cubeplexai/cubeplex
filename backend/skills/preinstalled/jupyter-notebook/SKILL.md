@@ -1,7 +1,7 @@
 ---
 name: "jupyter-notebook"
 description: "Use when the user asks to create, scaffold, or edit Jupyter notebooks (`.ipynb`) for experiments, explorations, or tutorials; prefer the bundled templates and run the helper script `new_notebook.py` to generate a clean starting notebook."
-version: 1.0.0-cubeplex.1
+version: 1.1.0
 keywords:
   - office
   - notebook
@@ -33,11 +33,12 @@ Prefer the bundled templates and the helper script for consistent structure and 
 
 ## Skill path
 
-```bash
-export JUPYTER_NOTEBOOK_CLI="/.skills/jupyter-notebook/1.0.0-cubeplex.1/scripts/new_notebook.py"
-```
+`load_skill` returned a `path` field — the sandbox directory holding this
+skill's files. Use it verbatim; never construct the path yourself:
 
-Cubeplex syncs enabled skill files into `/.skills/<name>/<version>/` inside the sandbox.
+```bash
+export JUPYTER_NOTEBOOK_CLI="<the `path` value from load_skill>/scripts/new_notebook.py"
+```
 
 ## Workflow
 1. Lock the intent.

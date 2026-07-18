@@ -374,6 +374,26 @@ SYSTEM_FALLBACK = {
     "body_b_rl":    "Helvetica-Bold",
 }
 
+# Locally installed CJK faces (fontconfig names) chained after the Latin cover
+# faces — cover.py appends them to every font-family, so Chinese cover text
+# gets a designed face instead of Chromium's default fallback. None of the
+# Google Fonts display faces carry CJK glyphs, and the @import needs network;
+# these faces cover both gaps. (display_cjk, body_cjk) per mood; serif Latin
+# faces pair with the CJK Serif.
+_CJK_FONT_PAIRS: dict[str, tuple[str, str]] = {
+    "authoritative": ("Noto Serif CJK SC", "Noto Sans CJK SC"),
+    "clean":         ("Noto Serif CJK SC", "Noto Sans CJK SC"),
+    "expressive":    ("Noto Serif CJK SC", "Noto Sans CJK SC"),
+    "scholarly":     ("Noto Serif CJK SC", "Noto Sans CJK SC"),
+    "restrained":    ("Noto Serif CJK SC", "Noto Sans CJK SC"),
+    "classical":     ("Noto Serif CJK SC", "Noto Serif CJK SC"),
+    "magazine":      ("Noto Serif CJK SC", "Noto Serif CJK SC"),
+    "darkroom":      ("Noto Serif CJK SC", "Noto Serif CJK SC"),
+    "terminal":      ("Noto Sans Mono CJK SC", "Noto Sans Mono CJK SC"),
+    "poster":        ("Noto Sans CJK SC", "Noto Sans Mono CJK SC"),
+}
+_CJK_DEFAULT_PAIR = ("Noto Sans CJK SC", "Noto Sans CJK SC")
+
 # ── Runtime font detection ─────────────────────────────────────────────────────
 # Each entry: ordered list of (path, subfont_index).
 # subfont_index is None for plain TTF; int for TTC (ReportLab subfontIndex=0).
@@ -595,6 +615,10 @@ def build_tokens(
         "font_display":  font_pair["display_css"],
         "font_body":     font_pair["body_css"],
         "gfonts_import": font_pair["gfonts_import"],
+
+        # Typography — locally installed CJK faces for the cover font chain
+        "font_display_cjk": _CJK_FONT_PAIRS.get(mood, _CJK_DEFAULT_PAIR)[0],
+        "font_body_cjk":    _CJK_FONT_PAIRS.get(mood, _CJK_DEFAULT_PAIR)[1],
 
         # Typography — ReportLab names for body pages
         "font_display_rl": display_entry["display_rl"],

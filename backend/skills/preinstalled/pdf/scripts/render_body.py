@@ -31,6 +31,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 import importlib.util
 
@@ -242,6 +243,14 @@ def make_styles(t: dict) -> dict:
             leading=t["line_gap"],
             textColor=HexColor(dk),
             spaceAfter=t["para_gap"], alignment=TA_JUSTIFY,
+        ),
+        # Chinese prose convention: first line indented by 2 characters.
+        "body_cjk": ParagraphStyle("BodyCJK",
+            fontName=bf, fontSize=t["size_body"],
+            leading=t["line_gap"],
+            textColor=HexColor(dk),
+            spaceAfter=t["para_gap"], alignment=TA_JUSTIFY,
+            firstLineIndent=t["size_body"] * 2,
         ),
         "bullet": ParagraphStyle("Bullet",
             fontName=bf, fontSize=t["size_body"],
@@ -646,8 +655,27 @@ def _add_heading(story: list, item: dict, ctx: dict, level: int):
         story.append(para)
 
 
+def _is_cjk_text(text: str) -> bool:
+    """True when CJK dominates among script-bearing characters. Markup tags,
+    digits, and ASCII punctuation carry no script signal, so they're excluded —
+    otherwise a citation-heavy sentence like 增长 15%<super>[1]</super> dips
+    below threshold and adjacent Chinese paragraphs get inconsistent indents."""
+    stripped = re.sub(r"<[^>]*>", "", text)
+    cjk = sum(
+        1 for c in stripped
+        if "一" <= c <= "鿿"   # CJK Unified Ideographs
+        or "　" <= c <= "〿"   # CJK punctuation
+        or "＀" <= c <= "￯"   # fullwidth forms
+    )
+    if not cjk:
+        return False
+    latin = sum(1 for c in stripped if c.isascii() and c.isalpha())
+    return cjk / (cjk + latin) > 0.3
+
+
 def _add_body(story: list, item: dict, ctx: dict):
-    story.append(Paragraph(item["text"], ctx["styles"]["body"]))
+    key = "body_cjk" if _is_cjk_text(item["text"]) else "body"
+    story.append(Paragraph(item["text"], ctx["styles"][key]))
 
 
 def _add_bullet(story: list, item: dict, ctx: dict):

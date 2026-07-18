@@ -1,6 +1,6 @@
 # Financial Formatting & Output Standards — Complete Agent Guide
 
-> This document is the complete reference manual for the agent when applying professional financial formatting to xlsx files. All operations target direct XML surgery on `xl/styles.xml` without using openpyxl. Every operational step provides ready-to-use XML snippets.
+> This document is the complete reference manual for the agent when applying professional financial formatting to xlsx files. Sections 1–13 target direct XML surgery on `xl/styles.xml` (the CREATE Path B / EDIT / FORMAT flows) and provide ready-to-use XML snippets. **Section 14 is the tool-agnostic visual-design standard** — palettes, charts, cover pages, layout — and applies to both the openpyxl path (CREATE Path A) and the XML path.
 
 ---
 
@@ -13,6 +13,9 @@ The user provides an existing xlsx file and requests that financial modeling for
 
 **Scenario B — Applying Format Standards After CREATE/EDIT**
 After completing data entry or formula writing, formatting is applied as the final step. At this point, `styles.xml` may come from the minimal_xlsx template (which pre-defines 13 style slots) or from a user file. In either case, follow the principle of "append only, never modify existing xf entries."
+
+**Scenario C — openpyxl CREATE (Path A)**
+Files built from scratch with openpyxl don't touch styles.xml directly, so §3–13 don't apply — but the visual standard does. Jump to **§14 Visual Design Standards** for palettes, layout, charts, and cover pages, and apply the §2.1 font-color roles via `Font(color=...)`.
 
 **Not applicable**: Reading or analyzing file contents only (use the READ path); modifying formulas or data (use the EDIT path).
 
@@ -766,3 +769,102 @@ Before outputting the final file, confirm each item:
 - [ ] Assumptions block and model block are clearly separated (different sheets or separated by empty rows within the same sheet)
 - [ ] Summary rows use `SUM()` formulas, not manually hard-coded totals
 - [ ] Balance verification: summary rows = sum of their respective line items (a check row can be added at the end of the model to verify)
+
+---
+
+## 14. Visual Design Standards (both paths)
+
+Sections 1–13 govern *financial* semantics via styles.xml. This section is the
+tool-agnostic look-and-feel standard for **every** deliverable. The font-color
+**role** system (§2.1: blue input / black formula / green cross-sheet / red
+external) always applies on top of whichever palette you pick below.
+
+Hex values here are 6-digit RGB (openpyxl form). For the XML path, prefix with
+the `FF` alpha byte to get AARRGGBB (`0066CC` → `FF0066CC`).
+
+### 14.1 Layout principles (apply to every sheet)
+
+- **Hide gridlines** on every sheet. openpyxl: `ws.sheet_view.showGridLines = False`. XML: `<sheetView showGridLines="0" workbookViewId="0"/>`.
+- **Start content at B2**, not A1 — leave column A and row 1 as breathing room.
+- **Title row height**: bump the title row so large text isn't clipped (openpyxl `ws.row_dimensions[2].height = 30`).
+- **No wrap text by default** — leave `wrap_text` off unless the user asks or a column genuinely needs it.
+- **Proportional sizing** — set sensible column widths / row heights; never leave a column too narrow to read or a row absurdly tall.
+- **Hierarchy & consistency** — convey structure through font size/weight and color intensity, and keep formatting uniform across similar data.
+
+### 14.2 Pick a palette
+
+| Task type | Palette | When |
+|-----------|---------|------|
+| **Non-financial** (reports, dashboards, data tables) | **Minimalist Monochrome** (default) | Anything that isn't fiscal analysis |
+| **Financial / fiscal** (revenue, budget, stock, GDP, ROI, valuation) | **Professional Finance** | Money-centric analysis; combine with §1–13 semantics |
+
+**Minimalist Monochrome** — white / black / grey + a *single* blue accent. No
+other hues (no green/red/orange/purple), no rainbow scales, no gradients across
+hue families. Exceptions: the §2.1 font-color roles and regional finance
+indicators below.
+- Background `FFFFFF` / `F5F5F5` / `F9F9F9` · text `000000` / `333333` · border `D0D0D0` · blue accent `0066CC` / `4A90D9` / `E6F0FA`
+
+**Professional Finance** — background `ECF0F1` · header `122B49` · accent
+`FFF3E0` · negative `FF0000`.
+- **Regional up/down convention** (price movement coloring):
+
+| Region | Up | Down |
+|--------|----|----|
+| China (Mainland) | Red | Green |
+| International | Green | Red |
+
+### 14.3 Borders
+
+Default to **no borders** — clean sheets read better. Add borders only to carry
+meaning: thin 1px lines inside a model, a thicker line for section breaks, and a
+top border on TOTAL rows (the accounting underline). The XML row-border recipe
+is in the SKILL.md EDIT section; in openpyxl use `Border(top=Side(style="thin"))`.
+
+### 14.4 Conditional formatting
+
+Apply to the **2–4 columns that carry the signal**, not everything. Keep colors
+consistent with the palette — in monochrome tasks stay within blue/grey (blue
+data bars); reserve red/green scales for finance tasks.
+
+| Data | Rule | openpyxl |
+|------|------|----------|
+| Magnitude | Data bar | `DataBarRule(start_type="min", end_type="max", color="4A90D9")` |
+| Distribution | Color scale | `ColorScaleRule(start_color="FFFFFF", end_color="4A90D9", ...)` |
+| Threshold | Highlight | `CellIsRule(operator="greaterThan", formula=["100000"], fill=...)` |
+
+### 14.5 Cover page
+
+Multi-sheet deliverables lead with a **Cover** as the first sheet:
+
+| Row | Content | Style |
+|-----|---------|-------|
+| 2–3 | Report title | 18–20pt, bold, centered (merge title cells) |
+| 5 | Subtitle / description | 12pt, grey |
+| 7–15 | 3–6 headline metrics | small table, highlighted |
+| 17+ | Sheet index | `Sheet name → description` per row |
+
+Hide gridlines on the cover, match the workbook palette, and give the title row
+extra height. If the workbook contains PivotTables, add a "refresh on open" note.
+
+### 14.6 Charts
+
+Create **real embedded charts** (openpyxl `openpyxl.chart`) — never a data sheet
+with a "go to Insert → Chart" instruction. If the user asks for visuals, ensure
+each prepared dataset gets at least one chart.
+
+| Data relationship | Chart | Note |
+|-------------------|-------|------|
+| Trend over time | Line | |
+| Compare categories | Column (`type="col"`) / Bar (`type="bar"`) | |
+| Composition | Pie / Doughnut | ≤ 6 slices |
+| Distribution | Histogram | |
+| Correlation | Scatter | |
+
+Chart color series — Monochrome: `333333` / `666666` / `0066CC` / `4A90D9`.
+Finance: `122B49` / `274C77` / `3B6796` / `D9E2F3`.
+
+### 14.7 External data → cite sources
+
+Any value from web search / an API / a filing needs a citation: two columns
+`Source Name` | `Source URL` (plain text, not `HYPERLINK()`), or a dedicated
+`Sources` sheet if per-row citation is impractical.

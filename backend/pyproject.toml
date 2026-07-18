@@ -31,7 +31,7 @@ dependencies = [
     # so `FakeRedis(decode_responses=True).hgetall(...)` returns bytes
     # under RESP3. Fix is in upstream PR cunla/fakeredis-py#492; once it
     # ships we can drop this cap.
-    "redis>=5.2.0,<8",
+    "redis>=5.2.0,<9",
     "python-magic>=0.4.27",
     "filetype>=1.2.0",
     "pillow>=10.4.0",
@@ -56,7 +56,7 @@ dependencies = [
     "python3-saml>=1.16.0",
     "dingtalk-stream>=0.24.3",
     "microsoft-teams-apps>=2.0.13.4",
-    "websockets>=11,<15",
+    "websockets>=11,<17",
 ]
 
 [project.optional-dependencies]

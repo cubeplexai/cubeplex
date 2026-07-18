@@ -2,7 +2,7 @@ import {readdir, readFile, writeFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 
 const buildDirectory = resolve(process.argv[2] ?? 'build');
-const siteOrigin = 'https://docs.cubeplex.ai';
+const siteOrigin = 'https://cubeplex.ai';
 
 async function walk(directory) {
   const entries = await readdir(directory, {withFileTypes: true});

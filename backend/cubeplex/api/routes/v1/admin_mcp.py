@@ -22,6 +22,7 @@ from typing import Annotated, Any, cast
 import httpx
 from cubepi.mcp import load_mcp_tools_http
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.middleware.rate_limit import limiter
@@ -86,6 +87,20 @@ from cubeplex.services.mcp_discovery import (
 from cubeplex.services.mcp_installs import MCPConnectorService
 
 router = APIRouter(prefix="/admin/mcp", tags=["admin-mcp"])
+
+_MCP_CONNECTOR_SLUG_UNIQUE_CONSTRAINT = "uq_mcp_connector_slug_per_org"
+
+
+def _is_connector_slug_unique_violation(exc: IntegrityError) -> bool:
+    """Return whether an integrity error came from connector-name uniqueness."""
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    constraint_name = getattr(diag, "constraint_name", None)
+    if constraint_name is not None:
+        return str(constraint_name) == _MCP_CONNECTOR_SLUG_UNIQUE_CONSTRAINT
+    return _MCP_CONNECTOR_SLUG_UNIQUE_CONSTRAINT in str(
+        orig
+    ) or _MCP_CONNECTOR_SLUG_UNIQUE_CONSTRAINT in str(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1014,7 +1029,13 @@ async def patch_admin_install(
         if conflicts:
             raise HTTPException(409, detail={"code": "install_already_exists"})
 
-    saved = await svc._install_repo.update(install)
+    try:
+        saved = await svc._install_repo.update(install)
+    except IntegrityError as exc:
+        await svc._install_repo.session.rollback()
+        if not _is_connector_slug_unique_violation(exc):
+            raise
+        raise HTTPException(409, detail={"code": "install_already_exists"}) from exc
     await audit.record(
         event="mcp.install.patched",
         actor_user_id=ctx.user.id,

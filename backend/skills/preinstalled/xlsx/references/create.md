@@ -1,8 +1,7 @@
 # Build New xlsx from Scratch
 
-Create new, production-quality xlsx files using the XML approach. NEVER use openpyxl
-for writing. NEVER hardcode Python-computed values — every derived number must be a
-live Excel formula.
+Create new, production-quality xlsx files. NEVER hardcode Python-computed values —
+every derived number must be a live Excel formula.
 
 ---
 
@@ -17,25 +16,136 @@ If the user provides an existing file to modify, switch to `edit.md` instead.
 
 ---
 
+## Pick Your Tool First
+
+There is no source file to protect when you create from scratch, so the
+openpyxl round-trip that corrupts *existing* files is a non-issue here. Choose:
+
+- **openpyxl (default)** — Path A below. Charts, conditional formatting, cover
+  pages, and styling are one API call each; agonizing in raw XML. Use this for
+  reports, dashboards, and most models.
+- **Raw XML template** — Path B (the bulk of this doc). Use when you need
+  byte-level determinism or precise `styles.xml` index control — e.g. a
+  financial model whose every style slot is audited per `format.md`.
+
+Both paths obey the same laws: formula-first, font-color roles, validate before
+delivery. openpyxl does not compute formula caches, so an openpyxl file MUST be
+recalculated (`libreoffice_recalc.py`) before `formula_check.py`.
+
+---
+
 ## The Non-Negotiable Rules
 
-Before touching any file, internalize these four rules:
+Before touching any file, internalize these four rules (they hold on both paths):
 
 1. **Formula-First**: Every calculated value (`SUM`, growth rate, ratio, subtotal, etc.)
-   MUST be written as `<f>SUM(B2:B9)</f>`, not as a hardcoded `<v>5000</v>`. Hardcoded
-   numbers go stale when source data changes. Only raw inputs and assumption parameters
-   may be hardcoded values.
+   MUST be a live formula (`=SUM(B2:B9)` in openpyxl, `<f>SUM(B2:B9)</f>` in XML), not a
+   hardcoded number. Hardcoded numbers go stale when source data changes. Only raw inputs
+   and assumption parameters may be hardcoded values.
 
-2. **No openpyxl for writing**: The entire file is built by editing XML directly. Python
-   is only allowed for reading/analysis (`pandas.read_excel()`) and for running helper
-   scripts (`xlsx_pack.py`, `formula_check.py`).
+2. **openpyxl only on your own workbook**: openpyxl is the default writer when you build a
+   *new* file in the same script. Never `load_workbook()` an existing file and re-save it —
+   that round-trip drops VBA/pivots/charts (see `edit.md`). On Path B, Python only runs the
+   helper scripts (`xlsx_pack.py`, `formula_check.py`) and reads (`pandas.read_excel()`).
 
 3. **Style encodes meaning**: Blue font = user input/assumption. Black font = formula
    result. Green font = cross-sheet reference. See `format.md` for the full color system
    and style index table.
 
-4. **Validate before delivery**: Run `formula_check.py` and fix all errors before
-   handing the file to the user.
+4. **Validate before delivery**: recalculate (openpyxl writes no formula cache), then run
+   `formula_check.py` and fix all errors before handing the file to the user.
+
+---
+
+## Path A — Build with openpyxl (default)
+
+The whole workbook is built in one Python script, so nothing pre-existing can be
+corrupted. This unlocks the features that are impractical in raw XML.
+
+```python
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.formatting.rule import DataBarRule, ColorScaleRule, CellIsRule
+
+wb = Workbook()
+```
+
+**Formula-first** (never paste a Python-computed result):
+```python
+ws["C2"] = "=A2*B2"          # ✅ live formula
+ws["C10"] = "=SUM(C2:C9)"    # ✅
+# ws["C2"] = a * b           # ❌ static value — forbidden for derived cells
+```
+
+**Font-color roles** (same semantics as `format.md`):
+```python
+ws["B2"].font = Font(color="0000FF")   # blue  = hard-coded input / assumption
+ws["C2"].font = Font(color="000000")   # black = formula result
+ws["D2"].font = Font(color="00B050")   # green = cross-sheet reference
+```
+
+**Hide gridlines** for a clean look — do it on every sheet, and start content at B2:
+```python
+for ws in wb.worksheets:
+    ws.sheet_view.showGridLines = False
+```
+
+**Charts** — embed real charts, never a "paste your data into Insert > Chart" note:
+```python
+chart = BarChart(); chart.type = "col"; chart.title = "Revenue by Year"
+data = Reference(ws, min_col=2, min_row=1, max_row=5)   # include header row
+cats = Reference(ws, min_col=1, min_row=2, max_row=5)
+chart.add_data(data, titles_from_data=True)
+chart.set_categories(cats)
+ws.add_chart(chart, "E2")
+```
+
+**Conditional formatting** — apply to the 2–4 columns that carry the signal:
+```python
+ws.conditional_formatting.add("C2:C100", DataBarRule(start_type="min", end_type="max", color="4A90D9"))
+ws.conditional_formatting.add("D2:D100", CellIsRule(operator="lessThan", formula=["0"], font=Font(color="FF0000")))
+```
+
+**Cover sheet** — for multi-sheet deliverables, make the first sheet a cover with the
+report title, 3–6 headline metrics, and a sheet index. It is just a normal worksheet
+with merged title cells and gridlines hidden.
+
+**External data → cite the source.** When any value comes from web search / an API /
+a filing, add `Source Name` and `Source URL` columns (or a dedicated `Sources` sheet).
+Use plain text, not `HYPERLINK()`.
+
+**Older-Excel compatibility.** openpyxl will happily write dynamic-array functions
+(`FILTER`, `UNIQUE`, `SORT`, `XLOOKUP`, `LET`, `LAMBDA`, `SEQUENCE`, …) that `#NAME?`
+in Excel 2019 and earlier. `formula_check.py` does NOT catch these — it treats them as
+valid names — so it's on you: unless the user targets Excel 365/2021+, use the classic
+equivalents (`INDEX`/`MATCH`, `SUMIF`, helper columns).
+
+**Then recalc + validate** (mandatory — openpyxl caches no results). Recalc into a
+separate file, confirm it, then deliver the recalculated file:
+```bash
+python3 $SKILL_DIR/scripts/libreoffice_recalc.py output.xlsx /tmp/recalc.xlsx
+python3 $SKILL_DIR/scripts/formula_check.py /tmp/recalc.xlsx --report
+```
+If LibreOffice is unavailable (exit 2), note it as SKIPPED and still run
+`formula_check.py` (static analysis needs no cache) — but warn the user that
+formula cells will read as empty in pandas/other headless readers until the file
+is opened once in Excel/WPS. Full recalc/validation detail: `validate.md`.
+
+The snippets above are the *how*; the authoritative visual standard is
+**`format.md` §14** (palette choice — Minimalist Monochrome vs Professional
+Finance, layout rules, chart colors, cover-page structure) plus §2.1 color roles
+and §2.2 number formats. Read §14 before styling anything non-trivial. The rest of
+this document (Path B) is the raw-XML route — read it only if you chose XML over
+openpyxl.
+
+---
+
+## Path B — Build with the raw XML template
+
+Everything below — the workflow, checklists, scenarios, and prohibitions — is the
+byte-level XML route. Use it when you chose XML over openpyxl for determinism or
+precise `styles.xml` control (see "Pick Your Tool First"). Otherwise Path A is faster.
 
 ---
 
@@ -678,9 +788,10 @@ The `Summary` sheet pulls from `Data` using cross-sheet formulas (green, `s="3"`
 
 ---
 
-## What You Must NOT Do
+## What You Must NOT Do (Path B)
 
-- Do NOT use openpyxl or any Python library to write the final xlsx file
+- Do NOT mix writers: on the XML path, build the file with the template + helper
+  scripts, not openpyxl. (openpyxl is Path A's job — see "Pick Your Tool First".)
 - Do NOT hardcode any calculated value — use `<f>` formulas for every derived number
 - Do NOT deliver without running `formula_check.py` first
 - Do NOT set a cell's `s` attribute to a value >= `cellXfs count`

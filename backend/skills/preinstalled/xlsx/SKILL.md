@@ -1,10 +1,9 @@
 ---
 name: xlsx
-version: 1.0.0-cubeplex.2
+version: 1.1.0
 description: "Open, create, read, analyze, edit, or validate Excel/spreadsheet files (.xlsx, .xlsm, .csv, .tsv). Use when the user asks to create, build, modify, analyze, read, validate, or format any Excel spreadsheet, financial model, pivot table, or tabular data file. Covers: creating new xlsx from scratch, reading and analyzing existing files, editing existing xlsx with zero format loss, formula recalculation and validation, and applying professional financial formatting standards. Triggers on 'spreadsheet', 'Excel', '.xlsx', '.csv', 'pivot table', 'financial model', 'formula', or any request to produce tabular data in Excel format."
 license: MIT
 metadata:
-  version: "1.0"
   category: productivity
   sources:
     - ECMA-376 Office Open XML File Formats
@@ -13,25 +12,48 @@ metadata:
 
 # xlsx
 
-Cubeplex adaptation of MiniMax `minimax-xlsx`.
+## Skill directory
 
-## Cubeplex Sandbox Path
-
-Enabled skill files are available at `/.skills/xlsx/1.0.0-cubeplex.2/`.
+`load_skill` returned a `path` field — the sandbox directory holding this
+skill's scripts, templates, and references. Use it verbatim; never construct
+the path yourself:
 
 ```bash
-export SKILL_DIR="/.skills/xlsx/1.0.0-cubeplex.2"
-cd "$SKILL_DIR"
+export SKILL_DIR="<the `path` value from load_skill>"
 ```
 
-Handle the request directly. Do NOT spawn sub-agents. Always write the output file the user requests.
+Handle the request in this conversation — don't delegate to subagents: edit
+integrity depends on one agent owning the file. Write output files to the
+working directory, never into `$SKILL_DIR`.
+
+## Choosing the write strategy: openpyxl vs XML surgery
+
+Two ways to write an `.xlsx`, each with a job. Pick by one question: **does an
+input file already exist whose non-cell content must survive?**
+
+| Situation | Strategy | Why |
+|-----------|----------|-----|
+| **CREATE** from scratch (no source file) | **openpyxl** (default) | Nothing to corrupt. openpyxl makes charts, conditional formatting, cover pages, and rich styling trivial — all painful in raw XML. |
+| **EDIT / FIX** an existing file | **XML surgery** (required) | openpyxl `load_workbook()` → `save()` silently drops VBA, pivot tables, sparklines, slicers, and some charts. Unpack → edit XML → pack changes only the nodes you touch. |
+
+Gray zone — a *financial model built from scratch*: openpyxl works and is
+faster. Reach for XML surgery only when you need byte-level determinism or
+precise `styles.xml` index control (see `references/format.md`).
+
+**The one absolute rule:** never `openpyxl.load_workbook(existing.xlsx)` then
+`save()` — that round-trip is what corrupts. openpyxl is safe only on a
+workbook *you* created in the same script.
+
+openpyxl writes formula *strings* but no cached results, so an openpyxl-created
+file MUST be recalculated (`libreoffice_recalc.py`) and checked
+(`formula_check.py`) before delivery — same gate as the XML path.
 
 ## Task Routing
 
 | Task | Method | Guide |
 |------|--------|-------|
 | **READ** — analyze existing data | `xlsx_reader.py` + pandas | `references/read-analyze.md` |
-| **CREATE** — new xlsx from scratch | XML template | `references/create.md` + `references/format.md` |
+| **CREATE** — new xlsx from scratch | openpyxl (default), or XML template for byte-level control | `references/create.md` + `references/format.md` |
 | **EDIT** — modify existing xlsx | XML unpack→edit→pack | `references/edit.md` (+ `format.md` if styling needed) |
 | **FIX** — repair broken formulas in existing xlsx | XML unpack→fix `<f>` nodes→pack | `references/fix.md` |
 | **VALIDATE** — check formulas | `formula_check.py` | `references/validate.md` |
@@ -44,9 +66,16 @@ Start with `xlsx_reader.py` for structure discovery, then pandas for custom anal
 
 **Aggregation rule**: Always compute sums/means/counts directly from the DataFrame column — e.g. `df['Revenue'].sum()`. Never re-derive column values before aggregation.
 
-## CREATE — XML template (read `references/create.md` + `references/format.md`)
+## CREATE — new file (read `references/create.md` + `references/format.md`)
 
-Copy `templates/minimal_xlsx/` → edit XML directly → pack with `xlsx_pack.py`. Every derived value MUST be an Excel formula (`<f>SUM(B2:B9)</f>`), never a hardcoded number. Apply font colors per `format.md`.
+Default: build with **openpyxl** — it unlocks charts, conditional formatting,
+cover pages, and styling with far less effort than raw XML. Alternative for
+byte-level determinism / precise style-index control: copy
+`templates/minimal_xlsx/` → edit XML directly → pack with `xlsx_pack.py`.
+
+Either way: every derived value MUST be an Excel formula (`=SUM(B2:B9)` /
+`<f>SUM(B2:B9)</f>`), never a hardcoded number. Apply font colors per
+`format.md`. Recalculate + `formula_check.py` before delivery.
 
 ## EDIT — XML direct-edit (read `references/edit.md` first)
 
@@ -62,7 +91,7 @@ Never use openpyxl round-trip on existing files (corrupts VBA, pivots, sparkline
 ```bash
 python3 $SKILL_DIR/scripts/xlsx_unpack.py input.xlsx /tmp/xlsx_work/
 # Find the target sheet's XML via xl/workbook.xml → xl/_rels/workbook.xml.rels
-# Then use the Edit tool to add <f> inside the target <c> element:
+# Then use edit_file to add <f> inside the target <c> element:
 #   <c r="B3"><f>SUM('Sales Data'!D2:D13)</f><v></v></c>
 python3 $SKILL_DIR/scripts/xlsx_pack.py /tmp/xlsx_work/ output.xlsx
 ```
@@ -108,7 +137,7 @@ After running helper scripts, apply borders to ALL cells in the target row, not 
 **Manual XML edit** (for anything the helper scripts don't cover):
 ```bash
 python3 $SKILL_DIR/scripts/xlsx_unpack.py input.xlsx /tmp/xlsx_work/
-# ... edit XML with the Edit tool ...
+# ... edit XML with edit_file ...
 python3 $SKILL_DIR/scripts/xlsx_pack.py /tmp/xlsx_work/ output.xlsx
 ```
 
@@ -131,10 +160,10 @@ Run `formula_check.py` for static validation. Use `libreoffice_recalc.py` for dy
 ## Key Rules
 
 1. **Formula-First**: Every calculated cell MUST use an Excel formula, not a hardcoded number
-2. **CREATE → XML template**: Copy minimal template, edit XML directly, pack with `xlsx_pack.py`
-3. **EDIT → XML**: Never openpyxl round-trip. Use unpack/edit/pack scripts
+2. **CREATE → openpyxl** by default (charts/formatting made easy); XML template only when you need byte-level control
+3. **EDIT existing → XML surgery**: never openpyxl round-trip on a file you didn't create — it drops VBA/pivots/charts. Use unpack/edit/pack scripts
 4. **Always produce the output file** — this is the #1 priority
-5. **Validate before delivery**: `formula_check.py` exit code 0 = safe
+5. **Validate before delivery**: recalculate, then `formula_check.py` exit code 0 = safe
 
 ## Utility Scripts
 

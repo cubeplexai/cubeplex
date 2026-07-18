@@ -1028,7 +1028,7 @@ requires-dist = [
     { name = "python-magic", specifier = ">=0.4.27" },
     { name = "python3-saml", specifier = ">=1.16.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "redis", specifier = ">=5.2.0,<8" },
+    { name = "redis", specifier = ">=5.2.0,<9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "slack-bolt", specifier = ">=1.28.0" },
     { name = "slack-sdk", specifier = ">=3.42.0" },
@@ -1039,7 +1039,7 @@ requires-dist = [
     { name = "uuid-utils", specifier = ">=0.14.1" },
     { name = "uvicorn", specifier = ">=0.27.1" },
     { name = "watchfiles", specifier = ">=1.2.0" },
-    { name = "websockets", specifier = ">=11,<15" },
+    { name = "websockets", specifier = ">=11,<17" },
     { name = "yarl", specifier = ">=1.23.0" },
 ]
 provides-extras = ["dev", "test"]
