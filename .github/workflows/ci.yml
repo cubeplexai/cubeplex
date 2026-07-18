@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -98,7 +98,7 @@ jobs:
           CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-check-ci
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-coverage
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: backend/coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -118,10 +118,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
@@ -184,7 +184,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -283,7 +283,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -293,7 +293,7 @@ jobs:
           # Ephemeral runner — skip post-run `uv cache prune --ci`
           # which occasionally hangs on a concurrent lock and fails the job.
           prune-cache: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
@@ -368,7 +368,7 @@ jobs:
 
       - name: Upload backend logs on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-log
           path: |
@@ -377,7 +377,7 @@ jobs:
 
       - name: Upload playwright traces on failure
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
           path: |
@@ -390,7 +390,7 @@ jobs:
     timeout-minutes: 5
     needs: [gate, backend-check]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -419,11 +419,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: cubeplex
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: cubeplex/cubeplex-ee
           path: cubeplex-ee

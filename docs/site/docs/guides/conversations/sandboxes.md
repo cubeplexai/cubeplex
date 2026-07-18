@@ -69,6 +69,14 @@ Each sandbox gets its own isolated storage — files in one sandbox are never vi
 - The row stays in the list until you **Delete** it (or until its owning conversation/topic is deleted and you clean up the orphaned row).
 - Stopping, pausing, or restarting a container does **not** remove the row — only Delete does.
 
+## Packages and Python environments
+
+Everything under the sandbox's working directory (`/workspace`) lives on its persistent storage:
+
+- **Installed packages persist.** When the agent runs a plain `pip install` or `npm install -g`, the packages land on persistent storage and are still available in later conversations — nothing gets reinstalled on every chat.
+- **Isolated environments work normally.** If a project or skill needs its own Python environment (a conflicting dependency set, a different Python version), the agent can create one with `python -m venv` or `uv`. Environments created under the working directory survive restarts and recreation like any other file.
+- **Everything outside the working directory is temporary.** System locations (`/tmp`, `/opt`, …) are reset when the sandbox is recreated.
+
 ## Tips
 
 - **Restart before Delete.** If a sandbox is misbehaving but you want to keep its files, Restart it. Reach for Delete only when you genuinely want a clean slate.
