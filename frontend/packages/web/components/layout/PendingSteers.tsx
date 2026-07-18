@@ -1,5 +1,6 @@
 'use client'
 
+import { useShallow } from 'zustand/react/shallow'
 import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { X } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -9,7 +10,7 @@ interface PendingSteersProps {
 }
 
 export function PendingSteers({ conversationId }: PendingSteersProps): React.ReactElement | null {
-  const pending = useMessageStore((s) => s.pendingSteers[conversationId] ?? [])
+  const pending = useMessageStore(useShallow((s) => s.pendingSteers[conversationId] ?? []))
   const cancelSteer = useMessageStore((s) => s.cancelSteer)
   const { workspaceId } = useWorkspaceContext()
 
