@@ -53,14 +53,21 @@ vi.mock('@cubeplex/core', () => ({
       attachedIds: () => string[]
       staging: Record<string, unknown[]>
     }) => unknown,
-  ) =>
-    selector({
+  ) => {
+    const state = {
       upload: storeMocks.upload,
       clear: storeMocks.clear,
       hydrate: storeMocks.hydrate,
       attachedIds: () => [],
       staging: {},
-    }),
+    }
+    const firstSnapshot = selector(state)
+    const secondSnapshot = selector(state)
+    if (firstSnapshot !== secondSnapshot) {
+      throw new Error('attachment selector returned an unstable snapshot')
+    }
+    return firstSnapshot
+  },
 }))
 
 vi.mock('@/hooks/useWorkspaceContext', () => ({
@@ -115,6 +122,10 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(textarea).not.toBeDisabled()
     })
+  })
+
+  it('keeps attachment selector snapshots stable', () => {
+    renderWithIntl(<InputBar conversationId="conv-1" />)
   })
 
   it('focuses the textarea when clicking the visible input shell padding', () => {
