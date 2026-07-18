@@ -4,6 +4,10 @@ import { themes as prismThemes } from 'prism-react-renderer';
 
 const classicOptions: ClassicOptions = {
   docs: {
+    // Docs render at the site root of the Docusaurus app; combined with the
+    // '/docs/' baseUrl below this yields public URLs of cubeplex.ai/docs/*
+    // (served on the main domain via the docs-proxy Worker).
+    routeBasePath: '/',
     sidebarPath: './sidebars.ts',
     editUrl: 'https://github.com/cubeplexai/cubeplex/edit/main/docs/site/',
   },
@@ -23,8 +27,11 @@ const config: Config = {
   tagline: 'Your AI agent workspace — chat, automate, extend',
   favicon: 'img/cubeplex-favicon.svg',
 
-  url: 'https://docs.cubeplex.ai',
-  baseUrl: '/',
+  // Served from the main domain under /docs (same-origin as the marketing
+  // site). baseUrl namespaces every page + asset under /docs/ so the
+  // docs-proxy Worker route `cubeplex.ai/docs*` captures all of it.
+  url: 'https://cubeplex.ai',
+  baseUrl: '/docs/',
   trailingSlash: false,
   organizationName: 'cubeplexai',
   projectName: 'cubeplex',

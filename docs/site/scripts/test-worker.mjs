@@ -16,69 +16,42 @@ const env = {
   },
 };
 
+// The docs origin serves the Docusaurus build at its own root. The /docs
+// prefix that appears on the public domain is added/stripped by the
+// docs-proxy Worker, so here the origin only canonicalizes to slashless URLs.
+const ORIGIN = 'https://cubeplex-docs.pages.dev';
+
+// Trailing slash on a document → 301 to the slashless canonical, query kept.
 const redirected = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/docs/intro/?source=legacy'),
+  new Request(`${ORIGIN}/getting-started/quick-start/?source=legacy`),
   env,
 );
 assert.equal(redirected.status, 301);
 assert.equal(
   redirected.headers.get('location'),
-  'https://docs.cubeplex.ai/docs/intro?source=legacy',
+  `${ORIGIN}/getting-started/quick-start?source=legacy`,
 );
 
-const root = await worker.fetch(new Request('https://docs.cubeplex.ai/?source=legacy'), env);
-assert.equal(root.status, 301);
-assert.equal(root.headers.get('location'), 'https://docs.cubeplex.ai/docs?source=legacy');
+// Locale home with a trailing slash → slashless.
+const zhSlash = await worker.fetch(new Request(`${ORIGIN}/zh-Hans/`), env);
+assert.equal(zhSlash.status, 301);
+assert.equal(zhSlash.headers.get('location'), `${ORIGIN}/zh-Hans`);
 
-const zhRoot = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/zh-Hans/?source=legacy'),
-  env,
-);
-assert.equal(zhRoot.status, 301);
-assert.equal(
-  zhRoot.headers.get('location'),
-  'https://docs.cubeplex.ai/zh-Hans/docs?source=legacy',
-);
-
-const zhRootWithoutSlash = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/zh-Hans'),
-  env,
-);
-assert.equal(zhRootWithoutSlash.status, 301);
-assert.equal(zhRootWithoutSlash.headers.get('location'), 'https://docs.cubeplex.ai/zh-Hans/docs');
-
-const canonical = await worker.fetch(new Request('https://docs.cubeplex.ai/docs/intro'), env);
+// Canonical (slashless) requests are served, not redirected.
+const canonical = await worker.fetch(new Request(`${ORIGIN}/getting-started/quick-start`), env);
 assert.equal(canonical.status, 200);
 
-const docsWelcome = await worker.fetch(new Request('https://docs.cubeplex.ai/docs'), env);
-assert.equal(docsWelcome.status, 200);
+// The docs home ('/') is served directly.
+const root = await worker.fetch(new Request(`${ORIGIN}/`), env);
+assert.equal(root.status, 200);
 
-const docsWelcomeWithSlash = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/docs/'),
-  env,
-);
-assert.equal(docsWelcomeWithSlash.status, 301);
-assert.equal(docsWelcomeWithSlash.headers.get('location'), 'https://docs.cubeplex.ai/docs');
-
-const zhWelcome = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/zh-Hans/docs'),
-  env,
-);
-assert.equal(zhWelcome.status, 200);
-
-const zhWelcomeWithSlash = await worker.fetch(
-  new Request('https://docs.cubeplex.ai/zh-Hans/docs/'),
-  env,
-);
-assert.equal(zhWelcomeWithSlash.status, 301);
-assert.equal(
-  zhWelcomeWithSlash.headers.get('location'),
-  'https://docs.cubeplex.ai/zh-Hans/docs',
-);
+// Static assets pass straight through.
+const asset = await worker.fetch(new Request(`${ORIGIN}/assets/js/main.js`), env);
+assert.equal(asset.status, 200);
 
 assert.deepEqual(delegatedRequests, [
-  'https://docs.cubeplex.ai/docs/intro',
-  'https://docs.cubeplex.ai/docs.html',
-  'https://docs.cubeplex.ai/zh-Hans/docs.html',
+  `${ORIGIN}/getting-started/quick-start`,
+  `${ORIGIN}/`,
+  `${ORIGIN}/assets/js/main.js`,
 ]);
 console.log('Cloudflare URL normalization check passed.');

@@ -2,7 +2,7 @@ import {readdir, readFile} from 'node:fs/promises';
 import {join, relative, resolve} from 'node:path';
 
 const buildDirectory = resolve(process.argv[2] ?? 'build');
-const siteOrigin = 'https://docs.cubeplex.ai';
+const siteOrigin = 'https://cubeplex.ai';
 const issues = [];
 
 async function walk(directory) {
