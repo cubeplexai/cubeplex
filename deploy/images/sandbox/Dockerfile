@@ -8,11 +8,13 @@ FROM hub.sensedeal.vip/library/ubuntu:24.04
 # Set build-time arguments
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Set environment variables early
+# Set environment variables early. Deliberately NOT exporting VIRTUAL_ENV:
+# a global VIRTUAL_ENV=/opt/venv makes uv/poetry treat /opt/venv as the active
+# env and silently install into it (an image layer, lost on recreate). PATH
+# alone makes /opt/venv the default interpreter.
 ENV PYTHONIOENCODING=utf-8 \
     TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
-    VIRTUAL_ENV=/opt/venv \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     NODE_PATH=/usr/local/lib/node_modules \
     PATH="/opt/venv/bin:$PATH"
@@ -263,19 +265,30 @@ ENV USER=neko \
     NEKO_WEBRTC_ICESERVERS_BACKEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]"
 
 # ---------------------------------------------------------------------------
-# User-installable runtime layer on /workspace (PVC). Set AFTER all baseline
-# installs so the build-time `pip install` / `npm install -g` land in
+# User-installable runtime layer on /workspace (PVC). Configured AFTER all
+# baseline installs so the build-time `pip install` / `npm install -g` land in
 # /opt/venv and /usr/local/lib/node_modules (image layers, not PVC).
 #
 # Effect at runtime:
 #   pip install xxx        -> /workspace/.python-packages (persisted on PVC)
 #   npm install -g xxx     -> /workspace/.npm-global      (persisted on PVC)
-#   python -c "import xxx" -> sees user packages + baseline (PYTHONPATH +
-#                              site.py-discovered venv site-packages)
+#   python -c "import xxx" -> sees user packages + baseline (sitecustomize.py
+#                              prepends the overlay to sys.path)
 #   require("xxx")         -> sees user globals + baseline globals (NODE_PATH)
 #   user-installed CLIs    -> on PATH (workspace bin dirs first)
+#   python -m venv / uv    -> clean self-contained envs, untouched by the
+#                              overlay (see below)
 #
-# Why PIP_PREFIX (not PIP_TARGET): pip --target's known issues include not
+# The overlay is wired into /opt/venv only — via its site-level pip.conf and
+# an executable .pth in its site-packages — NOT via global PIP_PREFIX /
+# PYTHONPATH env vars. Global env vars leak into every interpreter: PIP_PREFIX
+# hijacks `pip install` inside agent-created venvs (packages land in the
+# overlay, not the venv), and PYTHONPATH outranks a venv's own site-packages
+# (overlay/baseline versions shadow whatever the venv installed), so venvs
+# looked broken. Site-level scoping keeps the persistence behaviour for the
+# default interpreter and leaves agent-created envs alone.
+#
+# Why --prefix (not --target): pip --target's known issues include not
 # emitting console_scripts when bin/ already has entries, and treating the
 # install as a flat dir with no awareness of /opt/venv's packages (so deps
 # get installed redundantly). --prefix uses the standard sysconfig layout
@@ -283,10 +296,20 @@ ENV USER=neko \
 # correctly, and sees baseline packages so dependency resolution dedups.
 # Trade-off: `pip uninstall xxx` still refuses to touch /workspace packages
 # (the venv is at /opt/venv); `rm -rf` the package dir to remove cleanly.
+#
+# Mechanism: an executable .pth line (not sitecustomize.py — Debian/Ubuntu
+# ship /usr/lib/pythonX.Y/sitecustomize.py in the stdlib dir, which shadows a
+# venv-local one). The .pth front-inserts the overlay (site.addsitedir alone
+# appends, which would let baseline versions shadow user-upgraded packages)
+# and derives pythonX.Y from the running interpreter, so a Python bump can't
+# silently desync a hardcoded path.
 # ---------------------------------------------------------------------------
-ENV PIP_PREFIX=/workspace/.python-packages \
-    PYTHONPATH=/workspace/.python-packages/lib/python3.12/site-packages:/opt/venv/lib/python3.12/site-packages \
-    NPM_CONFIG_PREFIX=/workspace/.npm-global \
+RUN printf '[install]\nprefix = /workspace/.python-packages\n' > /opt/venv/pip.conf \
+    && PYVER="$(/opt/venv/bin/python -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')" \
+    && printf 'import sys, site; _o = f"/workspace/.python-packages/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages"; _b = len(sys.path); site.addsitedir(_o); _n = sys.path[_b:]; del sys.path[_b:]; sys.path[:0] = _n\n' \
+        > "/opt/venv/lib/python${PYVER}/site-packages/zz-workspace-overlay.pth"
+
+ENV NPM_CONFIG_PREFIX=/workspace/.npm-global \
     NODE_PATH=/workspace/.npm-global/lib/node_modules:/usr/local/lib/node_modules \
     PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/venv/bin:$PATH"
 
