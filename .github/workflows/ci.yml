@@ -28,6 +28,7 @@ jobs:
       checks: write
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
       check_run_id: ${{ steps.check.outputs.id }}
     steps:
       - name: Resolve target SHA
@@ -37,12 +38,19 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
             SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -q .head.sha)
+            BASE_SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -q .base.sha)
           elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            SHA="${{ github.sha }}"
+            BASE_SHA="${{ github.event.before }}"
           else
             SHA="${{ github.sha }}"
+            BASE_SHA=""
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
       - name: React to /ci comment
         if: github.event_name == 'issue_comment'
         env:
@@ -66,9 +74,59 @@ jobs:
             -q .id)
           echo "id=$ID" >> "$GITHUB_OUTPUT"
 
+  changes:
+    name: Determine changed areas
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+      - name: Detect changed areas
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ needs.gate.outputs.base_sha }}
+          TARGET_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "No usable base commit; running all checks."
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only "$BASE_SHA" "$TARGET_SHA" > changed-files.txt
+          echo "Changed files:"
+          cat changed-files.txt
+
+          # Shared build/config/workflow changes can affect either side.
+          if grep -qE '^(backend/|Makefile$|\.github/workflows/ci\.yml$)' changed-files.txt; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if grep -qE '^(frontend/|Makefile$|\.github/workflows/ci\.yml$)' changed-files.txt; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
   backend-check:
     name: Backend Check (ruff + mypy + pytest unit)
-    needs: gate
+    needs: [gate, changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -114,7 +172,8 @@ jobs:
 
   frontend-check:
     name: Frontend Check (eslint + prettier + type-check + vitest + build)
-    needs: gate
+    needs: [gate, changes]
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -136,7 +195,8 @@ jobs:
 
   backend-e2e:
     name: Backend E2E (pytest, shard ${{ matrix.shard }})
-    needs: gate
+    needs: [gate, changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -245,7 +305,8 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E (playwright)
-    needs: gate
+    needs: [gate, changes]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -388,7 +449,8 @@ jobs:
     name: EE Compat (Layer 1 contract tests)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [gate, backend-check]
+    needs: [gate, changes, backend-check]
+    if: needs.changes.outputs.backend == 'true'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -444,7 +506,7 @@ jobs:
       always() &&
       needs.gate.result == 'success' &&
       github.event_name == 'issue_comment'
-    needs: [gate, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
+    needs: [gate, changes, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
     runs-on: ubuntu-latest
     permissions:
       checks: write
