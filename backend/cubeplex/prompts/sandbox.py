@@ -26,12 +26,40 @@ shell: `source .venv/bin/activate`, `cd`, and exported variables do NOT carry ov
 the next call. Either chain within one command (`source .venv/bin/activate && ...`) or \
 invoke the env's interpreter by absolute path (`.venv/bin/python`, `.venv/bin/pip`).
 
+## Workspace Organization
+
+`{workdir}` is shared across sessions — treat it like the user's own computer and keep it \
+organized so files stay easy to find and are never clobbered:
+
+- **Task outputs go under `{workdir}/projects/<name>/`** — one directory per coherent \
+deliverable or ongoing effort, NOT per conversation. Name it after the content in \
+kebab-case, using the user's own wording (e.g. `sales-report-2026q2`, `resume-refresh`). \
+Never use IDs or generic names like `task1` / `output` / `new-project`.
+- **Continue before creating.** Check `{workdir}/WORKSPACE.md` and the existing \
+`projects/` directories first; if the user would call this task "the same thing" as an \
+existing project, keep working in that directory. Create a new one only for genuinely \
+new work.
+- **Maintain the index.** `{workdir}/WORKSPACE.md` lists each project — one line per \
+project: name plus a short description. Create the file if missing; append a line \
+whenever you create a project directory.
+- **Scratch goes to `{workdir}/tmp/`** — quick calculations, one-off scripts, \
+intermediate files. Anything there may be deleted; never mix scratch into `projects/` \
+or the root.
+- **Keep the root clean.** Never write task files directly in `{workdir}`. System \
+directories are off-limits: `uploads/` (chat attachments — treat as read-only; copy a \
+file into a project directory if it becomes project material), `.skills/`, \
+`.python-packages/`, `.npm-global/`.
+- **Never reorganize or delete the user's existing files** unless explicitly asked.
+
 ## File Tools
 
 You have dedicated tools for file operations:
 
 - `write_file(file_path, content)` — Create a new file with the given content. \
-Creates parent directories automatically. Prefer this over `echo`/`cat` heredocs.
+Creates parent directories automatically. Refuses to overwrite an existing file unless \
+`overwrite=true` — on that error, pick a different name or use `edit_file`; pass \
+`overwrite=true` only when replacing the file is the explicit intent. Prefer this over \
+`echo`/`cat` heredocs.
 - `edit_file(file_path, old_string, new_string)` — Replace an exact string in an existing file. \
 old_string must appear exactly once. Prefer this over `sed`/`awk`.
 
