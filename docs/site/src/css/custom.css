@@ -43,6 +43,10 @@
   --ifm-navbar-height: 56px;
   --ifm-navbar-background-color: var(--surface);
   --ifm-navbar-shadow: none;
+  /* Header spec shared with the marketing site (website app/globals.css):
+     56px tall, translucent bar + backdrop blur, 1px border, logo inset 24px. */
+  --nav-bg: rgba(250, 250, 250, 0.82);
+  --ifm-navbar-padding-horizontal: 24px;
   --ifm-toc-border-color: var(--ink-5);
   --ifm-hr-border-color: var(--ink-5);
   --ifm-code-font-size: 92%;
@@ -64,12 +68,22 @@
   --ifm-color-primary: var(--accent);
   --ifm-background-color: var(--ink-1);
   --ifm-background-surface-color: var(--surface);
+  --nav-bg: rgba(24, 24, 27, 0.82);
 }
 
 html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 
 /* No shadows except modals (which Docusaurus does not use in docs). */
-.navbar { border-bottom: 1px solid var(--ink-5); }
+/* Translucent, blurred header — matches the marketing site's .site-header. */
+.navbar {
+  border-bottom: 1px solid var(--ink-5);
+  background: var(--nav-bg);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .navbar { background: var(--ink-1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 .menu__link, .navbar__link { font-weight: 500; }
 .menu__link--active, .navbar__link--active { color: var(--accent); }
 
