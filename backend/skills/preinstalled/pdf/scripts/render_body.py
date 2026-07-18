@@ -243,6 +243,14 @@ def make_styles(t: dict) -> dict:
             textColor=HexColor(dk),
             spaceAfter=t["para_gap"], alignment=TA_JUSTIFY,
         ),
+        # Chinese prose convention: first line indented by 2 characters.
+        "body_cjk": ParagraphStyle("BodyCJK",
+            fontName=bf, fontSize=t["size_body"],
+            leading=t["line_gap"],
+            textColor=HexColor(dk),
+            spaceAfter=t["para_gap"], alignment=TA_JUSTIFY,
+            firstLineIndent=t["size_body"] * 2,
+        ),
         "bullet": ParagraphStyle("Bullet",
             fontName=bf, fontSize=t["size_body"],
             leading=t["line_gap"] - 1,
@@ -646,8 +654,24 @@ def _add_heading(story: list, item: dict, ctx: dict, level: int):
         story.append(para)
 
 
+def _is_cjk_text(text: str) -> bool:
+    """True when CJK characters dominate the visible text (markup dilutes the
+    ratio, hence the low threshold)."""
+    visible = [c for c in text if not c.isspace()]
+    if not visible:
+        return False
+    cjk = sum(
+        1 for c in visible
+        if "一" <= c <= "鿿"   # CJK Unified Ideographs
+        or "　" <= c <= "〿"   # CJK punctuation
+        or "＀" <= c <= "￯"   # fullwidth forms
+    )
+    return cjk / len(visible) > 0.3
+
+
 def _add_body(story: list, item: dict, ctx: dict):
-    story.append(Paragraph(item["text"], ctx["styles"]["body"]))
+    key = "body_cjk" if _is_cjk_text(item["text"]) else "body"
+    story.append(Paragraph(item["text"], ctx["styles"][key]))
 
 
 def _add_bullet(story: list, item: dict, ctx: dict):

@@ -67,10 +67,15 @@ Two typefaces maximum. Always.
 | Text (body, captions, UI) | Highly readable at 10–11pt, CJK support required for Chinese docs | NotoSansCJK (default), NotoSerifCJK, LiberationSans |
 
 Cover fonts are loaded live via `@import url(...)` in the cover HTML — Playwright
-fetches them at render time, no local caching. Body pages always use system fonts
-(Times-Bold / Helvetica) via ReportLab — consistent and offline-safe.
+fetches them at render time. `cover.py` automatically chains a locally installed
+CJK face after each Latin face (serif moods → Noto Serif CJK SC, sans → Noto Sans
+CJK SC, terminal/poster → Noto Sans Mono CJK SC): none of the Google Fonts faces
+carry CJK glyphs, so Chinese cover text renders in the chained face, and when the
+network is unavailable the cover degrades to the local faces instead of Chromium's
+default. Body pages use locally registered fonts via ReportLab (`noto-sans` by
+default — see SKILL.md's font table), falling back to Times/Helvetica.
 
-Pairs by mood (cover HTML only — body always uses system fonts):
+Pairs by mood (cover HTML only):
 - Authoritative: `Playfair Display` / `IBM Plex Sans`
 - Confident: `Syne` / `Nunito Sans`
 - Expressive: `Fraunces` / `Inter`
@@ -84,6 +89,54 @@ Pairs by mood (cover HTML only — body always uses system fonts):
 - Body default: `noto-sans` (NotoSansCJK — covers Latin + Simplified Chinese). Falls back to `Times-Bold` / `Helvetica` if Noto is not installed.
 - CJK documents: `noto-sans` or `noto-serif` — both embed full CJK glyph sets, no font substitution squares.
 - Body fallback (no fonts installed): `Times-Bold` / `Helvetica` (ReportLab built-ins, Latin only)
+
+### Choosing a pairing by feel
+
+The display/body pairing sets the document's voice — match it to the occasion,
+not just the doc type's default:
+
+- **Serif display + sans body** (authoritative, scholarly, clean, expressive,
+  restrained) reads **editorial / academic** — a serif headline signals authority
+  and considered prose. Reach for these on strategy briefs, papers, long-form.
+- **Serif display + serif body** (classical, magazine, darkroom) reads
+  **literary / print** — for annual reports, essays, publication-grade documents.
+- **Condensed / heavy display** (bold, editorial, poster) reads **high-impact** —
+  launches, manifestos, one big idea per page.
+- **Same-face pairs** (neutral, dynamic) read **modern / product** — the safe
+  workhorse for corporate, consulting, research. When in doubt, not wrong.
+- **Monospace** (terminal) reads **technical** — developer reports, system docs.
+
+### CJK typography (中文文档)
+
+What the pipeline already does, and the rules you still own:
+
+- **Faces.** Body: `noto-sans` (黑体感,通用) or `noto-serif` (宋体感,正式长文、
+  年报、学术) — pick by document register, same logic as 黑体/宋体 in print. Cover:
+  the CJK chain is automatic (see above).
+- **First-line indent.** Chinese body paragraphs conventionally indent the first
+  line by 2 characters. `render_body.py` applies this automatically to any `body`
+  block whose text is CJK-dominant — don't simulate it with full-width spaces.
+- **No italic for Chinese.** Chinese has no true italic; renderers fake it by
+  slanting glyphs, which looks broken. Never wrap Chinese text in `<i>` in
+  content.json — use `<b>` for emphasis.
+- **Punctuation.** Use full-width CJK punctuation (,。「」) in Chinese text, never
+  ASCII punctuation. Mixed CJK + Latin in one paragraph is fine — both faces carry
+  their own scripts.
+- **Line length.** The 10.5pt/17pt body scale is tuned for both scripts; don't
+  shrink CJK text to fit — cut copy instead.
+
+### Citations (reports, papers, anything citing external data)
+
+Citations are not decoration:
+
+- Every data claim in body text gets a superscript mark at point of use —
+  `<super>[N]</super>` in the block text — corresponding 1:1 with a
+  `bibliography` entry. A reference list with zero in-text marks is fake
+  completeness.
+- All references must be real and verifiable. Fabricating citations is
+  prohibited — search first when unsure.
+- Format: Chinese documents → GB/T 7714; English → APA; mixed → each reference
+  in its own language's format.
 
 ### Type scale
 
