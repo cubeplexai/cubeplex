@@ -1,6 +1,6 @@
 ---
 name: pdf
-version: 1.0.3
+version: 1.2.0
 description: >
   Use this skill when visual quality and design identity matter for a PDF.
   CREATE (generate from scratch): "make a PDF", "generate a report", "write a proposal",
@@ -15,26 +15,27 @@ description: >
   Prefer this skill when appearance matters, not just when any PDF output is needed.
 license: MIT
 metadata:
-  version: "1.0"
   category: document-generation
 ---
 
 # pdf
 
-Cubeplex adaptation of MiniMax `minimax-pdf`.
+## Skill directory
 
-## Cubeplex Sandbox Path
-
-Enabled skill files are available at `/.skills/pdf/1.0.0-cubeplex.2/`.
+`load_skill` returned a `path` field — the sandbox directory holding this
+skill's scripts and design references. Use it verbatim; never construct the
+path yourself:
 
 ```bash
-export SKILL_DIR="/.skills/pdf/1.0.0-cubeplex.2"
-cd "$SKILL_DIR"
+export SKILL_DIR="<the `path` value from load_skill>"
 ```
+
+Invoke scripts through `$SKILL_DIR` and write output files to the working
+directory, never into `$SKILL_DIR`.
 
 Three tasks. One skill.
 
-## Read `design/design.md` before any CREATE or REFORMAT work.
+## Read `$SKILL_DIR/design/design.md` before any CREATE or REFORMAT work.
 
 ---
 
@@ -50,12 +51,27 @@ Three tasks. One skill.
 
 ---
 
+## Content constraints (CREATE / REFORMAT)
+
+- **Length.** Explicit word count → ±20%; explicit page count → match exactly;
+  a stated minimum → never exceed 2x it. No padding with bullet lists.
+  Resume/CV: 1 page unless told otherwise.
+- **Citations.** Data claims need real, verifiable sources — search before
+  writing, never fabricate. In-text superscript marks (`<super>[N]</super>`)
+  correspond 1:1 with the `bibliography` block; format GB/T 7714 (Chinese) /
+  APA (English). Details: `design/design.md` → Citations.
+- **Chinese documents.** CJK body first-line indent and the cover CJK font
+  chain are automatic; never use `<i>` on Chinese text — use `<b>`.
+  Details: `design/design.md` → CJK typography.
+
+---
+
 ## Route A: CREATE
 
 Full pipeline — content → design tokens → cover → body → merged PDF.
 
 ```bash
-bash scripts/make.sh run \
+bash "$SKILL_DIR/scripts/make.sh" run \
   --title "Q3 Strategy Review" --type proposal \
   --author "Strategy Team" --date "October 2025" \
   --accent "#2D5F8A" \
@@ -93,7 +109,7 @@ Cover extras (inject into tokens via `--abstract`, `--cover-image`):
 **Font selection (optional — agent should choose based on document content):**
 
 ```bash
-bash scripts/make.sh run --title "..." --type report --body-font noto-serif ...
+bash "$SKILL_DIR/scripts/make.sh" run --title "..." --type report --body-font noto-serif ...
 ```
 
 | Font name | Character support | Best for |
@@ -175,10 +191,10 @@ Fill form fields in an existing PDF without altering layout or design.
 
 ```bash
 # Step 1: inspect
-python3 scripts/fill_inspect.py --input form.pdf
+python3 "$SKILL_DIR/scripts/fill_inspect.py" --input form.pdf
 
 # Step 2: fill
-python3 scripts/fill_write.py --input form.pdf --out filled.pdf \
+python3 "$SKILL_DIR/scripts/fill_write.py" --input form.pdf --out filled.pdf \
   --values '{"FirstName": "Jane", "Agree": "true", "Country": "US"}'
 ```
 
@@ -198,7 +214,7 @@ Always run `fill_inspect.py` first to get exact field names.
 Parse an existing document → content.json → CREATE pipeline.
 
 ```bash
-bash scripts/make.sh reformat \
+bash "$SKILL_DIR/scripts/make.sh" reformat \
   --input source.md --title "My Report" --type report --out output.pdf
 ```
 
@@ -209,9 +225,9 @@ bash scripts/make.sh reformat \
 ## Environment
 
 ```bash
-bash scripts/make.sh check   # verify all deps
-bash scripts/make.sh fix     # auto-install missing deps
-bash scripts/make.sh demo    # build a sample PDF
+bash "$SKILL_DIR/scripts/make.sh" check   # verify all deps
+bash "$SKILL_DIR/scripts/make.sh" fix     # auto-install missing deps
+bash "$SKILL_DIR/scripts/make.sh" demo    # build a sample PDF
 ```
 
 | Tool | Used by | Install |
