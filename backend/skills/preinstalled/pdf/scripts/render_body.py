@@ -31,6 +31,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 import importlib.util
 
@@ -655,18 +656,21 @@ def _add_heading(story: list, item: dict, ctx: dict, level: int):
 
 
 def _is_cjk_text(text: str) -> bool:
-    """True when CJK characters dominate the visible text (markup dilutes the
-    ratio, hence the low threshold)."""
-    visible = [c for c in text if not c.isspace()]
-    if not visible:
-        return False
+    """True when CJK dominates among script-bearing characters. Markup tags,
+    digits, and ASCII punctuation carry no script signal, so they're excluded —
+    otherwise a citation-heavy sentence like 增长 15%<super>[1]</super> dips
+    below threshold and adjacent Chinese paragraphs get inconsistent indents."""
+    stripped = re.sub(r"<[^>]*>", "", text)
     cjk = sum(
-        1 for c in visible
+        1 for c in stripped
         if "一" <= c <= "鿿"   # CJK Unified Ideographs
         or "　" <= c <= "〿"   # CJK punctuation
         or "＀" <= c <= "￯"   # fullwidth forms
     )
-    return cjk / len(visible) > 0.3
+    if not cjk:
+        return False
+    latin = sum(1 for c in stripped if c.isascii() and c.isalpha())
+    return cjk / (cjk + latin) > 0.3
 
 
 def _add_body(story: list, item: dict, ctx: dict):
