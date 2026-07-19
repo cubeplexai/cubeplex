@@ -130,6 +130,14 @@ jobs:
             --no-hashes --no-dev --no-editable --no-emit-project \
             > requirements-frozen.txt
 
+      - uses: docker/setup-qemu-action@v3
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+        with:
+          platforms: arm64
+
       - uses: docker/setup-buildx-action@v3
         if: |
           (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
