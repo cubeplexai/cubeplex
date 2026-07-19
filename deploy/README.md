@@ -51,11 +51,13 @@ The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,
 passes them through from the operator's environment. See the install
 guide for the full list.
 
-The sandbox Dockerfile uses the official `ubuntu:24.04` image by default. A
-private or mirrored base image can be selected explicitly when building it:
+The sandbox Dockerfile uses the official `ubuntu:24.04` and public PyPI images
+by default. Private or mirrored sources can be selected explicitly when
+building it:
 
 ```bash
 docker build --build-arg BASE_IMAGE=registry.example.com/library/ubuntu:24.04 \
+  --build-arg PIP_INDEX_URL=https://pypi.example.com/simple/ \
   -f deploy/images/sandbox/Dockerfile deploy/images/sandbox
 ```
 
