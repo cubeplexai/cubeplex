@@ -11,7 +11,7 @@ from cubeplex.db import get_session
 router = APIRouter(prefix="/system", tags=["system"])
 
 # v1 hardcoded; bump on release. Kept in sync with backend/pyproject.toml.
-_CUBEPLEX_VERSION = "0.1.0"
+_CUBEPLEX_VERSION = "0.2.0"
 
 
 @router.get("/info", response_model=SystemInfoResponse)
