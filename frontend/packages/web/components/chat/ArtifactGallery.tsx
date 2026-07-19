@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useShallow } from 'zustand/react/shallow'
 import { Package, ChevronDown, ChevronRight, Eye, Download, Loader2 } from 'lucide-react'
 import { useArtifactStore, usePanelStore } from '@cubeplex/core'
 import type { Artifact } from '@cubeplex/core'
@@ -16,7 +17,7 @@ interface ArtifactGalleryProps {
 export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
-  const artifacts = useArtifactStore((s) => s.getArtifacts(conversationId))
+  const artifacts = useArtifactStore(useShallow((s) => s.getArtifacts(conversationId)))
   const isLoading = useArtifactStore((s) => s.isLoading(conversationId))
   const openPreview = usePanelStore((s) => s.openArtifact)
 

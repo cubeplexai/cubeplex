@@ -1,6 +1,7 @@
 'use client'
 
 import { createApiClient, useAttachmentStore } from '@cubeplex/core'
+import { useShallow } from 'zustand/react/shallow'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { FileChip } from './FileChip'
 
@@ -9,7 +10,7 @@ interface Props {
 }
 
 export function AttachmentChips({ conversationId }: Props): React.ReactElement | null {
-  const items = useAttachmentStore((s) => s.staging[conversationId] || [])
+  const items = useAttachmentStore(useShallow((s) => s.staging[conversationId] || []))
   const cancel = useAttachmentStore((s) => s.cancel)
   const remove = useAttachmentStore((s) => s.remove)
   const { workspaceId } = useWorkspaceContext()

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
+import { useShallow } from 'zustand/react/shallow'
 import { useMessageStore, useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -63,11 +64,11 @@ export function InputBar({
 
   const upload = useAttachmentStore((s) => s.upload)
   const clearStaging = useAttachmentStore((s) => s.clear)
-  const attachedIds = useAttachmentStore((s) =>
-    conversationId ? s.attachedIds(conversationId) : [],
+  const attachedIds = useAttachmentStore(
+    useShallow((s) => (conversationId ? s.attachedIds(conversationId) : [])),
   )
-  const stagingItems = useAttachmentStore((s) =>
-    conversationId ? (s.staging[conversationId] ?? []) : [],
+  const stagingItems = useAttachmentStore(
+    useShallow((s) => (conversationId ? (s.staging[conversationId] ?? []) : [])),
   )
   const hydrate = useAttachmentStore((s) => s.hydrate)
 
