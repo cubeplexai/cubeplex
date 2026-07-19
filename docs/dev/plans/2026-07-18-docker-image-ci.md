@@ -7,7 +7,8 @@ and use a release manifest to pin the application and sandbox image combination.
 publication, and Git-tag release promotion. Image digests are the release outputs;
 the release values/manifest is the deployment input. Helm and Compose consume that
 input instead of inferring or overriding production versions. Sandbox has an independent
-workflow and version, while the release gate checks its compatibility with backend.
+workflow and version. Existing real sandbox E2E remains a separate workflow and is not
+part of image publication or release gating.
 
 **Tech stack:** GitHub Actions, Docker Buildx, GHCR, Helm, Docker Compose, shell
 scripts, and the existing backend/frontend/sandbox Dockerfiles.
@@ -67,8 +68,8 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
   cannot be overwritten with different content.
 - `latest`/`edge` are not production inputs; if retained, they are updated only by an
   explicit development job.
-- Sandbox failures do not fail unrelated image jobs, but the release gate fails when a
-  required sandbox image or compatibility result is missing.
+- Sandbox failures do not fail unrelated application image jobs. The release manifest
+  selects an existing sandbox reference without pulling it to the deployment machine.
 
 **Tests**
 
@@ -91,7 +92,7 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 
 **Interfaces**
 
-- Inputs: `v<semver>`, source commit, image SHA digests, and the verified sandbox digest.
+- Inputs: `v<semver>`, source commit, image SHA digests, and the selected sandbox digest.
 - Output: a manifest containing release, source commit, backend, frontend, sandbox, and
   egress webhook references.
 - Helm and Compose commands accept the manifest separately from operator secrets.
@@ -100,8 +101,8 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 
 - The release workflow looks up digests from the main build. If they are missing, it
   fails instead of rebuilding implicitly.
-- A sandbox digest may come from a recent independent sandbox release, but it must have
-  a compatibility result. Backend/sandbox contract changes require a new sandbox build.
+- A sandbox digest may come from a recent independent sandbox release. This workflow does
+  not pull it to the deployment machine or run a compatibility test.
 - The manifest is the rollback unit. Reusing it cannot pull a moving `latest` tag.
 
 **Tests**
@@ -112,7 +113,7 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 - Render Compose config from the same release result and verify non-empty matching
   `BACKEND_TAG` and `FRONTEND_TAG` values.
 
-## Unit 4 — Independent sandbox release and compatibility gate
+## Unit 4 — Independent sandbox image publication
 
 **Files**
 
@@ -120,35 +121,31 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
   manual, and scheduled triggers; publish sandbox SHA/version tags.
 - `deploy/images/sandbox/` — change only when tests expose a build or startup issue;
   avoid unrelated refactoring.
-- Sandbox compatibility smoke script in the existing deployment script location — cover
-  OpenSandbox create, exec, workspace files, and browser paths where available.
 
 **Interfaces**
 
 - Inputs: sandbox source revision, independent sandbox version, and OpenSandbox config.
-- Outputs: sandbox digest, runtime compatibility result, and a manifest-ready reference.
+- Outputs: sandbox digest and a manifest-ready reference.
 
 **Core logic**
 
 - Build sandbox only for sandbox changes, scheduled security rebuilds, or manual triggers.
-- OpenSandbox server/execd/egress remain deployment-configured; tests report whether the
-  configured runtime and sandbox image work together.
+- OpenSandbox server/execd/egress remain deployment-configured. This workflow does not
+  contact the runtime or download the candidate image for a compatibility test.
 - The egress webhook uses the cubeplex application commit tag and must match the chart's
   egress-image matching rule.
 
 **Tests**
 
-- Sandbox Docker build smoke test.
-- OpenSandbox runtime e2e test for sandbox creation, command execution, workspace files,
-  and browser/egress paths when enabled.
-- Release-gate test: backend contract changes without a new sandbox compatibility result
-  must fail the release.
+- Sandbox Docker build and image metadata smoke tests.
+- Existing sandbox E2E/nightly jobs remain responsible for runtime behavior and continue
+  to use their own credentials.
 
 ## Verification and rollout order
 
 1. Add metadata/change detection and PR build-only validation; confirm PRs cannot publish production tags.
 2. Add main SHA publication and digest artifacts; verify GHCR permissions and cache.
-3. Add the independent sandbox workflow and compatibility smoke test.
+3. Add the independent sandbox image workflow and metadata validation.
 4. Add release-tag promotion and manifest generation.
 5. Update Helm/Compose deployment docs and operator entry points, then switch production deployment to manifests.
 
