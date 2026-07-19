@@ -9,6 +9,8 @@ FROM ${BASE_IMAGE}
 # Set build-time arguments
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APT_MIRROR_HOST=
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_TRUSTED_HOST=
 
 # Set environment variables early. Deliberately NOT exporting VIRTUAL_ENV:
 # a global VIRTUAL_ENV=/opt/venv makes uv/poetry treat /opt/venv as the active
@@ -77,12 +79,13 @@ RUN unlink /etc/localtime \
     && ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo $TZ > /etc/timezone
 
-# Configure pip
-RUN mkdir -p /etc && printf '[global]\n\
-index-url = http://mirrors.cloud.aliyuncs.com/pypi/simple/\n\
-\n\
-[install]\n\
-trusted-host = mirrors.cloud.aliyuncs.com\n' > /etc/pip.conf
+# Configure pip. The public PyPI index is the default; private HTTP mirrors
+# can be selected with PIP_INDEX_URL and PIP_TRUSTED_HOST.
+RUN mkdir -p /etc \
+    && printf '[global]\nindex-url = %s\n' "$PIP_INDEX_URL" > /etc/pip.conf \
+    && if [ -n "$PIP_TRUSTED_HOST" ]; then \
+        printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /etc/pip.conf; \
+    fi
 
 # Configure npm registry
 RUN npm config set registry https://registry.npmmirror.com \
