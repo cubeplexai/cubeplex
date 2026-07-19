@@ -171,8 +171,10 @@ The sandbox workflow supports three triggers:
 2. `workflow_dispatch` for explicit rebuilds after OpenSandbox compatibility changes;
 3. scheduled security rebuilds for base-image and browser dependency updates.
 
-Successful builds publish independent `sha-*` and `sandbox-v*` tags. An application
-release selects a sandbox digest recorded by the release process; it does not rebuild
+Successful builds publish independent `sha-*` and `sandbox-v*` tags. The source of the
+sandbox version is `deploy/images/sandbox/VERSION`; changing sandbox contents requires
+incrementing that version. Existing version tags are immutable and cannot be overwritten.
+An application release selects the sandbox version from that file; it does not rebuild
 sandbox merely because backend/frontend changed. Existing sandbox E2E tests and their
 credentials remain outside this image workflow and are not release gates here.
 

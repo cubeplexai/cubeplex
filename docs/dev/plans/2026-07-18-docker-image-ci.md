@@ -121,12 +121,14 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 
 - `.github/workflows/sandbox-image.yml` or a sandbox job in the image workflow — path,
   manual, and scheduled triggers; publish sandbox SHA/version tags.
+- `deploy/images/sandbox/VERSION` — the independent semantic version for the sandbox
+  image; a published version tag is never overwritten.
 - `deploy/images/sandbox/` — change only when tests expose a build or startup issue;
   avoid unrelated refactoring.
 
 **Interfaces**
 
-- Inputs: sandbox source revision, independent sandbox version, and OpenSandbox config.
+- Inputs: sandbox source revision and the version in `deploy/images/sandbox/VERSION`.
 - Outputs: sandbox digest and a manifest-ready reference.
 
 **Core logic**

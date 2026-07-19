@@ -135,10 +135,11 @@ GITHUB_MIRROR= deploy/kubernetes/scripts/build-and-push.sh
 
 ### Release 使用的 sandbox 镜像
 
+sandbox 版本保存在 `deploy/images/sandbox/VERSION`。sandbox 内容变化时递增
+版本号。sandbox workflow 会发布 `sha-<commit>` 和 `sandbox-v<version>` 两个
+tag；release workflow 会把对应的 `sandbox-v<version>` 写入 release manifest。
 release workflow 不会从 GHCR 下载 candidate sandbox 镜像，也不会运行 runtime
-兼容测试。触发 tag release 前，在仓库 Variables 中设置
-`CUBEPLEX_SANDBOX_IMAGE`，值为已经选定的 sandbox 镜像引用；它会写入 release
-manifest。sandbox E2E/nightly workflow 继续独立运行。
+兼容测试；sandbox E2E/nightly workflow 继续独立运行。
 
 ---
 

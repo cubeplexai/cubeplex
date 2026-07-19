@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release workflow"
+  short_description: "Run cubeplex releases safely"
+  default_prompt: "Use $release to prepare and publish a cubeplex release."

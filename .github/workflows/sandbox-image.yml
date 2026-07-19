@@ -31,31 +31,52 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Read sandbox version
+        id: version
+        working-directory: deploy/images/sandbox
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Stage fonts
         working-directory: deploy/images/sandbox
         run: ./stage-fonts.sh
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Reject an existing sandbox version tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/cubeplex-sandbox:sandbox-v${{ steps.version.outputs.version }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing immutable image tag: $IMAGE" >&2
+            exit 1
+          fi
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/cubeplex-sandbox
-          tags: type=raw,value=sha-${{ github.sha }}
+          tags: |
+            type=raw,value=sha-${{ github.sha }}
+            type=raw,value=sandbox-v${{ steps.version.outputs.version }},enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
 
       - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: deploy/images/sandbox
           file: deploy/images/sandbox/Dockerfile
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=cubeplex-sandbox

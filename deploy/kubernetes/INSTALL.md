@@ -133,11 +133,12 @@ Empty / unset → upstream.
 
 ### Release sandbox selection
 
-The release workflow does not download a candidate sandbox image or run a
-runtime compatibility test. Set the repository variable
-`CUBEPLEX_SANDBOX_IMAGE` to the already selected sandbox image reference before
-using a tag-triggered release. The value is recorded in the release manifest;
-the sandbox E2E/nightly workflow remains separate.
+The sandbox version is stored in `deploy/images/sandbox/VERSION`. Increment it
+when sandbox contents change. The sandbox workflow publishes both
+`sha-<commit>` and `sandbox-v<version>`; the release workflow records the
+corresponding `sandbox-v<version>` reference in the release manifest. The release
+workflow does not download a candidate sandbox image or run a runtime compatibility
+test; the sandbox E2E/nightly workflow remains separate.
 
 ---
 
