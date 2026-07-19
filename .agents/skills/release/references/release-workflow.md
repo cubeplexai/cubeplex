@@ -46,14 +46,14 @@ release manifest and operator environment.
 The `main` image workflow builds affected application images and publishes:
 
 ```text
-ghcr.io/cubeplexai/cubeplex-backend:sha-<main-commit>
-ghcr.io/cubeplexai/cubeplex-frontend:sha-<main-commit>
+ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-main-<short-sha>
+ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-main-<short-sha>
 ```
 
 The sandbox workflow publishes:
 
 ```text
-ghcr.io/cubeplexai/cubeplex-sandbox:sha-<main-commit>
+ghcr.io/cubeplexai/cubeplex-sandbox:<YYMMDD>-main-<short-sha>
 ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v<version>
 ```
 
@@ -72,7 +72,7 @@ git tag -a v0.3.0 -m "Release v0.3.0" HEAD
 git push origin v0.3.0
 ```
 
-The tag must point to the same commit whose `sha-<commit>` images were built.
+The tag must point to the same commit whose `<YYMMDD>-main-<short-sha>` images were built.
 The release workflow accepts a tag immediately after merge and waits for the
 commit images for a bounded period. If they never appear, it fails instead of
 rebuilding.
@@ -83,7 +83,7 @@ For `v0.3.0`, the workflow:
 
 1. checks that all package/chart versions equal `0.3.0`;
 2. reads the sandbox version from `deploy/images/sandbox/VERSION`;
-3. waits for backend/frontend `sha-<commit>` images;
+3. computes the date/branch/short-SHA tag from the release commit and waits for backend/frontend images;
 4. adds `v0.3.0` to the same backend/frontend image manifests;
 5. waits for the corresponding `sandbox-v<version>` image;
 6. creates `release-manifest-v0.3.0.yaml` and uploads it to the GitHub Release.

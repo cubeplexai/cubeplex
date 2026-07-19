@@ -9,9 +9,9 @@
 
 image:
   backend:
-    tag: "<git-sha-short>"   # filled by build-and-push.sh
+    tag: "<YYMMDD>-<branch>-<short-sha>"   # filled by build-and-push.sh
   frontend:
-    tag: "<git-sha-short>"
+    tag: "<YYMMDD>-<branch>-<short-sha>"
 
 backend:
   secrets:
@@ -71,6 +71,6 @@ rustfs:
 #   sandboxNamespace: "opensandbox-system"
 #   webhook:
 #     image:
-#       tag: "<git-sha-short>"             # same tag the script just pushed
+#       tag: "<YYMMDD>-<branch>-<short-sha>" # same tag the script just pushed
 #     # MUST match opensandbox-server's configured egress.image exactly:
 #     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"

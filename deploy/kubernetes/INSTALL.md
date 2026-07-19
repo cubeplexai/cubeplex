@@ -79,11 +79,12 @@ secret-injection webhook (§4.10) and a docling-serve document parser
 ## 3. Build and push images
 
 For GitHub-hosted builds, `.github/workflows/images.yml` publishes backend and
-frontend images to GHCR. A `main` build is tagged with the full source commit:
+frontend images to GHCR. A `main` build uses the commit date, sanitized branch name,
+and short commit SHA:
 
 ```text
-ghcr.io/cubeplexai/cubeplex-backend:sha-<full-commit-sha>
-ghcr.io/cubeplexai/cubeplex-frontend:sha-<full-commit-sha>
+ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-<branch>-<short-sha>
+ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-<branch>-<short-sha>
 ```
 
 Formal `v<semver>` releases promote the same image digests and publish a
@@ -102,7 +103,7 @@ The script:
    `backend/requirements-frozen.txt` (gitignored — `uv.lock` stays the
    source of truth).
 2. `docker build` for the selected targets, tagging
-   `<REGISTRY>/<REPO>/cubeplex-<target>:sha-<full-git-sha>` by default.
+   `<REGISTRY>/<REPO>/cubeplex-<target>:<YYMMDD>-<branch>-<short-sha>` by default.
 3. `docker push` the immutable tag. Set `PUSH_LATEST=true` only when a
    development environment explicitly needs a moving `latest` tag.
 
@@ -112,7 +113,7 @@ The script:
 |---|---|---|
 | `REGISTRY` | `192.168.1.101:8050` | registry host:port |
 | `REPO` | `library` | second-level namespace inside the registry |
-| `TAG` | `sha-<full git SHA>` | image tag (also accepted as positional arg 1) |
+| `TAG` | `<YYMMDD>-<branch>-<short-sha>` | image tag (also accepted as positional arg 1) |
 | `TARGET` | `backend frontend` | space-separated targets; also supports `sandbox` and `egress-webhook` |
 | `PUSH_LATEST` | `false` | additionally push `latest` when set to `true` |
 
@@ -125,6 +126,7 @@ hits Debian, PyPI, npm, or GitHub slowly, override at build time:
 |---|---|---|
 | `APT_MIRROR_HOST` | `mirrors.tuna.tsinghua.edu.cn` | rewrites Debian sources inside both image stages |
 | `PIP_INDEX_URL` | `https://pypi.tuna.tsinghua.edu.cn/simple` | passes through to pip |
+| `PIP_TRUSTED_HOST` | `pypi.tuna.tsinghua.edu.cn` | trusts an HTTP/private PyPI host |
 | `UV_INDEX_URL` | same as PIP | passes through to uv |
 | `NPM_REGISTRY` | `https://registry.npmmirror.com` | sets `pnpm config registry` in the frontend build |
 | `GITHUB_MIRROR` | `https://githubfast.com/` | substitutes `https://github.com/` in the generated `requirements-frozen.txt` (only affects the cubepi git+url dependency) |
@@ -135,7 +137,7 @@ Empty / unset → upstream.
 
 The sandbox version is stored in `deploy/images/sandbox/VERSION`. Increment it
 when sandbox contents change. The sandbox workflow publishes both
-`sha-<commit>` and `sandbox-v<version>`; the release workflow records the
+`<YYMMDD>-<branch>-<short-sha>` and `sandbox-v<version>`; the release workflow records the
 corresponding `sandbox-v<version>` reference in the release manifest. The release
 workflow does not download a candidate sandbox image or run a runtime compatibility
 test; the sandbox E2E/nightly workflow remains separate.

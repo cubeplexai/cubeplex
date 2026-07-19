@@ -9,6 +9,7 @@ on:
       - "deploy/images/frontend/**"
       - "deploy/kubernetes/egress-bundle/**"
       - "deploy/kubernetes/scripts/build-and-push.sh"
+      - "scripts/image-tag.sh"
       - "Makefile"
       - ".github/workflows/images.yml"
   push:
@@ -20,6 +21,7 @@ on:
       - "deploy/images/frontend/**"
       - "deploy/kubernetes/egress-bundle/**"
       - "deploy/kubernetes/scripts/build-and-push.sh"
+      - "scripts/image-tag.sh"
       - "Makefile"
       - ".github/workflows/images.yml"
   workflow_dispatch:
@@ -53,7 +55,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -82,15 +84,10 @@ jobs:
             done < changed-files.txt
           fi
 
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            image_tag="pr-${PR_NUMBER}-${TARGET_SHA:0:12}"
-            publish=false
-          elif [[ "$EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
-            image_tag="sha-${TARGET_SHA}"
+          image_tag=$(scripts/image-tag.sh "$TARGET_SHA" "$TARGET_BRANCH")
+          publish=false
+          if [[ "$EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
             publish=true
-          else
-            image_tag="sha-${TARGET_SHA}"
-            publish=false
           fi
 
           echo "backend=$backend" >> "$GITHUB_OUTPUT"

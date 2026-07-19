@@ -61,7 +61,7 @@ backend/frontend images are identical:
 
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
-# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:sha-<full-git-sha>
+# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:<YYMMDD>-<branch>-<short-sha>
 ```
 
 Then in `.env` set `BACKEND_TAG` and `FRONTEND_TAG` to that immutable tag.
@@ -90,8 +90,8 @@ Required:
 ```dotenv
 IMAGE_REGISTRY=192.168.1.101:8050
 IMAGE_REPO=library
-BACKEND_TAG=sha-<full-git-sha>
-FRONTEND_TAG=sha-<full-git-sha>
+BACKEND_TAG=<YYMMDD>-<branch>-<short-sha>
+FRONTEND_TAG=<YYMMDD>-<branch>-<short-sha>
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
