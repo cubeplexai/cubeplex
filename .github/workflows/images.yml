@@ -71,10 +71,15 @@ jobs:
             git diff --name-only "$BASE_SHA" "$TARGET_SHA" > changed-files.txt
             while IFS= read -r path; do
               case "$path" in
-                backend/*|deploy/images/backend/*|deploy/kubernetes/scripts/build-and-push.sh|Makefile|.github/workflows/images.yml)
+                deploy/kubernetes/scripts/build-and-push.sh|scripts/image-tag.sh|Makefile|.github/workflows/images.yml)
+                  backend=true
+                  frontend=true
+                  egress_webhook=true
+                  ;;
+                backend/*|deploy/images/backend/*)
                   backend=true
                   ;;
-                frontend/*|deploy/images/frontend/*|deploy/kubernetes/scripts/build-and-push.sh|Makefile|.github/workflows/images.yml)
+                frontend/*|deploy/images/frontend/*)
                   frontend=true
                   ;;
                 deploy/kubernetes/egress-bundle/*)
