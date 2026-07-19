@@ -8,6 +8,7 @@ FROM ${BASE_IMAGE}
 
 # Set build-time arguments
 ARG DEBIAN_FRONTEND=noninteractive
+ARG APT_MIRROR_HOST=
 
 # Set environment variables early. Deliberately NOT exporting VIRTUAL_ENV:
 # a global VIRTUAL_ENV=/opt/venv makes uv/poetry treat /opt/venv as the active
@@ -20,8 +21,10 @@ ENV PYTHONIOENCODING=utf-8 \
     NODE_PATH=/usr/local/lib/node_modules \
     PATH="/opt/venv/bin:$PATH"
 
-# Configure apt mirror and install packages in a single layer
-RUN sed -i -r 's/(archive|security|ports).ubuntu.com/mirrors.cloud.aliyuncs.com/' /etc/apt/sources.list.d/ubuntu.sources \
+# Configure the optional apt mirror and install packages in a single layer
+RUN if [ -n "$APT_MIRROR_HOST" ]; then \
+        sed -i -r "s/(archive|security|ports).ubuntu.com/${APT_MIRROR_HOST}/" /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
