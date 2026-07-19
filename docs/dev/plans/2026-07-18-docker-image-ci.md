@@ -101,6 +101,8 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 
 - The release workflow looks up digests from the main build. If they are missing, it
   fails instead of rebuilding implicitly.
+- The release tag must match backend, frontend package, and Helm chart version fields;
+  version bumps happen in the release preparation PR before tagging.
 - A sandbox digest may come from a recent independent sandbox release. This workflow does
   not pull it to the deployment machine or run a compatibility test.
 - The manifest is the rollback unit. Reusing it cannot pull a moving `latest` tag.
