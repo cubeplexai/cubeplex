@@ -55,14 +55,16 @@ optionally the backend port for direct API access).
 
 ## 3. Build images
 
-Use the kubernetes mode's build script — the images are identical:
+For GitHub releases, use the immutable image tag from the release manifest.
+For a local or private registry build, use the kubernetes mode's script — the
+backend/frontend images are identical:
 
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
-# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:<git-sha>
+# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:sha-<full-git-sha>
 ```
 
-Then in `.env` set `BACKEND_TAG` and `FRONTEND_TAG` to that sha.
+Then in `.env` set `BACKEND_TAG` and `FRONTEND_TAG` to that immutable tag.
 
 ---
 
@@ -88,8 +90,8 @@ Required:
 ```dotenv
 IMAGE_REGISTRY=192.168.1.101:8050
 IMAGE_REPO=library
-BACKEND_TAG=<git-sha>
-FRONTEND_TAG=<git-sha>
+BACKEND_TAG=sha-<full-git-sha>
+FRONTEND_TAG=sha-<full-git-sha>
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>

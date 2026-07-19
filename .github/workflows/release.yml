@@ -1,0 +1,82 @@
+name: Container image release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v<semver> tag to promote
+        required: true
+        type: string
+      sandbox_image:
+        description: Existing sandbox image reference for the release manifest
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  promote:
+    name: Promote verified application images
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      SANDBOX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.sandbox_image || vars.CUBEPLEX_SANDBOX_IMAGE }}
+      IMAGE_OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Validate release inputs
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ -n "$SANDBOX_IMAGE" ]]
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote SHA images and write manifest
+        id: promote
+        run: |
+          set -euo pipefail
+
+          source_commit=$(git rev-parse HEAD)
+          source_tag="sha-${source_commit}"
+          manifest="release-manifest-${RELEASE_TAG}.yaml"
+
+          printf 'release: %s\nsource_commit: %s\nimages:\n' "$RELEASE_TAG" "$source_commit" > "$manifest"
+
+          for target in backend frontend; do
+            source="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${source_tag}"
+            release="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${RELEASE_TAG}"
+            digest=$(docker buildx imagetools inspect "$source" --format '{{.Manifest.Digest}}')
+            [[ "$digest" == sha256:* ]]
+            docker buildx imagetools create --tag "$release" "$source"
+            printf '  %s: ghcr.io/%s/cubeplex-%s@%s\n' "$target" "$IMAGE_OWNER" "$target" "$digest" >> "$manifest"
+          done
+
+          printf '  sandbox: %s\n' "$SANDBOX_IMAGE" >> "$manifest"
+          cat "$manifest"
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          gh release upload "$RELEASE_TAG" "${{ steps.promote.outputs.manifest }}" --clobber

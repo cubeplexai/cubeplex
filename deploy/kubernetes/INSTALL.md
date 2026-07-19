@@ -78,6 +78,20 @@ secret-injection webhook (§4.10) and a docling-serve document parser
 
 ## 3. Build and push images
 
+For GitHub-hosted builds, `.github/workflows/images.yml` publishes backend and
+frontend images to GHCR. A `main` build is tagged with the full source commit:
+
+```text
+ghcr.io/cubeplexai/cubeplex-backend:sha-<full-commit-sha>
+ghcr.io/cubeplexai/cubeplex-frontend:sha-<full-commit-sha>
+```
+
+Formal `v<semver>` releases promote the same image digests and publish a
+release manifest as a GitHub Release asset. Production deployments must use the
+commit or release tag from that manifest, not `latest`.
+
+For a local build or a private registry, use the script below.
+
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
 ```
@@ -87,9 +101,10 @@ The script:
 1. Runs `uv export` on the host against `backend/uv.lock` to produce
    `backend/requirements-frozen.txt` (gitignored — `uv.lock` stays the
    source of truth).
-2. `docker build` for backend and frontend, tagging
-   `<REGISTRY>/<REPO>/cubeplex-<target>:<git-sha>` and `…:latest`.
-3. `docker push` both tags.
+2. `docker build` for the selected targets, tagging
+   `<REGISTRY>/<REPO>/cubeplex-<target>:sha-<full-git-sha>` by default.
+3. `docker push` the immutable tag. Set `PUSH_LATEST=true` only when a
+   development environment explicitly needs a moving `latest` tag.
 
 ### Common variables
 
@@ -97,8 +112,9 @@ The script:
 |---|---|---|
 | `REGISTRY` | `192.168.1.101:8050` | registry host:port |
 | `REPO` | `library` | second-level namespace inside the registry |
-| `TAG` | `git rev-parse --short HEAD` | image tag (also accepted as positional arg 1) |
-| `TARGET` | `backend frontend` | build only one of these |
+| `TAG` | `sha-<full git SHA>` | image tag (also accepted as positional arg 1) |
+| `TARGET` | `backend frontend` | space-separated targets; also supports `sandbox` and `egress-webhook` |
+| `PUSH_LATEST` | `false` | additionally push `latest` when set to `true` |
 
 ### Mirror knobs (network tuning)
 
@@ -114,6 +130,14 @@ hits Debian, PyPI, npm, or GitHub slowly, override at build time:
 | `GITHUB_MIRROR` | `https://githubfast.com/` | substitutes `https://github.com/` in the generated `requirements-frozen.txt` (only affects the cubepi git+url dependency) |
 
 Empty / unset → upstream.
+
+### Release sandbox selection
+
+The release workflow does not download a candidate sandbox image or run a
+runtime compatibility test. Set the repository variable
+`CUBEPLEX_SANDBOX_IMAGE` to the already selected sandbox image reference before
+using a tag-triggered release. The value is recorded in the release manifest;
+the sandbox E2E/nightly workflow remains separate.
 
 ---
 

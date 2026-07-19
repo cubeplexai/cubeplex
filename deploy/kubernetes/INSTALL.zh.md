@@ -77,6 +77,19 @@ Namespace: cubeplex
 
 ## 3. 构建并推送镜像
 
+GitHub Actions 的 `.github/workflows/images.yml` 会在 PR 中验证构建，并在
+`main` 上发布带完整 commit SHA 的 backend/frontend 镜像：
+
+```text
+ghcr.io/cubeplexai/cubeplex-backend:sha-<full-commit-sha>
+ghcr.io/cubeplexai/cubeplex-frontend:sha-<full-commit-sha>
+```
+
+正式 `v<semver>` release 会将相同 digest 提升为 release tag，并把 release
+manifest 作为 GitHub Release asset 发布。生产部署不要使用 `latest`。
+
+本地构建或推送到私有 registry 时，使用下面的脚本。
+
 `deploy/kubernetes/scripts/build-and-push.sh` 接管：
 
 ```bash
@@ -95,7 +108,8 @@ GITHUB_MIRROR=https://githubfast.com/ \
 1. 在 host 上 `uv export` 把 `backend/uv.lock` 转成扁平 `requirements-frozen.txt`（gitignored）
 2. `sed` 把里面的 `github.com` 替换成 `${GITHUB_MIRROR}`（默认 githubfast.com，CN 网络可达）
 3. `docker build` 两个镜像
-4. `docker push` 到 registry，同时打 `:<git-sha>` 和 `:latest`
+4. `docker push` immutable tag。只有开发环境明确需要移动的 `latest` 时，才设置
+   `PUSH_LATEST=true`
 
 ### 常用变量
 
@@ -103,8 +117,9 @@ GITHUB_MIRROR=https://githubfast.com/ \
 |---|---|---|
 | `REGISTRY` | `192.168.1.101:8050` | registry 主机:端口 |
 | `REPO` | `library` | 仓库 namespace（registry 二级路径） |
-| `TAG` | git short sha | 镜像 tag（也可作为脚本第 1 个 positional arg） |
-| `TARGET` | `backend frontend` | 只构建其中之一 |
+| `TAG` | `sha-<full git SHA>` | 镜像 tag（也可作为脚本第 1 个 positional arg） |
+| `TARGET` | `backend frontend` | 空格分隔目标；也支持 `sandbox`、`egress-webhook` |
+| `PUSH_LATEST` | `false` | 设置为 `true` 时额外推送 `latest` |
 | `GITHUB_MIRROR` | `https://githubfast.com/` | github.com 替换；置空使用原始 github.com |
 
 ### 用国外网络构建
@@ -117,6 +132,13 @@ GITHUB_MIRROR= deploy/kubernetes/scripts/build-and-push.sh
 
 并按需调整 Dockerfile 里清华源 / npmmirror 为官方源（编辑
 `deploy/images/{backend,frontend}/Dockerfile`）。
+
+### Release 使用的 sandbox 镜像
+
+release workflow 不会从 GHCR 下载 candidate sandbox 镜像，也不会运行 runtime
+兼容测试。触发 tag release 前，在仓库 Variables 中设置
+`CUBEPLEX_SANDBOX_IMAGE`，值为已经选定的 sandbox 镜像引用；它会写入 release
+manifest。sandbox E2E/nightly workflow 继续独立运行。
 
 ---
 
