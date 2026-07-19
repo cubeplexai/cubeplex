@@ -177,6 +177,7 @@ jobs:
         with:
           context: .
           file: ${{ steps.dockerfile.outputs.path }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ needs.changes.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

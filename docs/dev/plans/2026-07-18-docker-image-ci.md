@@ -13,6 +13,9 @@ part of image publication or release gating.
 **Tech stack:** GitHub Actions, Docker Buildx, GHCR, Helm, Docker Compose, shell
 scripts, and the existing backend/frontend/sandbox Dockerfiles.
 
+Published images target both `linux/amd64` and `linux/arm64`. Build provenance
+attestations are retained separately from runnable platform manifests.
+
 ## Unit 1 — Define image metadata and changed-area contract
 
 **Files**

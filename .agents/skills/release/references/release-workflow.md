@@ -92,6 +92,10 @@ The application release tags are aliases for the already built image manifests,
 not new builds. The manifest records backend/frontend image digests and the
 selected sandbox version tag.
 
+Published application and sandbox tags contain `linux/amd64` and `linux/arm64`
+manifests. Any `unknown/unknown` entry shown by GHCR is a provenance attestation,
+not a runtime platform.
+
 ## Deploy the release
 
 Use the release manifest as the deployment input. For tag-based deployment:
