@@ -100,7 +100,7 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 **Core logic**
 
 - The release workflow looks up digests from the main build. If they are missing, it
-  fails instead of rebuilding implicitly.
+  waits for the bounded publication window and then fails instead of rebuilding implicitly.
 - The release tag must match backend, frontend package, and Helm chart version fields;
   version bumps happen in the release preparation PR before tagging.
 - A sandbox digest may come from a recent independent sandbox release. This workflow does

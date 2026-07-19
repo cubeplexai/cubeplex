@@ -115,6 +115,10 @@ The release tag must match the version fields already committed in backend
 bump is a normal pull request before the release tag; it is not performed by the image
 workflow. The workflow does not require a separate root `VERSION` file.
 
+The release job waits for the corresponding `sha-<commit>` images for a bounded period.
+This permits tagging immediately after merging while the `main` image workflow is still
+running. If the images never appear, the release fails instead of rebuilding them.
+
 The workflow also creates an auditable manifest:
 
 ```yaml
