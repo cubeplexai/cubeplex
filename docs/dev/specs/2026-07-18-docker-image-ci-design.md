@@ -110,6 +110,11 @@ When a `v<semver>` Git tag is pushed, the release workflow confirms that the com
 SHA images exist and passed validation. It then adds the release tag to those same
 digests; it does not silently rebuild a different image.
 
+The release tag must match the version fields already committed in backend
+`pyproject.toml`, the frontend package manifests, and Helm `Chart.yaml`. The version
+bump is a normal pull request before the release tag; it is not performed by the image
+workflow. The workflow does not require a separate root `VERSION` file.
+
 The workflow also creates an auditable manifest:
 
 ```yaml
