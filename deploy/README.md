@@ -9,9 +9,14 @@ Artifacts for deploying cubeplex to your own infrastructure.
 | **Kubernetes (Helm)** | available | [kubernetes/INSTALL.md](kubernetes/INSTALL.md) (English) / [kubernetes/INSTALL.zh.md](kubernetes/INSTALL.zh.md) (中文) |
 | **docker-compose** | available | [docker-compose/INSTALL.md](docker-compose/INSTALL.md) |
 
-Both modes share the same container images. Build them once with
-`deploy/kubernetes/scripts/build-and-push.sh`; both modes pull from the
-same registry.
+Both modes share the same backend/frontend container images. Pull request and
+`main` image builds are handled by `.github/workflows/images.yml`; formal
+releases promote the already verified commit digests. For a local or private
+registry build, use `deploy/kubernetes/scripts/build-and-push.sh`.
+
+The sandbox image is built independently by
+`.github/workflows/sandbox-image.yml` and is selected separately by the release
+process. Existing sandbox E2E workflows are not part of image publication.
 
 ## Layout
 

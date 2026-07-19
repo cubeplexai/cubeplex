@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build cubeplex-backend and cubeplex-frontend images and push to a docker
-# registry. Tag = git short sha by default.
+# Build cubeplex images and push them to a Docker registry. The default tag is
+# the full source commit with a `sha-` prefix.
 #
 # Usage:
 #   deploy/kubernetes/scripts/build-and-push.sh                # auto tag
@@ -11,9 +11,10 @@
 #
 #   REGISTRY            registry host:port (default 192.168.1.101:8050)
 #   REPO                registry second-level namespace (default library)
-#   TAG                 image tag (default git short sha; also accepted
+#   TAG                 image tag (default sha-<full git sha>; also accepted
 #                       as the first positional arg)
-#   TARGET              "backend", "frontend", or "backend frontend"
+#   TARGET              "backend", "frontend", "sandbox", or
+#                       "egress-webhook" (space-separated; default both app images)
 #                       (default both)
 #
 #   --- mirror knobs (defaults pass nothing → Dockerfile uses upstream) ---
@@ -35,16 +36,25 @@ cd "$ROOT"
 
 REGISTRY="${REGISTRY:-192.168.1.101:8050}"
 REPO="${REPO:-library}"
-TAG="${1:-$(git rev-parse --short HEAD)}"
+TAG="${1:-sha-$(git rev-parse HEAD)}"
 TARGETS="${TARGET:-backend frontend}"
-# Add "egress-webhook" to TARGET when deploying with egress.enabled.
+# Add "sandbox" or "egress-webhook" to TARGET when publishing those images.
+PUSH_LATEST="${PUSH_LATEST:-false}"
 
 # Map target → Dockerfile path. backend/frontend are under deploy/images,
 # egress-webhook lives next to its source under egress-bundle.
 declare -A DOCKERFILES=(
   [backend]="deploy/images/backend/Dockerfile"
   [frontend]="deploy/images/frontend/Dockerfile"
+  [sandbox]="deploy/images/sandbox/Dockerfile"
   [egress-webhook]="deploy/kubernetes/egress-bundle/webhook/Dockerfile"
+)
+
+declare -A CONTEXTS=(
+  [backend]="."
+  [frontend]="."
+  [sandbox]="deploy/images/sandbox"
+  [egress-webhook]="."
 )
 
 # Mirror knobs (empty → use upstream defaults)
@@ -87,22 +97,31 @@ BUILD_ARGS=(
 
 for target in $TARGETS; do
   dockerfile="${DOCKERFILES[$target]:-}"
-  if [[ -z "$dockerfile" ]]; then
-    echo "ERROR: unknown TARGET=$target (allowed: backend frontend egress-webhook)" >&2
+  context="${CONTEXTS[$target]:-}"
+  if [[ -z "$dockerfile" || -z "$context" ]]; then
+    echo "ERROR: unknown TARGET=$target (allowed: backend frontend sandbox egress-webhook)" >&2
     exit 1
   fi
   image="$REGISTRY/$REPO/cubeplex-$target:$TAG"
+
+  if [[ "$target" == "sandbox" ]]; then
+    echo "==> Staging sandbox fonts"
+    deploy/images/sandbox/stage-fonts.sh
+  fi
+
   echo
   echo "==> docker build $image  (using $dockerfile)"
   docker build \
     --file "$dockerfile" \
     --tag "$image" \
-    --tag "$REGISTRY/$REPO/cubeplex-$target:latest" \
     "${BUILD_ARGS[@]}" \
-    .
+    "$context"
   echo "==> docker push $image"
   docker push "$image"
-  docker push "$REGISTRY/$REPO/cubeplex-$target:latest"
+  if [[ "$PUSH_LATEST" == "true" ]]; then
+    docker tag "$image" "$REGISTRY/$REPO/cubeplex-$target:latest"
+    docker push "$REGISTRY/$REPO/cubeplex-$target:latest"
+  fi
 done
 
 echo

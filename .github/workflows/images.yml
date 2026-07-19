@@ -1,0 +1,187 @@
+name: Container images
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "deploy/images/backend/**"
+      - "deploy/images/frontend/**"
+      - "deploy/kubernetes/egress-bundle/**"
+      - "deploy/kubernetes/scripts/build-and-push.sh"
+      - "Makefile"
+      - ".github/workflows/images.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "deploy/images/backend/**"
+      - "deploy/images/frontend/**"
+      - "deploy/kubernetes/egress-bundle/**"
+      - "deploy/kubernetes/scripts/build-and-push.sh"
+      - "Makefile"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  changes:
+    name: Determine image targets
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.detect.outputs.backend }}
+      frontend: ${{ steps.detect.outputs.frontend }}
+      egress_webhook: ${{ steps.detect.outputs.egress_webhook }}
+      image_tag: ${{ steps.detect.outputs.image_tag }}
+      publish: ${{ steps.detect.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed image areas
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          backend=false
+          frontend=false
+          egress_webhook=false
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            backend=true
+            frontend=true
+            egress_webhook=true
+          else
+            git diff --name-only "$BASE_SHA" "$TARGET_SHA" > changed-files.txt
+            while IFS= read -r path; do
+              case "$path" in
+                backend/*|deploy/images/backend/*|deploy/kubernetes/scripts/build-and-push.sh|Makefile|.github/workflows/images.yml)
+                  backend=true
+                  ;;
+                frontend/*|deploy/images/frontend/*|deploy/kubernetes/scripts/build-and-push.sh|Makefile|.github/workflows/images.yml)
+                  frontend=true
+                  ;;
+                deploy/kubernetes/egress-bundle/*)
+                  egress_webhook=true
+                  ;;
+              esac
+            done < changed-files.txt
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            image_tag="pr-${PR_NUMBER}-${TARGET_SHA:0:12}"
+            publish=false
+          elif [[ "$EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            image_tag="sha-${TARGET_SHA}"
+            publish=true
+          else
+            image_tag="sha-${TARGET_SHA}"
+            publish=false
+          fi
+
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+          echo "egress_webhook=$egress_webhook" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "backend=$backend frontend=$frontend tag=$image_tag publish=$publish"
+
+  build:
+    name: Build ${{ matrix.target }} image
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, frontend, egress-webhook]
+    steps:
+      - uses: actions/checkout@v7
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: astral-sh/setup-uv@v6
+        if: matrix.target == 'backend' && needs.changes.outputs.backend == 'true'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          prune-cache: false
+
+      - name: Generate frozen backend requirements
+        if: matrix.target == 'backend' && needs.changes.outputs.backend == 'true'
+        working-directory: backend
+        run: |
+          uv export \
+            --format requirements-txt \
+            --no-hashes --no-dev --no-editable --no-emit-project \
+            > requirements-frozen.txt
+
+      - uses: docker/setup-buildx-action@v3
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+
+      - name: Log in to GHCR
+        if: needs.changes.outputs.publish == 'true' && ((matrix.target == 'backend' && needs.changes.outputs.backend == 'true') || (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') || (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true'))
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cubeplex-${{ matrix.target }}
+          tags: type=raw,value=${{ needs.changes.outputs.image_tag }}
+
+      - name: Select Dockerfile
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+        id: dockerfile
+        run: |
+          if [[ "${{ matrix.target }}" == "egress-webhook" ]]; then
+            echo "path=deploy/kubernetes/egress-bundle/webhook/Dockerfile" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=deploy/images/${{ matrix.target }}/Dockerfile" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image
+        if: |
+          (matrix.target == 'backend' && needs.changes.outputs.backend == 'true') ||
+          (matrix.target == 'frontend' && needs.changes.outputs.frontend == 'true') ||
+          (matrix.target == 'egress-webhook' && needs.changes.outputs.egress_webhook == 'true')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dockerfile.outputs.path }}
+          push: ${{ needs.changes.outputs.publish == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=cubeplex-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=cubeplex-${{ matrix.target }}
