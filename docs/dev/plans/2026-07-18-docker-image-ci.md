@@ -25,7 +25,8 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 **Interfaces**
 
 - Inputs: GitHub event, source commit, Git tag, and changed-file list.
-- Outputs: `targets` (backend/frontend/sandbox/egress-webhook), `sha_tag`, release
+- Outputs: `targets` (backend/frontend/sandbox/egress-webhook), formatted image tag,
+  release
   version, and build metadata for later jobs.
 
 **Core logic**
@@ -33,7 +34,8 @@ scripts, and the existing backend/frontend/sandbox Dockerfiles.
 - Extend the existing CI change detection to include Dockerfiles, deploy scripts,
   workflows, and shared build configuration.
 - PR events cannot enter a formal publication job. Main publishes only
-  `sha-<full-sha>`. A release consumes an existing main build.
+  `<YYMMDD>-<branch>-<short-sha>`. A release consumes an existing main build and
+  recomputes the tag from the release commit.
 - Sandbox paths are detected independently so ordinary application changes do not
   trigger the large sandbox build.
 

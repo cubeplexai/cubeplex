@@ -66,7 +66,8 @@ ghcr.io/<owner>/cubeplex-egress-webhook
 
 Each build produces at least:
 
-- `sha-<full-commit-sha>` for an immutable commit selector;
+- `<YYMMDD>-<branch>-<short-sha>` for an immutable commit selector. Branch names
+  are lowercased and sanitized to Docker-tag-safe characters;
 - `v<semver>` for a formal release, pointing to the already verified digest.
 
 `latest` or `edge` may remain as development convenience tags, but production must
@@ -100,7 +101,7 @@ release tags, or production registry namespaces.
 #### `main`
 
 After code CI succeeds, the workflow builds affected images and publishes
-`sha-<full-commit-sha>`. It stores each digest, affected image, and source commit as
+`<YYMMDD>-<branch>-<short-sha>`. It stores each digest, affected image, and source commit as
 build metadata for the release workflow. A commit tag must never be overwritten with
 different content.
 
@@ -115,7 +116,8 @@ The release tag must match the version fields already committed in backend
 bump is a normal pull request before the release tag; it is not performed by the image
 workflow. The workflow does not require a separate root `VERSION` file.
 
-The release job waits for the corresponding `sha-<commit>` images for a bounded period.
+The release job computes the corresponding date/branch/short-SHA tag from the tagged
+commit and waits for that image for a bounded period.
 This permits tagging immediately after merging while the `main` image workflow is still
 running. If the images never appear, the release fails instead of rebuilding them.
 
@@ -171,7 +173,7 @@ The sandbox workflow supports three triggers:
 2. `workflow_dispatch` for explicit rebuilds after OpenSandbox compatibility changes;
 3. scheduled security rebuilds for base-image and browser dependency updates.
 
-Successful builds publish independent `sha-*` and `sandbox-v*` tags. The source of the
+Successful builds publish independent `<YYMMDD>-<branch>-<short-sha>` and `sandbox-v*` tags. The source of the
 sandbox version is `deploy/images/sandbox/VERSION`; changing sandbox contents requires
 incrementing that version. Existing version tags are immutable and cannot be overwritten.
 An application release selects the sandbox version from that file; it does not rebuild
@@ -189,7 +191,7 @@ credentials remain outside this image workflow and are not release gates here.
 ## Success criteria
 
 - PRs validate affected Docker builds without publishing production tags.
-- `main` publishes backend/frontend images tagged with the full source commit and emits digests.
+- `main` publishes backend/frontend images tagged with the commit date, branch, and short SHA, and emits digests.
 - A release tag promotes already verified digests instead of rebuilding different content.
 - Sandbox builds occur only for sandbox changes, security rebuilds, or explicit triggers.
 - One release manifest identifies the complete backend/frontend/sandbox/egress image set.

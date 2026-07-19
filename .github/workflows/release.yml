@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
 
           source_commit=$(git rev-parse HEAD)
-          source_tag="sha-${source_commit}"
+          source_tag=$(scripts/image-tag.sh "$source_commit" main)
           sandbox_image="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:sandbox-v${{ steps.sandbox.outputs.version }}"
           manifest="release-manifest-${RELEASE_TAG}.yaml"
 

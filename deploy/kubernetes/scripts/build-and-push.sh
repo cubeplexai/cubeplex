@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build cubeplex images and push them to a Docker registry. The default tag is
-# the full source commit with a `sha-` prefix.
+# `<YYMMDD>-<branch>-<short-sha>`, derived from the source commit.
 #
 # Usage:
 #   deploy/kubernetes/scripts/build-and-push.sh                # auto tag
@@ -11,7 +11,7 @@
 #
 #   REGISTRY            registry host:port (default 192.168.1.101:8050)
 #   REPO                registry second-level namespace (default library)
-#   TAG                 image tag (default sha-<full git sha>; also accepted
+#   TAG                 image tag (default <YYMMDD>-<branch>-<short-sha>; also accepted
 #                       as the first positional arg)
 #   TARGET              "backend", "frontend", "sandbox", or
 #                       "egress-webhook" (space-separated; default both app images)
@@ -23,6 +23,7 @@
 #                       mirrors.tuna.tsinghua.edu.cn
 #   PIP_INDEX_URL       PyPI index, e.g.
 #                       https://pypi.tuna.tsinghua.edu.cn/simple
+#   PIP_TRUSTED_HOST    trusted host for an HTTP/private PyPI index
 #   UV_INDEX_URL        uv index URL (usually same as PIP_INDEX_URL)
 #   NPM_REGISTRY        npm registry, e.g.
 #                       https://registry.npmmirror.com
@@ -36,7 +37,7 @@ cd "$ROOT"
 
 REGISTRY="${REGISTRY:-192.168.1.101:8050}"
 REPO="${REPO:-library}"
-TAG="${1:-sha-$(git rev-parse HEAD)}"
+TAG="${1:-$(scripts/image-tag.sh)}"
 TARGETS="${TARGET:-backend frontend}"
 # Add "sandbox" or "egress-webhook" to TARGET when publishing those images.
 PUSH_LATEST="${PUSH_LATEST:-false}"
@@ -60,6 +61,7 @@ declare -A CONTEXTS=(
 # Mirror knobs (empty → use upstream defaults)
 APT_MIRROR_HOST="${APT_MIRROR_HOST:-}"
 PIP_INDEX_URL="${PIP_INDEX_URL:-}"
+PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-}"
 UV_INDEX_URL="${UV_INDEX_URL:-}"
 NPM_REGISTRY="${NPM_REGISTRY:-}"
 GITHUB_MIRROR="${GITHUB_MIRROR:-}"
@@ -88,12 +90,12 @@ fi
 # Build args common to both targets (each Dockerfile only references the
 # ones it knows about; unknown ARGs are ignored by docker classic builder
 # and silently consumed by BuildKit).
-BUILD_ARGS=(
-  --build-arg "APT_MIRROR_HOST=${APT_MIRROR_HOST}"
-  --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}"
-  --build-arg "UV_INDEX_URL=${UV_INDEX_URL}"
-  --build-arg "NPM_REGISTRY=${NPM_REGISTRY}"
-)
+BUILD_ARGS=()
+[[ -z "$APT_MIRROR_HOST" ]] || BUILD_ARGS+=(--build-arg "APT_MIRROR_HOST=${APT_MIRROR_HOST}")
+[[ -z "$PIP_INDEX_URL" ]] || BUILD_ARGS+=(--build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}")
+[[ -z "$PIP_TRUSTED_HOST" ]] || BUILD_ARGS+=(--build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}")
+[[ -z "$UV_INDEX_URL" ]] || BUILD_ARGS+=(--build-arg "UV_INDEX_URL=${UV_INDEX_URL}")
+[[ -z "$NPM_REGISTRY" ]] || BUILD_ARGS+=(--build-arg "NPM_REGISTRY=${NPM_REGISTRY}")
 
 for target in $TARGETS; do
   dockerfile="${DOCKERFILES[$target]:-}"
