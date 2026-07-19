@@ -65,7 +65,14 @@ jobs:
           for target in backend frontend; do
             source="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${source_tag}"
             release="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${RELEASE_TAG}"
-            digest=$(docker buildx imagetools inspect "$source" --format '{{.Manifest.Digest}}')
+            digest=""
+            for attempt in $(seq 1 60); do
+              if digest=$(docker buildx imagetools inspect "$source" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+                break
+              fi
+              echo "Waiting for $source (attempt $attempt/60)"
+              sleep 10
+            done
             [[ "$digest" == sha256:* ]]
             docker buildx imagetools create --tag "$release" "$source"
             printf '  %s: ghcr.io/%s/cubeplex-%s@%s\n' "$target" "$IMAGE_OWNER" "$target" "$digest" >> "$manifest"
