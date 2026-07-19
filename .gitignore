@@ -46,6 +46,7 @@ backend/.claude/
 # TEMP FILES
 tmp
 .playwright-cli
+.pnpm-store/
 
 # Playwright
 .playwright-mcp/
