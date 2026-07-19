@@ -85,6 +85,9 @@ ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-<branch>-<short-sha>
 ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-<branch>-<short-sha>
 ```
 
+每个发布 tag 都是同时包含 `linux/amd64` 和 `linux/arm64` 的多平台 manifest。
+GHCR 还可能显示 `unknown/unknown` 的 provenance 条目；它是元数据，不是可运行的镜像平台。
+
 正式 `v<semver>` release 会将相同 digest 提升为 release tag，并把 release
 manifest 作为 GitHub Release asset 发布。生产部署不要使用 `latest`。
 

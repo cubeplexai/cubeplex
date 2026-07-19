@@ -70,6 +70,10 @@ Each build produces at least:
   are lowercased and sanitized to Docker-tag-safe characters;
 - `v<semver>` for a formal release, pointing to the already verified digest.
 
+Published images are multi-platform manifests containing `linux/amd64` and
+`linux/arm64` images. Build provenance attestations may also appear as
+`unknown/unknown` entries; those are metadata, not runnable platforms.
+
 `latest` or `edge` may remain as development convenience tags, but production must
 not depend on them. Production should record and preferably consume image digests. If
 the first Helm/Compose implementation only supports tags, it must use immutable SHA

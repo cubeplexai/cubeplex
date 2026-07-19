@@ -87,6 +87,10 @@ ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-<branch>-<short-sha>
 ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-<branch>-<short-sha>
 ```
 
+Each published tag is a multi-platform manifest for `linux/amd64` and
+`linux/arm64`. GHCR may also display an `unknown/unknown` provenance entry; it is
+metadata and is not a runnable image platform.
+
 Formal `v<semver>` releases promote the same image digests and publish a
 release manifest as a GitHub Release asset. Production deployments must use the
 commit or release tag from that manifest, not `latest`.
