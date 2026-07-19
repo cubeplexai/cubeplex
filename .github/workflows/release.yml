@@ -10,10 +10,6 @@ on:
         description: Existing v<semver> tag to promote
         required: true
         type: string
-      sandbox_image:
-        description: Existing sandbox image reference for the release manifest
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -25,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      SANDBOX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.sandbox_image || vars.CUBEPLEX_SANDBOX_IMAGE }}
       IMAGE_OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +34,14 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ -n "$SANDBOX_IMAGE" ]]
+
+      - name: Read sandbox version
+        id: sandbox
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < deploy/images/sandbox/VERSION)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify repository versions
         run: scripts/check-version-consistency.sh "$RELEASE_TAG"
@@ -58,6 +60,7 @@ jobs:
 
           source_commit=$(git rev-parse HEAD)
           source_tag="sha-${source_commit}"
+          sandbox_image="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:sandbox-v${{ steps.sandbox.outputs.version }}"
           manifest="release-manifest-${RELEASE_TAG}.yaml"
 
           printf 'release: %s\nsource_commit: %s\nimages:\n' "$RELEASE_TAG" "$source_commit" > "$manifest"
@@ -78,7 +81,15 @@ jobs:
             printf '  %s: ghcr.io/%s/cubeplex-%s@%s\n' "$target" "$IMAGE_OWNER" "$target" "$digest" >> "$manifest"
           done
 
-          printf '  sandbox: %s\n' "$SANDBOX_IMAGE" >> "$manifest"
+          for attempt in $(seq 1 60); do
+            if docker buildx imagetools inspect "$sandbox_image" >/dev/null 2>&1; then
+              break
+            fi
+            echo "Waiting for $sandbox_image (attempt $attempt/60)"
+            sleep 10
+          done
+          docker buildx imagetools inspect "$sandbox_image" >/dev/null
+          printf '  sandbox: %s\n' "$sandbox_image" >> "$manifest"
           cat "$manifest"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
