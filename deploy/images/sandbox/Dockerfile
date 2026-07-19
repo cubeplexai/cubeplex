@@ -2,7 +2,8 @@
 # custom Xorg drivers).
 FROM ghcr.io/m1k1o/neko/chromium:latest AS neko
 
-FROM ubuntu:24.04
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
 
 # Set build-time arguments
 ARG DEBIAN_FRONTEND=noninteractive
