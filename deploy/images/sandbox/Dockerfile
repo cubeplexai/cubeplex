@@ -1,9 +1,8 @@
 # Source of the Neko streaming runtime (server binary, HTML5 client, configs,
-# custom Xorg drivers). Pin/mirror this into the internal registry for builds
-# that cannot reach ghcr.
+# custom Xorg drivers).
 FROM ghcr.io/m1k1o/neko/chromium:latest AS neko
 
-FROM hub.sensedeal.vip/library/ubuntu:24.04
+FROM ubuntu:24.04
 
 # Set build-time arguments
 ARG DEBIAN_FRONTEND=noninteractive
