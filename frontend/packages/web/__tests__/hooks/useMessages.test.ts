@@ -1,5 +1,6 @@
-import { act } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { useMessageStore, getTextContent } from '@cubeplex/core'
+import { useMessages } from '@/hooks/useMessages'
 
 const CONV_ID = 'conv-1'
 
@@ -586,5 +587,32 @@ describe('messageStore.send', () => {
     })
 
     nowSpy.mockRestore()
+  })
+})
+
+describe('useMessages', () => {
+  it('does not return an uncached external-store snapshot for subagents', () => {
+    useMessageStore.setState({
+      isStreaming: true,
+      streamingConversationId: CONV_ID,
+      streamAgents: {
+        main: {
+          text: '',
+          toolCalls: [],
+          toolResults: [],
+          thinking: '',
+          blocks: [],
+          name: null,
+        },
+      },
+    })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    renderHook(() => useMessages(CONV_ID))
+
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain(
+      'The result of getSnapshot should be cached',
+    )
+    consoleError.mockRestore()
   })
 })

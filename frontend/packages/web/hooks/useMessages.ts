@@ -53,16 +53,15 @@ export function useMessages(conversationId: string) {
   const contextWindow = useMessageStore((s) => s.contextWindow[conversationId] ?? null)
   const contextTokens = useMessageStore((s) => s.contextTokens[conversationId] ?? null)
 
-  // Derive subagent streams with stable reference — only for the streaming conversation
-  const rawSubAgents = useMessageStore((s) => {
-    if (s.streamingConversationId !== conversationId) return EMPTY_SUBAGENTS
-    const agents = s.streamAgents
-    const sub: Record<string, AgentStream> = {}
-    for (const key in agents) {
-      if (key !== 'main') sub[key] = agents[key]
-    }
-    return sub
-  })
+  // Select the store-owned record so useSyncExternalStore always gets a stable
+  // snapshot. Derive the subagent-only view after the selector has returned.
+  const streamAgents = useMessageStore((s) =>
+    s.streamingConversationId === conversationId ? s.streamAgents : EMPTY_SUBAGENTS,
+  )
+  const rawSubAgents: Record<string, AgentStream> = {}
+  for (const key in streamAgents) {
+    if (key !== 'main') rawSubAgents[key] = streamAgents[key]
+  }
   const subAgentStreams = useStableRecord(rawSubAgents)
 
   return {
