@@ -51,4 +51,12 @@ The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,
 passes them through from the operator's environment. See the install
 guide for the full list.
 
+The sandbox Dockerfile uses the official `ubuntu:24.04` image by default. A
+private or mirrored base image can be selected explicitly when building it:
+
+```bash
+docker build --build-arg BASE_IMAGE=registry.example.com/library/ubuntu:24.04 \
+  -f deploy/images/sandbox/Dockerfile deploy/images/sandbox
+```
+
 Design notes: [docs/dev/specs/2026-06-10-helm-deploy-design.md](../docs/dev/specs/2026-06-10-helm-deploy-design.md).
