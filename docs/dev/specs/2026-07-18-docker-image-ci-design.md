@@ -46,7 +46,9 @@ its context or security inputs change. A release manifest records the exact appl
 and sandbox digests that were tested together.
 
 This is the selected approach because it avoids unnecessary sandbox builds while still
-making each release reproducible.
+making each release reproducible. Runtime compatibility testing is intentionally not
+part of this image pipeline: pulling a GHCR candidate image from the deployment machine
+is too slow. Existing real sandbox E2E/nightly workflows remain separate.
 
 ## Design
 
@@ -121,8 +123,8 @@ images:
 ```
 
 If sandbox did not change in the application commit, the manifest references the most
-recent sandbox digest that passed compatibility tests. If the backend/sandbox contract
-changes, the release gate requires a new sandbox build and compatibility test.
+recent sandbox digest selected by the release process. The release workflow does not
+pull that image to the deployment machine or run a compatibility test.
 
 ### Registry authentication and publication
 
@@ -161,8 +163,9 @@ The sandbox workflow supports three triggers:
 3. scheduled security rebuilds for base-image and browser dependency updates.
 
 Successful builds publish independent `sha-*` and `sandbox-v*` tags. An application
-release selects a sandbox digest that has passed compatibility tests; it does not
-rebuild sandbox merely because backend/frontend changed.
+release selects a sandbox digest recorded by the release process; it does not rebuild
+sandbox merely because backend/frontend changed. Existing sandbox E2E tests and their
+credentials remain outside this image workflow and are not release gates here.
 
 ## Out of scope
 
