@@ -53,31 +53,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote SHA images and write manifest
+      - name: Write release manifest
         id: promote
         run: |
           set -euo pipefail
 
           source_commit=$(git rev-parse HEAD)
-          source_tag=$(scripts/image-tag.sh "$source_commit" main)
           sandbox_image="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:sandbox-v${{ steps.sandbox.outputs.version }}"
           manifest="release-manifest-${RELEASE_TAG}.yaml"
 
           printf 'release: %s\nsource_commit: %s\nimages:\n' "$RELEASE_TAG" "$source_commit" > "$manifest"
 
+          # images.yml builds and pushes version-tagged images when triggered by
+          # the same tag push; wait for them to appear (up to ~30 min)
           for target in backend frontend; do
-            source="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${source_tag}"
             release="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${RELEASE_TAG}"
             digest=""
-            for attempt in $(seq 1 60); do
-              if digest=$(docker buildx imagetools inspect "$source" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+            for attempt in $(seq 1 180); do
+              if digest=$(docker buildx imagetools inspect "$release" --format '{{.Manifest.Digest}}' 2>/dev/null); then
                 break
               fi
-              echo "Waiting for $source (attempt $attempt/60)"
+              echo "Waiting for $release (attempt $attempt/180)"
               sleep 10
             done
             [[ "$digest" == sha256:* ]]
-            docker buildx imagetools create --tag "$release" "$source"
             printf '  %s: ghcr.io/%s/cubeplex-%s@%s\n' "$target" "$IMAGE_OWNER" "$target" "$digest" >> "$manifest"
           done
 

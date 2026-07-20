@@ -15,20 +15,19 @@ the exact version, image, tag, and deployment contracts.
 2. Prepare a release PR that bumps the application package/chart versions and,
    only when sandbox contents change, `deploy/images/sandbox/VERSION`.
 3. Run the version-consistency check and the repository CI-equivalent checks.
-4. Merge the release PR into `main`; wait for the main image workflow to publish
-   commit-tagged images.
+4. Merge the release PR into `main`.
 5. Create `v<semver>` on that exact merged commit and push the tag.
-6. Let the release workflow verify versions, wait for the commit images, promote
-   the same manifests to release tags, and attach the release manifest.
+6. The tag push triggers two concurrent workflows: `images.yml` builds and pushes
+   version-tagged images; `release.yml` verifies versions, waits for those images,
+   writes the release manifest, and creates the GitHub Release.
 7. Deploy using the manifest's release tags or digests. Do not edit chart defaults
    or use `latest` for production.
 
 ## Guardrails
 
-- Never rebuild different image content during tag promotion.
 - Never overwrite an existing application or sandbox version tag.
 - Do not run sandbox runtime compatibility tests from the image release workflow;
   existing sandbox E2E/nightly workflows remain separate.
 - Keep registry credentials and runtime secrets out of release manifests.
-- If the main image workflow failed or the expected commit image does not appear,
-  stop and fix the build; do not create a replacement image under the same tag.
+- If the image build fails, fix the build; do not manually push a replacement image
+  under the same tag.
