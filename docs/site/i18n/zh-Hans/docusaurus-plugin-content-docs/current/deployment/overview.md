@@ -47,7 +47,7 @@ llm:
   # "<provider_name>/<model_id>"——provider_name 必须出现在 providers 下。
   default_model: "openai/gpt-5.6-terra"
   fallback_models:
-    - "anthropic/claude-sonnet-4"
+    - "anthropic/claude-opus-4.8"
   providers:
     # 任意 OpenAI 兼容的 chat-completions 端点。
     openai:
@@ -67,8 +67,8 @@ llm:
       api_key: "sk-ant-..."
       api: "anthropic-messages"
       models:
-        - id: "claude-sonnet-4"
-          name: "Claude Sonnet 4"
+        - id: "claude-opus-4.8"
+          name: "Claude Opus 4.8"
           reasoning: true
           input: ["text", "image"]
           context_window: 200000
