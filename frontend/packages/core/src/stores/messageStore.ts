@@ -1370,11 +1370,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const nextError =
           seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
 
-        // Restore toolResultMap entries that have details from history, so
-        // tool preview panels (e.g. edit_file diff) remain interactive on reload.
+        // Restore toolResultMap from history so tool preview panels remain
+        // interactive on reload (e.g. edit_file diff, write_file completed state).
         const restoredToolResultMap: MessageStore['toolResultMap'] = {}
         for (const msg of messages) {
-          if (msg.role !== 'tool_result' || !msg.tool_call_id || !msg.details) continue
+          if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
           restoredToolResultMap[msg.tool_call_id] = {
             content: msg.content
               .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
