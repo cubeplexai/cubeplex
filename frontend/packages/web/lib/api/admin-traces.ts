@@ -1,5 +1,7 @@
 import { readApiError } from '@/lib/csrf'
 import type {
+  FilterOption,
+  FilterOptionKind,
   TraceDetail,
   TraceFilterValues,
   TraceListResponse,
@@ -62,10 +64,28 @@ export async function getAdminTraceDetail(traceId: string): Promise<TraceDetail>
   return getJson<TraceDetail>(`/api/v1/admin/traces/${encodeURIComponent(traceId)}`)
 }
 
-export async function getAdminTraceTagValues(tag: string): Promise<string[]> {
+export async function getAdminTraceTagValues(tag: string, signal?: AbortSignal): Promise<string[]> {
   const params = new URLSearchParams({ tag })
   const res = await getJson<{ values: string[] }>(
     `/api/v1/admin/traces/tag-values?${params.toString()}`,
+    signal,
   )
   return res.values
+}
+
+// Dropdown options for workspace/user/conversation, resolved from Postgres
+// (org-scoped, prefix-narrowed server-side for user/conversation). `model` is
+// NOT served here - use getAdminTraceTagValues for it.
+export async function getAdminFilterOptions(
+  kind: FilterOptionKind,
+  q?: string,
+  signal?: AbortSignal,
+): Promise<FilterOption[]> {
+  const params = new URLSearchParams({ kind })
+  if (q) params.set('q', q)
+  const res = await getJson<{ options: FilterOption[] }>(
+    `/api/v1/admin/traces/filter-options?${params.toString()}`,
+    signal,
+  )
+  return res.options
 }
