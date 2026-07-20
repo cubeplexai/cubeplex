@@ -8,6 +8,10 @@ import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations
 import { parseWriteFileArgs, resolveLiveWriteFile } from '@/lib/writeFilePreview'
 import { useSandboxMarkdownContext } from '@/hooks/useSandboxMarkdownContext'
 
+// Stable empty fallback — avoids returning a new [] literal from the Zustand
+// selector on every call, which would cause an infinite render loop.
+const EMPTY_BLOCKS: never[] = []
+
 interface WriteFilePreviewViewProps {
   args: Record<string, unknown>
   result: string | null
@@ -193,7 +197,7 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
   const prevStreamingRef = useRef(false)
   const liveBlocks = useMessageStore((s) => {
     const agentId = toolRef?.agent_id
-    return agentId ? (s.streamAgents[agentId]?.blocks ?? []) : []
+    return agentId ? (s.streamAgents[agentId]?.blocks ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
   })
 
   const parsed = useMemo(() => {
