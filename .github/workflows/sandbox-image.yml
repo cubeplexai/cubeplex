@@ -83,7 +83,7 @@ jobs:
             type=raw,value=sandbox-v${{ steps.version.outputs.version }},enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: deploy/images/sandbox
           file: deploy/images/sandbox/Dockerfile
