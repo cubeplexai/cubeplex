@@ -4,9 +4,9 @@ Single-host deployment of cubeplex (backend, frontend, Postgres, Redis,
 rustfs object store) with `docker compose up -d`.
 
 - **Install guide:** [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
-  — also covers the optional OpenSandbox sandbox-execution overlay (what it
-  deploys, and which cubeplex features docker runtime mode can and can't
-  serve).
+  — also covers the two optional overlays: OpenSandbox sandbox execution
+  (what it deploys, and which cubeplex features docker runtime mode can and
+  can't serve) and docling document parsing (combined or standalone).
 - Uses the **same backend / frontend images** as the kubernetes mode;
   build them once with `deploy/kubernetes/scripts/build-and-push.sh`.
 
@@ -16,11 +16,15 @@ rustfs object store) with `docker compose up -d`.
 deploy/docker-compose/
 ├── README.md
 ├── INSTALL.md
+├── OPENSANDBOX.md
 ├── compose.yaml
+├── compose.opensandbox.yaml   # optional: sandbox execution overlay
+├── compose.docling.yaml       # optional: document parsing overlay
 ├── .env.example
 ├── config/
 │   ├── config.production.local.yaml.example
-│   └── config.production.secrets.yaml.example
+│   ├── config.production.secrets.yaml.example
+│   └── opensandbox.toml.example
 └── scripts/
     ├── up.sh          # docker compose pull + up -d
     ├── smoke-test.sh  # health probes + frontend HTML

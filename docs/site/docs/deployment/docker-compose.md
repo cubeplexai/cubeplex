@@ -374,3 +374,75 @@ docker compose -f compose.yaml -f compose.opensandbox.yaml down
 The MITM CA and any sandbox containers spawned by the server stay on the
 host Docker engine — they aren't part of this project's compose network.
 Inspect with `docker ps --filter "name=sandbox-"`.
+
+## Optional: document parsing (docling-serve)
+
+The backend's `file_read` tool converts uploaded PDF / office documents to
+markdown by calling a [docling-serve](https://github.com/docling-project/docling-serve)
+instance. Without it, other file types still work but document parsing
+doesn't. The optional `compose.docling.yaml` overlay is self-contained — it
+doesn't reference or extend any service from `compose.yaml` — so it
+supports two deployment shapes.
+
+### Combined: same host, same Docker network
+
+```bash
+cd deploy/docker-compose
+
+docker compose \
+  -f compose.yaml \
+  -f compose.docling.yaml \
+  --profile cpu \
+  up -d
+```
+
+Backend reaches it as `docling-serve-cpu:5001` over Docker DNS — no manual
+network bridging needed. Use `--profile gpu` instead for the CUDA image
+(`docling-serve-cu130`, requires the NVIDIA container runtime on the host).
+
+### Standalone: a separate host
+
+Because the overlay doesn't depend on anything else in `compose.yaml`, you
+can copy just `compose.docling.yaml` to its own host — for example a
+dedicated GPU box shared by multiple projects — and run it there on its
+own:
+
+```bash
+docker compose -f compose.docling.yaml --profile gpu up -d
+```
+
+Then point CubePlex's backend at that host from wherever it runs.
+
+### Configure the backend
+
+Either way, always pass `--profile cpu` or `--profile gpu` — neither
+`docling-serve-*` service starts without one (the model-download job runs
+for either). Set the resulting URL in `config.production.local.yaml`:
+
+```yaml
+parsers:
+  docling_serve:
+    base_url: "http://docling-serve-cpu:5001"     # combined, --profile cpu
+    # base_url: "http://docling-serve-cu130:5001" # combined, --profile gpu
+    # base_url: "http://<standalone host>:<port>" # standalone deployment
+```
+
+### Model download and registries
+
+The `docling-models` service downloads the model set (layout, table former,
+OCR, and VLM models — several GB) into a named volume on first start, and
+reuses it on restart. Both `docling-serve-cpu` and `docling-serve-cu130`
+wait for it to finish before serving.
+
+If the default GHCR registry or HuggingFace are slow or blocked from your
+build host, override before starting:
+
+```bash
+# Alternate image registry (quay.io mirror, or a China mainland sync — verify before production use)
+export DOCLING_REGISTRY=quay.io/docling-project
+# or: export DOCLING_REGISTRY=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/docling-project
+
+# HuggingFace mirror for model downloads
+export HF_ENDPOINT=https://hf-mirror.com
+# HF_TOKEN=hf_xxx   # only needed for gated/private repos
+```
