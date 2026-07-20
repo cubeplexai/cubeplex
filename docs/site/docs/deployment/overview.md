@@ -40,49 +40,77 @@ you're editing `config.production.secrets.yaml` (Docker Compose) or
 `values.local.yaml` (Kubernetes) — each guide links back here instead of
 repeating it.
 
+The most portable way to configure a provider is to point at any
+**OpenAI-compatible** (`api: openai-completions`) or **Anthropic-compatible**
+(`api: anthropic-messages`) endpoint. This covers OpenAI, Anthropic, Azure
+OpenAI, most cloud vendors, and self-hosted gateways (vLLM, LiteLLM, Ollama,
+…) — you supply `base_url`, `api_key`, and the models the endpoint exposes.
+
 ```yaml
 llm:
-  default_model: "deepseek/deepseek-v4-flash"
+  # "<provider_name>/<model_id>" — provider_name must appear under providers.
+  default_model: "openai/gpt-4o"
   fallback_models:
-    - "cubeplex/qwen3.5-plus-thinking"
+    - "anthropic/claude-sonnet-4"
   providers:
-    # Mode A — a cubepi built-in preset (simplest)
-    deepseek:
-      preset: "deepseek/cn/anthropic-messages"
+    # Any OpenAI-compatible chat-completions endpoint.
+    openai:
+      base_url: "https://api.openai.com/v1"   # includes /v1
       api_key: "sk-..."
-
-    # Mode B — fully custom (private gateway, self-hosted endpoint)
-    cubeplex:
-      base_url: "https://gateway.example.com/v1"
-      api_key: "..."
       api: "openai-completions"
       models:
-        - id: "qwen3.5-plus-thinking"
-          name: "Qwen3.5 Plus"
+        - id: "gpt-4o"
+          name: "GPT-4o"
+          input: ["text", "image"]
+          context_window: 128000
+          max_tokens: 16384
+
+    # Any Anthropic-compatible Messages endpoint.
+    anthropic:
+      base_url: "https://api.anthropic.com"   # host root, no /v1
+      api_key: "sk-ant-..."
+      api: "anthropic-messages"
+      models:
+        - id: "claude-sonnet-4"
+          name: "Claude Sonnet 4"
           reasoning: true
           input: ["text", "image"]
-          context_window: 991000
+          context_window: 200000
           max_tokens: 64000
-
-    # Mode C — Volcengine ark coding interface
-    arkcode:
-      preset: "volcengine/cn/openai-completions/coding"
-      api_key: "ark-..."
 ```
 
-- `default_model` uses the format `"<provider_name>/<model_id>"` — the
-  `provider_name` must appear under `providers`.
-- `fallback_models` uses the same format; providers are tried in order if
-  `default_model` fails.
-- Available `preset` names live in
-  `backend/cubeplex/llm/catalog/data/vendors.yaml` (deepseek / aliyun /
-  volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai,
-  and more). A preset key is `vendor/region/protocol[/plan]`, e.g.
-  `deepseek/cn/anthropic-messages`.
-- Custom providers must declare `base_url`, `api_key`, `api`, and at least
-  one entry in `models`.
+- `default_model` / `fallback_models` use `"<provider_name>/<model_id>"`; the
+  `provider_name` must appear under `providers`, and fallbacks are tried in
+  order if `default_model` fails.
+- Each provider declares `base_url`, `api_key`, `api`
+  (`openai-completions` | `anthropic-messages` | `openai-responses`), and at
+  least one entry in `models`. `base_url` follows each SDK's convention —
+  OpenAI-style includes `/v1`, Anthropic-style is the host root.
+- Set `reasoning: true` only for reasoning models; `input` lists the
+  modalities the model accepts (`text`, `image`).
 
-Minimal viable configuration (one provider):
+Minimal viable configuration (one provider, one model):
+
+```yaml
+llm:
+  default_model: "openai/gpt-4o"
+  providers:
+    openai:
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-..."
+      api: "openai-completions"
+      models:
+        - id: "gpt-4o"
+          name: "GPT-4o"
+          input: ["text", "image"]
+          context_window: 128000
+          max_tokens: 16384
+```
+
+### Shortcut: built-in vendor presets
+
+For a known vendor you can skip `base_url` / `api` / `models` and reference a
+built-in `preset` instead — it fills in the endpoint and model list for you:
 
 ```yaml
 llm:
@@ -92,6 +120,11 @@ llm:
       preset: "deepseek/cn/anthropic-messages"
       api_key: "sk-..."
 ```
+
+Preset keys are `vendor/region/protocol[/plan]` and live in
+`backend/cubeplex/llm/catalog/data/vendors.yaml` (deepseek / aliyun /
+volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai, and
+more).
 
 ## Required secrets
 
