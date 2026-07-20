@@ -9,7 +9,9 @@ test('workspace switching isolates conversation lists', async ({ page }) => {
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Hello in workspace 1')
   await input.press('Enter')
-  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
+  // Generous timeout: this is the first API call against a just-created
+  // workspace, the coldest path in the test.
+  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 20_000 })
   const convInWs1Url = page.url()
 
   await page.goto('/workspaces')

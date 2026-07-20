@@ -149,6 +149,30 @@ describe('WorkspaceHomePage', () => {
     expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
   })
 
+  it('does not clear the composer when conversation creation fails', async () => {
+    storeMocks.createConversation.mockRejectedValue(new Error('network blip'))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    await act(async () => {
+      renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
+      await Promise.resolve()
+    })
+
+    const input = await screen.findByTestId('chat-input')
+    fireEvent.change(input, { target: { value: 'Hello in workspace 1' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
+    })
+    // The failed send must not be silently absorbed: no navigation, and the
+    // user's message stays in the box instead of vanishing.
+    expect(storeMocks.push).not.toHaveBeenCalled()
+    expect(input).toHaveValue('Hello in workspace 1')
+
+    consoleError.mockRestore()
+  })
+
   it('loads an office task template into the composer', async () => {
     await act(async () => {
       renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
