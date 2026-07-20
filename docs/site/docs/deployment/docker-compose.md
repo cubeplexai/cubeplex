@@ -380,9 +380,8 @@ Inspect with `docker ps --filter "name=sandbox-"`.
 The backend's `file_read` tool converts uploaded PDF / office documents to
 markdown by calling a [docling-serve](https://github.com/docling-project/docling-serve)
 instance. Without it, other file types still work but document parsing
-doesn't. The optional `compose.docling.yaml` overlay is self-contained — it
-doesn't reference or extend any service from `compose.yaml` — so it
-supports two deployment shapes.
+doesn't. The optional `compose.docling.yaml` overlay supports two
+deployment shapes.
 
 ### Combined: same host, same Docker network
 
@@ -402,8 +401,7 @@ network bridging needed. Use `--profile gpu` instead for the CUDA image
 
 ### Standalone: a separate host
 
-Because the overlay doesn't depend on anything else in `compose.yaml`, you
-can copy just `compose.docling.yaml` to its own host — for example a
+Copy just `compose.docling.yaml` to its own host — for example a
 dedicated GPU box shared by multiple projects — and run it there on its
 own:
 
