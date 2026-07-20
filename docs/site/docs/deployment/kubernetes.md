@@ -716,11 +716,15 @@ backend:
       csrf_secret: "<openssl rand -hex 32>"
       vault_key: "<Fernet.generate_key()>"
     llm:
-      default_model: "deepseek/deepseek-v4-flash"
+      default_model: "openai/gpt-4o"
       providers:
-        deepseek:
-          preset: "deepseek/cn/anthropic-messages"
+        openai:               # any OpenAI-compatible endpoint
+          base_url: "https://api.openai.com/v1"
           api_key: "sk-..."
+          api: "openai-completions"
+          models:
+            - { id: "gpt-4o", name: "GPT-4o", input: ["text", "image"],
+                context_window: 128000, max_tokens: 16384 }
 
 postgres: { auth: { password: "<openssl rand -hex 16>" } }
 redis:    { auth: { password: "<openssl rand -hex 16>" } }

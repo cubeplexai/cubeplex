@@ -37,47 +37,76 @@ Docker Compose 上是 overlay），或一个外部沙箱端点。沙箱镜像默
 Compose）还是 `values.local.yaml`（Kubernetes），都适用这份参考——两份指南
 都会链接回这里，而不是各自重复一遍。
 
+最通用的配置方式，是指向任意 **OpenAI 兼容**（`api: openai-completions`）或
+**Anthropic 兼容**（`api: anthropic-messages`）端点。它覆盖 OpenAI、Anthropic、
+Azure OpenAI、大多数云厂商，以及自托管网关（vLLM、LiteLLM、Ollama 等）——你
+只需提供 `base_url`、`api_key` 和该端点暴露的模型。
+
 ```yaml
 llm:
-  default_model: "deepseek/deepseek-v4-flash"
+  # "<provider_name>/<model_id>"——provider_name 必须出现在 providers 下。
+  default_model: "openai/gpt-4o"
   fallback_models:
-    - "cubeplex/qwen3.5-plus-thinking"
+    - "anthropic/claude-sonnet-4"
   providers:
-    # 模式 A —— 使用 cubepi 内置 preset（最简单）
-    deepseek:
-      preset: "deepseek/cn/anthropic-messages"
+    # 任意 OpenAI 兼容的 chat-completions 端点。
+    openai:
+      base_url: "https://api.openai.com/v1"   # 带 /v1
       api_key: "sk-..."
-
-    # 模式 B —— 完全自定义（私有网关、自托管端点）
-    cubeplex:
-      base_url: "https://gateway.example.com/v1"
-      api_key: "..."
       api: "openai-completions"
       models:
-        - id: "qwen3.5-plus-thinking"
-          name: "Qwen3.5 Plus"
+        - id: "gpt-4o"
+          name: "GPT-4o"
+          input: ["text", "image"]
+          context_window: 128000
+          max_tokens: 16384
+
+    # 任意 Anthropic 兼容的 Messages 端点。
+    anthropic:
+      base_url: "https://api.anthropic.com"   # host 根，不带 /v1
+      api_key: "sk-ant-..."
+      api: "anthropic-messages"
+      models:
+        - id: "claude-sonnet-4"
+          name: "Claude Sonnet 4"
           reasoning: true
           input: ["text", "image"]
-          context_window: 991000
+          context_window: 200000
           max_tokens: 64000
-
-    # 模式 C —— Volcengine ark 编程接口
-    arkcode:
-      preset: "volcengine/cn/openai-completions/coding"
-      api_key: "ark-..."
 ```
 
-- `default_model` 的格式是 `"<provider_name>/<model_id>"`——`provider_name`
-  必须出现在 `providers` 下面。
-- `fallback_models` 使用同样的格式；当 `default_model` 失败时按顺序尝试。
-- 可用的 `preset` 名称列在 `backend/cubeplex/llm/catalog/data/vendors.yaml` 中
-  （deepseek / aliyun / volcengine / moonshot / zhipu / minimax / openrouter /
-  anthropic / openai 等等）。preset key 格式为 `vendor/region/protocol[/plan]`，
-  例如 `deepseek/cn/anthropic-messages`。
-- 自定义 provider 必须声明 `base_url`、`api_key`、`api`，并且至少包含一个
-  `models` 条目。
+- `default_model` / `fallback_models` 都用 `"<provider_name>/<model_id>"`；
+  `provider_name` 必须出现在 `providers` 下，fallback 会在 `default_model`
+  失败时按顺序尝试。
+- 每个 provider 声明 `base_url`、`api_key`、`api`
+  （`openai-completions` | `anthropic-messages` | `openai-responses`），以及
+  至少一个 `models` 条目。`base_url` 遵循各 SDK 约定——OpenAI 风格带 `/v1`，
+  Anthropic 风格是 host 根。
+- 只有推理模型才设 `reasoning: true`；`input` 列出模型接受的模态
+  （`text`、`image`）。
 
-最小可用配置（只配一个 provider）：
+最小可用配置（一个 provider、一个模型）：
+
+```yaml
+llm:
+  default_model: "openai/gpt-4o"
+  providers:
+    openai:
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-..."
+      api: "openai-completions"
+      models:
+        - id: "gpt-4o"
+          name: "GPT-4o"
+          input: ["text", "image"]
+          context_window: 128000
+          max_tokens: 16384
+```
+
+### 快捷方式：内置厂商 preset
+
+对已知厂商，可以省掉 `base_url` / `api` / `models`，改用内置 `preset`——它会
+帮你填好端点和模型列表：
 
 ```yaml
 llm:
@@ -87,6 +116,11 @@ llm:
       preset: "deepseek/cn/anthropic-messages"
       api_key: "sk-..."
 ```
+
+preset key 格式为 `vendor/region/protocol[/plan]`，列在
+`backend/cubeplex/llm/catalog/data/vendors.yaml` 中（deepseek / aliyun /
+volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai
+等等）。
 
 ## 必需的密钥
 

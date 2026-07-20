@@ -27,17 +27,31 @@ backend:
     # Mirror of backend/config.development.local.yaml `llm` block. Written
     # verbatim into the backend Secret as config.production.secrets.yaml.
     llm:
-      default_model: "deepseek/deepseek-v4-flash"
-      fallback_models:
-        - "cubeplex/qwen3.5-plus-thinking"
+      default_model: "openai/gpt-4o"
       providers:
-        deepseek:
-          preset: "deepseek/cn/anthropic-messages"
+        # Any OpenAI-compatible endpoint (OpenAI, Azure, vLLM, LiteLLM, a gateway…).
+        openai:
+          base_url: "https://api.openai.com/v1"   # includes /v1
           api_key: "sk-..."
-        cubeplex:
-          base_url: "https://..."
-          api_key: "..."
           api: "openai-completions"
+          models:
+            - id: "gpt-4o"
+              name: "GPT-4o"
+              input: ["text", "image"]
+              context_window: 128000
+              max_tokens: 16384
+        # Anthropic-compatible endpoint (base_url is the host root, no /v1):
+        # anthropic:
+        #   base_url: "https://api.anthropic.com"
+        #   api_key: "sk-ant-..."
+        #   api: "anthropic-messages"
+        #   models:
+        #     - { id: "claude-sonnet-4", name: "Claude Sonnet 4", reasoning: true,
+        #         input: ["text", "image"], context_window: 200000, max_tokens: 64000 }
+        # Shortcut for a known vendor via a built-in preset:
+        # deepseek:
+        #   preset: "deepseek/cn/anthropic-messages"
+        #   api_key: "sk-..."
     sandbox:
       domain: "cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090"
       image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
