@@ -107,6 +107,9 @@ export default function WorkspaceHomePage({
       router.push(`/w/${wsId}/conversations/${convId}`)
     } catch (err) {
       console.error('Failed to create conversation:', err)
+      // Rethrow so InputBar's handleSubmit doesn't clear the composer on a
+      // failed send — the user's message would otherwise silently vanish.
+      throw err
     }
   }
 
