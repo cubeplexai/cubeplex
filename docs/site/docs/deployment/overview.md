@@ -21,6 +21,17 @@ the orchestration differs.
 If you're not sure, start with Docker Compose — it's the simpler setup and
 covers everything except horizontal scaling across multiple machines.
 
+## Agent sandbox
+
+CubePlex runs agent tool calls (bash, file read/write, …) inside a sandbox. A
+base install gives you chat, but **tool calls fail until a sandbox is
+configured** — so most deployments will want one. Both guides cover it as a
+clearly-marked step: the bundled alibaba [OpenSandbox](https://github.com/alibaba/OpenSandbox)
+(a subchart on Kubernetes, an overlay on Docker Compose) or an external
+sandbox endpoint. Sandbox images default to Docker Hub (`opensandbox/*`) and
+GHCR (`ghcr.io/cubeplexai/cubeplex-sandbox`); mainland-China mirrors are noted
+inline in each guide.
+
 ## LLM provider configuration
 
 Both deployment modes configure LLM providers the same way, as a block under
@@ -63,8 +74,11 @@ llm:
   `provider_name` must appear under `providers`.
 - `fallback_models` uses the same format; providers are tried in order if
   `default_model` fails.
-- Available `preset` names live in `cubepi/llm/catalog/data/vendors.yaml`
-  (deepseek / doubao / qwen / minimax / openrouter / volcengine, and more).
+- Available `preset` names live in
+  `backend/cubeplex/llm/catalog/data/vendors.yaml` (deepseek / aliyun /
+  volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai,
+  and more). A preset key is `vendor/region/protocol[/plan]`, e.g.
+  `deepseek/cn/anthropic-messages`.
 - Custom providers must declare `base_url`, `api_key`, `api`, and at least
   one entry in `models`.
 

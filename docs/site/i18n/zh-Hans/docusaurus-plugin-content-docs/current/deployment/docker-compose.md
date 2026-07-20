@@ -14,7 +14,7 @@ Postgres + Redis + rustfs S3 存储）。它使用和 Kubernetes 部署模式完
 | 项 | 要求 |
 |---|---|
 | 带 Docker 引擎的 Linux 主机 | ≥ 24，带 `docker compose` v2 |
-| 到镜像仓库的出网网络 | 你的镜像托管 / 推送到的那个仓库 |
+| 拉取镜像的出网网络 | `ghcr.io` 和 Docker Hub（或你自己的镜像源） |
 | LLM provider 凭证 | 至少一个——见 [LLM Provider 配置](./overview.md#llm-provider-配置) |
 | 主机开放端口 | frontend 一个（默认 3000），backend 可选一个（默认 8000） |
 
@@ -40,18 +40,35 @@ Host
 Postgres）。主机只暴露 frontend 端口（以及可选的 backend 端口，用于直接
 访问 API）。
 
-## 3. 构建镜像
+## 3. 选择镜像
 
-对于 GitHub 发布版本，使用发布清单里的不可变镜像 tag。本地构建或推送到
-私有 registry 时，用 Kubernetes 模式的构建脚本——backend 和 frontend
-镜像是完全一样的：
+compose 默认使用 **GHCR 上的公开预构建发布镜像**——无需自己构建：
+
+```
+ghcr.io/cubeplexai/cubeplex-backend:<version>
+ghcr.io/cubeplexai/cubeplex-frontend:<version>
+```
+
+从[发布页](https://github.com/cubeplexai/cubeplex/releases)选一个版本 tag——
+backend 和 frontend 共用同一个应用版本，例如 `v0.2.0`——在下一步设为
+`BACKEND_TAG` / `FRONTEND_TAG`。`IMAGE_REGISTRY` / `IMAGE_REPO` 已默认为
+`ghcr.io` / `cubeplexai`，标准安装无需改动。GHCR 发布镜像是公开的，无需
+`docker login`。
+
+<details>
+<summary>改用自己构建的镜像（私有 registry / 离线 / 打过补丁）</summary>
+
+用 Kubernetes 模式的构建脚本——backend 和 frontend 镜像两种方式完全一样：
 
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
-# 推送到 ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:<YYMMDD>-<branch>-<short-sha>
+# 推送到 ${REGISTRY}/${REPO}/cubeplex-{backend,frontend}:<YYMMDD>-<branch>-<short-sha>
 ```
 
-然后在 `.env` 中把 `BACKEND_TAG` 和 `FRONTEND_TAG` 设为这个不可变 tag。
+然后把 `.env` 里的 `IMAGE_REGISTRY`、`IMAGE_REPO`、`BACKEND_TAG`、
+`FRONTEND_TAG` 指向该构建。
+
+</details>
 
 ## 4. 配置（`.env` + 两个 YAML 文件）
 
@@ -73,10 +90,10 @@ $EDITOR .env
 必填：
 
 ```dotenv
-IMAGE_REGISTRY=192.168.1.101:8050
-IMAGE_REPO=library
-BACKEND_TAG=<YYMMDD>-<branch>-<short-sha>
-FRONTEND_TAG=<YYMMDD>-<branch>-<short-sha>
+IMAGE_REGISTRY=ghcr.io
+IMAGE_REPO=cubeplexai
+BACKEND_TAG=v0.2.0        # 发布页上的一个版本 tag
+FRONTEND_TAG=v0.2.0
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
@@ -215,9 +232,13 @@ docker compose -f deploy/docker-compose/compose.yaml logs backend --tail=50
 让 Next.js 通过 Docker 网络在服务端代理 `/api/*`。如果你改了服务名，也要
 同步改这个环境变量。
 
-### 镜像拉取被拒绝
+### 镜像拉取失败
 
-如果你的 registry 是私有的：
+默认的 GHCR 发布镜像是公开的，无需登录。请确认 `BACKEND_TAG` /
+`FRONTEND_TAG` 填的是真实存在的发布 tag（见[发布页](https://github.com/cubeplexai/cubeplex/releases)）；
+出现 `manifest unknown` / `not found` 说明该 tag 不存在。
+
+如果你把 `IMAGE_REGISTRY` 指向了**私有**镜像源：
 
 ```bash
 docker login ${IMAGE_REGISTRY}
@@ -278,7 +299,7 @@ $EDITOR config/opensandbox.toml          # 设置 api_key、eip/host_ip、execd_
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # 这个 overlay 里的 Docker DNS 名称
-#     image:   "<你的 sandbox 镜像>"      # 例如 cubeplex-sandbox:24.04-...
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
 #     api_key: "<与 opensandbox.toml 中 [server].api_key 相同>"
 
 # 3. backend 非密钥配置 —— 启用 sandbox 并强制走 server 代理

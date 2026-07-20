@@ -1,8 +1,9 @@
 # cubeplex single-host docker-compose deployment.
 #
 # Variables come from .env (operator copies from .env.example). Images
-# are pulled from the same registry the kubernetes mode uses; build them
-# once with deploy/kubernetes/scripts/build-and-push.sh.
+# default to the public prebuilt releases on GHCR
+# (ghcr.io/cubeplexai/cubeplex-{backend,frontend}); override IMAGE_REGISTRY /
+# IMAGE_REPO in .env to use a private mirror or a self-built image.
 #
 # Quick start:
 #   cp .env.example .env
@@ -106,7 +107,7 @@ services:
 
   # Alembic migrate. Runs to completion before backend starts.
   backend-migrate:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_REPO:-cubeplexai}/cubeplex-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,7 +120,7 @@ services:
     restart: "no"
 
   backend:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-backend:${BACKEND_TAG}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_REPO:-cubeplexai}/cubeplex-backend:${BACKEND_TAG}
     <<: *restart-policy
     depends_on:
       postgres:
@@ -145,7 +146,7 @@ services:
       start_period: 30s
 
   frontend:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-frontend:${FRONTEND_TAG:?set FRONTEND_TAG in .env}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_REPO:-cubeplexai}/cubeplex-frontend:${FRONTEND_TAG:?set FRONTEND_TAG in .env}
     <<: *restart-policy
     depends_on:
       backend:

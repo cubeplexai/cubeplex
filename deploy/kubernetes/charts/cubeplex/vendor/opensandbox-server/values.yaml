@@ -22,9 +22,12 @@ server:
   #       name: opensandbox-api-key
   #       key: api-key
 
-  # -- Server image configuration
+  # -- Server image configuration. Defaults to Docker Hub (opensandbox/*).
+  # Mainland China: override repository with the
+  # sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ prefix (same
+  # image names and tags) — applies to server, ingress, execd, and egress below.
   image:
-    repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server
+    repository: opensandbox/server
     tag: "v0.1.14"
 
   # -- Server Service configuration
@@ -63,7 +66,7 @@ server:
       type: ClusterIP
       nodePort: ""
     image:
-      repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress
+      repository: opensandbox/ingress
       tag: "v1.0.7"
     replicaCount: 2
     port: 28888
@@ -98,7 +101,7 @@ configToml: |
 
   [runtime]
   type = "kubernetes"
-  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.18"
+  execd_image = "opensandbox/execd:v1.0.18"
 
   [kubernetes]
   kubeconfig_path = ""
@@ -111,5 +114,5 @@ configToml: |
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
   
   [egress]
-  image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+  image = "opensandbox/egress:v1.0.12"
   mode = "dns+nft"

@@ -20,6 +20,16 @@ backend / frontend 容器镜像**——只是编排方式不同。
 如果不确定选哪个，从 Docker Compose 开始——它更简单，除了跨多机的水平扩展外，
 其他能力都具备。
 
+## Agent 沙箱
+
+CubePlex 在沙箱里执行 agent 的工具调用（bash、文件读写等）。基础安装只提供
+对话能力，**在配置好沙箱之前工具调用都会失败**——所以大多数部署都会需要它。
+两篇指南都把它作为清晰标注的步骤：内置的 alibaba
+[OpenSandbox](https://github.com/alibaba/OpenSandbox)（Kubernetes 上是子 chart，
+Docker Compose 上是 overlay），或一个外部沙箱端点。沙箱镜像默认走 Docker Hub
+（`opensandbox/*`）和 GHCR（`ghcr.io/cubeplexai/cubeplex-sandbox`）；国内镜像源
+在各指南中就地标注。
+
 ## LLM Provider 配置
 
 两种部署模式配置 LLM provider 的方式完全一致，都是 backend 密钥配置里的
@@ -60,8 +70,10 @@ llm:
 - `default_model` 的格式是 `"<provider_name>/<model_id>"`——`provider_name`
   必须出现在 `providers` 下面。
 - `fallback_models` 使用同样的格式；当 `default_model` 失败时按顺序尝试。
-- 可用的 `preset` 名称列在 `cubepi/llm/catalog/data/vendors.yaml` 中
-  （deepseek / doubao / qwen / minimax / openrouter / volcengine 等等）。
+- 可用的 `preset` 名称列在 `backend/cubeplex/llm/catalog/data/vendors.yaml` 中
+  （deepseek / aliyun / volcengine / moonshot / zhipu / minimax / openrouter /
+  anthropic / openai 等等）。preset key 格式为 `vendor/region/protocol[/plan]`，
+  例如 `deepseek/cn/anthropic-messages`。
 - 自定义 provider 必须声明 `base_url`、`api_key`、`api`，并且至少包含一个
   `models` 条目。
 

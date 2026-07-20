@@ -15,8 +15,10 @@ namespaceOverride: ""
 controller:
   # -- Controller image configuration
   image:
-    # -- Controller image repository
-    repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/controller
+    # -- Controller image repository. Defaults to Docker Hub; for mainland
+    # China override with the
+    # sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ prefix.
+    repository: opensandbox/controller
     # -- Image pull policy
     pullPolicy: IfNotPresent
     # -- Overrides the image tag whose default is the chart appVersion
@@ -47,8 +49,8 @@ controller:
   # -- Pause/Resume snapshot configuration
   snapshot:
     # -- Image used for commit operations (must contain nerdctl tool)
-    # DockerHub: opensandbox/image-committer:v0.1.0
-    imageCommitterImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/image-committer:v0.1.0"
+    # Docker Hub default; China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/image-committer:v0.1.0
+    imageCommitterImage: "opensandbox/image-committer:v0.1.0"
     # -- Containerd socket path of host
     containerdSocketPath: "/var/run/containerd/containerd.sock"
     # -- Timeout duration for commit jobs
