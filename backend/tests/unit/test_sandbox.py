@@ -20,6 +20,7 @@ from cubeplex.middleware.sandbox import (
     _make_execute_tool,
     _make_file_read_tool,
     _make_write_file_tool,
+    _normalize_for_fuzzy,
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
@@ -296,6 +297,132 @@ async def test_edit_file_non_unique_old_string_returns_error() -> None:
 
     tool = _make_edit_file_tool(sandbox)
     args = _EditFileArgs(file_path="/work/f.txt", old_string="dup", new_string="rep")
+    result = await tool.execute("tc-1", args)
+    assert "Error" in _text(result)
+    assert "2 times" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_edit_file_exact_match_returns_diff_in_details() -> None:
+    sandbox = _make_sandbox()
+    original = "line1\nfoo bar\nline3"
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(file_path="/work/f.txt", old_string="foo bar", new_string="baz qux")
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    assert result.details is not None
+    assert isinstance(result.details, dict)
+    assert result.details["unified_diff"].startswith("--- a/")
+    assert result.details["fuzzy_matched"] is False
+
+
+# ---------------------------------------------------------------------------
+# _normalize_for_fuzzy
+
+
+def test_normalize_for_fuzzy_smart_single_quotes() -> None:
+    assert _normalize_for_fuzzy("‘hello’") == "'hello'"
+
+
+def test_normalize_for_fuzzy_smart_double_quotes() -> None:
+    assert _normalize_for_fuzzy("“hello”") == '"hello"'
+
+
+def test_normalize_for_fuzzy_en_dash() -> None:
+    assert _normalize_for_fuzzy("a–b") == "a-b"
+
+
+def test_normalize_for_fuzzy_nbsp() -> None:
+    assert _normalize_for_fuzzy("a b") == "a b"
+
+
+def test_normalize_for_fuzzy_strips_trailing_whitespace() -> None:
+    assert _normalize_for_fuzzy("hello   \nworld  ") == "hello\nworld"
+
+
+# ---------------------------------------------------------------------------
+# edit_file fuzzy matching
+
+
+@pytest.mark.asyncio
+async def test_edit_file_fuzzy_smart_quotes() -> None:
+    sandbox = _make_sandbox()
+    # File uses ASCII quotes; LLM sends smart quotes in old_string
+    original = "print('hello')"
+    sandbox.download = AsyncMock(return_value=[("/work/f.py", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.py",
+        old_string="print(‘hello’)",  # smart single quotes
+        new_string="print('world')",
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    sandbox.upload.assert_called_once_with([("/work/f.py", b"print('world')")])
+    assert result.details is not None
+    assert isinstance(result.details, dict)
+    assert result.details["fuzzy_matched"] is True
+    assert result.details["unified_diff"].startswith("--- a/")
+
+
+@pytest.mark.asyncio
+async def test_edit_file_fuzzy_nbsp() -> None:
+    sandbox = _make_sandbox()
+    original = "hello world"
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        old_string="hello world",  # NBSP
+        new_string="goodbye world",
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    sandbox.upload.assert_called_once_with([("/work/f.txt", b"goodbye world")])
+    assert result.details is not None
+    assert isinstance(result.details, dict)
+    assert result.details["fuzzy_matched"] is True
+
+
+@pytest.mark.asyncio
+async def test_edit_file_fuzzy_no_match_returns_error() -> None:
+    sandbox = _make_sandbox()
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", b"hello world")])
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        old_string="completely absent text",
+        new_string="replacement",
+    )
+    result = await tool.execute("tc-1", args)
+    assert "Error" in _text(result)
+    assert "not found" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_edit_file_fuzzy_ambiguous_returns_error() -> None:
+    sandbox = _make_sandbox()
+    # Two lines both using smart quotes -> both normalize to same ASCII form -> ambiguous
+    original = "print(‘dup’)\nprint(‘dup’)"
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", original.encode())])
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        old_string="print('dup')",  # ASCII quotes: matches both lines after normalization
+        new_string="print('rep')",
+    )
     result = await tool.execute("tc-1", args)
     assert "Error" in _text(result)
     assert "2 times" in _text(result)
