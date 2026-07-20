@@ -37,15 +37,14 @@ deploy/
 │   ├── scripts/
 │   └── egress-bundle/         # MITM webhook source (integrated into
 │                              # the chart as an opt-in subsystem)
-├── docker-compose/            # single-host compose deployment
-│   ├── README.md
-│   ├── INSTALL.md
-│   ├── compose.yaml
-│   ├── config/
-│   └── scripts/
-└── docling-serve/             # standalone docling document-conversion service
-    ├── docker-compose.yml
-    └── install.sh
+└── docker-compose/            # single-host compose deployment
+    ├── README.md
+    ├── INSTALL.md
+    ├── compose.yaml
+    ├── compose.opensandbox.yaml   # optional: sandbox execution overlay
+    ├── compose.docling.yaml       # optional: document parsing overlay
+    ├── config/
+    └── scripts/
 ```
 
 The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,

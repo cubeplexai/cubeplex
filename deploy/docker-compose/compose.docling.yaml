@@ -1,14 +1,45 @@
+# Optional overlay: adds docling-serve (PDF/office document → markdown
+# parsing used by the backend's file_read tool). Self-contained — it does
+# not reference or extend any service from compose.yaml, so it works two
+# ways:
+#
+# 1. Combined with the main stack, same host, same Docker network:
+#      docker compose \
+#        -f compose.yaml \
+#        -f compose.docling.yaml \
+#        --profile cpu \
+#        up -d
+#    Backend reaches it as `docling-serve-cpu:5001` over Docker DNS — no
+#    manual network bridging needed.
+#
+# 2. Standalone, on its own host (for example a dedicated GPU box shared by
+#    multiple projects) — copy just this file there and run it on its own:
+#      docker compose -f compose.docling.yaml --profile gpu up -d
+#    Then point cubeplex's backend at it from wherever it runs:
+#      parsers:
+#        docling_serve:
+#          base_url: "http://<that host>:<DOCLING_CU130_PORT>"
+#
+# Always pass --profile cpu or --profile gpu — neither docling-serve
+# variant starts without one (the model-download job runs for either).
+#
+# After starting, set in config/config.production.local.yaml:
+#   parsers:
+#     docling_serve:
+#       base_url: "http://docling-serve-cpu:5001"    # --profile cpu
+#       # base_url: "http://docling-serve-cu130:5001" # --profile gpu
+
 services:
   docling-models:
+    profiles: ["cpu", "gpu"]
     image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cpu:${DOCLING_CPU_TAG:-v1.16.1}
-    container_name: docling-models
     restart: "no"
     command:
       - sh
       - -lc
       - >-
         set -eu;
-        ready_flag=/models/.docling-models-ready-${DOCLING_CPU_TAG:-v1.16.1}-2;
+        ready_flag=/models/.docling-models-ready-${DOCLING_CPU_TAG:-v1.16.1};
         if [ -f "$$ready_flag" ]; then
           echo "Docling models already downloaded ($$ready_flag)";
           exit 0;
@@ -21,12 +52,11 @@ services:
       HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
-      - /opt/docling-serve/models:/models
+      - docling-models:/models
 
   docling-serve-cpu:
     profiles: ["cpu"]
     image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cpu:${DOCLING_CPU_TAG:-v1.16.1}
-    container_name: docling-serve-cpu
     restart: unless-stopped
     command:
       - docling-serve
@@ -50,13 +80,18 @@ services:
       DOCLING_SERVE_ALLOWED_VLM_ENGINES: '["api","api_openai","api_ollama","api_lmstudio"]'
       HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
     volumes:
-      - /opt/docling-serve/models:/models
-      - /opt/docling-serve/cpu/cache:/opt/app-root/src/.cache
+      - docling-models:/models
+      - docling-cache-cpu:/opt/app-root/src/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5001/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   docling-serve-cu130:
     profiles: ["gpu"]
     image: ${DOCLING_REGISTRY:-ghcr.io/docling-project}/docling-serve-cu130:${DOCLING_CU130_TAG:-v1.16.1}
-    container_name: docling-serve-cu130
     restart: unless-stopped
     command:
       - docling-serve
@@ -82,6 +117,17 @@ services:
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
     volumes:
-      - /opt/docling-serve/models:/models
-      - /opt/docling-serve/cu130/cache:/opt/app-root/src/.cache
+      - docling-models:/models
+      - docling-cache-cu130:/opt/app-root/src/.cache
     runtime: nvidia
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5001/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  docling-models:
+  docling-cache-cpu:
+  docling-cache-cu130:

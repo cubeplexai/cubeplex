@@ -367,3 +367,75 @@ docker compose -f compose.yaml -f compose.opensandbox.yaml down
 
 MITM CA 以及 server 拉起的沙箱容器会保留在主机 Docker 引擎上——它们不属于
 本项目的 compose 网络。可以用 `docker ps --filter "name=sandbox-"` 查看。
+
+## 可选：文档解析（docling-serve）
+
+backend 的 `file_read` 工具通过调用
+[docling-serve](https://github.com/docling-project/docling-serve) 实例，
+把上传的 PDF / Office 文档转换成 markdown。没有它时，其他文件类型仍然
+可用，只是文档解析不可用。可选的 `compose.docling.yaml` overlay 是自
+包含的——它不引用也不 extend `compose.yaml` 里的任何服务——所以支持两种
+部署形态。
+
+### 组合部署：同一台主机、同一个 Docker 网络
+
+```bash
+cd deploy/docker-compose
+
+docker compose \
+  -f compose.yaml \
+  -f compose.docling.yaml \
+  --profile cpu \
+  up -d
+```
+
+backend 通过 Docker DNS 以 `docling-serve-cpu:5001` 访问它——不需要手动
+打通网络。用 `--profile gpu` 可以改用 CUDA 镜像
+（`docling-serve-cu130`，需要主机上装有 NVIDIA container runtime）。
+
+### 独立部署：单独一台主机
+
+因为这个 overlay 不依赖 `compose.yaml` 里的任何服务，你可以只把
+`compose.docling.yaml` 复制到一台独立的主机上（比如一台被多个项目共用的
+专用 GPU 机器），单独在那里跑起来：
+
+```bash
+docker compose -f compose.docling.yaml --profile gpu up -d
+```
+
+然后无论 CubePlex 的 backend 跑在哪里，都把它指向那台主机。
+
+### 配置 backend
+
+不管哪种部署形态，都必须带上 `--profile cpu` 或 `--profile gpu`——两个
+`docling-serve-*` 服务都不带 profile 就不会启动（模型下载任务在两种
+profile 下都会运行）。把最终的地址写进
+`config.production.local.yaml`：
+
+```yaml
+parsers:
+  docling_serve:
+    base_url: "http://docling-serve-cpu:5001"     # 组合部署，--profile cpu
+    # base_url: "http://docling-serve-cu130:5001" # 组合部署，--profile gpu
+    # base_url: "http://<独立部署主机>:<端口>"      # 独立部署
+```
+
+### 模型下载和镜像源
+
+`docling-models` 服务首次启动时会把模型集合（layout、table former、OCR、
+VLM 模型——共几个 GB）下载到一个具名 volume 里，重启时复用。
+`docling-serve-cpu` 和 `docling-serve-cu130` 都会等它下载完成后再对外
+服务。
+
+如果默认的 GHCR registry 或 HuggingFace 从你的构建主机访问较慢或被墙，
+在启动前覆盖：
+
+```bash
+# 备用镜像 registry（quay.io 镜像，或中国大陆第三方同步——生产使用前请自行核实）
+export DOCLING_REGISTRY=quay.io/docling-project
+# 或者：export DOCLING_REGISTRY=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/docling-project
+
+# 模型下载用的 HuggingFace 镜像
+export HF_ENDPOINT=https://hf-mirror.com
+# HF_TOKEN=hf_xxx   # 仅访问受限/私有仓库时需要
+```
