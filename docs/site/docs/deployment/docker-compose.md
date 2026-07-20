@@ -83,6 +83,10 @@ Three files, all gitignored:
 | `config/config.production.local.yaml` | Non-secret runtime config (mode, public URL, cookie security, sandbox toggle). Mounted into the backend. |
 | `config/config.production.secrets.yaml` | Secrets — JWT/CSRF/vault material, infra passwords (must match `.env`), LLM provider API keys. Mounted into the backend. |
 
+This section covers the keys needed to boot. For every backend config key,
+the layering rules, and the env-var mapping, see the
+[backend configuration reference](./backend-config.md).
+
 ### 4.1 `.env`
 
 ```bash

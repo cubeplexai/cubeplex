@@ -154,7 +154,10 @@ cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
 $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```
 
-Each section below is documented in the order you fill it in.
+Each section below is documented in the order you fill it in. Anything under
+`backend.configOverrides` / `backend.secrets` maps to a backend config key —
+for the full field reference and the merge rules, see the
+[backend configuration reference](./backend-config.md).
 
 ### 4.1 Image tags (required)
 
