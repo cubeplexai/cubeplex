@@ -18,6 +18,10 @@ if [[ ! -f "$CHART/values.local.yaml" ]]; then
 fi
 
 echo "==> helm dependency update"
+# The vendored OpenSandbox umbrella has nested subcharts (server + controller),
+# so build its deps first — otherwise the top-level update packages an empty
+# opensandbox subchart and the sandbox controller/server never deploy.
+helm dependency update "$CHART/vendor/opensandbox"
 helm dependency update "$CHART"
 
 echo "==> helm upgrade --install $RELEASE -n $NAMESPACE"

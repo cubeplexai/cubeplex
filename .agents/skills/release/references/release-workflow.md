@@ -63,6 +63,17 @@ ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v<version>
 
 The sandbox workflow rejects an already existing `sandbox-v<version>` tag.
 
+`release.yml` also packages and publishes the Helm chart as an OCI artifact:
+
+```text
+oci://ghcr.io/cubeplexai/charts/cubeplex:<semver>
+```
+
+The chart version equals the release semver (enforced by
+`check-version-consistency.sh`), and the chart's default image tag is
+`v<appVersion>`, so a published chart points at the matching application images
+with no operator overrides.
+
 ## Create the application release
 
 After the version-bump commit is merged:

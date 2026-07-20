@@ -150,29 +150,27 @@ $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 任何内容都对应一个后端配置 key——完整字段参考和合并规则见
 [后端配置参考](./backend-config.md)。
 
-### 4.1 镜像 tag（必填）
+### 4.1 镜像 tag（可选）
 
-`image.registry` / `image.repository` 已默认为 `ghcr.io` / `cubeplexai`，
-标准安装只需把 tag 设为一个 release 版本（见[发布页](https://github.com/cubeplexai/cubeplex/releases)）：
+`image.registry` / `image.repository` 默认为 `ghcr.io` / `cubeplexai`，且 tag
+默认回退到 chart 的 `appVersion`——所以安装某个 release 版本的 chart 时，镜像
+已自动对上，这一节可整段跳过。只在需要覆盖时才设 `image`：
 
 ```yaml
 image:
-  backend:
-    tag: "v0.2.0"
-  frontend:
-    tag: "v0.2.0"
+  # 固定成与 chart appVersion 不同的镜像版本：
+  backend:  { tag: "v0.2.0" }
+  frontend: { tag: "v0.2.0" }
 ```
 
-仅当你自己构建并推送到私有 registry 时，才额外覆盖其位置：
+自己构建 / 私有 registry 的镜像，则额外设置其位置：
 
 ```yaml
 image:
   registry: "your-registry.example.com"
   repository: "cubeplex"
-  backend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"   # build-and-push.sh 生成的 tag
-  frontend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"
+  backend:  { tag: "<YYMMDD>-<branch>-<short-sha>" }   # build-and-push.sh 产出
+  frontend: { tag: "<YYMMDD>-<branch>-<short-sha>" }
 ```
 
 ### 4.2 Backend 非密钥配置
@@ -460,6 +458,28 @@ backend:
 
 ## 5. 安装
 
+### 推荐：使用已发布的 chart
+
+每个 release 都会把 chart 作为 OCI 制品发布到 GHCR——无需 clone 整个 repo，
+只要你的 `values.local.yaml`：
+
+```bash
+helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version 0.2.0 \
+  --namespace cubeplex --create-namespace \
+  --values values.local.yaml \
+  --wait --timeout 10m
+```
+
+从[发布页](https://github.com/cubeplexai/cubeplex/releases)选一个 chart 版本。
+已发布的 chart 内置了基础设施模板和 OpenSandbox 子 chart，且默认镜像 tag 与
+chart 版本一致——所以你只需提供 `values.local.yaml`（模板从 repo 或 release
+附件里取）。
+
+### 备选：从 repo checkout 安装
+
+需要定制 chart 或用开发构建时：
+
 ```bash
 deploy/kubernetes/scripts/helm-install.sh
 ```
@@ -467,6 +487,8 @@ deploy/kubernetes/scripts/helm-install.sh
 等价于：
 
 ```bash
+# vendor/opensandbox 有嵌套子 chart，先 build 它的依赖
+helm dependency update deploy/kubernetes/charts/cubeplex/vendor/opensandbox
 helm dependency update deploy/kubernetes/charts/cubeplex
 helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   --namespace cubeplex --create-namespace \
@@ -474,9 +496,6 @@ helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
   --wait --timeout 10m
 ```
-
-`helm dependency update` 会从 `vendor/opensandbox/` 重新打包
-`charts/opensandbox-0.2.0.tgz`，因此 `vendor/` 目录必须存在。
 
 ### 卸载
 

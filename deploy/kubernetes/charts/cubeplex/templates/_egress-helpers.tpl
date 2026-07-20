@@ -28,7 +28,7 @@ Operational consequence:
 {{- $reg := .Values.egress.webhook.image.registry | default .Values.image.registry -}}
 {{- $repo := .Values.egress.webhook.image.repository | default .Values.image.repository -}}
 {{- $name := .Values.egress.webhook.image.name -}}
-{{- $tag := required "egress.webhook.image.tag must be set in values.local.yaml when egress.enabled" .Values.egress.webhook.image.tag -}}
+{{- $tag := .Values.egress.webhook.image.tag | default (printf "v%s" .Chart.AppVersion) -}}
 {{- printf "%s/%s/%s:%s" $reg $repo $name $tag -}}
 {{- end -}}
 
