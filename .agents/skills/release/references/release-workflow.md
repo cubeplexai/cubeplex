@@ -43,11 +43,15 @@ release manifest and operator environment.
 
 ## Image publication order
 
-The `main` image workflow builds affected application images and publishes:
+Application images are built and pushed only on a release tag push or a manual
+`workflow_dispatch`. There are no per-PR or per-merge image builds.
+
+When a `v<semver>` tag is pushed, `images.yml` publishes:
 
 ```text
-ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-main-<short-sha>
-ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-main-<short-sha>
+ghcr.io/cubeplexai/cubeplex-backend:v<semver>
+ghcr.io/cubeplexai/cubeplex-frontend:v<semver>
+ghcr.io/cubeplexai/cubeplex-egress-webhook:v<semver>
 ```
 
 The sandbox workflow publishes:
@@ -58,11 +62,10 @@ ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v<version>
 ```
 
 The sandbox workflow rejects an already existing `sandbox-v<version>` tag.
-PR workflows build without pushing production tags.
 
 ## Create the application release
 
-After the version-bump commit is merged and the main image workflow succeeds:
+After the version-bump commit is merged:
 
 ```bash
 git fetch origin main --tags
@@ -72,19 +75,24 @@ git tag -a v0.3.0 -m "Release v0.3.0" HEAD
 git push origin v0.3.0
 ```
 
-The tag must point to the same commit whose `<YYMMDD>-main-<short-sha>` images were built.
-The release workflow accepts a tag immediately after merge and waits for the
-commit images for a bounded period. If they never appear, it fails instead of
-rebuilding.
+Pushing the tag triggers `images.yml` (builds and pushes version-tagged images)
+and `release.yml` (waits for those images, then creates the manifest and GitHub
+Release) concurrently. The image build takes up to ~30 minutes; the release
+workflow polls until the images appear or times out.
 
 ## Release workflow behavior
 
-For `v0.3.0`, the workflow:
+For `v0.3.0`, the two triggered workflows do:
 
+**`images.yml`** (triggered by the tag push):
+1. builds backend, frontend, and egress-webhook images for `linux/amd64` and `linux/arm64`;
+2. pushes them to GHCR with the `v0.3.0` tag.
+
+**`release.yml`** (triggered by the same tag push, runs concurrently):
 1. checks that all package/chart versions equal `0.3.0`;
 2. reads the sandbox version from `deploy/images/sandbox/VERSION`;
-3. computes the date/branch/short-SHA tag from the release commit and waits for backend/frontend images;
-4. adds `v0.3.0` to the same backend/frontend image manifests;
+3. polls for `ghcr.io/.../cubeplex-backend:v0.3.0` and `cubeplex-frontend:v0.3.0` (up to ~30 min);
+4. records their digests in the manifest;
 5. waits for the corresponding `sandbox-v<version>` image;
 6. creates `release-manifest-v0.3.0.yaml` and uploads it to the GitHub Release.
 
