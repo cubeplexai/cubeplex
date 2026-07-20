@@ -5,7 +5,7 @@ import type { Artifact } from '@cubeplex/core'
 import { usePanelStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
-import { buildPreviewUrl } from '@/components/panel/artifact/previewUtils'
+import { useArtifactCover } from '@/components/panel/artifact/useArtifactCover'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { cn } from '@/lib/utils'
 
@@ -38,11 +38,8 @@ function ImageArtifactCardImpl({ caption, artifact }: ImageArtifactCardProps) {
     openPreview(artifact.conversation_id, artifact.id)
   }, [openPreview, artifact])
 
-  const filename = artifact?.path.split('/').pop() || 'image.png'
-  const previewUrl =
-    artifact && workspaceId
-      ? buildPreviewUrl(artifact, filename, artifact.version, workspaceId)
-      : null
+  const cover = useArtifactCover(artifact, workspaceId)
+  const previewUrl = cover.coverUrl
 
   const showShimmer = !artifact || !previewUrl || !imgLoaded
 
@@ -78,6 +75,14 @@ function ImageArtifactCardImpl({ caption, artifact }: ImageArtifactCardProps) {
               {t('imageGenerating')}
             </span>
           </div>
+        )}
+        {cover.count > 1 && previewUrl && (
+          <span
+            className="absolute bottom-2 right-2 rounded-full bg-background/80 px-1.5
+              py-0.5 text-[10px] font-medium text-muted-foreground backdrop-blur-sm"
+          >
+            ×{cover.count}
+          </span>
         )}
       </div>
       {caption && (
