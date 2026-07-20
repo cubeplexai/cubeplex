@@ -10,13 +10,17 @@ parse errors / query strings never reach the frontend.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.schemas.trace import (
+    FilterOption,
+    FilterOptionKind,
+    FilterOptionsResponse,
     SpanNode,
     TagValuesResponse,
     TraceDetail,
@@ -24,7 +28,7 @@ from cubeplex.api.schemas.trace import (
 )
 from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubeplex.db import get_session
-from cubeplex.models import User
+from cubeplex.models import Conversation, Membership, User, Workspace
 from cubeplex.services.tempo_client import (
     TempoClient,
     TempoQueryError,
@@ -124,6 +128,71 @@ async def get_tag_values(
     except TempoQueryError as exc:
         raise _bad_upstream(exc) from exc
     return TagValuesResponse(values=values)
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE/ILIKE wildcards so a prefix search treats them literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# Registered before /{trace_id} (same reason as /tag-values above) so the
+# literal "filter-options" path isn't captured as a trace_id.
+@router.get("/filter-options", response_model=FilterOptionsResponse)
+async def get_filter_options(
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    kind: FilterOptionKind = Query(..., description="Entity kind to list."),
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=20, ge=1, le=50),
+) -> FilterOptionsResponse:
+    """Read-only dropdown options for the traces filter bar.
+
+    Postgres-backed (not Tempo): workspace/user/conversation names live in the
+    app DB, keyed by the IDs the trace spans carry. Org-scoped from the session
+    - never trusts a client-supplied org. Has no Tempo dependency, so it works
+    even when the trace viewer's Tempo backend is unset.
+    """
+    org_id = await resolve_current_org_id(user, session)
+    pattern = f"{_escape_like(q)}%" if q else None
+
+    if kind is FilterOptionKind.WORKSPACE:
+        # Coarse / low-cardinality: return all in the org (cap 200) so the
+        # combobox can filter client-side without a prefix round-trip.
+        stmt = select(cast(Any, Workspace.id), cast(Any, Workspace.name)).where(
+            cast(Any, Workspace.org_id) == org_id
+        )
+        if pattern is not None:
+            stmt = stmt.where(cast(Any, Workspace.name).ilike(pattern, escape="\\"))
+        stmt = stmt.order_by(cast(Any, Workspace.name)).limit(200)
+    elif kind is FilterOptionKind.CONVERSATION:
+        # High-cardinality: server-side prefix typeahead, never materialize all.
+        stmt = select(cast(Any, Conversation.id), cast(Any, Conversation.title)).where(
+            cast(Any, Conversation.org_id) == org_id,
+            cast(Any, Conversation.deleted_at).is_(None),
+        )
+        if pattern is not None:
+            stmt = stmt.where(cast(Any, Conversation.title).ilike(pattern, escape="\\"))
+        stmt = stmt.order_by(cast(Any, Conversation.title)).limit(limit)
+    else:  # FilterOptionKind.USER - users are org-scoped only via membership.
+        label = func.coalesce(cast(Any, User.display_name), cast(Any, User.email)).label("label")
+        stmt = (
+            select(cast(Any, User.id), label)
+            .join(Membership, cast(Any, Membership.user_id) == User.id)
+            .join(Workspace, cast(Any, Membership.workspace_id) == Workspace.id)
+            .where(cast(Any, Workspace.org_id) == org_id)
+        )
+        if pattern is not None:
+            stmt = stmt.where(
+                or_(
+                    cast(Any, User.display_name).ilike(pattern, escape="\\"),
+                    cast(Any, User.email).ilike(pattern, escape="\\"),
+                )
+            )
+        stmt = stmt.distinct().order_by(label).limit(limit)
+
+    rows = (await session.execute(stmt)).all()
+    options = [FilterOption(id=str(row[0]), name=str(row[1])) for row in rows]
+    return FilterOptionsResponse(options=options)
 
 
 def _has_foreign_org_span(node: SpanNode, expected_org_id: str) -> bool:
