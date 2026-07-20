@@ -312,7 +312,7 @@ $EDITOR config/opensandbox.toml          # set api_key, eip/host_ip, execd_image
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # Docker DNS name from this overlay
-#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.2.0"
 #     api_key: "<same as [server].api_key in opensandbox.toml>"
 
 # 3. backend non-secret — enable sandbox + force server proxy

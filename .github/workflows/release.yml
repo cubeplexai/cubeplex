@@ -64,7 +64,8 @@ jobs:
           set -euo pipefail
 
           source_commit=$(git rev-parse HEAD)
-          sandbox_image="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:sandbox-v${{ steps.sandbox.outputs.version }}"
+          sandbox_src="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:sandbox-v${{ steps.sandbox.outputs.version }}"
+          sandbox_release="ghcr.io/${IMAGE_OWNER}/cubeplex-sandbox:${RELEASE_TAG}"
           manifest="release-manifest-${RELEASE_TAG}.yaml"
 
           printf 'release: %s\nsource_commit: %s\nimages:\n' "$RELEASE_TAG" "$source_commit" > "$manifest"
@@ -85,15 +86,21 @@ jobs:
             printf '  %s: ghcr.io/%s/cubeplex-%s@%s\n' "$target" "$IMAGE_OWNER" "$target" "$digest" >> "$manifest"
           done
 
+          # The sandbox image is built separately (sandbox-image.yml) and tagged
+          # sandbox-v<version>. Wait for it, then promote it to the app version
+          # tag so every service image shares one release version — no rebuild.
           for attempt in $(seq 1 60); do
-            if docker buildx imagetools inspect "$sandbox_image" >/dev/null 2>&1; then
+            if docker buildx imagetools inspect "$sandbox_src" >/dev/null 2>&1; then
               break
             fi
-            echo "Waiting for $sandbox_image (attempt $attempt/60)"
+            echo "Waiting for $sandbox_src (attempt $attempt/60)"
             sleep 10
           done
-          docker buildx imagetools inspect "$sandbox_image" >/dev/null
-          printf '  sandbox: %s\n' "$sandbox_image" >> "$manifest"
+          docker buildx imagetools inspect "$sandbox_src" >/dev/null
+          docker buildx imagetools create --tag "$sandbox_release" "$sandbox_src"
+          sandbox_digest=$(docker buildx imagetools inspect "$sandbox_release" --format '{{.Manifest.Digest}}')
+          [[ "$sandbox_digest" == sha256:* ]]
+          printf '  sandbox: ghcr.io/%s/cubeplex-sandbox@%s\n' "$IMAGE_OWNER" "$sandbox_digest" >> "$manifest"
           cat "$manifest"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 

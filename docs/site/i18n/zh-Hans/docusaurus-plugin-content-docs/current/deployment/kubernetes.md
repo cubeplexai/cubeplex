@@ -73,9 +73,10 @@ ghcr.io/cubeplexai/cubeplex-backend:<version>
 ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
-一个 `v<semver>` release tag（由 `.github/workflows/images.yml` 推送）会同时
-发布这两个，外加 `cubeplex-egress-webhook` 和 `cubeplex-sandbox`（后者为
-`sandbox-v<version>`）。每个 tag 都是同时包含 `linux/amd64` 和 `linux/arm64`
+一个 `v<semver>` release tag 会以该版本发布全部四个镜像——`cubeplex-backend`、
+`cubeplex-frontend`、`cubeplex-egress-webhook`、`cubeplex-sandbox`（前三个由
+`images.yml` 构建；sandbox 由 `release.yml` 提升到同一 tag，见下）。每个 tag
+都是同时包含 `linux/amd64` 和 `linux/arm64`
 的多平台 manifest。GHCR 上可能还会显示一个 `unknown/unknown` 的 provenance
 条目——只是元数据，不是可运行平台。从[发布页](https://github.com/cubeplexai/cubeplex/releases)
 选一个版本，在 §4.1 设为镜像 tag。请使用真实的 release tag，不要用 `latest`。
@@ -127,14 +128,13 @@ GitHub 较慢，可以在构建时覆盖：
 
 留空 / 不设置 → 使用上游源。
 
-### Release 使用的 sandbox 镜像
+### sandbox 镜像的版本
 
-sandbox 版本记录在 `deploy/images/sandbox/VERSION` 中。sandbox 内容变化时
-递增版本号。sandbox workflow 会同时发布
-`<YYMMDD>-<branch>-<short-sha>` 和 `sandbox-v<version>` 两个 tag；release
-workflow 会把对应的 `sandbox-v<version>` 记录进 release manifest。release
-workflow 不会下载候选 sandbox 镜像，也不会运行运行时兼容性测试——sandbox
-E2E / nightly workflow 仍然独立运行。
+sandbox 镜像很重，所以单独构建（`sandbox-image.yml`），只在其输入变化时才构建，
+由 `deploy/images/sandbox/VERSION` 追踪、打上 `sandbox-v<version>` tag。发版时
+`release.yml` 会把该镜像**提升**为 `cubeplex-sandbox:v<semver>`（只是 tag 别名，
+不重新构建），使四个服务镜像共用同一个发布版本。因此 chart 的默认 sandbox 镜像
+是 `cubeplex-sandbox:v<appVersion>`，与其余保持一致。
 
 ## 4. 撰写 `values.local.yaml`
 
@@ -247,7 +247,7 @@ backend:
   secrets:
     sandbox:
       domain: "<opensandbox-host>:8090"  # OpenSandbox API 地址（不带 schema）
-      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+      # image 默认 cubeplex-sandbox:v<chart 版本>；仅在需要覆盖时才设
       api_key: "..."
   sandbox:
     enabled: true                       # 使用外部 sandbox 时打开

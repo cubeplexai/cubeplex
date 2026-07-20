@@ -302,7 +302,7 @@ $EDITOR config/opensandbox.toml          # 设置 api_key、eip/host_ip、execd_
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # 这个 overlay 里的 Docker DNS 名称
-#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.2.0"
 #     api_key: "<与 opensandbox.toml 中 [server].api_key 相同>"
 
 # 3. backend 非密钥配置 —— 启用 sandbox 并强制走 server 代理

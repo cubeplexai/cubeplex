@@ -200,7 +200,7 @@ for the user-facing behaviour and each deployment guide for wiring it up.
 sandbox:
   enabled: true
   domain: "…"             # OpenSandbox API host:port (no scheme)
-  image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.2.0"
   api_key: "…"
   use_server_proxy: false # true when the backend can't reach sandbox pods/ports directly
   secure_access: true     # false for docker-runtime OpenSandbox
