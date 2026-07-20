@@ -438,6 +438,49 @@ def _load_dotenv_into_environ(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip())
 
 
+def _seed_dev_agent(
+    worktree_path: Path,
+    *,
+    extra_args: list[str] | None = None,
+    required: bool = False,
+) -> None:
+    """Run scripts/dev/seed_dev_agent.py to provision a dev agent + API token.
+
+    Best-effort by default: a failure (e.g. Redis down so the temporary
+    server can't boot) logs a warning and does NOT abort the surrounding
+    init/reseed - the dev agent is a convenience, not a prerequisite for a
+    usable worktree. Pass ``required=True`` (the standalone subcommand) to
+    surface the failure as a non-zero exit instead.
+
+    The subprocess inherits os.environ, which already has .worktree.env
+    loaded - so the seeder targets the worktree's dev DB and port. The
+    seeder reuses a running dev server if one is up, else starts a
+    temporary one.
+    """
+    backend = worktree_path / "backend"
+    script = backend / "scripts" / "dev" / "seed_dev_agent.py"
+    if not script.exists():
+        msg = f"seed script missing: {script}"
+        if required:
+            raise RuntimeError(msg)
+        print(f"⚠ {msg}; skipping dev agent seed", file=sys.stderr)
+        return
+    print(f"-> seeding dev agent (user + org/workspace + API token) via {script.name}")
+    result = subprocess.run(
+        ["uv", "run", "python", str(script), *(extra_args or [])],
+        cwd=backend,
+    )
+    if result.returncode != 0:
+        msg = (
+            f"dev agent seed failed (exit {result.returncode}). "
+            "The worktree is still usable; run `./scripts/worktree-env seed-dev-agent` "
+            "to retry once Redis/the dev server is up."
+        )
+        if required:
+            raise RuntimeError(msg)
+        print(f"⚠ {msg}", file=sys.stderr)
+
+
 # --------------------------------------------------------------- subcommands
 
 import argparse
@@ -532,6 +575,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     _pnpm_install_frontend(info.path)
     _create_schemas(slug)
     _alembic_upgrade(info.path)
+
+    if not getattr(args, "no_seed_agent", False):
+        _seed_dev_agent(info.path)
 
     return cmd_show(args)
 
@@ -681,7 +727,54 @@ def cmd_reseed_db(args: argparse.Namespace) -> int:
     _create_schemas(slug)
     _alembic_upgrade(info.path)
 
+    # reseed wiped every row, so the dev agent must be re-created.
+    _seed_dev_agent(info.path)
+
     print("Done. Worktree databases reseeded from base; alembic at head.")
+    return 0
+
+
+def cmd_seed_dev_agent(args: argparse.Namespace) -> int:
+    """Provision a dev agent into the current worktree's dev DB (standalone).
+
+    Unlike the best-effort call from ``init``/``reseed-db``, this surfaces
+    seeder failures as a non-zero exit. Passes through the seeder's own
+    flags (``--email``, ``--label``, ...).
+    """
+    info = current_worktree_info()
+    env_file = env_file_path(info.path)
+    if not env_file.exists():
+        print(
+            f"No {ENV_FILE_NAME} at {info.path}. Run `./scripts/worktree-env init` first.",
+            file=sys.stderr,
+        )
+        return 1
+    # Load .worktree.env first so the seeder resolves the worktree's DB/port.
+    _load_dotenv_into_environ(env_file)
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
+
+    extra: list[str] = []
+    for flag, attr in (
+        ("--email", "email"),
+        ("--label", "label"),
+        ("--org-name", "org_name"),
+        ("--org-slug", "org_slug"),
+        ("--workspace-name", "workspace_name"),
+        ("--no-start-server", "no_start_server"),
+    ):
+        value = getattr(args, attr, None)
+        if value in (None, False):
+            continue
+        if value is True:
+            extra.append(flag)
+        else:
+            extra.extend([flag, str(value)])
+
+    try:
+        _seed_dev_agent(info.path, extra_args=extra, required=True)
+    except RuntimeError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -861,7 +954,12 @@ def main(argv: list[str] | None = None) -> int:
         description="Allocate ports / DB schemas / Redis prefix per worktree.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init", help="Allocate slot and provision the current worktree")
+    init_parser = sub.add_parser("init", help="Allocate slot and provision the current worktree")
+    init_parser.add_argument(
+        "--no-seed-agent",
+        action="store_true",
+        help="Skip seeding the dev agent (user + org/workspace + API token)",
+    )
     sub.add_parser("show", help="Print current worktree's allocations")
     sub.add_parser("doctor", help="Verify schema, ports, services")
     sub.add_parser("destroy", help="Drop schemas, clear Redis prefix, remove .worktree.env")
@@ -876,6 +974,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip the confirmation prompt (still refuses on main worktree)",
     )
+    seed_parser = sub.add_parser(
+        "seed-dev-agent",
+        help="Provision a dev agent (user + org/workspace + API token) into the "
+        "worktree's dev DB. Reuses a running dev server or starts a temporary one.",
+    )
+    seed_parser.add_argument("--email", default=None, help="Override the dev agent email.")
+    seed_parser.add_argument("--label", default="dev-agent", help="API key label.")
+    seed_parser.add_argument("--org-name", default=None, help="Override the org name.")
+    seed_parser.add_argument("--org-slug", default=None, help="Override the org slug.")
+    seed_parser.add_argument(
+        "--workspace-name", default=None, help="Override the workspace name."
+    )
+    seed_parser.add_argument(
+        "--no-start-server",
+        action="store_true",
+        help="Assume a dev server is already running on the worktree port.",
+    )
 
     args = parser.parse_args(argv)
     handlers = {
@@ -885,6 +1000,7 @@ def main(argv: list[str] | None = None) -> int:
         "destroy": cmd_destroy,
         "clean-orphans": cmd_clean_orphans,
         "reseed-db": cmd_reseed_db,
+        "seed-dev-agent": cmd_seed_dev_agent,
     }
     return handlers[args.cmd](args)
 

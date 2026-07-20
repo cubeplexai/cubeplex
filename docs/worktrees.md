@@ -28,6 +28,12 @@ This:
 - Copies `backend/.env` and `config.development.local.yaml` from main
   if missing.
 - Writes `.worktree.env`.
+- Seeds a **dev agent** (a registered user + onboarding org/workspace + a
+  personal-access API token) into the dev DB by exercising the real
+  `/auth/register` -> `/auth/login` -> `/onboarding` -> `/me/api-keys`
+  endpoints. The token is written to `.worktree.env` (see
+  [Dev Agent](#dev-agent-seeded-user--api-token)). Pass `--no-seed-agent`
+  to skip; the seed is best-effort and never blocks worktree creation.
 - Pushes the new branch to `<remote>` with `--no-verify` and sets the
   branch upstream.
 
@@ -108,13 +114,62 @@ neutralizes both.
 ./scripts/worktree-env doctor          # health check: DBs, ports, alembic
 ./scripts/worktree-env destroy         # drop DBs, clear redis prefix, delete .worktree.env
 ./scripts/worktree-env clean-orphans   # interactive cleanup of orphaned slots
-./scripts/worktree-env reseed-db       # drop + recreate DBs, re-run all migrations
+./scripts/worktree-env reseed-db       # drop + recreate DBs, re-run all migrations (re-seeds the dev agent)
+./scripts/worktree-env seed-dev-agent  # (re)seed just the dev agent into the dev DB
 ```
 
 Run `destroy` **before** `git worktree remove`.
 
 `reseed-db` is **destructive — wipes every row.** Pass `--yes` to skip
-the prompt.
+the prompt. Because it wipes every row, it re-runs the dev agent seed
+afterwards so the token in `.worktree.env` is refreshed against the new DB.
+
+## Dev Agent (seeded user + API token)
+
+`init` (and `reseed-db`) seed a dev agent into the worktree's **dev** DB
+so you - or an external test agent - can hit the dev server
+(`python main.py`) without manually registering + onboarding through the
+UI. The seed runs the real HTTP flow against a temporary uvicorn (reusing
+a running dev server if one is already up on the worktree port).
+
+After `init`, `.worktree.env` carries a `# Dev agent` section:
+
+```
+CUBEPLEX_DEV_AGENT_EMAIL=dev-agent-<slug>@example.com
+CUBEPLEX_DEV_AGENT_PASSWORD=DevAgent1!-<slug>
+CUBEPLEX_DEV_AGENT_TOKEN=sk-...                # use as `Authorization: Bearer`
+CUBEPLEX_DEV_AGENT_ORG_ID=org-...
+CUBEPLEX_DEV_AGENT_WORKSPACE_ID=ws-...         # prepend to /api/v1/ws/{...}/ routes
+```
+
+(`CUBEPLEX_API_URL` is already in `.worktree.env` and points at the
+worktree's dev server.) A test agent uses it directly:
+
+```bash
+curl -H "Authorization: Bearer $CUBEPLEX_DEV_AGENT_TOKEN" \
+     "$CUBEPLEX_API_URL/api/v1/auth/me"
+curl -H "Authorization: Bearer $CUBEPLEX_DEV_AGENT_TOKEN" \
+     "$CUBEPLEX_API_URL/api/v1/ws/$CUBEPLEX_DEV_AGENT_WORKSPACE_ID/conversations"
+```
+
+The token acts as its owning user - same workspace membership, same RBAC
+(the seeder's onboarding grants ADMIN). Re-running `seed-dev-agent` reuses
+the user/org/workspace and **rotates** the token (the plaintext is shown
+once and never stored, so it can only be regenerated, not recovered); the
+old labeled key is deleted first to stay under the per-user quota.
+
+Notes:
+
+- The temporary server's lifespan requires **Redis** (same as the real dev
+  server). If Redis is down the seed fails fast - start Redis, then
+  `./scripts/worktree-env seed-dev-agent`.
+- The temporary server runs with email verification disabled
+  (`CUBEPLEX_AUTH__EMAIL_VERIFICATION__ENABLED=false`) so login doesn't
+  require an OTP. When reusing a running dev server that *does* have SMTP
+  verification on, the seeder verifies the user directly in the dev DB and
+  retries (the OTP is sent over SMTP and cannot be captured).
+- Need a second dev agent (multi-user test)? `./scripts/worktree-env
+  seed-dev-agent --email other@example.com --label other`.
 
 ## When to Use `reseed-db`
 
