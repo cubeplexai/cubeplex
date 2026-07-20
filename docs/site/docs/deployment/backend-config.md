@@ -320,20 +320,128 @@ credentials (via env or the secrets file) to send verification / password-reset
 mail for real. Google login is off until you enable it and supply OAuth
 credentials.
 
-## Other subsystems
+## Memory
 
-| Section | Key | Default | Purpose |
-|---|---|---|---|
-| Memory | `memory.short_term_enabled` / `long_term_enabled` | `true` / `false` | Conversation memory features. |
-| MCP | `mcp.progressive_disclosure.enabled` | `auto` | Collapse deferrable tool schemas when they crowd the context. |
-| MCP | `mcp.icons.fetch_remote` | `true` | Fetch remote connector icons at discovery (set `false` air-gapped). |
-| Skills | `skills.preinstalled_dir` | `skills/preinstalled` | Skills seeded into the global catalog. |
-| Image gen | `image_generation.enabled` | `false` | `generate_image` tool; needs `api_key`. |
-| Tracing | `tracing.enabled` | `false` | Write cubepi agent-run spans to disk / OTLP. |
-| Logging | `logging.access_log` | `true` | One log line per HTTP request. |
-| Logging | `logging.third_party_level` | `WARNING` | Caps noisy third-party loggers. |
-| Lifecycle | `lifecycle.graceful_drain_timeout_seconds` | `3600` | Max drain time on shutdown. |
-| Egress | `egress_exchange.listener.enabled` | `false` | mTLS secret-injection listener (enabled by the egress bundle). |
+```yaml
+memory:
+  short_term_enabled: true
+  long_term_enabled: false
+```
+
+Conversation memory. Short-term (in-conversation working memory) is on by
+default; long-term (cross-conversation recall) is off until you turn it on.
+
+## MCP tools
+
+```yaml
+mcp:
+  progressive_disclosure:
+    enabled: "auto"        # auto | on | off
+    threshold_pct: 10.0    # collapse when deferrable schemas ≥ this % of context
+    min_servers: 2
+  icons:
+    allow_remote: true     # UI may render remote https icons
+    fetch_remote: true     # discovery may outbound-fetch icons → data: cache
+    fetch_timeout_ms: 2500
+    max_bytes: 262144      # 256 KiB per icon
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `mcp.progressive_disclosure.enabled` | `auto` | Collapses deferrable tool schemas when they crowd the context; `auto` decides per the threshold below. |
+| `mcp.progressive_disclosure.threshold_pct` | `10.0` | Collapse once deferrable schemas exceed this share of the context window. |
+| `mcp.icons.fetch_remote` | `true` | Set **both** icon flags `false` on air-gapped deploys; catalog brand icons still render from bundled assets. |
+
+Connectors themselves are managed in the DB-backed catalog, not here.
+
+## Skills
+
+```yaml
+skills:
+  cache_root: "skills_cache"            # local extraction cache
+  preinstalled_dir: "skills/preinstalled"
+registry:
+  skills_sh:
+    github_token: ""     # optional — raises the GitHub API rate limit 60 → 5000/h
+```
+
+`preinstalled_dir` is seeded into the global skills catalog on boot. Set
+`registry.skills_sh.github_token` (via env / secrets) if skill discovery hits
+GitHub rate limits.
+
+## Image generation
+
+```yaml
+image_generation:
+  enabled: false
+  api: "openai-images"
+  model: "gpt-image-2"
+  api_key: null          # via CUBEPLEX_IMAGE_GENERATION__API_KEY
+  base_url: null
+```
+
+Powers the `generate_image` tool (sandbox-gated). Off until you enable it and
+supply an `api_key`.
+
+## Tracing
+
+```yaml
+tracing:
+  enabled: false
+  directory: "./cubepi-traces"
+  record_content: false  # true captures full prompts/responses/tool I/O (larger, sensitive)
+  otlp:
+    endpoint: null       # e.g. http://localhost:4318/v1/traces to ship spans
+    headers: null
+  tempo:
+    query_endpoint: null # enables the admin trace viewer when set
+```
+
+Writes per-run cubepi spans to disk when enabled, and optionally ships them to
+an OTLP collector (Grafana Tempo, etc.). `record_content: true` is powerful for
+debugging but captures potentially sensitive prompt/tool data.
+
+## Logging
+
+```yaml
+logging:
+  third_party_level: "WARNING"   # caps noisy botocore/httpcore/… loggers
+  verbose_modules: []            # re-enable DEBUG for specific logger names
+  access_log: true               # one line per HTTP request
+```
+
+Set `access_log: false` behind a proxy that already logs requests. Add partial
+logger names to `verbose_modules` to selectively re-enable DEBUG.
+
+## Lifecycle
+
+```yaml
+lifecycle:
+  graceful_drain_timeout_seconds: 3600   # max wait for in-flight runs on shutdown
+  stale_run_threshold_seconds: 120
+```
+
+`graceful_drain_timeout_seconds` bounds how long the backend waits for active
+agent runs to finish before shutting down — align it with your longest expected
+run and the orchestrator's termination grace period.
+
+## Egress secret-injection listener
+
+```yaml
+egress_exchange:
+  auth:
+    mode: mtls           # mtls (production) | dev (shared secret, dev/test only)
+  listener:
+    enabled: false       # the egress bundle turns this on
+    port: 8443
+    certfile: ""
+    keyfile: ""
+    ca_certs: ""
+```
+
+The backend side of the [egress secret-injection](./kubernetes.md#410-egress-secret-injection-optional)
+feature. Left off unless you deploy the egress bundle, which sets the listener
+and its mTLS material for you.
 
 ## Next steps
 
