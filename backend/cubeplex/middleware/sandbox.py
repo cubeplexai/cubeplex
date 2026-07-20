@@ -16,7 +16,10 @@ command execution.
 from __future__ import annotations
 
 import asyncio
+import difflib
+import re
 import shlex
+import unicodedata
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -242,6 +245,98 @@ def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
     )
 
 
+_SMART_SINGLE_QUOTES = re.compile(r"[‘’‚‛]")
+_SMART_DOUBLE_QUOTES = re.compile(r"[“”„‟]")
+_UNICODE_DASHES = re.compile(r"[‐‑‒–—―−]")
+_UNICODE_SPACES = re.compile(r"[  -   　]")
+
+
+def _normalize_for_fuzzy(text: str) -> str:
+    """Normalize text for fuzzy matching.
+
+    Applies the same transforms as pi's normalizeForFuzzyMatch: NFKC,
+    trailing whitespace per line, smart quotes/dashes/spaces → ASCII.
+    Only used for match location — replacements are always applied to the
+    original bytes so non-matched content is never altered.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = "\n".join(line.rstrip() for line in text.split("\n"))
+    text = _SMART_SINGLE_QUOTES.sub("'", text)
+    text = _SMART_DOUBLE_QUOTES.sub('"', text)
+    text = _UNICODE_DASHES.sub("-", text)
+    text = _UNICODE_SPACES.sub(" ", text)
+    return text
+
+
+def _partial_normalize(text: str) -> str:
+    """Apply all fuzzy normalizations except trailing-whitespace stripping.
+
+    This is character-stable: each original char maps to \u22651 output chars with
+    a predictable position mapping. Used by _fuzzy_replace to build a
+    position map before applying the trailing-whitespace stripping step.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = _SMART_SINGLE_QUOTES.sub("'", text)
+    text = _SMART_DOUBLE_QUOTES.sub('"', text)
+    text = _UNICODE_DASHES.sub("-", text)
+    text = _UNICODE_SPACES.sub(" ", text)
+    return text
+
+
+def _fuzzy_replace(current: str, old_string: str, new_string: str) -> str | None:
+    """Find old_string in current via normalization and replace the original span.
+
+    Returns the updated content, or None if old_string is not found exactly
+    once after normalization (caller should already have verified count == 1).
+
+    Two-phase strategy to avoid the trailing-whitespace-stripping complication:
+    1. Apply NFKC + substitutions (character-stable) to get `partial`.
+       Build partial_to_orig: for each position in `partial`, which original index?
+    2. Strip trailing whitespace from `partial` line-by-line (same as _normalize_for_fuzzy).
+       Track which positions in `partial` survive into norm_content.
+    3. Use those maps to convert norm_start/norm_end back to original positions.
+    """
+    norm_content = _normalize_for_fuzzy(current)
+    norm_old = _normalize_for_fuzzy(old_string)
+
+    if norm_content.count(norm_old) != 1:
+        return None
+
+    norm_start = norm_content.index(norm_old)
+    norm_end = norm_start + len(norm_old)
+
+    # Phase 1: character-stable normalization -> partial
+    partial = _partial_normalize(current)
+
+    # Build partial_to_orig: partial[i] came from current[partial_to_orig[i]]
+    partial_to_orig: list[int] = []
+    for orig_idx, ch in enumerate(current):
+        n = _partial_normalize(ch)
+        partial_to_orig.extend([orig_idx] * len(n))
+
+    # Phase 2: strip trailing whitespace from partial line-by-line -> norm_content.
+    # Record which positions in partial survive into norm_content.
+    partial_lines = partial.split("\n")
+    partial_survived: list[int] = []  # partial positions that appear in norm_content
+    p_pos = 0
+    for li, line in enumerate(partial_lines):
+        stripped = line.rstrip()
+        for j in range(len(stripped)):
+            partial_survived.append(p_pos + j)
+        p_pos += len(line)
+        if li < len(partial_lines) - 1:
+            partial_survived.append(p_pos)  # the \n that joins lines
+            p_pos += 1
+
+    if len(partial_survived) != len(norm_content):
+        return None
+
+    orig_start = partial_to_orig[partial_survived[norm_start]]
+    orig_end = partial_to_orig[partial_survived[norm_end - 1]] + 1
+
+    return current[:orig_start] + new_string + current[orig_end:]
+
+
 def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
     """Build the edit_file cubepi.AgentTool backed by a sandbox instance."""
 
@@ -269,12 +364,13 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
                 content=[TextContent(text=f"Error reading {args.file_path}: {exc}")]
             )
         current = files[0][1].decode()
+
+        # --- exact match ---
         count = current.count(args.old_string)
-        if count == 0:
-            return AgentToolResult(
-                content=[TextContent(text=f"Error: old_string not found in {args.file_path}")]
-            )
-        if count > 1:
+        fuzzy_matched = False
+        if count == 1:
+            updated = current.replace(args.old_string, args.new_string, 1)
+        elif count > 1:
             return AgentToolResult(
                 content=[
                     TextContent(
@@ -285,9 +381,52 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
                     )
                 ]
             )
-        updated = current.replace(args.old_string, args.new_string, 1)
+        else:
+            # --- fuzzy fallback ---
+            norm_count = _normalize_for_fuzzy(current).count(_normalize_for_fuzzy(args.old_string))
+            if norm_count == 0:
+                return AgentToolResult(
+                    content=[TextContent(text=f"Error: old_string not found in {args.file_path}")]
+                )
+            if norm_count > 1:
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            text=(
+                                f"Error: old_string appears {norm_count} times in "
+                                f"{args.file_path}. It must be unique — provide more context."
+                            )
+                        )
+                    ]
+                )
+            result = _fuzzy_replace(current, args.old_string, args.new_string)
+            if result is None:
+                return AgentToolResult(
+                    content=[TextContent(text=f"Error: old_string not found in {args.file_path}")]
+                )
+            updated = result
+            fuzzy_matched = True
+
         await sandbox.upload([(args.file_path, updated.encode())])
-        return AgentToolResult(content=[TextContent(text=f"Successfully edited {args.file_path}")])
+
+        diff_lines = list(
+            difflib.unified_diff(
+                current.splitlines(keepends=True),
+                updated.splitlines(keepends=True),
+                fromfile=f"a/{args.file_path}",
+                tofile=f"b/{args.file_path}",
+                n=4,
+            )
+        )
+        suffix = " (fuzzy match)" if fuzzy_matched else ""
+        return AgentToolResult(
+            content=[TextContent(text=f"Successfully edited {args.file_path}{suffix}")],
+            details={
+                "file_path": args.file_path,
+                "unified_diff": "".join(diff_lines),
+                "fuzzy_matched": fuzzy_matched,
+            },
+        )
 
     return AgentTool(
         name="edit_file",
