@@ -306,20 +306,124 @@ social_login:
 凭证（经 env 或 secrets 文件）才能真正发送验证 / 找回密码邮件。Google 登录
 在你启用并提供 OAuth 凭证前保持关闭。
 
-## 其他子系统
+## 记忆（Memory）
 
-| 段 | Key | 默认 | 用途 |
-|---|---|---|---|
-| Memory | `memory.short_term_enabled` / `long_term_enabled` | `true` / `false` | 对话记忆功能。 |
-| MCP | `mcp.progressive_disclosure.enabled` | `auto` | 当可延迟的工具 schema 挤占上下文时折叠它们。 |
-| MCP | `mcp.icons.fetch_remote` | `true` | 发现时拉取远程连接器图标（离线设 `false`）。 |
-| Skills | `skills.preinstalled_dir` | `skills/preinstalled` | 预置进全局目录的技能。 |
-| 图片生成 | `image_generation.enabled` | `false` | `generate_image` 工具；需 `api_key`。 |
-| Tracing | `tracing.enabled` | `false` | 把 cubepi agent-run span 写到磁盘 / OTLP。 |
-| 日志 | `logging.access_log` | `true` | 每个 HTTP 请求一行日志。 |
-| 日志 | `logging.third_party_level` | `WARNING` | 压制吵闹的第三方 logger。 |
-| 生命周期 | `lifecycle.graceful_drain_timeout_seconds` | `3600` | 关机时的最大 drain 时间。 |
-| Egress | `egress_exchange.listener.enabled` | `false` | mTLS 密钥注入监听器（由 egress bundle 启用）。 |
+```yaml
+memory:
+  short_term_enabled: true
+  long_term_enabled: false
+```
+
+对话记忆。短期（对话内工作记忆）默认开启；长期（跨对话回忆）默认关闭，需手动
+开启。
+
+## MCP 工具
+
+```yaml
+mcp:
+  progressive_disclosure:
+    enabled: "auto"        # auto | on | off
+    threshold_pct: 10.0    # 可延迟 schema ≥ 上下文的此百分比时折叠
+    min_servers: 2
+  icons:
+    allow_remote: true     # UI 可渲染远程 https 图标
+    fetch_remote: true     # 发现时可外联拉取图标 → data: 缓存
+    fetch_timeout_ms: 2500
+    max_bytes: 262144      # 每个图标 256 KiB
+```
+
+| Key | 默认 | 说明 |
+|---|---|---|
+| `mcp.progressive_disclosure.enabled` | `auto` | 当可延迟的工具 schema 挤占上下文时折叠它们；`auto` 按下面的阈值判断。 |
+| `mcp.progressive_disclosure.threshold_pct` | `10.0` | 可延迟 schema 超过上下文窗口的此比例时折叠。 |
+| `mcp.icons.fetch_remote` | `true` | 离线部署把两个图标开关都设 `false`；目录品牌图标仍可从内置资源渲染。 |
+
+连接器本身在 DB 目录里管理，不在这里。
+
+## 技能（Skills）
+
+```yaml
+skills:
+  cache_root: "skills_cache"            # 本地解压缓存
+  preinstalled_dir: "skills/preinstalled"
+registry:
+  skills_sh:
+    github_token: ""     # 可选——把 GitHub API 限额从 60 提到 5000/h
+```
+
+`preinstalled_dir` 在启动时播种进全局技能目录。技能发现撞到 GitHub 限额时，
+设置 `registry.skills_sh.github_token`（经 env / secrets）。
+
+## 图片生成
+
+```yaml
+image_generation:
+  enabled: false
+  api: "openai-images"
+  model: "gpt-image-2"
+  api_key: null          # 经 CUBEPLEX_IMAGE_GENERATION__API_KEY
+  base_url: null
+```
+
+驱动 `generate_image` 工具（受 sandbox 门控）。默认关闭，需启用并提供 `api_key`。
+
+## Tracing
+
+```yaml
+tracing:
+  enabled: false
+  directory: "./cubepi-traces"
+  record_content: false  # true 会捕获完整 prompt/响应/工具 I/O（更大、敏感）
+  otlp:
+    endpoint: null       # 如 http://localhost:4318/v1/traces 以外发 span
+    headers: null
+  tempo:
+    query_endpoint: null # 设置后启用 admin trace 查看器
+```
+
+开启后把每次 run 的 cubepi span 写到磁盘，并可选外发到 OTLP collector（Grafana
+Tempo 等）。`record_content: true` 对调试很有用，但会捕获可能敏感的 prompt/工具
+数据。
+
+## 日志
+
+```yaml
+logging:
+  third_party_level: "WARNING"   # 压制吵闹的 botocore/httpcore/… logger
+  verbose_modules: []            # 为特定 logger 名重新开启 DEBUG
+  access_log: true               # 每个 HTTP 请求一行
+```
+
+前面已有反代记录请求时，把 `access_log` 设为 `false`。往 `verbose_modules` 加
+部分 logger 名可选择性重开 DEBUG。
+
+## 生命周期
+
+```yaml
+lifecycle:
+  graceful_drain_timeout_seconds: 3600   # 关机时等待进行中 run 的最大时间
+  stale_run_threshold_seconds: 120
+```
+
+`graceful_drain_timeout_seconds` 限定后端关机前等待活动 agent run 完成的时长——
+与你预期的最长 run 及编排器的终止宽限期对齐。
+
+## Egress 密钥注入监听器
+
+```yaml
+egress_exchange:
+  auth:
+    mode: mtls           # mtls（生产）| dev（共享密钥，仅 dev/test）
+  listener:
+    enabled: false       # 由 egress bundle 开启
+    port: 8443
+    certfile: ""
+    keyfile: ""
+    ca_certs: ""
+```
+
+[egress 密钥注入](./kubernetes.md#410-egress-密钥注入可选)功能的后端侧。除非你
+部署了 egress bundle（它会帮你设好监听器及其 mTLS 材料），否则保持关闭。
 
 ## 下一步
 
