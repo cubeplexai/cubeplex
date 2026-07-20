@@ -9,6 +9,7 @@ function mapContentType(toolName: string, backendContentType?: string): PanelCon
   if (bare === 'load_skill') return 'skill'
   if (bare === 'execute') return 'terminal'
   if (bare === 'write_file') return 'write_file'
+  if (bare === 'edit_file') return 'edit_file'
   if (bare === 'code_execute' || bare === 'python') return 'code_execute'
   if (bare === 'file_read') return 'file_read'
   if (backendContentType === 'file_read') return 'file_read'

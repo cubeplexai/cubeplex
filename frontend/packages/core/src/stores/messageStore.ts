@@ -110,7 +110,13 @@ export interface MessageStore {
   toolStartedMap: Record<string, number>
   toolResultMap: Record<
     string,
-    { content: string; receivedAt: number; startedAt?: number; contentType?: string }
+    {
+      content: string
+      receivedAt: number
+      startedAt?: number
+      contentType?: string
+      details?: unknown
+    }
   >
   turnUsage: Record<string, import('../types').TurnUsage | null>
   sessionUsage: Record<string, import('../types').SessionUsage | null>
@@ -598,6 +604,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           state.toolStartedMap[tcId] ??
           (e.data.started_at ? timestampToMs(e.data.started_at) : undefined),
         contentType: e.data.content_type,
+        details: e.data.details,
       }
     }
 

@@ -43,6 +43,7 @@ export type PanelContentType =
   | 'web_fetch'
   | 'terminal'
   | 'write_file'
+  | 'edit_file'
   | 'generic'
   | 'artifact'
   | 'skill'
@@ -158,6 +159,7 @@ export interface ToolResultEvent extends AgentEvent {
     content: string
     started_at?: string
     content_type?: string
+    details?: unknown
   }
 }
 
