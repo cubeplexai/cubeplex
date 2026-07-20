@@ -59,9 +59,11 @@ export function ToolCallGroup({
         name={block.name}
         arguments={block.arguments}
         toolCallId={block.id}
-        contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
+        contentTypeOverride={
+          block.name === 'write_file' || block.name === 'edit_file' ? block.name : undefined
+        }
         toolRef={
-          block.name === 'write_file'
+          block.name === 'write_file' || block.name === 'edit_file'
             ? ({
                 agent_id: agentId ?? null,
                 tool_call_id: block.id,
@@ -72,7 +74,7 @@ export function ToolCallGroup({
         toolResult={result}
         timestamp={messageCreatedAt}
         isPending={isPending}
-        allowOpenWhenPending={block.name === 'write_file'}
+        allowOpenWhenPending={block.name === 'write_file' || block.name === 'edit_file'}
         showDivider={i > 0}
         pendingConfirm={pendingConfirmMap?.[block.id] ?? null}
         onSandboxConfirm={onSandboxConfirm ? (d) => onSandboxConfirm(block.id, d) : undefined}

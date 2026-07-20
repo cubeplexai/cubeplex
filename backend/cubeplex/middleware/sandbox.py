@@ -409,10 +409,16 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
 
         await sandbox.upload([(args.file_path, updated.encode())])
 
+        def _lines_for_diff(text: str) -> list[str]:
+            lines = text.splitlines(keepends=True)
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            return lines
+
         diff_lines = list(
             difflib.unified_diff(
-                current.splitlines(keepends=True),
-                updated.splitlines(keepends=True),
+                _lines_for_diff(current),
+                _lines_for_diff(updated),
                 fromfile=f"a/{args.file_path}",
                 tofile=f"b/{args.file_path}",
                 n=4,

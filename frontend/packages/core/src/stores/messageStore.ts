@@ -816,6 +816,7 @@ function buildTurnMessages(
       timestamp: receivedAtMs / 1000,
       run_id: runId,
       metadata: {},
+      details: mapEntry?.details,
     })
   }
 
@@ -1369,6 +1370,21 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const nextError =
           seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
 
+        // Restore toolResultMap entries that have details from history, so
+        // tool preview panels (e.g. edit_file diff) remain interactive on reload.
+        const restoredToolResultMap: MessageStore['toolResultMap'] = {}
+        for (const msg of messages) {
+          if (msg.role !== 'tool_result' || !msg.tool_call_id || !msg.details) continue
+          restoredToolResultMap[msg.tool_call_id] = {
+            content: msg.content
+              .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+              .map((b) => b.text)
+              .join(''),
+            receivedAt: (msg.timestamp ?? 0) * 1000,
+            details: msg.details,
+          }
+        }
+
         set((s) => ({
           messages: { ...s.messages, [conversationId]: messages },
           oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
@@ -1382,7 +1398,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           streamAgents: nextStreamAgents,
           pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
           toolStartedMap: {},
-          toolResultMap: {},
+          toolResultMap: restoredToolResultMap,
           // When `skipSeed` fired (we just answered/cancelled this exact
           // question), preserve the current pendingAsk / pendingConfirmMap
           // instead of clearing them. The form stays mounted in its
