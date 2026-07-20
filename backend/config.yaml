@@ -25,7 +25,7 @@ default:
   api:
     host: "0.0.0.0"
     port: 8000
-    reload: true
+    reload: false          # dev enables autoreload in config.development.yaml
     public_url: ""
 
   # Egress secret-injection exchange endpoint.
@@ -51,81 +51,31 @@ default:
   # Note: For reasoning models, set reasoning config to enable reasoning output
   # Example: reasoning: {effort: "medium", summary: "auto"}
   llm:
-    # Tiered model presets seeded into the system OrgSettings.model_presets row.
-    # Each tier carries a primary model ref ("provider/model-id") plus optional
-    # fallbacks tried in order when the primary fails (timeout/error).
-    model_presets:
-      tiers:
-        lite:  { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking", fallbacks: [] }
-        flash: { enabled: false, primary: null, fallbacks: [] }
-        pro:   { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking",
-                 fallbacks: ["cubeplex/qwen3.5-plus-thinking"] }
-        max:   { enabled: false, primary: null, fallbacks: [] }
-      default_preset: pro
-      task_routing: {}
+    # LLM providers and model presets ship EMPTY by default — configure them per
+    # deployment via config.<env>.local.yaml / .secrets.yaml or the admin UI.
+    # See the deployment docs → "LLM provider configuration".
+    #
+    # model_presets seeds the system org's model-selector tiers. Each tier is a
+    # primary model ref ("provider/model-id") plus ordered fallbacks. Example:
+    #   model_presets:
+    #     tiers:
+    #       lite: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+    #       pro:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+    #     default_preset: pro
 
-    # Model Providers Configuration
-    providers:
-      cubeplex:
-        base_url: "USE ENV"
-        api_key: "USE ENV"
-        api: "openai-completions"
-        extra_body: {}
-        extra_headers: {}
-        models:
-          - id: "qwen3.5-plus-thinking"
-            name: "Qwen3.5 Plus"
-            reasoning: true
-            input: ["text", "image"]
-            cost:
-              input: 0.8
-              output: 4.8
-              cache_read: 0.08
-              cache_write: 1
-            context_window: 991000
-            max_tokens: 64000
-            extra_body: {}
-            extra_headers: {}
-          - id: "doubao-seed-1.8"
-            name: "DouBao Seed 1.8"
-            reasoning: false
-            input: ["text", "image"]
-            cost:
-              input: 2.4
-              output: 24
-              cache_read: 0
-              cache_write: 0
-            context_window: 256000
-            max_tokens: 64000
-            extra_body: {}
-            extra_headers: {}
-          - id: "doubao-seed-1.8-thinking"
-            name: "DouBao Seed 1.8 Reasoning"
-            reasoning: true
-            input: ["text", "image"]
-            cost:
-              input: 2.4
-              output: 24
-              cache_read: 0
-              cache_write: 0
-            context_window: 256000
-            max_tokens: 64000
-            extra_body: {}
-            extra_headers: {}
-
-          - id: "qwen3-max-2026-01-23"
-            name: "Qwen3 Max 0123"
-            reasoning: false
-            input: ["text"]
-            cost:
-              input: 7
-              output: 28
-              cache_read: 0
-              cache_write: 0
-            context_window: 256000
-            max_tokens: 32000
-            extra_body: {}
-            extra_headers: {}
+    # Model providers. Any OpenAI- or Anthropic-compatible endpoint. Example:
+    #   providers:
+    #     openai:
+    #       base_url: "https://api.openai.com/v1"   # OpenAI-style includes /v1
+    #       api_key: "sk-..."
+    #       api: "openai-completions"               # or "anthropic-messages"
+    #       models:
+    #         - id: "gpt-5.6-terra"
+    #           name: "GPT-5.6 Terra"
+    #           input: ["text", "image"]
+    #           context_window: 128000
+    #           max_tokens: 16384
+    providers: {}
 
   # Sandbox Configuration
   # Note: Sandbox lifecycle is managed by cubeplex's SandboxManager (cleanup_expired task).
@@ -232,9 +182,10 @@ default:
   # Object Storage Configuration (S3-compatible)
   objectstore:
     provider: "s3" # "oss" or "s3"
-    endpoint: "s3.us-east-2.amazonaws.com"
+    # e.g. "rustfs:9000" (bundled self-host) or "s3.<region>.amazonaws.com".
+    endpoint: ""
     bucket: "cubeplex"
-    region: "us-east-2"
+    region: "us-east-1"
     access_key: ""
     access_secret: ""
 
@@ -242,15 +193,16 @@ default:
   database:
     host: "localhost"
     port: 5432
-    user: "postgres"
-    password: "postgres"
+    user: "cubeplex"
+    password: ""          # set via config.<env>.local.yaml / secrets / env
     name: "cubeplex"
     pool_size: 10
     max_overflow: 20
     echo: false
 
   redis:
-    url: "redis://:passwd@localhost:6379/0" # ENV: CUBEPLEX_REDIS__URL
+    # Add ":<password>@" for a secured Redis. ENV: CUBEPLEX_REDIS__URL
+    url: "redis://localhost:6379/0"
     key_prefix: "cubeplex" # effective prefix is "{key_prefix}:{env}" at runtime
     # Connection pool / socket options passed to redis.asyncio.Redis.from_url
     max_connections: 64
@@ -407,8 +359,9 @@ default:
   # an int to pin the budget instead.
   compaction:
     enabled: true
-    summary_provider: "deepseek"
-    summary_model: "deepseek-v4-flash"
+    # Must reference a provider/model you configured under llm.providers.
+    summary_provider: "openai"
+    summary_model: "gpt-5.6-terra"
     threshold_ratio: 0.7
     keep_tail_tokens: 8000
     max_summary_tokens: null

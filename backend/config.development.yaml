@@ -8,6 +8,14 @@ development:
   api:
     reload: true
 
+  # Local dev infra defaults (base config.yaml ships these neutral). Override
+  # per-machine in config.development.local.yaml.
+  database:
+    user: "postgres"
+    password: "postgres"
+  redis:
+    url: "redis://:passwd@localhost:6379/0"
+
   # Graceful Restart: keep dev reload fast — uvicorn StatReload sends SIGTERM
   # on every file save, and the prod default of 3600s would block reload for
   # up to an hour if a chat is in flight. 5s lets clean post-completion
