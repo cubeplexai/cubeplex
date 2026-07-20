@@ -17,9 +17,9 @@ image:
   registry: "ghcr.io"
   repository: cubeplexai
   pullPolicy: IfNotPresent
-  # Set the tag in values.local.yaml to a release version from
-  # https://github.com/cubeplexai/cubeplex/releases (e.g. "v0.2.0"), or to the
-  # immutable tag build-and-push.sh produced for a self-built image.
+  # Tag is optional: it defaults to "v<Chart.appVersion>", so a released chart
+  # already points at the matching images. Override only for a self-built image
+  # (deploy/kubernetes/scripts/build-and-push.sh) or to pin a different version.
   backend:
     name: cubeplex-backend
     tag: ""

@@ -7,14 +7,14 @@
 #          -n cubeplex --create-namespace \
 #          -f values.yaml -f values.local.yaml
 
-image:
-  # A release version from https://github.com/cubeplexai/cubeplex/releases.
-  # (For a self-built image, use the <YYMMDD>-<branch>-<short-sha> tag
-  # build-and-push.sh produced and override image.registry / image.repository.)
-  backend:
-    tag: "v0.2.0"
-  frontend:
-    tag: "v0.2.0"
+# Image tag defaults to the chart's appVersion (v<appVersion>), so a release
+# chart already points at matching images — usually leave `image` unset.
+# Override only to pin a different version or use a self-built / private image:
+# image:
+#   registry: "your-registry.example.com"   # self-built / private mirror
+#   repository: "cubeplex"
+#   backend:  { tag: "<YYMMDD>-<branch>-<short-sha>" }
+#   frontend: { tag: "<YYMMDD>-<branch>-<short-sha>" }
 
 backend:
   secrets:

@@ -36,7 +36,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $reg := .Values.image.registry -}}
 {{- $repo := .Values.image.repository -}}
 {{- $name := .Values.image.backend.name -}}
-{{- $tag := required "image.backend.tag must be set (filled by build-and-push.sh into values.local.yaml)" .Values.image.backend.tag -}}
+{{- $tag := .Values.image.backend.tag | default (printf "v%s" .Chart.AppVersion) -}}
 {{- printf "%s/%s/%s:%s" $reg $repo $name $tag -}}
 {{- end -}}
 
@@ -44,7 +44,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $reg := .Values.image.registry -}}
 {{- $repo := .Values.image.repository -}}
 {{- $name := .Values.image.frontend.name -}}
-{{- $tag := required "image.frontend.tag must be set" .Values.image.frontend.tag -}}
+{{- $tag := .Values.image.frontend.tag | default (printf "v%s" .Chart.AppVersion) -}}
 {{- printf "%s/%s/%s:%s" $reg $repo $name $tag -}}
 {{- end -}}
 

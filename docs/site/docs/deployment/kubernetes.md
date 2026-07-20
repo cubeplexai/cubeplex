@@ -159,30 +159,28 @@ Each section below is documented in the order you fill it in. Anything under
 for the full field reference and the merge rules, see the
 [backend configuration reference](./backend-config.md).
 
-### 4.1 Image tags (required)
+### 4.1 Image tags (optional)
 
-`image.registry` / `image.repository` already default to `ghcr.io` /
-`cubeplexai`, so a standard install only sets the tag to a release version
-(see the [releases page](https://github.com/cubeplexai/cubeplex/releases)):
+`image.registry` / `image.repository` default to `ghcr.io` / `cubeplexai`, and
+the tag defaults to the chart's `appVersion` — so an installed release chart
+already points at the matching images, and you can skip this section entirely.
+Set `image` only to override:
 
 ```yaml
 image:
-  backend:
-    tag: "v0.2.0"
-  frontend:
-    tag: "v0.2.0"
+  # Pin a different image version than the chart's appVersion:
+  backend:  { tag: "v0.2.0" }
+  frontend: { tag: "v0.2.0" }
 ```
 
-Only if you self-built into a private registry, also override its location:
+For a self-built / private-registry image, also set the location:
 
 ```yaml
 image:
   registry: "your-registry.example.com"
   repository: "cubeplex"
-  backend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"   # the tag build-and-push.sh produced
-  frontend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"
+  backend:  { tag: "<YYMMDD>-<branch>-<short-sha>" }   # build-and-push.sh output
+  frontend: { tag: "<YYMMDD>-<branch>-<short-sha>" }
 ```
 
 ### 4.2 Backend non-secret config
@@ -478,6 +476,29 @@ backend:
 
 ## 5. Install
 
+### Recommended: from the published chart
+
+Each release publishes the chart to GHCR as an OCI artifact — no repo checkout
+needed, just your `values.local.yaml`:
+
+```bash
+helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version 0.2.0 \
+  --namespace cubeplex --create-namespace \
+  --values values.local.yaml \
+  --wait --timeout 10m
+```
+
+Pick the chart version from the
+[releases page](https://github.com/cubeplexai/cubeplex/releases). The published
+chart bundles the infra templates and the OpenSandbox subchart, and its default
+image tags match the chart version — so you only supply `values.local.yaml`
+(grab the template from the repo or the release assets).
+
+### Alternative: from a repo checkout
+
+For a customized chart or a development build:
+
 ```bash
 deploy/kubernetes/scripts/helm-install.sh
 ```
@@ -485,6 +506,8 @@ deploy/kubernetes/scripts/helm-install.sh
 equivalent to:
 
 ```bash
+# vendor/opensandbox has nested subcharts, so build its deps first
+helm dependency update deploy/kubernetes/charts/cubeplex/vendor/opensandbox
 helm dependency update deploy/kubernetes/charts/cubeplex
 helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   --namespace cubeplex --create-namespace \
@@ -492,9 +515,6 @@ helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
   --wait --timeout 10m
 ```
-
-`helm dependency update` re-packages `charts/opensandbox-0.2.0.tgz` from
-`vendor/opensandbox/`, so the `vendor/` directory must be present.
 
 ### Uninstall
 
