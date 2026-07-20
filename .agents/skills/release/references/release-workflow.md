@@ -23,9 +23,11 @@ deploy/images/sandbox/VERSION
 ```
 
 If the sandbox Dockerfile, fonts, browser/runtime dependencies, or other image
-inputs change, increment this value. A sandbox release publishes
-`sandbox-v<version>` and never overwrites an existing version tag. An ordinary
-application release keeps the existing sandbox version.
+inputs change, increment this value. A sandbox build publishes
+`sandbox-v<version>` and never overwrites an existing version tag. At release,
+`release.yml` promotes that image to `cubeplex-sandbox:v<semver>` (a tag alias,
+no rebuild) so every service image shares the one application version; an
+ordinary application release reuses the existing sandbox build.
 
 ## Release preparation PR
 
@@ -104,12 +106,13 @@ For `v0.3.0`, the two triggered workflows do:
 2. reads the sandbox version from `deploy/images/sandbox/VERSION`;
 3. polls for `ghcr.io/.../cubeplex-backend:v0.3.0` and `cubeplex-frontend:v0.3.0` (up to ~30 min);
 4. records their digests in the manifest;
-5. waits for the corresponding `sandbox-v<version>` image;
-6. creates `release-manifest-v0.3.0.yaml` and uploads it to the GitHub Release.
+5. waits for the `sandbox-v<version>` image, then promotes it to `cubeplex-sandbox:v0.3.0` (tag alias, no rebuild);
+6. packages and pushes the Helm chart to `oci://ghcr.io/.../charts/cubeplex:0.3.0`;
+7. creates `release-manifest-v0.3.0.yaml` and uploads it to the GitHub Release.
 
 The application release tags are aliases for the already built image manifests,
-not new builds. The manifest records backend/frontend image digests and the
-selected sandbox version tag.
+not new builds — the sandbox is likewise promoted, not rebuilt. The manifest
+records the backend/frontend/sandbox image digests.
 
 Published application and sandbox tags contain `linux/amd64` and `linux/arm64`
 manifests. Any `unknown/unknown` entry shown by GHCR is a provenance attestation,

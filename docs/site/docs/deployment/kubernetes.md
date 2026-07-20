@@ -76,9 +76,11 @@ ghcr.io/cubeplexai/cubeplex-backend:<version>
 ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
-A `v<semver>` release tag (pushed by `.github/workflows/images.yml`) publishes
-both, plus `cubeplex-egress-webhook` and `cubeplex-sandbox` (the latter as
-`sandbox-v<version>`). Each tag is a multi-platform manifest for `linux/amd64`
+A `v<semver>` release tag publishes all four images at that version —
+`cubeplex-backend`, `cubeplex-frontend`, `cubeplex-egress-webhook`, and
+`cubeplex-sandbox` (the first three built by `images.yml`; the sandbox promoted
+to the same tag by `release.yml`, see below). Each tag is a multi-platform
+manifest for `linux/amd64`
 and `linux/arm64`. GHCR may also show an `unknown/unknown` provenance entry —
 metadata, not a runnable platform. Pick a version from the
 [releases page](https://github.com/cubeplexai/cubeplex/releases) and set it as
@@ -133,15 +135,14 @@ hits Debian, PyPI, npm, or GitHub slowly, override at build time:
 
 Empty / unset → upstream.
 
-### Release sandbox selection
+### Sandbox image versioning
 
-The sandbox version is stored in `deploy/images/sandbox/VERSION`. Increment
-it when sandbox contents change. The sandbox workflow publishes both
-`<YYMMDD>-<branch>-<short-sha>` and `sandbox-v<version>`; the release
-workflow records the corresponding `sandbox-v<version>` reference in the
-release manifest. The release workflow does not download a candidate
-sandbox image or run a runtime compatibility test — the sandbox E2E/nightly
-workflow remains separate.
+The sandbox image is heavy, so it's built separately (`sandbox-image.yml`) only
+when its inputs change, tracked by `deploy/images/sandbox/VERSION` and tagged
+`sandbox-v<version>`. At release, `release.yml` **promotes** that built image to
+`cubeplex-sandbox:v<semver>` (a tag alias, no rebuild) so all four service
+images share one release version. The chart's default sandbox image is
+therefore `cubeplex-sandbox:v<appVersion>`, matching the rest.
 
 ## 4. Author `values.local.yaml`
 
@@ -260,7 +261,7 @@ backend:
   secrets:
     sandbox:
       domain: "<opensandbox-host>:8090"  # OpenSandbox API host:port (no scheme)
-      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+      # image defaults to cubeplex-sandbox:v<chart version>; set only to override
       api_key: "..."
   sandbox:
     enabled: true                       # flip this on if using an external sandbox

@@ -54,7 +54,8 @@ backend:
         #   api_key: "sk-..."
     sandbox:
       domain: "cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090"
-      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
+      # image defaults to ghcr.io/cubeplexai/cubeplex-sandbox:v<chart appVersion>;
+      # set it only to pin a different sandbox image.
       api_key: "REPLACE_ME"
 
 # Flip backend.sandbox.enabled if you're using an external sandbox endpoint
