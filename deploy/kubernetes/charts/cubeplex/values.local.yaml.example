@@ -8,10 +8,13 @@
 #          -f values.yaml -f values.local.yaml
 
 image:
+  # A release version from https://github.com/cubeplexai/cubeplex/releases.
+  # (For a self-built image, use the <YYMMDD>-<branch>-<short-sha> tag
+  # build-and-push.sh produced and override image.registry / image.repository.)
   backend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"   # filled by build-and-push.sh
+    tag: "v0.2.0"
   frontend:
-    tag: "<YYMMDD>-<branch>-<short-sha>"
+    tag: "v0.2.0"
 
 backend:
   secrets:
@@ -37,7 +40,7 @@ backend:
           api: "openai-completions"
     sandbox:
       domain: "cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090"
-      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
+      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
       api_key: "REPLACE_ME"
 
 # Flip backend.sandbox.enabled if you're using an external sandbox endpoint
@@ -60,17 +63,16 @@ rustfs:
     secretKey: "REPLACE_ME"
 
 # ── Egress secret-injection (opt-in) ─────────────────────────────────────
-# Enables the MITM webhook + backend mTLS exchange. Requires building one
-# more image (egress-webhook) — append `egress-webhook` to TARGET when
-# running build-and-push.sh:
-#   TARGET="backend frontend egress-webhook" \
-#     deploy/kubernetes/scripts/build-and-push.sh
+# Enables the MITM webhook + backend mTLS exchange. The egress-webhook image
+# ships with each GHCR release (self-builders append `egress-webhook` to
+# TARGET when running build-and-push.sh).
 #
 # egress:
 #   enabled: true
 #   sandboxNamespace: "opensandbox-system"
 #   webhook:
 #     image:
-#       tag: "<YYMMDD>-<branch>-<short-sha>" # same tag the script just pushed
+#       tag: "v0.2.0"                        # same release version as backend/frontend
 #     # MUST match opensandbox-server's configured egress.image exactly:
-#     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+#     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
+#     egressImage: "opensandbox/egress:v1.0.12"

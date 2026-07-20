@@ -9,8 +9,9 @@
 #
 # Environment variables (all optional):
 #
-#   REGISTRY            registry host:port (default 192.168.1.101:8050)
-#   REPO                registry second-level namespace (default library)
+#   REGISTRY            registry host:port your cluster nodes can pull from
+#                       (default localhost:5000 — set this to your own registry)
+#   REPO                registry second-level namespace (default cubeplex)
 #   TAG                 image tag (default <YYMMDD>-<branch>-<short-sha>; also accepted
 #                       as the first positional arg)
 #   TARGET              "backend", "frontend", "sandbox", or
@@ -35,8 +36,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-REGISTRY="${REGISTRY:-192.168.1.101:8050}"
-REPO="${REPO:-library}"
+REGISTRY="${REGISTRY:-localhost:5000}"
+REPO="${REPO:-cubeplex}"
 TAG="${1:-$(scripts/image-tag.sh)}"
 TARGETS="${TARGET:-backend frontend}"
 # Add "sandbox" or "egress-webhook" to TARGET when publishing those images.

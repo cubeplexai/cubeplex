@@ -14,7 +14,7 @@ images as the Kubernetes deployment mode — only the orchestration differs.
 | Item | Requirement |
 |---|---|
 | Linux host with Docker engine | ≥ 24, with `docker compose` v2 |
-| Outbound network to your image registry | wherever your images are hosted/pushed |
+| Outbound network to pull images | `ghcr.io` and Docker Hub (or your own mirror) |
 | LLM provider credentials | at least one — see [LLM provider configuration](./overview.md#llm-provider-configuration) |
 | Open ports on the host | one for the frontend (default 3000), optionally one for the backend (default 8000) |
 
@@ -40,18 +40,38 @@ All inter-service communication uses Docker DNS (for example, the backend
 reaches Postgres at `postgres:5432`). The host only sees the frontend port
 (and optionally the backend port, for direct API access).
 
-## 3. Build images
+## 3. Choose images
 
-For GitHub releases, use the immutable image tag from the release manifest.
-For a local or private-registry build, use the Kubernetes mode's build
-script — the backend and frontend images are identical either way:
+The compose stack defaults to the **public prebuilt release images on GHCR** —
+no build step required:
+
+```
+ghcr.io/cubeplexai/cubeplex-backend:<version>
+ghcr.io/cubeplexai/cubeplex-frontend:<version>
+```
+
+Pick a version tag from the
+[releases page](https://github.com/cubeplexai/cubeplex/releases) — backend and
+frontend share one app version, e.g. `v0.2.0` — and set it as `BACKEND_TAG` /
+`FRONTEND_TAG` in the next step. `IMAGE_REGISTRY` / `IMAGE_REPO` already default
+to `ghcr.io` / `cubeplexai`, so you don't need to change them for a standard
+install. GHCR release images are public — no `docker login` needed.
+
+<details>
+<summary>Build your own images instead (private registry / air-gapped / patched)</summary>
+
+Use the Kubernetes mode's build script — the backend and frontend images are
+identical either way:
 
 ```bash
 deploy/kubernetes/scripts/build-and-push.sh
-# pushes to ${REGISTRY:-192.168.1.101:8050}/${REPO:-library}/cubeplex-{backend,frontend}:<YYMMDD>-<branch>-<short-sha>
+# pushes to ${REGISTRY}/${REPO}/cubeplex-{backend,frontend}:<YYMMDD>-<branch>-<short-sha>
 ```
 
-Then, in `.env`, set `BACKEND_TAG` and `FRONTEND_TAG` to that immutable tag.
+Then point `IMAGE_REGISTRY`, `IMAGE_REPO`, `BACKEND_TAG`, and `FRONTEND_TAG` in
+`.env` at that build.
+
+</details>
 
 ## 4. Configure (`.env` + two YAML files)
 
@@ -73,10 +93,10 @@ $EDITOR .env
 Required:
 
 ```dotenv
-IMAGE_REGISTRY=192.168.1.101:8050
-IMAGE_REPO=library
-BACKEND_TAG=<YYMMDD>-<branch>-<short-sha>
-FRONTEND_TAG=<YYMMDD>-<branch>-<short-sha>
+IMAGE_REGISTRY=ghcr.io
+IMAGE_REPO=cubeplexai
+BACKEND_TAG=v0.2.0        # a release version from the releases page
+FRONTEND_TAG=v0.2.0
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
@@ -219,9 +239,14 @@ connection is plain HTTP.
 container, so Next.js proxies `/api/*` server-side over the Docker network.
 If you changed service names, update that env var too.
 
-### Image pull denied
+### Image pull fails
 
-If your registry is private:
+The default GHCR release images are public — no login needed. Check that
+`BACKEND_TAG` / `FRONTEND_TAG` name a real release tag (see the
+[releases page](https://github.com/cubeplexai/cubeplex/releases)); a
+`manifest unknown` / `not found` error means the tag doesn't exist.
+
+If you pointed `IMAGE_REGISTRY` at a **private** mirror instead:
 
 ```bash
 docker login ${IMAGE_REGISTRY}
@@ -283,7 +308,7 @@ $EDITOR config/opensandbox.toml          # set api_key, eip/host_ip, execd_image
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # Docker DNS name from this overlay
-#     image:   "<your sandbox image>"      # e.g. cubeplex-sandbox:24.04-...
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
 #     api_key: "<same as [server].api_key in opensandbox.toml>"
 
 # 3. backend non-secret — enable sandbox + force server proxy

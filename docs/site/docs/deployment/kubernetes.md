@@ -16,15 +16,18 @@ an existing Kubernetes cluster.
 | Kubernetes | ≥ 1.21 | kubeadm / k3s / managed clusters all fine |
 | Ingress controller | ingress-nginx recommended | the chart uses `ingressClassName: nginx` |
 | StorageClass | a dynamic provisioner | the chart can create `cubeplex-work-hostpath` on top of OpenEBS hostpath, or you can point at an existing one |
-| Docker registry | writable + pullable from cluster nodes | default `192.168.1.101:8050/library` — override for your environment |
+| Image pull access | cluster nodes reach `ghcr.io` + Docker Hub | default images are the public GHCR releases; only needs a private registry if you self-build |
 | Helm | ≥ 3.9 | dependency update + install |
 | LLM provider credentials | at least one | see [LLM provider configuration](./overview.md#llm-provider-configuration) |
 
 On the **operator workstation** (not the cluster):
 
+- `helm`, `kubectl` — installs the chart
+
+Only needed if you build your own images instead of using the GHCR releases:
+
 - `uv` — generates `requirements-frozen.txt`, used by `build-and-push.sh`
 - `docker` — builds the images
-- `helm`, `kubectl` — installs the chart
 
 ## 2. Architecture
 
@@ -62,29 +65,35 @@ and a docling-serve document parser
 ([§4.11](#411-docling-document-parsing-optional), Deployment + models PVC).
 Both are off by default.
 
-## 3. Build and push images
+## 3. Images
 
-For GitHub-hosted builds, `.github/workflows/images.yml` publishes backend
-and frontend images to GHCR. A `main` build uses the commit date, sanitized
-branch name, and short commit SHA:
+The chart defaults to the **public prebuilt release images on GHCR** — the
+cluster nodes pull them directly, so there is no operator build step for a
+standard install:
 
 ```text
-ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-<branch>-<short-sha>
-ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-<branch>-<short-sha>
+ghcr.io/cubeplexai/cubeplex-backend:<version>
+ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
-Each published tag is a multi-platform manifest for `linux/amd64` and
-`linux/arm64`. GHCR may also display an `unknown/unknown` provenance entry;
-it's metadata, not a runnable image platform.
+A `v<semver>` release tag (pushed by `.github/workflows/images.yml`) publishes
+both, plus `cubeplex-egress-webhook` and `cubeplex-sandbox` (the latter as
+`sandbox-v<version>`). Each tag is a multi-platform manifest for `linux/amd64`
+and `linux/arm64`. GHCR may also show an `unknown/unknown` provenance entry —
+metadata, not a runnable platform. Pick a version from the
+[releases page](https://github.com/cubeplexai/cubeplex/releases) and set it as
+the image tag in §4.1. Use a real release tag, never `latest`.
 
-Formal `v<semver>` releases promote the same image digests and publish a
-release manifest as a GitHub Release asset. Production deployments must use
-the commit or release tag from that manifest, not `latest`.
+### Build your own images (optional)
 
-For a local build or a private registry, use the script below.
+Only needed for a private registry, an air-gapped cluster, or a patched image.
+The script pushes to a registry **your cluster nodes can pull from** — set
+`REGISTRY` / `REPO` to your own (there is no working public default for a push
+target).
 
 ```bash
-deploy/kubernetes/scripts/build-and-push.sh
+REGISTRY=your-registry.example.com REPO=cubeplex \
+  deploy/kubernetes/scripts/build-and-push.sh
 ```
 
 The script:
@@ -102,8 +111,8 @@ The script:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `REGISTRY` | `192.168.1.101:8050` | Registry host:port. |
-| `REPO` | `library` | Second-level namespace inside the registry. |
+| `REGISTRY` | `localhost:5000` | Registry host:port — set to your own. |
+| `REPO` | `cubeplex` | Second-level namespace inside the registry. |
 | `TAG` | `<YYMMDD>-<branch>-<short-sha>` | Image tag (also accepted as positional arg 1). |
 | `TARGET` | `backend frontend` | Space-separated targets; also supports `sandbox` and `egress-webhook`. |
 | `PUSH_LATEST` | `false` | Additionally push `latest` when set to `true`. |
@@ -149,23 +158,28 @@ Each section below is documented in the order you fill it in.
 
 ### 4.1 Image tags (required)
 
+`image.registry` / `image.repository` already default to `ghcr.io` /
+`cubeplexai`, so a standard install only sets the tag to a release version
+(see the [releases page](https://github.com/cubeplexai/cubeplex/releases)):
+
 ```yaml
 image:
   backend:
-    tag: "9ab4005f"     # the git sha that build-and-push.sh just produced
+    tag: "v0.2.0"
   frontend:
-    tag: "9ab4005f"
+    tag: "v0.2.0"
 ```
 
-If you push to a non-default registry, also override:
+Only if you self-built into a private registry, also override its location:
 
 ```yaml
 image:
-  registry: "harbor.example.com"
+  registry: "your-registry.example.com"
   repository: "cubeplex"
   backend:
-    name: "backend"
-    tag: "v1.0.0"
+    tag: "<YYMMDD>-<branch>-<short-sha>"   # the tag build-and-push.sh produced
+  frontend:
+    tag: "<YYMMDD>-<branch>-<short-sha>"
 ```
 
 ### 4.2 Backend non-secret config
@@ -244,8 +258,8 @@ The sandbox is the container runtime where agent tools (bash, file_read,
 backend:
   secrets:
     sandbox:
-      domain: "39.99.248.80:18080"     # OpenSandbox API host:port (no scheme)
-      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
+      domain: "<opensandbox-host>:8090"  # OpenSandbox API host:port (no scheme)
+      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
       api_key: "..."
   sandbox:
     enabled: true                       # flip this on if using an external sandbox
@@ -353,9 +367,11 @@ rustfs:
 ### 4.9 OpenSandbox subchart (optional)
 
 The chart can bundle alibaba's OpenSandbox umbrella (controller + server)
-under the same release. Its execd / egress images come from
-`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com`, which the cluster nodes
-need to be able to pull.
+under the same release. Its controller / server / execd / egress images default
+to Docker Hub (`opensandbox/*`), which the cluster nodes need to be able to
+pull. For mainland-China clusters, override each with the
+`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/` prefix (same
+image names and tags) in the vendored subchart values.
 
 ```yaml
 opensandbox:
@@ -384,14 +400,8 @@ Moving pieces the chart wires up:
 | Backend mTLS server cert + mTLS listener on `:8443` | cubeplex ns |
 | Updated backend Service exposing `:8443` | cubeplex ns |
 
-Build the extra image:
-
-```bash
-TARGET="backend frontend egress-webhook" \
-  deploy/kubernetes/scripts/build-and-push.sh
-```
-
-Then turn it on in `values.local.yaml`:
+The `cubeplex-egress-webhook` image ships with each GHCR release, so no extra
+build is needed. Turn the feature on in `values.local.yaml`:
 
 ```yaml
 egress:
@@ -401,10 +411,14 @@ egress:
   sandboxNamespace: "opensandbox-system"
   webhook:
     image:
-      tag: "<git-sha>"          # same tag build-and-push.sh just produced
+      tag: "v0.2.0"             # same release version as backend/frontend
     # MUST exactly match opensandbox-server's configured egress.image.
-    egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+    # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
+    egressImage: "opensandbox/egress:v1.0.12"
 ```
+
+(Self-building instead? Add `egress-webhook` to `TARGET` when running
+`build-and-push.sh` and use that tag.)
 
 Notes:
 
@@ -600,11 +614,11 @@ Abridged tree of chart values:
 
 ```yaml
 image:
-  registry: "192.168.1.101:8050"
-  repository: "library"
+  registry: "ghcr.io"
+  repository: "cubeplexai"
   pullPolicy: "IfNotPresent"
-  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required
-  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required
+  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required (e.g. v0.2.0)
+  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required (e.g. v0.2.0)
 
 backend:
   replicaCount: 1
@@ -645,7 +659,8 @@ storageClass:
 
 postgres:
   enabled: true
-  image: "postgres:16-alpine"
+  # postgres:18 + PGroonga + pgvector; required by conversation-search
+  image: "cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2"
   auth: { username, database, password }
   persistence: { storageClass, size }
   resources: { ... }
@@ -684,8 +699,8 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "<git-sha>" }
-  frontend: { tag: "<git-sha>" }
+  backend:  { tag: "v0.2.0" }
+  frontend: { tag: "v0.2.0" }
 
 backend:
   configOverrides:

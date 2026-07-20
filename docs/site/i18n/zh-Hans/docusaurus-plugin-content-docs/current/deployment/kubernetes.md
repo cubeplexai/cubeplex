@@ -16,15 +16,18 @@ Kubernetes 集群中。
 | Kubernetes | ≥ 1.21 | kubeadm / k3s / 各类托管集群均可 |
 | Ingress controller | 推荐 ingress-nginx | chart 使用 `ingressClassName: nginx` |
 | StorageClass | 动态供给的 provisioner | chart 可以基于 OpenEBS hostpath 创建 `cubeplex-work-hostpath`，也可以指向已有的 StorageClass |
-| Docker registry | 可写入 + 集群节点可拉取 | 默认 `192.168.1.101:8050/library`——按你的环境覆盖 |
+| 镜像拉取访问 | 集群节点可访问 `ghcr.io` + Docker Hub | 默认镜像是 GHCR 上的公开发布版；仅当自己构建时才需要私有 registry |
 | Helm | ≥ 3.9 | dependency update + install |
 | LLM provider 凭证 | 至少一个 | 见 [LLM Provider 配置](./overview.md#llm-provider-配置) |
 
 **操作节点**（不是集群节点）上需要安装：
 
+- `helm`、`kubectl`——安装 chart
+
+仅当你自己构建镜像（而不用 GHCR 发布版）时才需要：
+
 - `uv`——生成 `requirements-frozen.txt`，供 `build-and-push.sh` 使用
 - `docker`——构建镜像
-- `helm`、`kubectl`——安装 chart
 
 ## 2. 部署架构
 
@@ -60,29 +63,32 @@ Namespace: cubeplex
 （[§4.11](#411-docling-文档解析可选)，一个 Deployment + models PVC）。两者
 默认都是关闭的。
 
-## 3. 构建并推送镜像
+## 3. 镜像
 
-对于 GitHub 托管的构建，`.github/workflows/images.yml` 会把 backend 和
-frontend 镜像发布到 GHCR。`main` 分支的构建使用提交日期、经过处理的分支名
-和短 commit SHA：
+chart 默认使用 **GHCR 上的公开预构建发布镜像**——集群节点直接拉取，标准
+安装无需任何操作节点构建步骤：
 
 ```text
-ghcr.io/cubeplexai/cubeplex-backend:<YYMMDD>-<branch>-<short-sha>
-ghcr.io/cubeplexai/cubeplex-frontend:<YYMMDD>-<branch>-<short-sha>
+ghcr.io/cubeplexai/cubeplex-backend:<version>
+ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
-每个发布的 tag 都是同时包含 `linux/amd64` 和 `linux/arm64` 的多平台
-manifest。GHCR 上可能还会显示一个 `unknown/unknown` 的 provenance
-条目——它只是元数据，不是可运行的镜像平台。
+一个 `v<semver>` release tag（由 `.github/workflows/images.yml` 推送）会同时
+发布这两个，外加 `cubeplex-egress-webhook` 和 `cubeplex-sandbox`（后者为
+`sandbox-v<version>`）。每个 tag 都是同时包含 `linux/amd64` 和 `linux/arm64`
+的多平台 manifest。GHCR 上可能还会显示一个 `unknown/unknown` 的 provenance
+条目——只是元数据，不是可运行平台。从[发布页](https://github.com/cubeplexai/cubeplex/releases)
+选一个版本，在 §4.1 设为镜像 tag。请使用真实的 release tag，不要用 `latest`。
 
-正式的 `v<semver>` release 会将相同的镜像 digest 提升为发布版本，并把
-release manifest 作为 GitHub Release 附件发布。生产环境部署必须使用该
-manifest 中的 commit tag 或 release tag，不能用 `latest`。
+### 自己构建镜像（可选）
 
-如果要本地构建或推送到私有 registry，用下面的脚本。
+仅在私有 registry、离线集群或打过补丁的镜像场景下需要。脚本推送到**集群节点
+能拉取的** registry——把 `REGISTRY` / `REPO` 设为你自己的（push 目标没有可用
+的公开默认值）。
 
 ```bash
-deploy/kubernetes/scripts/build-and-push.sh
+REGISTRY=your-registry.example.com REPO=cubeplex \
+  deploy/kubernetes/scripts/build-and-push.sh
 ```
 
 脚本会：
@@ -99,8 +105,8 @@ deploy/kubernetes/scripts/build-and-push.sh
 
 | 变量 | 默认值 | 用途 |
 |---|---|---|
-| `REGISTRY` | `192.168.1.101:8050` | registry 主机:端口。 |
-| `REPO` | `library` | registry 内的二级命名空间。 |
+| `REGISTRY` | `localhost:5000` | registry 主机:端口——设为你自己的。 |
+| `REPO` | `cubeplex` | registry 内的二级命名空间。 |
 | `TAG` | `<YYMMDD>-<branch>-<short-sha>` | 镜像 tag（也可以作为脚本的第 1 个 positional 参数）。 |
 | `TARGET` | `backend frontend` | 空格分隔的目标列表；也支持 `sandbox` 和 `egress-webhook`。 |
 | `PUSH_LATEST` | `false` | 设为 `true` 时额外推送 `latest`。 |
@@ -144,23 +150,27 @@ $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 
 ### 4.1 镜像 tag（必填）
 
+`image.registry` / `image.repository` 已默认为 `ghcr.io` / `cubeplexai`，
+标准安装只需把 tag 设为一个 release 版本（见[发布页](https://github.com/cubeplexai/cubeplex/releases)）：
+
 ```yaml
 image:
   backend:
-    tag: "9ab4005f"     # build-and-push.sh 刚刚生成的 git sha
+    tag: "v0.2.0"
   frontend:
-    tag: "9ab4005f"
+    tag: "v0.2.0"
 ```
 
-如果推送到非默认的 registry，也要覆盖：
+仅当你自己构建并推送到私有 registry 时，才额外覆盖其位置：
 
 ```yaml
 image:
-  registry: "harbor.example.com"
+  registry: "your-registry.example.com"
   repository: "cubeplex"
   backend:
-    name: "backend"
-    tag: "v1.0.0"
+    tag: "<YYMMDD>-<branch>-<short-sha>"   # build-and-push.sh 生成的 tag
+  frontend:
+    tag: "<YYMMDD>-<branch>-<short-sha>"
 ```
 
 ### 4.2 Backend 非密钥配置
@@ -236,8 +246,8 @@ sandbox 是 agent 工具调用（bash、file_read 等）实际执行的容器运
 backend:
   secrets:
     sandbox:
-      domain: "39.99.248.80:18080"     # OpenSandbox API 地址（不带 schema）
-      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
+      domain: "<opensandbox-host>:8090"  # OpenSandbox API 地址（不带 schema）
+      image: "ghcr.io/cubeplexai/cubeplex-sandbox:sandbox-v0.1.0"
       api_key: "..."
   sandbox:
     enabled: true                       # 使用外部 sandbox 时打开
@@ -344,8 +354,11 @@ rustfs:
 ### 4.9 OpenSandbox subchart（可选）
 
 chart 可以在同一个 release 下打包 alibaba 的 OpenSandbox umbrella
-（controller + server）。它的 execd / egress 镜像来自
-`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com`，集群节点需要能拉取到。
+（controller + server）。它的 controller / server / execd / egress 镜像默认
+走 Docker Hub（`opensandbox/*`），集群节点需要能拉取到。国内集群可在 vendored
+子 chart 的 values 中，把每个镜像改用
+`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/` 前缀（镜像名和
+tag 相同）。
 
 ```yaml
 opensandbox:
@@ -372,14 +385,8 @@ chart 会自动配置以下组件：
 | backend mTLS server 证书 + `:8443` 上的 mTLS listener | cubeplex 命名空间 |
 | 暴露 `:8443` 的 backend Service | cubeplex 命名空间 |
 
-构建额外镜像：
-
-```bash
-TARGET="backend frontend egress-webhook" \
-  deploy/kubernetes/scripts/build-and-push.sh
-```
-
-然后在 `values.local.yaml` 中打开：
+`cubeplex-egress-webhook` 镜像随每个 GHCR release 一起发布，无需额外构建。
+在 `values.local.yaml` 中打开：
 
 ```yaml
 egress:
@@ -389,10 +396,14 @@ egress:
   sandboxNamespace: "opensandbox-system"
   webhook:
     image:
-      tag: "<git-sha>"          # build-and-push.sh 刚刚生成的同一个 tag
+      tag: "v0.2.0"             # 与 backend/frontend 相同的 release 版本
     # 必须与 opensandbox-server 配置的 egress.image 完全一致。
-    egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+    # 国内镜像源：sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
+    egressImage: "opensandbox/egress:v1.0.12"
 ```
+
+（自己构建？运行 `build-and-push.sh` 时把 `egress-webhook` 加入 `TARGET`，
+并使用该 tag。）
 
 补充说明：
 
@@ -586,8 +597,8 @@ chart values 的精简树状结构：
 
 ```yaml
 image:
-  registry: "192.168.1.101:8050"
-  repository: "library"
+  registry: "ghcr.io"
+  repository: "cubeplexai"
   pullPolicy: "IfNotPresent"
   backend:  { name: "cubeplex-backend",  tag: "" }     # 必填
   frontend: { name: "cubeplex-frontend", tag: "" }     # 必填
@@ -631,7 +642,8 @@ storageClass:
 
 postgres:
   enabled: true
-  image: "postgres:16-alpine"
+  # postgres:18 + PGroonga + pgvector；conversation-search 必需
+  image: "cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2"
   auth: { username, database, password }
   persistence: { storageClass, size }
   resources: { ... }
@@ -670,8 +682,8 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "<git-sha>" }
-  frontend: { tag: "<git-sha>" }
+  backend:  { tag: "v0.2.0" }
+  frontend: { tag: "v0.2.0" }
 
 backend:
   configOverrides:
