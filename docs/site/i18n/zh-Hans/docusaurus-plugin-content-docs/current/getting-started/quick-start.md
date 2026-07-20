@@ -23,6 +23,8 @@ import TabItem from '@theme/TabItem';
 </TabItem>
 <TabItem value="self-hosted" label="自托管">
 
+如果 CubePlex 还没有安装，请先查看[部署指南](../deployment/overview.md)。
+
 1. 打开管理员提供的 CubePlex URL。
 2. 使用电子邮箱和密码注册。如果启用了邮箱验证，请输入发送到收件箱的一次性验证码。
 3. 如果你是 **第一个用户**，初始设置向导会引导你为组织命名、选择 slug，并创建第一个工作区。你将成为该组织的所有者。

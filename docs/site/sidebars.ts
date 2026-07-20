@@ -85,6 +85,15 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Deployment',
+      items: [
+        'deployment/overview',
+        'deployment/docker-compose',
+        'deployment/kubernetes',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Administration',
       items: [
         'admin/models',

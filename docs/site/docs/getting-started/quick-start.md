@@ -23,6 +23,8 @@ Get from zero to your first AI conversation in a few minutes.
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">
 
+If CubePlex isn't installed yet, see the [Deployment guide](../deployment/overview.md) first.
+
 1. Open the CubePlex URL your administrator provided.
 2. Register with your email and password. If email verification is enabled, enter the one-time code sent to your inbox.
 3. If you are the **first user**, the onboarding wizard has you name the organization, choose a slug, and create your first workspace. You become the organization's owner.

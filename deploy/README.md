@@ -4,10 +4,12 @@ Artifacts for deploying cubeplex to your own infrastructure.
 
 ## Pick a target
 
-| Mode | Status | Doc |
+Full install guides live on the docs site:
+
+| Mode | Status | Guide |
 |---|---|---|
-| **Kubernetes (Helm)** | available | [kubernetes/INSTALL.md](kubernetes/INSTALL.md) (English) / [kubernetes/INSTALL.zh.md](kubernetes/INSTALL.zh.md) (中文) |
-| **docker-compose** | available | [docker-compose/INSTALL.md](docker-compose/INSTALL.md) |
+| **Kubernetes (Helm)** | available | [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes) (English) / [中文](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes) |
+| **docker-compose** | available | [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose) |
 
 Both modes share the same backend/frontend container images. Pull request and
 `main` image builds are handled by `.github/workflows/images.yml`; formal
