@@ -105,3 +105,13 @@ export interface TraceFilterValues {
   max_duration_ms?: number
   limit?: number
 }
+
+// Postgres-backed dropdown options for the filter bar (see /admin/traces
+// filter-options). `model` is NOT here - it is low-cardinality and sourced
+// from Tempo tag-values, where the value is its own label.
+export type FilterOptionKind = 'workspace' | 'user' | 'conversation'
+
+export interface FilterOption {
+  id: string
+  name: string
+}

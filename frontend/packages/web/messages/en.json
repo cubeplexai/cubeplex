@@ -251,7 +251,11 @@
       "from": "From",
       "to": "To",
       "minDurationMs": "Min duration (ms)",
-      "maxDurationMs": "Max duration (ms)"
+      "maxDurationMs": "Max duration (ms)",
+      "searchPlaceholder": "Search…",
+      "loadingOptions": "Loading…",
+      "noOptions": "No matches",
+      "clear": "Clear"
     },
     "columns": {
       "startTime": "Start",

@@ -251,7 +251,11 @@
       "from": "开始时间",
       "to": "结束时间",
       "minDurationMs": "最短时长 (ms)",
-      "maxDurationMs": "最长时长 (ms)"
+      "maxDurationMs": "最长时长 (ms)",
+      "searchPlaceholder": "搜索…",
+      "loadingOptions": "加载中…",
+      "noOptions": "无匹配项",
+      "clear": "清除"
     },
     "columns": {
       "startTime": "开始",
