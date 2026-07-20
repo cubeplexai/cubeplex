@@ -49,7 +49,7 @@ OpenAI, most cloud vendors, and self-hosted gateways (vLLM, LiteLLM, Ollama,
 ```yaml
 llm:
   # "<provider_name>/<model_id>" — provider_name must appear under providers.
-  default_model: "openai/gpt-4o"
+  default_model: "openai/gpt-5.6-terra"
   fallback_models:
     - "anthropic/claude-sonnet-4"
   providers:
@@ -59,8 +59,8 @@ llm:
       api_key: "sk-..."
       api: "openai-completions"
       models:
-        - id: "gpt-4o"
-          name: "GPT-4o"
+        - id: "gpt-5.6-terra"
+          name: "GPT-5.6 Terra"
           input: ["text", "image"]
           context_window: 128000
           max_tokens: 16384
@@ -93,15 +93,15 @@ Minimal viable configuration (one provider, one model):
 
 ```yaml
 llm:
-  default_model: "openai/gpt-4o"
+  default_model: "openai/gpt-5.6-terra"
   providers:
     openai:
       base_url: "https://api.openai.com/v1"
       api_key: "sk-..."
       api: "openai-completions"
       models:
-        - id: "gpt-4o"
-          name: "GPT-4o"
+        - id: "gpt-5.6-terra"
+          name: "GPT-5.6 Terra"
           input: ["text", "image"]
           context_window: 128000
           max_tokens: 16384
