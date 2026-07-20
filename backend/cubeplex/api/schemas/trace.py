@@ -123,4 +123,29 @@ class TagValuesResponse(BaseModel):
     values: list[str]
 
 
+class FilterOptionKind(StrEnum):
+    """Entity kinds the traces filter dropdown can list from Postgres.
+
+    `model` is intentionally absent - it is low-cardinality and sourced from
+    Tempo via ``tag-values`` (the value is its own label). These three are
+    Postgres-backed, org-scoped, and (for user/conversation) prefix-narrowed.
+    """
+
+    WORKSPACE = "workspace"
+    USER = "user"
+    CONVERSATION = "conversation"
+
+
+class FilterOption(BaseModel):
+    """One selectable entry: ``id`` is the filter value stored in the URL,
+    ``name`` is the human-readable label shown in the dropdown."""
+
+    id: str
+    name: str
+
+
+class FilterOptionsResponse(BaseModel):
+    options: list[FilterOption]
+
+
 SpanNode.model_rebuild()

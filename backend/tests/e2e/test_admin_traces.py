@@ -1,12 +1,21 @@
 """E2E for /api/v1/admin/traces routes."""
 
+import secrets
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+import pytest_asyncio
 
 from cubeplex.api.routes.v1 import admin_traces
 from cubeplex.api.schemas.trace import TraceSummary
+from cubeplex.models import Conversation, Role, User, Workspace
+from cubeplex.repositories import (
+    MembershipRepository,
+    OrganizationRepository,
+    WorkspaceRepository,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -176,3 +185,126 @@ async def test_detail_404_on_org_mismatch(admin_client, fake_tempo, fake_resolve
     client, _ws = admin_client
     resp = await client.get("/api/v1/admin/traces/t1")
     assert resp.status_code == 404
+
+
+# --- filter-options (Postgres-backed dropdown suggestions) --------------------
+
+
+@pytest_asyncio.fixture
+async def seeded_filter_options(
+    admin_client_with_user_id, db_session
+) -> tuple[httpx.AsyncClient, dict[str, str]]:
+    """Seed the admin's org + a foreign org with workspaces/conversations/users
+    so filter-options scoping and prefix tests have something to assert against.
+
+    Returns ``(client, labels)`` where ``labels`` maps a role to the seeded
+    human-readable name the test asserts on.
+    """
+    client, ws_id, user_id = admin_client_with_user_id
+    ws = await db_session.get(Workspace, ws_id)
+    assert ws is not None
+    org_id = ws.org_id
+
+    token = secrets.token_hex(4)
+    foreign_org = await OrganizationRepository(db_session).create(
+        name=f"Foreign Org {token}", slug=f"foreign-{token}"
+    )
+    foreign_ws = await WorkspaceRepository(db_session).create(
+        org_id=foreign_org.id, name="Foreign WS"
+    )
+    await WorkspaceRepository(db_session).create(org_id=org_id, name="Alpha WS")
+
+    # 3 alpha conversations so a `limit` cap is observable.
+    for title in ("Alpha Chat A", "Alpha Chat B", "Alpha Chat C"):
+        db_session.add(
+            Conversation(
+                title=title,
+                org_id=org_id,
+                workspace_id=ws_id,
+                creator_user_id=user_id,
+                has_messages=True,
+            )
+        )
+    db_session.add(
+        Conversation(
+            title="Foreign Chat",
+            org_id=foreign_org.id,
+            workspace_id=foreign_ws.id,
+            creator_user_id=user_id,
+            has_messages=True,
+        )
+    )
+
+    alpha_user = User(
+        email=f"alpha-{token}@example.com",
+        hashed_password="x",
+        display_name="Alpha User",
+    )
+    foreign_user = User(
+        email=f"foreign-{token}@example.com",
+        hashed_password="x",
+        display_name="Foreign User",
+    )
+    db_session.add(alpha_user)
+    db_session.add(foreign_user)
+    await db_session.commit()
+
+    await MembershipRepository(db_session).grant(
+        user_id=alpha_user.id, workspace_id=ws_id, role=Role.MEMBER
+    )
+    await MembershipRepository(db_session).grant(
+        user_id=foreign_user.id, workspace_id=foreign_ws.id, role=Role.MEMBER
+    )
+
+    return client, {
+        "alpha_ws": "Alpha WS",
+        "foreign_ws": "Foreign WS",
+        "foreign_chat": "Foreign Chat",
+        "alpha_user": "Alpha User",
+        "foreign_user": "Foreign User",
+    }
+
+
+async def test_filter_options_workspace_org_scoped(seeded_filter_options) -> None:
+    client, labels = seeded_filter_options
+    resp = await client.get("/api/v1/admin/traces/filter-options?kind=workspace")
+    assert resp.status_code == 200, resp.text
+    names = {o["name"] for o in resp.json()["options"]}
+    assert labels["alpha_ws"] in names
+    assert labels["foreign_ws"] not in names  # foreign org excluded
+
+
+async def test_filter_options_conversation_prefix_and_scoped(seeded_filter_options) -> None:
+    client, labels = seeded_filter_options
+    resp = await client.get("/api/v1/admin/traces/filter-options?kind=conversation&q=Alpha")
+    assert resp.status_code == 200, resp.text
+    titles = {o["name"] for o in resp.json()["options"]}
+    assert "Alpha Chat A" in titles
+    assert labels["foreign_chat"] not in titles  # foreign org excluded
+
+
+async def test_filter_options_conversation_limit_caps(seeded_filter_options) -> None:
+    client, _labels = seeded_filter_options
+    resp = await client.get("/api/v1/admin/traces/filter-options?kind=conversation&q=Alpha&limit=2")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["options"]) == 2  # 3 match, capped at limit
+
+
+async def test_filter_options_user_prefix_and_scoped(seeded_filter_options) -> None:
+    client, labels = seeded_filter_options
+    resp = await client.get("/api/v1/admin/traces/filter-options?kind=user&q=Alpha")
+    assert resp.status_code == 200, resp.text
+    names = {o["name"] for o in resp.json()["options"]}
+    assert labels["alpha_user"] in names
+    assert labels["foreign_user"] not in names  # foreign org excluded via membership join
+
+
+async def test_filter_options_rejects_unknown_kind(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/traces/filter-options?kind=robot")
+    assert resp.status_code == 422  # FastAPI StrEnum query validation
+
+
+async def test_filter_options_requires_admin(non_admin_client) -> None:
+    resp = await non_admin_client.get("/api/v1/admin/traces/filter-options?kind=workspace")
+    assert resp.status_code == 403
