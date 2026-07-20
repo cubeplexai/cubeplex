@@ -90,6 +90,7 @@ const sidebars: SidebarsConfig = {
         'deployment/overview',
         'deployment/docker-compose',
         'deployment/kubernetes',
+        'deployment/backend-config',
       ],
     },
     {

@@ -80,6 +80,9 @@ deploy/kubernetes/scripts/build-and-push.sh
 | `config/config.production.local.yaml` | 非密钥的运行时配置（模式、公开 URL、cookie 安全性、sandbox 开关）。挂载进 backend。 |
 | `config/config.production.secrets.yaml` | 密钥——JWT / CSRF / vault 密钥材料、基础设施密码（必须与 `.env` 一致）、LLM provider API key。挂载进 backend。 |
 
+本节只覆盖启动所需的 key。完整的后端配置字段、分层规则和环境变量映射，见
+[后端配置参考](./backend-config.md)。
+
 ### 4.1 `.env`
 
 ```bash

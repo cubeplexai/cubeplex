@@ -146,7 +146,9 @@ cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
 $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```
 
-下面按照填写顺序逐节说明。
+下面按照填写顺序逐节说明。`backend.configOverrides` / `backend.secrets` 下的
+任何内容都对应一个后端配置 key——完整字段参考和合并规则见
+[后端配置参考](./backend-config.md)。
 
 ### 4.1 镜像 tag（必填）
 
