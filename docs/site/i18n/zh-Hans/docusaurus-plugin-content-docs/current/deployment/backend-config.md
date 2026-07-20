@@ -228,8 +228,8 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # 在 context_window * ratio 处压缩
   keep_tail_tokens: 8000         # 逐字保留的近期 token
-  summary_provider: "deepseek"
-  summary_model: "deepseek-v4-flash"
+  summary_provider: "openai"     # 必须是你已配置的 provider
+  summary_model: "gpt-5.6-terra"
   max_summary_tokens: null       # null = cubepi 动态预算
   fallback_context_window: 128000
 ```

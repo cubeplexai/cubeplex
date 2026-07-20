@@ -238,8 +238,8 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # compact at context_window * ratio
   keep_tail_tokens: 8000         # recent tokens kept verbatim
-  summary_provider: "deepseek"
-  summary_model: "deepseek-v4-flash"
+  summary_provider: "openai"     # must be a provider you configured
+  summary_model: "gpt-5.6-terra"
   max_summary_tokens: null       # null = cubepi dynamic budget
   fallback_context_window: 128000
 ```
