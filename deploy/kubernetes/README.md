@@ -1,11 +1,11 @@
 # cubeplex on Kubernetes (Helm)
 
 One `helm upgrade --install` deploys the cubeplex backend, frontend, and
-the infrastructure they need (Postgres, Redis, MinIO, optionally the
+the infrastructure they need (Postgres, Redis, rustfs, optionally the
 alibaba OpenSandbox umbrella) into a single namespace.
 
-- **English install guide:** [INSTALL.md](INSTALL.md)
-- **中文安装指南:** [INSTALL.zh.md](INSTALL.zh.md)
+- **English install guide:** [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes)
+- **中文安装指南:** [cubeplex.ai/docs/zh-Hans/deployment/kubernetes](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes)
 
 ## Layout
 
@@ -48,4 +48,5 @@ deploy/kubernetes/scripts/smoke-test.sh
 deploy/kubernetes/scripts/e2e.sh
 ```
 
-See [INSTALL.md](INSTALL.md) for the full guide.
+See [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes)
+for the full guide.

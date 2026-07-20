@@ -3,12 +3,10 @@
 Single-host deployment of cubeplex (backend, frontend, Postgres, Redis,
 rustfs object store) with `docker compose up -d`.
 
-- **Install guide:** [INSTALL.md](INSTALL.md)
-- **Optional OpenSandbox overlay:** [OPENSANDBOX.md](OPENSANDBOX.md) — how
-  to add alibaba/OpenSandbox in docker runtime mode, and what cubeplex
-  features the docker runtime cannot serve (TL;DR: `secureAccess` is
-  rejected, so the current `manager.py` setting blocks sandbox creation
-  until that's made conditional).
+- **Install guide:** [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
+  — also covers the optional OpenSandbox sandbox-execution overlay (what it
+  deploys, and which cubeplex features docker runtime mode can and can't
+  serve).
 - Uses the **same backend / frontend images** as the kubernetes mode;
   build them once with `deploy/kubernetes/scripts/build-and-push.sh`.
 
@@ -47,4 +45,5 @@ deploy/docker-compose/scripts/smoke-test.sh
 deploy/docker-compose/scripts/e2e.sh
 ```
 
-See [INSTALL.md](INSTALL.md) for the field-by-field config reference.
+See [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
+for the field-by-field config reference.

@@ -19,8 +19,8 @@ integrations, task automation, and governed workspaces in one platform.
 
 Choose the deployment path that fits your environment:
 
-- **Docker Compose** for a single host: [installation guide](deploy/docker-compose/INSTALL.md)
-- **Kubernetes with Helm**: [installation guide](deploy/kubernetes/INSTALL.md)
+- **Docker Compose** for a single host: [installation guide](https://cubeplex.ai/docs/deployment/docker-compose)
+- **Kubernetes with Helm**: [installation guide](https://cubeplex.ai/docs/deployment/kubernetes)
 
 Both deployment modes use the same backend and frontend images. The deployment
 guides cover image builds, configuration, secrets, and verification.
