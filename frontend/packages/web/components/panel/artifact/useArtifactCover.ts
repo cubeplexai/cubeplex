@@ -15,9 +15,13 @@ interface CoverState {
   loading: boolean
 }
 
-export function useArtifactCover(artifact: Artifact, workspaceId: string): CoverState {
-  const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
-  const { id, conversation_id } = artifact
+export function useArtifactCover(
+  artifact: Artifact | null,
+  workspaceId: string | null,
+): CoverState {
+  const filename = artifact ? artifact.entry_file || artifact.path.split('/').pop() || '' : ''
+  const id = artifact?.id
+  const conversation_id = artifact?.conversation_id
 
   // Hooks FIRST — before any early return (rules-of-hooks).
   const [state, setState] = useState<CoverState>({
@@ -27,7 +31,7 @@ export function useArtifactCover(artifact: Artifact, workspaceId: string): Cover
   })
 
   useEffect(() => {
-    if (hasImageExt(filename)) return
+    if (!artifact || !workspaceId || hasImageExt(filename)) return
     let cancelled = false
     const url =
       `/api/v1/ws/${workspaceId}/conversations/${conversation_id}` +
@@ -54,6 +58,11 @@ export function useArtifactCover(artifact: Artifact, workspaceId: string): Cover
       cancelled = true
     }
   }, [id, conversation_id, artifact, workspaceId, filename])
+
+  // Still generating (no artifact) or no workspace context yet.
+  if (!artifact || !workspaceId) {
+    return { coverUrl: null, count: 0, loading: true }
+  }
 
   // Single image path -> cover is that file, no list call, count 1.
   // (Computed as plain const, not via hook -- hooks are already at the top.)
