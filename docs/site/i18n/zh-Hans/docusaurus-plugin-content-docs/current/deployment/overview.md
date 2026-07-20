@@ -45,7 +45,7 @@ Azure OpenAI、大多数云厂商，以及自托管网关（vLLM、LiteLLM、Oll
 ```yaml
 llm:
   # "<provider_name>/<model_id>"——provider_name 必须出现在 providers 下。
-  default_model: "openai/gpt-4o"
+  default_model: "openai/gpt-5.6-terra"
   fallback_models:
     - "anthropic/claude-sonnet-4"
   providers:
@@ -55,8 +55,8 @@ llm:
       api_key: "sk-..."
       api: "openai-completions"
       models:
-        - id: "gpt-4o"
-          name: "GPT-4o"
+        - id: "gpt-5.6-terra"
+          name: "GPT-5.6 Terra"
           input: ["text", "image"]
           context_window: 128000
           max_tokens: 16384
@@ -89,15 +89,15 @@ llm:
 
 ```yaml
 llm:
-  default_model: "openai/gpt-4o"
+  default_model: "openai/gpt-5.6-terra"
   providers:
     openai:
       base_url: "https://api.openai.com/v1"
       api_key: "sk-..."
       api: "openai-completions"
       models:
-        - id: "gpt-4o"
-          name: "GPT-4o"
+        - id: "gpt-5.6-terra"
+          name: "GPT-5.6 Terra"
           input: ["text", "image"]
           context_window: 128000
           max_tokens: 16384
