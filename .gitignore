@@ -32,11 +32,13 @@ node_modules/
 !.agents/skills/debug-cubeplex/
 !.agents/skills/feature-workflow/
 !.agents/skills/pr-codex-review-loop/
+!.agents/skills/release/
 .claude/skills/*
 !.claude/skills/cubeplex-tdd
 !.claude/skills/debug-cubeplex
 !.claude/skills/feature-workflow
 !.claude/skills/pr-codex-review-loop
+!.claude/skills/release
 .superpowers/
 settings.local.json
 .claude/scheduled_tasks.lock
