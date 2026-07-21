@@ -19,9 +19,13 @@ _SANDBOX_OWNER_KINDS = frozenset({"BatchSandbox", "Sandbox"})
 
 
 def _is_sandbox_owner(o: dict[str, Any]) -> bool:
-    return o.get("apiVersion", "").startswith("sandbox.opensandbox.io/") and (
-        o.get("kind") in _SANDBOX_OWNER_KINDS
-    )
+    # Exact group match: apiVersion is `group/version`. A `startswith` check
+    # could be spoofed by a crafted ownerReference whose group merely begins
+    # with the sandbox prefix, letting a non-sandbox pod get the egress sidecar
+    # injected. Compare only the group segment, exactly.
+    api_version = o.get("apiVersion", "")
+    group = api_version.split("/", 1)[0] if "/" in api_version else api_version
+    return group == "sandbox.opensandbox.io" and o.get("kind") in _SANDBOX_OWNER_KINDS
 
 
 def sandbox_id_from_owners(pod: dict[str, Any]) -> str:

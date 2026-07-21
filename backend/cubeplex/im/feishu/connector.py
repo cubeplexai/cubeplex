@@ -27,7 +27,6 @@ or API endpoint.
 
 import asyncio
 import json
-import re
 from typing import Any
 
 from loguru import logger
@@ -43,8 +42,37 @@ from cubeplex.im.types import (
     make_participant_scope,
 )
 
-# Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
-_AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
+
+def _strip_at_tags(text: str) -> str:
+    """Remove ``<at ...>...</at>`` inline mention markup.
+
+    Linear-time scan replacing a polynomial regex. The old
+    ``<at[^>]*>.*?</at>`` (re.DOTALL) backtracked super-linearly on adversarial
+    input with many unclosed ``<at`` tags (``re.sub`` retried at every
+    position). This scans once: for each ``<at ...>`` opening tag it finds the
+    first ``</at>`` after the ``>`` and drops the whole span. If no ``>`` or no
+    ``</at>`` remains ahead, no later tag can close either, so the rest is
+    emitted verbatim and the scan stops - that early stop is what keeps this
+    O(n) instead of O(n^2).
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "<" and text.startswith("<at", i):
+            gt = text.find(">", i + 3)
+            if gt == -1:
+                out.append(text[i:])
+                break
+            close = text.find("</at>", gt + 1)
+            if close == -1:
+                out.append(text[i:])
+                break
+            i = close + len("</at>")
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
 
 # Feishu message types that carry a downloadable resource.
 _FEISHU_MEDIA_TYPES = frozenset({"image", "file", "audio", "media"})
@@ -106,7 +134,7 @@ def _substitute_mentions(
             raw_text = raw_text.replace(key, "")
         elif name:
             raw_text = raw_text.replace(key, f"@{name}")
-    return _AT_TAG_RE.sub("", raw_text).strip()
+    return _strip_at_tags(raw_text).strip()
 
 
 def _index_mentions(mentions: list[dict[str, Any]]) -> dict[str, dict[str, str]]:

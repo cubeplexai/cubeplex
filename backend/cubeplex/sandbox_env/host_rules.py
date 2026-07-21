@@ -59,8 +59,10 @@ def validate_host_pattern(pattern: str) -> None:
                 f"alternation '|' not allowed in host regex (can span domains): {pattern!r}"
             )
         # eTLD+1 boundary: the regex must END with a literal \.domain.tld so it
-        # cannot match more than one registrable domain.
-        m = re.search(r"(?:\\\.[A-Za-z0-9-]+)+$", core)
+        # cannot match more than one registrable domain. Unrolled to avoid the
+        # nested `(?:...+)+` quantifier (catastrophic backtracking on crafted
+        # patterns) - one required segment then zero-or-more more.
+        m = re.search(r"\\\.[A-Za-z0-9-]+(?:\\\.[A-Za-z0-9-]+)*$", core)
         if not m:
             raise HostPatternError(
                 f"regex must end with a literal \\.domain.tld suffix: {pattern!r}"
