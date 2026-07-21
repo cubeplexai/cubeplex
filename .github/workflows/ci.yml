@@ -297,11 +297,26 @@ jobs:
         # against the live LLM gateway. Keeping them off the PR path saves
         # ~5-10× wall-clock per push and prevents vendor-rate-limit flakes
         # from blocking unrelated merges.
-        run: make backend-test-e2e
+        #
+        # -ci variant additionally writes coverage-e2e.xml: e2e tests are the
+        # primary test type for business-flow code in this repo (see
+        # docs/testing.md), so without this the Codecov patch-coverage gate
+        # only ever sees the unit-test run and reports business logic as
+        # untested even when it's covered here.
+        run: make backend-test-e2e-ci
 
       - name: Cleanup leftover test sandboxes
         if: always()
         run: make backend-cleanup-sandboxes
+
+      - name: Upload e2e coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v7
+        with:
+          files: backend/coverage-e2e.xml
+          flags: backend-e2e-shard-${{ matrix.shard }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   frontend-e2e:
     name: Frontend E2E (playwright)

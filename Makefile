@@ -1,4 +1,4 @@
-.PHONY: help install skills-restore backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-contracts backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci test-ui-unit test-ui-e2e test-ui test-all clean
+.PHONY: help install skills-restore backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-e2e-ci backend-test-contracts backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci test-ui-unit test-ui-e2e test-ui test-all clean
 
 help:
 	@echo "Available commands:"
@@ -11,6 +11,7 @@ help:
 	@echo "  make check-ci                   - Run backend and frontend CI checks"
 	@echo "  make backend-migrate            - Run backend Alembic migrations"
 	@echo "  make backend-test-e2e           - Run backend E2E tests"
+	@echo "  make backend-test-e2e-ci        - Run backend E2E tests, writing coverage-e2e.xml for Codecov"
 	@echo "  make backend-test-contracts     - Run plugin contract tests (EE compat)"
 	@echo "  make backend-start              - Start backend server"
 	@echo "  make backend-cleanup-sandboxes  - Cleanup leftover test sandboxes"
@@ -55,6 +56,9 @@ backend-migrate:
 
 backend-test-e2e:
 	$(MAKE) -C backend test-e2e
+
+backend-test-e2e-ci:
+	$(MAKE) -C backend test-e2e-ci
 
 backend-test-contracts:
 	$(MAKE) -C backend test-contracts
