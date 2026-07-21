@@ -76,6 +76,18 @@ class TurnPayload(BaseModel):
     index: int
     stop_reason: str | None = None
     tool_calls_count: int = 0
+    messages: list[ChatMessage] = Field(default_factory=list)
+    output_messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class AgentPayload(BaseModel):
+    """Detail carried by the `invoke_agent` (run root) span."""
+
+    provider: str | None = None
+    tools: list[str] = Field(default_factory=list)
+    system_instructions: list[ChatMessage] = Field(default_factory=list)
+    messages: list[ChatMessage] = Field(default_factory=list)
+    output_messages: list[ChatMessage] = Field(default_factory=list)
 
 
 class SpanNode(BaseModel):
@@ -90,6 +102,7 @@ class SpanNode(BaseModel):
     llm: LlmCallPayload | None = None
     tool: ToolCallPayload | None = None
     turn: TurnPayload | None = None
+    agent: AgentPayload | None = None
     raw_attributes: dict[str, Any] = Field(default_factory=dict)
     children: list[SpanNode] = Field(default_factory=list)
 

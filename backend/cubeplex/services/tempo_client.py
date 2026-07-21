@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from cubeplex.api.schemas.trace import (
+    AgentPayload,
     ChatMessage,
     LlmCallPayload,
     SpanKind,
@@ -116,6 +117,7 @@ def parse_trace_detail(payload: dict[str, Any]) -> TraceDetail:
             llm=_extract_llm(attrs) if kind == SpanKind.CHAT else None,
             tool=_extract_tool(attrs) if kind == SpanKind.TOOL else None,
             turn=_extract_turn(attrs) if kind == SpanKind.TURN else None,
+            agent=_extract_agent(attrs) if kind == SpanKind.AGENT else None,
             raw_attributes=attrs,
         )
         nodes[node.span_id] = node
@@ -185,6 +187,20 @@ def _extract_turn(attrs: dict[str, Any]) -> TurnPayload:
         index=int(attrs.get("cubepi.turn.index", 0) or 0),
         stop_reason=attrs.get("cubepi.turn.stop_reason"),
         tool_calls_count=int(attrs.get("cubepi.turn.tool_calls.count", 0) or 0),
+        messages=_decode_messages(attrs.get("gen_ai.input.messages")),
+        output_messages=_decode_messages(attrs.get("gen_ai.output.messages")),
+    )
+
+
+def _extract_agent(attrs: dict[str, Any]) -> AgentPayload:
+    tools_raw = attrs.get("cubepi.agent.tools")
+    tools = [str(t) for t in tools_raw] if isinstance(tools_raw, list) else []
+    return AgentPayload(
+        provider=attrs.get("gen_ai.provider.name"),
+        tools=tools,
+        system_instructions=_decode_messages(attrs.get("gen_ai.system_instructions")),
+        messages=_decode_messages(attrs.get("gen_ai.input.messages")),
+        output_messages=_decode_messages(attrs.get("gen_ai.output.messages")),
     )
 
 
@@ -209,7 +225,13 @@ def _decode_messages(raw: Any) -> list[ChatMessage]:
         try:
             data = _json.loads(raw)
         except _json.JSONDecodeError:
-            return []
+            # Long attribute values can get truncated somewhere upstream in
+            # the tracing pipeline (span attribute length limits), leaving
+            # invalid JSON. Silently returning [] would be indistinguishable
+            # from "nothing was sent" - surface the partial raw content
+            # instead via a sentinel role/part-type the frontend renders
+            # distinctly (a truncation warning, not an empty list).
+            return [ChatMessage(role="_truncated", parts=[{"type": "_truncated", "content": raw}])]
     else:
         data = raw
     if not isinstance(data, list):
@@ -246,6 +268,55 @@ def _decode_tools(raw: Any) -> list[ToolDefinition]:
     return out
 
 
+def _derive_output_from_raw_response(raw_response: str | None) -> list[ChatMessage]:
+    """Fallback for `chat` spans: `gen_ai.output.messages` is never set on
+    them in this cubepi version (only on invoke_agent/cubepi.turn spans) -
+    but `cubepi.llm.raw_response` carries the same content in the provider's
+    wire format. Reconstruct a single assistant ChatMessage from it when the
+    response looks like an OpenAI-compatible chat completion (the only shape
+    observed in this deployment - openai.api.type=chat_completions). Any
+    other/unexpected shape just yields [] as before - no regression.
+    """
+    if not raw_response:
+        return []
+    try:
+        data = _json.loads(raw_response)
+    except _json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return []
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        return []
+
+    parts: list[dict[str, Any]] = []
+    content = message.get("content")
+    if isinstance(content, str) and content:
+        parts.append({"type": "text", "content": content})
+
+    for tc in message.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        args_raw = fn.get("arguments")
+        args: Any = args_raw
+        if isinstance(args_raw, str):
+            try:
+                args = _json.loads(args_raw)
+            except _json.JSONDecodeError:
+                pass  # keep the raw string - still better than dropping it
+        parts.append(
+            {"type": "tool_call", "id": tc.get("id"), "name": fn.get("name"), "arguments": args}
+        )
+
+    if not parts:
+        return []
+    return [ChatMessage(role="assistant", parts=parts)]
+
+
 def _extract_llm(attrs: dict[str, Any]) -> LlmCallPayload:
     finish = attrs.get("gen_ai.response.finish_reasons")
     finish_list = finish if isinstance(finish, list) else ([finish] if finish else [])
@@ -268,7 +339,8 @@ def _extract_llm(attrs: dict[str, Any]) -> LlmCallPayload:
         response_id=attrs.get("gen_ai.response.id"),
         system_instructions=_decode_messages(attrs.get("gen_ai.system_instructions")),
         messages=_decode_messages(attrs.get("gen_ai.input.messages")),
-        output_messages=_decode_messages(attrs.get("gen_ai.output.messages")),
+        output_messages=_decode_messages(attrs.get("gen_ai.output.messages"))
+        or _derive_output_from_raw_response(attrs.get("cubepi.llm.raw_response")),
         tools=_decode_tools(
             attrs.get("gen_ai.tool.definitions")
             or attrs.get("gen_ai.request.tools")

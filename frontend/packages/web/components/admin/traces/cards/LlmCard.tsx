@@ -31,9 +31,21 @@ const TOKEN_TONE_CLASSES: Record<TokenTone, string> = {
   muted: 'bg-muted text-muted-foreground',
 }
 
+// cubepi prefixes a provider name it doesn't canonically recognize with
+// "unknown:" (see cubepi/tracing/schema.py::map_provider_name) - real,
+// intentional signal, not a bug. Show the actual name as the primary text,
+// full value (with the prefix) as a tooltip so the signal isn't lost.
+function formatProvider(provider: string): { label: string; title: string } {
+  const idx = provider.indexOf(':')
+  return idx === -1
+    ? { label: provider, title: provider }
+    : { label: provider.slice(idx + 1), title: provider }
+}
+
 export function LlmCard({ llm }: Props) {
   const t = useTranslations('adminTraces.sections')
   const hasCache = llm.tokens.cache_read > 0 || llm.tokens.cache_write > 0
+  const provider = llm.provider ? formatProvider(llm.provider) : null
 
   return (
     <div className="space-y-3">
@@ -42,7 +54,9 @@ export function LlmCard({ llm }: Props) {
           <dt className="text-muted-foreground">Model</dt>
           <dd className="font-mono">{llm.model}</dd>
           <dt className="text-muted-foreground">Provider</dt>
-          <dd className="font-mono">{llm.provider ?? '—'}</dd>
+          <dd className="font-mono" title={provider?.title}>
+            {provider?.label ?? '—'}
+          </dd>
           <dt className="text-muted-foreground">Max tokens</dt>
           <dd className="font-mono">{llm.request_max_tokens ?? '—'}</dd>
           <dt className="text-muted-foreground">Temperature</dt>

@@ -36,7 +36,7 @@ export function ToolCard({ tool }: Props) {
         <JsonBlock value={tool.arguments} />
       </Section>
       <Section title={t('result')}>
-        <JsonBlock value={tool.result} language="text" />
+        <JsonBlock value={tool.result} />
       </Section>
     </div>
   )
