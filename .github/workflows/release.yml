@@ -72,7 +72,7 @@ jobs:
 
           # images.yml builds and pushes version-tagged images when triggered by
           # the same tag push; wait for them to appear (up to ~30 min)
-          for target in backend frontend; do
+          for target in backend frontend egress-webhook; do
             release="ghcr.io/${IMAGE_OWNER}/cubeplex-${target}:${RELEASE_TAG}"
             digest=""
             for attempt in $(seq 1 180); do

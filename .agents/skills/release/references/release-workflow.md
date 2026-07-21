@@ -104,7 +104,7 @@ For `v0.3.0`, the two triggered workflows do:
 **`release.yml`** (triggered by the same tag push, runs concurrently):
 1. checks that all package/chart versions equal `0.3.0`;
 2. reads the sandbox version from `deploy/images/sandbox/VERSION`;
-3. polls for `ghcr.io/.../cubeplex-backend:v0.3.0` and `cubeplex-frontend:v0.3.0` (up to ~30 min);
+3. polls for `ghcr.io/.../cubeplex-{backend,frontend,egress-webhook}:v0.3.0` (up to ~30 min);
 4. records their digests in the manifest;
 5. waits for the `sandbox-v<version>` image, then promotes it to `cubeplex-sandbox:v0.3.0` (tag alias, no rebuild);
 6. packages and pushes the Helm chart to `oci://ghcr.io/.../charts/cubeplex:0.3.0`;
@@ -112,7 +112,7 @@ For `v0.3.0`, the two triggered workflows do:
 
 The application release tags are aliases for the already built image manifests,
 not new builds — the sandbox is likewise promoted, not rebuilt. The manifest
-records the backend/frontend/sandbox image digests.
+records the backend/frontend/egress-webhook/sandbox image digests.
 
 Published application and sandbox tags contain `linux/amd64` and `linux/arm64`
 manifests. Any `unknown/unknown` entry shown by GHCR is a provenance attestation,
