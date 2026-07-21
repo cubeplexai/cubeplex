@@ -10,7 +10,7 @@ from __future__ import annotations
 import json as _json
 import re
 import urllib.parse
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -355,8 +355,6 @@ class TempoClient:
         model: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
-        min_duration_ms: int | None = None,
-        max_duration_ms: int | None = None,
         limit: int = 20,
     ) -> list[TraceSummary]:
         # cubepi.metadata.org_id lives on invoke_agent spans; gen_ai.request.model
@@ -379,10 +377,6 @@ class TempoClient:
             )
         if run_id:
             metadata_clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
-        if min_duration_ms is not None:
-            metadata_clauses.append(f"trace:duration > {int(min_duration_ms)}ms")
-        if max_duration_ms is not None:
-            metadata_clauses.append(f"trace:duration < {int(max_duration_ms)}ms")
 
         model_clauses: list[str] = []
         if model:
@@ -445,13 +439,29 @@ class TempoClient:
         # 2.8.2), which would leak workspace/user/conversation/model identifiers
         # across orgs via autocomplete. v2 honors the org-scoping TraceQL.
         #
+        # Same cross-span pitfall as search() above: cubepi.metadata.org_id
+        # lives on the invoke_agent span, but e.g. gen_ai.request.model lives
+        # on a child chat span. A single {...} selector requires both on the
+        # same span and would silently return zero values. Use sibling
+        # spansets joined at the top level, exactly like search() does, so
+        # the org scope and the requested tag are matched independently.
+        #
+        # Like search(), Tempo defaults to its own (narrow) window when start/
+        # end are omitted. This is a dropdown-population lookup, not a
+        # time-scoped search, so default to a wide window rather than
+        # requiring every caller to pass one. Capped just under 168h (7
+        # days) - this Tempo deployment rejects search/tag-values ranges
+        # wider than that with a 400.
+        now = datetime.now(UTC)
+        params: dict[str, Any] = {
+            "q": '{ resource.service.name="cubeplex" '
+            f'&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }} && {{ span.{tag} != "" }}',
+            "start": str(int((now - timedelta(hours=167)).timestamp())),
+            "end": str(int(now.timestamp())),
+        }
         # Tempo v2 takes the FULL prefixed tag name (e.g. `span.cubepi.run_id`)
         # as a single path segment — NOT `span/<tag>` as two segments. All tags
         # in _ALLOWED_TAGS live on spans, so we prepend `span.` here.
-        params: dict[str, Any] = {
-            "q": '{ resource.service.name="cubeplex" '
-            f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
-        }
         quoted = urllib.parse.quote(tag, safe=".")
         url = f"{self._endpoint}/api/v2/search/tag/span.{quoted}/values"
         async with httpx.AsyncClient(timeout=self._timeout) as http:
@@ -473,6 +483,22 @@ class TempoClient:
             raise TempoQueryError("Tempo tag values returned malformed payload") from exc
 
 
+def _total_span_count(t: dict[str, Any]) -> int:
+    # `spanSet(s).matched` counts spans that matched the *search selector*
+    # (e.g. 1, since only the invoke_agent span carries cubepi.metadata.org_id)
+    # - not the trace's real span count. `serviceStats.<service>.spanCount`
+    # is Tempo's actual per-trace span total; sum across services in case a
+    # trace ever spans more than one.
+    service_stats = t.get("serviceStats")
+    if not isinstance(service_stats, dict):
+        return 0
+    total = 0
+    for stats in service_stats.values():
+        if isinstance(stats, dict):
+            total += int(stats.get("spanCount") or 0)
+    return total
+
+
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
     # Tempo returns one or more spanSets (plural, documented). Legacy versions
     # also emit a singular `spanSet` alias with the same content as spanSets[0].
@@ -486,9 +512,7 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         sets.append(t["spanSet"])
 
     attrs_list: list[dict[str, Any]] = []
-    total_matched = 0
     for ss in sets:
-        total_matched += int(ss.get("matched") or 0)
         for span in ss.get("spans") or []:
             if isinstance(span, dict):
                 attrs_list.append(
@@ -507,7 +531,7 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         root_name=t.get("rootTraceName", ""),
         start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
         duration_ms=int(t.get("durationMs", 0)),
-        span_count=total_matched,
+        span_count=_total_span_count(t),
         workspace_id=first("cubepi.metadata.workspace_id"),
         user_id=first("cubepi.metadata.user_id"),
         conversation_id=first("cubepi.metadata.conversation_id"),

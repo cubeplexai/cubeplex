@@ -1,7 +1,7 @@
 """E2E for /api/v1/admin/traces routes."""
 
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import httpx
@@ -119,6 +119,39 @@ async def test_list_rejects_naive_datetime(admin_client, fake_tempo) -> None:
     assert "timezone" in resp.text.lower()
 
 
+async def test_list_defaults_to_last_hour_when_no_range_given(admin_client, fake_tempo) -> None:
+    """Tempo's own default search window is much narrower than useful (it can
+    return zero traces even when traces exist), so the route must never call
+    Tempo without an explicit range."""
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/traces")
+    assert resp.status_code == 200, resp.text
+    call = fake_tempo.search.await_args
+    start, end = call.kwargs["start"], call.kwargs["end"]
+    assert start is not None and end is not None
+    assert timedelta(minutes=59) < end - start < timedelta(hours=1, minutes=1)
+
+
+async def test_list_fills_missing_side_of_a_partial_range(admin_client, fake_tempo) -> None:
+    client, _ws = admin_client
+    start = datetime.now(UTC) - timedelta(minutes=30)
+    resp = await client.get("/api/v1/admin/traces", params={"start": start.isoformat()})
+    assert resp.status_code == 200, resp.text
+    call = fake_tempo.search.await_args
+    assert call.kwargs["start"] == start
+    assert call.kwargs["end"] is not None
+
+
+async def test_list_rejects_range_over_168h(admin_client, fake_tempo) -> None:
+    client, _ws = admin_client
+    resp = await client.get(
+        "/api/v1/admin/traces?start=2026-06-01T00:00:00%2B00:00&end=2026-07-01T00:00:00%2B00:00"
+    )
+    assert resp.status_code == 400
+    assert "7 days" in resp.text
+    fake_tempo.search.assert_not_awaited()
+
+
 async def test_detail_rejects_foreign_org_in_child_span(
     admin_client, fake_tempo, fake_resolve_org
 ) -> None:
@@ -212,28 +245,28 @@ async def seeded_filter_options(
     foreign_ws = await WorkspaceRepository(db_session).create(
         org_id=foreign_org.id, name="Foreign WS"
     )
-    await WorkspaceRepository(db_session).create(org_id=org_id, name="Alpha WS")
+    alpha_ws = await WorkspaceRepository(db_session).create(org_id=org_id, name="Alpha WS")
 
     # 3 alpha conversations so a `limit` cap is observable.
+    alpha_conv_ids: list[str] = []
     for title in ("Alpha Chat A", "Alpha Chat B", "Alpha Chat C"):
-        db_session.add(
-            Conversation(
-                title=title,
-                org_id=org_id,
-                workspace_id=ws_id,
-                creator_user_id=user_id,
-                has_messages=True,
-            )
-        )
-    db_session.add(
-        Conversation(
-            title="Foreign Chat",
-            org_id=foreign_org.id,
-            workspace_id=foreign_ws.id,
+        conv = Conversation(
+            title=title,
+            org_id=org_id,
+            workspace_id=ws_id,
             creator_user_id=user_id,
             has_messages=True,
         )
+        db_session.add(conv)
+        alpha_conv_ids.append(conv.id)
+    foreign_chat = Conversation(
+        title="Foreign Chat",
+        org_id=foreign_org.id,
+        workspace_id=foreign_ws.id,
+        creator_user_id=user_id,
+        has_messages=True,
     )
+    db_session.add(foreign_chat)
 
     alpha_user = User(
         email=f"alpha-{token}@example.com",
@@ -258,10 +291,16 @@ async def seeded_filter_options(
 
     return client, {
         "alpha_ws": "Alpha WS",
+        "alpha_ws_id": alpha_ws.id,
         "foreign_ws": "Foreign WS",
+        "foreign_ws_id": foreign_ws.id,
         "foreign_chat": "Foreign Chat",
+        "foreign_chat_id": foreign_chat.id,
+        "alpha_conv_id": alpha_conv_ids[0],
         "alpha_user": "Alpha User",
+        "alpha_user_id": alpha_user.id,
         "foreign_user": "Foreign User",
+        "foreign_user_id": foreign_user.id,
     }
 
 
@@ -288,6 +327,43 @@ async def test_filter_options_conversation_limit_caps(seeded_filter_options) -> 
     resp = await client.get("/api/v1/admin/traces/filter-options?kind=conversation&q=Alpha&limit=2")
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["options"]) == 2  # 3 match, capped at limit
+
+
+async def test_filter_options_ids_batch_lookup(seeded_filter_options) -> None:
+    """`ids` resolves exact IDs to names (used to render names in the trace
+    list table) instead of prefix-narrowing - and stays org-scoped like q."""
+    client, labels = seeded_filter_options
+    resp = await client.get(
+        "/api/v1/admin/traces/filter-options",
+        params={"kind": "workspace", "ids": [labels["alpha_ws_id"], labels["foreign_ws_id"]]},
+    )
+    assert resp.status_code == 200, resp.text
+    names = {o["name"] for o in resp.json()["options"]}
+    assert names == {labels["alpha_ws"]}  # foreign org's workspace excluded
+
+
+async def test_filter_options_ids_wins_over_q(seeded_filter_options) -> None:
+    client, labels = seeded_filter_options
+    resp = await client.get(
+        "/api/v1/admin/traces/filter-options",
+        params={
+            "kind": "conversation",
+            "q": "nonexistent-prefix",
+            "ids": [labels["alpha_conv_id"]],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    ids = {o["id"] for o in resp.json()["options"]}
+    assert ids == {labels["alpha_conv_id"]}
+
+
+async def test_filter_options_ids_rejects_oversized_batch(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.get(
+        "/api/v1/admin/traces/filter-options",
+        params={"kind": "user", "ids": [f"usr-{i}" for i in range(201)]},
+    )
+    assert resp.status_code == 400
 
 
 async def test_filter_options_user_prefix_and_scoped(seeded_filter_options) -> None:

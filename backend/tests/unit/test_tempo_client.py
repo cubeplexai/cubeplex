@@ -134,14 +134,21 @@ async def test_tag_values_handles_null_values() -> None:
 
 
 @respx.mock
-async def test_search_passes_zero_duration_filter() -> None:
+async def test_tag_values_scopes_org_and_tag_as_sibling_spansets() -> None:
+    """Regression: cubepi.metadata.org_id lives on the invoke_agent span while
+    e.g. gen_ai.request.model lives on a child chat span. A single {...}
+    selector requires both conditions on the same span and silently returns
+    zero values (verified against a live Tempo instance). The org scope and
+    the requested tag must be independent sibling spansets.
+    """
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    route = respx.get("http://tempo.local/api/search").mock(
-        return_value=httpx.Response(200, json={"traces": []})
+    route = respx.get("http://tempo.local/api/v2/search/tag/span.gen_ai.request.model/values").mock(
+        return_value=httpx.Response(200, json={"tagValues": []})
     )
-    await client.search(org_id="org-1", min_duration_ms=0)
+    await client.tag_values(tag="gen_ai.request.model", org_id="org-1")
     q = route.calls.last.request.url.params["q"]
-    assert "trace:duration > 0ms" in q
+    assert '{ resource.service.name="cubeplex" && span.cubepi.metadata.org_id="org-1" }' in q
+    assert '{ span.gen_ai.request.model != "" }' in q
 
 
 async def test_get_trace_rejects_invalid_trace_id() -> None:
@@ -291,6 +298,7 @@ async def test_search_extracts_model_from_sibling_spanset() -> None:
                         ],
                     },
                 ],
+                "serviceStats": {"cubeplex": {"spanCount": 3}},
             }
         ],
     }
@@ -299,7 +307,9 @@ async def test_search_extracts_model_from_sibling_spanset() -> None:
     [summary] = await client.search(org_id="org-1")
     assert summary.workspace_id == "ws-7"
     assert summary.model == "deepseek-v4-flash"
-    assert summary.span_count == 2  # both matched spans counted
+    # From serviceStats, not spanSet `matched` (which only counts spans that
+    # matched the search selector, not the trace's real span total).
+    assert summary.span_count == 3
 
 
 @respx.mock
@@ -348,6 +358,7 @@ async def test_search_reads_spansets_plural() -> None:
                     }
                 ],
                 # NO spanSet (singular)
+                "serviceStats": {"cubeplex": {"spanCount": 4}},
             }
         ],
     }
@@ -355,4 +366,27 @@ async def test_search_reads_spansets_plural() -> None:
     respx.get("http://tempo.local/api/search").mock(return_value=httpx.Response(200, json=payload))
     [summary] = await client.search(org_id="org-1")
     assert summary.workspace_id == "ws-plural"
-    assert summary.span_count == 1
+    assert summary.span_count == 4
+
+
+@respx.mock
+async def test_search_span_count_defaults_to_zero_without_service_stats() -> None:
+    """Older/malformed Tempo responses without serviceStats shouldn't crash -
+    just report an unknown span count as 0 rather than falling back to the
+    misleading `matched` count."""
+    payload = {
+        "traces": [
+            {
+                "traceID": "abc",
+                "rootTraceName": "invoke_agent",
+                "startTimeUnixNano": "1781164911000000000",
+                "durationMs": 8055,
+                "spanSet": {"matched": 1, "spans": []},
+                # NO serviceStats
+            }
+        ],
+    }
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(return_value=httpx.Response(200, json=payload))
+    [summary] = await client.search(org_id="org-1")
+    assert summary.span_count == 0
