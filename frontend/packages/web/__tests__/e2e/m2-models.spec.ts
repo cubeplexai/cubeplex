@@ -11,15 +11,15 @@ test.describe('M2 Model Management', () => {
       timeout: 10_000,
     })
 
-    // Seeded "cubeplex" system provider appears as a provider card
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
+    // Seeded system provider (deepseek, from config.test.yaml) appears as a card
+    await expect(page.getByTestId('provider-card-deepseek')).toBeVisible({ timeout: 10_000 })
   })
 
   test('admin can create, view, and delete a custom provider', async ({ page }) => {
     await registerAndLand(page)
     await page.goto('/admin/models')
 
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('provider-card-deepseek')).toBeVisible({ timeout: 10_000 })
 
     // "Add provider" now opens the full-page wizard, not a dialog.
     await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
@@ -63,7 +63,7 @@ test.describe('M2 Model Management', () => {
     await registerAndLand(page)
     await page.goto('/admin/models')
 
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('provider-card-deepseek')).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
     await expect(page).toHaveURL(/\/admin\/models\/new$/)
@@ -81,14 +81,14 @@ test.describe('M2 Model Management', () => {
     await registerAndLand(page)
     await page.goto('/admin/models')
 
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('provider-card-deepseek')).toBeVisible({ timeout: 10_000 })
 
     // System filter keeps the seeded provider visible
     await page.getByRole('button', { name: /^(System|系统)$/ }).click()
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeVisible()
+    await expect(page.getByTestId('provider-card-deepseek')).toBeVisible()
 
     // Custom filter hides it (no custom providers yet)
     await page.getByRole('button', { name: /^(Custom|自建)$/ }).click()
-    await expect(page.getByTestId('provider-card-cubeplex')).toBeHidden()
+    await expect(page.getByTestId('provider-card-deepseek')).toBeHidden()
   })
 })
