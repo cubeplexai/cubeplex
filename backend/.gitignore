@@ -2,6 +2,7 @@
 .test.env
 .coverage
 coverage.xml
+coverage-e2e.xml
 scripts/dev
 skills_cache/
 # cubepi tracing output (default tracing.directory); may contain prompt/tool payloads
