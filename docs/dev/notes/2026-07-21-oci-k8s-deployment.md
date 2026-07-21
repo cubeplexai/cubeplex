@@ -229,11 +229,77 @@ The official Kubernetes deployment guide (`deploy/kubernetes/INSTALL.md` and `do
    - Mark known limitations per provider
    - Link to provider-specific guides
 
-## Next Steps (Blocked)
+## Actions Taken to Update Documentation
 
-Once OCI cluster is reconfigured with managed nodes:
-1. Redeploy cubeplex Helm chart
-2. Run smoke tests (health checks, ingress routing)
-3. Execute e2e tests with arkplan LLM model
-4. Document any additional issues
-5. Update deployment guide with OCI best practices
+✅ **Updated Kubernetes deployment guide** (`docs/site/docs/deployment/kubernetes.md`):
+   - Added prominent OCI virtual node incompatibility warning at the top
+   - Created cloud provider compatibility matrix
+   - Added detailed OCI managed node pool setup instructions
+   - Explained why init containers and subPath are required
+
+✅ **Committed documentation changes:**
+   - Commit: `docs(deployment): add OCI Kubernetes virtual node limitations and compatibility guide`
+   - Future deployments will have clear warnings upfront
+
+## Next Steps (For User)
+
+To complete the OCI Kubernetes deployment:
+
+1. **Add a managed node pool to the OCI cluster** (via OCI Console):
+   - Create new node pool (e.g., `cubeplex-workload`)
+   - Choose VM shape appropriate for your workload
+   - Wait for nodes to reach `Ready` status
+
+2. **Deploy cubeplex to the managed node pool:**
+   ```bash
+   # Copy the template
+   cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
+      deploy/kubernetes/charts/cubeplex/values.local.yaml
+   
+   # Edit for your environment (LLM keys, URLs, passwords)
+   $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
+   
+   # Add nodeSelector for managed nodes
+   # backend:
+   #   nodeSelector:
+   #     node.kubernetes.io/workload: cubeplex
+   # frontend:
+   #   nodeSelector:
+   #     node.kubernetes.io/workload: cubeplex
+   
+   # Deploy
+   helm dependency update deploy/kubernetes/charts/cubeplex
+   helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
+     --namespace cubeplex --create-namespace \
+     -f deploy/kubernetes/charts/cubeplex/values.yaml \
+     -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
+     --wait --timeout 15m
+   ```
+
+3. **Run verification tests:**
+   ```bash
+   # Smoke tests
+   INGRESS_IP=<node-ip> deploy/kubernetes/scripts/smoke-test.sh
+   
+   # E2E tests with arkplan model
+   HOST=cubeplex.oci.local IP=<node-ip> PORT=<ingress-nodeport> \
+     deploy/kubernetes/scripts/e2e.sh
+   ```
+
+4. **Document any OCI-specific configuration** discovered during this deployment (update this note)
+
+## Resources Cleaned Up
+
+- Removed test `values.local.yaml` (user will create their own)
+- Uninstalled test release
+- Removed opensandbox-system namespace (will be recreated on next deploy)
+
+## Summary for Future Deployments
+
+OCI Kubernetes deployments now have clear documentation:
+- ✅ Warning at the top of the deployment guide
+- ✅ Compatibility matrix showing OCI limitation
+- ✅ Step-by-step instructions for adding managed node pools
+- ✅ Clear explanation of why virtual nodes don't work
+
+The deployment guide is now accurate and will prevent users from wasting time troubleshooting unsupported configurations.
