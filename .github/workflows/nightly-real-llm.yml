@@ -20,6 +20,9 @@ concurrency:
   group: nightly-real-llm
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   real-llm:
     name: real_llm pytest

@@ -12,6 +12,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default for every job. The `gate` and `report` jobs override
+# with the extra write scopes they need (checks / pull-requests).
+permissions:
+  contents: read
+
 jobs:
   gate:
     name: Gate (automatic, /ci, or workflow_dispatch)
@@ -21,7 +26,13 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
-       startsWith(github.event.comment.body, '/ci'))
+       startsWith(github.event.comment.body, '/ci') &&
+       # `/ci` checks out the PR head and runs its code with access to repo
+       # secrets, so restrict it to org members/collaborators. Ordinary PR
+       # CI still runs for everyone via the `pull_request` trigger above.
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -85,6 +96,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
           fetch-depth: 0
       - name: Detect changed areas
         id: filter
@@ -133,6 +145,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -180,6 +193,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
@@ -247,6 +261,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -362,6 +377,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -470,6 +486,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -487,33 +504,6 @@ jobs:
           CUBEPLEX_SANDBOX__IMAGE: dummy:image
           CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-test-contracts
-
-  test-ee-compat-cross-repo:
-    name: EE Compat Cross-Repo (Layer 2 placeholder)
-    # Enable once cubeplex-ee repo exists and has integration tests.
-    if: false
-    needs: gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: cubeplex
-          ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/checkout@v7
-        with:
-          repository: cubeplex/cubeplex-ee
-          path: cubeplex-ee
-          token: ${{ secrets.EE_REPO_READ_TOKEN }}
-      - uses: astral-sh/setup-uv@v7
-      - name: Install CE from working tree + EE
-        run: |
-          cd cubeplex-ee
-          uv pip install -e ../cubeplex/backend
-          uv pip install -e .
-      - name: Run EE smoke tests
-        working-directory: cubeplex-ee
-        run: uv run pytest
 
   report:
     name: Finalize CI check run
