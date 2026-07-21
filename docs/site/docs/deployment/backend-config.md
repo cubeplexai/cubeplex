@@ -238,14 +238,15 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # compact at context_window * ratio
   keep_tail_tokens: 8000         # recent tokens kept verbatim
-  summary_provider: "openai"     # must be a provider you configured
-  summary_model: "gpt-5.6-terra"
   max_summary_tokens: null       # null = cubepi dynamic budget
   fallback_context_window: 128000
 ```
 
-Point `summary_provider` / `summary_model` at a provider you actually have
-configured under `llm.providers`.
+The summarizer model is **not** configured here. It comes from the admin
+**Model settings → Task routing → "Compaction"** preset (falling back to the
+org's default preset if unset), so every task model — title, summarize, and
+compaction — lives in one place. `config.yaml` only holds the operational
+thresholds above.
 
 ## Conversation search
 
