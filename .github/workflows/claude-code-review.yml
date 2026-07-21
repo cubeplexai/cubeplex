@@ -14,7 +14,12 @@ jobs:
   claude-review:
     if: |
       github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/code-review')
+      startsWith(github.event.comment.body, '/code-review') &&
+      # `/code-review` checks out the PR head and runs Claude with write +
+      # id-token scopes, so restrict it to org members/collaborators.
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
 
     runs-on: ubuntu-latest
     permissions:
@@ -45,6 +50,7 @@ jobs:
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Run Claude Code Review
         id: claude-review
