@@ -57,7 +57,7 @@ export function RateChart({ series, orgAvg, height = 200 }: Props) {
           width={36}
           tickFormatter={(v) => `${v}%`}
         />
-        <Tooltip formatter={(v: number) => (v == null ? '—' : `${v.toFixed(1)}%`)} />
+        <Tooltip formatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '—')} />
         {series.map((s) => (
           <Line
             key={s.bucket}
