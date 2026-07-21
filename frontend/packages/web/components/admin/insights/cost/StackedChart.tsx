@@ -56,7 +56,10 @@ export function StackedChart({ data, palette, height = 200, formatValue }: Props
           }
         />
         <Tooltip
-          formatter={(v: number) => (formatValue ? formatValue(v * 1_000_000) : `$${v.toFixed(2)}`)}
+          formatter={(v) => {
+            if (typeof v !== 'number') return '—'
+            return formatValue ? formatValue(v * 1_000_000) : `$${v.toFixed(2)}`
+          }}
         />
         {buckets.map((b, i) => (
           <Area
