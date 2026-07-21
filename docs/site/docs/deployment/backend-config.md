@@ -242,12 +242,6 @@ compaction:
   fallback_context_window: 128000
 ```
 
-The summarizer model is **not** configured here. It comes from the admin
-**Model settings → Task routing → "Compaction"** preset (falling back to the
-org's default preset if unset), so every task model — title, summarize, and
-compaction — lives in one place. `config.yaml` only holds the operational
-thresholds above.
-
 ## Conversation search
 
 Hybrid lexical + vector search over past conversations.
