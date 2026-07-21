@@ -89,3 +89,22 @@ export async function getAdminFilterOptions(
   )
   return res.options
 }
+
+// Batch id -> name resolution for rendering the trace list table (raw IDs
+// otherwise). Same endpoint as getAdminFilterOptions, exact-match instead of
+// prefix. Missing ids (e.g. a deleted workspace/user) are simply absent from
+// the response - callers fall back to the raw id.
+export async function getAdminFilterOptionsByIds(
+  kind: FilterOptionKind,
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<FilterOption[]> {
+  if (ids.length === 0) return []
+  const params = new URLSearchParams({ kind })
+  for (const id of ids) params.append('ids', id)
+  const res = await getJson<{ options: FilterOption[] }>(
+    `/api/v1/admin/traces/filter-options?${params.toString()}`,
+    signal,
+  )
+  return res.options
+}

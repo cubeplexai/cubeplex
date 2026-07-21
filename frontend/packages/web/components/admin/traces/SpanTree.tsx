@@ -2,29 +2,12 @@
 
 import { useMemo } from 'react'
 import type { SpanNode } from './types'
+import { KIND_BADGE, KIND_BAR } from './kindStyles'
 
 interface Props {
   root: SpanNode
   selectedSpanId: string
   onSelect: (id: string) => void
-}
-
-// Maps span kind → [badge classes, bar fill class].
-// Uses semantic tokens only (no raw palette utilities per spec §1).
-const KIND_BADGE: Record<string, string> = {
-  agent: 'bg-info-surface text-info-fg',
-  turn: 'bg-warning-surface text-warning-fg',
-  chat: 'bg-primary/10 text-primary',
-  tool: 'bg-success-surface text-success-fg',
-  other: 'bg-muted text-muted-foreground',
-}
-
-const KIND_BAR: Record<string, string> = {
-  agent: 'bg-info-solid',
-  turn: 'bg-warning-solid',
-  chat: 'bg-primary',
-  tool: 'bg-success-solid',
-  other: 'bg-muted-foreground',
 }
 
 interface FlatRow {

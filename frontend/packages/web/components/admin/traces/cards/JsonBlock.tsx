@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 interface Props {
   value: string | undefined | null
@@ -9,8 +10,13 @@ interface Props {
 }
 
 export function JsonBlock({ value, language = 'json' }: Props) {
+  const t = useTranslations('adminTraces.sections')
   const [copied, setCopied] = useState(false)
-  if (!value) return null
+  // Distinguish "no data at all" (undefined/null - render nothing) from
+  // "the field is present but empty" (e.g. "" or "0") - the latter used to
+  // silently render nothing too, which reads as a bug, not an empty result.
+  if (value == null) return null
+  if (value === '') return <div className="text-xs text-muted-foreground italic">{t('empty')}</div>
   const formatted = (() => {
     if (language !== 'json') return value
     try {

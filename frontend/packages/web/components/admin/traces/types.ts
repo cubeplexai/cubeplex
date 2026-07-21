@@ -101,10 +101,16 @@ export interface TraceFilterValues {
   model?: string
   start?: string
   end?: string
-  min_duration_ms?: number
-  max_duration_ms?: number
   limit?: number
 }
+
+// Tempo hard-caps search ranges at 168h (7 days) on this deployment, so there
+// is no '1m' option - a full month can't be served by a single query.
+export type TimeRangePreset = '1h' | '1d' | '7d' | 'custom'
+
+export const DEFAULT_TIME_RANGE_PRESET: TimeRangePreset = '1h'
+
+export const DEFAULT_LIMIT = 50
 
 // Postgres-backed dropdown options for the filter bar (see /admin/traces
 // filter-options). `model` is NOT here - it is low-cardinality and sourced
