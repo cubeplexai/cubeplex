@@ -29,7 +29,8 @@ function internalPath(value) {
     trimmed.startsWith('data:') ||
     trimmed.startsWith('mailto:') ||
     trimmed.startsWith('tel:') ||
-    trimmed.startsWith('javascript:')
+    trimmed.startsWith('javascript:') ||
+    trimmed.startsWith('vbscript:')
   ) {
     return null;
   }
@@ -40,10 +41,12 @@ function internalPath(value) {
       url = new URL(`https:${trimmed}`);
     } else if (trimmed.startsWith('/')) {
       url = new URL(trimmed, siteOrigin);
-    } else if (trimmed.startsWith(siteOrigin)) {
-      url = new URL(trimmed);
     } else {
-      return null;
+      // Absolute URL: parse and let the origin check below decide. A
+      // `startsWith(siteOrigin)` gate here is unsafe - `https://cubeplex.ai.evil.com/`
+      // would pass it - and unnecessary since `url.origin === siteOrigin`
+      // already rejects other hosts.
+      url = new URL(trimmed);
     }
   } catch {
     return null;
