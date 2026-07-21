@@ -228,14 +228,13 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # 在 context_window * ratio 处压缩
   keep_tail_tokens: 8000         # 逐字保留的近期 token
-  summary_provider: "openai"     # 必须是你已配置的 provider
-  summary_model: "gpt-5.6-terra"
   max_summary_tokens: null       # null = cubepi 动态预算
   fallback_context_window: 128000
 ```
 
-`summary_provider` / `summary_model` 要指向你在 `llm.providers` 里确实配置了的
-provider。
+摘要所用的模型**不在这里配置**,而是取自管理后台的 **模型设置 → 任务路由 →
+"压缩(Compaction)"** 预设(未设置时回退到组织的默认预设)。这样标题、摘要、
+压缩等各任务模型都统一在一处配置,`config.yaml` 只保留上面这些运行阈值。
 
 ## 对话搜索
 

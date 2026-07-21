@@ -2874,14 +2874,16 @@ class RunManager:
             from cubeplex.config import config as _comp_cfg
 
             if _comp_cfg.get("compaction.enabled", False):
-                _summary_provider = _comp_cfg.get("compaction.summary_provider")
-                _summary_model_id = _comp_cfg.get("compaction.summary_model")
-                # Reuse the snapshot loaded above so admin-managed providers
-                # in the model registry are visible without a second DB read.
-                from cubeplex.llm.builder import build_provider as _build_provider
+                # Summarizer model comes from the admin model-settings
+                # "compaction" task routing (falls back to the org default
+                # preset), not config.yaml. Reuse the snapshot loaded above so
+                # admin-managed providers/presets are visible without a second
+                # DB read; a >1 chain gives the summarizer fallback resilience.
+                from cubeplex.llm.builder import build_chain_model
+                from cubeplex.llm.resolver import resolve_task_preset
 
-                _summary_provider_inst = _build_provider(snap, _summary_provider, cache_policy=None)
-                _summary_bound_model = _summary_provider_inst.model(_summary_model_id)
+                _summary_preset = resolve_task_preset(snap, "compaction")
+                _summary_bound_model = build_chain_model(snap, _summary_preset)
                 _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
                 _model_window = int(_model_config.context_window or 0)
                 _model_max_out = int(_model_config.max_tokens or 0)
@@ -2915,8 +2917,9 @@ class RunManager:
                     )
                 )
                 logger.info(
-                    "CompactionMiddleware enabled (threshold={} tokens, "
+                    "CompactionMiddleware enabled (preset={}, threshold={} tokens, "
                     "model_window={}, model_max_out={}, fallback={})",
+                    _summary_preset.key,
                     int(_ctx_window * _ratio),
                     _model_window,
                     _model_max_out,
@@ -3208,7 +3211,11 @@ class RunManager:
                     )
                     await _llm_session.commit()
 
-            preset = resolve_task_preset(snap, "compaction")
+            # Memory consolidation summarizes long content → the "summarize"
+            # task routing. ("compaction" now routes the inline context-window
+            # CompactionMiddleware, so the two background summarizers can use
+            # different models.)
+            preset = resolve_task_preset(snap, "summarize")
             bound_model = build_chain_model(snap, preset)
             # Tracer is optional — pass None to run_consolidation when tracing
             # is disabled, otherwise the background LLM call is wrapped in

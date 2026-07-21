@@ -359,9 +359,8 @@ default:
   # an int to pin the budget instead.
   compaction:
     enabled: true
-    # Must reference a provider/model you configured under llm.providers.
-    summary_provider: "openai"
-    summary_model: "gpt-5.6-terra"
+    # Summarizer model is NOT set here — it comes from the admin model-settings
+    # "compaction" task routing (falls back to the org's default preset).
     threshold_ratio: 0.7
     keep_tail_tokens: 8000
     max_summary_tokens: null
