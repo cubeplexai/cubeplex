@@ -19,6 +19,10 @@ import tldextract
 # lock under ~/.cache, which would raise OSError in read-only containers.
 _extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
+# Characters allowed in a DNS label segment (the `[A-Za-z0-9-]` from the
+# suffix check below). Module-level so the linear scan avoids re-parsing.
+_LABEL_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
 
 class HostPatternError(ValueError):
     """Raised when a host pattern is malformed or too broad."""
@@ -59,15 +63,31 @@ def validate_host_pattern(pattern: str) -> None:
                 f"alternation '|' not allowed in host regex (can span domains): {pattern!r}"
             )
         # eTLD+1 boundary: the regex must END with a literal \.domain.tld so it
-        # cannot match more than one registrable domain. Unrolled to avoid the
-        # nested `(?:...+)+` quantifier (catastrophic backtracking on crafted
-        # patterns) - one required segment then zero-or-more more.
-        m = re.search(r"\\\.[A-Za-z0-9-]+(?:\\\.[A-Za-z0-9-]+)*$", core)
-        if not m:
+        # cannot match more than one registrable domain. Scanned backward
+        # char-by-char (O(n)) instead of a regex: `re.search` on
+        # `(?:\\.X+)+$` and its unrolled form are polynomial under retry on
+        # crafted input (`\.-` repeated + a non-matching tail), and this path
+        # is reachable from the workspace sandbox-env route with no length cap
+        # on the pattern, so a workspace member could DoS validation.
+        i = len(core)
+        suffix_start: int | None = None
+        while i > 0:
+            # label = run of [A-Za-z0-9-] immediately before i
+            j = i
+            while j > 0 and core[j - 1] in _LABEL_CHARS:
+                j -= 1
+            if j == i:
+                break  # no label here -> stop
+            # the label must be preceded by a literal \. (escaped dot)
+            if j < 2 or core[j - 2 : j] != "\\.":
+                break
+            suffix_start = j - 2
+            i = j - 2
+        if suffix_start is None:
             raise HostPatternError(
                 f"regex must end with a literal \\.domain.tld suffix: {pattern!r}"
             )
-        literal = m.group(0).replace("\\.", ".").lstrip(".")
+        literal = core[suffix_start:].replace("\\.", ".").lstrip(".")
         if _registrable(literal) is None:
             raise HostPatternError(
                 f"regex literal suffix is not a single registrable domain: {pattern!r}"
