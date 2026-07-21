@@ -24,15 +24,41 @@ interface Props {
   loadOptions: (q: string, signal: AbortSignal) => Promise<FilterComboboxOption[]>
   mode: 'list' | 'typeahead'
   placeholder?: string
+  /**
+   * Resolved label for a deep-linked `value` (e.g. from a shared/bookmarked
+   * URL), fetched asynchronously by the parent. Swaps the input's display
+   * text from the raw id to this label once it arrives - but only while the
+   * input still shows exactly `value` untouched, so it never clobbers a
+   * selection or in-progress typing that happened in the meantime.
+   */
+  initialLabel?: string
 }
 
-export function FilterCombobox({ label, value, onChange, loadOptions, mode, placeholder }: Props) {
+export function FilterCombobox({
+  label,
+  value,
+  onChange,
+  loadOptions,
+  mode,
+  placeholder,
+  initialLabel,
+}: Props) {
   const t = useTranslations('adminTraces.filters')
   // inputValue is the editable text in the input. It is initialized from the
   // external value (a raw id when deep-linked from the URL) and thereafter
   // driven only by user actions (type/select/clear) - so a deep-linked id
-  // shows as-is until the user picks an option, which then shows its label.
+  // shows as-is until the user picks an option, or `initialLabel` resolves,
+  // whichever comes first.
   const [inputValue, setInputValue] = useState(value ?? '')
+
+  useEffect(() => {
+    if (initialLabel && value !== undefined && inputValue === value) {
+      setInputValue(initialLabel)
+    }
+    // Only re-run when the resolved label itself changes; re-checking on
+    // every inputValue change would fight the user's own typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLabel])
   const [options, setOptions] = useState<FilterComboboxOption[]>([])
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)

@@ -250,8 +250,14 @@
       "runId": "Run ID",
       "from": "From",
       "to": "To",
-      "minDurationMs": "Min duration (ms)",
-      "maxDurationMs": "Max duration (ms)",
+      "range": "Time range",
+      "rangePreset": {
+        "1h": "1h",
+        "1d": "1d",
+        "7d": "7d",
+        "custom": "Custom"
+      },
+      "limit": "Limit",
       "searchPlaceholder": "Search…",
       "loadingOptions": "Loading…",
       "noOptions": "No matches",
@@ -269,9 +275,15 @@
     "empty": "No traces match these filters.",
     "disabled": "Trace viewer is not configured for this deployment.",
     "loading": "Loading traces…",
+    "loadingMore": "Loading…",
+    "loadMore": "Load more",
     "sections": {
       "model": "Model",
       "tokens": "Token usage",
+      "tokensInput": "input",
+      "tokensOutput": "output",
+      "tokensCacheRead": "cache read",
+      "tokensCacheWrite": "cache write",
       "messages": "Messages",
       "system": "System instructions",
       "output": "Output messages",
@@ -282,7 +294,15 @@
       "toolInfo": "Tool",
       "arguments": "Arguments",
       "result": "Result",
-      "rawAttributes": "Raw attributes"
+      "rawAttributes": "Raw attributes",
+      "reasoning": "Reasoning",
+      "empty": "empty",
+      "roles": {
+        "user": "User",
+        "assistant": "Assistant",
+        "system": "System",
+        "tool": "Tool"
+      }
     }
   },
   "artifactsPage": {
