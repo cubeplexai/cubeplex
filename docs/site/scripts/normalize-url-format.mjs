@@ -32,10 +32,11 @@ function normalizeUrl(value) {
     if (trimmed.startsWith('/')) {
       url = new URL(trimmed, siteOrigin);
       relative = true;
-    } else if (trimmed.startsWith(siteOrigin)) {
-      url = new URL(trimmed);
     } else {
-      return value;
+      // Absolute URL: parse and let the origin check below decide. A
+      // `startsWith(siteOrigin)` gate here is unsafe (`https://cubeplex.ai.evil.com/`
+      // would pass it) and redundant with `url.origin !== siteOrigin`.
+      url = new URL(trimmed);
     }
   } catch {
     return value;

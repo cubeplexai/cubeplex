@@ -53,6 +53,19 @@ const SIZE_CLASS: Record<string, string> = {
   xl: 'size-16',
 }
 
+/**
+ * Allow only safe URL schemes for an `<img src>`. Avatar URLs are S3/SSO
+ * (`https://`), the same-origin proxy (`/api/v1/avatar/...`), a `blob:`, or a
+ * DiceBear `data:image/...` URI. Anything else - `javascript:`, `vbscript:`,
+ * `data:text/html` - is dropped so a malicious value can't reach a DOM sink;
+ * the component falls back to the generated DiceBear avatar.
+ */
+const SAFE_AVATAR_SRC = /^(?:https?:|\/|blob:|data:image\/)/i
+function safeAvatarSrc(src: string | null | undefined): string | undefined {
+  if (!src) return undefined
+  return SAFE_AVATAR_SRC.test(src) ? src : undefined
+}
+
 export function Avatar({
   src,
   seed,
@@ -64,6 +77,7 @@ export function Avatar({
   className,
 }: AvatarProps) {
   const effectiveSeed = seed ?? userId ?? name ?? 'unknown'
+  const safeSrc = safeAvatarSrc(src)
   const pixelSize = SIZE_MAP[size] ?? 32
 
   const svgDataUri = useMemo(() => {
@@ -89,20 +103,20 @@ export function Avatar({
     setRealLoaded(false)
     setRealFailed(false)
     const el = realImgRef.current
-    if (!el || !src) return
+    if (!el || !safeSrc) return
     if (el.complete) {
       if (el.naturalWidth > 0) setRealLoaded(true)
       else setRealFailed(true)
     }
-  }, [src])
+  }, [safeSrc])
 
-  const showReal = src && !realFailed && realLoaded
+  const showReal = safeSrc && !realFailed && realLoaded
   // Generated SVG shows when there is no real src (never-saved avatar), OR as
   // a fallback when the real src fails to load. While a real src is loading
   // we render nothing visible (transparent) so there's no "default -> real"
   // swap on refresh — the real image fades in once it arrives. When `loading`
   // is set (caller knows data is still fetching), show nothing at all.
-  const showGenerated = !loading && (!src || realFailed)
+  const showGenerated = !loading && (!safeSrc || realFailed)
 
   return (
     <span
@@ -123,11 +137,11 @@ export function Avatar({
         <img src={svgDataUri} alt="" className="size-full object-cover" />
       )}
       {/* Real image; fades in once loaded. onError drops to the generated SVG. */}
-      {src && !realFailed && !loading && (
+      {safeSrc && !realFailed && !loading && (
         // eslint-disable-next-line @next/next/no-img-element -- user/SSO avatar proxy URL
         <img
           ref={realImgRef}
-          src={src}
+          src={safeSrc}
           alt={name ?? ''}
           onLoad={() => setRealLoaded(true)}
           onError={() => setRealFailed(true)}
