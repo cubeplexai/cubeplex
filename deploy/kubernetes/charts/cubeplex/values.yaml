@@ -215,7 +215,7 @@ egress:
       registry: ""                     # falls back to .Values.image.registry
       repository: ""                   # falls back to .Values.image.repository
       name: cubeplex-egress-webhook
-      tag: ""                          # build-and-push.sh fills this
+      tag: ""                          # optional; defaults to "v<Chart.appVersion>"
       pullPolicy: ""                   # falls back to .Values.image.pullPolicy
     # MUST match the OpenSandbox server's configured egress.image exactly
     # (the webhook narrow-matches sandbox pods by ownerReference + egress
