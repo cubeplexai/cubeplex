@@ -9,7 +9,7 @@ parse errors / query strings never reach the frontend.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -78,8 +78,6 @@ async def list_traces(
     model: str | None = Query(default=None),
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
-    min_duration_ms: int | None = Query(default=None, ge=0),
-    max_duration_ms: int | None = Query(default=None, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> TraceListResponse:
     if start and end and start >= end:
@@ -90,6 +88,26 @@ async def list_traces(
                 status_code=400,
                 detail=f"{label} must be a timezone-aware ISO 8601 timestamp",
             )
+    # Never call Tempo without an explicit range: this deployment's own
+    # default search window is much narrower than useful, which made the
+    # trace list appear empty on first load. Default to the last hour, and
+    # fill in whichever side is missing relative to the other.
+    now = datetime.now(UTC)
+    if start is None and end is None:
+        start, end = now - timedelta(hours=1), now
+    elif end is None:
+        end = now
+    elif start is None:
+        start = end - timedelta(hours=1)
+    assert start is not None and end is not None  # always set by the block above
+    # Tempo hard-caps search ranges at 168h on this deployment; forwarding a
+    # wider one gets a generic 502 from _bad_upstream below, so reject it
+    # here with a message that actually explains the limit.
+    if end - start > timedelta(hours=168):
+        raise HTTPException(
+            status_code=400,
+            detail="Range exceeds the maximum supported window (7 days)",
+        )
     client = await _client_or_503()
     org_id = await resolve_current_org_id(user, session)
     try:
@@ -102,8 +120,6 @@ async def list_traces(
             model=model,
             start=start,
             end=end,
-            min_duration_ms=min_duration_ms,
-            max_duration_ms=max_duration_ms,
             limit=limit,
         )
     except TempoQueryValueError as exc:
@@ -143,6 +159,11 @@ async def get_filter_options(
     session: Annotated[AsyncSession, Depends(get_session)],
     kind: FilterOptionKind = Query(..., description="Entity kind to list."),
     q: str | None = Query(default=None, max_length=100),
+    ids: list[str] | None = Query(
+        default=None,
+        description="Exact-match batch lookup (e.g. resolving IDs already on "
+        "screen to names). Mutually exclusive with q - ids wins if both are given.",
+    ),
     limit: int = Query(default=20, ge=1, le=50),
 ) -> FilterOptionsResponse:
     """Read-only dropdown options for the traces filter bar.
@@ -152,8 +173,13 @@ async def get_filter_options(
     - never trusts a client-supplied org. Has no Tempo dependency, so it works
     even when the trace viewer's Tempo backend is unset.
     """
+    if ids is not None and len(ids) > 200:
+        raise HTTPException(status_code=400, detail="Too many ids requested")
     org_id = await resolve_current_org_id(user, session)
     pattern = f"{_escape_like(q)}%" if q else None
+    # Batch lookups are already bounded by the caller's page size; the normal
+    # prefix limit doesn't apply.
+    row_limit = len(ids) if ids is not None else limit
 
     if kind is FilterOptionKind.WORKSPACE:
         # Coarse / low-cardinality: return all in the org (cap 200) so the
@@ -161,7 +187,9 @@ async def get_filter_options(
         stmt = select(cast(Any, Workspace.id), cast(Any, Workspace.name)).where(
             cast(Any, Workspace.org_id) == org_id
         )
-        if pattern is not None:
+        if ids is not None:
+            stmt = stmt.where(cast(Any, Workspace.id).in_(ids))
+        elif pattern is not None:
             stmt = stmt.where(cast(Any, Workspace.name).ilike(pattern, escape="\\"))
         stmt = stmt.order_by(cast(Any, Workspace.name)).limit(200)
     elif kind is FilterOptionKind.CONVERSATION:
@@ -170,9 +198,11 @@ async def get_filter_options(
             cast(Any, Conversation.org_id) == org_id,
             cast(Any, Conversation.deleted_at).is_(None),
         )
-        if pattern is not None:
+        if ids is not None:
+            stmt = stmt.where(cast(Any, Conversation.id).in_(ids))
+        elif pattern is not None:
             stmt = stmt.where(cast(Any, Conversation.title).ilike(pattern, escape="\\"))
-        stmt = stmt.order_by(cast(Any, Conversation.title)).limit(limit)
+        stmt = stmt.order_by(cast(Any, Conversation.title)).limit(row_limit)
     else:  # FilterOptionKind.USER - users are org-scoped only via membership.
         label = func.coalesce(cast(Any, User.display_name), cast(Any, User.email)).label("label")
         stmt = (
@@ -181,14 +211,16 @@ async def get_filter_options(
             .join(Workspace, cast(Any, Membership.workspace_id) == Workspace.id)
             .where(cast(Any, Workspace.org_id) == org_id)
         )
-        if pattern is not None:
+        if ids is not None:
+            stmt = stmt.where(cast(Any, User.id).in_(ids))
+        elif pattern is not None:
             stmt = stmt.where(
                 or_(
                     cast(Any, User.display_name).ilike(pattern, escape="\\"),
                     cast(Any, User.email).ilike(pattern, escape="\\"),
                 )
             )
-        stmt = stmt.distinct().order_by(label).limit(limit)
+        stmt = stmt.distinct().order_by(label).limit(row_limit)
 
     rows = (await session.execute(stmt)).all()
     options = [FilterOption(id=str(row[0]), name=str(row[1])) for row in rows]
