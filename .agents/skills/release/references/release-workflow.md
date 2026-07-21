@@ -10,11 +10,18 @@ Application releases use one semver across these committed fields:
 - `frontend/packages/web/package.json` → `version`;
 - `deploy/kubernetes/charts/cubeplex/Chart.yaml` → `version` and `appVersion`.
 
-Check them with:
+`scripts/check-version-consistency.sh v0.3.0` verifies the six fields above.
+Two more code-level refs are NOT checked by the script and must be bumped by
+hand (the build or the pre-push gate fails if they are missed):
 
-```bash
-scripts/check-version-consistency.sh v0.3.0
-```
+- `backend/cubeplex/api/app.py` -> the FastAPI app `version="..."`;
+- `backend/cubeplex/api/routes/v1/system.py` -> `_CUBEPLEX_VERSION` (commented
+  "bump on release; kept in sync with backend/pyproject.toml").
+
+`backend/uv.lock` also records the cubeplex package version; regenerate it with
+`uv lock` (or any `uv run`) and commit the result. If you forget, the pre-push
+`backend-check-ci` hook rewrites `uv.lock` mid-run, pre-commit flags "files
+were modified by this hook", and the push is rejected.
 
 The sandbox has an independent version in:
 
@@ -33,20 +40,35 @@ ordinary application release reuses the existing sandbox build.
 
 From a feature branch:
 
-1. Bump the application versions to the target version, for example `0.3.0`.
-2. Bump `deploy/images/sandbox/VERSION` only when sandbox inputs changed.
-3. Run `scripts/check-version-consistency.sh v0.3.0`.
-4. Run the changed-module checks and the repository pre-push gate.
-5. Merge the PR into `main`.
+1. Bump the application version to the target (e.g. `0.3.0`) in every version
+   source listed above - the six checked fields PLUS `app.py`, `system.py`, and
+   the regenerated `uv.lock`. Match the prior release commit's file set.
+2. Bump `deploy/images/sandbox/VERSION` only when sandbox inputs changed. If you
+   bump it, merging this PR to `main` triggers `sandbox-image.yml` to build the
+   new `sandbox-v<version>`; that build must appear before `release.yml` can
+   promote it (release.yml polls, but only after the build is triggered).
+3. Run `scripts/check-version-consistency.sh v0.3.0` (checks the six fields).
+4. Push. The pre-push hook runs the full CI-equivalent `backend-check-ci` +
+   `frontend-check-ci` (~3 min). GitHub's SSH closes the idle connection while
+   the hook runs, so push with keepalive:
+   `GIT_SSH_COMMAND="ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=8" git push origin <branch>`.
+5. Merge the PR into `main`. The `main` branch ruleset requires
+   last-push-approval, so a release PR you pushed yourself cannot self-approve;
+   merge with `gh pr merge <n> --squash --admin` (you are the repo admin).
 
-Do not change `BACKEND_TAG`, `FRONTEND_TAG`, Helm default image tags, or Compose
-defaults in this preparation PR. Those deployment selections belong to the
-release manifest and operator environment.
+Do not change Helm default image tags (`values.yaml` `tag: ""`, which already
+default to `v<appVersion>`) or `compose.yaml` in this PR - those deployment
+selections belong to the release manifest and operator environment. Do update
+`deploy/docker-compose/.env.example`'s `BACKEND_TAG`/`FRONTEND_TAG` to the new
+release tag: it is a tracked template operators copy, and `compose.yaml`
+requires `BACKEND_TAG` (no default), so a stale example deploys old images.
 
 ## Image publication order
 
-Application images are built and pushed only on a release tag push or a manual
-`workflow_dispatch`. There are no per-PR or per-merge image builds.
+Application images are built on a release tag push or a manual
+`workflow_dispatch`. They are pushed only on a tag push, or on a
+`workflow_dispatch` run with its `publish` input set to `true` (default
+`false`). There are no per-PR or per-merge image builds.
 
 When a `v<semver>` tag is pushed, `images.yml` publishes:
 
@@ -120,19 +142,21 @@ not a runtime platform.
 
 ## Deploy the release
 
-Use the release manifest as the deployment input. For tag-based deployment:
+Use the release manifest as the deployment input. For docker-compose,
+`compose.yaml` requires these in `.env` (copy from `.env.example`):
 
 ```dotenv
 BACKEND_TAG=v0.3.0
 FRONTEND_TAG=v0.3.0
 ```
 
-or Helm values:
+For Helm, the chart already defaults every image tag to `v<appVersion>`, so a
+standard release needs no image overrides. Pin only to use a different version:
 
 ```yaml
 image:
-  backend: {tag: v0.3.0}
-  frontend: {tag: v0.3.0}
+  backend: {tag: v0.3.0}   # optional; defaults to v<appVersion>
+  frontend: {tag: v0.3.0}  # optional; defaults to v<appVersion>
 ```
 
 For a private registry, mirror the same digests and override the registry and
