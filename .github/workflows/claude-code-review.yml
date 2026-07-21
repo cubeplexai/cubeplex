@@ -12,11 +12,11 @@ on:
 
 jobs:
   claude-review:
+    # `/code-review` checks out the PR head and runs Claude with write +
+    # id-token scopes, so restrict it to org members/collaborators.
     if: |
       github.event.issue.pull_request != null &&
       startsWith(github.event.comment.body, '/code-review') &&
-      # `/code-review` checks out the PR head and runs Claude with write +
-      # id-token scopes, so restrict it to org members/collaborators.
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
        github.event.comment.author_association == 'COLLABORATOR')
