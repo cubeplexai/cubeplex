@@ -245,48 +245,82 @@ The official Kubernetes deployment guide (`deploy/kubernetes/INSTALL.md` and `do
 
 To complete the OCI Kubernetes deployment:
 
-1. **Add a managed node pool to the OCI cluster** (via OCI Console):
+### Phase 1: Add Managed Node Pool
+**Add a managed node pool to the OCI cluster** (via OCI Console):
    - Create new node pool (e.g., `cubeplex-workload`)
-   - Choose VM shape appropriate for your workload
+   - Choose VM shape appropriate for your workload (VM.Standard.E4.Flex for dev/test)
    - Wait for nodes to reach `Ready` status
 
-2. **Deploy cubeplex to the managed node pool:**
-   ```bash
-   # Copy the template
-   cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
-      deploy/kubernetes/charts/cubeplex/values.local.yaml
-   
-   # Edit for your environment (LLM keys, URLs, passwords)
-   $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
-   
-   # Add nodeSelector for managed nodes
-   # backend:
-   #   nodeSelector:
-   #     node.kubernetes.io/workload: cubeplex
-   # frontend:
-   #   nodeSelector:
-   #     node.kubernetes.io/workload: cubeplex
-   
-   # Deploy
-   helm dependency update deploy/kubernetes/charts/cubeplex
-   helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
-     --namespace cubeplex --create-namespace \
-     -f deploy/kubernetes/charts/cubeplex/values.yaml \
-     -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
-     --wait --timeout 15m
-   ```
+### Phase 2: Deploy CubePlex
+**Deploy cubeplex to the managed node pool:**
+```bash
+# Copy the template
+cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
+   deploy/kubernetes/charts/cubeplex/values.local.yaml
 
-3. **Run verification tests:**
+# Edit for your environment:
+#   - LLM provider keys (use arkplan/local config if available)
+#   - Database passwords (generate with: openssl rand -hex 16)
+#   - JWT/CSRF/vault secrets (generate as documented)
+#   - Ingress host (e.g., cubeplex.oci.local)
+$EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
+
+# Add nodeSelector for managed nodes:
+cat >> deploy/kubernetes/charts/cubeplex/values.local.yaml << 'YAML_EOF'
+backend:
+  nodeSelector:
+    node.kubernetes.io/workload: cubeplex
+frontend:
+  nodeSelector:
+    node.kubernetes.io/workload: cubeplex
+YAML_EOF
+
+# Deploy
+helm dependency update deploy/kubernetes/charts/cubeplex
+helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
+  --namespace cubeplex --create-namespace \
+  -f deploy/kubernetes/charts/cubeplex/values.yaml \
+  -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
+  --wait --timeout 15m
+```
+
+### Phase 3: Verification & Testing
+**⚠️ Testing Requirements (PENDING - only run after deployment succeeds):**
+
+1. **Smoke tests** (deployment correctness):
    ```bash
-   # Smoke tests
    INGRESS_IP=<node-ip> deploy/kubernetes/scripts/smoke-test.sh
-   
-   # E2E tests with arkplan model
-   HOST=cubeplex.oci.local IP=<node-ip> PORT=<ingress-nodeport> \
-     deploy/kubernetes/scripts/e2e.sh
    ```
 
-4. **Document any OCI-specific configuration** discovered during this deployment (update this note)
+2. **E2E tests with arkplan LLM model** (full round-trip including LLM):
+   ```bash
+   # Option A: Use deploy script (simple, but limited model testing)
+   HOST=cubeplex.oci.local IP=<node-ip> PORT=<ingress-nodeport> \
+   PROMPT="Say the word hello and nothing else." \
+     deploy/kubernetes/scripts/e2e.sh
+
+   # Option B: Use tests/e2e with arkplan config (full test suite)
+   # Configure LLM provider (arkplan or local) in tests/conftest.py
+   # Then run:
+   cd tests
+   pytest e2e/ -k "test_" -v --tb=short
+   ```
+
+   **Note on arkplan config:** 
+   - Check `backend/config.development.local.yaml` for local arkplan setup
+   - Kubernetes deployment should use the same LLM provider configured in `values.local.yaml`
+   - Full e2e test suite is in `tests/e2e/`; uses conftest.py for model config
+
+3. **Document any OCI-specific configuration** discovered (update this note)
+
+## Testing Scope
+
+| Test Type | Status | Notes |
+|---|---|---|
+| Smoke tests (routing, health) | Pending | Deployment must succeed first |
+| E2E with deploy script | Pending | Quick validation, limited models |
+| Full e2e test suite (pytest) | Pending | Comprehensive, uses arkplan if configured |
+| Sandbox integration tests | Pending | Requires OpenSandbox in `values.local.yaml` |
 
 ## Resources Cleaned Up
 
