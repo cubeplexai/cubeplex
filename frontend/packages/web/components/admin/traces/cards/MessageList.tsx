@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
+  AlertTriangle,
   Bot,
   Brain,
   ChevronDown,
@@ -28,6 +29,9 @@ const ROLE_STYLE: Record<string, { icon: typeof User; accent: string }> = {
   assistant: { icon: Bot, accent: 'border-l-primary' },
   system: { icon: Settings, accent: 'border-l-muted-foreground/40' },
   tool: { icon: Terminal, accent: 'border-l-success-solid' },
+  // _decode_messages' fallback when a span attribute was truncated upstream
+  // (invalid JSON) - not a real conversational role.
+  _truncated: { icon: AlertTriangle, accent: 'border-l-warning-solid' },
 }
 
 function str(v: unknown): string {
@@ -78,6 +82,16 @@ function ToolCallPart({ part }: { part: Record<string, unknown> }) {
   )
 }
 
+function TruncatedPart({ content }: { content: string }) {
+  const t = useTranslations('adminTraces.sections')
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-warning-fg">{t('truncated')}</p>
+      <JsonBlock value={content} language="text" />
+    </div>
+  )
+}
+
 function ToolResultPart({ part }: { part: Record<string, unknown> }) {
   return (
     <div className="rounded border border-border/60 bg-muted/20 p-2">
@@ -85,7 +99,7 @@ function ToolResultPart({ part }: { part: Record<string, unknown> }) {
         <Terminal className="size-3.5" />
         <span>result</span>
       </div>
-      <JsonBlock value={str(part.result)} language="text" />
+      <JsonBlock value={str(part.result)} />
     </div>
   )
 }
@@ -101,6 +115,8 @@ function MessagePart({ part }: { part: Record<string, unknown> }) {
       return <ToolCallPart part={part} />
     case 'tool_call_response':
       return <ToolResultPart part={part} />
+    case '_truncated':
+      return <TruncatedPart content={str(part.content)} />
     default:
       return <Badge variant="outline">[{type || 'unknown'}]</Badge>
   }
@@ -122,12 +138,14 @@ export function MessageList({ items }: Props) {
             <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <Icon className="size-3.5" />
               <span>
-                {KNOWN_ROLES.has(m.role)
-                  ? t(
-                      `roles.${m.role}` as
-                        'roles.user' | 'roles.assistant' | 'roles.system' | 'roles.tool',
-                    )
-                  : m.role}
+                {m.role === '_truncated'
+                  ? t('truncatedLabel')
+                  : KNOWN_ROLES.has(m.role)
+                    ? t(
+                        `roles.${m.role}` as
+                          'roles.user' | 'roles.assistant' | 'roles.system' | 'roles.tool',
+                      )
+                    : m.role}
               </span>
             </div>
             <div className="space-y-2">

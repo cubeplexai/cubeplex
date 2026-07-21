@@ -8,6 +8,7 @@ import httpx
 import pytest
 import respx
 
+from cubeplex.api.schemas.trace import SpanKind
 from cubeplex.services.tempo_client import TempoClient, TempoQueryError, TempoTraceNotFoundError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
@@ -72,6 +73,114 @@ async def test_get_trace_returns_detail() -> None:
     detail = await client.get_trace("abc123")
     assert detail.summary.trace_id == payload["batches"][0]["scopeSpans"][0]["spans"][0]["traceId"]
     assert detail.root.children
+
+
+@respx.mock
+async def test_get_trace_extracts_agent_and_turn_payloads() -> None:
+    """The invoke_agent (root) span and cubepi.turn spans carry their own
+    gen_ai.input.messages/output.messages/system_instructions. This real
+    captured fixture has some of these truncated mid-sentence (an actual
+    tracing-pipeline artifact, not a synthetic edge case) - exercising both
+    the happy path and the truncation sentinel in one fixture.
+    """
+    payload = json.loads((FIXTURES / "sample_trace_multi_turn.json").read_text())
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc123").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    detail = await client.get_trace("abc123")
+
+    agent = detail.root.agent
+    assert agent is not None
+    assert agent.provider == "unknown:deepseek-anthropic-shape"
+    assert "datetime" in agent.tools
+    # This fixture's agent-level system_instructions/messages are all
+    # truncated (>1400 chars, cut off mid-string) - decode falls back to the
+    # sentinel instead of silently returning [].
+    assert len(agent.system_instructions) == 1
+    assert agent.system_instructions[0].role == "_truncated"
+    assert len(agent.messages) == 1
+    assert agent.messages[0].role == "_truncated"
+
+    turns = {t.turn.index: t.turn for t in detail.root.children if t.kind == SpanKind.TURN}
+    # Turn 1's messages are short enough to be valid JSON - the happy path.
+    assert turns[1].messages and turns[1].messages[0].role != "_truncated"
+    assert turns[1].output_messages and turns[1].output_messages[0].role == "assistant"
+    # Turn 0's are truncated - same sentinel fallback as the agent-level ones.
+    assert turns[0].messages[0].role == "_truncated"
+    assert turns[0].output_messages[0].role == "_truncated"
+
+
+@respx.mock
+async def test_chat_span_derives_output_messages_from_raw_response() -> None:
+    """`gen_ai.output.messages` is never set on `chat` spans in this cubepi
+    version (only on invoke_agent/cubepi.turn) - the chat span's own response
+    content has to come from cubepi.llm.raw_response instead (OpenAI chat
+    completions shape: choices[0].message.{content,tool_calls}).
+    """
+    raw_response = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": "execute",
+                                    "arguments": '{"command": "ls -la /workspace"}',
+                                },
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+    )
+    payload = {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "traceId": "abc123",
+                                "spanId": "s1",
+                                "name": "chat glm-5.2",
+                                "startTimeUnixNano": "1781164911000000000",
+                                "endTimeUnixNano": "1781164912000000000",
+                                "attributes": [
+                                    {
+                                        "key": "gen_ai.operation.name",
+                                        "value": {"stringValue": "chat"},
+                                    },
+                                    {
+                                        "key": "cubepi.llm.raw_response",
+                                        "value": {"stringValue": raw_response},
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc123").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    detail = await client.get_trace("abc123")
+
+    output = detail.root.llm.output_messages if detail.root.llm else None
+    assert output is not None
+    assert len(output) == 1
+    assert output[0].role == "assistant"
+    assert output[0].parts[0]["type"] == "tool_call"
+    assert output[0].parts[0]["name"] == "execute"
+    assert output[0].parts[0]["arguments"] == {"command": "ls -la /workspace"}
 
 
 @respx.mock

@@ -277,6 +277,7 @@
     "loading": "加载中…",
     "loadingMore": "加载中…",
     "loadMore": "加载更多",
+    "backToList": "返回列表",
     "sections": {
       "model": "模型",
       "tokens": "Token 用量",
@@ -297,6 +298,10 @@
       "rawAttributes": "原始属性",
       "reasoning": "推理过程",
       "empty": "空",
+      "truncated": "数据在链路中被截断 — 仅显示部分原始内容",
+      "truncatedLabel": "已截断",
+      "agentOverview": "概览",
+      "provider": "提供方",
       "roles": {
         "user": "用户",
         "assistant": "助手",

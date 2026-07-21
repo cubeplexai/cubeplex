@@ -1,18 +1,29 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { RotateCw } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
 import type { SpanNode } from './types'
+import { AgentCard } from './cards/AgentCard'
 import { JsonBlock } from './cards/JsonBlock'
 import { LlmCard } from './cards/LlmCard'
 import { Section } from './cards/Section'
 import { ToolCard } from './cards/ToolCard'
+import { TurnCard } from './cards/TurnCard'
 import { KIND_BADGE } from './kindStyles'
 
 interface Props {
   node: SpanNode
+}
+
+// Distinct chat models used anywhere under this agent span - an agent run
+// can call more than one model across turns, so this isn't a single value.
+function collectModels(node: SpanNode): string[] {
+  const models = new Set<string>()
+  const walk = (n: SpanNode) => {
+    if (n.llm?.model) models.add(n.llm.model)
+    for (const c of n.children) walk(c)
+  }
+  walk(node)
+  return Array.from(models)
 }
 
 // Matches the formatDuration shape already used in TraceListTable.tsx (repo
@@ -48,21 +59,8 @@ export function SpanDetail({ node }: Props) {
       </div>
       {node.llm && <LlmCard llm={node.llm} />}
       {node.tool && <ToolCard tool={node.tool} />}
-      {node.turn && (
-        <Card className="flex-row items-center gap-3 p-4">
-          <div className="rounded-md bg-warning-surface p-2 text-warning-fg">
-            <RotateCw className="size-4" />
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="text-sm font-semibold">Turn {node.turn.index}</div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span>stop:</span>
-              <Badge variant="outline">{node.turn.stop_reason ?? '—'}</Badge>
-              <span>tool calls: {node.turn.tool_calls_count}</span>
-            </div>
-          </div>
-        </Card>
-      )}
+      {node.turn && <TurnCard turn={node.turn} />}
+      {node.agent && <AgentCard agent={node.agent} models={collectModels(node)} />}
       <Section title={t('rawAttributes')} defaultOpen={node.kind === 'other'}>
         <JsonBlock value={JSON.stringify(node.raw_attributes, null, 2)} />
       </Section>

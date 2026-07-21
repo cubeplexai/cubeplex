@@ -50,6 +50,16 @@ export interface TurnPayload {
   index: number
   stop_reason?: string | null
   tool_calls_count: number
+  messages: ChatMessage[]
+  output_messages: ChatMessage[]
+}
+
+export interface AgentPayload {
+  provider?: string | null
+  tools: string[]
+  system_instructions: ChatMessage[]
+  messages: ChatMessage[]
+  output_messages: ChatMessage[]
 }
 
 export interface SpanNode {
@@ -64,6 +74,7 @@ export interface SpanNode {
   llm?: LlmCallPayload | null
   tool?: ToolCallPayload | null
   turn?: TurnPayload | null
+  agent?: AgentPayload | null
   raw_attributes: Record<string, unknown>
   children: SpanNode[]
 }

@@ -277,6 +277,7 @@
     "loading": "Loading traces…",
     "loadingMore": "Loading…",
     "loadMore": "Load more",
+    "backToList": "Back to traces",
     "sections": {
       "model": "Model",
       "tokens": "Token usage",
@@ -297,6 +298,10 @@
       "rawAttributes": "Raw attributes",
       "reasoning": "Reasoning",
       "empty": "empty",
+      "truncated": "Data truncated in the tracing pipeline — showing partial raw content",
+      "truncatedLabel": "Truncated",
+      "agentOverview": "Overview",
+      "provider": "Provider",
       "roles": {
         "user": "User",
         "assistant": "Assistant",
