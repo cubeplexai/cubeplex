@@ -20,6 +20,9 @@ permissions:
 jobs:
   gate:
     name: Gate (automatic, /ci, or workflow_dispatch)
+    # `/ci` checks out the PR head and runs its code with access to repo
+    # secrets, so restrict it to org members/collaborators. Ordinary PR
+    # CI still runs for everyone via the `pull_request` trigger above.
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
@@ -27,9 +30,6 @@ jobs:
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
        startsWith(github.event.comment.body, '/ci') &&
-       # `/ci` checks out the PR head and runs its code with access to repo
-       # secrets, so restrict it to org members/collaborators. Ordinary PR
-       # CI still runs for everyone via the `pull_request` trigger above.
        (github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
         github.event.comment.author_association == 'COLLABORATOR'))
