@@ -9,6 +9,20 @@ A single `helm upgrade --install` deploys CubePlex (backend + frontend +
 Postgres + Redis + rustfs, optionally the alibaba OpenSandbox umbrella) to
 an existing Kubernetes cluster.
 
+## ⚠️ Known Limitations: OCI Virtual Nodes
+
+**OCI Container Engine for Kubernetes virtual nodes are not supported.**
+
+Virtual nodes in OCI Kubernetes run pods in Kata containers, which do not support:
+- **Init containers** (required for database migrations)
+- **VolumeMount subPath** (required for config file assembly)
+
+These are fundamental requirements of cubeplex — no workaround is possible without
+major architectural changes.
+
+**Solution:** Use OCI managed node pools instead of virtual nodes. See
+[Cloud Provider Compatibility](#cloud-provider-compatibility) for details.
+
 ## 1. Prerequisites
 
 | Item | Requirement | Notes |
@@ -760,3 +774,54 @@ opensandbox:
 
 A fuller annotated template lives at
 `deploy/kubernetes/charts/cubeplex/values.local.yaml.example` in the repo.
+
+## 9. Cloud Provider Compatibility
+
+### Tested & Supported
+
+| Provider | Service | Status | Notes |
+|---|---|---|---|
+| EKS (AWS) | Elastic Kubernetes Service | ✅ Fully supported | Standard managed K8s; no known issues |
+| GKE (Google) | Google Kubernetes Engine | ✅ Fully supported | Standard managed K8s; no known issues |
+| AKS (Azure) | Azure Kubernetes Service | ✅ Fully supported | Standard managed K8s; no known issues |
+| k3s | Lightweight K8s | ✅ Fully supported | Works great on any infra |
+| kubeadm | Self-hosted | ✅ Fully supported | Full K8s feature support |
+
+### Known Limitations
+
+| Provider | Service | Status | Details | Workaround |
+|---|---|---|---|---|
+| OCI | Container Engine for Kubernetes (Virtual Nodes) | ❌ Unsupported | Virtual nodes don't support init containers or VolumeMount subPath | Use managed node pools instead of virtual nodes |
+
+**OCI Virtual Nodes:** If your OCI cluster uses only virtual nodes, you must add a managed
+node pool to run cubeplex. Virtual nodes are optimized for stateless microservices and burst
+workloads, not for database-backed applications like cubeplex.
+
+**To add a managed node pool to OCI Kubernetes:**
+
+1. Visit the OCI Console → Container Engine for Kubernetes → [Your Cluster]
+2. Under "Node Pools," click "Create Node Pool"
+3. Configure:
+   - **Name:** `cubeplex-workload`
+   - **Kubernetes Version:** Match your cluster control plane (v1.36+)
+   - **Image:** Latest available (Oracle-provided or custom)
+   - **Shape:** Choose based on your workload (VM.Standard.E4.Flex recommended for dev/test)
+   - **Initial Node Count:** 1 (scales up with demand)
+4. Create the node pool and wait for nodes to become `Ready`
+5. Label the nodes so cubeplex pods target them:
+   ```bash
+   kubectl label nodes -l nodepool.oci.io/name=cubeplex-workload \
+     node.kubernetes.io/workload=cubeplex
+   ```
+6. Update `values.local.yaml` to add nodeSelector:
+   ```yaml
+   backend:
+     nodeSelector:
+       node.kubernetes.io/workload: cubeplex
+   frontend:
+     nodeSelector:
+       node.kubernetes.io/workload: cubeplex
+   ```
+7. Redeploy with `helm upgrade --install`
+
+After the node pool is ready, the standard installation should succeed.
