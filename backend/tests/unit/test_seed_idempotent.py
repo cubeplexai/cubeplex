@@ -32,8 +32,32 @@ def backend() -> FernetBackend:
     return FernetBackend([Fernet.generate_key()])
 
 
-async def test_seed_is_idempotent(clean_db: AsyncSession, backend: FernetBackend) -> None:
+# config.yaml ships llm.providers empty (configured per deployment), so seed
+# tests supply their own provider config rather than depending on shipped
+# defaults — same monkeypatch pattern as the preset-ref tests below.
+_SYSTEM_PROVIDERS = {
+    "cubeplex": {
+        "base_url": "http://seed.example/v1",
+        "api": "openai-completions",
+        "api_key": "k",
+        "models": [{"id": "m-pro", "name": "Model Pro"}],
+    }
+}
+
+
+def _use_system_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "cubeplex.seeders.provider_seeder.settings",
+        {"llm": {"providers": _SYSTEM_PROVIDERS}},
+        raising=True,
+    )
+
+
+async def test_seed_is_idempotent(
+    clean_db: AsyncSession, backend: FernetBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Seeding twice must produce the same set of system providers and models."""
+    _use_system_providers(monkeypatch)
     await seed_system_providers_from_config(clean_db, backend)
     providers1 = (
         (await clean_db.execute(select(Provider).where(Provider.org_id.is_(None)))).scalars().all()
@@ -53,8 +77,11 @@ async def test_seed_is_idempotent(clean_db: AsyncSession, backend: FernetBackend
         assert len(models) > 0, f"Provider {p.name} should have models after seed"
 
 
-async def test_seed_creates_providers(clean_db: AsyncSession, backend: FernetBackend) -> None:
+async def test_seed_creates_providers(
+    clean_db: AsyncSession, backend: FernetBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Seeding must create system providers with their models."""
+    _use_system_providers(monkeypatch)
     await seed_system_providers_from_config(clean_db, backend)
     providers = (
         (await clean_db.execute(select(Provider).where(Provider.org_id.is_(None)))).scalars().all()
@@ -72,9 +99,10 @@ async def test_seed_creates_providers(clean_db: AsyncSession, backend: FernetBac
 
 
 async def test_seed_updates_existing_provider_url(
-    clean_db: AsyncSession, backend: FernetBackend
+    clean_db: AsyncSession, backend: FernetBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Seeding an existing provider must update its base_url."""
+    _use_system_providers(monkeypatch)
     # Insert a provider manually with a different URL
     p = Provider(
         org_id=None,
