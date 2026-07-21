@@ -131,15 +131,22 @@ def _render_body(
     """Pick the best inline renderer for the artifact type.
 
     ``entry_file`` is percent-encoded for URL path use (``urllib.parse.quote``
-    with ``safe='/'``) — NOT html-escaped. ``html.escape`` would turn ``&``
-    into ``&amp;`` and leave ``?``/``#``/whitespace intact, producing
-    URL-significant characters that the iframe browser would mis-parse
-    (querystring/fragment truncation, mis-routed requests, blank previews).
+    with ``safe='/'``) and the resulting URL is HTML-escaped for attribute
+    context. Percent-encoding neutralizes path-significant characters
+    (``?``/``#``/whitespace, plus the ``"``/``<``/``>`` that would break out
+    of an HTML attribute); HTML-escaping is the correct treatment for a URL in
+    an ``src``/``href`` attribute. (``&`` in a URL is meant to be ``&amp;`` in
+    HTML — the browser decodes it back when fetching — so escaping is safe,
+    and here a no-op since ``quote`` already turned any ``&`` into ``%26``.)
     """
     safe_entry = quote(entry_file, safe="/")
     file_url = f"/api/v1/public/artifacts/share/{nonce}/file/{safe_entry}"
+    # HTML-escape for attribute context. ``quote`` already encoded the
+    # ``"``/``<``/``>``/``&`` that matter, so this is a behavior-preserving
+    # no-op on the URL but signals the sanitization to static analysis.
+    safe_url = html.escape(file_url, quote=True)
     if artifact_type == "image":
-        return f'<img src="{file_url}" alt="">'
+        return f'<img src="{safe_url}" alt="">'
     if artifact_type == "website":
         # Scripts allowed (websites are interactive) but NOT same-origin —
         # MDN explicitly notes that `allow-scripts allow-same-origin`
@@ -147,11 +154,11 @@ def _render_body(
         # agent-authored HTML read same-origin cookies (including the
         # non-HttpOnly CSRF cookie of a logged-in cubeplex session that
         # happens to open the share link) is a real exfiltration path.
-        return f'<iframe src="{file_url}" sandbox="allow-scripts"></iframe>'
+        return f'<iframe src="{safe_url}" sandbox="allow-scripts"></iframe>'
     if artifact_type in {"code", "document", "data", "skill"}:
-        return f'<iframe src="{file_url}" sandbox></iframe>'
+        return f'<iframe src="{safe_url}" sandbox></iframe>'
     # Visible link text IS user-facing HTML — keep html.escape there.
-    return f'<div class="empty"><a href="{file_url}">Download {html.escape(entry_file)}</a></div>'
+    return f'<div class="empty"><a href="{safe_url}">Download {html.escape(entry_file)}</a></div>'
 
 
 @router.get("/share/{nonce}/file/{file_path:path}")
