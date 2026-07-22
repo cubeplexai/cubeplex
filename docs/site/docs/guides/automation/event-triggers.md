@@ -33,10 +33,7 @@ Navigate to your workspace, open **Triggers** from the sidebar, and click **New 
 
 After saving, CubePlex displays the **webhook URL** and the **signing secret**. Copy both — you will need them when configuring your sender.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The trigger detail panel right after creation, showing the generated webhook URL and the (revealed) signing secret with their copy buttons.
-**Asset:** `/img/automation/trigger-webhook-url-secret.png`
-:::
+![Trigger detail panel with ingest URL controls and secret rotation state](/img/automation/trigger-webhook-url-secret.png)
 
 ## Webhook URL and signing
 
@@ -115,10 +112,7 @@ Requests with a missing/invalid signature or a stale timestamp are rejected with
 
 Use the event log to verify that your webhook integration is working, debug filter conditions, and monitor trigger health.
 
-:::info 📸 Screenshot placeholder
-**Capture:** A trigger's event log with a mix of outcomes (one accepted, one filtered out, one duplicate), each row expandable to show the payload.
-**Asset:** `/img/automation/trigger-event-log.png`
-:::
+![Trigger event log with filtered and failed delivery outcomes](/img/automation/trigger-event-log.png)
 
 ## Example: GitHub issue triage
 

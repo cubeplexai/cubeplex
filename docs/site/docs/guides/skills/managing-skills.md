@@ -29,10 +29,7 @@ A skill in your workspace can be in one of four states:
 | **Workspace-private** | Installed directly into this workspace (not org-wide). Always enabled. |
 | **Available** | Visible in the catalog but not installed in this workspace. You can install it from the detail panel. |
 
-:::info 📸 Screenshot placeholder
-**Capture:** The workspace **Skills** page showing skill cards with their state badges (org-enabled, org-disabled, workspace-private, available) and the source/state filter controls in the toolbar.
-**Asset:** `/img/skills/workspace-skills-page.png`
-:::
+![Workspace skills page with source and state filters](/img/skills/workspace-skills-page.png)
 
 ## Enabling and disabling skills
 

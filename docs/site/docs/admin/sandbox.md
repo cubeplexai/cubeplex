@@ -43,10 +43,7 @@ Set the default action to **Deny**, then add allow rules for only the hosts the 
 
 This ensures the agent can install packages and call your internal API, but cannot reach anything else.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Admin > Sandbox network policy editor with the default action set to **Deny** and a few allow rules added (e.g. `pypi.org`, `registry.npmjs.org`), showing the per-rule action/target controls.
-**Asset:** `/img/admin/sandbox-network-policy.png`
-:::
+![Sandbox network policy with deny-by-default and package registry allow rules](/img/admin/sandbox-network-policy.png)
 
 ### Command rules
 

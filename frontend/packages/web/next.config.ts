@@ -24,6 +24,8 @@ export const ATTACHMENT_PROXY_BODY_LIMIT = '60mb'
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
 export const nextConfig: NextConfig = {
+  // Keep development captures free of the Next.js route/build indicator.
+  devIndicators: false,
   allowedDevOrigins: [
     'localhost',
     '127.0.0.1',

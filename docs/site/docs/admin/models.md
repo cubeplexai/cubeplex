@@ -9,10 +9,7 @@ CubePlex connects to LLM providers through API keys you configure at the organiz
 
 All model management happens at **Admin > Models** (`/admin/models`).
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Admin > Models page showing the list of configured providers with their logos and connection/test status, and the models each provider exposes.
-**Asset:** `/img/admin/models-providers.png`
-:::
+![Admin model provider detail with endpoint, API-key status, and exposed models](/img/admin/models-providers.png)
 
 ## Providers
 

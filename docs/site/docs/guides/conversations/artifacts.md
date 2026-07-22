@@ -47,10 +47,7 @@ When the agent creates an artifact, an **artifact card** appears inline in the c
 
 Clicking the card (or the preview button) opens the **artifact panel** on the right side of the screen. The panel renders a live preview based on the artifact type — websites run in a sandboxed iframe, images display at full resolution, code gets syntax highlighting, and so on.
 
-:::info 📸 Screenshot placeholder
-**Capture:** An artifact card inline in the chat with the artifact panel open on the right, showing a live website preview and the version badge expanded into the version dropdown.
-**Asset:** `/img/conversations/artifact-panel.png`
-:::
+![Artifact card with the right-side preview panel open](/img/conversations/artifact-panel.png)
 
 ### Artifact gallery
 

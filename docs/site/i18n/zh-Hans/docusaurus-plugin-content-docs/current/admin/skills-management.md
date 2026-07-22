@@ -50,10 +50,7 @@ title: 技能管理
 
 注册表连接并启用后，用户搜索时，其技能会出现在发现界面中。之后你可以在注册表详情面板中启用、禁用或更改其信任级别。
 
-:::info 📸 截图占位符
-**截取内容：** Add Registry 表单，显示 Kind 选择器（skills.sh / ClawHub / remote）、在选择 remote 类型时显示的条件 URL 字段，以及 Trust tier 选择器。
-**资源：** `/img/admin/add-skill-registry.png`
-:::
+![添加技能注册表表单，显示自定义 URL 和信任级别控件](/img/admin/add-skill-registry.png)
 
 ## 安装并控制可用性
 

@@ -48,10 +48,7 @@ Before chatting, make sure at least one AI model is available.
 
 The agent responds with text, and may also produce tool calls, code execution results, or artifacts depending on the model and available tools.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The chat view mid-conversation — show the model selector on the chat input, the attachment icon, and a streaming agent response.
-**Asset:** `/img/getting-started/first-conversation.png`
-:::
+![CubePlex conversation with the model selector and attachment control](/img/getting-started/first-conversation.png)
 
 ### Try attaching a file
 

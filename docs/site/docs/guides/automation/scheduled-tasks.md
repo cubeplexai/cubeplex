@@ -18,10 +18,7 @@ Open your workspace and go to **Scheduled Tasks** from the sidebar. Click **New 
 | **Schedule** | How often the task fires. See [schedule types](#schedule-types) below. |
 | **Conversation target** | Which conversation each fire runs in. See [conversation options](#conversation-options) below. |
 
-:::info 📸 Screenshot placeholder
-**Capture:** The "New scheduled task" dialog with name, prompt, the frequency pills (Daily / Weekly / Monthly / Every… / Once), and the conversation target radio group all visible.
-**Asset:** `/img/scheduled-tasks/new-task-dialog.png`
-:::
+![New scheduled task dialog with schedule and conversation-target controls](/img/scheduled-tasks/new-task-dialog.png)
 
 ## Schedule types
 
@@ -92,10 +89,7 @@ Every occurrence is recorded in the task's run history, shown in the task detail
 
 The panel refreshes automatically every few seconds, and a **Refresh** button forces an immediate reload. Use run history to audit what the agent did and when, or to debug tasks that are not behaving as expected.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The task detail panel showing the schedule summary, next-run line, Pause/Resume controls, and the run-history list with a mix of Succeeded and Skipped (missed) state badges.
-**Asset:** `/img/scheduled-tasks/run-history.png`
-:::
+![Scheduled task detail with run history](/img/scheduled-tasks/run-history.png)
 
 ## Example: weekly issue digest
 

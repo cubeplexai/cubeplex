@@ -21,10 +21,7 @@ Each row shows the template's name, description, and current state for your work
 | Enabled | This template is active in your workspace. |
 | Disabled | An org admin has suspended this template org-wide. You cannot enable it while it is suspended. |
 
-:::info 📸 Screenshot placeholder
-**Capture:** The workspace MCP catalog showing a list of templates — one enabled (with a credential connected), one not yet enabled, and one with a "Disabled" badge.
-**Asset:** `/img/mcp/workspace-catalog.png`
-:::
+![Workspace MCP catalog with connected, disabled, and available templates](/img/mcp/workspace-catalog.png)
 
 ## Enable a template
 

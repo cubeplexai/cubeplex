@@ -50,10 +50,7 @@ Skill registries are external servers that host collections of skills. Connectin
 
 Once a registry is connected (and enabled), its skills surface in the discovery interface when users search. You can enable, disable, or change the trust tier of a registry later from its detail panel.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Add Registry form with the Kind selector (skills.sh / ClawHub / remote), the conditional URL field shown for the remote kind, and the Trust tier picker.
-**Asset:** `/img/admin/add-skill-registry.png`
-:::
+![Add skill registry form with custom URL and trust tier controls](/img/admin/add-skill-registry.png)
 
 ## Install and control availability
 

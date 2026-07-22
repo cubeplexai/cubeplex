@@ -33,10 +33,7 @@ CubePlex **不会** 原生接受第三方提供商的签名格式（例如 GitHu
 
 保存后，CubePlex 会显示 **webhook URL** 和 **签名密钥**。请复制两者——配置发送方时需要使用。
 
-:::info 📸 截图占位符
-**截图内容：** 创建后立即显示的触发器详情面板，展示生成的 webhook URL、已显示的签名密钥及其复制按钮。
-**资源：** `/img/automation/trigger-webhook-url-secret.png`
-:::
+![触发器详情面板，显示 ingest URL 控件和密钥轮换状态](/img/automation/trigger-webhook-url-secret.png)
 
 ## Webhook URL 和签名 {#webhook-url-and-signing}
 
@@ -115,10 +112,7 @@ CubePlex 可防止意外洪泛和重复投递：
 
 使用事件日志可验证 webhook 集成是否正常工作、调试筛选条件，并监控触发器健康状况。
 
-:::info 📸 截图占位符
-**截图内容：** 一个触发器的事件日志，其中混有不同结果（一个已接受、一个已筛除、一个重复），每一行均可展开查看载荷。
-**资源：** `/img/automation/trigger-event-log.png`
-:::
+![触发器事件日志，显示筛除和失败的投递结果](/img/automation/trigger-event-log.png)
 
 ## 示例：GitHub issue 分类
 

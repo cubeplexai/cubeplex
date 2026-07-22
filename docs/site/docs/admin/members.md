@@ -9,10 +9,7 @@ CubePlex uses a two-level role system: **organization roles** control access to 
 
 Org-level member management happens at **Admin > Members** (`/admin/members`). Workspace-level roles are managed within each workspace's settings.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Admin > Members table with several members listed — show the owner row carrying an **Owner** badge (no role dropdown, no Remove button) alongside other rows that have an admin/member role dropdown and a Remove action.
-**Asset:** `/img/admin/members-table.png`
-:::
+![Admin members table with owner and member role controls](/img/admin/members-table.png)
 
 ## Organization roles
 
