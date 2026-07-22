@@ -76,3 +76,9 @@
   user sandbox, and Workspace Settings > Sandboxes then showed the non-empty
   `Running` row with `Restart` and `Delete` actions. The resulting asset is
   `conversations/sandboxes-panel.png`, wired into both locale trees.
+- After PR review flagged test-environment details in two existing captures,
+  replaced the model-provider endpoints with public demo URLs and the sandbox
+  policy image with `cubeplex/sandbox:24.04` in the remote test database, then
+  recaptured `admin/models-providers.png` and
+  `admin/sandbox-network-policy.png`. The refreshed assets contain no private
+  LAN hosts, internal gateways, or registry names.
