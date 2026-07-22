@@ -86,15 +86,30 @@ def test_admin_body_rejects_task_value_not_available() -> None:
         )
 
 
-def test_admin_body_requires_all_four_tiers() -> None:
+def test_admin_body_accepts_partial_tiers() -> None:
+    """Omitting tier keys (flash/max here) is valid — missing tiers are
+    treated as disabled downstream, not rejected at the schema level."""
     partial = {
         "lite": {"enabled": False, "primary": None, "fallbacks": []},
         "pro": {"enabled": True, "primary": "a/b", "fallbacks": []},
     }
-    with pytest.raises(ValidationError, match="tiers"):
+    body = AdminModelPresetsBody.model_validate(
+        {
+            "tiers": partial,
+            "custom_presets": [],
+            "default_preset": "pro",
+            "task_routing": {},
+        }
+    )
+    assert "flash" not in body.tiers
+    assert "max" not in body.tiers
+
+
+def test_admin_body_rejects_empty_tiers() -> None:
+    with pytest.raises(ValidationError, match="at least one tier"):
         AdminModelPresetsBody.model_validate(
             {
-                "tiers": partial,
+                "tiers": {},
                 "custom_presets": [],
                 "default_preset": "pro",
                 "task_routing": {},

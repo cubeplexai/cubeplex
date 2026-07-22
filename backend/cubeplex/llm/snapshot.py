@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.errors import CorruptPresetsRowError
-from cubeplex.llm.snapshot_schema import ModelPresetsConfig, ModelTier
+from cubeplex.llm.snapshot_schema import ModelPresetsConfig, ModelTier, TierSetting
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ async def _load_presets(
         raise CorruptPresetsRowError(org_id=row.org_id, errors=exc.errors()) from exc
     presets: list[ModelPreset] = []
     for tier in ModelTier:  # def order: lite, flash, pro, max
-        s = cfg.tiers[tier]
+        s = cfg.tiers.get(tier, TierSetting())  # tiers config may omit disabled tiers
         if not s.enabled or not s.primary:
             continue
         presets.append(

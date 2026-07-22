@@ -27,7 +27,20 @@ backend:
     # Mirror of backend/config.development.local.yaml `llm` block. Written
     # verbatim into the backend Secret as config.production.secrets.yaml.
     llm:
-      default_model: "openai/gpt-5.6-terra"
+      # model_presets is REQUIRED: ModelPresetsConfig needs at least one tier
+      # defined under `tiers` (lite/flash/pro/max — any subset). An empty
+      # tiers map fails validation and crashes the pod at startup with a
+      # clear error; that's intentional (see backend/cubeplex/api/app.py's
+      # lifespan — model_presets seeding is NOT allowed to fail silently,
+      # unlike system-provider seeding). Tiers you omit are simply treated
+      # as disabled.
+      model_presets:
+        tiers:
+          lite:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          flash: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          pro:   { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          max:   { enabled: false, primary: null, fallbacks: [] }
+        default_preset: pro
       providers:
         # Any OpenAI-compatible endpoint (OpenAI, Azure, vLLM, LiteLLM, a gateway…).
         openai:

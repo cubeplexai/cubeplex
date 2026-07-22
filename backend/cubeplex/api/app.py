@@ -272,12 +272,21 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
         async with async_session_maker() as seed_session:
             await seed_system_providers_from_config(seed_session, _app.state.encryption_backend)
-            from cubeplex.seeders.provider_seeder import seed_model_presets_from_config
-
-            await seed_model_presets_from_config(seed_session)
         logger.info("System provider seed step completed")
     except Exception as e:
         logger.warning("Failed to seed system providers: {}", str(e))
+
+    # Seed system model_presets from config.yaml (idempotent). Deliberately NOT wrapped
+    # in a warn-and-continue try/except like the step above: an invalid llm.model_presets
+    # (e.g. a partial tiers map) previously left the app healthy but with no presets
+    # seeded at all, so every chat message failed at runtime with no_default_preset
+    # instead of the deployment failing fast where the bad config actually is.
+    from cubeplex.db import async_session_maker
+    from cubeplex.seeders.provider_seeder import seed_model_presets_from_config
+
+    async with async_session_maker() as seed_session:
+        await seed_model_presets_from_config(seed_session)
+    logger.info("System model_presets seed step completed")
 
     # Seed MCP connector templates (idempotent, lock-guarded).
     try:

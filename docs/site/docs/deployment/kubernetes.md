@@ -258,12 +258,27 @@ empty.
 backend:
   secrets:
     llm:
+      model_presets:
+        tiers:
+          lite:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          flash: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          pro:   { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          max:   { enabled: false, primary: null, fallbacks: [] }
+        default_preset: pro
       # see LLM provider configuration for the full field reference
 ```
 
 Configured the same way as the shared
 [LLM provider configuration](./overview.md#llm-provider-configuration) —
 just nested under `backend.secrets.llm` instead of `production.llm`.
+
+**`model_presets.tiers` needs at least one tier** — `lite`, `flash`, `pro`,
+`max` — any subset; tiers you omit are simply treated as disabled, no need to
+list them with `enabled: false`. An **empty** `tiers: {}` is the one thing
+that's rejected, and rejected loudly: it fails the pod at startup
+(`CrashLoopBackOff`) rather than degrading silently, so a broken config is
+visible immediately in `kubectl get pods` instead of surfacing later as a
+`no_default_preset` 500 on the first chat message.
 
 ### 4.5 Sandbox (optional)
 
@@ -614,7 +629,8 @@ kubectl -n cubeplex logs deploy/cubeplex-backend -c backend --previous
 | `PermissionError: '/app/logs'` | Image is older than `75da36fb`; rebuild. |
 | `CUBEPLEX_AUTH__VAULT_KEY is required` | Add `backend.secrets.auth.vault_key` to `values.local.yaml`. |
 | `Could not connect to 'cubeplex-postgresql:5432'` | Postgres still starting; usually self-heals. |
-| `Provider 'X' not found` | `default_model: "X/..."` references a provider not in `providers`. |
+| `Provider 'X' not found` | A model preset references a provider not in `providers`. |
+| `tiers must contain at least one tier` | `backend.secrets.llm.model_presets.tiers` is `{}` — add at least one tier. See [§4.4](#44-llm-providers). |
 
 ### PVC stays `Pending`
 
@@ -675,7 +691,7 @@ backend:
     # …any backend/config.yaml key
   secrets:                          # Secret
     auth:    { jwt_secret, csrf_secret, vault_key }     # required
-    llm:     { default_model, fallback_models, providers }
+    llm:     { model_presets, providers }             # model_presets needs at least one tier, see §4.4
     sandbox: { domain, image, api_key }
 
 frontend:
@@ -754,7 +770,13 @@ backend:
       csrf_secret: "<openssl rand -hex 32>"
       vault_key: "<Fernet.generate_key()>"
     llm:
-      default_model: "openai/gpt-5.6-terra"
+      model_presets:
+        tiers:
+          lite:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          flash: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          pro:   { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          max:   { enabled: false, primary: null, fallbacks: [] }
+        default_preset: pro
       providers:
         openai:               # any OpenAI-compatible endpoint
           base_url: "https://api.openai.com/v1"
