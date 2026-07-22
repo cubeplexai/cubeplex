@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   BookOpen,
@@ -112,8 +112,10 @@ export function MCPAdminDetailPanel({
 
   const currentOrgId = useWorkspaceStore((s) => s.workspaces[0]?.org_id ?? null)
   const isOrgAdmin = useOrgAdminFlag(currentOrgId)
-  const orgWorkspaces = useWorkspaceStore((s) =>
-    currentOrgId ? s.workspaces.filter((w) => w.org_id === currentOrgId) : [],
+  const workspaces = useWorkspaceStore((s) => s.workspaces)
+  const orgWorkspaces = useMemo(
+    () => (currentOrgId ? workspaces.filter((w) => w.org_id === currentOrgId) : []),
+    [currentOrgId, workspaces],
   )
   const [tryItScopedWsId, setTryItScopedWsId] = useState<string | null>(null)
 

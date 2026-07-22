@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   listWorkspaces,
+  wsListEffectiveConnectors,
   wsListCatalog,
   wsSetTemplateState,
   type ApiClient,
@@ -20,12 +21,19 @@ interface MCPWorkspacesTabProps {
 interface WsRow {
   ws: Workspace
   enabled: boolean
+  credentialSource: 'org' | 'workspace' | 'user' | 'none'
   saving: boolean
   error: string | null
 }
 
 export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesTabProps) {
   const t = useTranslations('mcpAdmin')
+  const credentialSourceLabels = {
+    org: t('credentialSourceOrg'),
+    workspace: t('credentialSourceWorkspace'),
+    user: t('credentialSourceUser'),
+    none: t('credentialSourceNone'),
+  } as const
 
   const [rows, setRows] = useState<WsRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,9 +52,15 @@ export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesT
             wsClient.setWorkspaceId(ws.id)
             const catalog = await wsListCatalog(wsClient, ws.id)
             const match = catalog.items.find((r) => r.template.template_id === templateId)
+            const effective = await wsListEffectiveConnectors(wsClient, ws.id)
+            const effectiveMatch = effective.items.find(
+              (r) => r.template?.template_id === templateId,
+            )
             return {
               ws,
               enabled: match?.enabled ?? false,
+              credentialSource:
+                effectiveMatch?.credential_source ?? match?.credential_policy ?? 'none',
               saving: false,
               error: null,
             } satisfies WsRow
@@ -54,6 +68,7 @@ export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesT
             return {
               ws,
               enabled: false,
+              credentialSource: 'none',
               saving: false,
               error: (err as Error).message,
             } satisfies WsRow
@@ -113,7 +128,7 @@ export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesT
       </p>
 
       <ul className="flex flex-col divide-y divide-border/70 rounded-md border border-border/70">
-        {rows.map(({ ws, enabled, saving, error }) => (
+        {rows.map(({ ws, enabled, credentialSource, saving, error }) => (
           <li
             key={ws.id}
             className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
@@ -124,6 +139,9 @@ export function MCPWorkspacesTab({ templateId, client: _client }: MCPWorkspacesT
               {error && <div className="mt-0.5 text-[11px] text-destructive">{error}</div>}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                {t('wsCredentialSource', { source: credentialSourceLabels[credentialSource] })}
+              </span>
               {saving ? (
                 <span className="text-xs text-muted-foreground">{t('wsSaving')}</span>
               ) : (

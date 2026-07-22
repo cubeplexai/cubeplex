@@ -138,9 +138,6 @@ The cache refreshes automatically in the background when it is older than 24 hou
 
 Each template's detail panel shows a **Workspaces** tab: a per-workspace list of whether the template is enabled or not, plus the credential source in use. You can see this for any template that has a connector row (i.e., has been engaged by at least one workspace).
 
-:::info 📸 Screenshot placeholder
-**Capture:** A template's detail panel with the **Workspaces** tab open, showing several workspaces with enabled/disabled state and credential source labels.
-**Asset:** `/img/mcp/admin-workspaces-tab.png`
-:::
+![WebTools template detail with the Workspaces tab showing enabled state and credential source labels](/img/mcp/admin-workspaces-tab.png)
 
 Individual workspace enable/disable toggles are managed by workspace admins from the workspace **MCP** page. Org admins can see the state but manage it only via the **Distribute** dialog or by using **Disable** to suspend the template org-wide.
