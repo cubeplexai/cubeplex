@@ -9,18 +9,13 @@ title: Kubernetes（Helm）
 Postgres + Redis + rustfs，可选 alibaba OpenSandbox 全家桶）部署到已有的
 Kubernetes 集群中。
 
-## ⚠️ 已知限制：OCI 虚拟节点
-
-**OCI Container Engine for Kubernetes 的虚拟节点不受支持。**
-
-OCI Kubernetes 的虚拟节点用 Kata 容器跑 Pod，不支持：
-- **Init containers**（数据库迁移需要用到）
-- **VolumeMount subPath**（组装配置文件需要用到）
-
-这两个是 cubeplex 的基本运行要求——不做架构级改动的话没有变通办法。
-
-**解决方法：** 用 OCI 的托管节点池代替虚拟节点。详见
-[云厂商兼容性](#9-云厂商兼容性)。
+backend Deployment 需要两个标准 Kubernetes Pod 特性：**init container**
+（用于数据库迁移步骤）和 **subPath volume mount**（用于从 ConfigMap/Secret
+组装配置文件）。标准节点池——包括各云厂商的托管节点池、k3s 和 kubeadm——均
+支持这两个特性。以轻量沙箱代替完整 kubelet 运行 Pod 的 serverless 或
+"虚拟节点"类方案（例如 OCI 虚拟节点、Azure AKS 虚拟节点）通常不支持其中
+一项或两项。如果你的集群使用此类方案，请参阅
+[§9 云厂商兼容性](#9-云厂商兼容性)。
 
 ## 1. 前置依赖
 
@@ -905,21 +900,38 @@ opensandbox:
 
 ## 9. 云厂商兼容性
 
-### 已测试且支持
+cubeplex 需要具备完整 kubelet 的 Kubernetes 节点池，具体来说是为了支持
+**init container** 和 **subPath volume mount**（见上文）。下表按厂商和
+服务类型列出兼容情况。
+
+### 已验证
 
 | 厂商 | 服务 | 状态 | 备注 |
 |---|---|---|---|
-| EKS（AWS） | Elastic Kubernetes Service | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
-| GKE（Google） | Google Kubernetes Engine | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
-| AKS（Azure） | Azure Kubernetes Service | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
-| k3s | 轻量级 K8s | ✅ 完全支持 | 在任何基础设施上都能跑 |
-| kubeadm | 自建 | ✅ 完全支持 | 完整支持所有 K8s 特性 |
+| OCI | Container Engine for Kubernetes — 托管节点池 | ✅ 支持 | 已端到端部署并测试，包括对话、sandbox 与 egress 功能。 |
+| OCI | Container Engine for Kubernetes — 虚拟节点 | ❌ 不支持 | Pod 无法启动（`Pending` / `CrashLoopBackOff`），不支持 init container 或 subPath。 |
 
-### 已知限制
+### 预期可用
 
-| 厂商 | 服务 | 状态 | 详情 | 变通方法 |
-|---|---|---|---|---|
-| OCI | Container Engine for Kubernetes（虚拟节点） | ❌ 不支持 | 虚拟节点不支持 init container 或 VolumeMount subPath | 用托管节点池代替虚拟节点 |
+以下服务均运行完整 kubelet 并实现标准 Pod API，预期 init container 和
+subPath mount 的行为与 OCI 托管节点池一致。尚未针对实际 cubeplex 部署
+逐一验证。
+
+| 厂商 | 服务 |
+|---|---|
+| EKS（AWS） | Elastic Kubernetes Service，EC2 支撑的 node group |
+| GKE（Google） | Google Kubernetes Engine，Standard 或 Autopilot |
+| AKS（Azure） | Azure Kubernetes Service，标准（VM 支撑的）节点池 |
+| k3s | 轻量级 Kubernetes |
+| kubeadm | 自托管 Kubernetes |
+
+### 不支持
+
+| 厂商 | 服务 | 状态 | 详情 |
+|---|---|---|---|
+| OCI | Container Engine — 虚拟节点 | ❌ 不支持 | 见上方"已验证"。 |
+| Azure | AKS 虚拟节点（ACI 支撑） | ❌ 不支持 | [Microsoft 官方虚拟节点文档](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes#limitations)将 init container 列为不支持项；PersistentVolumeClaim 同样不支持（仅支持 inline 的 Azure Files 挂载）。 |
+| AWS | EKS on Fargate | ⚠️ 部分支持 | Fargate 支持 init container，但仅支持静态 PV，不支持动态供给（参见 [Fargate storage](https://docs.aws.amazon.com/eks/latest/userguide/fargate-pod-configuration.html#fargate-storage)）。chart 默认的 StorageClass 需要动态供给，因此 Fargate 需要手动预先创建 PV，本文未涵盖该配置；使用常规 EC2 支撑的 node group 的 EKS 则没有此限制。 |
 
 **OCI 虚拟节点：** 如果你的 OCI 集群只有虚拟节点，必须加一个托管节点池才能跑
 cubeplex。虚拟节点是为无状态微服务和突发负载优化的，不适合 cubeplex 这类
