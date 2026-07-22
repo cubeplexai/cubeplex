@@ -1,6 +1,9 @@
 'use client'
 
 import { useAuthStore } from '../stores/authStore'
+import type { OrgMembership } from '../api/auth'
+
+const EMPTY_ORG_MEMBERSHIPS: OrgMembership[] = []
 
 /**
  * Returns true iff the current user is an admin or owner of the given org.
@@ -10,7 +13,7 @@ import { useAuthStore } from '../stores/authStore'
  * membership row is present.
  */
 export function useOrgAdminFlag(orgId: string | null | undefined): boolean {
-  const memberships = useAuthStore((s) => s.user?.org_memberships ?? [])
+  const memberships = useAuthStore((s) => s.user?.org_memberships ?? EMPTY_ORG_MEMBERSHIPS)
   if (!orgId) return false
   return memberships.some((m) => m.org_id === orgId && (m.role === 'admin' || m.role === 'owner'))
 }
