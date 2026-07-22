@@ -32,6 +32,15 @@ data:
         # Defaults to .Values.opensandbox.enabled for the common case.
         enabled: {{ dig "sandbox" "enabled" .Values.opensandbox.enabled .Values.backend }}
         use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}
+        secure_access: {{ dig "sandbox" "secure_access" true .Values.backend }}
+        {{- if .Values.egress.enabled }}
+        # Activates egress secret-injection in SandboxManager (every
+        # injection call is gated on `if self._exchange_host:`) and is
+        # force-allowed in the sandbox's egress network policy. Defaults to
+        # the same host the sandbox-side mitmproxy addon actually connects to
+        # (see egress-webhook-deployment.yaml's exchangeURL default).
+        egress_exchange_host: {{ dig "sandbox" "egress_exchange_host" (printf "%s.%s.svc.cluster.local" (include "cubeplex.backend.fullname" .) .Release.Namespace) .Values.backend }}
+        {{- end }}
       {{- if .Values.docling.enabled }}
       parsers:
         docling_serve:

@@ -49,6 +49,37 @@ def load_ca(key_pem: bytes, cert_pem: bytes) -> CA:
     return CA(key=key, cert=cert)
 
 
+def mint_server_cert(
+    ca: CA, *, common_name: str, sans: list[str], days: int = 365
+) -> tuple[bytes, bytes]:
+    """Mint a server leaf cert (with SANs, for TLS hostname verification) signed
+    by `ca`. Used for the webhook's own serving cert and the backend's mTLS
+    listener cert — distinct from `CertMinter.mint`, which mints CN-only client
+    certs for per-sandbox mTLS auth (no hostname to verify there)."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
+        .issuer_name(ca.cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=5))
+        .not_valid_after(now + dt.timedelta(days=days))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(s) for s in sans]), critical=False
+        )
+        .sign(ca.key, hashes.SHA256())
+    )
+    key_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    return key_pem, cert.public_bytes(serialization.Encoding.PEM)
+
+
 class CertMinter:
     def __init__(self, ca: CA) -> None:
         self._ca = ca

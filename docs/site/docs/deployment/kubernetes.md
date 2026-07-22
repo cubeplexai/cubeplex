@@ -301,9 +301,71 @@ Three typical layouts:
 
 | Layout | `values.local.yaml` |
 |---|---|
-| Bundled OpenSandbox subchart | `opensandbox.enabled: true`; `backend.secrets.sandbox.domain` points at `cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090` |
+| Bundled OpenSandbox subchart | `opensandbox.enabled: true`; `backend.secrets.sandbox.domain` points at `opensandbox-server.opensandbox-system.svc.cluster.local:80` (the vendored subchart hardcodes `fullnameOverride`/`namespaceOverride` — no release-name prefix, no `cubeplex` namespace, port 80 not 8090) |
 | External OpenSandbox | `opensandbox.enabled: false`; `backend.sandbox.enabled: true`; `backend.secrets.sandbox.domain` points at the external host |
 | No sandbox (chat-only) | `opensandbox.enabled: false`; leave `backend.sandbox.enabled` unset (it follows `opensandbox.enabled` → false) |
+
+The backend defaults to `sandbox.secure_access: true` — it expects sandbox
+access to go through a signed route token, which requires the OpenSandbox
+`gateway`/`ingress` component to be deployed
+(`opensandbox.opensandbox-server.server.gateway.enabled: true`, not covered
+here). If you're not deploying that gateway, disable the requirement or the
+backend can't create sandboxes at all:
+```yaml
+backend:
+  sandbox:
+    secure_access: false
+```
+
+If your node pool runs CRI-O (see the [image-name troubleshooting
+entry](#imageinspecterror--short-name-mode-is-enforcing-returns-ambiguous-list)),
+the OpenSandbox subchart's own images need the same `docker.io/` qualification, and its
+`configToml` needs `[server] api_key` set explicitly (it does **not** inherit
+`backend.secrets.sandbox.api_key` — set the same value manually) or the server refuses
+to start:
+```yaml
+opensandbox:
+  opensandbox-server:
+    server:
+      image: { repository: "docker.io/opensandbox/server" }
+      ingress: { image: { repository: "docker.io/opensandbox/ingress" } }
+    configToml: |
+      [server]
+      host = "0.0.0.0"
+      port = 80
+      api_key = "<same value as backend.secrets.sandbox.api_key>"
+      [log]
+      level = "INFO"
+      [runtime]
+      type = "kubernetes"
+      execd_image = "docker.io/opensandbox/execd:v1.0.18"
+      [kubernetes]
+      namespace = "opensandbox"
+      informer_enabled = true
+      informer_resync_seconds = 300
+      informer_watch_timeout_seconds = 60
+      snapshot_create_timeout_seconds = 900
+      workload_provider = "batchsandbox"
+      batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
+      [egress]
+      image = "docker.io/opensandbox/egress:v1.0.12"
+      mode = "dns+nft"
+  opensandbox-controller:
+    controller:
+      # v0.2.0 on Docker Hub crashes with `flag provided but not defined:
+      # -containerd-socket-path` — that published tag lags the chart's own
+      # template. Pin `latest` until upstream re-cuts a matching v0.2.0.
+      image: { repository: "docker.io/opensandbox/controller", tag: "latest" }
+      snapshot:
+        imageCommitterImage: "docker.io/opensandbox/image-committer:v0.1.0"
+```
+
+Also create the `opensandbox-system` and `opensandbox` namespaces before installing —
+neither the umbrella chart nor its subcharts create them:
+```bash
+kubectl create namespace opensandbox-system
+kubectl create namespace opensandbox   # where per-conversation sandbox pods actually run
+```
 
 ### 4.6 Bundled infra passwords (required)
 
@@ -437,15 +499,30 @@ build is needed. Turn the feature on in `values.local.yaml`:
 ```yaml
 egress:
   enabled: true
-  # Namespace where sandbox pods actually run.
-  # When using the bundled opensandbox subchart, "opensandbox-system".
-  sandboxNamespace: "opensandbox-system"
+  # Namespace where sandbox pods actually run — NOT the same as where
+  # opensandbox-server/-controller themselves run ("opensandbox-system").
+  # With the bundled subchart's own defaults, that's "opensandbox" (its
+  # configToml's [kubernetes] namespace). Get this wrong and the
+  # MutatingWebhookConfiguration's namespaceSelector never matches real
+  # sandbox pods — silently, since failurePolicy is Ignore. Confirm with
+  # `kubectl get pods -n <namespace>` after a sandbox has been created once.
+  sandboxNamespace: "opensandbox"
   webhook:
     image:
       tag: "v0.2.0"             # same release version as backend/frontend
     # MUST exactly match opensandbox-server's configured egress.image.
     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
     egressImage: "opensandbox/egress:v1.0.12"
+
+backend:
+  sandbox:
+    # REQUIRED — separate from the deploy-side wiring above. Without it the
+    # backend never actually builds or sends the placeholder credentials,
+    # even though the webhook/mTLS/CA infra is fully deployed and healthy —
+    # it just silently does nothing. Defaults correctly on its own (mirrors
+    # where the sandbox-side addon actually connects) — only set this if you
+    # need to override it.
+    # egress_exchange_host: "cubeplex-backend.cubeplex.svc.cluster.local"
 ```
 
 (Self-building instead? Add `egress-webhook` to `TARGET` when running
@@ -453,16 +530,61 @@ egress:
 
 Notes:
 
-- The chart auto-generates the MITM CA (`genCA`) on first install and marks
-  the Secret `helm.sh/resource-policy: keep`, so upgrades and
-  `helm uninstall` do not rotate the CA. Re-installs into an existing
-  cluster pick up the same CA via `lookup`.
+- **Known chart bug:** the CA the chart auto-generates on first install uses
+  Helm/Sprig's built-in `genCA`, which only produces **RSA** keys — but the
+  webhook's own `cert_minter.py` hard-requires an **EC** (SECP256R1) key and
+  crashes with `TypeError: CA key must be an EC private key` on startup.
+  There is no values.yaml-level fix — `deploy/kubernetes/scripts/
+  gen-egress-certs.sh` mints a proper EC CA + webhook/backend leaf certs
+  using `cert_minter.py`'s own functions and writes the four Secrets the
+  chart expects, so the chart's lookup-or-mint logic finds them already
+  present and reuses them instead of minting via the broken RSA path.
+
+  **If you install via `deploy/kubernetes/scripts/helm-install.sh`** (the
+  "from a repo checkout" path, §5 below), this is handled for you
+  automatically — the script detects `egress.enabled` from your rendered
+  values and runs `gen-egress-certs.sh` before the `helm upgrade` if the
+  certs don't exist yet. Nothing to do.
+
+  **If you install via the published OCI chart** (§5's "Recommended" path —
+  a bare `helm upgrade --install ... oci://ghcr.io/...`), there is no
+  wrapper script in that flow to run this for you: clone the repo (or just
+  fetch `deploy/kubernetes/scripts/gen-egress-certs.sh` and
+  `deploy/kubernetes/egress-bundle/webhook/cert_minter.py`) and run it
+  yourself **before** the `helm upgrade --install` if `egress.enabled: true`
+  — the same kind of required pre-step as generating `jwt_secret`/
+  `csrf_secret`/`vault_key` already is for every install.
+
+  Either way, if you ever re-run the script with `FORCE=true` (e.g.
+  rotating the CA) on an **already-deployed** release, two things need to
+  happen afterward that aren't automatic: (1) a fresh `helm upgrade` — the
+  cluster-scoped `MutatingWebhookConfiguration`'s `caBundle` is a
+  separately-templated value that does not refresh just because the
+  Secrets changed, and until it does, the API server's calls to the webhook
+  fail TLS verification silently (`failurePolicy: Ignore` — pods just stop
+  getting patched, no error anywhere); and (2) restart the webhook and
+  backend Deployments — their pods keep whatever cert data they already
+  mounted at startup, Secret volume updates don't get re-read without a
+  restart.
 - The webhook serving cert and the backend mTLS server cert are signed by
   the same CA and follow the same lookup-or-mint rule.
 - The webhook's `MutatingWebhookConfiguration` has `failurePolicy: Ignore`:
   a webhook outage never blocks sandbox pod creation. Affected sandboxes
   start without secret injection (placeholders stay literal) — alert on
   webhook health separately.
+- **Sandbox network policy is set once, at sandbox creation** — adding a host
+  to `PUT /api/v1/admin/sandbox-policy` does not retroactively apply to a
+  sandbox pod already running (e.g. reused across conversations in the same
+  workspace). Delete the `BatchSandbox` (not just the Pod, which just gets
+  recreated by the controller) to force a fresh sandbox that picks up the
+  new policy: `kubectl delete batchsandboxes -n <sandbox-namespace> --all`.
+- **A brand-new sandbox's very first outbound request can race the egress
+  sidecar's own MITM setup** — the vendored `docker/egress` binary installs
+  its transparent-intercept iptables rules a few hundred ms *after* the
+  sandbox process is otherwise ready, so an immediate first request can slip
+  through unsubstituted (placeholder leaks literally) while later requests on
+  the same sandbox are correctly intercepted. This is inside the third-party
+  egress binary, not fixable from the chart.
 
 ### 4.11 Docling document parsing (optional)
 
@@ -639,6 +761,22 @@ kubectl get pods -A | grep init-pvc
 # ErrImagePull on openebs/linux-utils → pre-pull on every node:
 docker pull openebs/linux-utils:3.5.0
 # or use an existing StorageClass instead of the chart's openebs SC
+```
+
+### `ImageInspectError` / `short name mode is enforcing... returns ambiguous list`
+
+CRI-O (used by some managed node pools, e.g. OCI Container Engine's
+non-virtual nodes) refuses to resolve unqualified image references — no
+registry host prefix — under its default short-name policy. The chart's
+`postgres.image` (`cubeplex/postgresql-pgroonga-pgvector:...`), `redis.image`
+(`redis:7-alpine`), and `rustfs.mcImage` (`minio/mc:...`) ship without a
+`docker.io/` prefix by default. If your nodes run CRI-O and hit this, fully
+qualify them in `values.local.yaml`:
+
+```yaml
+postgres: { image: "docker.io/cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2" }
+redis:    { image: "docker.io/library/redis:7-alpine" }
+rustfs:   { mcImage: "docker.io/minio/mc:RELEASE.2025-04-08T15-39-49Z" }
 ```
 
 ### Login cookie missing / API 403
@@ -819,31 +957,57 @@ A fuller annotated template lives at
 node pool to run cubeplex. Virtual nodes are optimized for stateless microservices and burst
 workloads, not for database-backed applications like cubeplex.
 
-**To add a managed node pool to OCI Kubernetes:**
+**To add a managed node pool to OCI Kubernetes** (CLI, via `oci ce node-pool create` —
+the OCI Console → Container Engine → your cluster → Node Pools → Create Node Pool wizard
+does the same thing interactively):
 
-1. Visit the OCI Console → Container Engine for Kubernetes → [Your Cluster]
-2. Under "Node Pools," click "Create Node Pool"
-3. Configure:
-   - **Name:** `cubeplex-workload`
-   - **Kubernetes Version:** Match your cluster control plane (v1.36+)
-   - **Image:** Latest available (Oracle-provided or custom)
-   - **Shape:** Choose based on your workload (VM.Standard.E4.Flex recommended for dev/test)
-   - **Initial Node Count:** 1 (scales up with demand)
-4. Create the node pool and wait for nodes to become `Ready`
-5. Label the nodes so cubeplex pods target them:
-   ```bash
-   kubectl label nodes -l nodepool.oci.io/name=cubeplex-workload \
-     node.kubernetes.io/workload=cubeplex
-   ```
-6. Update `values.local.yaml` to add nodeSelector:
-   ```yaml
-   backend:
-     nodeSelector:
-       node.kubernetes.io/workload: cubeplex
-   frontend:
-     nodeSelector:
-       node.kubernetes.io/workload: cubeplex
-   ```
-7. Redeploy with `helm upgrade --install`
+```bash
+oci ce node-pool create \
+  --cluster-id <cluster-ocid> --compartment-id <compartment-ocid> \
+  --name cubeplex-workload --kubernetes-version v1.36.1 \
+  --cni-type OCI_VCN_IP_NATIVE --node-shape VM.Standard.E5.Flex \
+  --node-shape-config '{"ocpus":2,"memoryInGBs":16}' \
+  --node-source-details '{"sourceType":"IMAGE","imageId":"<Oracle-Linux-x.y-OKE-<k8s-version> image OCID>","bootVolumeSizeInGBs":50}' \
+  --placement-configs '[{"availabilityDomain":"<AD>","subnetId":"<node-subnet-ocid>"}]' \
+  --pod-subnet-ids '["<node-subnet-ocid>"]' \
+  --size 2 --ssh-public-key "$(cat ~/.ssh/id_rsa.pub)"
+```
 
-After the node pool is ready, the standard installation should succeed.
+Find the right image OCID for your region/k8s version with
+`oci ce node-pool-options get --node-pool-option-id <cluster-ocid> --compartment-id <compartment-ocid>`
+and filter for `Oracle-Linux-*-OKE-<version>` (non-`aarch64`, non-`GPU` unless you need
+those). If a shape returns `Out of host capacity`, just retry with a different shape —
+`VM.Standard.E5.Flex` succeeded after `VM.Standard.E3.Flex` failed on capacity in one run.
+
+**The chart does not support `nodeSelector`/`nodeAffinity`** on the backend/frontend
+Deployments — there's no values field for it. Don't try to target the new node pool that
+way. Instead, keep cubeplex pods off the virtual nodes by making the virtual nodes
+unschedulable for **new** pods, which is enough since cubeplex's own pods carry no
+special tolerations:
+
+```bash
+kubectl taint node <virtual-node-ip> virtual-node=true:NoSchedule   # once per virtual node
+```
+
+`kubectl cordon` also works for this (blocks new scheduling regardless of taints/tolerations)
+and is simpler if you don't need the taint to persist across node restarts.
+
+**This is not sufficient if you also deploy OpenSandbox** (§4.5): its per-conversation
+sandbox pods carry a blanket `tolerations: [{operator: "Exists"}]`, which bypasses taints
+entirely, and `oci-bv`'s topology-aware `WaitForFirstConsumer` binding mode still offers
+virtual nodes as scheduling candidates even when cordoned — PVC provisioning then fails
+outright with `error getting CSINode for selected node "<virtual-node-ip>": csinode.storage.k8s.io "<virtual-node-ip>" not found`
+(virtual nodes never run a CSI node plugin), and the BatchSandbox controller loops
+forever creating fresh pods that hit the same wall. **If you need OpenSandbox, delete
+the virtual node pool entirely** rather than relying on taints/cordon:
+
+```bash
+oci ce virtual-node-pool delete --virtual-node-pool-id <virtual-node-pool-ocid> --force
+```
+
+Move anything still running on the virtual nodes (e.g. ingress-nginx) to the real pool
+first — `kubectl delete pod` on it after cordoning the virtual nodes is enough; it
+reschedules onto a schedulable (real) node automatically.
+
+After the node pool is ready (and, if using OpenSandbox, after the virtual node pool is
+gone), the standard installation should succeed.
