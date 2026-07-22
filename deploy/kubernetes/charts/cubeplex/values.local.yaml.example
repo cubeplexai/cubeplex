@@ -66,7 +66,7 @@ backend:
         #   preset: "deepseek/cn/anthropic-messages"
         #   api_key: "sk-..."
     sandbox:
-      domain: "cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090"
+      domain: "opensandbox-server.opensandbox-system.svc.cluster.local:80"
       # image defaults to ghcr.io/cubeplexai/cubeplex-sandbox:v<chart appVersion>;
       # set it only to pin a different sandbox image.
       api_key: "REPLACE_ME"

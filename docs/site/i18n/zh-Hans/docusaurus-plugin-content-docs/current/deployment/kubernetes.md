@@ -9,6 +9,19 @@ title: Kubernetes（Helm）
 Postgres + Redis + rustfs，可选 alibaba OpenSandbox 全家桶）部署到已有的
 Kubernetes 集群中。
 
+## ⚠️ 已知限制：OCI 虚拟节点
+
+**OCI Container Engine for Kubernetes 的虚拟节点不受支持。**
+
+OCI Kubernetes 的虚拟节点用 Kata 容器跑 Pod，不支持：
+- **Init containers**（数据库迁移需要用到）
+- **VolumeMount subPath**（组装配置文件需要用到）
+
+这两个是 cubeplex 的基本运行要求——不做架构级改动的话没有变通办法。
+
+**解决方法：** 用 OCI 的托管节点池代替虚拟节点。详见
+[云厂商兼容性](#9-云厂商兼容性)。
+
 ## 1. 前置依赖
 
 | 项 | 要求 | 备注 |
@@ -271,9 +284,70 @@ backend:
 
 | 场景 | `values.local.yaml` |
 |---|---|
-| 使用 chart 自带的 OpenSandbox subchart | `opensandbox.enabled: true`；`backend.secrets.sandbox.domain` 指向 `cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090` |
+| 使用 chart 自带的 OpenSandbox subchart | `opensandbox.enabled: true`；`backend.secrets.sandbox.domain` 指向 `opensandbox-server.opensandbox-system.svc.cluster.local:80`（vendored 的 subchart 写死了 `fullnameOverride`/`namespaceOverride`——不带 release 名前缀，不在 `cubeplex` 命名空间，端口是 80 不是 8090） |
 | 使用外部已有 OpenSandbox | `opensandbox.enabled: false`；`backend.sandbox.enabled: true`；`backend.secrets.sandbox.domain` 填外部地址 |
 | 不使用 sandbox（仅对话） | `opensandbox.enabled: false`；`backend.sandbox.enabled` 留空（跟随 `opensandbox.enabled` → false） |
+
+backend 默认要求 `sandbox.secure_access: true`——它要求 sandbox 访问走一个
+签过名的路由令牌，这需要部署 OpenSandbox 的 `gateway`/`ingress` 组件
+（`opensandbox.opensandbox-server.server.gateway.enabled: true`，本文档
+未涉及）。如果你不打算部署这个 gateway，就得把这个要求关掉，否则 backend
+根本创建不了 sandbox：
+```yaml
+backend:
+  sandbox:
+    secure_access: false
+```
+
+如果你的节点池跑的是 CRI-O（参见[镜像名相关的故障排查条目](#imageinspecterror--short-name-mode-is-enforcing-returns-ambiguous-list)），
+OpenSandbox subchart 自己的镜像也需要同样加上 `docker.io/` 前缀，而且它的
+`configToml` 需要显式设置 `[server] api_key`（**不会**继承
+`backend.secrets.sandbox.api_key`——得手动填一样的值），否则 server 直接
+拒绝启动：
+```yaml
+opensandbox:
+  opensandbox-server:
+    server:
+      image: { repository: "docker.io/opensandbox/server" }
+      ingress: { image: { repository: "docker.io/opensandbox/ingress" } }
+    configToml: |
+      [server]
+      host = "0.0.0.0"
+      port = 80
+      api_key = "<跟 backend.secrets.sandbox.api_key 一样的值>"
+      [log]
+      level = "INFO"
+      [runtime]
+      type = "kubernetes"
+      execd_image = "docker.io/opensandbox/execd:v1.0.18"
+      [kubernetes]
+      namespace = "opensandbox"
+      informer_enabled = true
+      informer_resync_seconds = 300
+      informer_watch_timeout_seconds = 60
+      snapshot_create_timeout_seconds = 900
+      workload_provider = "batchsandbox"
+      batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
+      [egress]
+      image = "docker.io/opensandbox/egress:v1.0.12"
+      mode = "dns+nft"
+  opensandbox-controller:
+    controller:
+      # Docker Hub 上的 v0.2.0 会崩溃，报
+      # `flag provided but not defined: -containerd-socket-path`——
+      # 这个发布出去的 tag 落后于 chart 自己的模板。暂时先 pin `latest`，
+      # 等上游重新出一个真正对得上的 v0.2.0。
+      image: { repository: "docker.io/opensandbox/controller", tag: "latest" }
+      snapshot:
+        imageCommitterImage: "docker.io/opensandbox/image-committer:v0.1.0"
+```
+
+装之前还要先建好 `opensandbox-system` 和 `opensandbox` 这两个命名空间——
+umbrella chart 和它的子 chart 都不会自动建：
+```bash
+kubectl create namespace opensandbox-system
+kubectl create namespace opensandbox   # 实际跑每次对话 sandbox pod 的地方
+```
 
 ### 4.6 内置基础设施密码（必填）
 
@@ -404,15 +478,28 @@ chart 会自动配置以下组件：
 ```yaml
 egress:
   enabled: true
-  # sandbox pod 实际运行的命名空间。
-  # 使用内置 opensandbox subchart 时为 "opensandbox-system"。
-  sandboxNamespace: "opensandbox-system"
+  # sandbox pod 实际运行的命名空间——不是 opensandbox-server/-controller
+  # 自己跑的那个（"opensandbox-system"）。用内置 subchart 默认配置时，
+  # 这个值是 "opensandbox"（server 自己的 configToml [kubernetes]
+  # namespace 默认值）。写错的话 MutatingWebhookConfiguration 的
+  # namespaceSelector 永远匹配不到真正的 sandbox pod——而且因为
+  # failurePolicy: Ignore，不会有任何报错，是完全静默的失败。装完后用
+  # `kubectl get pods -n <namespace>` 确认一下实际用的是哪个命名空间。
+  sandboxNamespace: "opensandbox"
   webhook:
     image:
       tag: "v0.2.0"             # 与 backend/frontend 相同的 release 版本
     # 必须与 opensandbox-server 配置的 egress.image 完全一致。
     # 国内镜像源：sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
     egressImage: "opensandbox/egress:v1.0.12"
+
+backend:
+  sandbox:
+    # 必填——跟上面部署侧的配置是两回事。不设的话 backend 根本不会生成或
+    # 发送占位符密钥，哪怕 webhook/mTLS/CA 全部部署正确、状态健康，功能
+    # 照样什么都不做，完全静默。这个字段有正确的自动默认值（跟 sandbox 里
+    # mitmproxy addon 实际连接的地址一致），只有需要覆盖时才用得上。
+    # egress_exchange_host: "cubeplex-backend.cubeplex.svc.cluster.local"
 ```
 
 （自己构建？运行 `build-and-push.sh` 时把 `egress-webhook` 加入 `TARGET`，
@@ -420,15 +507,55 @@ egress:
 
 补充说明：
 
-- chart 首次安装时会自动生成 MITM CA（`genCA`），并将该 Secret 标记为
-  `helm.sh/resource-policy: keep`，所以升级和 `helm uninstall` 都不会
-  轮换 CA。重新安装到已有集群时会通过 `lookup` 复用同一个 CA。
+- **已知 chart bug**：chart 首次安装自动生成的 CA 用的是 Helm/Sprig 内置的
+  `genCA`，这个函数只会生成 **RSA** 密钥——但 webhook 自己的
+  `cert_minter.py` 硬性要求 **EC**（SECP256R1）密钥，启动时直接崩溃报
+  `TypeError: CA key must be an EC private key`。这个问题在 values.yaml
+  层面无法修复——`deploy/kubernetes/scripts/gen-egress-certs.sh` 用
+  `cert_minter.py` 自己的函数生成正确的 EC CA + webhook/backend 叶子证书，
+  写好 chart 需要的 4 个 Secret，chart 的「先查找再生成」逻辑发现证书已经
+  存在就会直接复用，不会再走那条坏掉的 RSA 生成路径。
+
+  **如果你是通过 `deploy/kubernetes/scripts/helm-install.sh` 安装**（"从
+  repo checkout 安装"这条路，见下面第 5 节），这一步已经自动处理了——脚本
+  会根据渲染后的 values 检测 `egress.enabled`，如果证书还不存在，会在
+  `helm upgrade` 之前自动跑一遍 `gen-egress-certs.sh`，不需要你做任何事。
+
+  **如果你是直接拉 OCI chart 安装**（第 5 节"推荐"的那条路——一条裸的
+  `helm upgrade --install ... oci://ghcr.io/...`），这条安装流程里没有
+  包装脚本帮你做这件事：clone 一下仓库（或者只拉
+  `deploy/kubernetes/scripts/gen-egress-certs.sh` 和
+  `deploy/kubernetes/egress-bundle/webhook/cert_minter.py` 这两个文件），
+  在 `egress.enabled: true` 时,自己在 `helm upgrade --install` **之前**
+  跑一遍——这跟每次安装都要手动生成 `jwt_secret`/`csrf_secret`/`vault_key`
+  是同一类的必要前置步骤。
+
+  不管走哪条路，如果你之后又用 `FORCE=true` 重新跑了一遍这个脚本（比如
+  轮换 CA），并且是对着一个**已经部署好的** release 做的，还有两件事不会
+  自动发生：（1）重新跑一次 `helm upgrade`——集群级的
+  `MutatingWebhookConfiguration` 里的 `caBundle` 是单独渲染的字段，不会
+  因为 Secret 变了就自动刷新，同步之前 API server 调 webhook 会静默 TLS
+  校验失败（`failurePolicy: Ignore`——pod 就是不再被 patch，没有任何报错）；
+  （2）重启 webhook 和 backend 这两个 Deployment——它们的 Pod 只会用启动
+  时挂载到的那份证书，Secret 卷的内容更新了不会自动重新读取，得靠重启。
 - webhook 的服务证书和 backend 的 mTLS server 证书由同一个 CA 签发，遵循
   同样的「先查找再签发」规则。
 - webhook 的 `MutatingWebhookConfiguration` 设置了
   `failurePolicy: Ignore`：webhook 故障永远不会阻塞 sandbox pod
   创建。受影响的 sandbox 会在没有密钥注入的情况下启动（占位符保持原样）
   ——需要单独对 webhook 健康状况做告警。
+- **sandbox 的网络策略只在创建那一刻生效一次**——给
+  `PUT /api/v1/admin/sandbox-policy` 加一条新规则，不会追溯应用到已经在
+  跑的 sandbox pod（比如同一个 workspace 里跨对话复用的那个）。要让新策略
+  生效，得删掉 `BatchSandbox`（不是 Pod，删 Pod 只会被 controller 立刻
+  重建）强制建一个新的 sandbox：
+  `kubectl delete batchsandboxes -n <sandbox 命名空间> --all`。
+- **全新 sandbox 的第一个出站请求可能会跟 egress sidecar 自己的 MITM
+  启动过程产生竞争**——第三方的 `docker/egress` 二进制装透明拦截的
+  iptables 规则，比 sandbox 进程本身就绪要晚几百毫秒，所以第一个请求
+  可能会在这个窗口漏过去（占位符原样泄漏），而同一个 sandbox 后续的请求
+  会被正确拦截替换。这是 vendored 的第三方 egress 二进制自身的问题，chart
+  这一层修不了。
 
 ### 4.11 Docling 文档解析（可选）
 
@@ -605,6 +732,21 @@ docker pull openebs/linux-utils:3.5.0
 # 或者不使用 chart 的 openebs StorageClass，改用已有的
 ```
 
+### `ImageInspectError` / `short name mode is enforcing... returns ambiguous list`
+
+CRI-O（一些托管节点池会用，比如 OCI Container Engine 的非虚拟节点）在默认的
+短名策略下，拒绝解析不带 registry 前缀的镜像引用。chart 的 `postgres.image`
+（`cubeplex/postgresql-pgroonga-pgvector:...`）、`redis.image`
+（`redis:7-alpine`）、`rustfs.mcImage`（`minio/mc:...`）默认都不带
+`docker.io/` 前缀。如果你的节点跑 CRI-O 遇到这个问题，在
+`values.local.yaml` 里把它们补全：
+
+```yaml
+postgres: { image: "docker.io/cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2" }
+redis:    { image: "docker.io/library/redis:7-alpine" }
+rustfs:   { mcImage: "docker.io/minio/mc:RELEASE.2025-04-08T15-39-49Z" }
+```
+
 ### 登录 cookie 丢失 / API 返回 403
 
 - HTTP 部署需要 `backend.configOverrides.auth.cookie_secure: false`。
@@ -760,3 +902,77 @@ opensandbox:
 
 完整的带注释模板见仓库中的
 `deploy/kubernetes/charts/cubeplex/values.local.yaml.example`。
+
+## 9. 云厂商兼容性
+
+### 已测试且支持
+
+| 厂商 | 服务 | 状态 | 备注 |
+|---|---|---|---|
+| EKS（AWS） | Elastic Kubernetes Service | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
+| GKE（Google） | Google Kubernetes Engine | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
+| AKS（Azure） | Azure Kubernetes Service | ✅ 完全支持 | 标准托管 K8s，无已知问题 |
+| k3s | 轻量级 K8s | ✅ 完全支持 | 在任何基础设施上都能跑 |
+| kubeadm | 自建 | ✅ 完全支持 | 完整支持所有 K8s 特性 |
+
+### 已知限制
+
+| 厂商 | 服务 | 状态 | 详情 | 变通方法 |
+|---|---|---|---|---|
+| OCI | Container Engine for Kubernetes（虚拟节点） | ❌ 不支持 | 虚拟节点不支持 init container 或 VolumeMount subPath | 用托管节点池代替虚拟节点 |
+
+**OCI 虚拟节点：** 如果你的 OCI 集群只有虚拟节点，必须加一个托管节点池才能跑
+cubeplex。虚拟节点是为无状态微服务和突发负载优化的，不适合 cubeplex 这类
+依赖数据库的应用。
+
+**给 OCI Kubernetes 加托管节点池**（用 CLI，`oci ce node-pool create`——
+OCI 控制台里 Container Engine → 你的集群 → Node Pools → Create Node Pool
+的向导做的是同一件事）：
+
+```bash
+oci ce node-pool create \
+  --cluster-id <cluster-ocid> --compartment-id <compartment-ocid> \
+  --name cubeplex-workload --kubernetes-version v1.36.1 \
+  --cni-type OCI_VCN_IP_NATIVE --node-shape VM.Standard.E5.Flex \
+  --node-shape-config '{"ocpus":2,"memoryInGBs":16}' \
+  --node-source-details '{"sourceType":"IMAGE","imageId":"<Oracle-Linux-x.y-OKE-<k8s版本> 镜像 OCID>","bootVolumeSizeInGBs":50}' \
+  --placement-configs '[{"availabilityDomain":"<AD>","subnetId":"<节点子网 OCID>"}]' \
+  --pod-subnet-ids '["<节点子网 OCID>"]' \
+  --size 2 --ssh-public-key "$(cat ~/.ssh/id_rsa.pub)"
+```
+
+用 `oci ce node-pool-options get --node-pool-option-id <cluster-ocid> --compartment-id <compartment-ocid>`
+找到你所在区域/k8s 版本对应的镜像 OCID，筛选 `Oracle-Linux-*-OKE-<版本>`
+（不需要 `aarch64`、不需要 GPU 的话就排除这两类）。如果某个 shape 返回
+`Out of host capacity`，换个 shape 重试就行——我们这边 `VM.Standard.E3.Flex`
+容量不足失败后，换 `VM.Standard.E5.Flex` 就成功了。
+
+**chart 不支持在 backend/frontend 的 Deployment 上设置
+`nodeSelector`/`nodeAffinity`**——没有对应的 values 字段。不要想着靠这个
+把 Pod 定向调度到新节点池上。正确做法是让虚拟节点对**新** Pod
+不可调度——cubeplex 自己的 Pod 不带任何特殊 toleration，这样就够了：
+
+```bash
+kubectl taint node <虚拟节点IP> virtual-node=true:NoSchedule   # 每个虚拟节点跑一遍
+```
+
+`kubectl cordon` 也能达到同样效果（不管 taint/toleration 是什么都会阻止新调度），
+如果你不需要让这个限制在节点重启后还保留，用 cordon 更省事。
+
+**但如果你还部署了 OpenSandbox（§4.5），光这样是不够的**：它每次对话创建的
+sandbox pod 自带一个 `tolerations: [{operator: "Exists"}]`，会绕过所有
+taint；而且 `oci-bv` 的 topology-aware `WaitForFirstConsumer` 绑定模式，
+哪怕节点已经 cordon 了，还是会把虚拟节点当成调度候选——PVC provisioning
+会直接报错 `error getting CSINode for selected node "<虚拟节点IP>":
+csinode.storage.k8s.io "<虚拟节点IP>" not found`（虚拟节点从不跑 CSI node
+插件），然后 BatchSandbox controller 会没完没了地建新 pod，一直撞在同一堵
+墙上。**如果你需要用 OpenSandbox，必须彻底删掉虚拟节点池**，而不是指望
+taint/cordon：
+
+```bash
+oci ce virtual-node-pool delete --virtual-node-pool-id <虚拟节点池OCID> --force
+```
+
+删之前先把还跑在虚拟节点上的东西（比如 ingress-nginx）挪到真实节点池——
+先给虚拟节点 cordon，再 `kubectl delete pod` 对应的 pod 就行，它会自动
+调度到可调度的（真实）节点上。

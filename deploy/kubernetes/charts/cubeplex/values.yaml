@@ -207,8 +207,14 @@ egress:
   enabled: false
   # Namespace where sandbox pods live (where the MutatingWebhookConfiguration
   # matches and where the addon ConfigMap + MITM CA Secret are mirrored).
-  # When using the bundled opensandbox subchart, that's "opensandbox-system".
-  sandboxNamespace: "opensandbox-system"
+  # NOT the same as where opensandbox-server/-controller themselves run
+  # ("opensandbox-system") — per-conversation sandbox pods run wherever the
+  # server's own configToml [kubernetes] namespace points, which defaults to
+  # "opensandbox" in the bundled subchart (vendor/opensandbox-server's own
+  # values.yaml). Getting this wrong means the MutatingWebhookConfiguration's
+  # namespaceSelector never matches real sandbox pods — and with
+  # failurePolicy: Ignore, that failure is completely silent.
+  sandboxNamespace: "opensandbox"
   webhook:
     replicaCount: 1
     image:
