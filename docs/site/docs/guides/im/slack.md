@@ -102,10 +102,7 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 
 On binding, CubePlex validates the bot token against Slack (`auth.test`) and reads the bot's identity and the Slack team it belongs to; the Slack **team ID** becomes the account's external identifier, so you can only bind one CubePlex account per Slack team. Both tokens are stored encrypted. If the bot token is invalid, binding fails — fix it in the Slack console and retry. Delivery mode is fixed to **gateway** (Socket Mode); there is no webhook option for Slack.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The CubePlex "Connect Slack account" form with the Bot token and App-level token fields and the Run identity selector.
-**Asset:** `/img/im/slack-cubeplex-connect-form.png`
-:::
+![CubePlex Slack account connection form](/img/im/slack-cubeplex-connect-form.png)
 
 ## Step 8 — Link your identity
 

@@ -75,10 +75,7 @@ CubePlex 通过你的 **AppKey** 标识机器人（它同时用作机器人的 r
 
 传递模式固定为 **Stream**——无需选择。绑定时，CubePlex 会通过交换 AppKey + AppSecret 获取 DingTalk access token 来验证凭据；如果凭据错误，token 交换会失败并拒绝绑定。请在控制台中修复后重试。有效凭据会加密存储。
 
-:::info 📸 截图占位符
-**截图内容：** CubePlex 的“连接 DingTalk 账户”表单，包含 AppKey、AppSecret 和运行身份字段。
-**资源：** `/img/im/dingtalk-cubeplex-connect-form.png`
-:::
+![CubePlex DingTalk 账户连接表单](/img/im/dingtalk-cubeplex-connect-form.png)
 
 绑定后，CubePlex 会自动打开 Stream 连接。（注意：当前重新启用已禁用的 Stream 账户需要重启 API 才能重新建立 socket——参阅[概览](./overview.md#delivery-modes)。）
 

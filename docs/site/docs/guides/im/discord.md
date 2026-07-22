@@ -81,10 +81,7 @@ On binding, CubePlex validates the bot token by calling Discord's `GET /users/@m
 
 Once bound, CubePlex connects over the gateway and **syncs the `/new`, `/reset`, and `/link` slash commands** to the servers the bot is in, so they become available in Discord's command picker.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The CubePlex "Connect Discord account" form with the Bot token, Application ID, and Run identity fields.
-**Asset:** `/img/im/discord-cubeplex-connect-form.png`
-:::
+![CubePlex Discord account connection form](/img/im/discord-cubeplex-connect-form.png)
 
 :::caution Re-enabling needs an API restart
 Disabling or deleting a Discord account tears down its gateway connection immediately. Re-enabling it rebinds lazily — the current version needs the API process restarted to fully re-establish the socket. See the [overview](./overview.md#delivery-modes).
