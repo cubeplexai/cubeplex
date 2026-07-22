@@ -21,7 +21,7 @@ These are fundamental requirements of cubeplex — no workaround is possible wit
 major architectural changes.
 
 **Solution:** Use OCI managed node pools instead of virtual nodes. See
-[Cloud Provider Compatibility](#cloud-provider-compatibility) for details.
+[Cloud Provider Compatibility](#9-cloud-provider-compatibility) for details.
 
 ## 1. Prerequisites
 
