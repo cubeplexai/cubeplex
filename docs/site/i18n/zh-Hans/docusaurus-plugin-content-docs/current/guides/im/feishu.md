@@ -13,7 +13,7 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 
 你需要：
 
-- CubePlex 中的 **工作区管理员** 或成员账户（普通成员可以绑定一个以自身身份运行的机器人；模拟其他用户需要工作区管理员权限）。
+- CubePlex 中的 **工作区管理员** 或成员账户。工作区连接向导会将机器人绑定到当前用户。
 - 在 Feishu/Lark 组织的开发者控制台中创建 **自定义应用** 的权限。
 
 ## 步骤 1 — 创建自定义应用
@@ -40,9 +40,14 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 
 | 范围 | 是否必需 | 用途 |
 |---|---|---|
-| 消息读取/发送（`im:message`、`im:message:send_as_bot`、……） | 是 | 接收 @ 提及/私信并以机器人身份回复。 |
-| `im:chat:readonly`（或 `im:chat:read` / `im:chat`） | 是 | 通过 `GET /open-apis/im/v1/chats/:chat_id` 查询群组显示名称，使 CubePlex 话题标题显示真实群组名称。没有此权限时，标题会保持为空，UI 会显示本地化的“新建群聊”占位符。 |
-| 联系人电子邮箱读取（`contact:user.email:readonly` + 相关权限） | 建议 | 将发送者的 Feishu 电子邮箱自动匹配到 CubePlex 账户（避免手动 `link`）。 |
+| `im:message.p2p_msg:readonly` 和 `im:message.group_at_msg:readonly` | 是 | 接收私信和群聊中的 @ 提及。 |
+| `im:message:send_as_bot` 和 `im:message:update` | 是 | 发送和更新机器人回复。 |
+| `im:resource` | 是 | 读取消息附件。 |
+| `cardkit:card:read` 和 `cardkit:card:write` | 是 | 流式发送交互式卡片回复。 |
+| `im:message.reactions:read` 和 `im:message.reactions:write_only` | 是 | 读取和更新连接器使用的消息反应。 |
+| `contact:contact.base:readonly` | 是 | CubePlex 连接向导要求的范围。 |
+| `im:chat:readonly`（或 `im:chat:read` / `im:chat`） | 群组标题建议授予 | 通过 `GET /open-apis/im/v1/chats/:chat_id` 查询群组显示名称。没有此权限时，标题会保持为空，UI 会显示本地化的“新建群聊”占位符。 |
+| `contact:user.email:readonly` + 相关权限 | 建议 | 将发送者的 Feishu 电子邮箱自动匹配到 CubePlex 账户（避免手动 `link`）。 |
 
 添加范围后，请 **发布新应用版本**，以便租户授权生效——在版本发布前，Feishu 不会应用新范围。
 
@@ -113,9 +118,10 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 | **App Secret** | 是 | 来自步骤 1。CubePlex 使用它读取机器人身份并调用 Feishu。 |
 | **Encrypt Key** | 否 | 仅在启用了事件加密时填写（步骤 5）。 |
 | **Verification Token** | 否 | 来自步骤 5 的 token。 |
-| **域名** | 是 | `feishu` 或 `lark`——选择应用所在的版本。默认值为 `feishu`。 |
+| **域名** | 是 | `feishu` 或 `lark`——选择应用所在的版本。向导不会预选域名。 |
 | **传递模式** | 是 | `long_connection`（默认）或 `webhook`，与步骤 4 对应。 |
-| **运行身份** | 是 | 默认值为 `self`（机器人以你的身份运行）。绑定为以其他用户身份运行需要 **工作区管理员** 角色。 |
+
+当前工作区向导会提交 `acting_user_id: self`，不会显示身份选择器。如果直接调用 API，非 `self` 的运行身份仅限工作区管理员使用。
 
 绑定时，CubePlex 会使用 App ID + App Secret 从 Feishu 读取机器人身份，并加密存储凭据。如果 App Secret 错误或机器人未发布，绑定会失败——请修复控制台端配置后重试。
 

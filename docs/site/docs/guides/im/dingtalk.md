@@ -11,7 +11,7 @@ DingTalk binds an enterprise bot to your CubePlex workspace over a **Stream** co
 
 You need:
 
-- A **workspace admin** or member account in CubePlex (a plain member can bind a bot that runs as themselves; impersonating another user requires workspace admin).
+- A **workspace admin** or member account in CubePlex. The workspace connection wizard binds the bot to the current user.
 - Permission to create an **internal app** in your organization's DingTalk Open Platform console (`open-dev.dingtalk.com`).
 
 ## Step 1 — Create an internal app
@@ -50,6 +50,7 @@ In the app's **Permissions** section, grant the following scopes:
 | Permission | Required | Purpose |
 |---|---|---|
 | `qyapi_chat_manage` | Yes | Manage group chats the bot is added to. |
+| `qyapi_microapp_manage` | Yes for automatic app lookup | Let the wizard list internal apps and prefill the bot name and avatar. If the list is empty, the wizard lets you enter the bot name manually. |
 | `Card.Streaming.Write` | Yes | Stream content updates to AI Cards in real time. |
 | `Card.Instance.Write` | Yes | Create and deliver AI Card instances. |
 | `Contact.User.Read` | Recommended | Look up a sender's email to auto-match CubePlex accounts (avoids manual `link`). |
@@ -71,9 +72,9 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 |---|---|---|
 | **AppKey** | Yes | From Step 1. Also serves as the account's external identifier and the bot's robot code. |
 | **AppSecret** | Yes | From Step 1. CubePlex uses it to obtain an access token and to call DingTalk. |
-| **Run identity** | Yes | `self` (the bot runs as you) by default. Binding it to run as another user requires the **workspace admin** role. |
-
 The delivery mode is fixed to **Stream** — there is nothing to choose. On binding, CubePlex validates the AppKey + AppSecret by exchanging them for a DingTalk access token; if the credentials are wrong the token exchange fails and binding is rejected. Fix them in the console and retry. Valid credentials are stored encrypted.
+
+The workspace wizard currently submits `acting_user_id: self` and does not show an identity picker. If you use the API directly, a non-`self` acting user is restricted to workspace admins.
 
 ![CubePlex DingTalk account connection form](/img/im/dingtalk-cubeplex-connect-form.png)
 
