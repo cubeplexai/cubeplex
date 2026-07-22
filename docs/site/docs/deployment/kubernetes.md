@@ -9,19 +9,15 @@ A single `helm upgrade --install` deploys CubePlex (backend + frontend +
 Postgres + Redis + rustfs, optionally the alibaba OpenSandbox umbrella) to
 an existing Kubernetes cluster.
 
-## ⚠️ Known Limitations: OCI Virtual Nodes
-
-**OCI Container Engine for Kubernetes virtual nodes are not supported.**
-
-Virtual nodes in OCI Kubernetes run pods in Kata containers, which do not support:
-- **Init containers** (required for database migrations)
-- **VolumeMount subPath** (required for config file assembly)
-
-These are fundamental requirements of cubeplex — no workaround is possible without
-major architectural changes.
-
-**Solution:** Use OCI managed node pools instead of virtual nodes. See
-[Cloud Provider Compatibility](#9-cloud-provider-compatibility) for details.
+The backend Deployment requires two standard Kubernetes Pod features: **init
+containers** (used for the database migration step) and **subPath volume
+mounts** (used to assemble config files from a ConfigMap/Secret). Standard
+node pools — including managed node pools from any cloud provider, k3s, and
+kubeadm — support both. Serverless or "virtual node" offerings that run pods
+in a lightweight sandbox instead of a full kubelet (for example, OCI virtual
+nodes or Azure AKS virtual nodes) typically do not support one or both. See
+[§9 Cloud Provider Compatibility](#9-cloud-provider-compatibility) if your
+cluster uses one of these.
 
 ## 1. Prerequisites
 
@@ -937,21 +933,39 @@ A fuller annotated template lives at
 
 ## 9. Cloud Provider Compatibility
 
-### Tested & Supported
+cubeplex requires a Kubernetes node pool with a full kubelet, specifically for
+**init container** and **subPath volume mount** support (see above). The
+tables below summarize compatibility by provider and service.
+
+### Verified
 
 | Provider | Service | Status | Notes |
 |---|---|---|---|
-| EKS (AWS) | Elastic Kubernetes Service | ✅ Fully supported | Standard managed K8s; no known issues |
-| GKE (Google) | Google Kubernetes Engine | ✅ Fully supported | Standard managed K8s; no known issues |
-| AKS (Azure) | Azure Kubernetes Service | ✅ Fully supported | Standard managed K8s; no known issues |
-| k3s | Lightweight K8s | ✅ Fully supported | Works great on any infra |
-| kubeadm | Self-hosted | ✅ Fully supported | Full K8s feature support |
+| OCI | Container Engine for Kubernetes — managed node pool | ✅ Supported | Deployed and tested end-to-end, including chat, sandbox, and egress. |
+| OCI | Container Engine for Kubernetes — virtual nodes | ❌ Not supported | Pods fail to start (`Pending` / `CrashLoopBackOff`) — no init container or subPath support. |
 
-### Known Limitations
+### Expected to work
 
-| Provider | Service | Status | Details | Workaround |
-|---|---|---|---|---|
-| OCI | Container Engine for Kubernetes (Virtual Nodes) | ❌ Unsupported | Virtual nodes don't support init containers or VolumeMount subPath | Use managed node pools instead of virtual nodes |
+The following run a full kubelet and implement the standard Pod API, so init
+containers and subPath mounts are expected to work the same way as on OCI's
+managed node pools. These have not been independently verified against a live
+cubeplex deployment.
+
+| Provider | Service |
+|---|---|
+| EKS (AWS) | Elastic Kubernetes Service, EC2-backed node groups |
+| GKE (Google) | Google Kubernetes Engine, Standard or Autopilot |
+| AKS (Azure) | Azure Kubernetes Service, standard (VM-backed) node pools |
+| k3s | Lightweight Kubernetes |
+| kubeadm | Self-managed Kubernetes |
+
+### Not supported
+
+| Provider | Service | Status | Details |
+|---|---|---|---|
+| OCI | Container Engine — virtual nodes | ❌ Not supported | See Verified, above. |
+| Azure | AKS virtual nodes (ACI-backed) | ❌ Not supported | Init containers are listed as unsupported in [Microsoft's virtual-nodes documentation](https://learn.microsoft.com/en-us/azure/aks/virtual-nodes#limitations); PersistentVolumeClaims are also unsupported (only an inline Azure Files mount is available). |
+| AWS | EKS on Fargate | ⚠️ Partial | Fargate supports init containers, but only static PV provisioning, not dynamic (see [Fargate storage](https://docs.aws.amazon.com/eks/latest/userguide/fargate-pod-configuration.html#fargate-storage)). The chart's default StorageClass requires dynamic provisioning, so Fargate would need a manually pre-provisioned PV, which this guide does not cover. Standard EC2-backed EKS node groups do not have this restriction. |
 
 **OCI Virtual Nodes:** If your OCI cluster uses only virtual nodes, you must add a managed
 node pool to run cubeplex. Virtual nodes are optimized for stateless microservices and burst
