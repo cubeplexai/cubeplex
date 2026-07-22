@@ -35,8 +35,14 @@ Error creating pod: [initContainers are not supported]
 Error creating pod: [unsupported VolumeMount option: subPath: config]
 ```
 
-OCI virtual nodes run a Kata-based runtime that rejects both features outright — not a
-timing/config issue, a hard capability gap. The chart needs `initContainers` for the
+OCI virtual nodes are a Virtual Kubelet provider backed by OCI Container Instances
+(one Container Instance per Pod) — not a regular kubelet on a regular node. The gap is
+almost certainly in that Virtual Kubelet → Container Instances translation layer not
+implementing initContainers/subPath, the same pattern as Azure AKS virtual nodes
+(Virtual Kubelet + ACI, which Microsoft's own docs confirm drops initContainers too).
+It is not a property of Kata Containers as a runtime — Kata is CRI-compatible and
+doesn't itself reject these Pod-spec features on a normal node. Either way it's a hard
+capability gap, not a timing/config issue. The chart needs `initContainers` for the
 `migrate` (alembic) step and `subPath` for mounting individual config files from a
 ConfigMap/Secret. No workaround inside the chart is reasonable; the real fix is
 infrastructure: **add a managed node pool** and keep cubeplex off the virtual nodes.
