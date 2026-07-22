@@ -13,6 +13,8 @@ interface ConversationMemberStripProps {
   conversationId: string
 }
 
+const EMPTY_PARTICIPANTS: ConversationParticipant[] = []
+
 export function ConversationMemberStrip({
   wsId,
   conversationId,
@@ -26,7 +28,7 @@ export function ConversationMemberStrip({
   }, [wsId])
   const fetchConversationParticipants = useConversationStore((s) => s.fetchConversationParticipants)
   const participants: ConversationParticipant[] = useConversationStore(
-    (s) => s.conversationParticipants[conversationId] ?? [],
+    (s) => s.conversationParticipants[conversationId] ?? EMPTY_PARTICIPANTS,
   )
 
   // Lazy fetch on mount when state is empty. The store keeps the list fresh
