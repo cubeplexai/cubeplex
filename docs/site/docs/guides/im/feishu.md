@@ -13,7 +13,7 @@ CubePlex supports both editions from the same connector — choose **Feishu** (`
 
 You need:
 
-- A **workspace admin** or member account in CubePlex (a plain member can bind a bot that runs as themselves; impersonating another user requires workspace admin).
+- A **workspace admin** or member account in CubePlex. The workspace connection wizard binds the bot to the current user.
 - Permission to create a **custom app** in your Feishu/Lark organization's developer console.
 
 ## Step 1 — Create a custom app
@@ -40,9 +40,14 @@ Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions,
 
 | Scope | Required | Purpose |
 |---|---|---|
-| Message read / send (`im:message`, `im:message:send_as_bot`, …) | Yes | Receive @-mentions / DMs and reply as the bot. |
-| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Yes | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id` so CubePlex Topic titles show the real group name. Without it the title stays empty and the UI shows a localized "New Group Chat" placeholder. |
-| Contact email read (`contact:user.email:readonly` + related) | Recommended | Auto-match the sender's Feishu email to a CubePlex account (avoids manual `link`). |
+| `im:message.p2p_msg:readonly` and `im:message.group_at_msg:readonly` | Yes | Receive direct messages and group @-mentions. |
+| `im:message:send_as_bot` and `im:message:update` | Yes | Send and update bot replies. |
+| `im:resource` | Yes | Read message attachments. |
+| `cardkit:card:read` and `cardkit:card:write` | Yes | Stream interactive card replies. |
+| `im:message.reactions:read` and `im:message.reactions:write_only` | Yes | Read and update message reactions used by the connector. |
+| `contact:contact.base:readonly` | Yes | Required by the CubePlex connection wizard. |
+| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Recommended for group titles | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id`. Without it the title stays empty and the UI shows a localized "New Group Chat" placeholder. |
+| `contact:user.email:readonly` + related | Recommended | Auto-match the sender's Feishu email to a CubePlex account (avoids manual `link`). |
 
 After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.
 
@@ -113,9 +118,10 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 | **App Secret** | Yes | From Step 1. CubePlex uses it to read the bot identity and to call Feishu. |
 | **Encrypt Key** | No | Only if you enabled Event Encryption (Step 5). |
 | **Verification Token** | No | The token from Step 5. |
-| **Domain** | Yes | `feishu` or `lark` — pick the edition your app lives in. Defaults to `feishu`. |
+| **Domain** | Yes | `feishu` or `lark` — pick the edition your app lives in. The wizard does not preselect a domain. |
 | **Delivery mode** | Yes | `long_connection` (default) or `webhook`, matching Step 4. |
-| **Run identity** | Yes | `self` (the bot runs as you) by default. Binding it to run as another user requires the **workspace admin** role. |
+
+The workspace wizard currently submits `acting_user_id: self` and does not show an identity picker. If you use the API directly, a non-`self` acting user is restricted to workspace admins.
 
 On binding, CubePlex reads the bot's identity from Feishu using your App ID + App Secret and stores the credentials encrypted. If the App Secret is wrong or the bot isn't published, binding fails — fix the console side and retry.
 
