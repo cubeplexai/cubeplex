@@ -81,6 +81,42 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
 
 
 @pytest.mark.asyncio
+async def test_snapshot_loads_preset_with_partial_tiers(async_session, encryption_backend):
+    """A tiers dict that only lists `pro` (no lite/flash/max keys at all) loads
+    the same as listing them explicitly-disabled — missing tiers default to
+    disabled in _load_presets, they don't raise KeyError."""
+    p = _add_acme_provider_and_model(async_session)
+    await async_session.flush()
+    async_session.add(_make_model(p.id))
+    async_session.add(
+        OrgSettings(
+            org_id=None,
+            key=MODEL_PRESETS_KEY,
+            value={
+                "tiers": {"pro": {"enabled": True, "primary": "acme/m1"}},
+                "default_preset": "pro",
+                "task_routing": {},
+            },
+        )
+    )
+    await async_session.commit()
+
+    snap = await load_llm_snapshot(
+        async_session, org_id="org_test", encryption_backend=encryption_backend
+    )
+    assert snap.model_presets == (
+        ModelPreset(
+            key="pro",
+            primary="acme/m1",
+            fallbacks=(),
+            kind="tier",
+            is_default=True,
+            description="",
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_org_row_replaces_system_row(async_session, encryption_backend):
     async_session.add(
         OrgSettings(

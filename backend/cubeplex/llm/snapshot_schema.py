@@ -1,8 +1,10 @@
 """Pydantic schema for the OrgSettings.model_presets row value.
 
-Structured authoring shape: four built-in tiers + admin custom presets + a
-default + task routing. Tier descriptions are NOT stored here (fixed i18n copy
-in the frontend). Ref well-formedness / ref-exists-in-providers is enforced at
+Structured authoring shape: at least one of the four built-in tiers + admin
+custom presets + a default + task routing. Omitted tiers are treated as
+disabled (see `_load_presets` in snapshot.py, which defaults a missing tier to
+`TierSetting()`). Tier descriptions are NOT stored here (fixed i18n copy in the
+frontend). Ref well-formedness / ref-exists-in-providers is enforced at
 write/resolve time, not here.
 """
 
@@ -57,8 +59,8 @@ class ModelPresetsConfig(BaseModel):
 
     @model_validator(mode="after")
     def _invariants(self) -> Self:
-        if set(self.tiers.keys()) != set(ModelTier):
-            raise ValueError("tiers must contain exactly: lite, flash, pro, max")
+        if not self.tiers:
+            raise ValueError("tiers must contain at least one tier")
         available: set[str] = {t.value for t, s in self.tiers.items() if s.enabled and s.primary}
         labels = [c.label for c in self.custom_presets]
         if len(set(labels)) != len(labels):

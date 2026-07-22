@@ -231,11 +231,24 @@ backend:
 backend:
   secrets:
     llm:
+      model_presets:
+        tiers:
+          lite:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          flash: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          pro:   { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          max:   { enabled: false, primary: null, fallbacks: [] }
+        default_preset: pro
       # 完整字段参考见「LLM Provider 配置」
 ```
 
 配置方式与共享的 [LLM Provider 配置](./overview.md#llm-provider-配置)
 完全一致——只是嵌套在 `backend.secrets.llm` 下，而不是 `production.llm`。
+
+**`model_presets.tiers` 至少要写一个 tier**——`lite`、`flash`、`pro`、`max`
+任选，不用的 tier 直接省略就行（会被当成禁用处理），不需要写 `enabled: false`
+占位。唯一会被拒绝的是**空的** `tiers: {}`——而且是响亮地拒绝：Pod 会在启动时
+直接失败（`CrashLoopBackOff`），而不是悄悄降级，所以配置错了 `kubectl get
+pods` 立刻能看到，不会等到第一条聊天消息才冒出 `no_default_preset` 500。
 
 ### 4.5 Sandbox（可选）
 
@@ -580,7 +593,8 @@ kubectl -n cubeplex logs deploy/cubeplex-backend -c backend --previous
 | `PermissionError: '/app/logs'` | 镜像早于 `75da36fb`；重新构建。 |
 | `CUBEPLEX_AUTH__VAULT_KEY is required` | 在 `values.local.yaml` 中添加 `backend.secrets.auth.vault_key`。 |
 | `Could not connect to 'cubeplex-postgresql:5432'` | Postgres 还没就绪；通常会自愈。 |
-| `Provider 'X' not found` | `default_model: "X/..."` 引用的 provider 不在 `providers` 列表中。 |
+| `Provider 'X' not found` | 某个 model preset 引用的 provider 不在 `providers` 列表中。 |
+| `tiers must contain at least one tier` | `backend.secrets.llm.model_presets.tiers` 是空的 `{}`——加至少一个 tier，见 [§4.4](#44-llm-provider)。 |
 
 ### PVC 一直是 `Pending`
 
@@ -641,7 +655,7 @@ backend:
     # …backend/config.yaml 中的任意字段
   secrets:                          # Secret
     auth:    { jwt_secret, csrf_secret, vault_key }     # 必填
-    llm:     { default_model, fallback_models, providers }
+    llm:     { model_presets, providers }             # model_presets 至少需要写一个 tier，见 §4.4
     sandbox: { domain, image, api_key }
 
 frontend:
@@ -720,7 +734,13 @@ backend:
       csrf_secret: "<openssl rand -hex 32>"
       vault_key: "<Fernet.generate_key()>"
     llm:
-      default_model: "openai/gpt-5.6-terra"
+      model_presets:
+        tiers:
+          lite:  { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          flash: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          pro:   { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+          max:   { enabled: false, primary: null, fallbacks: [] }
+        default_preset: pro
       providers:
         openai:               # 任意 OpenAI 兼容端点
           base_url: "https://api.openai.com/v1"

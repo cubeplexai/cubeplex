@@ -23,11 +23,18 @@ def test_valid_config():
     assert cfg.tiers["max"].enabled is False
 
 
-def test_missing_tier_key_rejected():
-    bad = _tiers()
-    bad.pop("max")
-    with pytest.raises(ValidationError):
-        ModelPresetsConfig.model_validate({"tiers": bad, "default_preset": "pro"})
+def test_partial_tiers_accepted():
+    """Omitting a tier key is valid — missing tiers are treated as disabled
+    downstream (see _load_presets in snapshot.py)."""
+    partial = _tiers()
+    partial.pop("max")
+    cfg = ModelPresetsConfig.model_validate({"tiers": partial, "default_preset": "pro"})
+    assert "max" not in cfg.tiers
+
+
+def test_empty_tiers_rejected():
+    with pytest.raises(ValidationError, match="at least one tier"):
+        ModelPresetsConfig.model_validate({"tiers": {}, "default_preset": "pro"})
 
 
 def test_enabled_tier_needs_primary():
