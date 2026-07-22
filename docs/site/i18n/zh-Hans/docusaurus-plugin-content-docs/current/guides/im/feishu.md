@@ -119,10 +119,7 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 
 绑定时，CubePlex 会使用 App ID + App Secret 从 Feishu 读取机器人身份，并加密存储凭据。如果 App Secret 错误或机器人未发布，绑定会失败——请修复控制台端配置后重试。
 
-:::info 📸 截图占位符
-**截图内容：** CubePlex 的“连接 Feishu 账户”表单，包含 App ID、App Secret、Encrypt Key、Verification Token、域名（Feishu/Lark）和传递模式字段。
-**资源：** `/img/im/feishu/cubeplex-connect-form.png`
-:::
+![CubePlex Feishu 账户连接表单](/img/im/feishu/cubeplex-connect-form.png)
 
 如果选择 **webhook** 路径，现在请返回 Feishu 控制台并触发请求 URL 验证——CubePlex 会响应挑战。
 

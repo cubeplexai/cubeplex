@@ -75,10 +75,7 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 
 The delivery mode is fixed to **Stream** — there is nothing to choose. On binding, CubePlex validates the AppKey + AppSecret by exchanging them for a DingTalk access token; if the credentials are wrong the token exchange fails and binding is rejected. Fix them in the console and retry. Valid credentials are stored encrypted.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The CubePlex "Connect DingTalk account" form with the AppKey, AppSecret, and Run identity fields.
-**Asset:** `/img/im/dingtalk-cubeplex-connect-form.png`
-:::
+![CubePlex DingTalk account connection form](/img/im/dingtalk-cubeplex-connect-form.png)
 
 Once bound, CubePlex opens the Stream connection automatically. (Note: re-enabling a disabled Stream account currently requires an API restart to re-establish the socket — see the [Overview](./overview.md#delivery-modes).)
 

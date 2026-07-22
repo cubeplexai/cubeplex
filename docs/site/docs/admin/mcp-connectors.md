@@ -24,10 +24,7 @@ Connector management happens at **Admin > MCP Connectors** (`/admin/mcp`).
 
 The catalog at **Admin > MCP Connectors** shows all templates visible to your org — global (built-in), org-scope custom templates you have created, and workspace-scope templates your workspace admins have registered (for governance visibility).
 
-:::info 📸 Screenshot placeholder
-**Capture:** The admin catalog page showing the template list with filter chips (In use, Needs attention, Org credential, All) and at least two templates — one with a "Disabled" badge and one showing "3 workspaces enabled".
-**Asset:** `/img/mcp/admin-catalog.png`
-:::
+![MCP admin catalog with connector filters and template list](/img/mcp/admin-catalog.png)
 
 ### Filter chips
 
@@ -53,10 +50,7 @@ Distributing pushes a template to workspaces that have not yet made a decision a
    - **Auto-enable for future workspaces** — new workspaces that join the org will automatically have this template enabled.
 4. Confirm. CubePlex performs the fan-out immediately.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Distribute dialog for a template, showing both checkboxes checked (default state) and the count of workspaces that will be affected.
-**Asset:** `/img/mcp/admin-distribute-dialog.png`
-:::
+![MCP connector Distribute dialog with both rollout options enabled](/img/mcp/admin-distribute-dialog.png)
 
 ## Disable a template
 

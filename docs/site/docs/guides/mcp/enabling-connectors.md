@@ -68,10 +68,7 @@ For connectors that use OAuth (like GitHub, Notion, Slack, or Linear):
 
 **What happens behind the scenes:** CubePlex uses PKCE (Proof Key for Code Exchange) for all OAuth flows. For services that support Dynamic Client Registration (DCR) — Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare — no pre-configuration is needed. For services that do not support DCR — GitHub, Slack, Google Workspace — your system administrator must register an OAuth app in the vendor's developer console before the OAuth flow can complete.
 
-:::info 📸 Screenshot placeholder
-**Capture:** A connector credential panel showing the "Sign in with &lt;provider&gt;" button and the "Waiting for authorization in the new window…" state.
-**Asset:** `/img/mcp/oauth-connect.png`
-:::
+![MCP OAuth credential panel with the provider sign-in action](/img/mcp/oauth-connect.png)
 
 ### User-scoped OAuth
 

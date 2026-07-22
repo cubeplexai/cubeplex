@@ -101,10 +101,7 @@ The delivery mode for Teams is always **webhook** — there is no choice to make
 
 On binding, CubePlex validates the credentials by requesting a client-credentials token from Microsoft (`https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token`). If the App ID, secret, or tenant ID is wrong, the token request fails and binding is rejected with a "could not validate Teams bot credentials" error — fix the values in Azure and retry. The credentials are stored encrypted.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The CubePlex "Connect Teams account" form with the App ID, App secret, and Tenant ID fields, and the run-identity selector.
-**Asset:** `/img/im/teams-cubeplex-connect-form.png`
-:::
+![CubePlex Teams account connection form](/img/im/teams-cubeplex-connect-form.png)
 
 ## Step 6 — Test it
 

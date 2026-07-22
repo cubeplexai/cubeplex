@@ -119,10 +119,7 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 
 On binding, CubePlex reads the bot's identity from Feishu using your App ID + App Secret and stores the credentials encrypted. If the App Secret is wrong or the bot isn't published, binding fails — fix the console side and retry.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The CubePlex "Connect Feishu account" form with the App ID, App Secret, Encrypt Key, Verification Token, Domain (Feishu/Lark), and Delivery mode fields.
-**Asset:** `/img/im/feishu/cubeplex-connect-form.png`
-:::
+![CubePlex Feishu account connection form](/img/im/feishu/cubeplex-connect-form.png)
 
 If you chose the **webhook** path, go back to the Feishu console now and trigger the Request URL verification — CubePlex will answer the challenge.
 

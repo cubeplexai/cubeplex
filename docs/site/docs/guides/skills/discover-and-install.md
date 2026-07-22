@@ -43,10 +43,7 @@ Local catalog skills (built-in and uploaded) take priority over remote duplicate
 
 For a more visual browsing experience, open the **Skills** page from the workspace sidebar. It lives under your workspace at `/w/<workspace-id>/skills`, where `<workspace-id>` is your current workspace.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The workspace Skills marketplace page showing the System Catalog list on the left, a remote search query producing External Sources results below it, and a skill detail panel open on the right.
-**Asset:** `/img/skills/marketplace.png`
-:::
+![Skills marketplace with the catalog list and skill detail panel](/img/skills/marketplace.png)
 
 The marketplace shows two sections:
 
