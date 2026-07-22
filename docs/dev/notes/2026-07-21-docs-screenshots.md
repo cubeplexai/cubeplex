@@ -29,7 +29,7 @@
   and `zh-Hans` scheduled-task docs.
 - Chrome's screenshot method returns JPEG bytes even when the requested name
   ends in `.png`. Every accepted capture is converted with `sips` and checked
-  with `file`; the scheduled-task capture is a real 1712×886 PNG.
+  with `file`; the refreshed captures are real 1712×942 PNG files.
 - Current accepted product captures include the admin model/provider, members,
   sandbox, skill registry, profile/avatar, trigger detail/event log, scheduled
   task run history, workspace MCP catalog, memory center, workspace skills,
@@ -49,3 +49,25 @@
   indicator is absent, and the web package type-check passed.
 - Remaining work is tracked in
   `docs/dev/plans/2026-07-21-docs-screenshots.md`.
+
+## 2026-07-21 follow-up: formal demo identity and runtime recovery
+
+- The backend process was still listening on `8019`, but its SSH forwards to
+  the remote test services had stopped. Restarted the forwards for Postgres,
+  Redis, Tempo, the sandbox gateway, and WebTools, then restarted the backend.
+- The first backend restart failed because the inherited `.worktree.env`
+  database name (`cubeplex_feat_2026_07_18_docs_screenshots`) overrode the
+  remote configuration. The working runtime command explicitly sets
+  `CUBEPLEX_DATABASE__NAME=cubebox` while retaining the worktree API port.
+- Updated the signed-in demo account through Profile: display name `Chris`.
+  The profile email field is intentionally read-only, so the remote test row
+  was changed from `codex-docs-screenshots-20260721@example.com` to
+  `chris@cubeplex.ai`. The seeded member was similarly normalized to
+  `Docs Reviewer <docs-reviewer@cubeplex.ai>`.
+- Re-captured every accepted product asset that can be produced in the
+  current test environment, so the lower-left identity and member tables no
+  longer show the task-generated `codex-docs-screenshots` or `example.com`
+  values. The MCP detail capture now uses the enabled, no-credential-required
+  Microsoft Learn connector and has a populated right-side detail panel.
+- The build-based docs server remains available at `http://localhost:3040`;
+  the Chinese entry is `/docs/zh-Hans` (without a trailing slash).
