@@ -30,6 +30,10 @@ The existing conversation stays in place and becomes a group chat after the firs
 
 Only workspace members can be invited. An invitation does not add someone to the workspace or create an account.
 
+After the invitation, the participant control in the conversation header shows the people who share this one thread:
+
+![Two participants shown in the group chat header](/img/conversations/group-chat-participants.png)
+
 ## Shared sandbox and memory
 
 When a 1:1 conversation becomes a group chat:
