@@ -93,10 +93,7 @@ Bindings are managed per account from the workspace IM settings.
 
 IM connector accounts are created and managed from your workspace settings. Workspace members can connect a bot that runs **as themselves**; binding a bot that runs as *another* user (impersonation) requires the **workspace admin** role. Disabling, deleting, and channel-binding management are available from the same settings area.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The workspace IM connectors settings page showing the list of bound accounts (platform icon, bot name, enabled toggle) and the "Connect" entry point.
-**Asset:** `/img/im/connectors-list.png`
-:::
+![Workspace IM connector settings showing bound accounts and the Connect entry point](/img/im/connectors-list.png)
 
 ## Per-platform setup guides
 
