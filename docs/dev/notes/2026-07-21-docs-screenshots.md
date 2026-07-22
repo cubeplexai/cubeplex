@@ -38,9 +38,9 @@
 - A real agent run now produces a substantive artifact card and rendered
   right-side preview. `conversations/artifact-panel.png` and
   `conversations/conversation-layout.png` are real dark English-interface
-  captures wired into both locale trees. Remaining placeholder inventory is 40
-  blocks in English and 40 matching blocks in `zh-Hans` (12 files per locale):
-  cost tracking, admin MCP catalog/distribution, conversation sandbox/topics,
+  captures wired into both locale trees. Remaining placeholder inventory is 39
+  blocks in English and 39 matching blocks in `zh-Hans` (12 files per locale):
+  cost tracking, admin MCP catalog/distribution, conversation topics,
   OAuth connect, and the skills marketplace. Third-party IM console captures
   remain blocked by external-console login/permission state; no empty panel was
   promoted to an accepted asset.
@@ -71,3 +71,8 @@
   Microsoft Learn connector and has a populated right-side detail panel.
 - The build-based docs server remains available at `http://localhost:3040`;
   the Chinese entry is `/docs/zh-Hans` (without a trailing slash).
+- To fill the workspace sandbox placeholder, sent a real conversation request
+  requiring `printf` to run in the sandbox. Lazy provisioning created a running
+  user sandbox, and Workspace Settings > Sandboxes then showed the non-empty
+  `Running` row with `Restart` and `Delete` actions. The resulting asset is
+  `conversations/sandboxes-panel.png`, wired into both locale trees.

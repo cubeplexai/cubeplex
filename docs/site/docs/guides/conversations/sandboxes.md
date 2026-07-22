@@ -7,10 +7,7 @@ title: Managing Sandboxes
 
 A sandbox is the isolated environment where the agent runs code for a conversation or topic. Each sandbox has its own files and installed packages, and CubePlex keeps it around across container restarts — so the working files from a conversation are still there the next time you open it. The **Sandboxes** tab in your workspace settings is where you see every sandbox that belongs to you in this workspace and take action on one when something goes wrong.
 
-:::info 📸 Screenshot placeholder
-**Capture:** Workspace settings → Sandboxes tab, showing a list of sandbox rows. Each row has a status badge (Running / Off / Paused / Failed), a scope label (e.g. "Your workspace sandbox", "Topic: release-plan"), last-active time, and Restart + Delete buttons.
-**Asset:** `/img/conversations/sandboxes-panel.png`
-:::
+![Workspace settings Sandboxes tab showing a running sandbox with Restart and Delete actions](/img/conversations/sandboxes-panel.png)
 
 ## Opening the Sandboxes tab
 

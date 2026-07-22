@@ -6,7 +6,7 @@ Replace every remaining screenshot placeholder in the English and Simplified
 Chinese site docs with a real, readable screenshot. Each English/Chinese pair
 uses one shared asset under `docs/site/static/img/`. The latest main baseline
 had 53 remaining assets (106 locale-specific positions). After the current
-capture pass, 40 placeholder blocks remain in each locale (80 locale-specific
+capture pass, 39 placeholder blocks remain in each locale (78 locale-specific
 positions); every remaining block is listed as an explicit blocker below.
 
 ## Current baseline
@@ -78,10 +78,11 @@ the notes instead of fabricating a console screenshot.
 - Third-party DingTalk, Discord, Feishu, Slack, and Teams/Azure console
   screenshots require external console access or permissions that are not
   available in the current browser session.
-- Conversation artifact and basic-layout screenshots are complete: a real agent
-  run produced a populated artifact preview panel. Conversation sandbox/topic
-  captures remain blocked because no non-empty, non-sensitive demo state is
-  available for those panels.
+- Conversation artifact, basic-layout, and workspace sandbox screenshots are
+  complete: a real agent run produced a populated artifact preview panel and a
+  running sandbox row with Restart/Delete actions. Conversation topic captures
+  remain blocked because no non-empty, non-sensitive demo state is available for
+  those panels.
 - Admin cost, admin MCP distribution, OAuth connect, and the external skill
   marketplace currently load with no usable non-sensitive data or registry
   results, so those assets remain placeholders until a seeded demo path or
