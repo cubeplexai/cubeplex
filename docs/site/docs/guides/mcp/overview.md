@@ -64,10 +64,7 @@ CubePlex ships with global templates for a growing list of services:
 
 Your admin may have additional org-scope or workspace-scope templates available. Open the **MCP** page in your workspace sidebar to see what is enabled and what is available.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The workspace **MCP** page showing the full template list with enable toggles — at least one enabled (with a credential connected) and one not yet enabled.
-**Asset:** `/img/mcp/workspace-mcp-page.png`
-:::
+![Workspace MCP connector catalog](/img/mcp/workspace-mcp-page.png)
 
 ## Authentication modes
 

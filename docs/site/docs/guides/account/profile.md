@@ -31,10 +31,7 @@ action buttons. Once the editor finishes saving, your choice propagates
 everywhere your picture appears — group-chat sender badges, member lists, and
 the sidebar.
 
-:::info 📸 Screenshot placeholder
-**Capture:** Avatar editor in /settings/profile — current avatar, Upload/Shuffle/Reset, gallery grid.
-**Asset:** `/img/settings/avatar-editor.png`
-:::
+![Profile avatar editor with gallery and upload controls](/img/settings/avatar-editor.png)
 
 ## Other settings
 

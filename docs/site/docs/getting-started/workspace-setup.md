@@ -63,10 +63,7 @@ Before your team can chat, at least one AI model must be enabled at the organiza
 
 Models enabled at the org level are available across all workspaces.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Admin **Models > Model Providers** page with a provider being added — show the provider type selector, the API-key field, and the per-model enable toggles.
-**Asset:** `/img/admin/model-providers.png`
-:::
+![Model provider setup wizard with selectable reasoning models](/img/admin/model-providers.png)
 
 ## Install MCP tools
 

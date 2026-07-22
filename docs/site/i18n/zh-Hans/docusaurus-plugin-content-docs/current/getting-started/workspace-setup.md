@@ -63,10 +63,7 @@ import TabItem from '@theme/TabItem';
 
 在组织级别启用的模型可供所有工作区使用。
 
-:::info 📸 截图占位符
-**截图内容：** 管理面板的 **模型 > 模型提供商** 页面，正在添加提供商——展示提供商类型选择器、API 密钥字段以及每个模型的启用开关。
-**资源：** `/img/admin/model-providers.png`
-:::
+![模型提供商设置向导，显示可选择的推理模型](/img/admin/model-providers.png)
 
 ## 安装 MCP 工具
 

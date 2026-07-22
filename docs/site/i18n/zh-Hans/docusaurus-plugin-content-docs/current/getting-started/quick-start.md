@@ -48,10 +48,7 @@ import TabItem from '@theme/TabItem';
 
 智能体会以文本形式回复；具体取决于所选模型和可用工具，它还可能产生工具调用、代码执行结果或制品。
 
-:::info 📸 截图占位符
-**截图内容：** 对话进行中的聊天视图——展示聊天输入框上的模型选择器、附件图标以及智能体正在流式生成的回复。
-**资源：** `/img/getting-started/first-conversation.png`
-:::
+![带有模型选择器和附件控件的 CubePlex 对话](/img/getting-started/first-conversation.png)
 
 ### 试着附加文件
 

@@ -21,10 +21,7 @@ The layout has three main areas:
 - **Chat area** (center) — the message thread and input bar.
 - **Side panel** (right, opens on demand) — previews artifacts, attachment images, tool call details, or the sandbox browser.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The full conversation view with the three areas labeled — sidebar (left), chat thread (center), and the side panel open on the right showing an artifact preview.
-**Asset:** `/img/conversations/conversation-layout.png`
-:::
+![Conversation view with the chat thread and an artifact preview panel](/img/conversations/conversation-layout.png)
 
 The input bar sits at the bottom. It includes:
 

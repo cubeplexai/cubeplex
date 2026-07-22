@@ -11,10 +11,7 @@ The Memory Center is where you review what the agent remembers and retire items 
 
 Go to your workspace and open **Memory**. The Memory Center lives at `/w/{workspaceId}/memory`, where `{workspaceId}` is your current workspace. You can also reach it from a conversation: when the agent saves or updates a memory, the chip it shows links straight into the Memory Center, pre-filtered to that conversation.
 
-:::info 📸 Screenshot placeholder
-**Capture:** The Memory Center with the Personal / Workspace / Organization / Archived tabs visible, showing a few memory cards (type badge, confidence percentage, content, and the hover Archive button).
-**Asset:** `/img/memory/memory-center.png`
-:::
+![Memory Center with scope tabs, confidence scores, and populated memory cards](/img/memory/memory-center.png)
 
 ## Browsing memory items
 
