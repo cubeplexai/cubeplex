@@ -45,6 +45,7 @@ import {
   loadUnreadMap,
   publishClear,
   publishMark,
+  saveUnreadMap,
   subscribeUnreadSync,
   unreadMapsEqual,
   type UnreadConversationIds,
@@ -1269,6 +1270,9 @@ async function consumeRunStream(
   }
 }
 
+/** Per-conversation mark timestamps for stale-clear protection (module-local). */
+const unreadMarkAt: Record<string, number> = {}
+
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   pendingSteers: {},
@@ -2116,27 +2120,32 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const userId = currentUnreadUserId()
     const prev = get().unreadConversationIds
     if (prev[conversationId]) return
+    const at = Date.now()
     const next: UnreadConversationIds = { ...prev, [conversationId]: true }
     set({ unreadConversationIds: next })
-    if (userId) publishMark(userId, conversationId)
+    unreadMarkAt[conversationId] = at
+    if (userId) publishMark(userId, conversationId, at)
   },
 
   clearUnread(conversationId) {
     const userId = currentUnreadUserId()
     const prev = get().unreadConversationIds
+    const before = unreadMarkAt[conversationId] ?? Date.now()
     if (!prev[conversationId]) {
       // Still publish clear so a peer that marked while we are present drops it.
-      if (userId) publishClear(userId, conversationId)
+      if (userId) publishClear(userId, conversationId, before)
       return
     }
     const next: UnreadConversationIds = { ...prev }
     delete next[conversationId]
+    delete unreadMarkAt[conversationId]
     set({ unreadConversationIds: next })
-    if (userId) publishClear(userId, conversationId)
+    if (userId) publishClear(userId, conversationId, before)
   },
 
   resetUnread(options) {
     const userId = currentUnreadUserId()
+    for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
     set({ unreadConversationIds: {} })
     if (options?.clearStorage && userId) clearUnreadStorage(userId)
   },
@@ -2144,24 +2153,40 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   __applyUnreadRemote(event) {
     if (event.type === 'mark') {
       // Another tab marked C — if this tab is focused on C, treat as read and
-      // push a clear so the marker tab drops the dot.
+      // push a clear so the marker tab drops the dot (scoped to this mark's `at`).
       if (!isAwayFromConversation(event.conversationId)) {
-        get().clearUnread(event.conversationId)
+        const userId = currentUnreadUserId()
+        const prev = get().unreadConversationIds
+        if (prev[event.conversationId]) {
+          const next: UnreadConversationIds = { ...prev }
+          delete next[event.conversationId]
+          delete unreadMarkAt[event.conversationId]
+          set({ unreadConversationIds: next })
+        }
+        if (userId) publishClear(userId, event.conversationId, event.at)
         return
       }
       const prev = get().unreadConversationIds
-      if (prev[event.conversationId]) return
+      const existingAt = unreadMarkAt[event.conversationId]
+      if (prev[event.conversationId] && existingAt !== undefined && existingAt >= event.at) {
+        return
+      }
       set({
         unreadConversationIds: { ...prev, [event.conversationId]: true },
       })
+      unreadMarkAt[event.conversationId] = event.at
       return
     }
 
     if (event.type === 'clear') {
       const prev = get().unreadConversationIds
       if (!prev[event.conversationId]) return
+      const localAt = unreadMarkAt[event.conversationId]
+      // Ignore stale clears that predate a newer local mark.
+      if (localAt !== undefined && localAt > event.before) return
       const next: UnreadConversationIds = { ...prev }
       delete next[event.conversationId]
+      delete unreadMarkAt[event.conversationId]
       set({ unreadConversationIds: next })
       return
     }
@@ -2174,9 +2199,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       delete next[activeId]
       // Correct storage / peers that still hold the focused id.
       const userId = currentUnreadUserId()
-      if (userId) publishClear(userId, activeId)
+      if (userId) publishClear(userId, activeId, Date.now())
     }
     if (unreadMapsEqual(get().unreadConversationIds, next)) return
+    // Best-effort timestamps for ids introduced via storage replace.
+    const now = Date.now()
+    for (const id of Object.keys(next)) {
+      if (unreadMarkAt[id] === undefined) unreadMarkAt[id] = now
+    }
+    for (const id of Object.keys(unreadMarkAt)) {
+      if (!next[id]) delete unreadMarkAt[id]
+    }
     set({ unreadConversationIds: next })
   },
 
@@ -2192,29 +2225,47 @@ if (typeof window !== 'undefined') {
   let unsubRemote: (() => void) | null = null
   let boundUserId: string | null = null
 
-  const rebindUnreadForUser = (userId: string | null): void => {
+  const rebindUnreadForUser = (userId: string | null, prevUserId: string | null): void => {
     if (unsubRemote) {
       unsubRemote()
       unsubRemote = null
     }
     boundUserId = userId
     if (!userId) {
+      // Drop memory so the next user cannot see the previous user's badges.
+      for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
       useMessageStore.setState({ unreadConversationIds: {} })
       return
     }
-    useMessageStore.setState({ unreadConversationIds: loadUnreadMap(userId) })
+
+    const stored = loadUnreadMap(userId)
+    let merged: UnreadConversationIds = stored
+    if (prevUserId === null) {
+      // Auth just finished hydrating — keep marks from streams that completed
+      // while user was still null.
+      const pending = useMessageStore.getState().unreadConversationIds
+      merged = { ...stored, ...pending }
+    } else {
+      // User A → user B: do not carry over the previous user's map.
+      for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
+    }
+    const now = Date.now()
+    for (const id of Object.keys(merged)) {
+      if (unreadMarkAt[id] === undefined) unreadMarkAt[id] = now
+    }
+    useMessageStore.setState({ unreadConversationIds: merged })
+    saveUnreadMap(userId, merged)
     unsubRemote = subscribeUnreadSync(userId, (event) => {
-      // Ignore events if the bound user changed mid-flight.
       if (boundUserId !== userId) return
       useMessageStore.getState().__applyUnreadRemote(event)
     })
   }
 
-  rebindUnreadForUser(currentUnreadUserId())
+  rebindUnreadForUser(currentUnreadUserId(), null)
   useAuthStore.subscribe((state, prev) => {
     const nextId = state.user?.id ?? null
     const prevId = prev.user?.id ?? null
     if (nextId === prevId) return
-    rebindUnreadForUser(nextId)
+    rebindUnreadForUser(nextId, prevId)
   })
 }

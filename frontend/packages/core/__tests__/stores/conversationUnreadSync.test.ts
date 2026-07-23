@@ -91,6 +91,7 @@ describe('conversationUnreadSync multi-tab', () => {
         { type: 'mark', conversationId: 'peer1' },
         { type: 'clear', conversationId: 'peer1' },
       ])
+      // Timestamps are present on the wire; shape checked above by type.
       unsub()
     } finally {
       globalThis.BroadcastChannel = Original
