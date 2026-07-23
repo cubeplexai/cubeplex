@@ -1,31 +1,27 @@
-# Model picker avatar + short labels — implementation plan
+# Model picker: model-brand logo + tier + hover — implementation plan
 
-**Goal**: Workspace model presets expose provider logo metadata; the chat
-model picker shows avatar + short preset name instead of long mono primary.
+**Goal**: Workspace model presets expose primary-model detail fields; the
+chat model picker shows a model-family brand icon + tier/custom label, hides
+list description, and shows details on hover Tooltip.
 
-**Architecture**: Backend enriches `WorkspacePresetSummary` from the existing
-LLM snapshot + catalog logo resolution. Frontend maps fields into a shared
-`ProviderLogo` and restyles `ModelPicker` list/trigger. No migrations (logo
-columns already exist on `providers`).
+**Architecture**: Backend enriches `WorkspacePresetSummary` from
+`load_llm_snapshot` by parsing `primary` and reading `ModelConfig`. Frontend
+infers brand from `model_id` (not provider slug), restyles `ModelPicker`, and
+uses shared Tooltip. No migrations. No logo upload.
 
-**Tech stack**: FastAPI schemas, `load_llm_snapshot`, catalog `_resolve_logo`,
-React ModelPicker, existing ProviderLogo / lobehub icons.
+**Tech stack**: FastAPI schemas, LLM snapshot, React ModelPicker, existing
+brand icons (`@lobehub/icons`), `components/ui/tooltip`.
 
 ---
 
-## Unit 1: Backend — extend workspace preset summary
+## Unit 1: Backend — model detail fields on workspace preset summary
 
 **Files**:
 
 - `backend/cubeplex/api/schemas/model_presets.py`
 - `backend/cubeplex/api/routes/v1/model_presets.py`
-- Extract `_resolve_logo` from `admin_providers` into a shared module
-  (e.g. `cubeplex/llm/provider_logo.py` or `services/provider_logo.py`) so
-  workspace routes do not import admin route modules.
-- Either: slim provider metadata query next to the route/service, **or**
-  extend `ProviderConfig` + `_load_providers` with `name` / `logo_url` /
-  `preset_slug` (see design — prefer metadata map if snapshot should stay
-  LLM-call-only).
+- Optional tiny helper module if parse/lookup is non-trivial (keep out of
+  admin routes)
 
 **Interfaces**:
 
@@ -37,43 +33,42 @@ class WorkspacePresetSummary(BaseModel):
     description: str
     is_default: bool
     provider_slug: str | None = None
-    provider_name: str | None = None
-    logo: str | None = None
-    logo_url: str | None = None
     model_id: str | None = None
+    model_display_name: str | None = None
+    context_window: int | None = None
+    reasoning: bool | None = None
+    input_modalities: list[str] | None = None
 ```
 
 All new fields default `None` (additive wire contract).
 
-**Core logic** (in `get_workspace_model_presets`) — **do not** read
-`logo_url` / `preset_slug` / `name` from today’s `ProviderConfig`:
+**Core logic** (in `get_workspace_model_presets`):
 
 ```
-meta = load_provider_display_meta(session, org_id)
-  # slug -> {name, logo_url, preset_slug} from Provider rows
+snap = load_llm_snapshot(...)
 for each preset p in snap.model_presets:
   slug, model_id = split_primary(p.primary)  # first "/" only
-  m = meta.get(slug) if slug else None
-  logo_url = m.logo_url if m else None
-  logo = _resolve_logo(m.preset_slug) if m else None
-  provider_name = (m.name if m else None) or slug
+  mc = find_model(snap.providers, slug, model_id)
   emit WorkspacePresetSummary(
-    ..., provider_slug=slug, provider_name=provider_name,
-    logo=logo, logo_url=logo_url, model_id=model_id)
+    key=..., kind=..., primary=..., description=..., is_default=...,
+    provider_slug=slug,
+    model_id=model_id,
+    model_display_name=mc.name if mc else None,
+    context_window=mc.context_window if mc else None,
+    reasoning=mc.reasoning if mc else None,
+    input_modalities=list(mc.input) if mc else None,
+  )
 ```
 
-If architecture B is chosen instead, extend snapshot load once and map from
-the enriched `ProviderConfig`.
+Malformed / missing provider or model → nulls, no 500.
 
 **Tests intent**:
 
-- Unit/API test: workspace presets response includes logo fields for a
-  catalog-backed provider and a custom provider with `logo_url`.
-- Custom provider without logo: `logo` null, `logo_url` null, name present.
-- Malformed primary without `/`: graceful nulls, no 500.
-- **Two-provider fixture**: presets referencing A vs B return A’s logo/name
-  for A’s primary and B’s for B’s — assert no cross-wiring.
-- Nested model id after first slash preserved in `model_id`.
+- Known primary fills all detail fields from fixture provider/model.
+- Missing model: slug/model_id still parsed when possible; detail nulls.
+- Nested model id after first slash preserved.
+- Two-provider fixture: no cross-wiring of context/reasoning between A and B.
+- No logo fields asserted (feature does not return them).
 
 ---
 
@@ -81,33 +76,33 @@ the enriched `ProviderConfig`.
 
 **Files**:
 
-- `frontend/packages/web/lib/types/presets.ts` (`WorkspacePresetSummary`)
-- Any `@cubeplex/core` type if presets are duplicated there
-- `frontend/packages/web/lib/api/presets.ts` (passthrough JSON)
+- `frontend/packages/web/lib/types/presets.ts`
+- `frontend/packages/web/lib/api/presets.ts` (passthrough if untyped parse)
 
-**What changes**: Add nullable fields matching API. Backward-tolerant
-parsing (`field ?? null`). Before `ProviderLogo`, normalize
-`name = provider_name ?? provider_slug ?? primary`.
+**What changes**: Add nullable fields matching API. Tolerate missing keys
+(`?? null`).
 
-**Tests intent**: typecheck; optional schema assert in existing presets
-tests.
+**Tests intent**: typecheck; optional assert in existing presets tests.
 
 ---
 
-## Unit 3: Share `ProviderLogo`
+## Unit 3: `inferModelBrand` + logo presentation
 
 **Files**:
 
-- Move or re-export from
-  `frontend/packages/web/components/admin/models/ProviderLogo.tsx`
-  → e.g. `frontend/packages/web/components/models/ProviderLogo.tsx`
-- Update admin imports to the new path
+- New e.g. `frontend/packages/web/lib/models/infer-model-brand.ts`
+- New or shared e.g. `frontend/packages/web/components/models/ModelBrandLogo.tsx`
+  (extract brand map from admin `ProviderLogo` without requiring `logo_url`
+  letter path for chat)
 
-**What changes**: No visual redesign; ensure `sm` size works in picker rows
-and trigger. Keep priority `logo_url → logo → letter`.
+**What changes**:
 
-**Tests intent**: existing admin logo tests if any; smoke import from chat
-bundle.
+1. `inferModelBrand(modelId, displayName?) → brandId | null` per design table.
+2. `ModelBrandLogo`: brand icon if known, else default model icon (`Cpu`).
+3. Unit tests for patterns: claude→anthropic, gpt→openai, qwen→qwen,
+   openrouter-style ids still match on model portion, unknown→null.
+
+**Do not** use provider slug in the inference function.
 
 ---
 
@@ -116,36 +111,37 @@ bundle.
 **Files**:
 
 - `frontend/packages/web/components/chat/ModelPicker.tsx`
+- `frontend/packages/web/__tests__/components/ModelPicker.test.tsx`
 
 **What changes**:
 
-1. List row: `ProviderLogo` + `nameOf(p)` as hero; demote/remove mono
-   `primary` as main line; `title={p.primary}`; row `aria-label` includes
-   display name + full `primary`.
-2. Trigger: selected `ProviderLogo` instead of `Cpu` when `selected`
-   exists; fallback `Cpu` only if no presets; trigger aria includes
-   selected display name + `primary`.
-3. Preserve effort slider, selection store, hydration gating for labels.
-4. `aria-pressed` / aria labels remain correct per above.
-
-**Core logic**: pure presentational mapping from summary fields.
+1. **List row**: `ModelBrandLogo` + tier/custom title only; remove mono
+   `primary` main line; **remove description under row**; keep default badge
+   + checkmark.
+2. **Trigger**: selected brand logo instead of bare `Cpu` when selected;
+   keep name · effort · chevron.
+3. **Tooltip** on each row (and optionally trigger): labeled fields —
+   provider slug, model id, display name, context, reasoning, input
+   modalities, description (tier i18n desc or custom `description`).
+4. Labels: `nameOf` = tier i18n / custom `key` only (unchanged hero rule).
+5. Aria: row + trigger include label + full `primary`.
+6. Preserve effort slider, selection store, hydration gating.
 
 **Tests intent**:
 
-- Component test: renders preset name without requiring full primary as
-  visible main text; shows logo props when provided.
-- Accessible names include full `primary` on row and trigger.
+- Renders tier name; does not require mono primary as main text.
+- Description not in list DOM as secondary line (tooltip content may hold it).
+- Unknown brand still shows a default icon node.
 - Selection still updates store on click.
 
 ---
 
 ## Unit 5: Docs (implementation PR)
 
-**Files** (if user-facing):
+**Files** (if any user-facing admin/composer docs mention the picker):
 
-- `docs/site/docs/admin/models.md` — one line: optional Logo URL improves
-  chat model picker; monogram used otherwise.
-- Conversations / composer docs only if they describe the picker layout.
+- Short note only if docs currently describe mono primary rows — update to
+  tier + hover details.
 
 **Tests intent**: none.
 
@@ -154,14 +150,17 @@ bundle.
 ## Unit 6: Verification
 
 - Backend unit/API tests for summary enrichment.
-- Frontend ModelPicker test(s).
-- Manual: catalog provider brand icon; custom with URL; custom without URL
-  (letter); long model ids no longer dominate the row.
+- Frontend `inferModelBrand` + ModelPicker tests.
+- Manual: Claude/GPT/Qwen ids show correct brands; unknown id → default icon;
+  hover shows context/reasoning/modalities; list has no description clutter;
+  thinking effort still works.
 
 ---
 
 ## Non-goals
 
-- Logo file upload endpoint
-- Changing preset selection or thinking defaults
+- Provider logo upload or Logo URL promotion for picker
+- Provider letter monogram as picker identity
+- Full capability blob / cost / failover in tooltip
 - Group-by-provider list
+- Changing preset selection or thinking defaults

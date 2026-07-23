@@ -1,11 +1,18 @@
-# Model picker: avatar + short labels
+# Model picker: model-brand logo + tier + hover details
 
 ## Goal
 
-Make the chat composer **model picker** scannable: show a **provider avatar**
-and a **short human name** instead of a long mono `provider_slug/model_id`
-string as the primary list label. Keep the full primary ref discoverable
-via tooltip / secondary text / aria.
+Make the chat composer **model picker** scannable:
+
+1. Leading **model-family brand logo** (inferred from `model_id` / display
+   name), not the gateway **provider** logo.
+2. List label = **tier name** (or custom preset key) only.
+3. **No description** in the list row.
+4. On **hover**, a Tooltip with model details (provider, model-id, context,
+   reasoning, modalities, description, etc.).
+
+No logo upload. No provider avatar work. Unknown models get a default model
+icon.
 
 ## Context
 
@@ -15,11 +22,11 @@ via tooltip / secondary text / aria.
 
 | Surface | Today |
 | --- | --- |
-| Closed trigger | Generic `Cpu` icon + preset display name (tier i18n or custom key) + thinking effort |
+| Closed trigger | Generic `Cpu` + preset display name (tier i18n or custom key) + thinking effort |
 | Open list row | Checkmark + **mono full `primary`** + preset name + optional description + default badge |
 
 `primary` is the org preset chain head (`slug/model_id`). Long custom slugs
-and model IDs dominate the `w-72` popover.
+and model IDs dominate the `w-72` popover. Description adds vertical noise.
 
 ### Workspace API today
 
@@ -29,200 +36,242 @@ and model IDs dominate the `w-72` popover.
 key, kind, primary, description, is_default
 ```
 
-No logo metadata. Workspace list is built in
-`get_workspace_model_presets` from `load_llm_snapshot` without joining
-provider `logo_url` / catalog brand id.
+No model metadata for tooltips. `primary` alone cannot supply
+`context_window`, `reasoning`, or `input_modalities`.
 
-### Admin logos already exist
+### What already exists
 
-| Mechanism | Where |
-| --- | --- |
-| Brand icon id `logo` | Catalog vendor via `preset_slug` → `_resolve_logo` in `admin_providers.py` |
-| Custom URL `logo_url` | `Provider.logo_url` (optional string, max 512) on create/update |
-| Fallback | `ProviderLogo` letter monogram from provider **name** |
+| Asset | Where | Use in this feature |
+| --- | --- | --- |
+| Model config in snapshot | `ProviderConfig.models[]` (`id`, `name`, `contextWindow`, `reasoning`, `input`, …) | Hover fields after resolving `primary` |
+| Brand icons | `ProviderLogo` + `@lobehub/icons` map (`anthropic`, `openai`, `qwen`, …) | Reuse as **model-family** glyphs via shared helper |
+| Catalog vendors | `llm/catalog/data/vendors.yaml` | Pattern reference only; matching is heuristic on model id/name |
+| Provider `logo_url` / upload | Admin provider form | **Out of scope** — not used for picker identity |
 
-UI: `frontend/packages/web/components/admin/models/ProviderLogo.tsx`  
-Priority: **`logo_url` → brand `logo` → letter fallback**.
+### Product revision (vs earlier draft)
 
-### Custom providers
+Earlier draft (#402 rev1) focused on **provider** logo + API logo fields +
+optional upload. That is **superseded**:
 
-| Capability | Supported? |
-| --- | --- |
-| Public **logo URL** in Advanced settings | **Yes** |
-| **File upload** for logo | **No** (not in this feature) |
-| Catalog brand icon | Yes when `preset_slug` maps to a known vendor |
-| Empty logo | Letter avatar — acceptable for MVP |
+- Gateway provider logo is low-signal (vLLM / OpenRouter / custom reverse
+  proxies hide the real model family).
+- Asking operators to upload logos is friction without proportional UX win.
+- Users care whether the model is Claude / GPT / Qwen, not which proxy slug
+  routes it.
 
 ## Approaches considered
 
-**A. Avatar + short name (recommended)**  
-List: leading `ProviderLogo`, title = preset display name, secondary muted
-model id or tooltip for full `primary`. Trigger: replace `Cpu` with selected
-provider avatar. Requires workspace summary logo fields.
+| Option | Notes |
+| --- | --- |
+| **A. Model-family brand from model_id + tier label + hover details** | Recommended. Frontend brand inference; API only adds model detail fields. |
+| B. Provider logo from DB | Weak for proxies; needs logo_url / upload. Rejected. |
+| C. Truncate mono `primary` only | No brand, still noisy. Rejected. |
+| D. Group list by provider | Heavier; defer. |
 
-**B. Truncate mono `primary` only**  
-CSS-only; no brand clarity; weak for custom providers.
-
-**C. Two-line layout without avatar**  
-Name + truncated primary; better than today, still text-heavy.
-
-**D. Group list by provider**  
-Heavier UX; defer unless many models per provider become common.
-
-**Chosen: A** (ship API logo fields + UI together; pure UI demotion of
-`primary` alone is a weak intermediate if both land in one PR).
+**Chosen: A.**
 
 ## Design
 
+### List and trigger (UI)
+
+**List row**
+
+- Leading: model-family logo (`sm`), from `inferModelBrand(model_id, model_display_name)`.
+- Title: **tier / custom label only**
+  - `kind === "tier"` → existing i18n `adminPresets.modelTiers.<key>.name`
+  - `kind === "custom"` → `p.key` (custom preset label/key)
+- **Do not** render mono `primary` as a visible line.
+- **Do not** render description under the row.
+- Default badge retained when `is_default`.
+- Checkmark retained for active state.
+- Row is the Tooltip trigger (see below).
+
+**Closed trigger**
+
+- Replace generic `Cpu` with selected preset’s model-family logo (same
+  inference). Fallback default model icon if brand unknown or no selection.
+- Keep: short tier/custom name · thinking effort · chevron.
+- Trigger accessible name includes selected label and full `primary` when a
+  preset is selected.
+
+### Brand inference (model family, not provider)
+
+Pure client (and optionally a tiny shared pure function under web `lib/`):
+
+```text
+inferModelBrand(modelId: string, displayName?: string | null): string | null
+```
+
+- Input: `model_id` portion of `primary` (after first `/`), plus optional
+  `model_display_name`.
+- Output: brand id already known to the icon map (`anthropic`, `openai`,
+  `qwen`, `moonshot`, `zhipu`, `doubao`, `deepseek`, `minimax`, `mistral`,
+  `xai`, …) or `null`.
+- **Do not** use provider slug for brand (openrouter / vllm / ollama would
+  mis-label).
+
+Suggested match order (case-insensitive; first hit wins; refine in impl):
+
+| Patterns (illustrative) | Brand id |
+| --- | --- |
+| `claude*` | anthropic |
+| `gpt-*`, `o1*`, `o3*`, `o4*`, `chatgpt*` | openai |
+| `qwen*` | qwen |
+| `kimi*` | moonshot |
+| `glm*` | zhipu |
+| `doubao*`, `seed-*` (when clearly Doubao) | doubao |
+| `deepseek*` | deepseek |
+| `minimax*`, `MiniMax*` | minimax |
+| `mistral*`, `mixtral*`, `codestral*` | mistral |
+| `grok*` | xai |
+| else | `null` → default model icon |
+
+Optional later: exact match against catalog model ids. Not required for MVP.
+
+**Default icon:** reuse `Cpu` (or a single shared “generic model” glyph) —
+never an empty broken image, never provider letter monogram for this surface.
+
+**Component reuse:** extract brand icon rendering from admin
+`ProviderLogo` into a neutral path (e.g. `components/models/ModelBrandLogo.tsx`
+or shared `BrandLogo`) that accepts `brand: string | null` and falls back to
+default icon. Admin provider UI may keep letter/`logo_url` behavior; chat
+picker does **not** need `logo_url`.
+
+### Hover details (Tooltip)
+
+Use existing `components/ui/tooltip` (not native `title` alone — content is
+multi-field).
+
+**Fields (product-locked):**
+
+| Field | Source |
+| --- | --- |
+| Provider | `provider_slug` (and optional display name if we add it later; slug is enough for MVP) |
+| Model ID | `model_id` |
+| Display name | `model_display_name` when present |
+| Context | `context_window` (format e.g. `128k` / raw int — pick one consistent formatter) |
+| Reasoning | `reasoning` boolean |
+| Input modalities | `input_modalities` (e.g. `text`, `image`) |
+| Description | preset `description`; for tiers, existing i18n tier description by key |
+
+**Not in tooltip:** full provider `capability` blob, cost, failover chain,
+max_tokens (unless free to include later — not required).
+
+Layout: compact definition list / stacked labeled rows; max width so the
+popover does not fight the picker. Delay: default Tooltip provider delay is
+fine (~400ms).
+
+A11y: tooltip content should be reachable for keyboard focus per existing
+Tooltip patterns; row/trigger `aria-label` still includes display label +
+full `primary`.
+
 ### Workspace preset summary (API)
 
-Extend `WorkspacePresetSummary` with fields resolved from the primary ref
-and **DB provider display metadata** (not from `ProviderConfig` alone):
+Extend `WorkspacePresetSummary` with nullable model detail fields resolved
+from the preset `primary` and the LLM snapshot (no new DB tables):
 
 ```text
 key, kind, primary, description, is_default   # existing
 provider_slug: str | null
-provider_name: str | null
-logo: str | null          # catalog brand id (e.g. "openai", "anthropic")
-logo_url: str | null      # custom URL if set
-model_id: str | null      # portion after first "/" of primary
+model_id: str | null
+model_display_name: str | null
+context_window: int | null
+reasoning: bool | null
+input_modalities: list[str] | null
 ```
 
-**Wire contract:** every new field is optional / nullable (`= None` on the
-backend schema). Older clients ignore extras. Frontend must tolerate missing
-keys (`?? null`).
+**Wire contract:** all new fields optional / default `None` (or empty list
+only if we prefer `[]` for modalities — prefer `None` when unknown so clients
+can distinguish missing vs empty). Older clients ignore extras.
 
-**Important:** `load_llm_snapshot().providers` maps slug → `ProviderConfig`
-used for LLM calls. Today that model has `base_url`, `api_key`, `models`,
-etc. — **not** `logo_url`, `preset_slug`, or display `name`. Implementers
-must not read those attributes from `ProviderConfig` without extending it.
+**Resolution** in `get_workspace_model_presets` (or a small helper):
 
-Resolution in `get_workspace_model_presets` (or a small helper) — **pick one
-architecture and document it in code**:
+1. Parse `primary` on **first `/` only**: `provider_slug`, `model_id`
+   (everything after first slash). No slash → treat whole string as slug or
+   model_id defensively; never 500.
+2. Look up `snap.providers.get(provider_slug)`.
+3. Find model where `m.id == model_id` (snapshot `ModelConfig.id`).
+4. Fill:
+   - `model_display_name` ← `m.name`
+   - `context_window` ← `m.context_window`
+   - `reasoning` ← `m.reasoning`
+   - `input_modalities` ← `m.input`
+5. Missing provider/model → null detail fields; UI still shows tier label +
+   default icon + tooltip with whatever is known (`primary` / description).
 
-**Preferred (A):** During `get_workspace_model_presets`, load a slim
-provider metadata map for the org (slug → `{name, logo_url, preset_slug}`)
-via a scoped repository/query (or batch read of `Provider` rows already
-loaded for the org). Parse each preset `primary`, join by slug, then:
+**Do not:**
 
-1. Parse `primary` as `provider_slug/model_id` (first `/` only; nested
-   model ids like `vendor/model/v1` keep everything after the first slash
-   as `model_id`). Missing slash → `provider_slug = primary`, `model_id =
-   null` (or inverse if no slug — never 500).
-2. `logo_url` from DB `Provider.logo_url`.
-3. `logo` via existing catalog `_resolve_logo(provider.preset_slug)` —
-   extract `_resolve_logo` from `admin_providers` into a shared module if
-   needed; do not fork brand tables; pass **DB `preset_slug`**, not the
-   runtime slug alone.
-4. `provider_name` from DB `Provider.name` (display name).
+- Extend `ProviderConfig` with logo fields for this feature.
+- Join provider `logo_url` / `preset_slug` for the picker.
+- Return a backend `logo` / brand id unless we later choose server-side
+  inference for consistency (frontend inference is the default).
 
-**Alternative (B):** Extend `ProviderConfig` + `_load_providers` to carry
-`name`, `logo_url`, `preset_slug` on the snapshot. Acceptable if chat/LLM
-paths ignore the extra fields and secrets stay as today. Prefer A if
-snapshot bloat / cache invalidation is a concern.
+Frontend types (`WorkspacePresetSummary` in `lib/types/presets.ts`) must
+match. Normalize before render: `model_id ?? split(primary)`.
 
-Frontend types (`WorkspacePresetSummary` in web `lib/types/presets.ts` and
-any core mirror) must match.
+### Label rules (product-locked)
 
-### Model picker UI
+| Preset kind | List / trigger title |
+| --- | --- |
+| tier | i18n tier name |
+| custom | `key` |
 
-**List row**
+`model_display_name` appears in the **tooltip**, not as the list hero.
 
-- Leading: `ProviderLogo` (`sm`) with
-  `name={provider_name ?? provider_slug ?? primary}` (never null —
-  `ProviderLogo` requires a string for letter fallback + a11y),
-  `logoUrl`, `logo`.
-- Title line: preset display name (`nameOf(p)` — tier i18n / custom key)
-  as the **hero** font (not mono primary).
-- Secondary (optional muted truncate): `model_id` only, or omit and put
-  full `primary` on `title` / tooltip.
-- Default badge unchanged.
-- Description stays under the title when present.
-- Checkmark retained for active state.
-- Row accessible name / `aria-label`: preset display name + full
-  `primary` (e.g. `"Fast · openai/gpt-4o"`).
+### Phasing
 
-**Closed trigger**
+Single implementation PR preferred:
 
-- Replace generic `Cpu` with selected preset’s `ProviderLogo` (sm).
-- Keep short name · effort · chevron.
-- Trigger `aria-label` must include selected preset display name **and**
-  full `primary` when a preset is selected (not a static generic string
-  alone). Fallback `Cpu` only if no presets.
+1. API enrichment of model detail fields + tests  
+2. `inferModelBrand` + logo component  
+3. ModelPicker list/trigger/tooltip  
 
-**Full ref discoverability (concrete)**
-
-- Visual: `title={primary}` (or tooltip) on the row and/or avatar.
-- A11y: row + trigger accessible names include full `primary` as above.
-- Do not rely on mono primary as the only visible line.
-
-### Component reuse
-
-- Reuse `ProviderLogo` logic. Prefer **moving or re-exporting** to a
-  neutral path (e.g. `components/models/ProviderLogo.tsx` or
-  `components/shared/ProviderLogo.tsx`) so chat does not import from
-  `admin/models/`. Admin keeps a re-export or updated import.
-- Do not invent a second logo system.
-- `logo_url` remote images: reuse admin Next/image or `<img>` patterns;
-  verify remote patterns already cover admin usage.
-
-### Custom provider product note
-
-- Operators set **Logo URL** under provider Advanced settings.
-- No upload in this issue.
-- Missing URL → monogram from provider name — not a broken empty icon.
-- Optional later: object-store upload; not required for acceptance.
-
-### Phasing within the feature
-
-Prefer one implementation PR that does API + picker together (avatar is
-the product point). If split:
-
-1. API fields + types  
-2. Picker UI + ProviderLogo share  
-
-Not in this feature: logo file upload, failover-chain UI, admin preset
-redesign.
+No separate logo-upload PR.
 
 ## Out of scope
 
-- Provider logo **file upload**
-- CDN pack for every open-weight model
-- Changing which presets appear or failover chain behavior
-- Requiring every custom provider to set a logo before ship
-- Redesigning org model-preset admin beyond summary fields
-- Showing full failover chain in the picker
+- Provider logo **file upload** or promoting Logo URL for the picker
+- Provider letter monogram as the picker’s primary identity
+- CDN pack for every open-weight id beyond the heuristic table
+- Full `capability` object in tooltip (only reasoning + input_modalities)
+- Failover chain UI, group-by-provider list
+- Changing which presets appear or selection / thinking behavior
+- Redesigning org model-preset admin
 
 ## Success criteria
 
 1. List no longer uses long untruncated `provider/model` as the primary
    readable label.
-2. When brand id or `logo_url` is available, list rows and closed trigger
-   show that avatar.
-3. Custom providers without `logo_url` show letter fallback — not empty
-   broken icons.
-4. Full `primary` remains discoverable (tooltip / secondary / aria).
-5. Thinking effort + selection behavior unchanged.
-6. i18n/a11y: trigger still clearly names the selection.
-7. API schema + frontend types updated; unit/API tests for summary fields;
-   ModelPicker display tests updated.
-8. Endpoint test with **two distinct providers** proves each preset’s
-   `provider_slug` / `logo` / `logo_url` / `model_id` match the referenced
-   provider (no cross-provider logo mix-up).
+2. List does not show description under rows.
+3. List and closed trigger show model-family brand when `model_id` matches
+   the heuristic table; otherwise default model icon.
+4. List/trigger title is tier i18n name or custom `key`.
+5. Hover Tooltip shows provider slug, model id, display name (if any),
+   context window, reasoning, input modalities, and description (tier i18n
+   or custom text).
+6. Thinking effort + selection behavior unchanged.
+7. API schema + frontend types updated; tests for primary parse, missing
+   model, two-provider no cross-wiring of model details; ModelPicker tests
+   for label, no description row, brand/default icon, tooltip fields.
 
 ## Resolved product choices
 
 | Question | Decision |
 | --- | --- |
-| Hero text | Preset display name (tier i18n / custom key), not raw model id |
-| Provider text in list | Hidden when avatar present; full ref via tooltip |
-| Closed trigger avatar | Always (including letter fallback) |
-| Custom logo | URL only; upload is P2 |
-| API | Extend `WorkspacePresetSummary` in the same feature |
+| Logo identity | **Model family** via `model_id` / name heuristics |
+| Unknown brand | Default model icon (`Cpu` or equivalent) |
+| Provider logo / upload | **No** |
+| List hero text | Tier i18n name / custom `key` |
+| List description | **Hidden** (tooltip only) |
+| Hover carrier | `Tooltip` component |
+| Tooltip capability | **Only** `reasoning` + `input_modalities` (plus provider, model id, display name, context, description) |
+| Brand resolution | Frontend pure function; not provider slug |
+| API | Extend `WorkspacePresetSummary` with model detail fields only |
 
 ## Related
 
-- Issue #393
-- `ModelPicker.tsx`, `ProviderLogo.tsx`, `ProviderConfigForm.tsx`
+- Issue #393, PR #402
+- `ModelPicker.tsx`, `ProviderLogo.tsx` (brand map source), `tooltip.tsx`
 - `model_presets.py` routes + schemas
-- `Provider.logo_url`, `_resolve_logo`, LLM snapshot providers map
+- `load_llm_snapshot` / `ProviderConfig` / `ModelConfig`
+- Supersedes earlier provider-avatar + logo-upload direction on this branch
