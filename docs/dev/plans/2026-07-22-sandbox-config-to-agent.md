@@ -2,12 +2,14 @@
 
 Related: #398 · Spec: `docs/dev/specs/2026-07-22-sandbox-config-to-agent-design.md`
 
-**Goal**: Hybrid delivery of network policy + env inventory (no secrets) to the
-agent via `sandbox_config` tool + short stable prompt guidance.
+**Goal**: Tool-only delivery of network policy + env inventory (no secrets) to
+the agent via an eager `sandbox_config` tool. No system-prompt diagnosis blurb;
+no `DeferredToolGroup` in v1.
 
 **Architecture**: Pure serialization helpers over existing policy/env services;
-one DI-backed tool registered when sandbox tools are attached; append a fixed
-paragraph to `SANDBOX_PROMPT_TEMPLATE` (or adjacent fragment).
+one DI-backed tool registered when sandbox tools are attached (same place as
+`execute` / `write_file`). Playbook lives in the tool description and optional
+result `guidance` field.
 
 **Tech stack**: Existing `SandboxPolicyService`, `SandboxEnvService.resolve`,
 cubepi `AgentTool`, sandbox middleware / `run_manager` tool wiring.
@@ -55,7 +57,7 @@ must not receive that object unfiltered.
 
 ---
 
-## Unit 2: `sandbox_config` tool
+## Unit 2: `sandbox_config` tool (eager)
 
 **Files**:
 - `backend/cubeplex/tools/builtin/sandbox_config.py` (new) **or** factory inside
@@ -69,35 +71,27 @@ must not receive that object unfiltered.
 3. Return JSON with sections: `network`, `env`, optional `command_rules`,
    `truncated` flags, `policy_source`, and `sandbox_note` that network rules
    apply at sandbox create / may require recreate after admin edits.
+4. Optional short static `guidance` string in the result (when to use, no secret
+   echo, point user to settings) — **not** copied into `SANDBOX_PROMPT_TEMPLATE`.
+
+**Tool description** (static English, in the AgentTool schema): call on
+network / auth / missing-env failures; do not invent credentials; never print
+secret values.
 
 **Args**: none required for v1 (optional `section: network|env|all` later).
+
+**Not in v1**: `DeferredToolGroup` / `load_tools` path; capability registry
+entry under `agents/actions/`.
 
 **Tests**:
 - unit with mocked services
 - e2e optional: member agent tool call returns rules from seeded policy
 - assert tool result never contains secret values / credential ids
+- assert tool is present when sandbox tools are registered
 
 ---
 
-## Unit 3: Prompt guidance (stable)
-
-**Files**:
-- `backend/cubeplex/prompts/sandbox.py` — append fixed diagnosis blurb to
-  `SANDBOX_PROMPT_TEMPLATE` **or** separate constant concatenated in middleware
-
-**Content** (short, static English):
-- Egress and env vars are admin/workspace configured.
-- On network/auth failure call `sandbox_config` before inventing credentials.
-- Never print secret values; secrets are host-scoped placeholders.
-- Point user to settings for missing allow rules / env entries.
-
-**Cache**: text is constant → no extra busts. Do not interpolate live rules.
-
-**Tests**: unit snapshot of template contains key phrases; no dynamic fields.
-
----
-
-## Unit 4: Wiring + docs
+## Unit 3: Wiring + docs
 
 **Files**:
 - `middleware/sandbox.py` / `run_manager` — ensure tool appears with other
@@ -105,17 +99,23 @@ must not receive that object unfiltered.
 - `docs/site/docs/admin/sandbox.md` — short “agent troubleshooting metadata”
   note (implementation PR)
 
-**Tests**: registry/tool-list unit if pattern exists.
+**Explicit non-work**: do **not** edit `prompts/sandbox.py` /
+`SANDBOX_PROMPT_TEMPLATE` for a diagnosis blurb.
+
+**Tests**: registry/tool-list unit if pattern exists; no new system-prompt
+snapshot requirement for this feature.
 
 ---
 
-## Unit 5 (optional Phase 3): Error enrichment
+## Unit 4 (optional Phase 3): Error enrichment
 
 **Files**: execute path / egress error mapping
 
 When a command or network failure is clearly policy deny, append one line:
-`egress_default=deny; host X not in allow rules` (only when detection is
-reliable). Skip if ambiguous.
+`egress_default=deny; host X not in allow rules` and/or `call sandbox_config`
+(only when detection is reliable). Skip if ambiguous.
+
+Prefer this over adding a stable system-prompt blurb if model recall is weak.
 
 Defer unless Phase 1–2 are solid.
 
@@ -124,16 +124,17 @@ Defer unless Phase 1–2 are solid.
 ## Delivery order
 
 1. Unit 1 serializers + redaction tests (must land first)
-2. Unit 2 tool
-3. Unit 3 prompt blurb
-4. Unit 4 wiring + admin docs
-5. Unit 5 optional
+2. Unit 2 eager tool (+ description / optional result guidance)
+3. Unit 3 wiring + admin docs
+4. Unit 4 optional error enrichment
 
 ## Out of scope
 
 - Agent mutating policy/env
 - Putting secret values or placeholders into system prompt
-- Always-on full policy dump in stable prefix (Phase 4 later)
+- Diagnosis playbook or live policy dump in the stable system prefix
+- `DeferredToolGroup` for a single `sandbox_config` tool
+- Always-on full policy dump in stable prefix
 
 ## Risks
 
@@ -142,6 +143,6 @@ Defer unless Phase 1–2 are solid.
 | Accidental value leak via `ResolvedEnv.value` | Separate inventory DTO; whitelist serializers; recursive redaction tests |
 | Extra keys on persisted rule JSON | Whitelist only `action`/`target` (etc.); plant extras in fixtures |
 | Member sees org env names via agent | Document intentional diagnosis visibility; no value disclosure |
-| Tool unused by model | Stable blurb + later error hints |
+| Tool unused by model | Strong tool description + optional result `guidance`; Phase 3 error hints if needed — **not** system-prompt blurb |
 | Huge rule lists | Cap + truncated flag |
 | Stale sandbox vs new admin policy | `sandbox_note` + policy_source; never claim live re-apply |
