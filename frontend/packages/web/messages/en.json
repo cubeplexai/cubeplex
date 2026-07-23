@@ -90,6 +90,7 @@
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
     "noRecentChats": "No conversations yet",
+    "conversationRunning": "Conversation running",
     "search": {
       "open": "Search Chats",
       "placeholder": "Search Chats…",

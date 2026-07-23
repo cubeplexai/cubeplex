@@ -90,6 +90,7 @@
     "collapseSidebar": "收起侧边栏",
     "expandSidebar": "展开侧边栏",
     "noRecentChats": "暂无会话",
+    "conversationRunning": "会话运行中",
     "search": {
       "open": "搜索对话",
       "placeholder": "搜索对话…",
