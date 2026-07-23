@@ -24,27 +24,34 @@ cubepi `AgentTool`, sandbox middleware / `run_manager` tool wiring.
 
 ```python
 def serialize_network_policy(policy) -> dict[str, Any]:
-    # default_action, rules[{action, target}], egress_proxy: "set"|"unset"
-    # cap rules; truncated flag
+    # WHITELIST only: default_action, rules[{action, target}],
+    # egress_proxy: "set"|"unset", truncated, policy_source, sandbox_note
+    # Never forward raw rule dicts / model_dump()
 
-def serialize_env_inventory(resolved: list[ResolvedEnv], *, include_scope: ...) -> list[dict]:
-    # env_name, kind, scope if available, status if available, hosts, header_names
-    # NEVER value, credential_id, secret material
+def serialize_env_inventory(meta: list[EnvInventoryItem]) -> list[dict]:
+    # WHITELIST: env_name, kind, scope, status, hosts, header_names
+    # NEVER value, credential_id, secret material, extra keys
 
 def serialize_command_rules(policy) -> list[dict]:
-    # action + pattern only
+    # WHITELIST: action + pattern only
 ```
 
-**Important**: `ResolvedEnv` currently has `value` for injection — serializers
-must not include it. Prefer building from repo rows with scope/status if
-`ResolvedEnv` lacks scope; extend a lightweight DTO if needed **without**
-passing decrypted values into the agent path.
+**DTO**: introduce `EnvInventoryItem` (or equivalent) populated during resolve
+from the **winning** `SandboxEnvVar` row: scope + status + hosts/headers +
+kind, with **no** decrypted value field on the object that serializers see.
+Do not re-query unscoped rows in a way that bypasses effective merge.
+
+**Important**: `ResolvedEnv` currently has `value` for injection — agent path
+must not receive that object unfiltered.
 
 **Tests** (`backend/tests/unit/test_sandbox_runtime_config_serialize.py`):
 - Secret row with fake value never appears in JSON output
 - Plain row value never appears even if present on DTO
 - Caps/truncation marker
 - Hosts and header_names preserved for secrets
+- Fixtures with **extra forbidden keys** on rules/env rows never appear
+- Recursive scan: no `credential_id`, proxy credentials, or value-like fields
+- Scope/status present for winning rows; precedence cases
 
 ---
 
@@ -56,16 +63,19 @@ passing decrypted values into the agent path.
 - Register in sandbox tool list construction (only when sandbox is available)
 
 **Behavior**:
-1. Load org sandbox policy via existing service.
-2. Resolve effective env for `(workspace_id, user_id)` via `SandboxEnvService`.
-3. Return JSON text content with sections: `network`, `env`, optional
-   `command_rules`, `truncated` flags, short `notes` (e.g. sandbox recreate).
+1. Load org sandbox policy via existing service (admin-authored; agent sees
+   diagnosis view, not admin UI parity — see spec Security).
+2. Resolve effective env inventory DTO for `(workspace_id, user_id)`.
+3. Return JSON with sections: `network`, `env`, optional `command_rules`,
+   `truncated` flags, `policy_source`, and `sandbox_note` that network rules
+   apply at sandbox create / may require recreate after admin edits.
 
 **Args**: none required for v1 (optional `section: network|env|all` later).
 
 **Tests**:
 - unit with mocked services
 - e2e optional: member agent tool call returns rules from seeded policy
+- assert tool result never contains secret values / credential ids
 
 ---
 
@@ -129,7 +139,9 @@ Defer unless Phase 1–2 are solid.
 
 | Risk | Mitigation |
 | --- | --- |
-| Accidental value leak via `ResolvedEnv.value` | Explicit serializer tests; never `model_dump()` raw |
+| Accidental value leak via `ResolvedEnv.value` | Separate inventory DTO; whitelist serializers; recursive redaction tests |
+| Extra keys on persisted rule JSON | Whitelist only `action`/`target` (etc.); plant extras in fixtures |
+| Member sees org env names via agent | Document intentional diagnosis visibility; no value disclosure |
 | Tool unused by model | Stable blurb + later error hints |
 | Huge rule lists | Cap + truncated flag |
-| Stale sandbox vs new admin policy | Note in tool result about recreate |
+| Stale sandbox vs new admin policy | `sandbox_note` + policy_source; never claim live re-apply |
