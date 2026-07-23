@@ -21,10 +21,15 @@ under `backend/scripts/dev/`, pytest e2e (`test_prompt_cache.py`), markdown
 notes under `docs/dev/notes/`.
 
 **Spec:** [docs/dev/specs/2026-07-22-system-prompt-trace-optimization-design.md](../specs/2026-07-22-system-prompt-trace-optimization-design.md)  
-**Issue:** #391  
+**Seed note (Phase A/B draft):** [docs/dev/notes/2026-07-22-system-prompt-trace-review.md](../notes/2026-07-22-system-prompt-trace-review.md)  
+**Issue:** #391 · design PR #412  
 **Must read before any prompt edit:**
 [backend/docs/prompt-cache-discipline.md](../../../backend/docs/prompt-cache-discipline.md)  
 **Trace skill:** `.agents/skills/cubepi-trace/SKILL.md`
+
+**Progress:** Seed measurement for `conv-1m1jE95wSfyYDi` / run
+`fd9890facb3e92805a7a775621000a41` is in the note (findings **F1–F8**).
+Still need stratified sample + human approval before Phase C code.
 
 ---
 
@@ -124,10 +129,25 @@ docs/dev/notes/2026-07-22-system-prompt-trace-review.md
 5. Recommended PR split (one concern per PR)
 6. Open questions remaining after analysis
 
+**Done (seed):** [2026-07-22-system-prompt-trace-review.md](../notes/2026-07-22-system-prompt-trace-review.md)
+documents conversation `conv-1m1jE95wSfyYDi`, run `fd9890…`, findings
+**F1–F8**, won’t-fix, and a recommended PR split. Remaining for B2:
+expand N with stratified scenarios; then human approve.
+
 **Success for #391 analysis gate:** note **merged or explicitly human-
 approved**. Severity is evidence-based — there is no requirement to
 produce three high-severity rows. “No high severity” with evidence is a
 valid outcome.
+
+**Example fix candidates after approval (from seed findings, not code):**
+
+| Finding | Candidate follow-up PR |
+| --- | --- |
+| F1 | Gate/slim `WIDGET_GUIDELINES` when conversation-stable |
+| F2 | History / skill-ref truncation or compaction policy |
+| F3 | Short skill catalog lines (+ display work in #399) |
+| F4 | Memory system-block budget |
+| F5 | More deferred tools / shorter schemas |
 
 ---
 
