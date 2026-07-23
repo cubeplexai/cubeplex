@@ -20,18 +20,18 @@ You need:
 
 In the Feishu/Lark **Developer Console** (`open.feishu.cn` for Feishu, `open.larksuite.com` for Lark), create a new **custom app**. Note its **App ID** and **App Secret** — you'll need both when binding to CubePlex.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The Feishu/Lark developer console "Create custom app" dialog, and the app's credentials page showing where App ID and App Secret appear.
-**Asset:** `/img/im/feishu/console-app-credentials.png`
+![Feishu app credentials page](/img/im/feishu/console-app-credentials.png)
 :::
 
 ## Step 2 — Enable the bot capability
 
 Under the app's **Features**, add the **Bot** capability and publish the bot identity. CubePlex reads the bot's identity (its open ID) automatically from the App ID + App Secret when you bind — but the bot must be **published** first, or binding fails with a "could not hydrate bot" error.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The app Features page with the Bot capability enabled.
-**Asset:** `/img/im/feishu/console-bot-capability.png`
+![Feishu bot capability page](/img/im/feishu/console-bot-capability.png)
 :::
 
 ## Step 3 — Grant message permissions
@@ -51,9 +51,9 @@ Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions,
 
 After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The app Permissions & Scopes page with the message read/send, group-info read (`im:chat:readonly`), and contact email scopes selected.
-**Asset:** `/img/im/feishu/console-permissions.png`
+![Feishu permissions and scopes page](/img/im/feishu/console-permissions.png)
 :::
 
 ## Step 4 — Choose how events reach CubePlex
@@ -80,9 +80,9 @@ Feishu sends a one-time `url_verification` challenge to that URL; CubePlex echoe
 
 When you bind in CubePlex, set `delivery_mode` to `webhook`.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The Feishu console Event Subscriptions page showing the long-connection toggle vs. the Request URL field.
-**Asset:** `/img/im/feishu/console-event-delivery.png`
+![Feishu event delivery settings](/img/im/feishu/console-event-delivery.png)
 :::
 
 ## Step 5 — Configure the verification token and encryption (optional but recommended)
@@ -94,18 +94,18 @@ In the Feishu console's **Event Subscriptions** section, Feishu shows two securi
 
 Both are optional fields when binding. If you set an Encrypt Key, Feishu signs each webhook request and CubePlex verifies the signature (see [Signature scheme](#signature-scheme)).
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The Event Subscriptions security panel showing the Verification Token and Encrypt Key / Event Encryption toggle.
-**Asset:** `/img/im/feishu/console-token-encrypt.png`
+![Feishu event encryption settings](/img/im/feishu/console-token-encrypt.png)
 :::
 
 ### Subscribe to the message event
 
 Still under Event Subscriptions, add the bot-message-received event so Feishu forwards messages to CubePlex. Without this subscription the bot never sees any messages.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The "Add events" dialog with the receive-message event subscribed.
-**Asset:** `/img/im/feishu/console-subscribe-message.png`
+![Feishu message event subscription](/img/im/feishu/console-subscribe-message.png)
 :::
 
 ## Step 6 — Bind the bot in CubePlex

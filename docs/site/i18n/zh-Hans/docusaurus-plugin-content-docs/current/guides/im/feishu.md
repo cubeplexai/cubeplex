@@ -20,18 +20,18 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 
 在 Feishu/Lark **开发者控制台**中（Feishu 使用 `open.feishu.cn`，Lark 使用 `open.larksuite.com`），创建一个新的 **自定义应用**。记下其 **App ID** 和 **App Secret**——绑定到 CubePlex 时需要这两项。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** Feishu/Lark 开发者控制台的“创建自定义应用”对话框，以及应用凭据页面中显示 App ID 和 App Secret 的位置。
-**资源：** `/img/im/feishu/console-app-credentials.png`
+![Feishu 应用凭据页面](/img/im/feishu/console-app-credentials.png)
 :::
 
 ## 步骤 2 — 启用机器人能力
 
 在应用的 **功能** 下，添加 **机器人** 能力并发布机器人身份。CubePlex 会在绑定时，通过 App ID + App Secret 自动读取机器人的身份（其 open ID）——但必须先 **发布** 机器人，否则绑定会失败，并显示“could not hydrate bot”错误。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** 应用功能页面，其中已启用机器人能力。
-**资源：** `/img/im/feishu/console-bot-capability.png`
+![Feishu 机器人能力页面](/img/im/feishu/console-bot-capability.png)
 :::
 
 ## 步骤 3 — 授予消息权限
@@ -51,9 +51,9 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 
 添加范围后，请 **发布新应用版本**，以便租户授权生效——在版本发布前，Feishu 不会应用新范围。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** 应用的“权限与范围”页面，已选择消息读取/发送、群组信息读取（`im:chat:readonly`）和联系人电子邮箱范围。
-**资源：** `/img/im/feishu/console-permissions.png`
+![Feishu 权限与范围页面](/img/im/feishu/console-permissions.png)
 :::
 
 ## 步骤 4 — 选择事件到达 CubePlex 的方式
@@ -80,9 +80,9 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 
 在 CubePlex 中绑定时，将 `delivery_mode` 设置为 `webhook`。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** Feishu 控制台的事件订阅页面，展示长连接开关与请求 URL 字段。
-**资源：** `/img/im/feishu/console-event-delivery.png`
+![Feishu 事件传递设置](/img/im/feishu/console-event-delivery.png)
 :::
 
 ## 步骤 5 — 配置验证 token 和加密（可选但推荐）
@@ -94,18 +94,18 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 
 绑定时，这两项均为可选字段。如果你设置了 Encrypt Key，Feishu 会为每个 webhook 请求签名，CubePlex 会验证签名（参阅[签名方案](#signature-scheme)）。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** 事件订阅安全面板，显示 Verification Token、Encrypt Key 和事件加密开关。
-**资源：** `/img/im/feishu/console-token-encrypt.png`
+![Feishu 事件加密设置](/img/im/feishu/console-token-encrypt.png)
 :::
 
 ### 订阅消息事件
 
 仍在事件订阅中，添加机器人接收消息事件，以便 Feishu 将消息转发给 CubePlex。没有此订阅，机器人永远无法看到任何消息。
 
-:::info 📸 截图占位符
+:::info 📸 截图
 **截图内容：** “添加事件”对话框，已订阅接收消息事件。
-**资源：** `/img/im/feishu/console-subscribe-message.png`
+![Feishu 消息事件订阅](/img/im/feishu/console-subscribe-message.png)
 :::
 
 ## 步骤 6 — 在 CubePlex 中绑定机器人

@@ -18,9 +18,9 @@ You need:
 
 Go to the [DingTalk Open Platform app console](https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app) and create a new **internal enterprise app**. Once it exists, open its **Credentials & Basic Info** page and note the **AppKey** and **AppSecret** — you'll need both when binding to CubePlex.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The DingTalk Open Platform "create internal app" dialog, and the app's Credentials & Basic Info page showing where AppKey and AppSecret appear.
-**Asset:** `/img/im/dingtalk-app-credentials.png`
+![DingTalk app credentials page](/img/im/dingtalk/app-credentials.png)
 :::
 
 ## Step 2 — Add the bot (robot) capability
@@ -29,18 +29,18 @@ Under the app's capabilities, add the **Bot** (robot) capability so the app can 
 
 CubePlex identifies the bot by your **AppKey** (it doubles as the bot's robot code), so there is no separate bot ID to copy here — but the robot capability must be added, or the bot never receives messages.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The app's capability/feature page with the Bot (robot) capability added and the bot name/icon filled in.
-**Asset:** `/img/im/dingtalk-bot-capability.png`
+![DingTalk bot capability page](/img/im/dingtalk/bot-capability.png)
 :::
 
 ## Step 3 — Enable Stream mode
 
 In the bot's message-receiving settings, choose **Stream mode** (the persistent-connection delivery option) rather than a webhook/HTTP callback URL. In Stream mode DingTalk pushes each inbound message down the socket CubePlex holds open, so you don't configure any public callback URL.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The bot's message-receiving configuration with the Stream-mode (persistent connection) option selected instead of the HTTP-callback option.
-**Asset:** `/img/im/dingtalk-stream-mode.png`
+![DingTalk Stream mode settings](/img/im/dingtalk/stream-mode.png)
 :::
 
 ## Step 4 — Grant the permissions the connector needs
@@ -59,9 +59,9 @@ The bot-message send/receive permission (`qyapi_robot_sendmsg`) is granted by de
 
 Group Topic titles use the `conversationTitle` field that DingTalk already includes on every robot receive callback — **no extra permission** is required for the group name.
 
-:::info 📸 Screenshot placeholder
+:::info 📸 Screenshot
 **Capture:** The app Permissions page with the bot-message send/receive permission and the user-profile (email) read permission granted.
-**Asset:** `/img/im/dingtalk-permissions.png`
+![DingTalk permissions page](/img/im/dingtalk/permissions.png)
 :::
 
 ## Step 5 — Bind the bot in CubePlex
