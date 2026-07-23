@@ -118,7 +118,7 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 | **App Secret** | 是 | 来自步骤 1。CubePlex 使用它读取机器人身份并调用 Feishu。 |
 | **Encrypt Key** | 否 | 仅在启用了事件加密时填写（步骤 5）。 |
 | **Verification Token** | 否 | 来自步骤 5 的 token。 |
-| **域名** | 是 | `feishu` 或 `lark`——选择应用所在的版本。向导不会预选域名。 |
+| **域名** | 是 | 默认预选 `lark`。Lark 应用保持此值；如果应用是在中国飞书控制台创建的，请改为 `feishu`。 |
 | **传递模式** | 是 | `long_connection`（默认）或 `webhook`，与步骤 4 对应。 |
 
 当前工作区向导会提交 `acting_user_id: self`，不会显示身份选择器。如果直接调用 API，非 `self` 的运行身份仅限工作区管理员使用。
