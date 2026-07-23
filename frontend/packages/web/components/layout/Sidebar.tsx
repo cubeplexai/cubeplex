@@ -27,6 +27,7 @@ import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
 import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
+import { DeleteConversationDialog } from '@/components/layout/DeleteConversationDialog'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { VscMcp } from 'react-icons/vsc'
@@ -90,7 +91,7 @@ export function ConversationRow({
 }): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
-  const { remove, rename, setPin, setActive, pinPending } = useConversationStore()
+  const { rename, setPin, setActive, pinPending } = useConversationStore()
   const isPinPending = !!pinPending[convo.id]
   const hasGroupParticipants = useConversationStore(
     (s) => (s.conversationParticipants[convo.id]?.length ?? 0) > 0,
@@ -99,6 +100,7 @@ export function ConversationRow({
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(convo.title)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -242,10 +244,10 @@ export function ConversationRow({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => {
-                void remove(buildClient(currentWsId), convo.id).catch((err) =>
-                  console.error('Failed to delete conversation:', err),
-                )
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setDeleteOpen(true)
               }}
             >
               <Trash2 className="size-3.5" />
@@ -254,6 +256,13 @@ export function ConversationRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </Link>
+      <DeleteConversationDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        conversationId={convo.id}
+        conversationTitle={convo.title}
+        currentWsId={currentWsId}
+      />
     </li>
   )
 }
