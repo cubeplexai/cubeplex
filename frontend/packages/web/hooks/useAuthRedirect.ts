@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import type { ApiClient } from '@cubeplex/core'
+import { useAuthStore, useMessageStore } from '@cubeplex/core'
 
 export function useAuthRedirect(client: ApiClient) {
   const router = useRouter()
@@ -14,6 +15,11 @@ export function useAuthRedirect(client: ApiClient) {
       if (firing) return
       firing = true
       const next = encodeURIComponent(pathname)
+      // Tear down live agent state before redirect so a late stream terminal
+      // cannot mark unread under a subsequent login (session expiry path).
+      useMessageStore.getState().clearStream()
+      useMessageStore.getState().resetUnread()
+      useAuthStore.getState().reset()
       // Clear the auth + CSRF cookies via the backend's logout endpoint
       // BEFORE bouncing to /login. proxy.ts redirects /login → / whenever
       // an auth cookie is present (any value, even a stale one), so leaving

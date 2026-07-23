@@ -263,4 +263,18 @@ describe('messageStore unread', () => {
     expect(loadUnreadMap(USER_B)).toEqual({ cB: true })
     expect(loadUnreadMap(USER_A)).toEqual({ cA: true })
   })
+
+  it('user A→B switch aborts streaming so late terminal cannot mark under B', () => {
+    seedStreaming('cA', {
+      text: 'still going',
+      blocks: [{ type: 'text', text: 'still going' }],
+    })
+    expect(useMessageStore.getState().isStreaming).toBe(true)
+
+    setUser(USER_B)
+
+    expect(useMessageStore.getState().isStreaming).toBe(false)
+    expect(useMessageStore.getState().streamingConversationId).toBeNull()
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({})
+  })
 })
