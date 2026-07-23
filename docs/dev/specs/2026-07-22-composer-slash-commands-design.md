@@ -51,31 +51,47 @@ primary in-composer command entry.
 
 ### 4.1 Trigger rules
 
-Open the palette when the composer draft has a **command token** at the
-caret:
+**Single grammar (resolved — spec and plan must match):**
 
-- **MVP rule (resolved):** open when the draft **starts with** `/` (leading
-  token of the whole value), i.e. `^\s*/` optional leading space then `/`.
-  Prefer **start of draft** only for v1 to avoid fighting mid-sentence
-  paths like `see https://…` — actually URLs have `://` not leading `/`
-  mid-line; the risky case is “type / in the middle of a sentence.”  
-  **Decision:** open only when `/` is at the **beginning of the draft**
-  (after optional leading whitespace). Mid-draft `/` is plain text.
-- Query filter string = text after the leading `/` until end of first token
-  (no spaces yet), e.g. `/mod` → filter `mod`.
-- **Close when:** Esc, click outside, delete the `/`, successful command
-  execution that consumes the token, or draft no longer matches the
-  trigger.
+Open the palette only when the **entire draft** is a single leading
+command token:
+
+```text
+/^\s*\/(\S*)$/
+```
+
+| Draft | Palette | Query |
+| --- | --- | --- |
+| `/` | open | `""` |
+| `/mod` | open | `"mod"` |
+| `  /stop` | open | `"stop"` |
+| `/foo bar` | **closed** (space ended the token) | — |
+| `/model\nextra` | **closed** (newline ends “single token” draft) | — |
+| `hello /mod` | **closed** (not start-only whole draft) | — |
+| mid-sentence `/` | **closed** | — |
+
+- Query = capture group 1 (text after `/`, no spaces).
+- **Close when:** Esc, click outside, successful `run` that clears the
+  draft/token, or draft no longer matches the regex (including space or
+  more prose after the token — this is the literal-`/` escape).
+- Caret position: MVP ignores caret and uses full draft value only (no
+  mid-field open). IME: ignore key handling while `e.nativeEvent.isComposing`
+  (same as InputBar today).
+- Paste: same regex on the resulting value.
 
 ### 4.2 Unknown `/text` + Enter (resolved)
 
 - Palette open with ≥1 match: Enter / Tab applies **highlighted** row
-  (default first match).
-- Palette open with **0** matches: **send as plain text** (Slack-like) —
-  do not block with a toast. Document in tests.
-- Escape path for literal leading slash intended as message: user can
-  type a space after `/` so the token no longer matches a command open
-  state, or send with zero matches.
+  (default first match); **do not** send/steer.
+- Palette open with **0** matches: fall through to the **normal Enter
+  path** for the current composer mode:
+  - **Idle:** `send` as plain text (Slack-like).
+  - **Streaming on this conversation:** existing behavior is **steer**
+    when the box has text — zero-match slash drafts use that same path
+    (steer the live run with the literal text). Do **not** invent a
+    separate “force new message” path for MVP.
+- Escape for literal leading slash: type space after `/` (palette closes)
+  then continue typing, or send/steer with zero matches.
 
 ### 4.3 Popover UX
 
@@ -111,16 +127,15 @@ type SlashCommandContext = {
   conversationId?: string
   workspaceId: string | null
   isStreaming: boolean
-  router: AppRouterInstance // or navigate callbacks
-  // stores / handlers injected by InputBar
+  // All open-* / navigation actions are **injected by InputBar/shell** —
+  // registry never imports AppShell / Sidebar.
   cancelStream: (conversationId: string) => void
   openModelPicker: () => void
   openEffortControl: () => void
   startRename: () => void
   openAttach: () => void
   createNewChat: () => void | Promise<void>
-  openShare?: () => void
-  // …
+  openShare: () => void
 }
 
 type SlashCommand = {
@@ -165,9 +180,40 @@ unless already trivial deep links.
 ### 4.7 `/new` while streaming (resolved)
 
 **Allow** navigate/create without auto-stop (ties to #388 / #389 background
-awareness). Do not force-cancel the previous run from `/new`. Document:
-previous stream may continue on the client until single-stream abort rules
-apply when starting another send.
+awareness). Do not force-cancel the previous run from `/new`.
+
+**Lifecycle after `/new` (resolved for implementers):**
+
+- Reuse the same code path as the existing “New Chat” control in the shell
+  (navigate to workspace home / create draft conversation — whichever that
+  control already does on that surface).
+- Do **not** clear global `isStreaming` / `streamingConversationId` just
+  because the user left the page; single-stream ownership stays with the
+  conversation that owns the SSE until cancel or a new `send` aborts it.
+- Home empty composer: `/new` may no-op or re-focus empty state if already
+  there; conversation page: same as header/sidebar new-chat.
+- When the user later `send`s from the new conversation, existing
+  `activeStreamController.abort()` rules apply (one active client stream).
+
+### 4.7.1 Minimum concrete shell APIs for P0 open-controls (required)
+
+Today these are **not** callable from `InputBar` alone; implementation must
+add thin, explicit seams (choose the smallest existing pattern):
+
+| Command | Required seam |
+| --- | --- |
+| `/model` | Controlled open prop or `requestOpen()` on `ModelPicker` (Popover is uncontrolled today) |
+| `/effort` | Same visibility/open control the composer effort UI already uses; hide command when effort UI is not shown |
+| `/share` | Lift `SharePanel` open state to `AppShell` context/callback and pass `openShare` into `InputBar` |
+| `/rename` | Export a store action or shell event that enters rename for `activeId` / `conversationId` (row-local `isEditing` is not enough) |
+| `/attach` | Existing `fileInputRef.click()` in `InputBar` |
+| `/stop` | Existing `cancelStream` |
+| `/new` | Existing `onCreateConversation` and/or router path used by New Chat |
+| `/help` | Local popover mode only |
+
+Silent no-ops are **not** acceptable for P0 commands that appear in the
+list — if a seam is missing, the command must be `isAvailable: false`
+(hidden) until the seam lands in the same implementation PR.
 
 ### 4.8 i18n
 
@@ -222,8 +268,11 @@ apply when starting another send.
 
 | Question | Decision |
 | --- | --- |
-| `/` mid-draft? | No — start of draft only for MVP |
-| `/model` UX? | Open existing `ModelPicker`, not a new dialog |
-| `/new` while streaming? | Allow without auto-stop |
+| `/` mid-draft? | No — whole draft must be `/query` token only |
+| Space after `/`? | Closes palette (escape to plain text) |
+| Zero-match Enter while streaming? | Same as normal Enter → steer |
+| `/model` UX? | Open existing `ModelPicker` via controlled open seam |
+| `/new` while streaming? | Allow without auto-stop; stream ownership unchanged |
 | Include P1 in MVP? | No — P0 only; registry ready for P1 |
 | Skills as dynamic entries? | Phase 3 |
+| Missing shell seam for a P0 command? | Hide command until seam exists in same PR |

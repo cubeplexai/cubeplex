@@ -70,8 +70,8 @@ type CommandToken =
   | null
 
 function parseLeadingCommandToken(draft: string): CommandToken
-// open when draft matches /^\s*\/(\S*)$/  (only slash token, no trailing prose yet)
-// If user typed "/foo bar", palette closes / inactive — treat as normal text.
+// MUST match spec §4.1: open only when draft matches /^\s*\/(\S*)$/
+// "/foo bar", multiline, mid-draft "/" → null (palette closed).
 
 function filterCommands(
   commands: SlashCommand[],
@@ -180,20 +180,28 @@ type CommandPopoverProps = {
    - rename → conversation store rename entry or focus title editor
 3. `onKeyDown` when slash open:
    - ArrowUp/Down: preventDefault, move index
-   - Enter/Tab: preventDefault, `run` selected (or first)
+   - Enter/Tab with ≥1 match: preventDefault, `run` selected (or first)
    - Escape: close palette, keep draft
-   - Enter with 0 matches: fall through to normal send path
+   - Enter with 0 matches: **fall through to existing Enter matrix**
+     (`steer` if streaming+text, else `send`) — never invent a third path
+   - Respect `e.nativeEvent.isComposing` (no-op) like today
 4. After successful `run`, clear content (or strip token) and close
-   palette — **do not** call `send` with slash text.
-5. Ensure normal send still works when palette closed.
+   palette — **do not** call `send` / `steer` with slash text.
+5. Ensure normal send/steer still works when palette closed.
+6. **P0 shell seams (same PR as wiring):** implement the minimum APIs in
+   spec §4.7.1 (`ModelPicker` open, `SharePanel` open callback into
+   InputBar, rename action for current conversation). Commands without a
+   seam stay `isAvailable: false` / hidden — no silent no-op in the list.
 
 **Tests (intent):**
 
 - Type `/` → popover shows `/new` (or help list).
 - Select `/stop` while streaming mock → `cancelStream` called; no
-  `send`.
-- `/zzzzz` + Enter with empty filter → send path invoked (plain text).
+  `send`/`steer`.
+- `/zzzzz` + Enter idle → `send` path; streaming → `steer` path.
+- `/foo bar` does not open palette.
 - Esc closes without send.
+- `/new` while streaming does not call `cancelStream`.
 
 ---
 
