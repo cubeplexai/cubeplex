@@ -91,6 +91,23 @@ export async function generateConversationTitle(
   return res.json() as Promise<Conversation>
 }
 
+export type CompactConversationResult = {
+  ok: boolean
+  compacted: boolean
+  reason?: string | null
+  boundary?: number | null
+}
+
+/** Force context compaction (slash ``/compact``). 409 if a run is active. */
+export async function compactConversation(
+  client: ApiClient,
+  id: string,
+): Promise<CompactConversationResult> {
+  const res = await client.post(`/api/v1/conversations/${id}/compact`, {})
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<CompactConversationResult>
+}
+
 export async function listArtifacts(
   client: ApiClient,
   conversationId: string,

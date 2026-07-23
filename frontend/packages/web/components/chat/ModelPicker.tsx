@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils'
 
 interface ModelPickerProps {
   wsId: string
+  /** Controlled open (slash `/model` / `/effort`). Uncontrolled when omitted. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 const THINKING_LABEL_KEY = {
@@ -39,7 +42,7 @@ function brandForPreset(p: WorkspacePresetSummary): string | null {
  * label; hover Tooltip holds provider/model details. Backed by the per-`wsId`
  * Zustand store; refetches + revalidates on mount.
  */
-export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
+export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): React.ReactElement {
   const t = useTranslations('chat')
   const tTier = useTranslations('adminPresets.modelTiers')
   const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId])
@@ -109,9 +112,10 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
       : t('modelPickerAria')
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         aria-label={triggerAria}
+        data-testid="model-picker-trigger"
         className={cn(
           'flex h-8 items-center gap-1.5 rounded border border-transparent bg-transparent px-2',
           'text-sm whitespace-nowrap transition-colors outline-none',

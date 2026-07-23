@@ -14,13 +14,23 @@ const storeMocks = vi.hoisted(() => ({
   clear: vi.fn(),
   hydrate: vi.fn(),
   setWorkspaceId: vi.fn(),
+  compactConversation: vi.fn().mockResolvedValue({ ok: true, compacted: false }),
   state: { isStreaming: false, streamingConversationId: null as string | null },
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), message: vi.fn(), error: vi.fn() },
 }))
 
 vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({
     setWorkspaceId: storeMocks.setWorkspaceId,
   }),
+  compactConversation: storeMocks.compactConversation,
   useMessageStore: (
     selector: (state: {
       send: typeof storeMocks.send

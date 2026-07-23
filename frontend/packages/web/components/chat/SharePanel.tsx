@@ -14,6 +14,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
 
 const SCOPE_OPTIONS: ShareScope[] = ['public', 'org', 'workspace']
 
@@ -67,6 +68,15 @@ export function SharePanel({ conversationId }: SharePanelProps) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load when panel opens
     if (open) void loadShares()
   }, [open, loadShares])
+
+  // Slash `/share` (and other chrome) requests open via composer-chrome store.
+  const shareRequest = useComposerChromeStore((s) => s.shareRequest)
+  useEffect(() => {
+    if (!shareRequest) return
+    if (shareRequest.conversationId !== conversationId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- open on external request nonce
+    setOpen(true)
+  }, [shareRequest, conversationId])
 
   const handleCreate = useCallback(async () => {
     setCreating(true)

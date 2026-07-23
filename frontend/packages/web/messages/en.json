@@ -198,6 +198,26 @@
     "hint": "Enter to send / Shift+Enter for newline",
     "pendingHitlLock": "Answer the pending question above first."
   },
+  "slashCommands": {
+    "listAria": "Composer commands",
+    "noMatches": "No matching commands",
+    "compactSuccess": "Conversation context compacted",
+    "compactSkipped": "Not enough history to compact yet",
+    "compactFailed": "Could not compact conversation",
+    "commands": {
+      "help": { "description": "Show available commands" },
+      "new": { "description": "Start a new chat" },
+      "stop": { "description": "Stop the current run" },
+      "model": { "description": "Choose model and effort" },
+      "effort": { "description": "Open thinking / effort control" },
+      "rename": { "description": "Rename this conversation" },
+      "share": { "description": "Share this conversation" },
+      "attach": { "description": "Attach a file" },
+      "skills": { "description": "Open workspace skills" },
+      "mcp": { "description": "Open MCP connectors" },
+      "compact": { "description": "Compact conversation context" }
+    }
+  },
   "askUser": {
     "submit": "Submit",
     "submitting": "Sending…",

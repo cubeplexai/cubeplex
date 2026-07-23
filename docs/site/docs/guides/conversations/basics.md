@@ -31,6 +31,30 @@ The input bar sits at the bottom. It includes:
 - **Text area** — type your message. Press **Enter** to send, **Shift+Enter** for a new line.
 - **Send / Stop button** — sends the message, or stops a running response.
 
+## Slash commands
+
+Type **`/`** at the start of the composer (the whole draft is just the command
+token) to open a filterable command palette. Use ↑/↓ to highlight, **Enter** or
+**Tab** to run, **Esc** to dismiss. Client commands never create a user message
+bubble for the slash text.
+
+| Command | What it does |
+| --- | --- |
+| `/help` | List available commands in the palette |
+| `/new` | Start a new chat (same as sidebar New Chat) |
+| `/stop` | Cancel the in-flight run (only while streaming) |
+| `/model` | Open the model / effort picker |
+| `/effort` | Open thinking / effort control |
+| `/rename` | Rename the current conversation in the sidebar |
+| `/share` | Open the share panel |
+| `/attach` | Open the file attachment picker |
+| `/skills` | Open workspace skills |
+| `/mcp` | Open workspace MCP connectors |
+| `/compact` | Force-compact older context for this conversation (idle only) |
+
+Unknown text like `/zzzzz` with no match sends as a normal message (or steers
+while streaming). Type a space after `/` to write a literal leading slash.
+
 ## What the agent can do
 
 During a conversation, the agent can:
