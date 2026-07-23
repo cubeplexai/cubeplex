@@ -59,6 +59,23 @@ Use **Confirm** for sensitive operations you want a person to sign off on, and *
 Each sandbox run also has an execution timeout: long-running commands are cut off automatically so a stuck process cannot hold a sandbox open indefinitely.
 :::
 
+### Agent troubleshooting metadata
+
+When a sandbox is available for a conversation, the agent can call a
+**`sandbox_config`** tool to read a non-secret diagnosis view of:
+
+- Org **network** default action and host allow/deny rules
+- **Command** deny/confirm patterns (if configured)
+- Effective **env inventory** for the run (name, plain vs secret, scope;
+  for secrets: allowed hosts and header names) — **never secret values**
+
+This is intentional for diagnosis: the agent may see org- and workspace-scoped
+env **names** that a member cannot list via the user-scoped HTTP APIs. Values
+and vault credentials are never included. Network rules apply at sandbox
+**create**; after you change policy, recreate the sandbox for the new rules to
+take effect. On command policy denials, the agent is nudged to call
+`sandbox_config` rather than inventing credentials or dumping `printenv`.
+
 ## Environment variables and secrets
 
 You can inject environment variables and secrets into the sandbox at runtime. This lets the agent's code access API keys, database URLs, or configuration values without hardcoding them.

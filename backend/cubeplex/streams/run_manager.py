@@ -2979,12 +2979,24 @@ class RunManager:
                         {"action": "deny", "pattern": "*"},
                     ]
 
+                from cubeplex.config import config as _sb_cfg
+                from cubeplex.tools.builtin.sandbox_config import make_session_loader
+
+                _sb_default_image = str(_sb_cfg.get("sandbox.image", "ubuntu:22.04"))
+                _sb_config_loader = make_session_loader(
+                    session_factory=async_session_maker,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    default_image=_sb_default_image,
+                )
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
                     workspace_id=ctx.workspace_id,
                     command_rules=_command_rules,
                     channel=sandbox_hitl_channel,
+                    config_loader=_sb_config_loader,
                 )
                 cubepi_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write_file, edit_file, file_read) collected for
