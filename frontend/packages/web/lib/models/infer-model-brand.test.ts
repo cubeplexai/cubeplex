@@ -6,11 +6,15 @@ describe('inferModelBrand', () => {
   it('maps common model families', () => {
     expect(inferModelBrand('claude-opus-4-7')).toBe('anthropic')
     expect(inferModelBrand('gpt-5')).toBe('openai')
+    expect(inferModelBrand('gpt4o')).toBe('openai')
     expect(inferModelBrand('o4-mini')).toBe('openai')
+    expect(inferModelBrand('o1')).toBe('openai')
     expect(inferModelBrand('qwen3-max')).toBe('qwen')
+    expect(inferModelBrand('Qwen2.5-72B-Instruct')).toBe('qwen')
     expect(inferModelBrand('kimi-k2.5')).toBe('moonshot')
     expect(inferModelBrand('glm-5')).toBe('zhipu')
     expect(inferModelBrand('doubao-seed-2.0-pro')).toBe('doubao')
+    expect(inferModelBrand('seed-1-6')).toBe('doubao')
     expect(inferModelBrand('deepseek-v4-pro')).toBe('deepseek')
     expect(inferModelBrand('MiniMax-M2.5')).toBe('minimax')
     expect(inferModelBrand('mistral-large')).toBe('mistral')
@@ -25,6 +29,16 @@ describe('inferModelBrand', () => {
 
   it('can use display name when model id is opaque', () => {
     expect(inferModelBrand('ft-abc123', 'Claude Sonnet fine-tune')).toBe('anthropic')
+  })
+
+  it('does not false-positive on brand substrings mid-id', () => {
+    expect(inferModelBrand('company-gpt-proxy')).toBeNull()
+    expect(inferModelBrand('internal-grok-adapter')).toBeNull()
+    expect(inferModelBrand('notclaude-v1')).toBeNull()
+    expect(inferModelBrand('myclaude-router')).toBeNull()
+    // o-series must not match o100 / o30
+    expect(inferModelBrand('o100-custom')).toBeNull()
+    expect(inferModelBrand('o30-experimental')).toBeNull()
   })
 
   it('returns null for unknown models', () => {

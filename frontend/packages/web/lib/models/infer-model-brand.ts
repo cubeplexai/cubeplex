@@ -4,55 +4,92 @@
  * Uses the model identifier — not the gateway provider slug — so
  * `openrouter/claude-sonnet` and `my-vllm/claude-sonnet` both resolve to
  * anthropic. Returns null when no pattern matches (UI shows a default icon).
+ *
+ * Matching is deliberately prefix / word-boundary based so substrings like
+ * `company-gpt-proxy` or `internal-grok-adapter` do not false-positive on
+ * model ids (only true family prefixes at the start of the id match).
  */
 
-type Rule = { brand: string; test: (s: string) => boolean }
-
-function startsWithCi(hay: string, prefix: string): boolean {
-  return hay.length >= prefix.length && hay.slice(0, prefix.length).toLowerCase() === prefix
+type Rule = {
+  brand: string
+  /** Match against model_id: family prefix at start of string. */
+  idPatterns: RegExp[]
+  /** Match against display_name: family as a whole word. */
+  namePatterns: RegExp[]
 }
 
-function includesCi(hay: string, needle: string): boolean {
-  return hay.toLowerCase().includes(needle)
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Order matters: first match wins. Prefer specific model-family prefixes over
-// generic tokens.
+/** Family name at the start of a model id (e.g. `claude-…`, `qwen3…`, `gpt-5`). */
+function idPrefix(prefix: string): RegExp {
+  // After the prefix: end, digit, or non-letter separator — not another letter.
+  return new RegExp(`^${escapeRe(prefix)}(?=$|[^a-z])`, 'i')
+}
+
+/** Family token as its own word in a display name (e.g. "Claude Sonnet fine-tune"). */
+function wordToken(token: string): RegExp {
+  return new RegExp(`(?:^|[^a-z0-9])${escapeRe(token)}(?=$|[^a-z0-9])`, 'i')
+}
+
+// Order matters: first match wins.
 const RULES: Rule[] = [
-  { brand: 'anthropic', test: (s) => startsWithCi(s, 'claude') || includesCi(s, 'claude') },
+  {
+    brand: 'anthropic',
+    idPatterns: [idPrefix('claude')],
+    namePatterns: [wordToken('claude')],
+  },
   {
     brand: 'openai',
-    test: (s) =>
-      startsWithCi(s, 'gpt-') ||
-      startsWithCi(s, 'gpt') ||
-      startsWithCi(s, 'o1') ||
-      startsWithCi(s, 'o3') ||
-      startsWithCi(s, 'o4') ||
-      startsWithCi(s, 'chatgpt') ||
-      includesCi(s, 'gpt-'),
+    idPatterns: [
+      idPrefix('chatgpt'),
+      idPrefix('gpt'),
+      // o-series reasoning models: o1 / o3 / o4 (+ optional separator/suffix)
+      /^o(?:1|3|4)(?=$|[-._])/i,
+    ],
+    namePatterns: [wordToken('chatgpt'), wordToken('gpt')],
   },
-  { brand: 'qwen', test: (s) => startsWithCi(s, 'qwen') || includesCi(s, 'qwen') },
-  { brand: 'moonshot', test: (s) => startsWithCi(s, 'kimi') || includesCi(s, 'kimi') },
-  { brand: 'zhipu', test: (s) => startsWithCi(s, 'glm') || includesCi(s, 'glm-') },
+  {
+    brand: 'qwen',
+    idPatterns: [idPrefix('qwen')],
+    namePatterns: [wordToken('qwen')],
+  },
+  {
+    brand: 'moonshot',
+    idPatterns: [idPrefix('kimi')],
+    namePatterns: [wordToken('kimi')],
+  },
+  {
+    brand: 'zhipu',
+    idPatterns: [idPrefix('glm')],
+    namePatterns: [wordToken('glm')],
+  },
   {
     brand: 'doubao',
-    test: (s) => startsWithCi(s, 'doubao') || startsWithCi(s, 'seed-') || includesCi(s, 'doubao'),
+    idPatterns: [idPrefix('doubao'), idPrefix('seed')],
+    namePatterns: [wordToken('doubao')],
   },
-  { brand: 'deepseek', test: (s) => startsWithCi(s, 'deepseek') || includesCi(s, 'deepseek') },
+  {
+    brand: 'deepseek',
+    idPatterns: [idPrefix('deepseek')],
+    namePatterns: [wordToken('deepseek')],
+  },
   {
     brand: 'minimax',
-    test: (s) => startsWithCi(s, 'minimax') || includesCi(s, 'minimax'),
+    idPatterns: [idPrefix('minimax')],
+    namePatterns: [wordToken('minimax')],
   },
   {
     brand: 'mistral',
-    test: (s) =>
-      startsWithCi(s, 'mistral') ||
-      startsWithCi(s, 'mixtral') ||
-      startsWithCi(s, 'codestral') ||
-      includesCi(s, 'mistral') ||
-      includesCi(s, 'mixtral'),
+    idPatterns: [idPrefix('mistral'), idPrefix('mixtral'), idPrefix('codestral')],
+    namePatterns: [wordToken('mistral'), wordToken('mixtral'), wordToken('codestral')],
   },
-  { brand: 'xai', test: (s) => startsWithCi(s, 'grok') || includesCi(s, 'grok') },
+  {
+    brand: 'xai',
+    idPatterns: [idPrefix('grok')],
+    namePatterns: [wordToken('grok')],
+  },
 ]
 
 /**
@@ -63,11 +100,16 @@ export function inferModelBrand(
   modelId: string | null | undefined,
   displayName?: string | null,
 ): string | null {
-  const candidates = [modelId, displayName].filter((s): s is string => Boolean(s && s.trim()))
-  for (const raw of candidates) {
-    const s = raw.trim()
+  const mid = modelId?.trim()
+  if (mid) {
     for (const rule of RULES) {
-      if (rule.test(s)) return rule.brand
+      if (rule.idPatterns.some((re) => re.test(mid))) return rule.brand
+    }
+  }
+  const name = displayName?.trim()
+  if (name) {
+    for (const rule of RULES) {
+      if (rule.namePatterns.some((re) => re.test(name))) return rule.brand
     }
   }
   return null
