@@ -14,6 +14,7 @@ from loguru import logger
 from redis.asyncio import Redis
 from redis.exceptions import LockNotOwnedError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models import Organization, OrgPreinstalledTombstone, OrgSkillInstall
@@ -25,6 +26,7 @@ from cubeplex.skills.storage_paths import global_skill_prefix, skill_object_key
 
 LOCK_KEY = "cubeplex:lock:skill_seeder"
 # Catalog seed is usually fast; org-install reconcile can touch many orgs.
+# Concurrent inserts are conflict-safe (see _reconcile_preinstalled_installs).
 LOCK_TTL_SECONDS = 120
 
 
@@ -209,15 +211,37 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
             key = (org_id, skill.id)
             if key in existing_pairs or key in tomb_pairs:
                 continue
-            db_session.add(
-                OrgSkillInstall(
-                    org_id=org_id,
-                    skill_id=skill.id,
-                    installed_version=skill.current_version,
-                    installed_by_user_id=None,
-                    auto_bind=True,
-                )
-            )
+            # SAVEPOINT per row: concurrent seeder / unique-index races must not
+            # abort the whole reconcile batch. Re-check tombstone inside the
+            # nested txn so a concurrent admin uninstall is less likely to be
+            # undone (uninstall itself is a single commit for install+tombstone).
+            try:
+                async with db_session.begin_nested():
+                    still_tomb = (
+                        await db_session.execute(
+                            select(OrgPreinstalledTombstone).where(
+                                OrgPreinstalledTombstone.org_id == org_id,  # type: ignore[arg-type]
+                                OrgPreinstalledTombstone.skill_id == skill.id,  # type: ignore[arg-type]
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if still_tomb is not None:
+                        tomb_pairs.add(key)
+                        continue
+                    db_session.add(
+                        OrgSkillInstall(
+                            org_id=org_id,
+                            skill_id=skill.id,
+                            installed_version=skill.current_version,
+                            installed_by_user_id=None,
+                            auto_bind=True,
+                        )
+                    )
+                    await db_session.flush()
+            except IntegrityError:
+                # Concurrent insert of the same (org, skill) org-wide install.
+                existing_pairs.add(key)
+                continue
             existing_pairs.add(key)
             created += 1
 

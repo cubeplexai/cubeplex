@@ -31,7 +31,7 @@ from cubeplex.api.schemas.skill_discovery import (
 from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubeplex.config import config as _config
 from cubeplex.db import get_session
-from cubeplex.models import Skill, User
+from cubeplex.models import OrgPreinstalledTombstone, Skill, User
 from cubeplex.repositories.organization import OrganizationRepository
 from cubeplex.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
@@ -464,12 +464,21 @@ async def uninstall_skill(
         )
         await session.flush()
         await session.delete(install)
-        await session.commit()
 
+    # Tombstone + install delete must land in ONE commit so the boot-time
+    # preinstalled-skill reconciler cannot reinstall between the two.
     if skill.source == "preinstalled":
-        await OrgPreinstalledTombstoneRepository(session).add_tombstone(
-            org_id=org_id, skill_id=skill_id, hidden_by_user_id=user.id
-        )
+        existing_tomb = await OrgPreinstalledTombstoneRepository(session).get(org_id, skill_id)
+        if existing_tomb is None:
+            session.add(
+                OrgPreinstalledTombstone(
+                    org_id=org_id,
+                    skill_id=skill_id,
+                    hidden_by_user_id=user.id,
+                )
+            )
+
+    await session.commit()
 
 
 @router.post("/upload", status_code=201)
