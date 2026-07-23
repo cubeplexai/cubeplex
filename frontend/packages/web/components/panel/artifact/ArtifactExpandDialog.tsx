@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 interface ArtifactExpandDialogProps {
@@ -12,12 +12,22 @@ interface ArtifactExpandDialogProps {
   identityKey: string
   header: ReactNode
   children: ReactNode
+  /**
+   * Prefer the Exit expand control so keyboard users start outside embedded
+   * iframes (HTML/Office), where Esc would not reach the dialog.
+   */
+  initialFocusRef?: RefObject<HTMLElement | null>
+  /** Restore focus to the rail Expand control when still mounted. */
+  finalFocusRef?: RefObject<HTMLElement | null>
 }
 
 /**
  * In-app theater for artifact preview: large centered dialog (~90vw × 90vh).
  * Esc / backdrop / controlled onOpenChange(false) close expand only — callers
  * decide whether panelStore selection is kept.
+ *
+ * Modal by design: the rail under the backdrop is inert while open. Exit expand
+ * first, then use the rail Close control to dismiss the whole panel.
  */
 export function ArtifactExpandDialog({
   open,
@@ -26,6 +36,8 @@ export function ArtifactExpandDialog({
   identityKey,
   header,
   children,
+  initialFocusRef,
+  finalFocusRef,
 }: ArtifactExpandDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -35,6 +47,8 @@ export function ArtifactExpandDialog({
         className="flex h-[90vh] w-[min(90vw,1400px)] max-w-none flex-col gap-0 overflow-hidden
           p-0 sm:max-w-none"
         aria-describedby={undefined}
+        initialFocus={initialFocusRef}
+        finalFocus={finalFocusRef}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         {header}
