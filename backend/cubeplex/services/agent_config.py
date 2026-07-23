@@ -86,25 +86,25 @@ async def set_system_prompt(
             f"persona exceeds max length {PERSONA_MAX_LENGTH} (got {len(text)})"
         )
 
-    if expected_fingerprint is not None:
-        # Ensure the row exists first (may commit once on create).
-        await get_or_create_agent_config(session, org_id, workspace_id)
-        result = await session.execute(
-            select(AgentConfig)
-            .where(
-                AgentConfig.org_id == org_id,
-                AgentConfig.workspace_id == workspace_id,
-            )
-            .with_for_update()
+    # Always lock the row before mutating so concurrent Settings PUT and
+    # agent HITL commits cannot last-write-win over each other on a stale
+    # ORM object. get_or_create may commit once if the row is missing.
+    await get_or_create_agent_config(session, org_id, workspace_id)
+    result = await session.execute(
+        select(AgentConfig)
+        .where(
+            AgentConfig.org_id == org_id,
+            AgentConfig.workspace_id == workspace_id,
         )
-        cfg = result.scalar_one()
-        current = cfg.system_prompt or ""
+        .with_for_update()
+    )
+    cfg = result.scalar_one()
+    current = cfg.system_prompt or ""
+    if expected_fingerprint is not None:
         if persona_fingerprint(current) != expected_fingerprint:
             raise PersonaConflictError(
                 "persona changed since confirmation started; re-read and try again"
             )
-    else:
-        cfg = await get_or_create_agent_config(session, org_id, workspace_id)
 
     cfg.system_prompt = text
     session.add(cfg)

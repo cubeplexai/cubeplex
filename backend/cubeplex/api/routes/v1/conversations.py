@@ -77,6 +77,24 @@ router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversatio
 logger = logging.getLogger(__name__)
 
 
+async def _trigger_for_resume(
+    rds: RedisHandle,
+    *,
+    run_id: str,
+    fallback: str = "interactive",
+) -> str:
+    """Restore the original run trigger for HITL resume / cancel.
+
+    Persona writes and other interactive-only tools key off ``RunContext.trigger``.
+    HTTP resume must not silently default non-interactive (schedule/IM/automated)
+    runs back to interactive.
+    """
+    meta = await get_run_meta(rds.client, prefix=rds.key_prefix, run_id=run_id)
+    if meta is not None and meta.trigger:
+        return meta.trigger
+    return fallback
+
+
 async def _resolve_topic_run_context(
     conversation: Conversation,
     ctx: RequestContext,
@@ -1914,13 +1932,6 @@ async def cancel_active_run(
     from cubeplex.agents.checkpointer import shared_checkpointer
 
     run_manager = raw_request.app.state.run_manager
-    run_ctx = RunContext(
-        user_id=ctx.user.id,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-        conversation_id=conversation_id,
-        conversation_creator_user_id=conversation.creator_user_id,
-    )
 
     # Cancel-on-paused dispatch — covers both the live paused_hitl case
     # AND the long-pause TTL-expired case where the Redis active-run row
@@ -1938,6 +1949,14 @@ async def cancel_active_run(
             paused_run_id = persisted_run_id
 
     if paused_run_id is not None:
+        run_ctx = RunContext(
+            user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            conversation_id=conversation_id,
+            conversation_creator_user_id=conversation.creator_user_id,
+            trigger=await _trigger_for_resume(rds, run_id=paused_run_id),
+        )
         try:
             await run_manager.cancel_paused_run(
                 conversation_id=conversation_id,
@@ -2166,6 +2185,7 @@ async def submit_sandbox_confirm(
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
         conversation_creator_user_id=conversation.creator_user_id,
+        trigger=await _trigger_for_resume(rds, run_id=run_id),
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(
@@ -2271,6 +2291,7 @@ async def submit_ask_user_answer(
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
         conversation_creator_user_id=conversation.creator_user_id,
+        trigger=await _trigger_for_resume(rds, run_id=run_id),
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(
