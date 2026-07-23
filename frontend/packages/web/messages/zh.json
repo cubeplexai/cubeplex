@@ -427,7 +427,7 @@
     "metricToggleLabel": "主指标",
     "metricTokens": "Token",
     "metricCost": "成本",
-    "pricingHint": "尚未配置模型价格，因此成本显示为 $0，但流量已有 token。",
+    "pricingHint": "该时间范围内全组织成本为 $0，但 token 非零——可能尚未配置模型价格（KPI 为全组织汇总，不受工作区/模型筛选影响）。",
     "pricingHintLink": "前往模型管理设置价格",
     "kpi": {
       "totalCost": "总成本",

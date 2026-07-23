@@ -427,7 +427,7 @@
     "metricToggleLabel": "Primary metric",
     "metricTokens": "Tokens",
     "metricCost": "Cost",
-    "pricingHint": "Model prices are not configured, so cost shows $0 while traffic has tokens.",
+    "pricingHint": "Org-wide cost is $0 for this range while tokens are non-zero — model prices may not be configured (KPI totals ignore workspace/model filters).",
     "pricingHintLink": "Set pricing under Models",
     "kpi": {
       "totalCost": "Total cost",
