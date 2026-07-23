@@ -91,9 +91,14 @@ only** until traces confirm.
 | **D** | **Guardrails** | Optional snapshots / size budgets; cache e2e green |
 
 This design + plan cover **A–B as the primary deliverable of #391**, with
-C–D specified so implementers do not improvise process. Phase C may land
-in the same branch **only** after the note exists and top findings are
-ranked; prefer separate PRs per concern when edits are large.
+C–D specified so implementers do not improvise process.
+
+**Hard gate for Phase C (resolved):** no prompt-code PR (and no prompt
+edits on the analysis branch) until the findings note is **merged or
+explicitly design-approved** (human review). Each fix PR must reference a
+specific finding `id` from that note and include: evidence (trace ids),
+expected metric, and post-change measurement notes. “Note file exists on
+the branch” is **not** sufficient to start rewrites.
 
 ### 4.2 Prerequisites for measurement
 
@@ -103,6 +108,17 @@ ranked; prefer separate PRs per concern when edits are large.
 - Prefer diverse scenarios: short Q&A, tool-heavy research, sandbox coding,
   artifacts, citation-heavy web search, multi-subagent, CN vs EN users,
   long multi-turn, oneshot title/reflection
+
+**Privacy / data boundary (required):**
+
+- Prefer **synthetic local** or **explicitly sanitized staging** traffic.
+- Do **not** enable `record_content` against production by default for this
+  workstream.
+- Do not commit raw traces, user prompts, tool args/results, or secrets into
+  the repo. The engineering note may cite **trace ids** and redacted
+  snippets only.
+- After analysis, delete or retain local JSONL per team retention norms;
+  document env used in the note (`local` / `staging`).
 
 ### 4.3 How to inspect
 
@@ -166,10 +182,20 @@ filename; keep the slug `system-prompt-trace-review`.)
 - Edit strings in `backend/cubeplex/prompts/*.py` and middleware
   conditionals—not hand-edited traces.
 - Prefer **conditional / lazy injection** when evidence shows dead weight
-  (e.g. gate widget text if tool not registered or task class never needs
-  it)—but keep **tool availability and prompt consistent**.
+  (e.g. gate widget text if the **tool is not registered for that agent
+  config**)—but keep **tool availability and prompt consistent**.
+- **Cache-safe gating (non-negotiable):** capability sections that sit in
+  the stable system prefix must be **fixed for the lifetime of a
+  conversation** and decided **before the first model call** of that
+  conversation (or when agent/tool config is fixed). **Forbidden:**
+  per-turn / per-user-message task classification that adds or removes
+  system-prefix fragments mid-conversation (busts byte-identical prefix —
+  see `prompt-cache-discipline.md`). Turn-varying guidance belongs after
+  the cache breakpoint or in a new conversation.
 - Preserve cache discipline: stable ordering, no timestamps, deterministic
-  skill sort (already present).
+  skill sort (already present). After any injection change, require
+  byte-level prompt comparison across ≥2 turns of the same conversation
+  (or the existing cache e2e) to prove prefix stability.
 - No mega-diff of all prompts at once.
 - Re-run cache e2e and relevant agent e2e after each fix PR.
 - User-visible behavior changes → update matching `docs/site` page in the
@@ -190,14 +216,22 @@ filename; keep the slug `system-prompt-trace-review`.)
 
 ### 4.8 Success metrics
 
-Baselines **before** edits, from the same sample methodology:
+Baselines **before** edits, from the same sample methodology. Report
+fields **separately** (do not invent a single ratio without defining
+denominators against provider/cubepi fields):
 
-- Median / p95 **input tokens** per turn; cache read ratio where available
-- Quality proxies: citation presence on search, wrong-language rate,
-  unnecessary preamble, retry/loop, early stop
-- Reflection oneshot: false-positive saves / missed prefs (spot-check)
-- No regression on `tests/e2e/memory/test_prompt_cache.py` and relevant
-  agent e2e
+| Metric | How to record |
+| --- | --- |
+| Input / prompt tokens | `gen_ai.usage.input_tokens` (or provider equivalent) per turn |
+| Cache read tokens | provider `cache_read` / `cache_read_input_tokens` when present |
+| Cache creation tokens | provider `cache_creation` / write tokens when present |
+| Uncached input | derived only with an explicit formula that matches billing semantics used in `test_prompt_cache` / provider docs — never assume `cache_read / input_tokens` is a “hit rate” without checking whether `input_tokens` is total or uncached-only |
+| Quality proxies | citation presence on search, wrong-language, preamble, retry/loop, early stop — tallied with a **fixed rubric** |
+| Reflection oneshot | false-positive saves / missed prefs (spot-check) |
+| Guardrail | `tests/e2e/memory/test_prompt_cache.py` + relevant agent e2e green |
+
+Document the exact field names observed in cubepi spans in the note so
+formulas are reproducible.
 
 ## 5. Out of scope
 
@@ -211,11 +245,16 @@ Baselines **before** edits, from the same sample methodology:
 ## 6. Success criteria
 
 1. Analysis note exists under `docs/dev/notes/` with methodology, findings
-   table, prioritized recommendations.
-2. At least **3 high-severity findings** fixed in follow-up PRs **or**
-   explicitly deferred with rationale.
-3. Any prompt change preserves cache discipline; cache e2e stays green.
-4. Conditional/lazy injection preferred when evidence supports it.
+   table, prioritized recommendations — and is **reviewed/approved** before
+   Phase C.
+2. Every finding that meets predeclared impact/confidence thresholds is
+   either fixed in a follow-up PR or **explicitly deferred** with rationale.
+   There is **no quota** to invent N high-severity rows; zero or one real
+   high-severity finding is acceptable if the evidence says so.
+3. Any prompt change preserves cache discipline; cache e2e stays green;
+   mid-conversation system-prefix gating is not introduced.
+4. Conditional/lazy injection preferred when evidence supports it **and**
+   gating is conversation-stable (or config-stable).
 5. Diffs are surgical (per-fragment / per-concern), not a full rewrite
    without evidence.
 
@@ -223,7 +262,8 @@ Baselines **before** edits, from the same sample methodology:
 
 | Question | Guidance |
 | --- | --- |
-| Minimum sample size? | Target ≥10 diverse traces; more if variance is high. Dev or staging with content recording is fine; note env. |
+| Minimum sample size? | Stratified sample: cover the scenario classes in §4.2 with **≥2 traces per primary class** when claiming a class-level finding (not one anecdote per class). Overall target often ≥10–20 runs; state N and uncertainty in the note. Keep a small **holdout** for post-fix comparison. |
 | Prompt composition debug endpoint? | Optional; offline traces + a small `backend/scripts/dev/` size dump is enough for #391. |
-| Widget/citation/sandbox → skill-triggered? | Only if traces show dead weight **and** tool pairing stays consistent. |
+| Widget/citation/sandbox → skill-triggered? | Only if traces show dead weight **and** tool pairing stays consistent **and** injection is conversation-stable. |
 | Per-model-family prompts? | Only if failure modes clearly differ; default is one prompt. |
+| Production `record_content`? | Default no; synthetic/staging + redaction only. |

@@ -38,20 +38,21 @@ notes under `docs/dev/notes/`.
 **Core logic:**
 
 1. Confirm tracing records system prompt content on `chat` spans.
-2. Run a **diverse sample** (target ≥10 runs), covering at least:
-   - short Q&A (no tools)
-   - web/search + citations
-   - sandbox coding
-   - artifact creation
-   - widget / generative UI if available
-   - multi-subagent
-   - multi-turn with `load_skill`
-   - Chinese and English user messages
-   - title and reflection oneshots if observable
-3. Record for each: trace id, model, scenario tag, rough outcome
-   (success / loop / miss).
+2. Use **synthetic local or sanitized staging** data only; do not default
+   to production `record_content`. Do not commit raw JSONL.
+3. Run a **stratified sample**:
+   - Scenario classes: short Q&A (no tools); web/search + citations;
+     sandbox coding; artifact creation; widget / generative UI if
+     available; multi-subagent; multi-turn with `load_skill`; Chinese and
+     English; title/reflection oneshots if observable.
+   - Prefer **≥2 runs per primary class** before ranking a class-level
+     finding; overall N often ≥10–20. Record uncertainty when N is small.
+   - Reserve a small **holdout** set for post-fix comparison.
+4. Record for each: trace id, model, scenario tag, outcome under a
+   **fixed scoring rubric** (success / loop / instruction-miss / other) —
+   not free-form only.
 
-**Tests:** N/A (ops). Evidence = list of trace ids in the note.
+**Tests:** N/A (ops). Evidence = list of trace ids + rubric in the note.
 
 ### Unit of work A2 — Section size / composition baseline
 
@@ -72,11 +73,17 @@ presence.
 
 ### Unit of work A3 — Metric baselines (pre-edit)
 
-**Core logic:** From the same sample, compute:
+**Core logic:** From the same sample, record **separate** fields (see
+spec §4.8):
 
 - median / p95 input tokens per turn (by scenario if possible)
-- cache hit proxy (`cache_read / input_tokens` where available)
-- qualitative tallies: citation miss, wrong language, preamble, loops
+- cache_read tokens, cache_creation tokens, uncached input — only with
+  formulas reconciled to cubepi/provider field meanings and
+  `test_prompt_cache` / billing semantics
+- **Do not** report a single “cache hit ratio” unless the denominator is
+  defined in the note
+- qualitative tallies via fixed rubric: citation miss, wrong language,
+  preamble, loops
 
 **Do not** edit prompts until these numbers are written down.
 
@@ -117,15 +124,18 @@ docs/dev/notes/2026-07-22-system-prompt-trace-review.md
 5. Recommended PR split (one concern per PR)
 6. Open questions remaining after analysis
 
-**Success for #391 analysis gate:** note merged (or sitting on this branch
-ready for review) with ≥3 high-severity rows **or** explicit “no high
-severity found” with evidence (unlikely given widget size—still data-driven).
+**Success for #391 analysis gate:** note **merged or explicitly human-
+approved**. Severity is evidence-based — there is no requirement to
+produce three high-severity rows. “No high severity” with evidence is a
+valid outcome.
 
 ---
 
 ## Phase C — Fix (follow-up PRs)
 
-Only after B2. **Do not** land a mega-diff.
+Only after B2 **and** analysis gate approval. **Do not** land prompt
+rewrites on the design-only or unapproved-analysis branch. **Do not** land
+a mega-diff.
 
 ### Unit of work C* — Per-finding PR template
 
@@ -141,10 +151,12 @@ Only after B2. **Do not** land a mega-diff.
 **Core logic rules:**
 
 1. One concern per PR (e.g. “gate widget guidelines” ≠ “rewrite citations”).
-2. Tool availability ↔ prompt consistency.
-3. Stable sort / fixed append order for cache.
-4. Re-measure a small hold-out or re-run scripted scenarios after each fix.
-5. If user-visible agent behavior changes, update `docs/site` in the same
+2. Each PR body references finding `id` + evidence + expected metric.
+3. Tool availability ↔ prompt consistency.
+4. Stable sort / fixed append order for cache; **no mid-conversation
+   system-prefix add/remove** based on user turn classification.
+5. Re-measure holdout or scripted scenarios after each fix; paste metrics.
+6. If user-visible agent behavior changes, update `docs/site` in the same
    PR.
 
 **Example fix candidates (only if findings confirm):**
@@ -203,11 +215,11 @@ way operators must know. User docs only if behavior changes.
 | PR | Content |
 | --- | --- |
 | **This PR (design)** | Spec + this plan only |
-| **Analysis PR** (may be same branch after approval) | Note + optional size script; **no** prompt rewrites required |
-| **Fix PR 1..N** | One high-severity finding each |
+| **Analysis PR** | Note + optional size script; **no** prompt rewrites; human review |
+| **Fix PR 1..N** | Only after analysis approval; one finding each; cite finding id |
 
-Acceptance from the issue: at least 3 high-severity findings **fixed or
-explicitly deferred** with rationale in the note.
+Acceptance: all threshold-meeting findings are **fixed or explicitly
+deferred** with rationale in the note (count is not a goal).
 
 ---
 
