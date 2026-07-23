@@ -3643,9 +3643,10 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to inject available-skills list: {}", exc)
 
-            # show_widget guidelines — appended unconditionally at a fixed spot
-            # so the cache prefix stays deterministic (the tool is always
-            # registered). See backend/docs/prompt-cache-discipline.md.
+            # show_widget short stub — always-on at a fixed spot so the cache
+            # prefix stays deterministic (tool is always registered). Full
+            # playbook is the preinstalled `show-widget` skill. See
+            # backend/docs/prompt-cache-discipline.md and prompts/widget.py.
             from cubeplex.prompts.persona import PERSONA_AUTHORING_BLOCK
             from cubeplex.prompts.widget import WIDGET_GUIDELINES
 
@@ -3981,7 +3982,7 @@ class RunManager:
 
         The leading setup (citation counter, subagent/citation drainer,
         sandbox + skill catalog resolution, AgentConfig system-prompt
-        merge, available-skills suffix, widget guidelines suffix) is
+        merge, available-skills suffix, widget stub suffix) is
         identical to ``_execute_run``'s — keeping it byte-stable preserves
         the prompt cache prefix across pause/resume.
         """
