@@ -47,6 +47,8 @@ When the agent creates an artifact, an **artifact card** appears inline in the c
 
 Clicking the card (or the preview button) opens the **artifact panel** on the right side of the screen. The panel renders a live preview based on the artifact type — websites run in a sandboxed iframe, images display at full resolution, code gets syntax highlighting, and so on.
 
+On desktop, use **Expand preview** in the panel header to open a large centered in-app view (most of the viewport). Press Esc, click the backdrop, or use **Exit expand** to return to the side panel without losing the selected artifact. The side panel **Close** control still closes the whole preview.
+
 ![Artifact card with the right-side preview panel open](/img/conversations/artifact-panel.png)
 
 ### Artifact gallery

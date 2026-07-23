@@ -8,8 +8,8 @@ const messages = {
     header: {
       copy: 'Copy',
       close: 'Close',
-      fullscreen: 'Fullscreen',
-      exitFullscreen: 'Exit fullscreen',
+      expand: 'Expand preview',
+      exitExpand: 'Exit expand',
     },
   },
 }
@@ -63,16 +63,27 @@ describe('PanelHeader', () => {
     expect(screen.queryByTitle('Copy')).not.toBeInTheDocument()
   })
 
-  it('fullscreen toggle fires and flips its label', () => {
+  it('expand toggle fires with expand tooltip', () => {
     const onToggle = vi.fn()
     renderHeader(
       <PanelHeader
         source={{ kind: 'plain', icon: null, title: 'Browser' }}
-        fullscreen={{ active: false, onToggle }}
+        expand={{ active: false, onToggle }}
         onClose={() => {}}
       />,
     )
-    fireEvent.click(screen.getByTitle('Fullscreen'))
+    fireEvent.click(screen.getByTitle('Expand preview'))
     expect(onToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it('expand active shows exit expand tooltip', () => {
+    renderHeader(
+      <PanelHeader
+        source={{ kind: 'plain', icon: null, title: 'Browser' }}
+        expand={{ active: true, onToggle: () => {} }}
+        onClose={() => {}}
+      />,
+    )
+    expect(screen.getByTitle('Exit expand')).toBeInTheDocument()
   })
 })
