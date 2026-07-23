@@ -182,6 +182,16 @@ export interface MessageStore {
 
 let activeStreamController: AbortController | null = null
 
+/**
+ * Shared streaming flags (`isStreaming`, `streamingConversationId`,
+ * `streamAgents`, …) belong to at most one conversation at a time. When send
+ * on B aborts A, a late terminal/error path for A must not wipe B's flags or
+ * commit B's in-flight `streamAgents` into A's history.
+ */
+function ownsStreamingConversation(state: MessageStore, conversationId: string): boolean {
+  return state.streamingConversationId === conversationId
+}
+
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
 const loadMessagesInFlight = new Map<string, Promise<void>>()
@@ -913,6 +923,9 @@ async function finalizeCompletedStream(
   conversationId: string,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
 ): Promise<void> {
+  // Superseded by another send — do not read/clear shared streamAgents or flags.
+  if (!ownsStreamingConversation(get(), conversationId)) return
+
   const { assistantMessage, toolMessages } = buildTurnMessages(
     get().streamAgents,
     get().toolResultMap,
@@ -922,7 +935,43 @@ async function finalizeCompletedStream(
   )
 
   if (!assistantMessage) {
-    set((state) => ({
+    set((state) => {
+      if (!ownsStreamingConversation(state, conversationId)) {
+        return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+      }
+      return {
+        isStreaming: false,
+        pendingConfirmMap: {},
+        pendingAsk: null,
+        streamingConversationId: null,
+        currentRunId: null,
+        statusPhase: null,
+        pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+      }
+    })
+    return
+  }
+
+  set((state) => {
+    if (!ownsStreamingConversation(state, conversationId)) {
+      return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+    }
+    return {
+      messages: {
+        ...state.messages,
+        [conversationId]: [
+          ...(state.messages[conversationId] ?? []),
+          assistantMessage,
+          ...toolMessages,
+        ],
+      },
+      // Reset the in-flight stream now that the content lives in messages.
+      // Leaving streamAgents populated forces MessageList's lastAssistantId
+      // skip to fire — which can hide a DIFFERENT history assistant if the
+      // resume turn's mainStream content arrives before cubepi commits the
+      // resume assistant to the message log.
+      streamAgents: {},
+      toolStartedMap: {},
       isStreaming: false,
       pendingConfirmMap: {},
       pendingAsk: null,
@@ -930,34 +979,8 @@ async function finalizeCompletedStream(
       currentRunId: null,
       statusPhase: null,
       pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
-    }))
-    return
-  }
-
-  set((state) => ({
-    messages: {
-      ...state.messages,
-      [conversationId]: [
-        ...(state.messages[conversationId] ?? []),
-        assistantMessage,
-        ...toolMessages,
-      ],
-    },
-    // Reset the in-flight stream now that the content lives in messages.
-    // Leaving streamAgents populated forces MessageList's lastAssistantId
-    // skip to fire — which can hide a DIFFERENT history assistant if the
-    // resume turn's mainStream content arrives before cubepi commits the
-    // resume assistant to the message log.
-    streamAgents: {},
-    toolStartedMap: {},
-    isStreaming: false,
-    pendingConfirmMap: {},
-    pendingAsk: null,
-    streamingConversationId: null,
-    currentRunId: null,
-    statusPhase: null,
-    pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
-  }))
+    }
+  })
 }
 
 async function finalizePausedStream(
@@ -979,6 +1002,9 @@ async function finalizePausedStream(
   // needs to answer. Mirrors bootstrap's pending_hitl branch which
   // marks the conversation "streaming-attached" even with no live SSE.
   const state0 = get()
+  // Superseded by another send — do not touch shared streamAgents / flags.
+  if (!ownsStreamingConversation(state0, conversationId)) return
+
   const stillAttached =
     state0.pendingAsk !== null || Object.keys(state0.pendingConfirmMap).length > 0
   const nextStreamingConversationId = stillAttached ? conversationId : null
@@ -992,33 +1018,43 @@ async function finalizePausedStream(
   )
 
   if (!assistantMessage) {
-    set((state) => ({
+    set((state) => {
+      if (!ownsStreamingConversation(state, conversationId)) {
+        return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+      }
+      return {
+        isStreaming: false,
+        streamingConversationId: nextStreamingConversationId,
+        statusPhase: null,
+        pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+      }
+    })
+    return
+  }
+
+  set((state) => {
+    if (!ownsStreamingConversation(state, conversationId)) {
+      return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+    }
+    return {
+      messages: {
+        ...state.messages,
+        [conversationId]: [
+          ...(state.messages[conversationId] ?? []),
+          assistantMessage,
+          ...toolMessages,
+        ],
+      },
+      // Same rationale as finalizeCompletedStream — drop the in-flight
+      // stream now that history owns the content.
+      streamAgents: {},
+      toolStartedMap: {},
       isStreaming: false,
       streamingConversationId: nextStreamingConversationId,
       statusPhase: null,
       pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
-    }))
-    return
-  }
-
-  set((state) => ({
-    messages: {
-      ...state.messages,
-      [conversationId]: [
-        ...(state.messages[conversationId] ?? []),
-        assistantMessage,
-        ...toolMessages,
-      ],
-    },
-    // Same rationale as finalizeCompletedStream — drop the in-flight
-    // stream now that history owns the content.
-    streamAgents: {},
-    toolStartedMap: {},
-    isStreaming: false,
-    streamingConversationId: nextStreamingConversationId,
-    statusPhase: null,
-    pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
-  }))
+    }
+  })
 }
 
 async function consumeRunStream(
@@ -1069,61 +1105,72 @@ async function consumeRunStream(
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
         flush()
-        set((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
-          },
-          errors: {
-            ...s.errors,
-            [conversationId]: { runId: s.currentRunId ?? '', data: errData },
-          },
-          streamAgents: {},
-          toolStartedMap: {},
-          toolResultMap: {},
-          isStreaming: false,
-          pendingConfirmMap: {},
-          pendingAsk: null,
-          streamingConversationId: null,
-          currentRunId: null,
-          statusPhase: null,
-          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-        }))
+        set((s) => {
+          const owns = ownsStreamingConversation(s, conversationId)
+          return {
+            messages: {
+              ...s.messages,
+              [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+            },
+            errors: {
+              ...s.errors,
+              [conversationId]: { runId: s.currentRunId ?? '', data: errData },
+            },
+            pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+            ...(owns
+              ? {
+                  streamAgents: {},
+                  toolStartedMap: {},
+                  toolResultMap: {},
+                  isStreaming: false,
+                  pendingConfirmMap: {},
+                  pendingAsk: null,
+                  streamingConversationId: null,
+                  currentRunId: null,
+                  statusPhase: null,
+                  lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+                }
+              : {}),
+          }
+        })
         break
       } else if (event.type === 'done') {
         const usage = (event.data as Record<string, unknown>).usage as
           import('../types').UsageSummary | undefined
         const paused = (event.data as Record<string, unknown>).paused === true
-        const usageUpdate: Partial<MessageStore> = {
-          lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-        }
-        if (usage) {
-          usageUpdate.turnUsage = {
-            ...get().turnUsage,
-            [conversationId]: usage.turn,
+        // Only advance the shared event cursor / usage while we still own
+        // the stream — a superseded reattach must not clobber the live send.
+        if (ownsStreamingConversation(get(), conversationId)) {
+          const usageUpdate: Partial<MessageStore> = {
+            lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
           }
-          usageUpdate.sessionUsage = {
-            ...get().sessionUsage,
-            [conversationId]: usage.session,
+          if (usage) {
+            usageUpdate.turnUsage = {
+              ...get().turnUsage,
+              [conversationId]: usage.turn,
+            }
+            usageUpdate.sessionUsage = {
+              ...get().sessionUsage,
+              [conversationId]: usage.session,
+            }
+            usageUpdate.contextWindow = {
+              ...get().contextWindow,
+              [conversationId]: usage.context_window,
+            }
+            usageUpdate.contextTokens = {
+              ...get().contextTokens,
+              [conversationId]: usage.context_tokens ?? null,
+            }
           }
-          usageUpdate.contextWindow = {
-            ...get().contextWindow,
-            [conversationId]: usage.context_window,
+          set(usageUpdate)
+          // paused: the run task is over but the conversation is parked
+          // on a pending HITL question — keep pendingAsk / pendingConfirmMap
+          // alive so the card stays visible until the user answers or cancels.
+          if (paused) {
+            sawPausedDone = true
+          } else {
+            sawDone = true
           }
-          usageUpdate.contextTokens = {
-            ...get().contextTokens,
-            [conversationId]: usage.context_tokens ?? null,
-          }
-        }
-        set(usageUpdate)
-        // paused: the run task is over but the conversation is parked
-        // on a pending HITL question — keep pendingAsk / pendingConfirmMap
-        // alive so the card stays visible until the user answers or cancels.
-        if (paused) {
-          sawPausedDone = true
-        } else {
-          sawDone = true
         }
         break
       } else if (event.type === 'injected_message') {
@@ -1131,13 +1178,19 @@ async function consumeRunStream(
         // Flush batched stream mutations so the commit reads fully-applied
         // streamAgents, not a stale snapshot.
         flush()
-        set((s) => ({
-          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-        }))
-        get().__commitTurnAndInject(conversationId, d)
+        if (ownsStreamingConversation(get(), conversationId)) {
+          set((s) => ({
+            lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+          }))
+          get().__commitTurnAndInject(conversationId, d)
+        }
         continue
       }
 
+      if (!ownsStreamingConversation(get(), conversationId)) {
+        shouldFinalize = false
+        return
+      }
       batchedSet((s) => applyStreamEvent(s, event))
       if (++processed % YIELD_EVERY === 0) {
         await yieldToEventLoop()
@@ -1644,6 +1697,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     try {
       outer: for (;;) {
         for await (const event of streamSource) {
+          // Drop late events once another send owns the shared stream flags.
+          if (!ownsStreamingConversation(get(), conversationId)) {
+            break outer
+          }
           if (event.event_id && get().lastAppliedEventId) {
             if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
           }
@@ -1668,6 +1725,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             if (!retried && !sawDone && errData.message.includes('409')) {
               retried = true
               await new Promise((r) => setTimeout(r, 400))
+              if (!ownsStreamingConversation(get(), conversationId)) break outer
               streamSource = streamMessages(
                 client,
                 conversationId,
@@ -1679,32 +1737,40 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               continue outer
             }
             flush()
-            set((s) => ({
-              messages: {
-                ...s.messages,
-                [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
-              },
-              errors: {
-                ...s.errors,
-                [conversationId]: { runId: s.currentRunId ?? '', data: errData },
-              },
-              streamAgents: {},
-              toolStartedMap: {},
-              toolResultMap: {},
-              isStreaming: false,
-              pendingConfirmMap: {},
-              pendingAsk: null,
-              streamingConversationId: null,
-              currentRunId: null,
-              statusPhase: null,
-              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-              pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-            }))
+            set((s) => {
+              const owns = ownsStreamingConversation(s, conversationId)
+              return {
+                messages: {
+                  ...s.messages,
+                  [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+                },
+                errors: {
+                  ...s.errors,
+                  [conversationId]: { runId: s.currentRunId ?? '', data: errData },
+                },
+                pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+                ...(owns
+                  ? {
+                      streamAgents: {},
+                      toolStartedMap: {},
+                      toolResultMap: {},
+                      isStreaming: false,
+                      pendingConfirmMap: {},
+                      pendingAsk: null,
+                      streamingConversationId: null,
+                      currentRunId: null,
+                      statusPhase: null,
+                      lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+                    }
+                  : {}),
+              }
+            })
             break outer
           } else if (event.type === 'done') {
             const usage = (event.data as Record<string, unknown>).usage as
               import('../types').UsageSummary | undefined
             const paused = (event.data as Record<string, unknown>).paused === true
+            if (!ownsStreamingConversation(get(), conversationId)) break outer
             const usageUpdate: Partial<MessageStore> = {
               lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
             }
@@ -1738,6 +1804,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             // Flush batched stream mutations so the commit reads fully-applied
             // streamAgents, not a stale snapshot.
             flush()
+            if (!ownsStreamingConversation(get(), conversationId)) break outer
             set((s) => ({
               lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
             }))
@@ -1753,21 +1820,28 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         break outer
       }
     } catch (err) {
-      set((s) => ({
-        errors: {
-          ...s.errors,
-          [conversationId]: {
-            runId: s.currentRunId ?? '',
-            data: { error_code: 'internal_error', message: (err as Error).message },
+      set((s) => {
+        const owns = ownsStreamingConversation(s, conversationId)
+        return {
+          errors: {
+            ...s.errors,
+            [conversationId]: {
+              runId: s.currentRunId ?? '',
+              data: { error_code: 'internal_error', message: (err as Error).message },
+            },
           },
-        },
-        isStreaming: false,
-        pendingConfirmMap: {},
-        pendingAsk: null,
-        streamingConversationId: null,
-        currentRunId: null,
-        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-      }))
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          ...(owns
+            ? {
+                isStreaming: false,
+                pendingConfirmMap: {},
+                pendingAsk: null,
+                streamingConversationId: null,
+                currentRunId: null,
+              }
+            : {}),
+        }
+      })
       return
     } finally {
       flush()
@@ -1778,7 +1852,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     if (sawDone || sawPausedDone) {
       const lastState = get()
-      if (!lastState.errors[conversationId]) {
+      if (
+        !lastState.errors[conversationId] &&
+        ownsStreamingConversation(lastState, conversationId)
+      ) {
         if (sawPausedDone) {
           await finalizePausedStream(get, set, conversationId)
         } else {
@@ -1931,15 +2008,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (hasContent) {
       await finalizeCompletedStream(get, set, conversationId, 'aborted')
     } else {
-      set((s) => ({
-        isStreaming: false,
-        pendingConfirmMap: {},
-        pendingAsk: null,
-        streamingConversationId: null,
-        currentRunId: null,
-        statusPhase: null,
-        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-      }))
+      set((s) => {
+        if (!ownsStreamingConversation(s, conversationId)) {
+          return { pendingSteers: { ...s.pendingSteers, [conversationId]: [] } }
+        }
+        return {
+          isStreaming: false,
+          pendingConfirmMap: {},
+          pendingAsk: null,
+          streamingConversationId: null,
+          currentRunId: null,
+          statusPhase: null,
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+        }
+      })
     }
 
     try {
