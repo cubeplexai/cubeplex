@@ -76,20 +76,36 @@ async def set_system_prompt(
 ) -> AgentConfig:
     """Replace workspace persona text.
 
-    ``expected_fingerprint`` — when set, commit only if the current prompt
-    still hashes to this value (optimistic concurrency for HITL overwrite).
+    ``expected_fingerprint`` — when set, the row is locked with
+    ``SELECT … FOR UPDATE`` and the write commits only if the current prompt
+    still hashes to this value (optimistic concurrency for HITL overwrite,
+    safe against concurrent Settings/agent writers).
     """
     if len(text) > PERSONA_MAX_LENGTH:
         raise PersonaTooLongError(
             f"persona exceeds max length {PERSONA_MAX_LENGTH} (got {len(text)})"
         )
-    cfg = await get_or_create_agent_config(session, org_id, workspace_id)
-    current = cfg.system_prompt or ""
+
     if expected_fingerprint is not None:
+        # Ensure the row exists first (may commit once on create).
+        await get_or_create_agent_config(session, org_id, workspace_id)
+        result = await session.execute(
+            select(AgentConfig)
+            .where(
+                AgentConfig.org_id == org_id,
+                AgentConfig.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        cfg = result.scalar_one()
+        current = cfg.system_prompt or ""
         if persona_fingerprint(current) != expected_fingerprint:
             raise PersonaConflictError(
                 "persona changed since confirmation started; re-read and try again"
             )
+    else:
+        cfg = await get_or_create_agent_config(session, org_id, workspace_id)
+
     cfg.system_prompt = text
     session.add(cfg)
     await session.commit()

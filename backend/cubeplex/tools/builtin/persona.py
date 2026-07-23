@@ -71,13 +71,15 @@ def create_persona_tools(
     org_id: str,
     workspace_id: str,
     channel: HitlChannel | None = None,
-    include_update: bool = True,
+    allow_write: bool = True,
 ) -> list[AgentTool]:  # type: ignore[type-arg]
-    """Build persona_get and optionally persona_update tools.
+    """Build persona_get and persona_update tools.
 
-    ``include_update`` should be True only for interactive member-originated
-    chat runs. Scheduled / IM / automation tool lists omit the write tool.
-    ``channel`` is required when ``include_update`` is True (HITL overwrite).
+    Both tools are always registered so the tool schema stays stable across
+    interactive and automated turns (prompt-cache / replay). Writes are gated
+    by ``allow_write`` (True only for interactive member-originated chat).
+    ``channel`` is required for HITL on non-empty overwrite when writes are
+    allowed; may be None when ``allow_write`` is False.
     """
 
     async def _persona_get_execute(
@@ -111,13 +113,8 @@ def create_persona_tools(
         execute=_persona_get_execute,
     )
 
-    tools: list[AgentTool] = [persona_get]  # type: ignore[type-arg]
-
-    if not include_update:
-        return tools
-
-    if channel is None:
-        raise ValueError("persona_update requires a HITL channel")
+    if allow_write and channel is None:
+        raise ValueError("persona_update requires a HITL channel when allow_write=True")
 
     async def _persona_update_execute(
         tool_call_id: str,
@@ -127,6 +124,19 @@ def create_persona_tools(
         on_update: object = None,
     ) -> AgentToolResult:
         del tool_call_id, on_update
+        if not allow_write:
+            return _tool_result(
+                {
+                    "updated": False,
+                    "reason": "not_allowed",
+                    "error": (
+                        "persona_update is only available on interactive chat runs; "
+                        "scheduled/IM/automation cannot change workspace persona"
+                    ),
+                },
+                is_error=True,
+            )
+        assert channel is not None  # gated above when allow_write
         new_text = args.system_prompt
         if len(new_text) > PERSONA_MAX_LENGTH:
             return _tool_result(
@@ -281,5 +291,4 @@ def create_persona_tools(
     # Built-in HITL tool: do not set the custom-tool durability guard so
     # CheckpointedChannel.ask works from inside this tool body.
     persona_update.hitl_builtin = True
-    tools.append(persona_update)
-    return tools
+    return [persona_get, persona_update]
