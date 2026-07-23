@@ -3,9 +3,10 @@
 **Goal**: Default Insights to token metrics with a Tokens | Cost toggle;
 keep cost mode behavior; persist preference.
 
-**Architecture**: Frontend-only metric mode over existing cost/usage APIs.
-Parameterize value accessors in KPI, stacked sections, and charts. No
-schema or migration changes.
+**Architecture**: Metric mode over existing cost/usage APIs. Parameterize
+value accessors in KPI, stacked sections, and charts. No schema or
+migration changes. **Narrow backend change allowed** so timeseries
+top-N/cap ranks by tokens when metric is tokens (today it ranks by cost).
 
 **Tech stack**: React Insights shell, Recharts stacked chart, next-intl,
 `localStorage`, existing `@cubeplex/core` billing types.
@@ -33,8 +34,9 @@ export type InsightsMetric = 'tokens' | 'cost'
 
 **Core logic**:
 
-- `InsightsShell` holds `metric` state initialized from localStorage
-  (client-only; SSR-safe default tokens then hydrate).
+- `InsightsShell` holds `metric` state **initialized to `'tokens'` always**.
+- After mount (`useEffect`): read/validate localStorage; if `'cost'`, set
+  state. Never read storage in `useState(() => ...)` initializer.
 - Pass `metric` + `onMetricChange` into top bar segmented control.
 - On change: set state + write localStorage.
 
@@ -42,6 +44,8 @@ export type InsightsMetric = 'tokens' | 'cost'
 
 - Unit test preference helper (default, round-trip, invalid → tokens).
 - Component smoke: toggle calls onChange.
+- Hydration-safe: initial render is `tokens` even when storage has `cost`;
+  after effect, mode becomes `cost`.
 
 ---
 
@@ -97,6 +101,8 @@ metric=tokens and USD path when cost.
 
 - `frontend/packages/web/components/admin/insights/cost/StackedSection.tsx`
 - `frontend/packages/web/components/admin/insights/cost/StackedChart.tsx`
+- `frontend/packages/web/lib/cost/helpers.ts` (`capTimeseries`,
+  `topNWithOther`)
 - `frontend/packages/web/components/admin/insights/InsightsShell.tsx`
   (pass metric / columns)
 
@@ -114,6 +120,9 @@ metric === 'cost'
 ```
 
 - `topNWithOther(..., rankFn)` uses token total in tokens mode.
+- `capTimeseries` must accept a rank function or metric — **today it sums
+  `cost_amount_micro` only**; tokens mode with all-zero cost produces
+  arbitrary series retention.
 - Column defs: `defaultCostColumns` vs `defaultTokenColumns` (or one
   factory with metric).
 - Tooltip / Y-axis formatters switch between `$` and compact tokens.
@@ -122,7 +131,31 @@ metric === 'cost'
 **Tests intent**:
 
 - Helper: ranking prefers higher token total when metric=tokens.
+- `capTimeseries` with zero costs keeps highest-token series.
 - Chart pivot unit test if extracted pure function.
+
+---
+
+## Unit 4b: Backend timeseries rank-by (narrow)
+
+**Files**:
+
+- `backend/cubeplex/repositories/billing.py` (`get_timeseries` bucket
+  totals / keep set)
+- `backend/cubeplex/api/routes/v1/cost.py` (query param)
+- Frontend `fetchCostTimeseries` + `useCostData` to pass rank mode
+
+**Core logic**:
+
+- Add `rank_by: 'cost' | 'tokens'` (default `cost` for backward compat).
+- When `tokens`, rank `bucket_totals` by sum of
+  `input_tokens + output_tokens` before `__other` collapse.
+- Tokens mode Insights passes `rank_by=tokens`.
+
+**Tests intent**:
+
+- Repo/API test: all `cost_amount_micro` zero, distinct token totals —
+  highest-token buckets remain outside `__other`.
 
 ---
 
@@ -134,7 +167,8 @@ metric === 'cost'
 - i18n strings + link to admin models route (existing org models path)
 
 **Core logic**: show only when `metric === 'cost'` && total cost 0 &&
-token total > 0.
+token total > 0 (using **summary** totals — org-wide today; document in
+UI copy if filters can make charts disagree with KPIs).
 
 **Tests intent**: conditional render unit test with mock props.
 
@@ -158,7 +192,13 @@ token total > 0.
 
 ## Non-goals
 
-- Backend API changes (unless a timeseries path is found without tokens —
-  then a narrow backend fix is allowed; verify first)
+- Schema/migration changes; full usage API redesign
+- Summary endpoint workspace/model filter parity (pre-existing gap;
+  optional follow-up)
 - Renaming nav to “Usage” (optional follow-up)
 - Workspace non-admin usage page
+
+## In-scope backend exception
+
+- Timeseries `rank_by` / token-aware series cap (Unit 4b) — required for
+  tokens mode correctness when costs are all zero.
