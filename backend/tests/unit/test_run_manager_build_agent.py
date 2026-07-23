@@ -201,10 +201,11 @@ async def test_build_registers_persona_tools_for_interactive(
     assert "persona_update" in names
 
 
-async def test_build_omits_persona_update_for_non_interactive(
+async def test_build_keeps_persona_update_schema_for_non_interactive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scheduled / automation runs must not expose persona_update."""
+    """Scheduled runs still register persona_update (stable tool schema) but
+    gate writes at execute time via allow_write=False."""
     mock_agent = MagicMock()
     mock_agent._extra = {}
     monkeypatch.setattr(
@@ -257,6 +258,17 @@ async def test_build_omits_persona_update_for_non_interactive(
         MagicMock(return_value=mock_bound_model),
     )
 
+    import cubeplex.tools.builtin.persona as persona_mod
+
+    real_create = persona_mod.create_persona_tools
+    captured: dict[str, Any] = {}
+
+    def _capture_create_persona_tools(**kwargs: Any) -> list[Any]:
+        captured.update(kwargs)
+        return real_create(**kwargs)
+
+    monkeypatch.setattr(persona_mod, "create_persona_tools", _capture_create_persona_tools)
+
     rm = RunManager(
         app=_stub_app(),
         redis=MagicMock(),
@@ -286,4 +298,5 @@ async def test_build_omits_persona_update_for_non_interactive(
     )
     names = {getattr(t, "name", None) for t in tools}
     assert "persona_get" in names
-    assert "persona_update" not in names
+    assert "persona_update" in names
+    assert captured.get("allow_write") is False

@@ -51,7 +51,7 @@ class TestPersonaToolsAgainstSettings:
             org_id=org_id,
             workspace_id=DEFAULT_WS_ID,
             channel=channel,
-            include_update=True,
+            allow_write=True,
         )
         update = next(t for t in tools if t.name == "persona_update")
         get_tool = next(t for t in tools if t.name == "persona_get")
@@ -95,7 +95,7 @@ class TestPersonaToolsAgainstSettings:
             org_id=org_id,
             workspace_id=DEFAULT_WS_ID,
             channel=channel,
-            include_update=True,
+            allow_write=True,
         )
         update = next(t for t in tools if t.name == "persona_update")
         result = await update.execute(
@@ -132,7 +132,7 @@ class TestPersonaToolsAgainstSettings:
             org_id=org_id,
             workspace_id=DEFAULT_WS_ID,
             channel=channel,
-            include_update=True,
+            allow_write=True,
         )
         update = next(t for t in tools if t.name == "persona_update")
         new_text = "Approved replacement persona."

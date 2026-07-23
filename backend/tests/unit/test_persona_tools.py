@@ -32,18 +32,19 @@ class _Cfg:
         self.system_prompt = text
 
 
-async def test_create_persona_tools_read_only_omits_update() -> None:
+async def test_create_persona_tools_always_registers_update() -> None:
+    """Tool schema is stable even when writes are disabled."""
     tools = create_persona_tools(
         org_id="o1",
         workspace_id="w1",
-        include_update=False,
+        allow_write=False,
     )
-    assert [t.name for t in tools] == ["persona_get"]
+    assert [t.name for t in tools] == ["persona_get", "persona_update"]
 
 
-async def test_create_persona_tools_with_update_requires_channel() -> None:
+async def test_create_persona_tools_with_write_requires_channel() -> None:
     with pytest.raises(ValueError, match="HITL channel"):
-        create_persona_tools(org_id="o1", workspace_id="w1", include_update=True)
+        create_persona_tools(org_id="o1", workspace_id="w1", allow_write=True)
 
 
 async def test_persona_get_returns_current(
@@ -62,7 +63,7 @@ async def test_persona_get_returns_current(
         MagicMock(return_value=cm),
     )
 
-    tools = create_persona_tools(org_id="o1", workspace_id="w1", include_update=False)
+    tools = create_persona_tools(org_id="o1", workspace_id="w1", allow_write=False)
     get = tools[0]
     result = await get.execute("tc", PersonaGetArgs(), signal=None, on_update=None)
     payload = _parse(result)
@@ -97,7 +98,7 @@ async def test_persona_update_empty_first_write_no_hitl(
         org_id="o1",
         workspace_id="w1",
         channel=channel,
-        include_update=True,
+        allow_write=True,
     )
     update = next(t for t in tools if t.name == "persona_update")
     assert getattr(update, "hitl_builtin", False) is True
@@ -145,7 +146,7 @@ async def test_persona_update_overwrite_requires_confirm_and_commits(
         org_id="o1",
         workspace_id="w1",
         channel=channel,
-        include_update=True,
+        allow_write=True,
     )
     update = next(t for t in tools if t.name == "persona_update")
     result = await update.execute(
@@ -187,7 +188,7 @@ async def test_persona_update_overwrite_denied(
         org_id="o1",
         workspace_id="w1",
         channel=channel,
-        include_update=True,
+        allow_write=True,
     )
     update = next(t for t in tools if t.name == "persona_update")
     result = await update.execute(
@@ -226,7 +227,7 @@ async def test_persona_update_conflict_on_stale_hash(
         org_id="o1",
         workspace_id="w1",
         channel=channel,
-        include_update=True,
+        allow_write=True,
     )
     update = next(t for t in tools if t.name == "persona_update")
     result = await update.execute(
@@ -239,6 +240,33 @@ async def test_persona_update_conflict_on_stale_hash(
     assert payload["updated"] is False
     assert payload["reason"] == "conflict"
     assert result.is_error is True
+
+
+async def test_persona_update_rejects_when_write_disallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cubeplex.tools.builtin.persona.set_system_prompt",
+        set_mock,
+    )
+    tools = create_persona_tools(
+        org_id="o1",
+        workspace_id="w1",
+        allow_write=False,
+    )
+    update = next(t for t in tools if t.name == "persona_update")
+    result = await update.execute(
+        "tc",
+        PersonaUpdateArgs(system_prompt="Nope"),
+        signal=None,
+        on_update=None,
+    )
+    payload = _parse(result)
+    assert payload["updated"] is False
+    assert payload["reason"] == "not_allowed"
+    assert result.is_error is True
+    set_mock.assert_not_awaited()
 
 
 async def test_persona_update_unchanged_short_circuits(
@@ -266,7 +294,7 @@ async def test_persona_update_unchanged_short_circuits(
         org_id="o1",
         workspace_id="w1",
         channel=channel,
-        include_update=True,
+        allow_write=True,
     )
     update = next(t for t in tools if t.name == "persona_update")
     result = await update.execute(
