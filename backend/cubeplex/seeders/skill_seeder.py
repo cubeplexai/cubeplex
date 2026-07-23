@@ -13,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 from redis.asyncio import Redis
 from redis.exceptions import LockNotOwnedError
-from sqlalchemy import select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -245,12 +245,28 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
             existing_pairs.add(key)
             created += 1
 
-    if created == 0:
+    # Tombstone wins: drop any org-wide install that already has a tombstone
+    # (heals dual-state from concurrent uninstall vs uncommitted reconcile).
+    purge = await db_session.execute(
+        delete(OrgSkillInstall).where(
+            OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+            OrgSkillInstall.skill_id.in_(skill_ids),  # type: ignore[attr-defined]
+            exists().where(
+                OrgPreinstalledTombstone.org_id == OrgSkillInstall.org_id,  # type: ignore[arg-type]
+                OrgPreinstalledTombstone.skill_id == OrgSkillInstall.skill_id,  # type: ignore[arg-type]
+            ),
+        )
+    )
+    purged = int(getattr(purge, "rowcount", 0) or 0)
+
+    if created == 0 and purged == 0:
         return
 
     await db_session.commit()
     logger.info(
-        "Reconciled preinstalled skill installs: created {} row(s) for {} org(s)",
+        "Reconciled preinstalled skill installs: created {} row(s), purged {} dual-state "
+        "for {} org(s)",
         created,
+        purged,
         len(org_ids),
     )

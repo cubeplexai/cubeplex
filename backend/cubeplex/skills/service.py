@@ -13,7 +13,13 @@ from loguru import logger
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.models import OrgSkillInstall, Skill, SkillVersion, WorkspaceSkillBinding
+from cubeplex.models import (
+    OrgPreinstalledTombstone,
+    OrgSkillInstall,
+    Skill,
+    SkillVersion,
+    WorkspaceSkillBinding,
+)
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.repositories.artifact import ArtifactRepository
 from cubeplex.repositories.skill import (
@@ -22,12 +28,12 @@ from cubeplex.repositories.skill import (
     SkillVersionRepository,
 )
 from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.content_hash import compute_skill_version_hash
 from cubeplex.skills.frontmatter import (  # noqa: F401
     InvalidFrontmatterError,
     parse_skill_md,
     peek_skill_name,
 )
-from cubeplex.skills.content_hash import compute_skill_version_hash
 from cubeplex.skills.storage_paths import org_skill_prefix, skill_object_key
 
 
@@ -60,6 +66,9 @@ class SkillCatalogService:
         A skill is enabled if:
         - It has an explicit WorkspaceSkillBinding with enabled=True, OR
         - auto_bind=True on the install AND no explicit binding with enabled=False exists.
+
+        Preinstalled skills with an org tombstone are never returned, even if an
+        orphan install row still exists (e.g. boot reconcile race with uninstall).
         """
         explicit_disable = exists().where(
             WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
@@ -73,6 +82,11 @@ class SkillCatalogService:
             WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
             WorkspaceSkillBinding.enabled.is_(True),  # type: ignore[attr-defined]
         )
+        # Tombstone wins over install for preinstalled skills (admin uninstall).
+        not_tombstoned = ~exists().where(
+            OrgPreinstalledTombstone.org_id == org_id,  # type: ignore[arg-type]
+            OrgPreinstalledTombstone.skill_id == Skill.id,  # type: ignore[arg-type]
+        )
         stmt = (
             select(Skill, SkillVersion)
             .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)  # type: ignore[arg-type]
@@ -84,6 +98,7 @@ class SkillCatalogService:
             .where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
                 OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+                not_tombstoned,
                 or_(
                     explicit_enable,
                     (OrgSkillInstall.auto_bind.is_(True) & ~explicit_disable),  # type: ignore[attr-defined]
@@ -163,9 +178,7 @@ class SkillCatalogService:
         sv = await self.session.get(SkillVersion, skill_version_id)
         if sv is None:
             raise ValueError(f"skill_version_id not found: {skill_version_id}")
-        cache_dir = await self.cache.ensure_extracted(
-            sv.id, storage_prefix=sv.storage_prefix
-        )
+        cache_dir = await self.cache.ensure_extracted(sv.id, storage_prefix=sv.storage_prefix)
         return (cache_dir / sv.entry_file).read_text(encoding="utf-8")
 
     async def list_files_for_sandbox_sync(
@@ -220,14 +233,10 @@ def validate_skill_files(files: dict[str, bytes]) -> None:
         if rel.startswith("/") or ".." in PurePosixPath(rel).parts:
             raise InvalidZipPathError(f"invalid path in skill bundle: {rel!r}")
         if len(data) > MAX_FILE_BYTES:
-            raise FileTooLargeError(
-                f"{rel} is {len(data)} bytes; cap is {MAX_FILE_BYTES}"
-            )
+            raise FileTooLargeError(f"{rel} is {len(data)} bytes; cap is {MAX_FILE_BYTES}")
         total += len(data)
         if total > MAX_TOTAL_BYTES:
-            raise FileTooLargeError(
-                f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes"
-            )
+            raise FileTooLargeError(f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes")
 
 
 class SkillPublishService:
@@ -261,7 +270,7 @@ class SkillPublishService:
         keys = await store.list_objects(prefix)
         files: dict[str, bytes] = {}
         for key in keys:
-            rel = key[len(prefix):].lstrip("/")
+            rel = key[len(prefix) :].lstrip("/")
             if not rel:
                 continue
             data, _ = await store.download_file(key)
@@ -369,9 +378,7 @@ class SkillPublishService:
                 "frontmatter 'name' must not contain ':'; the org prefix is added by the server"
             )
         if not SKILL_SLUG_RE.match(fm.name):
-            raise InvalidSkillNameError(
-                f"name must match {SKILL_SLUG_RE.pattern}; got {fm.name!r}"
-            )
+            raise InvalidSkillNameError(f"name must match {SKILL_SLUG_RE.pattern}; got {fm.name!r}")
 
         canonical_name = f"{org_slug}:{fm.name}"
         skills = SkillRepository(self.session)
@@ -481,9 +488,7 @@ def _normalize_skill_zip_files(files: dict[str, bytes]) -> dict[str, bytes]:
         return files
 
     top_levels = {
-        PurePosixPath(path).parts[0]
-        for path in files
-        if len(PurePosixPath(path).parts) > 1
+        PurePosixPath(path).parts[0] for path in files if len(PurePosixPath(path).parts) > 1
     }
     if len(top_levels) != 1:
         logger.info(
