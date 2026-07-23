@@ -11,6 +11,7 @@ import {
   updateLanguage,
   useAuthStore,
   useConversationStore,
+  useMessageStore,
   useWorkspaceStore,
 } from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -58,6 +59,10 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
     } catch {
       /* ignore */
     }
+    // Stop any live stream before clearing auth so a late terminalization
+    // cannot buffer unread marks for the next login on this browser.
+    useMessageStore.getState().clearStream()
+    useMessageStore.getState().resetUnread()
     useAuthStore.getState().reset()
     useConversationStore.setState({ conversations: [], activeId: null })
     useWorkspaceStore.getState().reset()
