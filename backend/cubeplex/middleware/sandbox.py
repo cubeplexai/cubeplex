@@ -2,8 +2,9 @@
 
 Implements the cubepi ``Middleware`` protocol with two hooks:
 
-- ``tools``: exposes ``execute``, ``write_file``, ``edit_file``, and
-  ``file_read`` as ``cubepi.AgentTool`` instances.
+- ``tools``: exposes ``execute``, ``write_file``, ``edit_file``,
+  ``file_read``, and (when a config loader is provided) ``sandbox_config``
+  as ``cubepi.AgentTool`` instances.
 - ``transform_system_prompt``: appends the sandbox capability section
   (SANDBOX_PROMPT_TEMPLATE) to the system prompt.
 
@@ -21,7 +22,7 @@ import re
 import shlex
 import unicodedata
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from cubepi.agent.types import (
@@ -41,6 +42,11 @@ from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubeplex.sandbox.base import Sandbox
 from cubeplex.sandbox_policy.rules import evaluate_command
+from cubeplex.services.sandbox_runtime_config import POLICY_DENY_NUDGE
+from cubeplex.tools.builtin.sandbox_config import (
+    SandboxConfigLoader,
+    create_sandbox_config_tool,
+)
 
 # ---------------------------------------------------------------------------
 # Per-(workspace_id, conversation_id) ring buffer of commands the sandbox
@@ -607,12 +613,14 @@ class SandboxMiddleware(Middleware):
         workspace_id: str | None = None,
         command_rules: list[dict[str, Any]] | None = None,
         channel: HitlChannel | None = None,
+        config_loader: SandboxConfigLoader | Callable[[], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
         self.workspace_id = workspace_id
         self.command_rules = command_rules or []
         self.channel = channel
+        self.config_loader = config_loader
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
@@ -624,6 +632,8 @@ class SandboxMiddleware(Middleware):
             _make_edit_file_tool(sandbox),
             _make_file_read_tool(sandbox, conversation_id),
         ]
+        if config_loader is not None:
+            self._tools.append(create_sandbox_config_tool(config_loader))
 
     @property
     def tools(self) -> list[AgentTool[Any]]:
@@ -665,7 +675,7 @@ class SandboxMiddleware(Middleware):
         if action == "deny":
             return BeforeToolCallResult(
                 block=True,
-                reason=f"command blocked by org policy: {pattern}",
+                reason=(f"command blocked by org policy: {pattern}\n{POLICY_DENY_NUDGE}"),
                 deny_reason=pattern,
                 hitl_trace={"decision": "policy_deny", "pattern": pattern},
             )

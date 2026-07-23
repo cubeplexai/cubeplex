@@ -77,12 +77,15 @@ async def test_allow_passes_without_channel_call():
 
 @pytest.mark.asyncio
 async def test_deny_blocks_without_channel_call():
+    from cubeplex.services.sandbox_runtime_config import POLICY_DENY_NUDGE
+
     ch = _StubChannel()
     mw = _mw(ch, [{"action": "deny", "pattern": "rm *"}])
     res = await mw.before_tool_call(_Ctx("execute", "rm -rf /tmp/x"), signal=None)
     assert res is not None and res.block is True
     assert ch.calls == []
     assert res.hitl_trace["decision"] == "policy_deny"
+    assert POLICY_DENY_NUDGE in (res.reason or "")
 
 
 @pytest.mark.asyncio
