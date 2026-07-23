@@ -46,13 +46,15 @@ else → ArtifactCard
 
 ## Non-goals
 
-- Collaborative rich-text / multi-user CRDT / live multi-user cursors.
-- Full WYSIWYG document model that rewrites markdown on every keystroke
-  (Notion-style). Source markdown remains the edit surface.
+- Collaborative multi-user CRDT / live multi-user cursors.
+- Arbitrary rich HTML (font colors, page layout) that cannot round-trip to
+  Markdown — schema is **markdown-expressible nodes only**.
 - Inline edit for non-markdown types (PDF, office, websites, binary) in v1.
 - Guaranteed sandbox rewrite when sandbox is dead or path missing.
 - Changing the agent `save_artifact` tool contract beyond light awareness that
   user-created versions can appear (list already shows path + version).
+- Byte-identical markdown on save (canonical serialization is allowed; see
+  Editor).
 
 ## Product definition
 
@@ -87,10 +89,10 @@ Edit:
 ┌─────────────────────────────────────────┐
 │ 📄 title.md                    v3  ⋮    │
 ├─────────────────────────────────────────┤
-│ [B I H • # `]     Write | Preview       │  format toolbar + mode toggle
+│ [B I H • ≡ 🔗 `]                        │  TipTap toolbar (markdown-safe marks)
 ├─────────────────────────────────────────┤
-│  1  # Heading…                          │  CodeMirror markdown source
-│  2  paragraph with **bold**…            │  (or live Preview via same renderer)
+│  # Heading…                             │  WYSIWYG (TipTap); non-tech primary
+│  paragraph with **bold** rendered…      │
 │  …                                      │
 │  [Cancel]                    [Save]     │  dirty state; Cmd/Ctrl+S saves
 └─────────────────────────────────────────┘
@@ -99,8 +101,8 @@ Edit:
 | Mode | Behavior |
 | --- | --- |
 | Read | Fetch preview text for current version; render with shared markdown renderer; selection enabled for quote |
-| Edit | **Real markdown source editor** (not a bare `<textarea>`) — see Editor below; dirty state; **Save** / **Cancel** |
-| Save | PUT new content → new version; show new body; toast on success or partial sandbox fail |
+| Edit | **TipTap WYSIWYG** loaded from markdown via `@tiptap/markdown` — not a bare `<textarea>`; see Editor; dirty; **Save** / **Cancel** |
+| Save | Serialize editor → markdown → PUT → new version; show new body; toast on success or partial sandbox fail |
 | Error | Keep edit buffer; error toast |
 
 Click targets:
@@ -115,26 +117,36 @@ Click targets:
 Editing is the primary value of this feature. Shipping a plain monospace
 `<textarea>` is **not acceptable** for v1.
 
+**Audience:** most customers are **non-technical**. They should edit headings,
+bold, lists, links, and code **without writing markdown syntax**. The durable
+format remains markdown for agents/object store, via TipTap's official
+`@tiptap/markdown` bidirectional bridge.
+
 | Requirement | Detail |
 | --- | --- |
-| Surface | CodeMirror 6 markdown source editor (`@codemirror/lang-markdown` or thin React wrapper such as `@uiw/react-codemirror`) |
-| Highlighting | Markdown syntax highlighting; theme-aware (match app light/dark) |
-| Layout | Soft wrap for prose; min height ≈ read card; grow with content up to a max then scroll |
-| Write / Preview | Toggle (or split when wide enough): **Write** = source editor; **Preview** = same `MarkdownWithCitations` / prose renderer as read mode so save-what-you-see matches chat |
-| Format helpers | Lightweight toolbar that wraps/inserts common markdown: bold, italic, heading, list, link, inline/fenced code — pure source transforms, not a separate document model |
-| Keys | `Cmd/Ctrl+S` → save; `Esc` → cancel when clean, confirm-or-stay when dirty (product may soften to toast + stay) |
-| Focus | Enter edit focuses the editor; leave edit restores sensible focus (Edit button or card) |
-| Bytes | Editor edits the raw markdown string; save sends exact UTF-8 text — no silent reformat / prettier on save |
+| Surface | TipTap (`@tiptap/react` + StarterKit-class extensions) + `@tiptap/markdown` |
+| Load | `contentType: 'markdown'` (or `editor.commands.setContent(md, { contentType: 'markdown' })`) from object-store preview text |
+| Save | `editor.getMarkdown()` / markdown storage serialize → UTF-8 string for PUT |
+| Schema (whitelist) | Only markdown-expressible nodes: paragraph, heading, bold/italic/strike, lists (incl. task if GFM), blockquote, code + fenced codeBlock, link, GFM table. **No** font color, font size, complex HTML layout |
+| GFM | Enable Marked GFM (`markedOptions: { gfm: true }`) so agent tables/task lists round-trip |
+| Layout | Min height ≈ read card; grow with content up to a max then scroll; prose-friendly styles matching read mode where practical |
+| Toolbar | Bold, italic, headings, lists, link, inline/code block — TipTap commands, not raw markdown wrap |
+| Keys | `Cmd/Ctrl+S` → save; `Esc` → cancel when clean |
+| Focus | Enter edit focuses the editor; leave edit restores Edit button / card |
+| Canonicalization | Save may **normalize** markdown (indent style, emphasis markers). **Not** byte-identical to input. Acceptable: semantic equivalence |
+| Fidelity tests | Fixture set of agent-like md: parse → edit no-op → serialize → re-parse; assert structure/content stable. Block regression on headings, lists, fences, links, tables |
+| Optional | Collapsed "View source" (read-only md) for power users — not required for v1 |
 
 **Rejected alternatives:**
 
 | Option | Why not for v1 |
 | --- | --- |
-| Bare `<textarea>` | Core UX of the feature; looks unfinished; no highlight/toolbar/keys |
-| Full WYSIWYG (TipTap/ProseMirror Notion-style) | Mangles agent markdown; heavy model; out of scope for collaborative rich-text non-goal |
-| Monaco full IDE | Overkill weight for chat-inline cards; CodeMirror is enough |
+| Bare `<textarea>` | Unusable for non-technical customers; looks unfinished |
+| CodeMirror source-only | Wrong primary audience; keep only if later optional Source mode |
+| Full Notion / collaborative CRDT | Out of scope; single-user edit + version CAS is enough |
+| Unbounded HTML schema | Serialize drops styles; user thinks save kept colors that never hit md |
 
-Extract a reusable `MarkdownSourceEditor` component so the side panel can
+Extract a reusable `MarkdownRichEditor` (TipTap wrapper) so the side panel can
 adopt the same editor later without a second implementation.
 
 ### Quote → composer
@@ -217,8 +229,9 @@ No change to `save_artifact` schema required for v1.
 | A. Panel-only edit | Less chat friction relief; rejected as primary UX |
 | B. Inline read + edit + version API + best-effort sandbox + quote | **Chosen** — matches image-class deliverables |
 | C. Always require live sandbox on save | Too brittle; object store is the durable history |
-| D. Bare `<textarea>` for edit MVP | **Rejected** — edit is the core feature; ship CodeMirror source + Preview in v1 |
-| E. Full WYSIWYG (TipTap/ProseMirror) | Deferred / out of scope — source markdown stays canonical for agents |
+| D. Bare `<textarea>` for edit MVP | **Rejected** — edit is the core feature |
+| E. CodeMirror source-only | Rejected as **primary** UX — non-technical customers; optional later |
+| F. TipTap + `@tiptap/markdown` WYSIWYG | **Chosen** — visual edit for customers; md for agent/store via official bridge |
 
 ## Phasing
 
@@ -236,8 +249,9 @@ Implementation may ship 1–2 together if small; keep phases testable independen
 1. Markdown document artifacts render **inline** with readable rendered content.
 2. User can Edit → change text → **Save** → version increments; preview/download
    serve new content.
-3. Edit mode uses a **real markdown source editor** (CodeMirror 6 + highlight +
-   Write/Preview + basic format toolbar) — **not** a bare `<textarea>`.
+3. Edit mode uses **TipTap + `@tiptap/markdown`** (toolbar WYSIWYG, markdown
+   load/save) — **not** a bare `<textarea>` or source-only CodeMirror as
+   primary UX.
 4. Prior versions remain listable in the panel version popover.
 5. When sandbox + path are valid, file at `path` (or `path/entry_file`) updates;
    when not, save still succeeds with explicit partial status.
@@ -246,15 +260,16 @@ Implementation may ship 1–2 together if small; keep phases testable independen
 7. Non-markdown documents/images unchanged.
 8. Authz and conversation soft-delete rules match existing artifact routes.
 9. E2E covers happy path save; unit/e2e cover concurrency, sandbox missing,
-   path missing, and authz.
+   path missing, and authz. Round-trip fixtures cover markdown fidelity
+   (semantic, not byte-identical).
 
 ## Open questions (resolved for v1 unless product overrides)
 
 1. **Enter edit:** explicit Edit button (+ optional double-click); not single-click body.
 2. **Concurrency:** `expected_version` → 409 on mismatch.
 3. **Directory artifacts:** edit only when `entry_file` is markdown.
-4. **Editor:** CodeMirror 6 markdown source + Write/Preview + format toolbar
-   in v1 (no bare textarea; no full WYSIWYG).
+4. **Editor:** TipTap + `@tiptap/markdown` for non-technical primary UX;
+   markdown remains the storage format (canonical serialize OK).
 5. **Max size:** 2 MB UTF-8 text default.
 
 ## Related code

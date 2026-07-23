@@ -12,10 +12,10 @@ from `AssistantMessage` via a shared markdown-detection helper.
 
 **Tech stack**: FastAPI + existing Artifact/Version repos + objectstore
 `upload_file` + sandbox `upload`; React + `MarkdownWithCitations` +
-`useComposerDraft` + **CodeMirror 6** markdown source editor (new deps via
-`pnpm add` in `packages/web` — e.g. `@uiw/react-codemirror`,
-`@codemirror/lang-markdown`, theme packages as needed). Bare `<textarea>` is
-explicitly rejected for the edit surface.
+`useComposerDraft` + **TipTap** (`@tiptap/react`, starter-kit class extensions,
+`@tiptap/markdown` for bidirectional md). Add packages via `pnpm add` in
+`packages/web`. Bare `<textarea>` and CodeMirror-as-primary are rejected;
+primary UX is WYSIWYG for non-technical users; storage remains markdown.
 
 ---
 
@@ -119,34 +119,35 @@ non-markdown still uses ArtifactCard (existing AssistantMessage tests extended).
 
 ---
 
-## Unit 5: Frontend — markdown editor + save
+## Unit 5: Frontend — TipTap markdown editor + save
 
 **Files**:
-- `frontend/packages/web/components/editor/MarkdownSourceEditor.tsx` (new) —
-  reusable CodeMirror 6 surface: markdown lang, soft wrap, theme-aware,
-  controlled `value`/`onChange`, imperative focus, optional format commands
-- `MarkdownArtifactCard.tsx` — edit chrome: format toolbar, Write | Preview
-  toggle, Save/Cancel, dirty state; Preview reuses read-mode renderer
+- `frontend/packages/web/components/editor/MarkdownRichEditor.tsx` (new) —
+  reusable TipTap surface: markdown load/save via `@tiptap/markdown`, whitelist
+  schema, toolbar, controlled dirty, imperative focus, dynamic client import
+- `MarkdownArtifactCard.tsx` — edit chrome: toolbar + Save/Cancel + dirty;
+  read mode still uses `MarkdownWithCitations`
 - API client method on existing artifacts API module
 - `artifactStore` (or equivalent) version metadata refresh after save
-- i18n keys: edit, save, cancel, saving, write, preview, sandbox partial warning
-- deps: `pnpm add` CodeMirror packages in `packages/web` (do not hand-edit
-  `package.json`)
+- i18n keys: edit, save, cancel, saving, sandbox partial warning
+- deps: `pnpm add @tiptap/react @tiptap/starter-kit @tiptap/markdown` (+ link /
+  table / task-list extensions as needed) in `packages/web`
 
 **Editor bar (ship in this unit, not a follow-up):**
-1. Syntax-highlighted markdown source (CodeMirror 6).
-2. Write | Preview toggle; Preview = same renderer as read mode.
-3. Toolbar: bold / italic / heading / list / link / code (source wrap/insert).
-4. `Cmd/Ctrl+S` save; `Esc` cancel when clean.
-5. No silent reformat of markdown bytes on save.
+1. TipTap WYSIWYG for non-technical users (not bare textarea / not CM primary).
+2. Load with `contentType: 'markdown'`; save with `getMarkdown()`.
+3. Toolbar: bold / italic / heading / list / link / code.
+4. Schema whitelist = markdown-expressible only; GFM on for tables/tasks.
+5. `Cmd/Ctrl+S` save; `Esc` cancel when clean.
+6. Canonical markdown on serialize is OK; fixture tests for semantic fidelity.
 
 **Flow**: Edit → load raw text if not already held → editor mounts focused →
 Save PUT with `expected_version` → on success swap to read mode with new
 content; toast if `sandbox_synced === false`.
 
 **Tests**: mock API success/409/error; dirty cancel restores previous body;
-editor present in edit mode (not a raw textarea); format helper unit tests for
-wrap/insert helpers if extracted pure.
+editor present in edit mode (not a raw textarea); unit fixtures for
+parse→serialize semantic stability on agent-like markdown samples.
 
 ---
 
@@ -184,20 +185,23 @@ issue: implementation deferred). Track as checkbox in implementation PR.
 
 ## Out of scope for this plan
 
-- Full WYSIWYG / Notion-style document model (source markdown stays canonical).
-- Live collaborative multi-user editing.
+- Collaborative multi-user editing / CRDT.
+- Non-markdown HTML features (colors, arbitrary layout).
 - Changing agent `save_artifact` schema.
 - Inline edit for non-md types.
 - Diff-against-previous-version UI (nice later; not blocking).
+- CodeMirror source mode (optional later for power users).
 
 ## Risks
 
 | Risk | Mitigation |
 | --- | --- |
 | Large md blocks bloat chat DOM | max-height + expand; later virtualize if needed |
-| Bare textarea slips into MVP | Spec forbids it; review checklist + component test asserts editor surface |
-| CodeMirror bundle size / SSR | Dynamic import editor only in edit mode; client-only mount |
-| Theme mismatch light/dark | Use existing next-themes + CM theme mapping; visual check both |
+| Bare textarea slips into MVP | Spec forbids it; component test asserts TipTap surface |
+| TipTap md round-trip drift | Schema whitelist + GFM fixtures; accept canonical serialize |
+| `@tiptap/markdown` early-release bugs | Pin version; fixture suite; fall back errors keep buffer |
+| Bundle size / SSR | Dynamic import editor only in edit mode; client-only mount |
+| Citations / custom syntax in md | Treat as plain text or extend tokenizer; don't drop content |
 | Race with agent `save_artifact` | Atomic CAS on version + unique (artifact_id, version) |
 | Version points at missing object | Upload/DB consistency strategy; test both failure orders |
 | Directory multi-file version shrink | Reject edit or copy prior objects |
