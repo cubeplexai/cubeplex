@@ -202,3 +202,49 @@ async def test_seed_skips_tombstoned_org_on_reconcile(
     # Re-seed must not resurrect the install.
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
     assert await installs.get(org.id, skill.id) is None
+
+
+@pytest.mark.asyncio
+async def test_list_enabled_excludes_tombstoned_even_with_orphan_install(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Dual-state (install + tombstone) must not make load_skill succeed.
+
+    Catalog list_enabled is what load_skill uses; tombstone wins.
+    """
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
+
+    org = await OrganizationRepository(db_session).create(
+        name=f"dual-org-{uuid.uuid4().hex[:8]}",
+        slug=f"dual-org-{uuid.uuid4().hex[:8]}",
+    )
+    skill_name = _unique_name("dual-state")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+    assert await installs.get(org.id, skill.id) is not None
+
+    # Simulate dual-state: tombstone without deleting install.
+    await OrgPreinstalledTombstoneRepository(db_session).add_tombstone(
+        org_id=org.id, skill_id=skill.id, hidden_by_user_id=None
+    )
+    assert await installs.get(org.id, skill.id) is not None
+
+    catalog = SkillCatalogService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    # workspace_id unused for org-wide path matching; any non-empty id works.
+    enabled = await catalog.list_enabled_for_workspace("ws-placeholder", org_id=org.id)
+    assert all(r.skill_id != skill.id for r in enabled)
+    assert (
+        await catalog.find_enabled_by_name("ws-placeholder", org_id=org.id, name=skill_name) is None
+    )
+
+    # Next reconcile should purge the orphan install.
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+    assert await installs.get(org.id, skill.id) is None
