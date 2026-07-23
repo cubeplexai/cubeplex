@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  UNREAD_CHANNEL_NAME,
-  UNREAD_STORAGE_KEY,
-  broadcastUnreadMap,
+  UNREAD_STORAGE_KEY_LEGACY,
+  dropLegacyUnreadStorage,
   loadUnreadMap,
   parseUnreadMap,
-  publishUnreadMap,
+  publishClear,
+  publishMark,
   saveUnreadMap,
   subscribeUnreadSync,
+  unreadStorageKey,
 } from '../../src/stores/conversationUnreadSync'
+
+const USER = 'user_test_1'
 
 describe('conversationUnreadSync multi-tab', () => {
   beforeEach(() => {
@@ -20,13 +23,27 @@ describe('conversationUnreadSync multi-tab', () => {
     vi.restoreAllMocks()
   })
 
-  it('save/load round-trips', () => {
-    saveUnreadMap({ a: true, b: true })
-    expect(loadUnreadMap()).toEqual({ a: true, b: true })
+  it('save/load round-trips under user-scoped key', () => {
+    saveUnreadMap(USER, { a: true, b: true })
+    expect(loadUnreadMap(USER)).toEqual({ a: true, b: true })
+    expect(localStorage.getItem(unreadStorageKey(USER))).toContain('a')
+    expect(localStorage.getItem(UNREAD_STORAGE_KEY_LEGACY)).toBeNull()
   })
 
-  it('subscribeUnreadSync delivers BroadcastChannel messages', () => {
-    // jsdom's BroadcastChannel is incomplete; stub a minimal bus for this test.
+  it('publishMark merges into storage without dropping other ids', () => {
+    saveUnreadMap(USER, { c: true })
+    const next = publishMark(USER, 'a')
+    expect(next).toEqual({ c: true, a: true })
+    expect(loadUnreadMap(USER)).toEqual({ c: true, a: true })
+  })
+
+  it('publishClear removes only the target id', () => {
+    saveUnreadMap(USER, { a: true, c: true })
+    expect(publishClear(USER, 'c')).toEqual({ a: true })
+    expect(loadUnreadMap(USER)).toEqual({ a: true })
+  })
+
+  it('subscribeUnreadSync delivers BroadcastChannel mark/clear ops', () => {
     type Handler = (ev: MessageEvent) => void
     const listeners = new Map<string, Set<Handler>>()
     class FakeChannel {
@@ -60,43 +77,48 @@ describe('conversationUnreadSync multi-tab', () => {
     globalThis.BroadcastChannel = FakeChannel
 
     try {
-      const received: Array<Record<string, true>> = []
-      const unsub = subscribeUnreadSync((ids) => {
-        received.push(ids)
+      const received: Array<{ type: string; conversationId?: string }> = []
+      const unsub = subscribeUnreadSync(USER, (ev) => {
+        if (ev.type === 'mark' || ev.type === 'clear') {
+          received.push({ type: ev.type, conversationId: ev.conversationId })
+        }
       })
 
-      const peer = new BroadcastChannel(UNREAD_CHANNEL_NAME)
-      peer.postMessage({ type: 'sync', ids: { peer1: true } })
-      peer.close()
+      publishMark(USER, 'peer1')
+      publishClear(USER, 'peer1')
 
-      expect(received).toEqual([{ peer1: true }])
+      expect(received).toEqual([
+        { type: 'mark', conversationId: 'peer1' },
+        { type: 'clear', conversationId: 'peer1' },
+      ])
       unsub()
     } finally {
       globalThis.BroadcastChannel = Original
     }
   })
 
-  it('subscribeUnreadSync reacts to storage events', () => {
-    const received: Array<Record<string, true>> = []
-    const unsub = subscribeUnreadSync((ids) => {
-      received.push(ids)
+  it('subscribeUnreadSync reacts to storage events for the user key', () => {
+    const received: Array<{ type: string }> = []
+    const unsub = subscribeUnreadSync(USER, (ev) => {
+      received.push({ type: ev.type })
     })
 
-    const ev = new StorageEvent('storage', {
-      key: UNREAD_STORAGE_KEY,
-      newValue: JSON.stringify({ fromStorage: true }),
-      storageArea: localStorage,
-    })
-    window.dispatchEvent(ev)
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: unreadStorageKey(USER),
+        newValue: JSON.stringify({ fromStorage: true }),
+        storageArea: localStorage,
+      }),
+    )
 
-    expect(received).toEqual([{ fromStorage: true }])
+    expect(received).toEqual([{ type: 'replace' }])
     unsub()
   })
 
   it('ignores storage events for other keys', () => {
-    const received: Array<Record<string, true>> = []
-    const unsub = subscribeUnreadSync((ids) => {
-      received.push(ids)
+    const received: Array<{ type: string }> = []
+    const unsub = subscribeUnreadSync(USER, (ev) => {
+      received.push({ type: ev.type })
     })
     window.dispatchEvent(
       new StorageEvent('storage', {
@@ -109,25 +131,15 @@ describe('conversationUnreadSync multi-tab', () => {
     unsub()
   })
 
-  it('broadcastUnreadMap is best-effort when channel construction fails', () => {
-    const Original = globalThis.BroadcastChannel
-    // @ts-expect-error test stub
-    globalThis.BroadcastChannel = class {
-      constructor() {
-        throw new Error('no channel')
-      }
-    }
-    expect(() => broadcastUnreadMap({ a: true })).not.toThrow()
-    globalThis.BroadcastChannel = Original
+  it('dropLegacyUnreadStorage removes the unscoped key', () => {
+    localStorage.setItem(UNREAD_STORAGE_KEY_LEGACY, JSON.stringify({ old: true }))
+    dropLegacyUnreadStorage()
+    expect(localStorage.getItem(UNREAD_STORAGE_KEY_LEGACY)).toBeNull()
   })
 
   it('parseUnreadMap strips invalid shapes', () => {
     expect(parseUnreadMap('[]')).toEqual({})
     expect(parseUnreadMap('"x"')).toEqual({})
-  })
-
-  it('publishUnreadMap persists for other tabs to load', () => {
-    publishUnreadMap({ tabA: true })
-    expect(localStorage.getItem(UNREAD_STORAGE_KEY)).toContain('tabA')
+    expect(parseUnreadMap('{"a":true,"b":false}')).toEqual({ a: true })
   })
 })

@@ -1,22 +1,28 @@
 /**
  * Cross-tab unread conversation sync.
  *
- * Persist the unread id set to localStorage (reload + multi-tab storage events)
- * and mirror mutations over BroadcastChannel so tabs that did not own the SSE
- * still show / clear the sidebar dot.
- *
- * Not multi-device / not server-backed — browser-local only.
+ * - Per-user localStorage (reload) + BroadcastChannel ops (live multi-tab).
+ * - Mutations are per-conversation mark/clear so concurrent tabs do not
+ *   clobber each other with last-writer-wins full-map snapshots.
+ * - Not multi-device / not server-backed.
  */
 
 export type UnreadConversationIds = Record<string, true>
 
-export const UNREAD_STORAGE_KEY = 'cubeplex:conversation-unread-v1'
-export const UNREAD_CHANNEL_NAME = 'cubeplex-conversation-unread'
+/** Legacy unscoped key from the first implementation — removed on bind. */
+export const UNREAD_STORAGE_KEY_LEGACY = 'cubeplex:conversation-unread-v1'
 
-type UnreadChannelMessage = {
-  type: 'sync'
-  ids: UnreadConversationIds
-}
+export const UNREAD_STORAGE_KEY_PREFIX = 'cubeplex:conversation-unread-v1:'
+export const UNREAD_CHANNEL_PREFIX = 'cubeplex-conversation-unread:'
+
+export type UnreadRemoteEvent =
+  | { type: 'mark'; conversationId: string }
+  | { type: 'clear'; conversationId: string }
+  /** Full replace — only from storage events (best-effort fallback). */
+  | { type: 'replace'; ids: UnreadConversationIds }
+
+type UnreadChannelMessage =
+  { type: 'mark'; conversationId: string } | { type: 'clear'; conversationId: string }
 
 function canUseStorage(): boolean {
   return typeof localStorage !== 'undefined'
@@ -24,6 +30,14 @@ function canUseStorage(): boolean {
 
 function canUseBroadcastChannel(): boolean {
   return typeof BroadcastChannel !== 'undefined'
+}
+
+export function unreadStorageKey(userId: string): string {
+  return `${UNREAD_STORAGE_KEY_PREFIX}${userId}`
+}
+
+export function unreadChannelName(userId: string): string {
+  return `${UNREAD_CHANNEL_PREFIX}${userId}`
 }
 
 export function parseUnreadMap(raw: string | null): UnreadConversationIds {
@@ -41,21 +55,40 @@ export function parseUnreadMap(raw: string | null): UnreadConversationIds {
   }
 }
 
-export function loadUnreadMap(): UnreadConversationIds {
-  if (!canUseStorage()) return {}
+export function loadUnreadMap(userId: string): UnreadConversationIds {
+  if (!canUseStorage() || !userId) return {}
   try {
-    return parseUnreadMap(localStorage.getItem(UNREAD_STORAGE_KEY))
+    return parseUnreadMap(localStorage.getItem(unreadStorageKey(userId)))
   } catch {
     return {}
   }
 }
 
-export function saveUnreadMap(ids: UnreadConversationIds): void {
-  if (!canUseStorage()) return
+export function saveUnreadMap(userId: string, ids: UnreadConversationIds): void {
+  if (!canUseStorage() || !userId) return
   try {
-    localStorage.setItem(UNREAD_STORAGE_KEY, JSON.stringify(ids))
+    localStorage.setItem(unreadStorageKey(userId), JSON.stringify(ids))
   } catch {
     // Quota / private mode — in-memory still works for this tab.
+  }
+}
+
+export function clearUnreadStorage(userId: string): void {
+  if (!canUseStorage() || !userId) return
+  try {
+    localStorage.removeItem(unreadStorageKey(userId))
+  } catch {
+    // ignore
+  }
+}
+
+/** Drop the pre-scoping global key so logout/login cannot revive shared state. */
+export function dropLegacyUnreadStorage(): void {
+  if (!canUseStorage()) return
+  try {
+    localStorage.removeItem(UNREAD_STORAGE_KEY_LEGACY)
+  } catch {
+    // ignore
   }
 }
 
@@ -66,54 +99,87 @@ export function unreadMapsEqual(a: UnreadConversationIds, b: UnreadConversationI
   return aKeys.every((k) => b[k] === true)
 }
 
-/** Broadcast the full map so peers can replace their set. */
-export function broadcastUnreadMap(ids: UnreadConversationIds): void {
-  if (!canUseBroadcastChannel()) return
+function broadcastOp(userId: string, msg: UnreadChannelMessage): void {
+  if (!canUseBroadcastChannel() || !userId) return
   try {
-    const channel = new BroadcastChannel(UNREAD_CHANNEL_NAME)
-    const msg: UnreadChannelMessage = { type: 'sync', ids }
+    const channel = new BroadcastChannel(unreadChannelName(userId))
     channel.postMessage(msg)
     channel.close()
   } catch {
-    // Ignore — storage event remains a fallback for other tabs.
+    // Ignore — storage remains a best-effort fallback.
   }
 }
 
 /**
- * Persist + notify other tabs. Call only from local mark/clear mutations
- * (not when applying a remote sync payload).
+ * Mark one conversation unread: RMW localStorage + broadcast mark op.
+ * Returns the merged map after applying the mark to storage.
  */
-export function publishUnreadMap(ids: UnreadConversationIds): void {
-  saveUnreadMap(ids)
-  broadcastUnreadMap(ids)
+export function publishMark(userId: string, conversationId: string): UnreadConversationIds {
+  const prev = loadUnreadMap(userId)
+  if (prev[conversationId]) {
+    broadcastOp(userId, { type: 'mark', conversationId })
+    return prev
+  }
+  const next: UnreadConversationIds = { ...prev, [conversationId]: true }
+  saveUnreadMap(userId, next)
+  broadcastOp(userId, { type: 'mark', conversationId })
+  return next
 }
 
 /**
- * Subscribe to remote unread updates (BroadcastChannel + storage events).
- * Returns an unsubscribe function. Safe no-op in non-browser environments.
+ * Clear one conversation unread: RMW localStorage + broadcast clear op.
+ * Returns the map after removal.
  */
-export function subscribeUnreadSync(onRemote: (ids: UnreadConversationIds) => void): () => void {
-  if (typeof window === 'undefined') return () => {}
+export function publishClear(userId: string, conversationId: string): UnreadConversationIds {
+  const prev = loadUnreadMap(userId)
+  if (!prev[conversationId]) {
+    // Still broadcast so peers that hold the id drop it (e.g. present-tab rejection).
+    broadcastOp(userId, { type: 'clear', conversationId })
+    return prev
+  }
+  const next: UnreadConversationIds = { ...prev }
+  delete next[conversationId]
+  saveUnreadMap(userId, next)
+  broadcastOp(userId, { type: 'clear', conversationId })
+  return next
+}
+
+/**
+ * Subscribe to remote unread updates for one user.
+ * BC delivers per-conversation ops; storage events deliver full maps.
+ */
+export function subscribeUnreadSync(
+  userId: string,
+  onRemote: (event: UnreadRemoteEvent) => void,
+): () => void {
+  if (typeof window === 'undefined' || !userId) return () => {}
 
   let channel: BroadcastChannel | null = null
   const onMessage = (ev: MessageEvent<UnreadChannelMessage>) => {
     const data = ev.data
-    if (!data || data.type !== 'sync' || !data.ids || typeof data.ids !== 'object') return
-    onRemote(parseUnreadMap(JSON.stringify(data.ids)))
+    if (!data || typeof data !== 'object') return
+    if (data.type === 'mark' && typeof data.conversationId === 'string') {
+      onRemote({ type: 'mark', conversationId: data.conversationId })
+      return
+    }
+    if (data.type === 'clear' && typeof data.conversationId === 'string') {
+      onRemote({ type: 'clear', conversationId: data.conversationId })
+    }
   }
 
   if (canUseBroadcastChannel()) {
     try {
-      channel = new BroadcastChannel(UNREAD_CHANNEL_NAME)
+      channel = new BroadcastChannel(unreadChannelName(userId))
       channel.addEventListener('message', onMessage)
     } catch {
       channel = null
     }
   }
 
+  const storageKey = unreadStorageKey(userId)
   const onStorage = (ev: StorageEvent) => {
-    if (ev.key !== UNREAD_STORAGE_KEY) return
-    onRemote(parseUnreadMap(ev.newValue))
+    if (ev.key !== storageKey) return
+    onRemote({ type: 'replace', ids: parseUnreadMap(ev.newValue) })
   }
   window.addEventListener('storage', onStorage)
 
