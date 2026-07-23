@@ -1,10 +1,11 @@
 """User-driven markdown artifact content updates (versioned object store).
 
 Unlike agent ``register_artifact_from_sandbox``, this path:
-1. Uploads bytes to a **request-unique staging** key (never races on final key).
-2. CAS-bumps artifact version **and** inserts the version row in one transaction.
-3. Promotes staging → final version key (re-upload from memory), then GC staging.
-4. Best-effort sandbox write-back (never fails the save).
+1. Uploads bytes to a **request-unique staging** key (durable mid-flight copy).
+2. Locks the artifact row (FOR UPDATE), checks ``expected_version``.
+3. Writes the **final** version key, then CAS-bumps + inserts version row in the
+   same transaction (DB never advances without a durable object).
+4. GC staging; best-effort sandbox write-back (never fails the save).
 """
 
 from __future__ import annotations
@@ -177,31 +178,34 @@ async def update_artifact_content(
     final_key = f"artifacts/{conversation_id}/{artifact_id}/v{next_version}/{filename}"
     mime = artifact.mime_type or mimetypes.guess_type(filename)[0] or "text/markdown"
 
-    # Staging first: concurrent losers never share a final version key.
+    # Staging first: durable copy until final key is written under the row lock.
+    # Concurrent losers never share a final version key.
     await store.upload_file(staging_key, content_bytes, content_type=mime)
 
     try:
-        bumped = await _cas_bump_and_insert_version(
+        bumped = await _cas_promote_and_commit(
             session,
+            store=store,
             org_id=org_id,
             workspace_id=workspace_id,
             artifact_id=artifact_id,
             expected_version=expected_version,
             mime=mime,
+            final_key=final_key,
+            content_bytes=content_bytes,
         )
         if bumped is None:
             raise ArtifactContentError(
                 "version_conflict",
                 f"Version conflict: expected {expected_version}",
             )
-        # Promote to the durable version key only after we own the version number.
-        await store.upload_file(final_key, content_bytes, content_type=mime)
     except ArtifactContentError:
         raise
     except Exception:
         logger.exception("Failed CAS/promote for artifact {}", artifact_id)
         raise
     finally:
+        # Safe after success (final exists) or failure (no DB bump).
         try:
             await store.delete_file(staging_key)
         except Exception:
@@ -223,16 +227,25 @@ async def update_artifact_content(
     )
 
 
-async def _cas_bump_and_insert_version(
+async def _cas_promote_and_commit(
     session: AsyncSession,
     *,
+    store: Any,
     org_id: str,
     workspace_id: str,
     artifact_id: str,
     expected_version: int,
     mime: str,
+    final_key: str,
+    content_bytes: bytes,
 ) -> Artifact | None:
-    """Lock row, CAS bump version, insert version snapshot — one transaction."""
+    """Under row lock: write final object, then CAS bump + version row, commit.
+
+    Order guarantees the published version always has a durable object: the DB
+    is only advanced after ``final_key`` upload succeeds. Concurrent losers
+    block on FOR UPDATE, then see a version mismatch and leave without writing
+    the final key.
+    """
     stmt = (
         select(Artifact)
         .where(
@@ -247,6 +260,9 @@ async def _cas_bump_and_insert_version(
     if artifact is None or artifact.version != expected_version:
         await session.rollback()
         return None
+
+    # Publish object before DB so a crash never leaves version pointing at void.
+    await store.upload_file(final_key, content_bytes, content_type=mime)
 
     artifact.version = expected_version + 1
     artifact.updated_at = datetime.now(UTC)
