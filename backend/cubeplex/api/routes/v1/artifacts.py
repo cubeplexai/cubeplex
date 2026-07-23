@@ -155,6 +155,8 @@ async def update_artifact_content_route(
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=exc.message) from exc
         if exc.code == "version_conflict":
             raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        if exc.code == "list_failed":
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.message) from exc
         if exc.code in {
             "not_markdown",
             "no_entry",
