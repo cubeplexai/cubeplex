@@ -2,7 +2,7 @@
 
 **Goal:** Add a `/`-triggered command palette on the chat composer with a
 registry and P0 commands (`help`, `new`, `stop`, `model`, `effort`,
-`rename`, `share`, `attach`).
+`rename`, `share`, `attach`, `skills`, `mcp`, `compact`).
 
 **Architecture:**
 
@@ -47,6 +47,7 @@ lucide-react, Vitest + RTL; optional Playwright smoke.
 | `frontend/packages/web/components/chat/CommandPopover.tsx` | Create | Popover UI + keyboard list |
 | `frontend/packages/web/components/layout/InputBar.tsx` | Modify | Wire parse, popover, keydown, run |
 | `frontend/packages/web/messages/en.json` / `zh.json` | Modify | `slashCommands.*` |
+| `frontend/packages/core/src/api/…` + backend route (if missing) | Create/modify | Force-compact API for `/compact` |
 | `frontend/packages/web/lib/slash-commands/__tests__/*.ts` | Create | parse/filter/registry availability |
 | `frontend/packages/web/__tests__/components/CommandPopover.test.tsx` | Create | keyboard + select |
 | `frontend/packages/web/__tests__/components/InputBar.slash.test.tsx` | Create | open / run / no-send |
@@ -102,7 +103,7 @@ function filterCommands(
 
 **Files:** `registry.ts`, `types.ts`
 
-**Core logic:** Implement the eight P0 commands from the spec:
+**Core logic:** Implement the eleven P0 commands from the spec:
 
 | id | run sketch |
 | --- | --- |
@@ -114,6 +115,9 @@ function filterCommands(
 | `rename` | `ctx.startRename()` — may navigate focus to title/sidebar rename; inject callback from shell if needed |
 | `share` | `ctx.openShare()` — open existing share panel control |
 | `attach` | `ctx.openAttach()` — `fileInputRef.click()` |
+| `skills` | `ctx.openSkills()` — `router.push(/w/{wsId}/skills)` |
+| `mcp` | `ctx.openMcp()` — `router.push(/w/{wsId}/mcp)` |
+| `compact` | `ctx.compactConversation(conversationId)` — force-compact API; toast on result; never `send` |
 
 Wire **callbacks from InputBar/shell** rather than importing half the app
 into the registry module. Registry holds declarative metadata + thin
@@ -122,12 +126,16 @@ into the registry module. Registry holds declarative metadata + thin
 **Availability:**
 
 - `stop`: `ctx.isStreaming && !!ctx.conversationId`
-- `rename` / `share`: `!!ctx.conversationId`
+- `rename` / `share` / `compact`: `!!ctx.conversationId` (and for
+  `compact`: `!ctx.isStreaming`)
+- `skills` / `mcp`: `!!ctx.workspaceId`
 - `effort`: when effort UI is applicable (reuse same conditions as
   composer effort control visibility)
+- `compact`: also require force-compact seam wired; otherwise hide
 
 **Tests:** table-driven availability for streaming vs idle, with/without
-conversation id.
+conversation / workspace id; `/skills` filters on `ski`; `/compact`
+hidden while streaming.
 
 ---
 
@@ -178,6 +186,10 @@ type CommandPopoverProps = {
    - share → call same control AppShell uses for SharePanel if reachable;
      otherwise navigate or dispatch a small UI event already used for share
    - rename → conversation store rename entry or focus title editor
+   - skills / mcp → `router.push` to `/w/{wsId}/skills` and
+     `/w/{wsId}/mcp`
+   - compact → call force-compact client helper (Unit of work 2b); toast
+     success/error; clear slash token
 3. `onKeyDown` when slash open:
    - ArrowUp/Down: preventDefault, move index
    - Enter/Tab with ≥1 match: preventDefault, `run` selected (or first)
@@ -190,14 +202,19 @@ type CommandPopoverProps = {
 5. Ensure normal send/steer still works when palette closed.
 6. **P0 shell seams (same PR as wiring):** implement the minimum APIs in
    spec §4.7.1 (`ModelPicker` open, `SharePanel` open callback into
-   InputBar, rename action for current conversation). Commands without a
-   seam stay `isAvailable: false` / hidden — no silent no-op in the list.
+   InputBar, rename action for current conversation, skills/mcp router
+   pushes, compact API helper). Commands without a seam stay
+   `isAvailable: false` / hidden — no silent no-op in the list.
 
 **Tests (intent):**
 
-- Type `/` → popover shows `/new` (or help list).
+- Type `/` → popover shows `/new` (or help list) and includes `/skills`
+  when workspace is set.
 - Select `/stop` while streaming mock → `cancelStream` called; no
   `send`/`steer`.
+- Select `/skills` → `openSkills` / router push; no `send`.
+- Select `/compact` idle → `compactConversation` called; no `send`.
+- `/compact` not listed while streaming.
 - `/zzzzz` + Enter idle → `send` path; streaming → `steer` path.
 - `/foo bar` does not open palette.
 - Esc closes without send.
@@ -205,11 +222,45 @@ type CommandPopoverProps = {
 
 ---
 
+## Unit of work 2b — Force-compact seam for `/compact`
+
+**Why:** Automatic compaction already exists on agent turns; there is no
+user-invoked force path today. `/compact` needs one.
+
+**Preferred shape (smallest that reuses existing pipeline):**
+
+```text
+POST /api/v1/conversations/{conversation_id}/compact
+→ 200 { ok: true, compacted: bool, …summary metadata if cheap }
+→ 409 if a run is active for this conversation
+→ 4xx/5xx on failure (client toast)
+```
+
+- Reuse the same summarizer / task-routing preset as
+  `CompactionMiddleware` (do not invent a second policy).
+- Run only when idle (route rejects if streaming/active run).
+- Do **not** rewrite transcript messages for the UI; same persistence
+  rules as automatic compaction.
+- Frontend: thin `compactConversation(conversationId)` in
+  `@cubeplex/core` (or web API helper) used by `ctx.compactConversation`.
+
+**If this endpoint cannot ship with the palette PR:** keep `/compact` in
+the registry with `isAvailable: () => false` (or omit until helper
+exists) — still document it as P0 so the next PR is unblocked. Prefer
+landing API + command together when practical.
+
+**Tests:** backend unit/e2e for force-compact idle success + active-run
+reject; frontend mock that `/compact` calls the helper and clears the
+token.
+
+---
+
 ## Unit of work 5 — i18n + user docs (implementation PR)
 
 **Files:** `en.json`, `zh.json`, `docs/site/docs/...`
 
-- All command titles/descriptions under `slashCommands`.
+- All command titles/descriptions under `slashCommands` (include
+  skills, mcp, compact).
 - User doc page listing P0 commands when feature merges (project rule:
   user-facing change updates docs site in same PR).
 
@@ -217,10 +268,11 @@ type CommandPopoverProps = {
 
 ## Out of scope this plan
 
-- P1 open-surface commands (unless a single `router.push` is free)
+- Remaining P1 open-surface commands (`/memory`, `/sandbox`,
+  `/artifacts`, `/search`, `/topic`, `/schedule`, `/triggers`)
 - Global Cmd+K
-- Dynamic skill registration
-- Backend changes
+- Dynamic skill registration (`/skill-name` per install)
+- Changing automatic compaction thresholds / policy
 
 ---
 
@@ -231,7 +283,11 @@ cd frontend/packages/web
 pnpm exec vitest run lib/slash-commands __tests__/components/CommandPopover.test.tsx __tests__/components/InputBar.slash.test.tsx
 ```
 
-Optional Playwright: type `/` in chat → see `/new` → run.
+Optional Playwright: type `/` in chat → see `/new` → run; `/skills`
+navigates; `/compact` (when API live) no user bubble.
+
+If force-compact lands in the same PR, also run the backend compact tests
+for that endpoint.
 
 ---
 
@@ -239,6 +295,7 @@ Optional Playwright: type `/` in chat → see `/new` → run.
 
 1. `feat(web): add slash command registry and parse/filter helpers`
 2. `feat(web): CommandPopover + InputBar slash integration (P0)`
-3. `docs(site): document composer slash commands`
+3. `feat(api): force-compact conversation endpoint for /compact` (if same PR)
+4. `docs(site): document composer slash commands`
 
 Implementation waits for design approval.

@@ -22,10 +22,12 @@ skills and open-surface commands.
 - Stream control: `useMessageStore.send`, `cancelStream`, `steer`.
 - Model / effort: `ModelPicker` + per-workspace preset selection store
   (`lib/stores/preset-selection.ts`).
-- Surfaces already in product (deep-link / open targets for later phases):
-  skills, MCP, memory, artifacts, scheduled tasks, triggers, sandbox env,
-  share panel (`SharePanel` in `AppShell`), conversation search, rename
-  via conversation store.
+- Surfaces already in product (deep-link / open targets):
+  skills (`/w/{wsId}/skills`), MCP (`/w/{wsId}/mcp`), memory, artifacts,
+  scheduled tasks, triggers, sandbox env, share panel (`SharePanel` in
+  `AppShell`), conversation search, rename via conversation store.
+- Context compaction: automatic via `CompactionMiddleware` on agent turns;
+  no user-facing “compact now” control yet (needed for `/compact`).
 - Empty-state `PromptCards` + `useComposerDraft` for prompt injection —
   complementary discovery, not a command system.
 - IM bots have separate platform slash semantics in backend docs; **web
@@ -99,7 +101,8 @@ command token:
 - Rows: optional icon | `/name` | short description; optional right badge
   (“Streaming only”).
 - Optional sections for P0: **Conversation**, **Run**, **Composer**,
-  **Help** (light grouping; skip if cluttered).
+  **Tools** (`/skills`, `/mcp`, `/compact`), **Help** (light grouping;
+  skip if cluttered).
 - Filter: case-insensitive **substring** on name, aliases, and keywords.
 - Keyboard: ↑/↓ move highlight, Enter/Tab apply, Esc dismiss without
   sending.
@@ -111,9 +114,9 @@ command token:
 
 | Kind | Behavior | P0 examples |
 | --- | --- | --- |
-| **Client action** | Run immediately; remove `/…` from composer; **no** user message bubble | `/new`, `/stop`, `/rename`, `/attach` |
+| **Client action** | Run immediately; remove `/…` from composer; **no** user message bubble | `/new`, `/stop`, `/rename`, `/attach`, `/compact` |
 | **Open control** | Focus/open existing UI chrome | `/model`, `/effort` |
-| **Open surface** | Navigate or open panel (P1) | `/skills`, `/mcp`, … |
+| **Open surface** | Navigate or open panel | `/skills`, `/mcp`, `/share` |
 
 Running a client command must **not** call `send` with the slash text.
 
@@ -127,8 +130,8 @@ type SlashCommandContext = {
   conversationId?: string
   workspaceId: string | null
   isStreaming: boolean
-  // All open-* / navigation actions are **injected by InputBar/shell** —
-  // registry never imports AppShell / Sidebar.
+  // All open-* / navigation / compact actions are **injected by
+  // InputBar/shell** — registry never imports AppShell / Sidebar.
   cancelStream: (conversationId: string) => void
   openModelPicker: () => void
   openEffortControl: () => void
@@ -136,6 +139,10 @@ type SlashCommandContext = {
   openAttach: () => void
   createNewChat: () => void | Promise<void>
   openShare: () => void
+  openSkills: () => void
+  openMcp: () => void
+  /** Force context compaction for the active conversation. */
+  compactConversation: (conversationId: string) => void | Promise<void>
 }
 
 type SlashCommand = {
@@ -170,12 +177,35 @@ not streaming).
 | `/rename` | Client | Enter rename flow for current conversation (reuse sidebar rename or title edit entrypoint) | When `conversationId` present |
 | `/share` | Open surface | Open existing share UI for current conversation | When `conversationId` present |
 | `/attach` | Client | Trigger paperclip / file input (`fileInputRef.click()`) | Always (composer attach) |
+| `/skills` | Open surface | Navigate to workspace skills page (`/w/{wsId}/skills`) | When `workspaceId` present |
+| `/mcp` | Open surface | Navigate to workspace MCP / connectors page (`/w/{wsId}/mcp`) | When `workspaceId` present |
+| `/compact` | Client | Force context compaction for the current conversation (summarize older turns so later model calls use less prompt). **No** user message bubble for `/compact` itself. Show a short success/error toast (or inline status) from the API result. | When `conversationId` present and **not** streaming |
 
-**P1+** (registry stubs allowed, not required in Phase 1): `/skills`,
-`/mcp`, `/memory`, `/sandbox`, `/artifacts`, `/search`, `/topic`,
-`/schedule`, `/triggers`, dynamic skills, `/compact`, `/fork`, etc. —
-see issue body. Do not implement full P1 in the first implementation PR
-unless already trivial deep links.
+#### 4.6.1 `/compact` product semantics
+
+Today compaction only runs automatically inside the agent turn
+(`CompactionMiddleware` when token thresholds trip). `/compact` is the
+**manual** path (Claude Code / Codex analogue):
+
+1. User runs `/compact` while idle on a conversation.
+2. Client calls a thin force-compact API (see §4.7.1) — **not** `send` of
+   the string `/compact`.
+3. Backend reuses the existing compaction pipeline (same summary model /
+   task routing as automatic compaction) against the conversation’s
+   checkpointer state, even if the ratio threshold has not been reached.
+4. UI history stays intact (compaction already does not rewrite
+   `state.messages` for the transcript); only model-facing projection
+   shrinks.
+5. While streaming: command is **hidden** (same rule as other run-sensitive
+   actions). Do not race compact with an active SSE run.
+
+If the force-compact endpoint cannot land in the same implementation PR as
+the palette, hide `/compact` (`isAvailable: false`) until the seam exists —
+no silent no-op row.
+
+**P1+** (registry stubs allowed, not required in Phase 1): `/memory`,
+`/sandbox`, `/artifacts`, `/search`, `/topic`, `/schedule`, `/triggers`,
+dynamic skills, `/skill` picker, `/fork`, etc. — see issue body.
 
 ### 4.7 `/new` while streaming (resolved)
 
@@ -195,10 +225,11 @@ awareness). Do not force-cancel the previous run from `/new`.
 - When the user later `send`s from the new conversation, existing
   `activeStreamController.abort()` rules apply (one active client stream).
 
-### 4.7.1 Minimum concrete shell APIs for P0 open-controls (required)
+### 4.7.1 Minimum concrete shell APIs for P0 commands (required)
 
-Today these are **not** callable from `InputBar` alone; implementation must
-add thin, explicit seams (choose the smallest existing pattern):
+Today several of these are **not** callable from `InputBar` alone;
+implementation must add thin, explicit seams (choose the smallest existing
+pattern):
 
 | Command | Required seam |
 | --- | --- |
@@ -210,6 +241,9 @@ add thin, explicit seams (choose the smallest existing pattern):
 | `/stop` | Existing `cancelStream` |
 | `/new` | Existing `onCreateConversation` and/or router path used by New Chat |
 | `/help` | Local popover mode only |
+| `/skills` | `router.push(\`/w/${workspaceId}/skills\`)` (existing page) via `ctx.openSkills` |
+| `/mcp` | `router.push(\`/w/${workspaceId}/mcp\`)` (existing page) via `ctx.openMcp` |
+| `/compact` | `ctx.compactConversation(id)` → client helper calling a **force-compact** API on the conversation (thin endpoint that reuses `CompactionMiddleware` / summarizer path). Hide until API + helper exist. |
 
 Silent no-ops are **not** acceptable for P0 commands that appear in the
 list — if a seam is missing, the command must be `isAvailable: false`
@@ -230,8 +264,10 @@ list — if a seam is missing, the command must be `isAvailable: false`
 - Extract `CommandPopover` component under
   `frontend/packages/web/components/chat/` or `layout/`.
 - Home/empty composer (`onCreateConversation` path) should support at
-  least `/new`, `/help`, `/model`, `/effort`, `/attach` where controls
-  exist; commands needing `conversationId` stay unavailable/hidden.
+  least `/new`, `/help`, `/model`, `/effort`, `/attach`, `/skills`,
+  `/mcp` where controls / `workspaceId` exist; commands needing
+  `conversationId` (`/rename`, `/share`, `/compact`, `/stop`) stay
+  unavailable/hidden.
 
 ## 5. Out of scope (MVP)
 
@@ -240,29 +276,35 @@ list — if a seam is missing, the command must be `isAvailable: false`
 - `@` mentions / file reference pickers (reserve `@` for later).
 - Replacing IM bot command systems.
 - Registering every installed skill as `/skill-name` (Phase 3).
-- Org-admin deep links.
+- Org-admin deep links (`/admin/skills`, `/admin/mcp` — workspace pages only).
 - Notifications / unread / running indicators (#388, #389).
+- Changing automatic compaction thresholds / policy (only add a manual
+  force path for `/compact`).
 
 ## 6. Success criteria
 
 1. Typing `/` at draft start opens the command list without sending.
 2. Filtering narrows; ↑/↓ / Enter / Esc / click work.
 3. All **P0** commands implemented with correct enablement (`/stop` only
-   while streaming).
-4. Client commands do not create a user message bubble for slash text.
+   while streaming; `/compact` only idle + conversation; `/skills` /
+   `/mcp` only with workspace).
+4. Client commands do not create a user message bubble for slash text
+   (including `/compact`).
 5. Unavailable commands hidden or disabled with a clear rule.
 6. i18n keys + basic listbox a11y.
 7. Unknown `/text` + Enter with zero matches sends as plain text (tested).
 8. User docs list shipped commands when the **implementation** merges
    (not required for this design PR).
+9. `/skills` / `/mcp` land on the existing workspace pages; `/compact`
+   either force-compacts via API or stays hidden until that API ships.
 
 ## 7. Phasing
 
 | Phase | Deliverable |
 | --- | --- |
-| **1** (this issue MVP) | Palette + registry + P0 |
-| **2** | P1 open-surface deep links |
-| **3** | Dynamic skills + custom templates + `/compact` / `/fork` when supported |
+| **1** (this issue MVP) | Palette + registry + full P0 (incl. `/skills`, `/mcp`, `/compact`) |
+| **2** | Remaining P1 open-surface deep links (`/memory`, `/sandbox`, …) |
+| **3** | Dynamic skills + custom templates + `/fork` when supported |
 
 ## 8. Open questions (resolved)
 
@@ -273,6 +315,7 @@ list — if a seam is missing, the command must be `isAvailable: false`
 | Zero-match Enter while streaming? | Same as normal Enter → steer |
 | `/model` UX? | Open existing `ModelPicker` via controlled open seam |
 | `/new` while streaming? | Allow without auto-stop; stream ownership unchanged |
-| Include P1 in MVP? | No — P0 only; registry ready for P1 |
+| Include extra open-surface / compact in P0? | **Yes** — `/skills`, `/mcp`, `/compact` are P0 (promoted from issue P1/P2) |
 | Skills as dynamic entries? | Phase 3 |
 | Missing shell seam for a P0 command? | Hide command until seam exists in same PR |
+| `/compact` while streaming? | Hidden; do not race active run |
