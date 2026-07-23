@@ -1455,6 +1455,8 @@
     "header": {
       "copy": "Copy",
       "close": "Close",
+      "expand": "Expand preview",
+      "exitExpand": "Exit expand",
       "fullscreen": "Fullscreen",
       "exitFullscreen": "Exit fullscreen"
     },
@@ -1500,8 +1502,9 @@
     "artifactPanel": {
       "download": "Download",
       "close": "Close",
-      "fullscreen": "Fullscreen",
-      "exitFullscreen": "Exit fullscreen",
+      "expand": "Expand preview",
+      "exitExpand": "Exit expand",
+      "expandedPlaceholder": "Expanded in preview",
       "unknownType": "Unknown type",
       "justNow": "just now",
       "minutesAgo": "{n}m ago",

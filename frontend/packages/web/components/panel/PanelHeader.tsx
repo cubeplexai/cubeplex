@@ -5,6 +5,7 @@ import { X, Copy, Check, Plug, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
+import { cn } from '@/lib/utils'
 import { useMcpToolRegistryStore } from '@cubeplex/core'
 
 interface ToolHeaderSource {
@@ -29,11 +30,23 @@ interface PanelHeaderProps {
   source: PanelHeaderSource
   /** per-adapter extras (version popover, download, take-over…) rendered before the standard actions */
   actions?: ReactNode
-  fullscreen?: { active: boolean; onToggle: () => void }
+  /** In-app expand (theater). Prefer this over browser Fullscreen API. */
+  expand?: { active: boolean; onToggle: () => void }
+  /**
+   * Extra class for the expand control (e.g. `hidden md:inline-flex` to hide
+   * on mobile where the panel already fills the viewport).
+   */
+  expandClassName?: string
   onClose: () => void
 }
 
-export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeaderProps) {
+export function PanelHeader({
+  source,
+  actions,
+  expand,
+  expandClassName,
+  onClose,
+}: PanelHeaderProps) {
   const t = useTranslations('panel.header')
   const [copied, setCopied] = useState(false)
   const mcpEntry = useMcpToolRegistryStore((s) =>
@@ -114,13 +127,16 @@ export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeade
             )}
           </button>
         )}
-        {fullscreen && (
+        {expand && (
           <button
-            onClick={fullscreen.onToggle}
-            className="p-1 rounded-xs hover:bg-accent transition-colors duration-fast"
-            title={t(fullscreen.active ? 'exitFullscreen' : 'fullscreen')}
+            onClick={expand.onToggle}
+            className={cn(
+              'p-1 rounded-xs hover:bg-accent transition-colors duration-fast',
+              expandClassName,
+            )}
+            title={t(expand.active ? 'exitExpand' : 'expand')}
           >
-            {fullscreen.active ? (
+            {expand.active ? (
               <Minimize2 className="size-3.5 text-muted-foreground" />
             ) : (
               <Maximize2 className="size-3.5 text-muted-foreground" />

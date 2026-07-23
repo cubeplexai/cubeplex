@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubeplex/core'
 import type { Artifact, ArtifactVersion } from '@cubeplex/core'
@@ -21,6 +21,7 @@ import { FallbackPreview } from './FallbackPreview'
 import { SkillArtifactPreview } from './SkillArtifactPreview'
 import { OfficePreview } from './OfficePreview'
 import { buildDownloadUrl, buildPreviewUrl } from './previewUtils'
+import { ArtifactExpandDialog } from './ArtifactExpandDialog'
 
 const PdfPreview = dynamic(() => import('./PdfPreview').then((m) => m.PdfPreview), {
   ssr: false,
@@ -123,8 +124,7 @@ function ArtifactPanelHeader({
   selectedVersion,
   onSelectVersion,
   onClose,
-  onToggleFullscreen,
-  isFullscreen,
+  expand,
   workspaceId,
   portalContainer,
 }: {
@@ -133,8 +133,7 @@ function ArtifactPanelHeader({
   selectedVersion: number | null
   onSelectVersion: (version: number | null) => void
   onClose: () => void
-  onToggleFullscreen: () => void
-  isFullscreen: boolean
+  expand: { active: boolean; onToggle: () => void }
   workspaceId: string
   portalContainer: HTMLElement | null
 }) {
@@ -168,13 +167,15 @@ function ArtifactPanelHeader({
           </a>
         </>
       }
-      fullscreen={{ active: isFullscreen, onToggle: onToggleFullscreen }}
+      expand={expand}
+      // Mobile sheet already fills the viewport — hide expand control below md.
+      expandClassName="hidden md:inline-flex"
       onClose={onClose}
     />
   )
 }
 
-function PreviewContent({
+export function PreviewContent({
   artifact,
   version,
   workspaceId,
@@ -227,8 +228,23 @@ export function ArtifactPanel() {
   const artifact = conversationId && artifactId ? artifacts[conversationId]?.[artifactId] : null
 
   const { workspaceId } = useWorkspaceContext()
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const t = useTranslations('panel.artifactPanel')
+
+  // Identity-keyed expand: when the selected artifact (or panel view) changes,
+  // expanded becomes false without a post-paint effect — no stale theater flash.
+  const identityKey = conversationId && artifactId ? `${conversationId}:${artifactId}` : null
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const expanded = expandedKey !== null && expandedKey === identityKey
+
+  const openExpand = (): void => {
+    if (identityKey) setExpandedKey(identityKey)
+  }
+  const closeExpand = (): void => {
+    setExpandedKey(null)
+  }
+
+  const [railPortalEl, setRailPortalEl] = useState<HTMLElement | null>(null)
+  const [theaterPortalEl, setTheaterPortalEl] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
@@ -237,50 +253,86 @@ export function ArtifactPanel() {
     loadVersions(client, conversationId, artifactId)
   }, [artifact, conversationId, artifactId, loadVersions, workspaceId])
 
-  useEffect(() => {
-    const handleChange = (): void => {
-      setIsFullscreen(document.fullscreenElement === containerRef.current)
-    }
-    document.addEventListener('fullscreenchange', handleChange)
-    return () => document.removeEventListener('fullscreenchange', handleChange)
-  }, [])
-
-  const toggleFullscreen = (): void => {
-    const el = containerRef.current
-    if (!el) return
-    if (document.fullscreenElement === el) {
-      void document.exitFullscreen()
-    } else {
-      void el.requestFullscreen()
-    }
-  }
-
-  if (view.type !== 'artifact' || !artifact || !workspaceId) return null
+  if (view.type !== 'artifact' || !artifact || !workspaceId || !identityKey) return null
 
   const artifactVersions = versions[artifact.id] ?? []
   const currentSelectedVersion = selectedVersion[artifact.id] ?? null
 
+  const handleSelectVersion = (v: number | null): void => {
+    selectVersion(artifact.id, v)
+  }
+
+  const handlePanelClose = (): void => {
+    closeExpand()
+    close()
+  }
+
+  const headerProps = {
+    artifact,
+    versions: artifactVersions,
+    selectedVersion: currentSelectedVersion,
+    onSelectVersion: handleSelectVersion,
+    workspaceId,
+  }
+
   return (
-    <div ref={containerRef} className="flex flex-col h-full bg-background">
+    <div ref={setRailPortalEl} className="flex flex-col h-full bg-background">
       <ArtifactPanelHeader
-        artifact={artifact}
-        versions={artifactVersions}
-        selectedVersion={currentSelectedVersion}
-        onSelectVersion={(v) => selectVersion(artifact.id, v)}
-        onClose={close}
-        onToggleFullscreen={toggleFullscreen}
-        isFullscreen={isFullscreen}
-        workspaceId={workspaceId}
-        // eslint-disable-next-line react-hooks/refs
-        portalContainer={isFullscreen ? containerRef.current : null}
+        {...headerProps}
+        onClose={handlePanelClose}
+        expand={{
+          active: expanded,
+          onToggle: expanded ? closeExpand : openExpand,
+        }}
+        portalContainer={railPortalEl}
       />
       <div className="flex-1 overflow-hidden">
-        <PreviewContent
-          artifact={artifact}
-          version={currentSelectedVersion}
-          workspaceId={workspaceId}
-        />
+        {expanded ? (
+          <div
+            className="flex h-full items-center justify-center text-sm text-muted-foreground px-4
+              text-center"
+            data-testid="artifact-rail-placeholder"
+          >
+            {t('expandedPlaceholder')}
+          </div>
+        ) : (
+          <div data-testid="artifact-rail-preview">
+            <PreviewContent
+              artifact={artifact}
+              version={currentSelectedVersion}
+              workspaceId={workspaceId}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Mount theater only while expanded so PreviewContent has a single host. */}
+      {expanded && (
+        <ArtifactExpandDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) closeExpand()
+          }}
+          title={artifact.name}
+          identityKey={identityKey}
+          header={
+            <div ref={setTheaterPortalEl}>
+              <ArtifactPanelHeader
+                {...headerProps}
+                onClose={closeExpand}
+                expand={{ active: true, onToggle: closeExpand }}
+                portalContainer={theaterPortalEl}
+              />
+            </div>
+          }
+        >
+          <PreviewContent
+            artifact={artifact}
+            version={currentSelectedVersion}
+            workspaceId={workspaceId}
+          />
+        </ArtifactExpandDialog>
+      )}
     </div>
   )
 }
