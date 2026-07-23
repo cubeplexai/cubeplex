@@ -1,8 +1,10 @@
 """User-driven markdown artifact content updates (versioned object store).
 
-Unlike agent ``register_artifact_from_sandbox``, this path uploads the next
-version object first, then CAS-bumps the DB so the current version never points
-at a missing object.
+Unlike agent ``register_artifact_from_sandbox``, this path:
+1. Uploads bytes to a **request-unique staging** key (never races on final key).
+2. CAS-bumps artifact version **and** inserts the version row in one transaction.
+3. Promotes staging → final version key (re-upload from memory), then GC staging.
+4. Best-effort sandbox write-back (never fails the save).
 """
 
 from __future__ import annotations
@@ -10,19 +12,24 @@ from __future__ import annotations
 import mimetypes
 import posixpath
 import re
+import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models.artifact import Artifact
+from cubeplex.models.artifact_version import ArtifactVersion
 from cubeplex.objectstore import get_objectstore_client
-from cubeplex.repositories import ArtifactRepository, ArtifactVersionRepository
+from cubeplex.repositories import ArtifactRepository
 
 MAX_CONTENT_BYTES = 2_000_000
 _MD_EXT = re.compile(r"\.(md|markdown|mdx)$", re.IGNORECASE)
 _MD_MIME = frozenset({"text/markdown", "text/x-markdown"})
+_WORKSPACE_ROOT = "/workspace"
 
 
 class ArtifactContentError(Exception):
@@ -70,8 +77,18 @@ def is_markdown_eligible(artifact: Artifact) -> bool:
     return name is not None and bool(_MD_EXT.search(name))
 
 
+def _under_workspace(abs_path: str) -> bool:
+    """True if *abs_path* is ``/workspace`` or a path strictly under it."""
+    if abs_path == _WORKSPACE_ROOT:
+        return True
+    return abs_path.startswith(_WORKSPACE_ROOT + "/")
+
+
 def resolve_sandbox_write_path(artifact: Artifact) -> tuple[str | None, str | None]:
-    """Return ``(abs_path, error_reason)`` for best-effort sandbox write."""
+    """Return ``(abs_path, error_reason)`` for best-effort sandbox write.
+
+    Writes are restricted to ``/workspace`` (and children) after normalization.
+    """
     path = (artifact.path or "").strip()
     if not path:
         return None, "no_path"
@@ -90,11 +107,8 @@ def resolve_sandbox_write_path(artifact: Artifact) -> tuple[str | None, str | No
 
     if ".." in target.split("/"):
         return None, "path_escape"
-    if not target.startswith("/workspace"):
-        # Soft rule aligned with sandbox file API; still allow other workdirs
-        # when already absolute under a single root without escape.
-        if not target.startswith("/"):
-            return None, "path_escape"
+    if not target.startswith("/") or not _under_workspace(target):
+        return None, "path_escape"
 
     if looks_dir and not entry:
         return None, "path_is_directory"
@@ -143,9 +157,12 @@ async def update_artifact_content(
     current_prefix = f"artifacts/{conversation_id}/{artifact_id}/v{artifact.version}/"
     try:
         existing = await store.list_objects(current_prefix)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed listing artifact objects for {}", artifact_id)
-        existing = []
+        raise ArtifactContentError(
+            "list_failed",
+            "Could not verify artifact contents; retry later",
+        ) from exc
     # Multi-file version: reject (v1) so we do not shrink the version tree.
     if len(existing) > 1:
         raise ArtifactContentError(
@@ -154,41 +171,41 @@ async def update_artifact_content(
         )
 
     next_version = expected_version + 1
-    key = f"artifacts/{conversation_id}/{artifact_id}/v{next_version}/{filename}"
+    staging_key = (
+        f"artifacts/{conversation_id}/{artifact_id}/staging/{secrets.token_hex(16)}/{filename}"
+    )
+    final_key = f"artifacts/{conversation_id}/{artifact_id}/v{next_version}/{filename}"
     mime = artifact.mime_type or mimetypes.guess_type(filename)[0] or "text/markdown"
 
-    # Upload first so DB never points at a missing object.
-    await store.upload_file(key, content_bytes, content_type=mime)
+    # Staging first: concurrent losers never share a final version key.
+    await store.upload_file(staging_key, content_bytes, content_type=mime)
 
-    bumped = await repo.cas_bump_version(
-        artifact_id,
-        expected_version=expected_version,
-    )
-    if bumped is None:
-        try:
-            await store.delete_file(key)
-        except Exception:
-            logger.warning("Failed to GC orphan object after CAS miss: {}", key)
-        raise ArtifactContentError(
-            "version_conflict",
-            f"Version conflict: expected {expected_version}",
-        )
-
-    version_repo = ArtifactVersionRepository(session, org_id=org_id, workspace_id=workspace_id)
     try:
-        await version_repo.create(
-            artifact_id=bumped.id,
-            version=bumped.version,
-            name=bumped.name,
-            description=bumped.description,
-            path=bumped.path,
-            entry_file=bumped.entry_file,
-            mime_type=bumped.mime_type or mime,
+        bumped = await _cas_bump_and_insert_version(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            expected_version=expected_version,
+            mime=mime,
         )
-    except Exception:
-        # Compensate: best-effort leave orphan object; do not claim success.
-        logger.exception("Failed to insert artifact version row for {}", artifact_id)
+        if bumped is None:
+            raise ArtifactContentError(
+                "version_conflict",
+                f"Version conflict: expected {expected_version}",
+            )
+        # Promote to the durable version key only after we own the version number.
+        await store.upload_file(final_key, content_bytes, content_type=mime)
+    except ArtifactContentError:
         raise
+    except Exception:
+        logger.exception("Failed CAS/promote for artifact {}", artifact_id)
+        raise
+    finally:
+        try:
+            await store.delete_file(staging_key)
+        except Exception:
+            logger.warning("Failed to GC staging object: {}", staging_key)
 
     sandbox_synced, sandbox_reason = await _best_effort_sandbox_write(
         session,
@@ -204,6 +221,51 @@ async def update_artifact_content(
         sandbox_synced=sandbox_synced,
         sandbox_sync_reason=sandbox_reason,
     )
+
+
+async def _cas_bump_and_insert_version(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    workspace_id: str,
+    artifact_id: str,
+    expected_version: int,
+    mime: str,
+) -> Artifact | None:
+    """Lock row, CAS bump version, insert version snapshot — one transaction."""
+    stmt = (
+        select(Artifact)
+        .where(
+            cast(Any, Artifact.id) == artifact_id,
+            cast(Any, Artifact.org_id) == org_id,
+            cast(Any, Artifact.workspace_id) == workspace_id,
+        )
+        .with_for_update()
+    )
+    result = await session.execute(stmt)
+    artifact = result.scalar_one_or_none()
+    if artifact is None or artifact.version != expected_version:
+        await session.rollback()
+        return None
+
+    artifact.version = expected_version + 1
+    artifact.updated_at = datetime.now(UTC)
+    session.add(
+        ArtifactVersion(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            artifact_id=artifact.id,
+            version=artifact.version,
+            name=artifact.name,
+            description=artifact.description,
+            path=artifact.path,
+            entry_file=artifact.entry_file,
+            mime_type=artifact.mime_type or mime,
+        )
+    )
+    await session.commit()
+    await session.refresh(artifact)
+    return artifact
 
 
 async def _best_effort_sandbox_write(

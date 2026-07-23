@@ -56,3 +56,14 @@ def test_resolve_sandbox_write_path_escape() -> None:
     path, reason = resolve_sandbox_write_path(_art(entry_file="../secret.md"))
     assert path is None
     assert reason == "path_escape"
+
+
+def test_resolve_sandbox_write_path_rejects_outside_workspace() -> None:
+    path, reason = resolve_sandbox_write_path(_art(path="/etc/config.md", entry_file=None))
+    assert path is None
+    assert reason == "path_escape"
+    path2, reason2 = resolve_sandbox_write_path(
+        _art(path="/workspace/../etc/config.md", entry_file=None)
+    )
+    assert path2 is None
+    assert reason2 == "path_escape"
