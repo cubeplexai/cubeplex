@@ -710,10 +710,15 @@ GET  /api/v1/system/info     — confirm deployment_mode
 POST /api/v1/auth/register   — single-tenant auto-setup
 POST /api/v1/auth/login      — cookie jar
 GET  /api/v1/auth/me         — receive CSRF cookie (safe methods only)
+POST /api/v1/onboarding      — only if this is the deployment's first user
 POST /ws/{ws}/conversations  — conv_id
 POST .../conversations/{conv}/messages — run_id
 GET  .../runs/{run}/stream   — SSE; assert text_delta arrives
 ```
+
+The first user registered on a fresh deployment lands in pending-owner state
+with no workspace, so the script runs onboarding to create one. Every later
+user is attached to the singleton org at registration and skips that step.
 
 To exercise the sandbox path too:
 

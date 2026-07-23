@@ -678,10 +678,14 @@ GET  /api/v1/system/info     — 确认 deployment_mode
 POST /api/v1/auth/register   — 单租户自动初始化
 POST /api/v1/auth/login      — 建立 cookie
 GET  /api/v1/auth/me         — 获取 CSRF cookie（仅安全方法）
+POST /api/v1/onboarding      — 仅当该用户是本部署的第一个用户
 POST /ws/{ws}/conversations  — 得到 conv_id
 POST .../conversations/{conv}/messages — 得到 run_id
 GET  .../runs/{run}/stream   — SSE；断言 text_delta 到达
 ```
+
+全新部署上注册的第一个用户处于 pending-owner 状态、还没有 workspace，脚本会
+调用 onboarding 创建一个。之后注册的用户在注册时就被挂进单例 org，跳过该步。
 
 顺带验证 sandbox 路径：
 

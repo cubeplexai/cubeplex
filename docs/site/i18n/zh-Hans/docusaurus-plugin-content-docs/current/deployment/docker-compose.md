@@ -203,9 +203,12 @@ PROMPT="Say the word hello and nothing else." \
 `e2e.sh` 执行流程：
 
 ```
-注册 → 单租户自动初始化 → 创建对话
+注册 → 登录 → 确定 workspace → 创建对话
      → 发送消息 → SSE 流 → 断言收到 text_delta
 ```
+
+全新部署上注册的第一个用户还没有 workspace，脚本会调用 onboarding 创建一个；
+之后注册的用户在注册时就已经拿到 workspace，跳过该步。
 
 两个脚本默认针对 `localhost`；用 `HOST`、`BACKEND_PORT`、`FRONTEND_PORT`
 覆盖以针对远程主机运行。

@@ -210,9 +210,13 @@ PROMPT="Say the word hello and nothing else." \
 `e2e.sh` drives:
 
 ```
-register → single-tenant auto-setup → create conversation
+register → login → resolve workspace → create conversation
         → POST message → SSE stream → assert text_delta arrived
 ```
+
+On a fresh deployment the first registered user has no workspace yet, so the
+script runs onboarding to create one; later users already have one from
+registration.
 
 Both scripts default to `localhost`; override with `HOST`, `BACKEND_PORT`,
 `FRONTEND_PORT` to run against a remote host.

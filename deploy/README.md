@@ -29,6 +29,10 @@ deploy/
 │   ├── backend/Dockerfile
 │   ├── frontend/Dockerfile
 │   └── sandbox/               # agent sandbox image (Dockerfile + neko browser + fonts)
+├── scripts/lib/               # verification logic shared by both targets
+│   ├── common.sh              # step/fail helpers, proxy handling
+│   ├── http-probes.sh         # smoke probes (health, system info, frontend)
+│   └── e2e-core.sh            # the auth + chat round-trip
 ├── kubernetes/                # Helm chart + scripts + docs
 │   ├── README.md
 │   ├── INSTALL.md             # English install guide
@@ -46,6 +50,12 @@ deploy/
     ├── config/
     └── scripts/
 ```
+
+Each target's `scripts/smoke-test.sh` and `scripts/e2e.sh` only work out how to
+reach that deployment — published host ports for compose, ingress plus
+`--resolve` for kubernetes — then hand off to `deploy/scripts/lib/`. Checks that
+apply to both live in the shared library; the platform-native parts
+(`docker compose ps`, `kubectl rollout status`) stay in the entry points.
 
 The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,
 `PIP_INDEX_URL`, `UV_INDEX_URL`, `NPM_REGISTRY`) and `build-and-push.sh`
