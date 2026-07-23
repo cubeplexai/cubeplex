@@ -69,14 +69,16 @@ export function SharePanel({ conversationId }: SharePanelProps) {
     if (open) void loadShares()
   }, [open, loadShares])
 
-  // Slash `/share` (and other chrome) requests open via composer-chrome store.
+  // Slash `/share` requests open via composer-chrome store (consumable).
   const shareRequest = useComposerChromeStore((s) => s.shareRequest)
+  const consumeShareRequest = useComposerChromeStore((s) => s.consumeShareRequest)
   useEffect(() => {
     if (!shareRequest) return
     if (shareRequest.conversationId !== conversationId) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- open on external request nonce
     setOpen(true)
-  }, [shareRequest, conversationId])
+    consumeShareRequest(shareRequest.nonce)
+  }, [shareRequest, conversationId, consumeShareRequest])
 
   const handleCreate = useCallback(async () => {
     setCreating(true)

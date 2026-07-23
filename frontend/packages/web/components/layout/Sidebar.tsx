@@ -106,6 +106,7 @@ export function ConversationRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const renameRequest = useComposerChromeStore((s) => s.renameRequest)
+  const consumeRenameRequest = useComposerChromeStore((s) => s.consumeRenameRequest)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -119,13 +120,14 @@ export function ConversationRow({
     }
   }, [isEditing])
 
-  // Slash `/rename` requests edit mode on the matching row.
+  // Slash `/rename` requests edit mode on the matching row (consumable).
   useEffect(() => {
     if (!renameRequest) return
     if (renameRequest.conversationId !== convo.id) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- open on external request nonce
     setIsEditing(true)
-  }, [renameRequest, convo.id])
+    consumeRenameRequest(renameRequest.nonce)
+  }, [renameRequest, convo.id, consumeRenameRequest])
 
   const commitEdit = async (): Promise<void> => {
     const next = draft.trim()

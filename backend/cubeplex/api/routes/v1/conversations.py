@@ -1912,8 +1912,9 @@ async def compact_conversation(
 ) -> dict[str, object]:
     """Force context compaction for the conversation (slash ``/compact``).
 
-    Rejects with 409 when a run is active. Reuses cubepi compaction state in
-    the checkpointer; does not rewrite the UI transcript.
+    Rejects with 409 when a run is active or another compact is in flight.
+    Reuses cubepi compaction state in the checkpointer; does not rewrite the
+    UI transcript. Active-run is re-checked around the write (see service).
     """
     from cubeplex.services.conversation_compact import force_compact_conversation
 
@@ -1930,22 +1931,44 @@ async def compact_conversation(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    active_run = await get_active_run(
-        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
-    )
-    if active_run is not None:
+    lock_key = f"{rds.key_prefix}:conversation_compact_lock:{conversation_id}"
+    acquired = bool(await rds.client.set(lock_key, "1", nx=True, ex=120))
+    if not acquired:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot compact while a run is active",
+            detail="Compaction already in progress",
         )
 
-    result = await force_compact_conversation(conversation_id)
-    return {
-        "ok": result.ok,
-        "compacted": result.compacted,
-        "reason": result.reason,
-        "boundary": result.boundary,
-    }
+    async def _run_active() -> bool:
+        return (
+            await get_active_run(rds.client, prefix=rds.key_prefix, conversation_id=conversation_id)
+            is not None
+        )
+
+    try:
+        if await _run_active():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot compact while a run is active",
+            )
+
+        result = await force_compact_conversation(
+            conversation_id,
+            is_busy=_run_active,
+        )
+        if not result.ok and result.reason in {"busy", "busy_after_save"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot compact while a run is active",
+            )
+        return {
+            "ok": result.ok,
+            "compacted": result.compacted,
+            "reason": result.reason,
+            "boundary": result.boundary,
+        }
+    finally:
+        await rds.client.delete(lock_key)
 
 
 @router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
