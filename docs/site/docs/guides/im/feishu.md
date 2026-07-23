@@ -51,9 +51,9 @@ Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions,
 
 After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.
 
-:::info 📸 Screenshot
+:::info 📸 Screenshot placeholder
 **Capture:** The app Permissions & Scopes page with the message read/send, group-info read (`im:chat:readonly`), and contact email scopes selected.
-![Feishu permissions and scopes page](/img/im/feishu/console-permissions.png)
+**Asset:** `/img/im/feishu/console-permissions.png`
 :::
 
 ## Step 4 — Choose how events reach CubePlex
@@ -103,9 +103,9 @@ Both are optional fields when binding. If you set an Encrypt Key, Feishu signs e
 
 Still under Event Subscriptions, add the bot-message-received event so Feishu forwards messages to CubePlex. Without this subscription the bot never sees any messages.
 
-:::info 📸 Screenshot
+:::info 📸 Screenshot placeholder
 **Capture:** The "Add events" dialog with the receive-message event subscribed.
-![Feishu message event subscription](/img/im/feishu/console-subscribe-message.png)
+**Asset:** `/img/im/feishu/console-subscribe-message.png`
 :::
 
 ## Step 6 — Bind the bot in CubePlex

@@ -51,9 +51,9 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 
 添加范围后，请 **发布新应用版本**，以便租户授权生效——在版本发布前，Feishu 不会应用新范围。
 
-:::info 📸 截图
+:::info 📸 截图占位符
 **截图内容：** 应用的“权限与范围”页面，已选择消息读取/发送、群组信息读取（`im:chat:readonly`）和联系人电子邮箱范围。
-![Feishu 权限与范围页面](/img/im/feishu/console-permissions.png)
+**资源：** `/img/im/feishu/console-permissions.png`
 :::
 
 ## 步骤 4 — 选择事件到达 CubePlex 的方式
@@ -103,9 +103,9 @@ Feishu 会向该 URL 发送一次性 `url_verification` 验证挑战；一旦账
 
 仍在事件订阅中，添加机器人接收消息事件，以便 Feishu 将消息转发给 CubePlex。没有此订阅，机器人永远无法看到任何消息。
 
-:::info 📸 截图
+:::info 📸 截图占位符
 **截图内容：** “添加事件”对话框，已订阅接收消息事件。
-![Feishu 消息事件订阅](/img/im/feishu/console-subscribe-message.png)
+**资源：** `/img/im/feishu/console-subscribe-message.png`
 :::
 
 ## 步骤 6 — 在 CubePlex 中绑定机器人

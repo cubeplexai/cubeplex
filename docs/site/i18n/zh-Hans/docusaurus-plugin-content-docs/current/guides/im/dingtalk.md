@@ -59,9 +59,9 @@ CubePlex 通过你的 **AppKey** 标识机器人（它同时用作机器人的 r
 
 群组话题标题使用钉钉在每个机器人接收回调中已经包含的 `conversationTitle` 字段——群组名称 **不需要额外权限**。
 
-:::info 📸 截图
+:::info 📸 截图占位符
 **截图内容：** 应用 Permissions 页面，已授予机器人消息收发权限和用户资料（电子邮箱）读取权限。
-![钉钉权限页面](/img/im/dingtalk/permissions.png)
+**资源：** `/img/im/dingtalk/permissions.png`
 :::
 
 ## 步骤 5 — 在 CubePlex 中绑定机器人
