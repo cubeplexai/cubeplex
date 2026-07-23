@@ -70,6 +70,13 @@ Unnecessary; data is already dual-metric.
 - Default for first visit: **`tokens`**.
 - Persist: `localStorage` key e.g. `cubeplex.insights.metric`
   (`'tokens' | 'cost'`). Invalid/missing → tokens.
+- **SSR / hydration (required):** First paint must be deterministic —
+  always initialize React state to **`tokens`**. Read/validate
+  `localStorage` in a client `useEffect` (or equivalent after mount) and
+  then switch to `cost` if stored. Do **not** read `localStorage` in the
+  `useState` initializer (that desyncs SSR markup vs client first paint).
+  Brief flash to tokens for cost-preferring returning users is acceptable;
+  hydration warnings are not.
 
 ### Token definition (locked)
 
@@ -97,7 +104,17 @@ avg $/call.
 **Charts / rankings:**
 
 - Value accessor: `input_tokens + output_tokens` (or precomputed helper).
-- `topNWithOther` / `capTimeseries` rank by token total.
+- **Frontend:** `topNWithOther` / `capTimeseries` must rank by the active
+  metric (token total in tokens mode, cost in cost mode). Today both
+  hard-code `cost_amount_micro` — parameterize them.
+- **Backend:** `BillingRepository.get_timeseries` collapses series above
+  `max_series` by **cost** (`bucket_totals` sums `cost_amount_micro`).
+  When prices are unset, every cost is 0 and high-token series can be
+  collapsed into `__other` before the UI sees them. **Tokens mode requires
+  token-aware ranking at the server as well** — e.g. pass a `rank_by`
+  query param (`cost` | `tokens`) or raise/adjust `max_series` so the
+  frontend receives enough series and re-ranks. Do not claim
+  “frontend-only” if server capping still discards high-token buckets.
 - `StackedChart` pivot uses token totals; Y-axis / tooltip use compact
   token formatting (not `$`).
 
@@ -105,6 +122,15 @@ avg $/call.
 
 - Primary sort column = tokens; cost column optional secondary or hidden
   in tokens mode.
+
+**Filters vs KPIs (pre-existing; document, do not silently re-scope):**
+
+- Timeseries requests already pass workspace/model filters; the summary
+  endpoint and `fetchCostSummary` today do **not**. KPI tiles and
+  cost-empty hint therefore use **org-wide** totals for the date range
+  (same as current cost mode). This feature does **not** require fixing
+  summary filtering unless product wants it in scope — if deferred, state
+  it in the plan and keep success criteria honest (hint/KPIs are org-wide).
 
 ### Cost mode
 
@@ -131,6 +157,8 @@ avg $/call.
 
 - Admin insights only (existing page). Workspace-member usage surface is
   out of scope.
+- Backend change is **in scope only** for token-aware timeseries ranking /
+  series cap (narrow). No new aggregate tables or token schema.
 
 ## Out of scope
 
@@ -140,16 +168,20 @@ avg $/call.
 - Real-time streaming org usage
 - Renaming the whole Insights IA (optional phase 3)
 - Non-admin usage dashboards
+- Fixing pre-existing summary API lack of workspace/model filters
+  (optional follow-up; document KPI org-wide behavior)
 
 ## Success criteria
 
 1. Fresh visit defaults to **token** metrics (not $0 cost as the hero).
 2. Toggle switches KPIs + stacked ranking/series without full reload.
 3. Zero prices + non-zero traffic → tokens mode shows meaningful non-zero
-   numbers.
-4. Cost mode works when prices are set; $0 + tokens>0 shows pricing hint.
+   numbers **and** ranks/caps series by tokens (not cost-zero order).
+4. Cost mode works when prices are set; $0 + tokens>0 shows pricing hint
+   (org-wide summary totals unless summary filters are fixed).
 5. Cache section remains valid in both modes.
-6. Preference persists across reloads (localStorage).
+6. Preference persists across reloads (localStorage) without hydration
+   mismatch.
 7. en/zh strings; toggle is keyboard/accessible.
 
 ## Resolved product choices
@@ -161,7 +193,8 @@ avg $/call.
 | Preference | localStorage |
 | Avg in tokens mode | tokens/call |
 | Nav rename to “Usage” | later optional |
-| Backend API | reuse existing token fields |
+| Backend API | reuse existing token fields; narrow rank-by for timeseries cap |
+| Summary filters | pre-existing org-wide KPIs; defer filter parity |
 
 ## Related
 
