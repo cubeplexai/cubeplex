@@ -46,7 +46,9 @@ else → ArtifactCard
 
 ## Non-goals
 
-- Collaborative rich-text / multi-user CRDT.
+- Collaborative rich-text / multi-user CRDT / live multi-user cursors.
+- Full WYSIWYG document model that rewrites markdown on every keystroke
+  (Notion-style). Source markdown remains the edit surface.
 - Inline edit for non-markdown types (PDF, office, websites, binary) in v1.
 - Guaranteed sandbox rewrite when sandbox is dead or path missing.
 - Changing the agent `save_artifact` tool contract beyond light awareness that
@@ -72,6 +74,7 @@ a clear single file target).
 ### Inline card UX
 
 ```text
+Read:
 ┌─────────────────────────────────────────┐
 │ 📄 title.md                    v3  ⋮    │  header: name, version, open panel, download
 ├─────────────────────────────────────────┤
@@ -79,12 +82,24 @@ a clear single file target).
 │  …                                      │
 │  [Edit]                                 │  explicit Edit; selection does not enter edit
 └─────────────────────────────────────────┘
+
+Edit:
+┌─────────────────────────────────────────┐
+│ 📄 title.md                    v3  ⋮    │
+├─────────────────────────────────────────┤
+│ [B I H • # `]     Write | Preview       │  format toolbar + mode toggle
+├─────────────────────────────────────────┤
+│  1  # Heading…                          │  CodeMirror markdown source
+│  2  paragraph with **bold**…            │  (or live Preview via same renderer)
+│  …                                      │
+│  [Cancel]                    [Save]     │  dirty state; Cmd/Ctrl+S saves
+└─────────────────────────────────────────┘
 ```
 
 | Mode | Behavior |
 | --- | --- |
 | Read | Fetch preview text for current version; render with shared markdown renderer; selection enabled for quote |
-| Edit | Monospace textarea (MVP); dirty state; **Save** / **Cancel** |
+| Edit | **Real markdown source editor** (not a bare `<textarea>`) — see Editor below; dirty state; **Save** / **Cancel** |
 | Save | PUT new content → new version; show new body; toast on success or partial sandbox fail |
 | Error | Keep edit buffer; error toast |
 
@@ -94,6 +109,33 @@ Click targets:
   drag must **not** enter edit.
 - **Header / open panel** → existing `ArtifactPanel`.
 - **Quote control** → only when selection is non-empty (floating toolbar).
+
+### Editor (v1 requirement — not deferred)
+
+Editing is the primary value of this feature. Shipping a plain monospace
+`<textarea>` is **not acceptable** for v1.
+
+| Requirement | Detail |
+| --- | --- |
+| Surface | CodeMirror 6 markdown source editor (`@codemirror/lang-markdown` or thin React wrapper such as `@uiw/react-codemirror`) |
+| Highlighting | Markdown syntax highlighting; theme-aware (match app light/dark) |
+| Layout | Soft wrap for prose; min height ≈ read card; grow with content up to a max then scroll |
+| Write / Preview | Toggle (or split when wide enough): **Write** = source editor; **Preview** = same `MarkdownWithCitations` / prose renderer as read mode so save-what-you-see matches chat |
+| Format helpers | Lightweight toolbar that wraps/inserts common markdown: bold, italic, heading, list, link, inline/fenced code — pure source transforms, not a separate document model |
+| Keys | `Cmd/Ctrl+S` → save; `Esc` → cancel when clean, confirm-or-stay when dirty (product may soften to toast + stay) |
+| Focus | Enter edit focuses the editor; leave edit restores sensible focus (Edit button or card) |
+| Bytes | Editor edits the raw markdown string; save sends exact UTF-8 text — no silent reformat / prettier on save |
+
+**Rejected alternatives:**
+
+| Option | Why not for v1 |
+| --- | --- |
+| Bare `<textarea>` | Core UX of the feature; looks unfinished; no highlight/toolbar/keys |
+| Full WYSIWYG (TipTap/ProseMirror Notion-style) | Mangles agent markdown; heavy model; out of scope for collaborative rich-text non-goal |
+| Monaco full IDE | Overkill weight for chat-inline cards; CodeMirror is enough |
+
+Extract a reusable `MarkdownSourceEditor` component so the side panel can
+adopt the same editor later without a second implementation.
 
 ### Quote → composer
 
@@ -175,6 +217,8 @@ No change to `save_artifact` schema required for v1.
 | A. Panel-only edit | Less chat friction relief; rejected as primary UX |
 | B. Inline read + edit + version API + best-effort sandbox + quote | **Chosen** — matches image-class deliverables |
 | C. Always require live sandbox on save | Too brittle; object store is the durable history |
+| D. Bare `<textarea>` for edit MVP | **Rejected** — edit is the core feature; ship CodeMirror source + Preview in v1 |
+| E. Full WYSIWYG (TipTap/ProseMirror) | Deferred / out of scope — source markdown stays canonical for agents |
 
 ## Phasing
 
@@ -192,14 +236,16 @@ Implementation may ship 1–2 together if small; keep phases testable independen
 1. Markdown document artifacts render **inline** with readable rendered content.
 2. User can Edit → change text → **Save** → version increments; preview/download
    serve new content.
-3. Prior versions remain listable in the panel version popover.
-4. When sandbox + path are valid, file at `path` (or `path/entry_file`) updates;
+3. Edit mode uses a **real markdown source editor** (CodeMirror 6 + highlight +
+   Write/Preview + basic format toolbar) — **not** a bare `<textarea>`.
+4. Prior versions remain listable in the panel version popover.
+5. When sandbox + path are valid, file at `path` (or `path/entry_file`) updates;
    when not, save still succeeds with explicit partial status.
-5. Selecting text offers **quote into composer** with selection + artifact
+6. Selecting text offers **quote into composer** with selection + artifact
    context.
-6. Non-markdown documents/images unchanged.
-7. Authz and conversation soft-delete rules match existing artifact routes.
-8. E2E covers happy path save; unit/e2e cover concurrency, sandbox missing,
+7. Non-markdown documents/images unchanged.
+8. Authz and conversation soft-delete rules match existing artifact routes.
+9. E2E covers happy path save; unit/e2e cover concurrency, sandbox missing,
    path missing, and authz.
 
 ## Open questions (resolved for v1 unless product overrides)
@@ -207,7 +253,8 @@ Implementation may ship 1–2 together if small; keep phases testable independen
 1. **Enter edit:** explicit Edit button (+ optional double-click); not single-click body.
 2. **Concurrency:** `expected_version` → 409 on mismatch.
 3. **Directory artifacts:** edit only when `entry_file` is markdown.
-4. **Editor:** monospace textarea MVP; richer editor later.
+4. **Editor:** CodeMirror 6 markdown source + Write/Preview + format toolbar
+   in v1 (no bare textarea; no full WYSIWYG).
 5. **Max size:** 2 MB UTF-8 text default.
 
 ## Related code
