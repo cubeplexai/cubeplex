@@ -1,9 +1,16 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useShallow } from 'zustand/react/shallow'
-import { useMessageStore, useAttachmentStore, createApiClient } from '@cubeplex/core'
+import { toast } from 'sonner'
+import {
+  useMessageStore,
+  useAttachmentStore,
+  createApiClient,
+  compactConversation,
+} from '@cubeplex/core'
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -11,9 +18,18 @@ import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
 import { ModelPicker } from '@/components/chat/ModelPicker'
+import { CommandPopover } from '@/components/chat/CommandPopover'
 import { reasoningFromThinking } from '@/lib/reasoning-control'
 import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
+import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
+import {
+  filterCommands,
+  parseLeadingCommandToken,
+  SLASH_COMMANDS,
+  type SlashCommand,
+  type SlashCommandContext,
+} from '@/lib/slash-commands'
 
 interface InputBarProps {
   conversationId?: string
@@ -41,13 +57,22 @@ export function InputBar({
 }: InputBarProps): React.ReactElement {
   const t = useTranslations('input')
   const tShell = useTranslations('shellLayout')
+  const tSlash = useTranslations('slashCommands')
+  const router = useRouter()
   const [content, setContent] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
+  const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0)
+  const [slashHelpMode, setSlashHelpMode] = useState(false)
+  /** Esc dismisses until the draft changes (keeps `/…` text without reopening). */
+  const [slashDismissed, setSlashDismissed] = useState(false)
   const send = useMessageStore((s) => s.send)
   const cancelStream = useMessageStore((s) => s.cancelStream)
   const steer = useMessageStore((s) => s.steer)
   const { workspaceId } = useWorkspaceContext()
+  const requestOpenShare = useComposerChromeStore((s) => s.requestOpenShare)
+  const requestRename = useComposerChromeStore((s) => s.requestRename)
   const messageIsStreaming =
     useMessageStore((s) =>
       conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false,
@@ -61,6 +86,7 @@ export function InputBar({
   )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const slashListboxId = useId()
 
   const upload = useAttachmentStore((s) => s.upload)
   const clearStaging = useAttachmentStore((s) => s.clear)
@@ -185,8 +211,145 @@ export function InputBar({
     }
   }
 
+  const clearComposer = useCallback((): void => {
+    setContent('')
+    setSlashHelpMode(false)
+    setSlashActiveIndex(0)
+    resetTextareaHeight()
+  }, [])
+
+  const slashToken = parseLeadingCommandToken(content)
+  const slashOpen = !slashDismissed && (slashToken !== null || slashHelpMode)
+
+  const runSlashCommand = useCallback(
+    async (cmd: SlashCommand, ctx: SlashCommandContext): Promise<void> => {
+      // help keeps the popover open with full list; other commands clear draft.
+      if (cmd.id === 'help') {
+        setSlashHelpMode(true)
+        setContent('/')
+        setSlashActiveIndex(0)
+        await cmd.run(ctx)
+        return
+      }
+      setSlashHelpMode(false)
+      clearComposer()
+      await cmd.run(ctx)
+    },
+    [clearComposer],
+  )
+
+  const slashCtx: SlashCommandContext = useMemo(
+    () => ({
+      conversationId,
+      workspaceId: workspaceId ?? null,
+      isStreaming: messageIsStreaming,
+      effortAvailable: Boolean(workspaceId),
+      modelPickerAvailable: Boolean(workspaceId),
+      compactAvailable: true,
+      cancelStream: (id: string) => {
+        const client = createApiClient('')
+        if (workspaceId) client.setWorkspaceId(workspaceId)
+        void cancelStream(client, id)
+      },
+      openModelPicker: () => setModelPickerOpen(true),
+      openEffortControl: () => setModelPickerOpen(true),
+      startRename: () => {
+        if (conversationId) requestRename(conversationId)
+      },
+      openAttach: () => fileInputRef.current?.click(),
+      createNewChat: () => {
+        if (workspaceId) {
+          router.push(`/w/${workspaceId}`)
+        }
+      },
+      openShare: () => {
+        if (conversationId) requestOpenShare(conversationId)
+      },
+      openSkills: () => {
+        if (workspaceId) router.push(`/w/${workspaceId}/skills`)
+      },
+      openMcp: () => {
+        if (workspaceId) router.push(`/w/${workspaceId}/mcp`)
+      },
+      compactConversation: async (id: string) => {
+        const client = createApiClient('')
+        if (workspaceId) client.setWorkspaceId(workspaceId)
+        try {
+          const result = await compactConversation(client, id)
+          if (result.compacted) {
+            toast.success(tSlash('compactSuccess'))
+          } else {
+            toast.message(tSlash('compactSkipped'))
+          }
+        } catch (err) {
+          console.error('Failed to compact conversation:', err)
+          toast.error(tSlash('compactFailed'))
+        }
+      },
+      showHelp: () => {
+        setSlashHelpMode(true)
+        setSlashActiveIndex(0)
+      },
+    }),
+    [
+      conversationId,
+      workspaceId,
+      messageIsStreaming,
+      cancelStream,
+      requestRename,
+      requestOpenShare,
+      router,
+      tSlash,
+    ],
+  )
+
+  const slashQuery = slashHelpMode ? '' : (slashToken?.query ?? '')
+  const slashCommands = useMemo(
+    () => filterCommands(SLASH_COMMANDS, slashQuery, slashCtx),
+    [slashQuery, slashCtx],
+  )
+
+  // Keep highlight in range when the filtered list shrinks.
+  useEffect(() => {
+    if (slashActiveIndex >= slashCommands.length) {
+      setSlashActiveIndex(Math.max(0, slashCommands.length - 1))
+    }
+  }, [slashCommands.length, slashActiveIndex])
+
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.nativeEvent.isComposing) return
+
+    if (slashOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        if (slashCommands.length === 0) return
+        setSlashActiveIndex((i) => (i + 1) % slashCommands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (slashCommands.length === 0) return
+        setSlashActiveIndex((i) => (i - 1 + slashCommands.length) % slashCommands.length)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashHelpMode(false)
+        setSlashDismissed(true)
+        return
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+        if (slashCommands.length > 0) {
+          e.preventDefault()
+          const cmd = slashCommands[slashActiveIndex] ?? slashCommands[0]
+          if (cmd) void runSlashCommand(cmd, slashCtx)
+          return
+        }
+        // Zero matches: fall through to normal Enter matrix.
+        if (e.key === 'Tab') return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (hasPendingHitl) return
@@ -199,7 +362,12 @@ export function InputBar({
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-    setContent(e.target.value)
+    const next = e.target.value
+    setContent(next)
+    setSlashDismissed(false)
+    if (slashHelpMode && parseLeadingCommandToken(next) === null) {
+      setSlashHelpMode(false)
+    }
     const ta = textareaRef.current
     if (ta) {
       ta.style.height = 'auto'
@@ -302,9 +470,17 @@ export function InputBar({
         </div>
       )}
       <div
-        className="flex flex-col rounded-lg border border-transparent bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 has-[[aria-expanded=true]]:border-primary has-[[aria-expanded=true]]:ring-2 has-[[aria-expanded=true]]:ring-ring/30 duration-base"
+        className="relative flex flex-col rounded-lg border border-transparent bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 has-[[aria-expanded=true]]:border-primary has-[[aria-expanded=true]]:ring-2 has-[[aria-expanded=true]]:ring-ring/30 duration-base"
         onMouseDown={handleShellMouseDown}
       >
+        <CommandPopover
+          open={slashOpen}
+          commands={slashCommands}
+          activeIndex={slashActiveIndex}
+          onActiveIndexChange={setSlashActiveIndex}
+          onSelect={(cmd) => void runSlashCommand(cmd, slashCtx)}
+          listboxId={slashListboxId}
+        />
         <textarea
           ref={textareaRef}
           data-testid="chat-input"
@@ -314,6 +490,10 @@ export function InputBar({
           placeholder={hasPendingHitl ? t('pendingHitlLock') : t('placeholder')}
           title={hasPendingHitl ? t('pendingHitlLock') : undefined}
           rows={1}
+          role="combobox"
+          aria-expanded={slashOpen}
+          aria-controls={slashOpen ? slashListboxId : undefined}
+          aria-autocomplete="list"
           className="resize-none bg-transparent outline-none text-md text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto px-3.5 pt-3 pb-1 disabled:cursor-not-allowed"
           disabled={(isSubmitting && !messageIsStreaming) || hasPendingHitl}
         />
@@ -330,7 +510,11 @@ export function InputBar({
           <div className="ml-auto flex items-center gap-1">
             {workspaceId && (
               <>
-                <ModelPicker wsId={workspaceId} />
+                <ModelPicker
+                  wsId={workspaceId}
+                  open={modelPickerOpen}
+                  onOpenChange={setModelPickerOpen}
+                />
               </>
             )}
             {showStop ? (

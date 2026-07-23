@@ -198,6 +198,26 @@
     "hint": "Enter 发送 / Shift+Enter 换行",
     "pendingHitlLock": "请先回答上方待处理的问题。"
   },
+  "slashCommands": {
+    "listAria": "输入框命令",
+    "noMatches": "没有匹配的命令",
+    "compactSuccess": "已压缩对话上下文",
+    "compactSkipped": "历史消息还不够，暂无法压缩",
+    "compactFailed": "压缩对话失败",
+    "commands": {
+      "help": { "description": "显示可用命令" },
+      "new": { "description": "开始新对话" },
+      "stop": { "description": "停止当前运行" },
+      "model": { "description": "选择模型与推理强度" },
+      "effort": { "description": "打开思考 / 推理强度控制" },
+      "rename": { "description": "重命名此对话" },
+      "share": { "description": "分享此对话" },
+      "attach": { "description": "附加文件" },
+      "skills": { "description": "打开工作区技能" },
+      "mcp": { "description": "打开 MCP 连接器" },
+      "compact": { "description": "压缩对话上下文" }
+    }
+  },
   "askUser": {
     "submit": "提交",
     "submitting": "发送中…",

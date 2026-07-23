@@ -1903,6 +1903,51 @@ async def get_run_meta_route(
     }
 
 
+@router.post("/{conversation_id}/compact", status_code=status.HTTP_200_OK)
+async def compact_conversation(
+    conversation_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Force context compaction for the conversation (slash ``/compact``).
+
+    Rejects with 409 when a run is active. Reuses cubepi compaction state in
+    the checkpointer; does not rewrite the UI transcript.
+    """
+    from cubeplex.services.conversation_compact import force_compact_conversation
+
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    if active_run is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot compact while a run is active",
+        )
+
+    result = await force_compact_conversation(conversation_id)
+    return {
+        "ok": result.ok,
+        "compacted": result.compacted,
+        "reason": result.reason,
+        "boundary": result.boundary,
+    }
+
+
 @router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
 async def cancel_active_run(
     conversation_id: str,

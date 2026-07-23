@@ -5,6 +5,7 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
+import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
 import { Tooltip as BaseTooltip } from '@base-ui/react'
 import {
   type Conversation,
@@ -104,6 +105,7 @@ export function ConversationRow({
   const [draft, setDraft] = useState(convo.title)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const renameRequest = useComposerChromeStore((s) => s.renameRequest)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -116,6 +118,14 @@ export function ConversationRow({
       inputRef.current?.select()
     }
   }, [isEditing])
+
+  // Slash `/rename` requests edit mode on the matching row.
+  useEffect(() => {
+    if (!renameRequest) return
+    if (renameRequest.conversationId !== convo.id) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- open on external request nonce
+    setIsEditing(true)
+  }, [renameRequest, convo.id])
 
   const commitEdit = async (): Promise<void> => {
     const next = draft.trim()
