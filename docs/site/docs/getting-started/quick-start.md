@@ -13,12 +13,7 @@ Get from zero to your first AI conversation in a few minutes.
 ## 1. Create your account
 
 <Tabs groupId="deploy-mode">
-<TabItem value="cloud" label="Cloud">
-
-CubePlex Cloud is coming soon. Until it is available, install CubePlex self-hosted and create your account there (see the **Self-hosted** tab).
-
-</TabItem>
-<TabItem value="self-hosted" label="Self-hosted">
+<TabItem value="self-hosted" label="Self-hosted" default>
 
 If CubePlex isn't installed yet, see the [Deployment guide](../deployment/overview.md) first.
 
@@ -26,6 +21,11 @@ If CubePlex isn't installed yet, see the [Deployment guide](../deployment/overvi
 2. Register with your email and password. If email verification is enabled, enter the one-time code sent to your inbox.
 3. If you are the **first user**, the onboarding wizard has you name the organization, choose a slug, and create your first workspace. You become the organization's owner.
 4. Otherwise you join the existing organization as a member and create your own personal workspace through the same wizard.
+
+</TabItem>
+<TabItem value="cloud" label="Cloud">
+
+CubePlex Cloud is coming soon. Until it is available, install CubePlex self-hosted and create your account there (see the **Self-hosted** tab).
 
 </TabItem>
 </Tabs>
