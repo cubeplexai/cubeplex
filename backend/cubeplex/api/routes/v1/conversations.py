@@ -1931,8 +1931,11 @@ async def compact_conversation(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    # Tokenized lock: release only if we still own the key (TTL expiry must
+    # not let finally delete a later owner's lock).
     lock_key = f"{rds.key_prefix}:conversation_compact_lock:{conversation_id}"
-    acquired = bool(await rds.client.set(lock_key, "1", nx=True, ex=120))
+    lock_token = secrets.token_hex(16)
+    acquired = bool(await rds.client.set(lock_key, lock_token, nx=True, ex=120))
     if not acquired:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1961,6 +1964,11 @@ async def compact_conversation(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot compact while a run is active",
             )
+        if result.reason == "history_changed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Conversation changed during compaction",
+            )
         return {
             "ok": result.ok,
             "compacted": result.compacted,
@@ -1968,7 +1976,14 @@ async def compact_conversation(
             "boundary": result.boundary,
         }
     finally:
-        await rds.client.delete(lock_key)
+        # Compare-and-delete: only the owner may clear the key.
+        await rds.client.eval(  # type: ignore[misc]
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            lock_key,
+            lock_token,
+        )
 
 
 @router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
