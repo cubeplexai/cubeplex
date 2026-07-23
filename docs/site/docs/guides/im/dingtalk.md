@@ -59,9 +59,9 @@ The bot-message send/receive permission (`qyapi_robot_sendmsg`) is granted by de
 
 Group Topic titles use the `conversationTitle` field that DingTalk already includes on every robot receive callback — **no extra permission** is required for the group name.
 
-:::info 📸 Screenshot
+:::info 📸 Screenshot placeholder
 **Capture:** The app Permissions page with the bot-message send/receive permission and the user-profile (email) read permission granted.
-![DingTalk permissions page](/img/im/dingtalk/permissions.png)
+**Asset:** `/img/im/dingtalk/permissions.png`
 :::
 
 ## Step 5 — Bind the bot in CubePlex
