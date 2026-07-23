@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from cubeplex.models import Artifact
 from cubeplex.models.artifact_version import ArtifactVersion
@@ -76,6 +76,35 @@ class ArtifactRepository(ScopedRepository[Artifact]):
         await self.session.commit()
         await self.session.refresh(artifact)
         return artifact
+
+    async def cas_bump_version(
+        self,
+        artifact_id: str,
+        *,
+        expected_version: int,
+    ) -> Artifact | None:
+        """Atomic version bump when ``version == expected_version``.
+
+        Returns the refreshed artifact on success, or ``None`` on miss
+        (not found / wrong scope / version mismatch). Commits the session.
+        """
+        now = datetime.now(UTC)
+        stmt = (
+            update(Artifact)
+            .where(
+                cast(Any, Artifact.id) == artifact_id,
+                cast(Any, Artifact.org_id) == self.org_id,
+                cast(Any, Artifact.workspace_id) == self.workspace_id,
+                cast(Any, Artifact.version) == expected_version,
+            )
+            .values(version=expected_version + 1, updated_at=now)
+        )
+        result = await self.session.execute(stmt)
+        if result.rowcount != 1:  # type: ignore[attr-defined]
+            await self.session.rollback()
+            return None
+        await self.session.commit()
+        return await self.get_by_id(artifact_id)
 
     async def find_by_path(
         self,

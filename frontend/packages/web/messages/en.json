@@ -1566,7 +1566,30 @@
     "addToWorkspaceFailed": "Add to workspace failed",
     "addToWorkspaceVersionExists": "Version already exists. Bump the version in SKILL.md and try again.",
     "retry": "Retry",
-    "imageGenerating": "Generating image…"
+    "imageGenerating": "Generating image…",
+    "mdEdit": "Edit",
+    "mdSave": "Save",
+    "mdSaving": "Saving…",
+    "mdCancel": "Cancel",
+    "mdSaved": "Document saved",
+    "mdSaveFailed": "Failed to save document",
+    "mdVersionConflict": "This document was updated elsewhere. Reload and try again.",
+    "mdSandboxPartial": "Saved to history; sandbox file was not updated",
+    "mdSandboxReason": {
+      "no_sandbox": "No active sandbox",
+      "no_path": "No sandbox path on record",
+      "path_is_directory": "Path is a directory without a file target",
+      "path_missing": "Sandbox path missing",
+      "path_escape": "Invalid sandbox path",
+      "sandbox_error": "Sandbox write failed"
+    },
+    "mdQuote": "Quote",
+    "mdQuoted": "Quoted into composer",
+    "mdLoading": "Loading document…",
+    "mdLoadFailed": "Failed to load document",
+    "mdShowMore": "Show more",
+    "mdShowLess": "Show less",
+    "mdEditorPlaceholder": "Write markdown…"
   },
   "workspaceCreate": {
     "nameLabel": "New workspace name",

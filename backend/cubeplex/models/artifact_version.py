@@ -2,7 +2,7 @@
 
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
@@ -14,7 +14,10 @@ class ArtifactVersion(CubeplexBase, OrgScopedMixin, table=True):
 
     _PREFIX: ClassVar[str] = "artv"
     __tablename__ = "artifact_versions"
-    __table_args__ = (Index("ix_artifact_versions_org_ws", "org_id", "workspace_id"),)
+    __table_args__ = (
+        Index("ix_artifact_versions_org_ws", "org_id", "workspace_id"),
+        UniqueConstraint("artifact_id", "version", name="uq_artifact_versions_artifact_version"),
+    )
 
     artifact_id: str = Field(foreign_key="artifacts.id", max_length=20, index=True)
     version: int

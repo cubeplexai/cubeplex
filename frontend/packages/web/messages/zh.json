@@ -1566,7 +1566,30 @@
     "addToWorkspaceFailed": "添加到工作空间失败",
     "addToWorkspaceVersionExists": "版本已存在，请先在 SKILL.md 中 bump version 后重试。",
     "retry": "重试",
-    "imageGenerating": "正在生成图片…"
+    "imageGenerating": "正在生成图片…",
+    "mdEdit": "编辑",
+    "mdSave": "保存",
+    "mdSaving": "保存中…",
+    "mdCancel": "取消",
+    "mdSaved": "文档已保存",
+    "mdSaveFailed": "保存文档失败",
+    "mdVersionConflict": "文档已被其他地方更新，请重新加载后再试。",
+    "mdSandboxPartial": "已保存到历史；沙箱文件未同步",
+    "mdSandboxReason": {
+      "no_sandbox": "没有可用沙箱",
+      "no_path": "没有记录的沙箱路径",
+      "path_is_directory": "路径是目录且无文件目标",
+      "path_missing": "沙箱路径不存在",
+      "path_escape": "非法沙箱路径",
+      "sandbox_error": "写入沙箱失败"
+    },
+    "mdQuote": "引用",
+    "mdQuoted": "已插入到输入框",
+    "mdLoading": "正在加载文档…",
+    "mdLoadFailed": "加载文档失败",
+    "mdShowMore": "展开",
+    "mdShowLess": "收起",
+    "mdEditorPlaceholder": "编写内容…"
   },
   "workspaceCreate": {
     "nameLabel": "新工作区名称",
