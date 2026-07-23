@@ -80,16 +80,24 @@ Flow:
 3. **Body (plain language):**
    - Name the conversation (title or “Untitled chat”).
    - “This removes the chat from your history.”
-   - “Messages will no longer be available.”
-   - “Related artifacts will no longer appear in the library.”
+   - “Messages will no longer be available **in this conversation**.”
+   - “Related artifacts will no longer appear in the library or the
+     conversation panel.”
    - Do **not** say files are securely wiped or permanently purged from
      storage.
    - Do **not** promise restore / recycle bin.
+   - Do **not** claim that existing public / org / workspace **share links**
+     or share snapshots are revoked. Shares are independent immutable
+     snapshots (and short-lived artifact share tokens); deleting the source
+     conversation does not revoke them. Share revocation stays out of scope.
 4. **Actions:** Cancel | Delete (destructive). Esc / cancel = no API call.
 5. Confirm → existing `remove(client, id)`; on success row leaves the list
    and active conversation clears as today.
-6. Prefer surfacing delete failures to the user (toast or inline), not only
-   `console.error` — small improvement while wiring the dialog.
+6. **Required:** surface delete failures to the user (toast or inline), not
+   only `console.error`. While `remove` is in flight: disable Confirm (and
+   prefer disable Cancel only if double-submit is a risk — at minimum disable
+   Confirm). On failure: keep the dialog open, show the error, leave the row
+   in the list. On success: close dialog then apply store removal as today.
 
 Dialog state: local to `ConversationRow` (or a tiny row-level confirm
 component). Do not put delete-confirm in a global store.
@@ -98,9 +106,13 @@ component). Do not put delete-confirm in a global store.
 
 Document and copy must agree:
 
-> Deleting a conversation soft-deletes it. Messages and related artifacts
-> become inaccessible in the product. Rows and object-store files are
-> retained for integrity, cost audit, and future GC — not hard cascade-wiped.
+> Deleting a conversation soft-deletes it. The conversation leaves the
+> sidebar history; messages are no longer available in that conversation;
+> related artifacts leave the workspace library and conversation artifact
+> surfaces. Rows and object-store files are retained for integrity, cost
+> audit, and future GC — not hard cascade-wiped. **Existing conversation
+> share snapshots and active public share links are not revoked by this
+> action** (shares copy data at share time; revoke is a separate flow).
 
 No change to:
 
@@ -129,6 +141,7 @@ still wraps after implementation.
 - GC job for soft-deleted conversations
 - Redesign of the full sidebar menu
 - Changing who may delete
+- Revoking conversation shares or public artifact share tokens on delete
 
 ## Success criteria
 
@@ -138,11 +151,13 @@ still wraps after implementation.
 3. Confirm soft-deletes via existing API and removes the row; active
    conversation clears safely as today.
 4. Confirm copy does not claim permanent storage wipe; it states messages
-   and artifacts become unavailable.
-5. No auth / soft-delete / artifact-404 regressions.
-6. en/zh i18n for label + dialog title/body/actions.
-7. Implementation PR updates user-facing docs if the basics page still
-   under-explains artifact library visibility.
+   and artifacts become unavailable in conversation / library surfaces, and
+   does not claim share-link revocation.
+5. Failed delete shows user-visible error; row remains; dialog stays open.
+6. No auth / soft-delete / artifact-404 regressions.
+7. en/zh i18n for label + dialog title/body/actions.
+8. Implementation PR updates user-facing docs if the basics page still
+   under-explains artifact library visibility or soft-delete limits.
 
 ## Resolved product choices (this design)
 

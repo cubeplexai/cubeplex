@@ -53,11 +53,15 @@ snapshot not required.
    calling `remove` immediately.
 2. Render `AlertDialog` patterned after
    `workspace-settings/sandboxes/SandboxCard.tsx` confirm block:
-   Title, Description (include conversation title), Cancel, destructive
-   Confirm.
-3. Confirm handler: `void remove(buildClient(currentWsId), convo.id)` with
-   better error surfacing if a toast helper is already used nearby; else
-   keep `console.error` and note a follow-up.
+   Title, Description (include conversation title; messages + library
+   artifacts inaccessible; **no** share-revoke or storage-wipe claims),
+   Cancel, destructive Confirm.
+3. Confirm handler: `await remove(buildClient(currentWsId), convo.id)`.
+   - Pending: disable Confirm; track `deleting` state.
+   - Success: close dialog (store already drops row / clears activeId).
+   - Failure: keep dialog open; show toast or inline error (required —
+     not `console.error` only). Use any nearby toast helper; if none,
+     add a minimal one consistent with other shell errors.
 4. Prevent row navigation when interacting with menu/dialog
    (`stopPropagation` as today).
 
@@ -84,6 +88,8 @@ Confirm → remove(client, id) → store drops row; activeId clear if needed
 
 - Component / RTL test: opening Delete shows dialog; Cancel does not call
   remove; Confirm calls remove once.
+- Rejected `remove`: dialog stays open, error is shown, row mock remains
+  (no successful list mutation).
 - Prefer mocking `useConversationStore` remove.
 - Existing backend e2e for soft-delete + artifact 404 remain the
   contract for server behavior (no new e2e required for MVP unless
@@ -98,9 +104,9 @@ Confirm → remove(client, id) → store drops row; activeId clear if needed
 - `docs/site/docs/guides/conversations/basics.md`
 
 **What changes**: Tighten the **Delete** bullet so it matches product copy:
-soft-delete, no UI restore, messages unavailable, related artifacts leave
-library / conversation surfaces; internal retention for audit/GC, not a
-user recycle bin.
+soft-delete, no UI restore, messages unavailable in that conversation,
+related artifacts leave library / conversation surfaces; internal retention
+for audit/GC, not a user recycle bin. Do not imply share links are revoked.
 
 **Tests intent**: docs-only; none.
 
