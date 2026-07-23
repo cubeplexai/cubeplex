@@ -53,6 +53,19 @@ While expanded, the theater is a modal overlay — the side panel underneath is 
 
 ![Artifact card with the right-side preview panel open](/img/conversations/artifact-panel.png)
 
+### Markdown documents in chat
+
+Markdown document artifacts (`.md` / `.markdown` / `.mdx`, or `text/markdown`)
+render **inline** in the transcript — similar to image previews — so you can
+read them without opening the side panel.
+
+- **Edit** opens a rich-text editor (TipTap). Save creates a **new version** of
+  the artifact. If the conversation sandbox and file path are still valid,
+  CubePlex also tries to write the same content back to that path; if not, the
+  save still succeeds and you get a non-blocking notice.
+- **Select text** in the rendered body, then **Quote**, to insert the passage
+  and artifact context into the composer so you can ask the agent to revise it.
+
 ### Artifact gallery
 
 At the top of the chat area, a collapsible **Artifacts** bar shows all artifacts created in the current conversation. Click to expand the gallery and quickly jump to any artifact without scrolling through the message history.

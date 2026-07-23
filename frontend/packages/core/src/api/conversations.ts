@@ -114,6 +114,24 @@ export async function listArtifactVersions(
   return data.versions || []
 }
 
+export interface ArtifactContentUpdateResponse {
+  artifact: Artifact
+  sandbox_synced: boolean
+  sandbox_sync_reason?: string | null
+}
+
+export async function updateArtifactContent(
+  client: ApiClient,
+  conversationId: string,
+  artifactId: string,
+  body: { content: string; expected_version: number },
+): Promise<ArtifactContentUpdateResponse> {
+  const url = `/api/v1/conversations/${conversationId}/artifacts/${artifactId}/content`
+  const res = await client.put(url, body)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ArtifactContentUpdateResponse>
+}
+
 export interface PreviewTokenResponse {
   download_url: string
   viewer_url: string

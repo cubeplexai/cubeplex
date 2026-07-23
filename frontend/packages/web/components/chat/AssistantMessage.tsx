@@ -14,8 +14,10 @@ import type {
 import type { AgentStream } from '@cubeplex/core'
 import { useArtifactStore } from '@cubeplex/core'
 import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
+import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageArtifactCard } from './ImageArtifactCard'
+import { MarkdownArtifactCard } from './MarkdownArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { TaskProgressCard } from './TaskProgressCard'
@@ -360,6 +362,9 @@ function ContentBlockRenderer({
     if (artifact) {
       if (artifact.artifact_type === 'image') {
         return <ImageArtifactCard caption={artifact.name} artifact={artifact} />
+      }
+      if (isMarkdownArtifact(artifact)) {
+        return <MarkdownArtifactCard artifact={artifact} />
       }
       return <ArtifactCard artifact={artifact} />
     }

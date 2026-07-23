@@ -119,6 +119,59 @@ async def list_artifact_versions(
     return {"versions": [v.to_dict() for v in versions], "total": len(versions)}
 
 
+class ArtifactContentUpdateIn(BaseModel):
+    content: str
+    expected_version: int
+
+
+@router.put("/{artifact_id}/content")
+async def update_artifact_content_route(
+    conversation_id: str,
+    artifact_id: str,
+    body: ArtifactContentUpdateIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, object]:
+    """Save a new markdown version from the browser editor."""
+    from cubeplex.services.artifact_content import (
+        ArtifactContentError,
+        update_artifact_content,
+    )
+
+    await _require_conversation(session, ctx, conversation_id)
+    try:
+        result = await update_artifact_content(
+            session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            conversation_id=conversation_id,
+            artifact_id=artifact_id,
+            content=body.content,
+            expected_version=body.expected_version,
+            caller_user_id=ctx.user.id,
+        )
+    except ArtifactContentError as exc:
+        if exc.code == "not_found":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=exc.message) from exc
+        if exc.code == "version_conflict":
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        if exc.code in {
+            "not_markdown",
+            "no_entry",
+            "multi_file",
+            "too_large",
+            "bad_version",
+        }:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+
+    return {
+        "artifact": result.artifact.to_dict(),
+        "sandbox_synced": result.sandbox_synced,
+        "sandbox_sync_reason": result.sandbox_sync_reason,
+    }
+
+
 @router.get("/{artifact_id}/download")
 async def download_artifact(
     conversation_id: str,
