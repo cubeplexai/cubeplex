@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 from redis.asyncio import Redis
 
-from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
+from cubeplex.repositories.organization import OrganizationRepository
+from cubeplex.repositories.skill import (
+    OrgPreinstalledTombstoneRepository,
+    OrgSkillInstallRepository,
+    SkillRepository,
+    SkillVersionRepository,
+)
 from cubeplex.seeders import seed_preinstalled_skills
 
 
@@ -136,3 +142,63 @@ async def test_seeder_writes_content_hash(tmp_path: Path, db_session, redis_clie
     versions = await SkillVersionRepository(db_session).list_for_skill(skill.id)
     assert len(versions) == 1
     assert versions[0].content_hash.startswith("sha256:")
+
+
+@pytest.mark.asyncio
+async def test_seed_auto_installs_for_existing_org(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Existing orgs get OrgSkillInstall for newly seeded preinstalled skills.
+
+    Bootstrap only installs at org-create; seeder reconcile closes the gap so
+    agents can load_skill after deploy without a manual admin install.
+    """
+    org = await OrganizationRepository(db_session).create(
+        name=f"seed-org-{uuid.uuid4().hex[:8]}",
+        slug=f"seed-org-{uuid.uuid4().hex[:8]}",
+    )
+    skill_name = _unique_name("show-widget")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0", description="widgets")
+
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    install = await OrgSkillInstallRepository(db_session).get(org.id, skill.id)
+    assert install is not None
+    assert install.installed_version == "1.0.0"
+    assert install.auto_bind is True
+    assert install.workspace_id is None
+
+
+@pytest.mark.asyncio
+async def test_seed_skips_tombstoned_org_on_reconcile(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Admin uninstall (tombstone) must not be undone by seeder reconcile."""
+    org = await OrganizationRepository(db_session).create(
+        name=f"tomb-org-{uuid.uuid4().hex[:8]}",
+        slug=f"tomb-org-{uuid.uuid4().hex[:8]}",
+    )
+    skill_name = _unique_name("tombstoned")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+
+    # First seed creates catalog + install.
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+    assert await installs.get(org.id, skill.id) is not None
+
+    # Org admin uninstalls: delete install + tombstone (mirrors admin route).
+    await installs.delete(org.id, skill.id)
+    await OrgPreinstalledTombstoneRepository(db_session).add_tombstone(
+        org_id=org.id, skill_id=skill.id, hidden_by_user_id=None
+    )
+    assert await installs.get(org.id, skill.id) is None
+
+    # Re-seed must not resurrect the install.
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+    assert await installs.get(org.id, skill.id) is None

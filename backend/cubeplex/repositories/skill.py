@@ -427,7 +427,7 @@ class OrgPreinstalledTombstoneRepository:
         return result.scalar_one_or_none()
 
     async def add_tombstone(
-        self, *, org_id: str, skill_id: str, hidden_by_user_id: str
+        self, *, org_id: str, skill_id: str, hidden_by_user_id: str | None = None
     ) -> OrgPreinstalledTombstone:
         row = OrgPreinstalledTombstone(
             org_id=org_id,
