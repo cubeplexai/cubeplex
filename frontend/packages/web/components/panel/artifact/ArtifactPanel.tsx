@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, type Ref } from 'react'
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubeplex/core'
 import type { Artifact, ArtifactVersion } from '@cubeplex/core'
@@ -125,6 +125,7 @@ function ArtifactPanelHeader({
   onSelectVersion,
   onClose,
   expand,
+  expandButtonRef,
   workspaceId,
   portalContainer,
 }: {
@@ -134,6 +135,7 @@ function ArtifactPanelHeader({
   onSelectVersion: (version: number | null) => void
   onClose: () => void
   expand: { active: boolean; onToggle: () => void }
+  expandButtonRef?: Ref<HTMLButtonElement>
   workspaceId: string
   portalContainer: HTMLElement | null
 }) {
@@ -168,6 +170,7 @@ function ArtifactPanelHeader({
         </>
       }
       expand={expand}
+      expandButtonRef={expandButtonRef}
       // Mobile sheet already fills the viewport — hide expand control below md.
       expandClassName="hidden md:inline-flex"
       onClose={onClose}
@@ -245,6 +248,10 @@ export function ArtifactPanel() {
 
   const [railPortalEl, setRailPortalEl] = useState<HTMLElement | null>(null)
   const [theaterPortalEl, setTheaterPortalEl] = useState<HTMLElement | null>(null)
+  // Focus exit-expand on open so Esc works before the user tabs into an iframe.
+  const exitExpandButtonRef = useRef<HTMLButtonElement | null>(null)
+  // Restore focus to rail Expand when the theater closes (if still mounted).
+  const expandButtonRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
@@ -284,6 +291,7 @@ export function ArtifactPanel() {
           active: expanded,
           onToggle: expanded ? closeExpand : openExpand,
         }}
+        expandButtonRef={expandButtonRef}
         portalContainer={railPortalEl}
       />
       <div className="flex-1 overflow-hidden">
@@ -306,7 +314,8 @@ export function ArtifactPanel() {
         )}
       </div>
 
-      {/* Mount theater only while expanded so PreviewContent has a single host. */}
+      {/* Mount theater only while expanded so PreviewContent has a single host.
+          Modal backdrop makes the rail inert — exit expand, then rail Close. */}
       {expanded && (
         <ArtifactExpandDialog
           open
@@ -315,12 +324,15 @@ export function ArtifactPanel() {
           }}
           title={artifact.name}
           identityKey={identityKey}
+          initialFocusRef={exitExpandButtonRef}
+          finalFocusRef={expandButtonRef}
           header={
             <div ref={setTheaterPortalEl}>
               <ArtifactPanelHeader
                 {...headerProps}
                 onClose={closeExpand}
                 expand={{ active: true, onToggle: closeExpand }}
+                expandButtonRef={exitExpandButtonRef}
                 portalContainer={theaterPortalEl}
               />
             </div>

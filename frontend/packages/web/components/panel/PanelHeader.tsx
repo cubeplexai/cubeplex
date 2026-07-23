@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import { X, Copy, Check, Plug, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -37,6 +37,8 @@ interface PanelHeaderProps {
    * on mobile where the panel already fills the viewport).
    */
   expandClassName?: string
+  /** Ref to the expand/exit-expand button (dialog initial/final focus). */
+  expandButtonRef?: Ref<HTMLButtonElement>
   onClose: () => void
 }
 
@@ -45,6 +47,7 @@ export function PanelHeader({
   actions,
   expand,
   expandClassName,
+  expandButtonRef,
   onClose,
 }: PanelHeaderProps) {
   const t = useTranslations('panel.header')
@@ -129,12 +132,15 @@ export function PanelHeader({
         )}
         {expand && (
           <button
+            ref={expandButtonRef}
+            type="button"
             onClick={expand.onToggle}
             className={cn(
               'p-1 rounded-xs hover:bg-accent transition-colors duration-fast',
               expandClassName,
             )}
             title={t(expand.active ? 'exitExpand' : 'expand')}
+            data-testid={expand.active ? 'panel-exit-expand' : 'panel-expand'}
           >
             {expand.active ? (
               <Minimize2 className="size-3.5 text-muted-foreground" />

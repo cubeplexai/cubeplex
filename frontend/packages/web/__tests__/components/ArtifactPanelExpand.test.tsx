@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Artifact } from '@cubeplex/core'
@@ -167,17 +167,34 @@ describe('ArtifactPanel expand theater', () => {
     })
   })
 
-  it('panel rail Close closes the whole panel', () => {
+  it('theater Close exits expand only; rail Close after exit dismisses panel', () => {
     renderPanel()
-    fireEvent.click(screen.getByTitle('Expand preview'))
+    fireEvent.click(screen.getByTestId('panel-expand'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
 
-    // Rail header Close is outside the dialog
-    const rail = screen.getByTestId('artifact-rail-placeholder').parentElement!
-    const railHeaderClose = within(rail.parentElement!).getAllByTitle('Close')[0]!
-    fireEvent.click(railHeaderClose)
+    // Theater X closes expand only (modal keeps rail inert while open).
+    fireEvent.click(within(screen.getByRole('dialog')).getByTitle('Close'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(usePanelStore.getState().view).toEqual({
+      type: 'artifact',
+      conversationId: 'conv-1',
+      artifactId: 'art-1',
+    })
 
+    // After exit, rail Close dismisses the whole panel.
+    fireEvent.click(screen.getByTitle('Close'))
     expect(usePanelStore.getState().view).toEqual({ type: 'closed' })
-    expect(screen.queryByTestId('artifact-expand-preview')).not.toBeInTheDocument()
+  })
+
+  it('opens with focus on theater Exit expand (outside embedded preview)', async () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId('panel-expand'))
+    const dialog = await screen.findByRole('dialog')
+    const exitBtn = within(dialog).getByTestId('panel-exit-expand')
+    // Base UI initialFocus moves focus to the exit control after open.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(exitBtn)
+    })
   })
 
   it('navigate-away to another artifact closes theater without dual host', () => {
