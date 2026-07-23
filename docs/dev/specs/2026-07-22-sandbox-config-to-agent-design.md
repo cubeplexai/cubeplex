@@ -85,19 +85,29 @@ require a new sandbox (align with deploy docs).
 #### B. Env inventory (names + types only)
 
 Per **effective** entry after scope merge for this run’s org/workspace/user
-(same merge as injection):
+(same merge as injection).
+
+**DTO requirement:** `ResolvedEnv` today has `env_name`, `is_secret`, `hosts`,
+`header_names`, `credential_id`, optional `value` — **not** `scope` or
+`status`. Implementation must introduce an agent-facing metadata DTO (or extend
+resolution with a parallel non-secret view) that carries the **winning row’s**
+`scope` and `status` without ever attaching decrypted values.
 
 | Field | Include? |
 | --- | --- |
 | `env_name` | Yes |
 | `kind` / `is_secret` | Yes (`plain` / `secret`) |
-| `scope` | Yes |
-| `status` | Yes |
+| `scope` | Yes (from winning row) |
+| `status` | Yes (from winning row; invalid winners reported if present) |
 | `hosts` | Yes for secrets |
 | `header_names` | Yes if set |
 | **value / secret** | **Never** |
 | placeholder string | Prefer **no** |
-| `credential_id` | Prefer **no** |
+| `credential_id` | **Never** |
+
+Invalid / suppressed rows: document v1 choice — **omit non-winning and
+non-resolvable entries** (match inject set) unless a row wins but is invalid
+(then show `status` so the agent can say “configured but not injectable”).
 
 Plain entries: inventory says the name is configured; agent may read the value
 inside the sandbox only when needed for execution — **not** dump into the
@@ -135,15 +145,31 @@ When network or auth fails:
 
 ### Security
 
-- Same visibility bar as workspace members listing env metadata (no values).
-- Org policy is OK to show to agents running in that org’s sandboxes.
+- **Authz (explicit, not “same as member list”)**: today members may list only
+  **user-scoped** env rows; workspace- and org-scoped env metadata and org
+  network policy require **admin** APIs. The agent tool intentionally exposes
+  the **effective inject set** for this run (names + kinds + secret host/header
+  constraints — never values) so diagnosis matches runtime. That is a deliberate
+  expansion of what a member can see via HTTP for org/workspace env **names**.
+  Document this product decision; do **not** claim parity with list APIs.
 - Cap rule list and env list (e.g. 100) with a `truncated: true` marker.
-- Treat env **names** as untrusted data (prompt injection); never execute them.
-- Unit tests: serialization helpers never include value/secret fields.
+- Treat env **names** and rule **patterns** as untrusted data (prompt injection);
+  never execute them.
+- Serializers must **whitelist fields only** (no `model_dump()` / raw JSON
+  passthrough of rule dicts). Tests must plant forbidden extra keys and assert
+  recursive absence of values, `credential_id`, proxy credentials, and unknown keys.
 
 ### Cache / freshness
 
-- Tool path: always read DB at call time.
+- Tool path: read **current** org policy + effective env from DB at call time.
+- **Sandbox policy may be stale**: network policy is structural and applied at
+  sandbox **create** (manager does not re-apply on reuse). Tool output must
+  include a clear note that DB policy is “desired / next create”, and when
+  possible flag drift if the active sandbox record can expose which policy was
+  applied (image drift already exists as precedent). Prefer wording:
+  `policy_source: "org_db_current"` + `sandbox_note: "network rules apply at
+  create; recreate sandbox after admin changes"`. Do not claim live enforcement
+  of newly edited rules on an old sandbox.
 - Prompt blurb: static; does not include live rules.
 - Optional future inline summary would need deterministic snapshot discipline.
 
