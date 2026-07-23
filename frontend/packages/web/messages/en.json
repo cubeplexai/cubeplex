@@ -206,17 +206,39 @@
     "compactFailed": "Could not compact conversation",
     "renameUnavailable": "Could not open rename — try the sidebar menu",
     "commands": {
-      "help": { "description": "Show available commands" },
-      "new": { "description": "Start a new chat" },
-      "stop": { "description": "Stop the current run" },
-      "model": { "description": "Choose model and effort" },
-      "effort": { "description": "Open thinking / effort control" },
-      "rename": { "description": "Rename this conversation" },
-      "share": { "description": "Share this conversation" },
-      "attach": { "description": "Attach a file" },
-      "skills": { "description": "Open workspace skills" },
-      "mcp": { "description": "Open MCP connectors" },
-      "compact": { "description": "Compact conversation context" }
+      "help": {
+        "description": "Show available commands"
+      },
+      "new": {
+        "description": "Start a new chat"
+      },
+      "stop": {
+        "description": "Stop the current run"
+      },
+      "model": {
+        "description": "Choose model and effort"
+      },
+      "effort": {
+        "description": "Open thinking / effort control"
+      },
+      "rename": {
+        "description": "Rename this conversation"
+      },
+      "share": {
+        "description": "Share this conversation"
+      },
+      "attach": {
+        "description": "Attach a file"
+      },
+      "skills": {
+        "description": "Open workspace skills"
+      },
+      "mcp": {
+        "description": "Open MCP connectors"
+      },
+      "compact": {
+        "description": "Compact conversation context"
+      }
     }
   },
   "askUser": {
@@ -422,6 +444,11 @@
       "openPage": "Open memory",
       "openPageAria": "Go to memory page",
       "empty": "No memories yet"
+    },
+    "compactionMarker": {
+      "label": "Context compacted",
+      "manual": "Context compacted",
+      "auto": "Context compacted automatically"
     }
   },
   "subagent": {

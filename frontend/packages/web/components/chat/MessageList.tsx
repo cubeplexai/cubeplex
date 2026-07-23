@@ -27,6 +27,7 @@ import { SenderBadge } from './SenderBadge'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
+import { CompactionMarker } from './CompactionMarker'
 import { MessageAttachments } from './MessageAttachments'
 import type { FailoverEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -577,6 +578,20 @@ export function MessageList({ conversationId }: MessageListProps) {
           // user bubble before the run is claimed — those are never search
           // targets, so we just skip the anchor.
           <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
+            {msg.role === 'user' &&
+              msg.metadata?.synthetic === true &&
+              (msg.metadata.synthetic_source === 'compaction' ||
+                msg.metadata.kind === 'compaction') && (
+                <CompactionMarker
+                  source={
+                    typeof msg.metadata.compaction === 'object' &&
+                    msg.metadata.compaction !== null &&
+                    'source' in msg.metadata.compaction
+                      ? String((msg.metadata.compaction as { source?: string }).source ?? '')
+                      : undefined
+                  }
+                />
+              )}
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
                 {/* Sender identity is stamped on every user message (incl. 1:1)

@@ -96,6 +96,8 @@ export type CompactConversationResult = {
   compacted: boolean
   reason?: string | null
   boundary?: number | null
+  /** Synthetic timeline marker (not the /compact command). Append to history. */
+  marker?: import('../types').Message | null
 }
 
 /** Force context compaction (slash ``/compact``). 409 if a run is active. */

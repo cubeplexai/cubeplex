@@ -1974,6 +1974,8 @@ async def compact_conversation(
             "compacted": result.compacted,
             "reason": result.reason,
             "boundary": result.boundary,
+            # Synthetic history marker (not the /compact command text) for UI.
+            "marker": result.marker,
         }
     finally:
         # Compare-and-delete: only the owner may clear the key.

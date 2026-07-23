@@ -206,17 +206,39 @@
     "compactFailed": "压缩对话失败",
     "renameUnavailable": "无法打开重命名，请从侧边栏菜单操作",
     "commands": {
-      "help": { "description": "显示可用命令" },
-      "new": { "description": "开始新对话" },
-      "stop": { "description": "停止当前运行" },
-      "model": { "description": "选择模型与推理强度" },
-      "effort": { "description": "打开思考 / 推理强度控制" },
-      "rename": { "description": "重命名此对话" },
-      "share": { "description": "分享此对话" },
-      "attach": { "description": "附加文件" },
-      "skills": { "description": "打开工作区技能" },
-      "mcp": { "description": "打开 MCP 连接器" },
-      "compact": { "description": "压缩对话上下文" }
+      "help": {
+        "description": "显示可用命令"
+      },
+      "new": {
+        "description": "开始新对话"
+      },
+      "stop": {
+        "description": "停止当前运行"
+      },
+      "model": {
+        "description": "选择模型与推理强度"
+      },
+      "effort": {
+        "description": "打开思考 / 推理强度控制"
+      },
+      "rename": {
+        "description": "重命名此对话"
+      },
+      "share": {
+        "description": "分享此对话"
+      },
+      "attach": {
+        "description": "附加文件"
+      },
+      "skills": {
+        "description": "打开工作区技能"
+      },
+      "mcp": {
+        "description": "打开 MCP 连接器"
+      },
+      "compact": {
+        "description": "压缩对话上下文"
+      }
     }
   },
   "askUser": {
@@ -422,6 +444,11 @@
       "openPage": "打开记忆页",
       "openPageAria": "跳转到记忆页面",
       "empty": "暂无记忆"
+    },
+    "compactionMarker": {
+      "label": "上下文已压缩",
+      "manual": "上下文已压缩",
+      "auto": "上下文已自动压缩"
     }
   },
   "subagent": {
