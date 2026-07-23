@@ -90,6 +90,21 @@ function renderPanel() {
 
 describe('ArtifactPanel expand theater', () => {
   beforeEach(() => {
+    // Desktop viewport for expand control + theater (useMediaQuery min-width 768px).
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string) =>
+        ({
+          matches: query.includes('min-width: 768px'),
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as MediaQueryList,
+    )
     usePanelStore.setState({ view: { type: 'closed' } })
     useArtifactStore.setState({
       artifacts: {},
@@ -194,6 +209,81 @@ describe('ArtifactPanel expand theater', () => {
     // Base UI initialFocus moves focus to the exit control after open.
     await waitFor(() => {
       expect(document.activeElement).toBe(exitBtn)
+    })
+  })
+
+  it('backdrop click closes theater and keeps selection', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTestId('panel-expand'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
+    expect(overlay).toBeTruthy()
+    fireEvent.click(overlay!)
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(usePanelStore.getState().view).toEqual({
+      type: 'artifact',
+      conversationId: 'conv-1',
+      artifactId: 'art-1',
+    })
+  })
+
+  it('version selection while expanded survives exit', () => {
+    const multi: Artifact = { ...artifact, version: 3, name: 'report-v3.bin' }
+    useArtifactStore.setState({
+      artifacts: { 'conv-1': { 'art-1': multi } },
+      versions: {
+        'art-1': [
+          {
+            id: 'v1',
+            artifact_id: 'art-1',
+            version: 1,
+            name: 'report-v1.bin',
+            path: '/workspace/v1',
+            created_at: '2026-07-20T00:00:00Z',
+          },
+          {
+            id: 'v2',
+            artifact_id: 'art-1',
+            version: 2,
+            name: 'report-v2.bin',
+            path: '/workspace/v2',
+            created_at: '2026-07-21T00:00:00Z',
+          },
+          {
+            id: 'v3',
+            artifact_id: 'art-1',
+            version: 3,
+            name: 'report-v3.bin',
+            path: '/workspace/v3',
+            created_at: '2026-07-22T00:00:00Z',
+          },
+        ],
+      },
+      selectedVersion: {},
+      loading: {},
+      deletedIds: {},
+    })
+    usePanelStore.getState().openArtifact('conv-1', 'art-1')
+
+    renderPanel()
+    fireEvent.click(screen.getByTestId('panel-expand'))
+    const dialog = screen.getByRole('dialog')
+    // Open version popover in theater and pick v1 (not latest).
+    fireEvent.click(within(dialog).getByText('v3'))
+    fireEvent.click(within(dialog).getByText('v1'))
+
+    expect(useArtifactStore.getState().selectedVersion['art-1']).toBe(1)
+
+    fireEvent.click(within(dialog).getByTestId('panel-exit-expand'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // Selection remains after exit expand.
+    expect(useArtifactStore.getState().selectedVersion['art-1']).toBe(1)
+    expect(usePanelStore.getState().view).toEqual({
+      type: 'artifact',
+      conversationId: 'conv-1',
+      artifactId: 'art-1',
     })
   })
 

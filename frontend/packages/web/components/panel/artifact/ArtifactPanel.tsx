@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { PanelHeader } from '@/components/panel/PanelHeader'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { getArtifactIcon } from './artifactIcons'
 import { PreviewLoading } from './PreviewLoading'
 import { HtmlPreview } from './HtmlPreview'
@@ -252,6 +253,13 @@ export function ArtifactPanel() {
   const exitExpandButtonRef = useRef<HTMLButtonElement | null>(null)
   // Restore focus to rail Expand when the theater closes (if still mounted).
   const expandButtonRef = useRef<HTMLButtonElement | null>(null)
+  // Expand is desktop-only; clear theater if the viewport drops below md so
+  // finalFocus does not target a display:none control.
+  const isDesktop = useMediaQuery('(min-width: 768px)', true)
+
+  useEffect(() => {
+    if (!isDesktop) setExpandedKey(null)
+  }, [isDesktop])
 
   useEffect(() => {
     if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
