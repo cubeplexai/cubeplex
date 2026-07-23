@@ -118,7 +118,7 @@ In your CubePlex workspace, open the **IM connectors** settings and connect a ne
 | **App Secret** | Yes | From Step 1. CubePlex uses it to read the bot identity and to call Feishu. |
 | **Encrypt Key** | No | Only if you enabled Event Encryption (Step 5). |
 | **Verification Token** | No | The token from Step 5. |
-| **Domain** | Yes | `feishu` or `lark` — pick the edition your app lives in. The wizard does not preselect a domain. |
+| **Domain** | Yes | `lark` is preselected. Keep it for Lark, or change it to `feishu` for an app created in the China Feishu console. |
 | **Delivery mode** | Yes | `long_connection` (default) or `webhook`, matching Step 4. |
 
 The workspace wizard currently submits `acting_user_id: self` and does not show an identity picker. If you use the API directly, a non-`self` acting user is restricted to workspace admins.
