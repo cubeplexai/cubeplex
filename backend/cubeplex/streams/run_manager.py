@@ -947,6 +947,7 @@ class RunManager:
                 started_at=started_at,
                 user_message=content,
                 ttl_seconds=self._run_event_ttl_seconds,
+                trigger=ctx.trigger,
             )
 
         created_run = await _try_create_run()

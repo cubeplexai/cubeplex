@@ -55,6 +55,10 @@ class RunMeta:
     error_code: str | None = None
     error_params: str | None = None  # JSON-encoded dict (Redis hash values are strings)
     error_message: str | None = None  # English fallback shown to non-Web clients
+    # Origin of the run (interactive / im / schedule / automated / …).
+    # Persisted so HITL HTTP resume rebuilds RunContext with the same
+    # write-gating as the original turn (e.g. persona_update allow_write).
+    trigger: str | None = None
 
 
 @dataclass(slots=True)
@@ -218,6 +222,7 @@ def _meta_from_hash(raw: dict[str, str]) -> RunMeta | None:
         error_code=raw.get("error_code"),
         error_params=raw.get("error_params"),
         error_message=raw.get("error_message"),
+        trigger=raw.get("trigger"),
     )
 
 
@@ -231,6 +236,7 @@ async def create_run(
     started_at: str,
     user_message: str | None = None,
     ttl_seconds: int,
+    trigger: str | None = None,
 ) -> RunMeta | None:
     """Atomically claim the active-run slot for a conversation.
 
@@ -243,6 +249,7 @@ async def create_run(
         status=status,
         started_at=started_at,
         user_message=user_message,
+        trigger=trigger,
     )
     pairs = _meta_hash_pairs(meta)
 
