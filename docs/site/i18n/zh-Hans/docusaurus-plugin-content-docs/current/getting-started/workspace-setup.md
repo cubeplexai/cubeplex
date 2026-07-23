@@ -43,7 +43,7 @@ import TabItem from '@theme/TabItem';
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="云服务">
 
-点击你通过电子邮件收到的邀请链接。如果你还没有 CubePlex 账户，系统会先提示你创建账户。
+CubePlex 云服务即将推出。在开放之前，请加入自托管实例（见 **自托管**）。
 
 </TabItem>
 <TabItem value="self-hosted" label="自托管">

@@ -15,10 +15,7 @@ import TabItem from '@theme/TabItem';
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="云服务">
 
-1. 前往 [cubeplex.ai](https://cubeplex.ai)，然后点击 **注册**。
-2. 输入你的电子邮箱和密码（或使用社交账号登录）。
-3. 如果你的实例启用了邮箱验证，请输入发送到收件箱的一次性验证码以确认邮箱地址。
-4. 完成 **初始设置** 向导：为组织命名、选择 slug，并创建第一个工作区。
+CubePlex 云服务即将推出。在开放之前，请通过自托管部署创建账户（见 **自托管** 标签）。
 
 </TabItem>
 <TabItem value="self-hosted" label="自托管">

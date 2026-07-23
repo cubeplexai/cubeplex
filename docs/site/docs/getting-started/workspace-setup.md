@@ -43,7 +43,7 @@ To invite to a workspace:
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="Cloud">
 
-Click the invite link you received by email. If you do not have a CubePlex account yet, you will be prompted to create one first.
+CubePlex Cloud is coming soon. Until it is available, join a self-hosted instance (see **Self-hosted**).
 
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">
