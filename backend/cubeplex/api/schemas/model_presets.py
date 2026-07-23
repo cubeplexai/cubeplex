@@ -18,6 +18,14 @@ class WorkspacePresetSummary(BaseModel):
     primary: str
     description: str
     is_default: bool
+    # Detail fields for composer picker (tooltip / brand heuristics).
+    # Additive; older clients ignore. Null when primary cannot be resolved.
+    provider_slug: str | None = None
+    model_id: str | None = None
+    model_display_name: str | None = None
+    context_window: int | None = None
+    reasoning: bool | None = None
+    input_modalities: list[str] | None = None
 
 
 class WorkspacePresetsResponse(BaseModel):
