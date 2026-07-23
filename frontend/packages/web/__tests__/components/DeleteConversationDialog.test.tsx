@@ -113,6 +113,47 @@ describe('DeleteConversationDialog', () => {
     })
   })
 
+  it('does not navigate when the route changed while delete was in flight', async () => {
+    pathname = '/w/ws-1/conversations/conv-1'
+    let resolveRemove: (() => void) | undefined
+    remove.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRemove = resolve
+        }),
+    )
+    const { rerender } = renderDialog()
+
+    fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
+    await waitFor(() => {
+      expect(screen.getByTestId('conversation-delete-confirm')).toBeDisabled()
+    })
+
+    // User left the deleted conversation before DELETE finished.
+    pathname = '/w/ws-1/conversations/other-conv'
+    rerender(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <DeleteConversationDialog
+          open
+          onOpenChange={vi.fn()}
+          conversationId="conv-1"
+          conversationTitle="Sprint planning"
+          currentWsId="ws-1"
+        />
+      </NextIntlClientProvider>,
+    )
+
+    resolveRemove?.()
+    await waitFor(() => {
+      expect(remove).toHaveBeenCalledTimes(1)
+    })
+    // Give the success path a tick; must not bounce the user off other-conv.
+    await waitFor(() => {
+      expect(screen.queryByText('Deleting…')).not.toBeInTheDocument()
+    })
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
   it('does not navigate when delete fails on the open conversation', async () => {
     pathname = '/w/ws-1/conversations/conv-1'
     remove.mockRejectedValue(new Error('network down'))
