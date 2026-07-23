@@ -174,20 +174,47 @@ describe('messageStore unread', () => {
       get: () => 'visible',
     })
 
-    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA' })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA', at: 100 })
     expect(useMessageStore.getState().unreadConversationIds.cA).toBeUndefined()
   })
 
   it('remote mark applies when away', () => {
     useConversationStore.setState({ activeId: 'cB' })
-    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA' })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA', at: 100 })
     expect(useMessageStore.getState().unreadConversationIds).toEqual({ cA: true })
   })
 
   it('remote clear removes only the target id', () => {
     useMessageStore.setState({ unreadConversationIds: { cA: true, cB: true } })
-    useMessageStore.getState().__applyUnreadRemote({ type: 'clear', conversationId: 'cA' })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA', at: 50 })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cB', at: 50 })
+    useMessageStore
+      .getState()
+      .__applyUnreadRemote({ type: 'clear', conversationId: 'cA', before: 50 })
     expect(useMessageStore.getState().unreadConversationIds).toEqual({ cB: true })
+  })
+
+  it('stale remote clear does not wipe a newer mark', () => {
+    useConversationStore.setState({ activeId: 'cB' })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA', at: 100 })
+    // Newer mark
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA', at: 200 })
+    // Delayed clear for the older mark
+    useMessageStore
+      .getState()
+      .__applyUnreadRemote({ type: 'clear', conversationId: 'cA', before: 100 })
+    expect(useMessageStore.getState().unreadConversationIds.cA).toBe(true)
+  })
+
+  it('merges pending in-memory marks when auth user binds', () => {
+    setUser(null)
+    useMessageStore.setState({ unreadConversationIds: {} })
+    useMessageStore.getState().markUnread('pending1')
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({ pending1: true })
+
+    setUser(USER_A)
+    expect(useMessageStore.getState().unreadConversationIds.pending1).toBe(true)
+    expect(loadUnreadMap(USER_A).pending1).toBe(true)
   })
 
   it('resetUnread clears memory and optionally storage', () => {

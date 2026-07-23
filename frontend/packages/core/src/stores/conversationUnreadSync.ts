@@ -16,13 +16,14 @@ export const UNREAD_STORAGE_KEY_PREFIX = 'cubeplex:conversation-unread-v1:'
 export const UNREAD_CHANNEL_PREFIX = 'cubeplex-conversation-unread:'
 
 export type UnreadRemoteEvent =
-  | { type: 'mark'; conversationId: string }
-  | { type: 'clear'; conversationId: string }
+  | { type: 'mark'; conversationId: string; at: number }
+  | { type: 'clear'; conversationId: string; before: number }
   /** Full replace — only from storage events (best-effort fallback). */
   | { type: 'replace'; ids: UnreadConversationIds }
 
 type UnreadChannelMessage =
-  { type: 'mark'; conversationId: string } | { type: 'clear'; conversationId: string }
+  | { type: 'mark'; conversationId: string; at: number }
+  | { type: 'clear'; conversationId: string; before: number }
 
 function canUseStorage(): boolean {
   return typeof localStorage !== 'undefined'
@@ -112,35 +113,48 @@ function broadcastOp(userId: string, msg: UnreadChannelMessage): void {
 
 /**
  * Mark one conversation unread: RMW localStorage + broadcast mark op.
- * Returns the merged map after applying the mark to storage.
+ * `at` is a monotonic-ish timestamp used so delayed clears cannot wipe a
+ * newer mark. Returns the merged map after applying the mark to storage.
+ *
+ * Note: localStorage RMW is best-effort under concurrent tab writes; live
+ * multi-tab correctness prefers BroadcastChannel ops. A true atomic merge
+ * would need a versioned op log — out of scope for this UI badge.
  */
-export function publishMark(userId: string, conversationId: string): UnreadConversationIds {
+export function publishMark(
+  userId: string,
+  conversationId: string,
+  at: number = Date.now(),
+): UnreadConversationIds {
   const prev = loadUnreadMap(userId)
   if (prev[conversationId]) {
-    broadcastOp(userId, { type: 'mark', conversationId })
+    broadcastOp(userId, { type: 'mark', conversationId, at })
     return prev
   }
   const next: UnreadConversationIds = { ...prev, [conversationId]: true }
   saveUnreadMap(userId, next)
-  broadcastOp(userId, { type: 'mark', conversationId })
+  broadcastOp(userId, { type: 'mark', conversationId, at })
   return next
 }
 
 /**
  * Clear one conversation unread: RMW localStorage + broadcast clear op.
- * Returns the map after removal.
+ * Peers only drop a mark if their local mark timestamp is `<= before`.
  */
-export function publishClear(userId: string, conversationId: string): UnreadConversationIds {
+export function publishClear(
+  userId: string,
+  conversationId: string,
+  before: number = Date.now(),
+): UnreadConversationIds {
   const prev = loadUnreadMap(userId)
   if (!prev[conversationId]) {
     // Still broadcast so peers that hold the id drop it (e.g. present-tab rejection).
-    broadcastOp(userId, { type: 'clear', conversationId })
+    broadcastOp(userId, { type: 'clear', conversationId, before })
     return prev
   }
   const next: UnreadConversationIds = { ...prev }
   delete next[conversationId]
   saveUnreadMap(userId, next)
-  broadcastOp(userId, { type: 'clear', conversationId })
+  broadcastOp(userId, { type: 'clear', conversationId, before })
   return next
 }
 
@@ -158,12 +172,24 @@ export function subscribeUnreadSync(
   const onMessage = (ev: MessageEvent<UnreadChannelMessage>) => {
     const data = ev.data
     if (!data || typeof data !== 'object') return
-    if (data.type === 'mark' && typeof data.conversationId === 'string') {
-      onRemote({ type: 'mark', conversationId: data.conversationId })
+    if (
+      data.type === 'mark' &&
+      typeof data.conversationId === 'string' &&
+      typeof data.at === 'number'
+    ) {
+      onRemote({ type: 'mark', conversationId: data.conversationId, at: data.at })
       return
     }
-    if (data.type === 'clear' && typeof data.conversationId === 'string') {
-      onRemote({ type: 'clear', conversationId: data.conversationId })
+    if (
+      data.type === 'clear' &&
+      typeof data.conversationId === 'string' &&
+      typeof data.before === 'number'
+    ) {
+      onRemote({
+        type: 'clear',
+        conversationId: data.conversationId,
+        before: data.before,
+      })
     }
   }
 
