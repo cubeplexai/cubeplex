@@ -41,14 +41,14 @@ To invite to a workspace:
 ## Join an existing workspace
 
 <Tabs groupId="deploy-mode">
+<TabItem value="self-hosted" label="Self-hosted" default>
+
+Click the invite link, or ask your admin to add you directly from the workspace members page. Depending on your instance's registration policy, you may need admin approval.
+
+</TabItem>
 <TabItem value="cloud" label="Cloud">
 
 CubePlex Cloud is coming soon. Until it is available, join a self-hosted instance (see **Self-hosted**).
-
-</TabItem>
-<TabItem value="self-hosted" label="Self-hosted">
-
-Click the invite link, or ask your admin to add you directly from the workspace members page. Depending on your instance's registration policy, you may need admin approval.
 
 </TabItem>
 </Tabs>

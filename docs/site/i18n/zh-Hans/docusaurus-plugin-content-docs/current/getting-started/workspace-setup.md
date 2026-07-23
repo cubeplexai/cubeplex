@@ -41,14 +41,14 @@ import TabItem from '@theme/TabItem';
 ## 加入现有工作区 {#join-an-existing-workspace}
 
 <Tabs groupId="deploy-mode">
+<TabItem value="self-hosted" label="自托管" default>
+
+点击邀请链接，或请管理员从工作区成员页面直接添加你。根据实例的注册策略，你可能需要获得管理员批准。
+
+</TabItem>
 <TabItem value="cloud" label="云服务">
 
 CubePlex 云服务即将推出。在开放之前，请加入自托管实例（见 **自托管**）。
-
-</TabItem>
-<TabItem value="self-hosted" label="自托管">
-
-点击邀请链接，或请管理员从工作区成员页面直接添加你。根据实例的注册策略，你可能需要获得管理员批准。
 
 </TabItem>
 </Tabs>
