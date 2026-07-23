@@ -50,9 +50,11 @@ user for vague screenshots — **never** exposing secret values.
 1. **Effective network policy** visible in compact non-secret form.
 2. **Env inventory**: name + kind + scope + status + secret host/header
    constraints — **never** plaintext secret values.
-3. Short prompt rules for diagnosis and when to send the user to settings.
-4. Respect **prompt-cache discipline**: prefer on-demand tool for full dump;
-   keep any always-on text tiny and stable.
+3. Teach diagnosis via **tool description + result guidance** (and optional
+   error-path hints later) — **not** by growing the stable system prompt.
+4. Respect **prompt-cache discipline**: full dump only on-demand via tool;
+   leave `SANDBOX_PROMPT_TEMPLATE` free of live policy/env and free of a
+   diagnosis playbook.
 5. Prefer DB metadata over scraping the sandbox environment.
 
 ## Non-goals
@@ -61,6 +63,8 @@ user for vague screenshots — **never** exposing secret values.
 - Letting the agent **mutate** network policy or env entries from chat.
 - Full packet capture / MITM debug logs.
 - Replacing command HITL confirm flows.
+- Injecting live policy/env (or a long diagnosis blurb) into the system prompt.
+- Wrapping `sandbox_config` in a `DeferredToolGroup` in v1 (see Delivery).
 
 ## Design
 
@@ -118,18 +122,37 @@ system prompt.
 Short list of deny/confirm patterns so the agent avoids known-denied commands
 and understands HITL confirms are policy, not random errors.
 
-### Delivery: hybrid (chosen)
+### Delivery: tool-only (chosen)
 
 | Layer | Content |
 | --- | --- |
-| **Stable prompt blurb** | Fixed short guidance: egress/env are admin-configured; call `sandbox_config` on network/auth failure; never print secrets; secrets use host-scoped placeholders. |
-| **Tool `sandbox_config`** | JSON: network summary + env inventory (+ optional command rules). Read DB at call time. |
-| **Later optional** | Structured one-line hints on blocked egress / policy_deny execute errors |
+| **Eager tool `sandbox_config`** | Registered with other sandbox tools (`execute`, `write_file`, …) when the sandbox is available. JSON: network summary + env inventory (+ optional command rules). Read DB at call time. |
+| **Tool description + result guidance** | When to call (network/auth/env failures); never print secrets; point user to settings for missing allow rules / env entries. Optional short `guidance` field in the tool result so the playbook is not system-prompt-resident. |
+| **System prompt** | **No change** for this feature: keep existing workdir / file-tools sandbox section. Do **not** append a diagnosis blurb; do **not** interpolate live rules or env names. |
+| **Later optional** | Structured one-line hints on blocked egress / policy_deny execute errors (error path, not stable prefix). |
+
+#### Why not hybrid prompt blurb
+
+- Matches other on-demand capabilities (`conversation_history`, `artifacts`):
+  discovery via tool surface, data only after the agent calls.
+- Avoids growing the always-on system prompt (#391 / #412 direction).
+- Cache-safe by construction: no new stable-prefix fragment at all.
+
+#### Why not `DeferredToolGroup` in v1
+
+Deferred groups (`cubeplex:conversation_history`, MCP servers, …) hide **many
+tool schemas** behind a catalog line + `load_tools`. `sandbox_config` is a
+**single small diagnostic tool** used on the failure path — a deferred group
+still costs catalog text in the system prompt and an extra `load_tools`
+round-trip with almost no schema savings (same reason `generate_image` stays
+eager). Register it eagerly next to other sandbox tools.
+
+If diagnosis later grows into multiple ops (e.g. network check, env lookup),
+revisit a `cubeplex:sandbox_runtime` deferred group then.
 
 Why not always-on full dump: token cost and cache busts when admin edits.
-Why not tool-only: agent must remember to call; a short blurb raises recall.
 
-### Prompt playbook (agent behavior)
+### Agent behavior (encoded in tool description / result, not system prompt)
 
 When network or auth fails:
 
@@ -170,17 +193,17 @@ When network or auth fails:
   `policy_source: "org_db_current"` + `sandbox_note: "network rules apply at
   create; recreate sandbox after admin changes"`. Do not claim live enforcement
   of newly edited rules on an old sandbox.
-- Prompt blurb: static; does not include live rules.
+- No new system-prompt fragment → no extra cache surface for this feature.
 - Optional future inline summary would need deterministic snapshot discipline.
 
 ## Phasing
 
 | Phase | Deliverable |
 | --- | --- |
-| **1** | `sandbox_config` tool: network rules + env inventory (no values); redaction tests |
-| **2** | Short sandbox prompt guidance + failure-diagnosis playbook |
+| **1** | Safe serializers + redaction tests |
+| **2** | Eager `sandbox_config` tool (description + optional result guidance); wiring with other sandbox tools |
 | **3** | Optional: structured hints on blocked egress / policy_deny execute errors |
-| **4** | Optional: compact always-on summary if token budget allows |
+| **4** | Optional: deferred multi-op group **only if** more sandbox-diagnosis tools appear; not a v1 goal |
 
 ## Acceptance criteria
 
@@ -193,15 +216,18 @@ When network or auth fails:
    “configured as secret for hosts […]”).
 5. Unit tests ensure secret values never appear in serialization helpers.
 6. Docs note: agent can see policy/env **metadata** for troubleshooting.
+7. `SANDBOX_PROMPT_TEMPLATE` (or equivalent always-on sandbox section) does
+   **not** gain a diagnosis blurb or live policy/env dump for this feature.
 
 ## Open questions (v1 decisions)
 
 | Question | Decision |
 | --- | --- |
-| Prompt vs tool vs hybrid | **Hybrid** |
+| Prompt vs tool vs hybrid | **Tool-only** (eager `sandbox_config`; no system-prompt blurb) |
+| DeferredToolGroup | **No** for v1 single tool |
 | Command rules in v1 | **Include if present on policy row** (cheap, high value) |
 | Org env visibility | **Effective merge** as injected into the sandbox |
-| Auto error enrichment | **Phase 3** optional |
+| Auto error enrichment | **Phase 3** optional (preferred over prompt blurb if recall is weak) |
 | Egress proxy | Presence only, never credentials |
 
 ## Related code
@@ -212,5 +238,6 @@ When network or auth fails:
 - `backend/cubeplex/services/sandbox_policy.py`
 - `backend/cubeplex/sandbox_env/injector.py`
 - `backend/cubeplex/prompts/sandbox.py`, `middleware/sandbox.py`
+- `backend/cubeplex/agents/actions/registry.py` (deferred capability pattern — **not** used for v1)
 - `docs/site/docs/admin/sandbox.md`
 - `backend/docs/prompt-cache-discipline.md`
