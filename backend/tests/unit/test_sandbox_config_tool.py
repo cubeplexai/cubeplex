@@ -65,12 +65,15 @@ async def test_sandbox_config_tool_returns_loader_json() -> None:
 @pytest.mark.asyncio
 async def test_sandbox_config_tool_surfaces_loader_errors() -> None:
     async def loader() -> dict[str, Any]:
-        raise RuntimeError("db down")
+        raise RuntimeError("db down connection string=secret")
 
     tool = create_sandbox_config_tool(loader)
     result = await tool.execute("id", tool.parameters(), signal=None, on_update=None)
     assert result.is_error is True
-    assert "db down" in result.content[0].text  # type: ignore[union-attr]
+    text = result.content[0].text  # type: ignore[union-attr]
+    assert "temporarily unavailable" in text
+    assert "db down" not in text
+    assert "secret" not in text
 
 
 @pytest.mark.asyncio

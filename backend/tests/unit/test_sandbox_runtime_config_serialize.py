@@ -15,6 +15,8 @@ from cubeplex.services.sandbox_runtime_config import (
     FORBIDDEN_KEY_FRAGMENTS,
     GUIDANCE,
     POLICY_SOURCE,
+    POLICY_SOURCE_BUILT_IN,
+    POLICY_SOURCE_ORG_DB,
     SANDBOX_NOTE,
     EnvInventoryItem,
     load_agent_view,
@@ -68,6 +70,13 @@ def test_network_policy_egress_unset_when_none() -> None:
     policy = EffectivePolicy(default_image="img", egress_proxy=None)
     out = serialize_network_policy(policy)
     assert out["egress_proxy"] == "unset"
+
+
+def test_network_policy_source_built_in_defaults() -> None:
+    policy = EffectivePolicy(default_image="img")
+    out = serialize_network_policy(policy, policy_source=POLICY_SOURCE_BUILT_IN)
+    assert out["policy_source"] == POLICY_SOURCE_BUILT_IN
+    assert out["policy_source"] != POLICY_SOURCE_ORG_DB
 
 
 def test_network_policy_truncates_rules() -> None:
@@ -175,6 +184,13 @@ async def test_load_agent_view_uses_resolvers_not_values(
     class _FakeSession:
         pass
 
+    class _FakeRepo:
+        def __init__(self, session: object, *, org_id: str) -> None:
+            del session, org_id
+
+        async def get(self) -> object | None:
+            return object()  # pretend org row exists
+
     async def fake_policy_resolve(self: object) -> EffectivePolicy:
         return EffectivePolicy(
             default_image="img",
@@ -200,6 +216,10 @@ async def test_load_agent_view_uses_resolvers_not_values(
         ]
 
     monkeypatch.setattr(
+        "cubeplex.services.sandbox_runtime_config.SandboxPolicyRepository",
+        _FakeRepo,
+    )
+    monkeypatch.setattr(
         "cubeplex.services.sandbox_runtime_config.SandboxPolicyResolver.resolve",
         fake_policy_resolve,
     )
@@ -217,7 +237,54 @@ async def test_load_agent_view_uses_resolvers_not_values(
     )
     assert view["guidance"] == GUIDANCE
     assert view["network"]["rules"] == [{"action": "allow", "target": "pypi.org"}]
+    assert view["network"]["policy_source"] == POLICY_SOURCE_ORG_DB
     assert view["command_rules"] == [{"action": "deny", "pattern": "rm *"}]
     assert view["env"][0]["env_name"] == "API_KEY"
     assert "value" not in view["env"][0]
     assert _forbidden_paths(view) == []
+
+
+@pytest.mark.asyncio
+async def test_load_agent_view_built_in_policy_source_when_no_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeSession:
+        pass
+
+    class _FakeRepo:
+        def __init__(self, session: object, *, org_id: str) -> None:
+            del session, org_id
+
+        async def get(self) -> None:
+            return None
+
+    async def fake_policy_resolve(self: object) -> EffectivePolicy:
+        return EffectivePolicy(default_image="img", network_default_action="deny")
+
+    async def fake_inventory(
+        session: object, *, org_id: str, workspace_id: str, user_id: str
+    ) -> list[EnvInventoryItem]:
+        del session, org_id, workspace_id, user_id
+        return []
+
+    monkeypatch.setattr(
+        "cubeplex.services.sandbox_runtime_config.SandboxPolicyRepository",
+        _FakeRepo,
+    )
+    monkeypatch.setattr(
+        "cubeplex.services.sandbox_runtime_config.SandboxPolicyResolver.resolve",
+        fake_policy_resolve,
+    )
+    monkeypatch.setattr(
+        "cubeplex.services.sandbox_runtime_config.resolve_env_inventory",
+        fake_inventory,
+    )
+
+    view = await load_agent_view(
+        _FakeSession(),  # type: ignore[arg-type]
+        org_id="org1",
+        workspace_id="ws1",
+        user_id="u1",
+        default_image="ubuntu:22.04",
+    )
+    assert view["network"]["policy_source"] == POLICY_SOURCE_BUILT_IN

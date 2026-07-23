@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -14,8 +15,12 @@ from pydantic import BaseModel
 
 from cubeplex.services.sandbox_runtime_config import load_agent_view
 
+logger = logging.getLogger(__name__)
+
 # Loader opens its own session and returns the agent view dict.
 SandboxConfigLoader = Callable[[], Awaitable[dict[str, Any]]]
+
+_SANITIZED_LOADER_ERROR = "sandbox configuration is temporarily unavailable."
 
 
 class _SandboxConfigArgs(BaseModel):
@@ -37,9 +42,11 @@ def create_sandbox_config_tool(
         del tool_call_id, args, signal, on_update
         try:
             view = await loader()
-        except Exception as exc:  # noqa: BLE001 — surface to model, don't crash turn
+        except Exception:
+            # Do not leak driver/DB details into the model transcript.
+            logger.exception("sandbox_config loader failed")
             return AgentToolResult(
-                content=[TextContent(text=f"sandbox_config failed: {exc}")],
+                content=[TextContent(text=_SANITIZED_LOADER_ERROR)],
                 is_error=True,
             )
         text = json.dumps(view, sort_keys=True, default=str)
