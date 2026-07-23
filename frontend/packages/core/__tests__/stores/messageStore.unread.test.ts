@@ -1,14 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isAwayFromConversation, useMessageStore } from '../../src/stores/messageStore'
 import { useConversationStore } from '../../src/stores/conversationStore'
-import {
-  UNREAD_STORAGE_KEY,
-  loadUnreadMap,
-  parseUnreadMap,
-  publishUnreadMap,
-  unreadMapsEqual,
-} from '../../src/stores/conversationUnreadSync'
+import { useAuthStore } from '../../src/stores/authStore'
+import { loadUnreadMap, unreadStorageKey } from '../../src/stores/conversationUnreadSync'
 import type { AgentStream } from '../../src/stores/messageStore'
+import type { MeResult } from '../../src/api/auth'
 
 vi.mock('../../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/api')>()
@@ -21,6 +17,26 @@ vi.mock('../../src/api', async (importOriginal) => {
 import { cancelActiveRun } from '../../src/api'
 
 const fakeClient = { resolvePath: (s: string) => s, post: vi.fn() } as never
+const USER_A = 'user_a'
+const USER_B = 'user_b'
+
+function setUser(id: string | null): void {
+  useAuthStore.setState({
+    user: id
+      ? ({
+          id,
+          email: `${id}@example.com`,
+          display_name: id,
+          avatar_url: null,
+          avatar_seed: null,
+          avatar_kind: null,
+          avatar_style: null,
+          language: 'en',
+          is_verified: true,
+        } satisfies MeResult)
+      : null,
+  })
+}
 
 function seedStreaming(conversationId: string, stream: Partial<AgentStream> = {}): void {
   useMessageStore.setState({
@@ -43,25 +59,12 @@ function seedStreaming(conversationId: string, stream: Partial<AgentStream> = {}
   })
 }
 
-describe('conversationUnreadSync helpers', () => {
-  it('parseUnreadMap accepts only true-valued id keys', () => {
-    expect(parseUnreadMap(null)).toEqual({})
-    expect(parseUnreadMap('{"a":true,"b":false,"c":1}')).toEqual({ a: true })
-    expect(parseUnreadMap('not-json')).toEqual({})
-  })
-
-  it('unreadMapsEqual compares key sets', () => {
-    expect(unreadMapsEqual({ a: true }, { a: true })).toBe(true)
-    expect(unreadMapsEqual({ a: true }, { b: true })).toBe(false)
-    expect(unreadMapsEqual({ a: true, b: true }, { a: true })).toBe(false)
-  })
-})
-
 describe('messageStore unread', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
     useConversationStore.setState({ activeId: null })
+    setUser(USER_A)
     useMessageStore.setState({
       messages: {},
       streamAgents: {},
@@ -78,24 +81,24 @@ describe('messageStore unread', () => {
 
   afterEach(() => {
     localStorage.clear()
+    setUser(null)
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
   })
 
-  it('markUnread / clearUnread are idempotent and publish to localStorage', () => {
+  it('markUnread / clearUnread publish to user-scoped localStorage', () => {
     useMessageStore.getState().markUnread('c1')
     useMessageStore.getState().markUnread('c1')
     expect(useMessageStore.getState().unreadConversationIds).toEqual({ c1: true })
-    expect(loadUnreadMap()).toEqual({ c1: true })
+    expect(loadUnreadMap(USER_A)).toEqual({ c1: true })
+    expect(localStorage.getItem(unreadStorageKey(USER_B))).toBeNull()
 
     useMessageStore.getState().clearUnread('c1')
     useMessageStore.getState().clearUnread('c1')
     expect(useMessageStore.getState().unreadConversationIds).toEqual({})
-    expect(loadUnreadMap()).toEqual({})
-  })
-
-  it('__applyUnreadMap replaces local state without requiring localStorage write loop', () => {
-    useMessageStore.getState().markUnread('c1')
-    useMessageStore.getState().__applyUnreadMap({ c2: true })
-    expect(useMessageStore.getState().unreadConversationIds).toEqual({ c2: true })
+    expect(loadUnreadMap(USER_A)).toEqual({})
   })
 
   it('marks unread when stream completes while activeId is another conversation', async () => {
@@ -105,7 +108,6 @@ describe('messageStore unread', () => {
     })
     useConversationStore.setState({ activeId: 'cB' })
 
-    // Drive terminalization via cancelStream (finalizeCompletedStream path).
     await useMessageStore.getState().cancelStream(fakeClient, 'cA')
 
     expect(useMessageStore.getState().unreadConversationIds.cA).toBe(true)
@@ -147,11 +149,6 @@ describe('messageStore unread', () => {
       get: () => 'hidden',
     })
     expect(isAwayFromConversation('cA')).toBe(true)
-
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      get: () => 'visible',
-    })
   })
 
   it('marks unread when document is hidden even if activeId matches', async () => {
@@ -168,16 +165,51 @@ describe('messageStore unread', () => {
     await useMessageStore.getState().cancelStream(fakeClient, 'cA')
 
     expect(useMessageStore.getState().unreadConversationIds.cA).toBe(true)
+  })
 
+  it('remote mark is rejected when this tab is focused on the conversation', () => {
+    useConversationStore.setState({ activeId: 'cA' })
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       get: () => 'visible',
     })
+
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA' })
+    expect(useMessageStore.getState().unreadConversationIds.cA).toBeUndefined()
   })
 
-  it('publishUnreadMap writes storage used by multi-tab peers', () => {
-    publishUnreadMap({ x: true })
-    expect(localStorage.getItem(UNREAD_STORAGE_KEY)).toBe(JSON.stringify({ x: true }))
-    expect(loadUnreadMap()).toEqual({ x: true })
+  it('remote mark applies when away', () => {
+    useConversationStore.setState({ activeId: 'cB' })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'mark', conversationId: 'cA' })
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({ cA: true })
+  })
+
+  it('remote clear removes only the target id', () => {
+    useMessageStore.setState({ unreadConversationIds: { cA: true, cB: true } })
+    useMessageStore.getState().__applyUnreadRemote({ type: 'clear', conversationId: 'cA' })
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({ cB: true })
+  })
+
+  it('resetUnread clears memory and optionally storage', () => {
+    useMessageStore.getState().markUnread('c1')
+    expect(loadUnreadMap(USER_A)).toEqual({ c1: true })
+    useMessageStore.getState().resetUnread({ clearStorage: true })
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({})
+    expect(loadUnreadMap(USER_A)).toEqual({})
+  })
+
+  it('rebinds storage when auth user changes', () => {
+    useMessageStore.getState().markUnread('cA')
+    expect(loadUnreadMap(USER_A)).toEqual({ cA: true })
+
+    // User B starts with empty scoped storage.
+    setUser(USER_B)
+    // Auth subscribe is async in the sense it runs synchronously via zustand.
+    // rebind loads empty map for B.
+    expect(useMessageStore.getState().unreadConversationIds.cA).toBeUndefined()
+
+    useMessageStore.getState().markUnread('cB')
+    expect(loadUnreadMap(USER_B)).toEqual({ cB: true })
+    expect(loadUnreadMap(USER_A)).toEqual({ cA: true })
   })
 })
