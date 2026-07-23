@@ -50,17 +50,23 @@ requires; do not block MVP on C.
 
 ### 4.1 State model
 
-Add client-only unread tracking, preferred location either:
+Add client-only unread tracking. **Resolved ownership (avoid circular
+store imports):**
 
-- New fields on `useMessageStore` (next to stream lifecycle), **or**
-- New small store / fields on `useConversationStore`
+- `messageStore` **already** imports `useConversationStore` (e.g. title
+  generation). Do **not** make `conversationStore` import `messageStore`
+  for `clearUnread` — that creates a bidirectional ES module dependency.
+- Keep the unread map + `markUnread` / `clearUnread` on **`messageStore`**
+  (next to stream terminalization).
+- Call **`clearUnread` from the focus boundary** (conversation page
+  `setActive` effect, sidebar click path, deep-link mount) via
+  `useMessageStore.getState().clearUnread(id)` — UI/page layer, not
+  `conversationStore.setActive` body.
 
-**Recommendation:** keep unread next to stream completion in
-**`messageStore`** (or a dedicated thin `conversationUiStore` if message
-store bloat is a concern). Concrete shape:
+Concrete shape:
 
 ```ts
-unreadConversationIds: ReadonlySet<string> | Record<string, true>
+unreadConversationIds: Record<string, true>  // prefer over Set for Zustand immutability
 // helpers:
 markUnread(conversationId: string): void
 clearUnread(conversationId: string): void
@@ -76,42 +82,60 @@ moment a run for `C` reaches a **terminal** client state:
 1. The completing stream’s conversation is `C`
    (`streamingConversationId === C` just before clear, or completion
    handler is invoked with `C`).
-2. The user is **away** from `C`’s chat surface, defined for MVP as:
+2. The user is **away** from `C`’s chat surface. **MVP away predicate
+   (resolved):**
 
    ```text
-   useConversationStore.activeId !== C
+   isAwayFrom(C) =
+     useConversationStore.activeId !== C
+     OR the current app route is not C’s conversation page
+        (e.g. pathname does not match /w/{ws}/conversations/{C})
    ```
 
+   Rationale: today navigating to workspace home / settings / other
+   panels often **leaves `activeId` set** to the last conversation (page
+   unmount does not call `setActive(null)`). Treating `activeId === C`
+   alone as “present” would miss the primary “user left the chat” case.
+
+   Implementation options (pick one in the plan; both acceptable):
+
+   - **A.** Clear `activeId` on conversation-page unmount / non-chat
+     navigation, then `activeId !== C` is sufficient; or
+   - **B.** At mark time, also require a route/focus helper
+     `isViewingConversation(C)` injected or read from a small shell
+     signal.
+
    Optional strengthening (same PR if cheap): also treat
-   `document.visibilityState === 'hidden'` as away **even if**
-   `activeId === C` (user switched browser tab/window while still “on”
-   that route). Product default in the issue: leave conversation UI
-   focus **or** tab not focused — implement at least `activeId !== C`;
-   add document visibility if it is a few lines and tested.
+   `document.visibilityState === 'hidden'` as away **even if** the user
+   is still on C’s route (browser tab hidden).
 
-3. The terminal outcome produced **viewable new content** worth reviewing:
+3. Terminal outcome — **MVP mark rule (resolved):** mark on any client
+   stream **terminalization** that runs for `C` while away:
 
-   - **Default (issue):** any terminal run that produced viewable new
-     assistant/error content — success, error with content, cancel after
-     partial assistant text if the store still committed something
-     visible.
-   - Practical MVP rule: mark on any client stream terminalization
-     (done / error / cancel) **except** when the user never left `C`
-     (criterion 2). Avoid over-filtering cancel vs success in v1 unless
-     tests show noise.
+   - `finalizeCompletedStream` (normal done)
+   - `finalizePausedStream` is **not** a “run finished while away” signal
+     for unread (HITL still needs user input on C — do not mark unread
+     solely because the stream paused)
+   - SSE / generic stream **error** paths that clear streaming flags
+   - `cancelStream` completion (including cancel with no partial text)
 
-**Do not mark** if the user stayed on `C` the whole time (`activeId === C`
-and, if visibility is implemented, document visible).
+   Prefer **one shared terminal helper** invoked from every path that
+   clears `isStreaming` for a completed/aborted run so mark cannot be
+   skipped on a stray catch branch. Empty cancel vs partial content: still
+   mark when away (issue default: any terminal worth a glance).
+
+**Do not mark** if the user stayed on C’s chat surface the whole time
+(`!isAwayFrom(C)` and, if visibility is implemented, document visible).
 
 ### 4.3 When to clear unread
 
 Clear unread for `C` when the user **opens / focuses** `C` again:
 
-- `setActive(C)` from sidebar click / navigation into
-  `/w/{ws}/conversations/{C}`
-- Also clear if the user lands on `C` via search result or deep link
-  (any path that sets `activeId` to `C` or mounts the conversation page
-  for `C`).
+- Conversation page mount / `setActive(C)` from sidebar click / navigation
+  into `/w/{ws}/conversations/{C}` — call `clearUnread(C)` at that UI
+  boundary (same place `setActive` is invoked today), **not** inside
+  `conversationStore.setActive` if that would import `messageStore`.
+- Deep link / search result that mounts C’s page likewise.
 
 Clear is **idempotent**. Do not require scrolling to bottom for MVP
 (“had a chance to see” = open the conversation).
@@ -183,7 +207,9 @@ trivial later, treat as follow-up.
 
 | Question | Decision |
 | --- | --- |
-| Fail/cancel mark unread? | Yes if user was away (any terminal stream end). |
+| Fail/cancel mark unread? | Yes if user was away (any non-HITL-pause terminal). |
+| HITL pause mark unread? | No — user still must answer on that conversation. |
 | Require scroll-to-bottom to clear? | No — open/focus is enough. |
 | Persist across reload? | No for MVP. |
-| document.visibilityState? | Nice-to-have same PR; `activeId` is required. |
+| document.visibilityState? | Nice-to-have same PR; route/`activeId` away predicate is required. |
+| `activeId` stale after leaving chat? | Treat non-chat route as away; and/or clear `activeId` on unmount. |
