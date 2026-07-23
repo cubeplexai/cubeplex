@@ -6,12 +6,19 @@ import { DeleteConversationDialog } from '@/components/layout/DeleteConversation
 
 const remove = vi.fn()
 const toastError = vi.fn()
+const routerReplace = vi.fn()
+let pathname = '/w/ws-1'
 
 vi.mock('sonner', () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
     success: vi.fn(),
   },
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: routerReplace }),
+  usePathname: () => pathname,
 }))
 
 vi.mock('@cubeplex/core', () => ({
@@ -43,6 +50,8 @@ describe('DeleteConversationDialog', () => {
   beforeEach(() => {
     remove.mockReset()
     toastError.mockReset()
+    routerReplace.mockReset()
+    pathname = '/w/ws-1'
   })
 
   it('shows title and consequence copy with the conversation title', () => {
@@ -88,6 +97,33 @@ describe('DeleteConversationDialog', () => {
       expect(onOpenChange).toHaveBeenCalledWith(false)
     })
     expect(toastError).not.toHaveBeenCalled()
+    // Not viewing this conversation → no leave-route navigation.
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('navigates to workspace home when deleting the open conversation', async () => {
+    pathname = '/w/ws-1/conversations/conv-1'
+    remove.mockResolvedValue(undefined)
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
+
+    await waitFor(() => {
+      expect(routerReplace).toHaveBeenCalledWith('/w/ws-1')
+    })
+  })
+
+  it('does not navigate when delete fails on the open conversation', async () => {
+    pathname = '/w/ws-1/conversations/conv-1'
+    remove.mockRejectedValue(new Error('network down'))
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalled()
+    })
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 
   it('keeps the dialog open and toasts when remove rejects', async () => {
