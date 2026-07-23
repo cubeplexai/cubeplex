@@ -2,7 +2,7 @@
 
 **Goal:** Mark a conversation unread in the sidebar when its agent run
 finishes while the user is focused elsewhere; clear when they open it again.
-In-session client state only.
+Browser-local state with multi-tab sync (`localStorage` + `BroadcastChannel`).
 
 **Architecture:**
 
@@ -13,6 +13,8 @@ In-session client state only.
    sidebar navigation) — **not** by importing `messageStore` from
    `conversationStore`.
 4. `ConversationRow` renders a compact unread dot when the id is in the set.
+5. Publish mark/clear to `localStorage` + `BroadcastChannel`; hydrate on load
+   and apply remote maps without re-broadcast loops.
 
 Coordinate with #388: spinner while streaming; unread only after complete
 when away (do not show both).
@@ -29,12 +31,13 @@ plain CSS dot, Vitest + RTL.
 
 | File | Action | Responsibility |
 | --- | --- | --- |
-| `frontend/packages/core/src/stores/messageStore.ts` | Modify | Unread map + mark on shared terminal helper; export helpers |
-| `frontend/packages/web/app/(app)/w/[wsId]/conversations/[id]/page.tsx` | Modify | Clear unread on mount/focus; optionally clear `activeId` on unmount |
+| `frontend/packages/core/src/stores/conversationUnreadSync.ts` | Create | localStorage + BroadcastChannel helpers |
+| `frontend/packages/core/src/stores/messageStore.ts` | Modify | Unread map + mark on shared terminal helper; multi-tab hydrate/subscribe |
+| `frontend/packages/web/app/(app)/w/[wsId]/conversations/[id]/page.tsx` | Modify | Clear unread on mount/focus/visibility; clear `activeId` on unmount |
 | `frontend/packages/web/components/layout/Sidebar.tsx` | Modify | Unread dot in `ConversationRow`; clear on row activate if needed |
 | `frontend/packages/web/messages/en.json` / `zh.json` | Modify | `sidebar.conversationUnread` |
 | `frontend/packages/core/__tests__/stores/messageStore.unread.test.ts` | Create | Mark/clear + away rules |
-| `frontend/packages/web/__tests__/components/…` | Create | Dot renders from store state |
+| `frontend/packages/core/__tests__/stores/conversationUnreadSync.test.ts` | Create | Multi-tab parse/publish/subscribe |
 
 **Do not** import `useMessageStore` from `conversationStore.ts` — that
 creates a circular dependency (`messageStore` already imports
@@ -65,7 +68,8 @@ already uses Sets elsewhere.
 1. Initialize empty map in store defaults and any full-reset paths.
 2. `markUnread(id)`: set key; no-op if already set.
 3. `clearUnread(id)`: remove key; no-op if absent.
-4. **Do not** persist.
+4. Persist via `publishUnreadMap` on local mark/clear; hydrate from
+   `loadUnreadMap` at store init; remote apply via `__applyUnreadMap`.
 
 **Hook points for mark** — introduce or extend **one** shared terminal
 helper (conceptually `onStreamTerminal({ conversationId, kind })`)

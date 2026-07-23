@@ -39,6 +39,13 @@ import {
 import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
+import {
+  loadUnreadMap,
+  publishUnreadMap,
+  subscribeUnreadSync,
+  unreadMapsEqual,
+  type UnreadConversationIds,
+} from './conversationUnreadSync'
 
 const YIELD_EVERY = 200
 
@@ -139,6 +146,11 @@ export interface MessageStore {
   hasMoreByConv: Record<string, boolean>
   /** Backscroll-in-flight guard so a click-spam on "Load earlier" only fires once. */
   loadingOlderByConv: Record<string, boolean>
+  /**
+   * Conversations with an unread agent completion while the user was away.
+   * Browser-local only (localStorage + BroadcastChannel multi-tab); not server-backed.
+   */
+  unreadConversationIds: UnreadConversationIds
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
@@ -176,8 +188,32 @@ export interface MessageStore {
   __commitTurnAndInject(conversationId: string, data: InjectedMessageData): void
   clearStream(): void
   clearLastRunStatus(): void
+  /** Mark a conversation unread (local + multi-tab publish). Idempotent. */
+  markUnread(conversationId: string): void
+  /** Clear unread for a conversation (local + multi-tab publish). Idempotent. */
+  clearUnread(conversationId: string): void
+  /** Replace the unread map without re-publishing (remote multi-tab apply). */
+  __applyUnreadMap(ids: UnreadConversationIds): void
   /** Test hook: apply a single AgentEvent synchronously */
   __applyEvent(event: AgentEvent): void
+}
+
+/** True when the user is not focused on this conversation's chat surface. */
+export function isAwayFromConversation(conversationId: string): boolean {
+  const activeId = useConversationStore.getState().activeId
+  if (activeId !== conversationId) return true
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true
+  return false
+}
+
+/**
+ * Shared terminalization side-effect: if the user is away, mark unread.
+ * Do not call from HITL pause (`finalizePausedStream`).
+ */
+function maybeMarkUnreadOnTerminal(get: () => MessageStore, conversationId: string): void {
+  if (isAwayFromConversation(conversationId)) {
+    get().markUnread(conversationId)
+  }
 }
 
 let activeStreamController: AbortController | null = null
@@ -949,6 +985,7 @@ async function finalizeCompletedStream(
         pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
       }
     })
+    maybeMarkUnreadOnTerminal(get, conversationId)
     return
   }
 
@@ -981,6 +1018,7 @@ async function finalizeCompletedStream(
       pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
     }
   })
+  maybeMarkUnreadOnTerminal(get, conversationId)
 }
 
 async function finalizePausedStream(
@@ -1105,8 +1143,10 @@ async function consumeRunStream(
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
         flush()
+        let didTerminal = false
         set((s) => {
           const owns = ownsStreamingConversation(s, conversationId)
+          if (owns) didTerminal = true
           return {
             messages: {
               ...s.messages,
@@ -1133,6 +1173,7 @@ async function consumeRunStream(
               : {}),
           }
         })
+        if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
         break
       } else if (event.type === 'done') {
         const usage = (event.data as Record<string, unknown>).usage as
@@ -1244,6 +1285,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   oldestSeqByConv: {},
   hasMoreByConv: {},
   loadingOlderByConv: {},
+  // Hydrated from localStorage below when running in a browser.
+  unreadConversationIds: {},
 
   appendFailoverEvent(conversationId, event) {
     set((s) => ({
@@ -1737,8 +1780,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               continue outer
             }
             flush()
+            let didTerminal = false
             set((s) => {
               const owns = ownsStreamingConversation(s, conversationId)
+              if (owns) didTerminal = true
               return {
                 messages: {
                   ...s.messages,
@@ -1765,6 +1810,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                   : {}),
               }
             })
+            if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
             break outer
           } else if (event.type === 'done') {
             const usage = (event.data as Record<string, unknown>).usage as
@@ -1820,8 +1866,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         break outer
       }
     } catch (err) {
+      let didTerminal = false
       set((s) => {
         const owns = ownsStreamingConversation(s, conversationId)
+        if (owns) didTerminal = true
         return {
           errors: {
             ...s.errors,
@@ -1842,6 +1890,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             : {}),
         }
       })
+      if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
       return
     } finally {
       flush()
@@ -2022,6 +2071,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         }
       })
+      maybeMarkUnreadOnTerminal(get, conversationId)
     }
 
     try {
@@ -2051,7 +2101,41 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   clearLastRunStatus() {
     set({ lastRunStatus: null })
   },
+
+  markUnread(conversationId) {
+    const prev = get().unreadConversationIds
+    if (prev[conversationId]) return
+    const next: UnreadConversationIds = { ...prev, [conversationId]: true }
+    set({ unreadConversationIds: next })
+    publishUnreadMap(next)
+  },
+
+  clearUnread(conversationId) {
+    const prev = get().unreadConversationIds
+    if (!prev[conversationId]) return
+    const next: UnreadConversationIds = { ...prev }
+    delete next[conversationId]
+    set({ unreadConversationIds: next })
+    publishUnreadMap(next)
+  },
+
+  __applyUnreadMap(ids) {
+    if (unreadMapsEqual(get().unreadConversationIds, ids)) return
+    set({ unreadConversationIds: ids })
+  },
+
   __applyEvent(event: AgentEvent) {
     set((s) => applyStreamEvent(s, event) as MessageStore)
   },
 }))
+
+// Browser: hydrate unread from localStorage and keep multi-tab peers in sync.
+if (typeof window !== 'undefined') {
+  const initial = loadUnreadMap()
+  if (Object.keys(initial).length > 0) {
+    useMessageStore.setState({ unreadConversationIds: initial })
+  }
+  subscribeUnreadSync((ids) => {
+    useMessageStore.getState().__applyUnreadMap(ids)
+  })
+}
