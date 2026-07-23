@@ -1721,6 +1721,12 @@
     "inputBarStop": "停止生成",
     "sidebar": "侧边栏",
     "deleteConversation": "删除对话",
+    "deleteConversationTitle": "删除对话？",
+    "deleteConversationDescription": "「{title}」将从历史记录中移除。消息将无法再在该对话中查看。相关产物将不再出现在库或对话面板中。",
+    "deleteConversationConfirm": "删除",
+    "deleteConversationCancel": "取消",
+    "deleteConversationDeleting": "删除中\u2026",
+    "deleteConversationFailed": "删除对话失败",
     "workspaceSettings": "工作区设置",
     "accountMenu": "账号菜单",
     "signOut": "退出登录"
