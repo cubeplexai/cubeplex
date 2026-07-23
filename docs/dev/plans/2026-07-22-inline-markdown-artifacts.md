@@ -54,21 +54,27 @@ entry target.
 ```
 
 **Logic**:
-1. Authz + load conversation + artifact (existing helpers).
-2. Reject non-markdown-eligible artifacts with 400.
-3. If `expected_version` provided and mismatches → 409.
-4. Enforce max length (config or constant ~2_000_000 chars/bytes).
-5. Bump version via repository `update` path used by agent registration;
-   create version row with same path/entry_file/mime.
-6. `ObjectStoreClient.upload_file(key, content_bytes, content_type=...)`.
-7. Best-effort sandbox (Unit 3); never fail the whole request solely because
+1. Authz + load conversation + artifact; assert
+   `artifact.conversation_id == conversation_id`.
+2. Reject non-markdown-eligible artifacts with 400. **v1 default:** reject
+   multi-file directory artifacts for content edit unless copy-prior-objects
+   is implemented (see spec).
+3. Enforce max length (config or constant ~2_000_000 chars/bytes).
+4. **Consistency strategy (do not call `ArtifactRepository.update` then
+   non-fatal upload):** upload object for next version key first **or** use
+   pending/ready state; then **atomic CAS** bump
+   (`WHERE version = expected_version`) + insert version row. On upload
+   failure after DB commit, compensate or never commit current to missing
+   object. Unique `(artifact_id, version)` recommended.
+5. Best-effort sandbox (Unit 3); never fail the whole request solely because
    sandbox write failed.
 
 **Tests** (`backend/tests/e2e/...` if hits DB/app; pure validation in unit):
 - Happy path: version N→N+1, object exists, body returned.
-- 409 on version mismatch.
-- 400 on non-markdown artifact.
-- Authz: non-member / wrong workspace.
+- 409 on version mismatch; concurrent browser + agent save only one winner.
+- Upload-fails-after-DB and DB-fails-after-upload orders (no missing current object).
+- 400 on non-markdown / directory (if rejected).
+- Authz: non-member / wrong workspace / **artifact from other conversation**.
 - Soft-deleted conversation: same as other artifact routes.
 
 ---
@@ -81,13 +87,16 @@ agent tools / lazy sandbox.
 **Logic**:
 1. If no active sandbox for conversation → reason `no_sandbox`.
 2. Resolve write path: `path` if file-like; else `join(path, entry_file)` when
-   directory + entry_file markdown.
-3. Reject path escape outside workdir.
+   directory + entry_file markdown (`entry_file` must be relative single-file).
+3. Canonicalize; reject `..`, absolute entry, workdir escape, symlink escape
+   when detectable → `path_escape` / `path_missing`.
 4. `sandbox.upload([(path, content.encode("utf-8"))])`.
-5. Catch errors → `sandbox_synced: false` + reason; log warning.
+5. Catch errors → `sandbox_synced: false` + stable reason (`sandbox_error` for
+   unknowns); log warning; never return raw exception strings.
 
-**Tests**: mock sandbox missing; path missing parent; successful upload
-called with expected path/bytes.
+**Tests**: mock sandbox missing; path missing parent; traversal/symlink cases;
+successful upload called with expected path/bytes; e2e partial failure still
+returns updated artifact + reason + UI toast path.
 
 ---
 
@@ -167,6 +176,9 @@ issue: implementation deferred). Track as checkbox in implementation PR.
 | Risk | Mitigation |
 | --- | --- |
 | Large md blocks bloat chat DOM | max-height + expand; later virtualize if needed |
-| Race with agent `save_artifact` | `expected_version` 409; user reloads and retries |
+| Race with agent `save_artifact` | Atomic CAS on version + unique (artifact_id, version) |
+| Version points at missing object | Upload/DB consistency strategy; test both failure orders |
+| Directory multi-file version shrink | Reject edit or copy prior objects |
 | Sandbox dead → user thinks save failed | toast distinguishes history vs sandbox |
+| Path escape / symlink | Canonical path checks + tests |
 | Path is directory | disable Edit unless entry_file is md |

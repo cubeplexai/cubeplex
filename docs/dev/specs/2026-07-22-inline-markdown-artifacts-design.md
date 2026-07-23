@@ -120,27 +120,47 @@ Content-Type: application/json
 Server steps:
 
 1. Authz same as other conversation artifact routes (`require_member` +
-   conversation soft-delete rules).
-2. Load artifact; reject if not markdown-eligible; optional optimistic
-   concurrency: if `expected_version` ≠ current → 409.
+   conversation soft-delete rules). **Invariant:** resolve artifact by id
+   **and** require `artifact.conversation_id == path conversation_id` (cross-
+   conversation IDOR test mandatory for this mutating route).
+2. Load artifact; reject if not markdown-eligible; **atomic** optimistic
+   concurrency: compare-and-swap on `version` (conditional
+   `UPDATE … WHERE version = :expected` or row lock + recheck) — not
+   read-then-increment. On mismatch → 409. Unique constraint on
+   `(artifact_id, version)` recommended.
 3. Size limit (e.g. 1–2 MB UTF-8 text).
 4. Resolve target filename from `entry_file` or basename(`path`).
-5. **Object store (required for success):** write bytes under
-   `artifacts/{conv}/{id}/v{new}/…` via `upload_file` (or equivalent); create
-   `ArtifactVersion` row; bump `Artifact.version`; keep path/mime unless
-   intentionally updated.
-6. **Sandbox sync (best-effort):**
+5. **Object store + DB consistency (required for success):** do **not** reuse
+   agent registration's “upload non-fatal after version bump” pattern.
+   Define one strategy and test both failure orders:
+   - **Preferred:** upload object for `v{n+1}` first under the version key;
+     then CAS-bump DB + insert `ArtifactVersion` in one transaction; on DB
+     failure delete or GC the orphan object (or mark key provisional).
+   - **Alternative:** DB row in `pending_upload` then upload then mark
+     `ready` — only if product wants durable incomplete versions.
+   Never leave current version pointing at a missing object.
+6. **Directory artifacts:** existing multi-file registration uploads every
+   file under the directory into the version prefix. User edit of a single
+   markdown entry must either (a) **copy prior version objects** then
+   overwrite the edited entry key, (b) mark the new version as
+   **single-file-only** with explicit product semantics, or (c) **reject**
+   directory artifacts for edit in v1. Choose (c) unless copy is cheap —
+   document the choice; add a multi-file regression test.
+7. **Sandbox sync (best-effort):**
    - Resolve conversation active sandbox (same rules as agent tools).
    - Missing sandbox → `sandbox_synced: false`, reason `no_sandbox`.
    - Empty path → `no_path`.
    - Path is a directory without usable `entry_file` → `path_is_directory`.
-   - Parent missing / path escape outside workdir → `path_missing` /
-     `path_escape`.
+   - **Path safety:** resolve with provider-aware normalization; reject
+     absolute `entry_file`, `..` segments, path escape outside workdir,
+     symlink escape when detectable; require `entry_file` to be a relative
+     single-file path. Reasons: `path_missing` / `path_escape`.
    - Else write via sandbox `upload([(abs_path, bytes)])` (prefer file API over
-     shell heredoc).
-7. Response includes updated artifact metadata + `sandbox_synced` + optional
+     shell heredoc). Unknown exceptions → `sandbox_error` (stable code; no
+     raw exception text to client).
+8. Response includes updated artifact metadata + `sandbox_synced` + optional
    `sandbox_sync_reason`.
-8. Do **not** delete prior version objects.
+9. Do **not** delete prior version objects.
 
 ### Agent awareness
 
