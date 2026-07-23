@@ -2259,6 +2259,11 @@ function rebindUnreadForUser(userId: string | null, prevUserId: string | null): 
     unsubRemote()
     unsubRemote = null
   }
+  // Leaving any authenticated session (logout, expiry → null, or A→B switch):
+  // abort in-flight SSE so a late terminalization cannot mark under the next user.
+  if (prevUserId !== null && prevUserId !== userId) {
+    useMessageStore.getState().clearStream()
+  }
   boundUserId = userId
   if (!userId) {
     // Drop memory so the next user cannot see the previous user's badges.
@@ -2267,7 +2272,6 @@ function rebindUnreadForUser(userId: string | null, prevUserId: string | null): 
     if (prevUserId !== null) {
       // Logout / session end — discard any marks that land while logged out.
       mergePendingOnNextBind = false
-      useMessageStore.getState().clearStream()
     }
     return
   }
