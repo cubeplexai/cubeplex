@@ -1,18 +1,22 @@
 /**
  * Cross-component seams for slash-command open-controls that live outside
  * InputBar (SharePanel in AppShell header, Sidebar rename).
- * InputBar requests; the owning component reacts.
+ * InputBar requests; the owning component reacts and **consumes** the request
+ * so stale nonces never replay on remount.
  */
 import { create } from 'zustand'
 
-type ComposerChromeState = {
-  /** Bumped to request SharePanel open for conversationId. */
-  shareRequest: { conversationId: string; nonce: number } | null
-  requestOpenShare: (conversationId: string) => void
+export type ChromeRequest = { conversationId: string; nonce: number }
 
-  /** Bumped to enter rename on the matching sidebar row. */
-  renameRequest: { conversationId: string; nonce: number } | null
+type ComposerChromeState = {
+  shareRequest: ChromeRequest | null
+  requestOpenShare: (conversationId: string) => void
+  /** Clear only if the nonce still matches (consumable event). */
+  consumeShareRequest: (nonce: number) => void
+
+  renameRequest: ChromeRequest | null
   requestRename: (conversationId: string) => void
+  consumeRenameRequest: (nonce: number) => void
 }
 
 let nonce = 0
@@ -23,9 +27,15 @@ export const useComposerChromeStore = create<ComposerChromeState>((set) => ({
     nonce += 1
     set({ shareRequest: { conversationId, nonce } })
   },
+  consumeShareRequest: (n) => {
+    set((s) => (s.shareRequest?.nonce === n ? { shareRequest: null } : s))
+  },
   renameRequest: null,
   requestRename: (conversationId) => {
     nonce += 1
     set({ renameRequest: { conversationId, nonce } })
+  },
+  consumeRenameRequest: (n) => {
+    set((s) => (s.renameRequest?.nonce === n ? { renameRequest: null } : s))
   },
 }))
