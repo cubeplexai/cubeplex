@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -61,6 +61,11 @@ export function DeleteConversationDialog({
   const tSidebar = useTranslations('sidebar')
   const router = useRouter()
   const pathname = usePathname()
+  // Read latest route at await completion — the onConfirm closure can outlive
+  // a mid-flight navigation (browser back / other UI) and must not bounce the
+  // user back to workspace home from their new page.
+  const pathnameRef = useRef(pathname)
+  pathnameRef.current = pathname
   const remove = useConversationStore((s) => s.remove)
   const [deleting, setDeleting] = useState(false)
 
@@ -80,7 +85,7 @@ export function DeleteConversationDialog({
       await remove(buildClient(currentWsId), conversationId)
       onOpenChange(false)
       // Store clears activeId, but the chat route stays mounted unless we leave.
-      if (currentWsId && isViewingConversation(pathname, currentWsId, conversationId)) {
+      if (currentWsId && isViewingConversation(pathnameRef.current, currentWsId, conversationId)) {
         router.replace(`/w/${currentWsId}`)
       }
     } catch (err) {
