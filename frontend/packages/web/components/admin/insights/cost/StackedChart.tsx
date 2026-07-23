@@ -10,12 +10,14 @@ import {
   YAxis,
 } from 'recharts'
 import type { TimeseriesResponse } from '@cubeplex/core'
+import { formatTokenCount, tokenTotal } from '@/lib/cost/helpers'
+import type { InsightsMetric } from '@/lib/cost/metricPreference'
 
 interface Props {
   data: TimeseriesResponse
   palette: string[]
   height?: number
-  formatValue?: (micro: number) => string
+  metric?: InsightsMetric
 }
 
 interface PivotRow {
@@ -23,7 +25,10 @@ interface PivotRow {
   [bucket: string]: number | string
 }
 
-function pivot(data: TimeseriesResponse): { rows: PivotRow[]; buckets: string[] } {
+function pivot(
+  data: TimeseriesResponse,
+  metric: InsightsMetric,
+): { rows: PivotRow[]; buckets: string[] } {
   const buckets = data.series.map((s) => s.bucket)
   const datesSet = new Set<string>()
   data.series.forEach((s) => s.points.forEach((p) => datesSet.add(p.date)))
@@ -32,15 +37,20 @@ function pivot(data: TimeseriesResponse): { rows: PivotRow[]; buckets: string[] 
     const row: PivotRow = { date }
     data.series.forEach((s) => {
       const pt = s.points.find((p) => p.date === date)
-      row[s.bucket] = pt ? pt.cost_amount_micro / 1_000_000 : 0
+      if (!pt) {
+        row[s.bucket] = 0
+        return
+      }
+      // Cost: plot USD (micro / 1e6). Tokens: raw token totals.
+      row[s.bucket] = metric === 'cost' ? pt.cost_amount_micro / 1_000_000 : tokenTotal(pt)
     })
     return row
   })
   return { rows, buckets }
 }
 
-export function StackedChart({ data, palette, height = 200, formatValue }: Props) {
-  const { rows, buckets } = pivot(data)
+export function StackedChart({ data, palette, height = 200, metric = 'cost' }: Props) {
+  const { rows, buckets } = pivot(data, metric)
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -51,14 +61,16 @@ export function StackedChart({ data, palette, height = 200, formatValue }: Props
           axisLine={false}
           tickLine={false}
           width={50}
-          tickFormatter={(v: number | string) =>
-            typeof v === 'number' ? `$${v.toFixed(0)}` : String(v)
-          }
+          tickFormatter={(v: number | string) => {
+            if (typeof v !== 'number') return String(v)
+            return metric === 'cost' ? `$${v.toFixed(0)}` : formatTokenCount(v)
+          }}
         />
         <Tooltip
           formatter={(v) => {
             if (typeof v !== 'number') return '—'
-            return formatValue ? formatValue(v * 1_000_000) : `$${v.toFixed(2)}`
+            if (metric === 'cost') return `$${v.toFixed(2)}`
+            return `${formatTokenCount(v)} (${v.toLocaleString()})`
           }}
         />
         {buckets.map((b, i) => (
@@ -66,7 +78,7 @@ export function StackedChart({ data, palette, height = 200, formatValue }: Props
             key={b}
             type="monotone"
             dataKey={b}
-            stackId="cost"
+            stackId="usage"
             stroke={palette[Math.min(i, palette.length - 1)]}
             fill={palette[Math.min(i, palette.length - 1)]}
             fillOpacity={0.7}

@@ -263,6 +263,51 @@ async def test_get_timeseries_top_n_collapses_to_other() -> None:
         assert total == sum(r["cost_micro"] for r in rows)
 
 
+async def test_get_timeseries_rank_by_tokens_with_zero_cost() -> None:
+    """When all costs are 0, rank_by=tokens keeps highest-token buckets outside __other."""
+    async with _db_session() as session:
+        org = "org-ts-rank-tokens"
+        day = datetime(2026, 5, 2, 12, tzinfo=UTC)
+        rows: list[dict[str, Any]] = []
+        for i in range(12):
+            # All zero cost; tokens decrease with i so ws-00 is highest tokens.
+            rows.append(
+                {
+                    "workspace_id": f"ws-tok-{i:02d}",
+                    "user_id": "usr-tok-u",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": day,
+                    "cost_micro": 0,
+                    "input": (12 - i) * 1000,
+                    "output": 100,
+                }
+            )
+        await _seed_events(session, org_id=org, rows=rows)
+        repo = BillingRepository(session, org_id=org)
+        since = datetime(2026, 5, 2, tzinfo=UTC)
+        until = datetime(2026, 5, 2, 23, 59, 59, tzinfo=UTC)
+        series = await repo.get_timeseries(
+            dimension="workspace",
+            since=since,
+            until=until,
+            granularity="day",
+            max_series=5,
+            rank_by="tokens",
+        )
+        buckets = [s["bucket"] for s in series]
+        assert "__other" in buckets
+        assert len(series) == 5  # 4 real + __other
+        real = [b for b in buckets if b != "__other"]
+        assert "ws-tok-00" in real
+        assert "ws-tok-01" in real
+        assert "ws-tok-11" not in real  # lowest tokens collapsed
+        total_tokens = sum(
+            p["input_tokens"] + p["output_tokens"] for s in series for p in s["points"]
+        )
+        assert total_tokens == sum(int(r["input"]) + int(r["output"]) for r in rows)
+
+
 async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> None:
     """/admin/cost/summary returns a `by_user` aggregation with the expected fields."""
     async with _db_session() as session:

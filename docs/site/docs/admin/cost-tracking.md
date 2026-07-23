@@ -5,7 +5,7 @@ title: Cost Tracking
 
 # Cost Tracking
 
-CubePlex tracks LLM token usage across your organization so you can monitor spending and identify cost trends. The cost tracking dashboard is available at **Admin > Cost** (`/admin/cost`).
+CubePlex tracks LLM token usage across your organization so you can monitor load and spending. The usage dashboard is available at **Admin > Insights** (`/admin/insights`; `/admin/cost` redirects there).
 
 ## What is tracked
 
@@ -23,35 +23,48 @@ Cost tracking also records **sandbox compute** events, so the totals reflect mor
 
 ## Usage dashboard
 
-The dashboard gives you a high-level view of your organization's AI spending.
+The dashboard defaults to **token** metrics so it stays useful even when model prices are not configured (costs would otherwise show as $0). Use the **Tokens | Cost** toggle in the top bar to switch to USD when you have set pricing under Models. Your last choice is remembered in the browser.
 
-### Spend over time
+### Primary metric
 
-A time-series chart of spend, viewable at **daily** or **weekly** granularity. You can break the series down by **workspace**, **model**, or **user**. Use this to spot trends — increasing usage after onboarding new team members, spikes from large batch tasks, or the impact of switching to a cheaper model.
+| Mode | KPIs and charts | When to use |
+| --- | --- | --- |
+| **Tokens** (default) | Total / input / output tokens, avg tokens per call, stacked series ranked by tokens | Always meaningful; no pricing required |
+| **Cost** | Total cost, avg $/call, series ranked by cost | After model prices are set |
+
+If you switch to **Cost** while total cost is $0 but tokens are non-zero, the page shows a short hint linking to [Model Management](./models.md).
+
+### Spend / usage over time
+
+A time-series chart at **daily** or **weekly** granularity, broken down by **workspace**, **model**, or **user**. In tokens mode the axis is token totals; in cost mode it is USD. Use this to spot trends — increasing usage after onboarding, spikes from large batch tasks, or the impact of switching models.
 
 ### Breakdowns
 
-Alongside the org-wide totals, the dashboard breaks spend down several ways for the selected period:
+Alongside the org-wide totals, the dashboard breaks usage down for the selected period:
 
-- **By model** — which models drive the most spend, and whether cheaper alternatives might work for certain use cases.
-- **By workspace** — which teams or projects are spending the most.
+- **By model** — which models drive the most traffic (or spend).
+- **By workspace** — which teams or projects are busiest.
 - **By user** — per-person usage.
-- **By day** — daily totals across the period.
+- **Cache efficiency** — hit rate from token fields (token-based in both modes).
 
-Each row shows input/output and cache token counts, the call count, and the cost.
+Each table row shows input/output (and cache where relevant) token counts, call count, and either a token total or cost depending on the active metric.
+
+:::note KPI vs filters
+Summary KPI tiles use **org-wide** totals for the date range. Workspace/model filters currently apply to timeseries charts. Matching filters on the summary is a known follow-up.
+:::
 
 ### Export
 
 You can export the raw cost data as CSV — for the whole organization or for a single workspace — to analyze it in a spreadsheet or feed it into your own reporting.
 
 :::info 📸 Screenshot placeholder
-**Capture:** The Admin > Cost dashboard showing the spend-over-time chart at the top (with the workspace/model/user dimension toggle) and a breakdown table below it.
+**Capture:** The Admin > Insights dashboard with the Tokens | Cost toggle, token KPIs (or cost KPIs), stacked chart, and breakdown table.
 **Asset:** `/img/admin/cost-dashboard.png`
 :::
 
 ## Tips for managing costs
 
-- **Set accurate cost rates.** Make sure the input and output token rates in [Model Management](./models.md) reflect your actual provider pricing. Without accurate rates, the dashboard numbers will be misleading.
+- **Set accurate cost rates.** Make sure the input and output token rates in [Model Management](./models.md) reflect your actual provider pricing. Without rates, cost mode shows $0; tokens mode still reflects real load.
 - **Review regularly.** Check the dashboard weekly to catch unexpected spikes early.
-- **Right-size your models.** If a significant portion of spend comes from a high-cost model being used for simple tasks, consider guiding your team toward a lighter model for those use cases.
-- **Use the per-model view to compare.** After switching models or adding a new one, the per-model breakdown shows whether the change had the expected cost impact.
+- **Right-size your models.** If a significant portion of usage comes from a high-cost model on simple tasks, guide the team toward a lighter model for those cases.
+- **Use the per-model view to compare.** After switching models or adding a new one, the per-model breakdown shows whether the change had the expected impact.

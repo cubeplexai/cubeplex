@@ -8,6 +8,7 @@ import {
   type CostSummaryResponse,
   type TimeseriesResponse,
 } from '@cubeplex/core'
+import type { InsightsMetric } from '@/lib/cost/metricPreference'
 
 export type RangePreset = '7d' | '30d' | '90d'
 export type Granularity = 'day' | 'week'
@@ -58,9 +59,9 @@ function priorWindow(from: string, to: string): { from: string; to: string } {
   return { from: iso(priorFrom), to: iso(priorTo) }
 }
 
-export function useCostData(filters: CostFilters): CostData {
+export function useCostData(filters: CostFilters, metric: InsightsMetric = 'tokens'): CostData {
   const client = useMemo(() => createApiClient(''), [])
-  const key = JSON.stringify(filters)
+  const key = JSON.stringify({ filters, metric })
   const [data, setData] = useState<CostData>({
     summary: null,
     priorSummary: null,
@@ -81,6 +82,7 @@ export function useCostData(filters: CostFilters): CostData {
 
     const wsIds = filters.workspaceIds.length ? filters.workspaceIds : undefined
     const models = filters.models.length ? filters.models : undefined
+    const rank_by = metric === 'tokens' ? 'tokens' : 'cost'
 
     Promise.allSettled([
       fetchCostSummary(client, { from, to }),
@@ -92,6 +94,7 @@ export function useCostData(filters: CostFilters): CostData {
         granularity: filters.granularity,
         workspace_ids: wsIds,
         models,
+        rank_by,
       }),
       fetchCostTimeseries(client, {
         dimension: 'model',
@@ -100,6 +103,7 @@ export function useCostData(filters: CostFilters): CostData {
         granularity: filters.granularity,
         workspace_ids: wsIds,
         models,
+        rank_by,
       }),
       fetchCostTimeseries(client, {
         dimension: 'user',
@@ -108,6 +112,7 @@ export function useCostData(filters: CostFilters): CostData {
         granularity: filters.granularity,
         workspace_ids: wsIds,
         models,
+        rank_by,
       }),
     ]).then((results) => {
       if (cancelled) return

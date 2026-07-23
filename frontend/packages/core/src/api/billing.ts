@@ -46,6 +46,8 @@ export interface TimeseriesParams {
   to?: string
   workspace_ids?: string[]
   models?: string[]
+  /** Series top-N / __other ranking. Default cost (server default). */
+  rank_by?: 'cost' | 'tokens'
 }
 
 export async function fetchCostTimeseries(
@@ -62,6 +64,9 @@ export async function fetchCostTimeseries(
   }
   if (params.models && params.models.length) {
     query.set('models', params.models.join(','))
+  }
+  if (params.rank_by) {
+    query.set('rank_by', params.rank_by)
   }
   const res = await client.get(`/api/v1/admin/cost/timeseries?${query}`)
   if (!res.ok) throw await toApiError(res)

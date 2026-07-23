@@ -5,13 +5,7 @@ import { useTranslations } from 'next-intl'
 import { BarChart3 } from 'lucide-react'
 import type { TurnUsage, SessionUsage } from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
-}
+import { computeCacheHitRate, formatPercent, formatTokenCount } from '@/lib/cost/helpers'
 
 function progressColor(pct: number): string {
   if (pct >= 80) return 'bg-danger-solid'
