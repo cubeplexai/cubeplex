@@ -18,7 +18,10 @@ from cubeplex.services.sandbox_policy import EffectivePolicy, SandboxPolicyResol
 # Match SandboxEnvResolver precedence (user > workspace > org).
 _SCOPE_RANK = {"user": 3, "workspace": 2, "org": 1}
 
-POLICY_SOURCE = "org_db_current"
+POLICY_SOURCE_ORG_DB = "org_db_current"
+POLICY_SOURCE_BUILT_IN = "built_in_defaults"
+# Back-compat alias used by older call sites / tests.
+POLICY_SOURCE = POLICY_SOURCE_ORG_DB
 SANDBOX_NOTE = "network rules apply at create; recreate sandbox after admin changes"
 GUIDANCE = (
     "Call sandbox_config on network, auth, or missing-env failures. "
@@ -64,6 +67,7 @@ def serialize_network_policy(
     policy: EffectivePolicy,
     *,
     max_rules: int = DEFAULT_MAX_RULES,
+    policy_source: str = POLICY_SOURCE_ORG_DB,
 ) -> dict[str, Any]:
     raw_rules = list(policy.network_rules or [])
     truncated = len(raw_rules) > max_rules
@@ -78,7 +82,7 @@ def serialize_network_policy(
         "default_action": policy.network_default_action,
         "rules": rules,
         "egress_proxy": "set" if policy.egress_proxy else "unset",
-        "policy_source": POLICY_SOURCE,
+        "policy_source": policy_source,
         "sandbox_note": SANDBOX_NOTE,
         "truncated": truncated,
     }
@@ -168,17 +172,22 @@ async def load_agent_view(
 
     Opens no credentials path. Caller owns the session lifecycle.
     """
+    policy_repo = SandboxPolicyRepository(session, org_id=org_id)
+    # Distinguish persisted org policy from built-in defaults (resolver falls
+    # back when the row is missing). One get() here; resolve() may get again.
+    policy_row = await policy_repo.get()
     policy = await SandboxPolicyResolver(
-        SandboxPolicyRepository(session, org_id=org_id),
+        policy_repo,
         default_image=default_image,
     ).resolve()
+    policy_source = POLICY_SOURCE_ORG_DB if policy_row is not None else POLICY_SOURCE_BUILT_IN
     inventory = await resolve_env_inventory(
         session,
         org_id=org_id,
         workspace_id=workspace_id,
         user_id=user_id,
     )
-    network = serialize_network_policy(policy, max_rules=max_rules)
+    network = serialize_network_policy(policy, max_rules=max_rules, policy_source=policy_source)
     env_list, env_truncated = serialize_env_inventory(inventory, max_items=max_env)
     command_rules = serialize_command_rules(policy, max_rules=max_rules)
     cmd_truncated = len(policy.command_rules or []) > max_rules
