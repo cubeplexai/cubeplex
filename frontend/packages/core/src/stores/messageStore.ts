@@ -201,6 +201,11 @@ export interface MessageStore {
   resetUnread(options?: { clearStorage?: boolean }): void
   /** Apply a remote multi-tab event (no re-broadcast of the same op). */
   __applyUnreadRemote(event: UnreadRemoteEvent): void
+  /**
+   * Test-only: restore first-hydrate merge semantics and empty unread state
+   * (module-level bind flags are otherwise sticky across tests).
+   */
+  __resetUnreadSessionForTests(): void
   /** Test hook: apply a single AgentEvent synchronously */
   __applyEvent(event: AgentEvent): void
 }
@@ -2096,6 +2101,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   clearStream() {
+    // Abort any in-flight SSE so a late terminalization cannot mark unread
+    // after logout (or otherwise race the UI into a half-live stream).
+    activeStreamController?.abort()
+    activeStreamController = null
     set({
       streamAgents: {},
       pendingSteers: {},
@@ -2216,53 +2225,85 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   __applyEvent(event: AgentEvent) {
     set((s) => applyStreamEvent(s, event) as MessageStore)
   },
-}))
 
-// Browser: bind unread persistence to the authenticated user.
-if (typeof window !== 'undefined') {
-  dropLegacyUnreadStorage()
-
-  let unsubRemote: (() => void) | null = null
-  let boundUserId: string | null = null
-
-  const rebindUnreadForUser = (userId: string | null, prevUserId: string | null): void => {
+  __resetUnreadSessionForTests() {
+    // Avoid treating auth nulling below as a real logout (which disables merge).
+    skipUnreadAuthRebind = true
+    mergePendingOnNextBind = true
+    boundUserId = null
     if (unsubRemote) {
       unsubRemote()
       unsubRemote = null
     }
-    boundUserId = userId
-    if (!userId) {
-      // Drop memory so the next user cannot see the previous user's badges.
-      for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
-      useMessageStore.setState({ unreadConversationIds: {} })
-      return
-    }
+    for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
+    set({ unreadConversationIds: {} })
+    useAuthStore.setState({ user: null, isLoading: false, error: null })
+    skipUnreadAuthRebind = false
+  },
+}))
 
-    const stored = loadUnreadMap(userId)
-    let merged: UnreadConversationIds = stored
-    if (prevUserId === null) {
-      // Auth just finished hydrating — keep marks from streams that completed
-      // while user was still null.
-      const pending = useMessageStore.getState().unreadConversationIds
-      merged = { ...stored, ...pending }
-    } else {
-      // User A → user B: do not carry over the previous user's map.
-      for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
+/** Multi-tab unread bind state (module-local). */
+let unsubRemote: (() => void) | null = null
+let boundUserId: string | null = null
+/**
+ * Merge in-memory marks only for the first auth hydrate (stream may finish
+ * while loadMe is still in flight). After a real logout (user → null), a
+ * late stream terminalization must NOT seed the next user's scoped map.
+ */
+let mergePendingOnNextBind = true
+/** Test-only: suppress auth-driven rebind while resetting session fixtures. */
+let skipUnreadAuthRebind = false
+
+function rebindUnreadForUser(userId: string | null, prevUserId: string | null): void {
+  if (unsubRemote) {
+    unsubRemote()
+    unsubRemote = null
+  }
+  boundUserId = userId
+  if (!userId) {
+    // Drop memory so the next user cannot see the previous user's badges.
+    for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
+    useMessageStore.setState({ unreadConversationIds: {} })
+    if (prevUserId !== null) {
+      // Logout / session end — discard any marks that land while logged out.
+      mergePendingOnNextBind = false
+      useMessageStore.getState().clearStream()
     }
-    const now = Date.now()
-    for (const id of Object.keys(merged)) {
-      if (unreadMarkAt[id] === undefined) unreadMarkAt[id] = now
-    }
-    useMessageStore.setState({ unreadConversationIds: merged })
-    saveUnreadMap(userId, merged)
+    return
+  }
+
+  const stored = loadUnreadMap(userId)
+  let merged: UnreadConversationIds = stored
+  if (prevUserId === null && mergePendingOnNextBind) {
+    // First hydrate (or cold start): keep marks from streams that completed
+    // while user was still null.
+    const pending = useMessageStore.getState().unreadConversationIds
+    merged = { ...stored, ...pending }
+  } else {
+    // User switch, or post-logout bind: never carry the previous session's map.
+    for (const id of Object.keys(unreadMarkAt)) delete unreadMarkAt[id]
+  }
+  mergePendingOnNextBind = false
+  const now = Date.now()
+  for (const id of Object.keys(merged)) {
+    if (unreadMarkAt[id] === undefined) unreadMarkAt[id] = now
+  }
+  useMessageStore.setState({ unreadConversationIds: merged })
+  saveUnreadMap(userId, merged)
+  if (typeof window !== 'undefined') {
     unsubRemote = subscribeUnreadSync(userId, (event) => {
       if (boundUserId !== userId) return
       useMessageStore.getState().__applyUnreadRemote(event)
     })
   }
+}
 
+// Browser: bind unread persistence to the authenticated user.
+if (typeof window !== 'undefined') {
+  dropLegacyUnreadStorage()
   rebindUnreadForUser(currentUnreadUserId(), null)
   useAuthStore.subscribe((state, prev) => {
+    if (skipUnreadAuthRebind) return
     const nextId = state.user?.id ?? null
     const prevId = prev.user?.id ?? null
     if (nextId === prevId) return

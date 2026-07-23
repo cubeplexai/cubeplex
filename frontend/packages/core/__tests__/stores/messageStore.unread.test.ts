@@ -64,6 +64,8 @@ describe('messageStore unread', () => {
     vi.clearAllMocks()
     localStorage.clear()
     useConversationStore.setState({ activeId: null })
+    // Cold-start bind flags + auth null without treating it as logout.
+    useMessageStore.getState().__resetUnreadSessionForTests()
     setUser(USER_A)
     useMessageStore.setState({
       messages: {},
@@ -71,6 +73,7 @@ describe('messageStore unread', () => {
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,
+      // Keep whatever rebind hydrated; most tests clear explicitly via mark helpers.
       unreadConversationIds: {},
       pendingConfirmMap: {},
       pendingAsk: null,
@@ -206,7 +209,9 @@ describe('messageStore unread', () => {
     expect(useMessageStore.getState().unreadConversationIds.cA).toBe(true)
   })
 
-  it('merges pending in-memory marks when auth user binds', () => {
+  it('merges pending in-memory marks when auth user binds on first hydrate', () => {
+    // Cold start: reset bind flags, stay logged out, mark, then first bind.
+    useMessageStore.getState().__resetUnreadSessionForTests()
     setUser(null)
     useMessageStore.setState({ unreadConversationIds: {} })
     useMessageStore.getState().markUnread('pending1')
@@ -215,6 +220,25 @@ describe('messageStore unread', () => {
     setUser(USER_A)
     expect(useMessageStore.getState().unreadConversationIds.pending1).toBe(true)
     expect(loadUnreadMap(USER_A).pending1).toBe(true)
+  })
+
+  it('does not merge pending marks into the next user after logout', () => {
+    useMessageStore.getState().markUnread('fromA')
+    expect(loadUnreadMap(USER_A)).toEqual({ fromA: true })
+
+    // Logout: user A → null (sets mergePendingOnNextBind = false, clears memory).
+    setUser(null)
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({})
+
+    // Late stream terminalization while logged out.
+    useMessageStore.getState().markUnread('leaked')
+    expect(useMessageStore.getState().unreadConversationIds).toEqual({ leaked: true })
+
+    // Next user must not inherit the pending mark.
+    setUser(USER_B)
+    expect(useMessageStore.getState().unreadConversationIds.leaked).toBeUndefined()
+    expect(loadUnreadMap(USER_B).leaked).toBeUndefined()
+    expect(loadUnreadMap(USER_A)).toEqual({ fromA: true })
   })
 
   it('resetUnread clears memory and optionally storage', () => {
