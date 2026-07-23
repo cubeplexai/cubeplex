@@ -76,6 +76,12 @@ MCP connectors let the agent interact with external services.
 
 Once enabled and credentialed, the tools are available to the agent in conversations. See the [MCP Tools guide](../guides/mcp/overview.md) for a full walkthrough.
 
+## Agent Persona
+
+**Agent Persona** (Settings → General) sets standing instructions for the AI assistant in every conversation in this workspace — role, tone, and policies that should always apply.
+
+You can edit the persona text on the settings page, or ask the agent in chat to update it (for example: “From now on always answer in formal Chinese in this workspace”). Changes apply on subsequent turns and affect all workspace members. Prefer **Memory** for small personal preferences; use persona when you want a durable workspace-wide role or policy block.
+
 ## Install skills
 
 Skills extend what the agent can do. To add skills to your workspace:

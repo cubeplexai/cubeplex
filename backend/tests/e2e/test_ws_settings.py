@@ -33,6 +33,13 @@ class TestPersonaRuntime:
         get_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/agent")
         assert get_resp.json()["system_prompt"] == persona
 
+    def test_persona_rejects_over_max_length(self, client: TestClient) -> None:
+        resp = client.put(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/settings/agent",
+            json={"system_prompt": "x" * 8001},
+        )
+        assert resp.status_code == 422
+
 
 class TestSkillsSettings:
     """Workspace skill binding and private skill management."""
