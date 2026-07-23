@@ -85,7 +85,10 @@ const isRunning = useMessageStore(
   row for `c1` → spinner is in the document with the running accessible
   name.
 - Given same store and row for `c2` → no spinner.
-- Given `isStreaming: false` → no spinner.
+- Given `isStreaming: false` → no spinner (covers idle **and** paused HITL
+  where `streamingConversationId` may still be set).
+- Given `{ isStreaming: false, streamingConversationId: 'c1' }` (HITL-paused
+  shape) and row `c1` → **no** spinner.
 - Row still exposes rename/pin controls (smoke: menu trigger or pin icon
   still present) — protect “layout not broken,” not DOM counts for their
   own sake.
@@ -93,6 +96,12 @@ const isRunning = useMessageStore(
 Prefer a focused unit/component test with store state injected (existing
 patterns in `InputBar.test.tsx` / messageStore mocks) over a full Playwright
 suite for this pure client indicator.
+
+**Store ownership (implementation note, not a spinner feature):** If during
+QA a late terminal event from aborted conversation A clears B’s streaming
+flags, fix the owner check inside `messageStore` terminalization (only clear
+when `streamingConversationId === completedId` / current run still owns the
+controller). Do not add a second running set in the sidebar.
 
 ---
 
