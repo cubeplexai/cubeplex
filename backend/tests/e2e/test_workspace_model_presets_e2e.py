@@ -119,6 +119,13 @@ async def test_member_sees_effective_preset_summaries(
     assert pro["is_default"] is True
     # Tiers carry no stored description; frontend supplies i18n copy by key.
     assert pro["description"] == ""
+    # Detail fields resolved from snapshot primary → model config.
+    assert pro["provider_slug"] == ref.split("/", 1)[0]
+    assert pro["model_id"] == "m1"
+    assert pro["model_display_name"] == "m1"
+    assert pro["context_window"] == 128_000
+    assert pro["reasoning"] is False
+    assert pro["input_modalities"] == ["text"]
 
     assert "fancy" in by_key, body
     fancy = by_key["fancy"]
@@ -126,6 +133,8 @@ async def test_member_sees_effective_preset_summaries(
     assert fancy["primary"] == ref
     assert fancy["is_default"] is False
     assert fancy["description"] == "a custom one"
+    assert fancy["model_id"] == "m1"
+    assert fancy["context_window"] == 128_000
 
 
 async def test_non_member_of_workspace_403(

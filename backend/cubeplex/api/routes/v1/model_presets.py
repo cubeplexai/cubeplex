@@ -14,6 +14,7 @@ from cubeplex.api.schemas.model_presets import (
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.db import get_session
+from cubeplex.llm.preset_details import detail_fields
 from cubeplex.llm.snapshot import load_llm_snapshot
 
 router = APIRouter(
@@ -34,15 +35,22 @@ async def get_workspace_model_presets(
         ctx.org_id,
         raw_request.app.state.encryption_backend,
     )
-    return WorkspacePresetsResponse(
-        presets=[
+    presets: list[WorkspacePresetSummary] = []
+    for p in snap.model_presets:
+        d = detail_fields(snap.providers, p.primary)
+        presets.append(
             WorkspacePresetSummary(
                 key=p.key,
                 kind=p.kind,
                 primary=p.primary,
                 description=p.description,
                 is_default=p.is_default,
+                provider_slug=d.provider_slug,
+                model_id=d.model_id,
+                model_display_name=d.model_display_name,
+                context_window=d.context_window,
+                reasoning=d.reasoning,
+                input_modalities=d.input_modalities,
             )
-            for p in snap.model_presets
-        ],
-    )
+        )
+    return WorkspacePresetsResponse(presets=presets)

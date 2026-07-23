@@ -128,7 +128,31 @@ def test_workspace_summary_shape() -> None:
         "primary": "a/b",
         "description": "",
         "is_default": True,
+        "provider_slug": None,
+        "model_id": None,
+        "model_display_name": None,
+        "context_window": None,
+        "reasoning": None,
+        "input_modalities": None,
     }
+
+
+def test_workspace_summary_accepts_detail_fields() -> None:
+    summary = WorkspacePresetSummary(
+        key="pro",
+        kind="tier",
+        primary="anthropic/claude-opus-4-7",
+        description="",
+        is_default=True,
+        provider_slug="anthropic",
+        model_id="claude-opus-4-7",
+        model_display_name="Claude Opus 4.7",
+        context_window=1_000_000,
+        reasoning=True,
+        input_modalities=["text", "image"],
+    )
+    assert summary.model_id == "claude-opus-4-7"
+    assert summary.input_modalities == ["text", "image"]
 
 
 def test_admin_body_is_model_presets_config() -> None:

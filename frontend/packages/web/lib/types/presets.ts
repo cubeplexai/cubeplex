@@ -30,4 +30,11 @@ export interface WorkspacePresetSummary {
   primary: string
   description: string
   is_default: boolean
+  /** Gateway provider slug from primary; optional on older API responses. */
+  provider_slug?: string | null
+  model_id?: string | null
+  model_display_name?: string | null
+  context_window?: number | null
+  reasoning?: boolean | null
+  input_modalities?: string[] | null
 }
