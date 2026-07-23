@@ -15,10 +15,7 @@ Get from zero to your first AI conversation in a few minutes.
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="Cloud">
 
-1. Go to [cubeplex.ai](https://cubeplex.ai) and click **Sign up**.
-2. Enter your email and password (or use a social login).
-3. If your instance has email verification enabled, enter the one-time code sent to your inbox to confirm your address.
-4. Finish the **onboarding** wizard: name your organization, choose a slug, and create your first workspace.
+CubePlex Cloud is coming soon. Until it is available, install CubePlex self-hosted and create your account there (see the **Self-hosted** tab).
 
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">

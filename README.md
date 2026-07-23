@@ -1,13 +1,19 @@
 <p align="center">
-  <img
-    src="frontend/packages/web/public/brand/cubeplex-lockup-on-light.svg"
-    alt="CubePlex"
-    width="320"
-  />
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="frontend/packages/web/public/brand/cubeplex-lockup-on-dark.svg"
+    />
+    <img
+      src="frontend/packages/web/public/brand/cubeplex-lockup-on-light.svg"
+      alt="CubePlex"
+      width="320"
+    />
+  </picture>
 </p>
 
 <p align="center">
-  <strong>AI agent workspace for teams</strong>
+  <strong>Cloud-native AI agent workspace for teams</strong>
 </p>
 
 <p align="center">
@@ -25,9 +31,9 @@
   <img src="https://img.shields.io/badge/deploy-Docker%20%7C%20Kubernetes-2496ED?logo=docker&logoColor=white" alt="Docker | Kubernetes" />
 </p>
 
-CubePlex is a full-stack AI agent workspace. Chat across models, install skills,
-keep shared memory, connect MCP tools, automate runs, and govern team access —
-in one platform you can self-host or run in the cloud.
+CubePlex is a cloud-native AI agent workspace for teams. Chat across models,
+install skills, keep shared memory, connect MCP tools, automate runs, and
+govern team access — self-hosted on Docker Compose or Kubernetes.
 
 ## Features
 
@@ -37,21 +43,20 @@ in one platform you can self-host or run in the cloud.
 | **Skills** | Packaged agent capabilities — built-in, org-uploaded, or from remote registries (e.g. skills.sh). |
 | **Memory** | Personal, workspace, and org-scoped memory the agent recalls across conversations. |
 | **MCP tools** | Catalog of connectors with static credentials or OAuth; grant tools per workspace. |
-| **Code sandboxes** | Run agent code in isolated environments with network and resource policies. |
+| **Workspace sandboxes** | Per-workspace isolated runtimes with **persistent storage** — files, packages, and the working tree survive restarts so agents resume the same work site. |
 | **Artifacts** | Versioned deliverables — files, previews, code, images — rendered in the thread. |
 | **Automation** | Scheduled tasks (cron / interval / one-shot) and webhook event triggers. |
 | **IM bridges** | Talk to agents from Slack, Discord, Teams, Feishu, DingTalk, and more. |
 | **Team governance** | Organizations, workspaces, roles, model access policies, and cost tracking. |
-| **Deploy anywhere** | Docker Compose for a single host; Helm for Kubernetes. Cloud signup at [cubeplex.ai](https://cubeplex.ai). |
+| **Deploy anywhere** | Docker Compose for a single host; Helm for Kubernetes. |
 
 ## Get started
 
 - **Docker Compose** (single host): [installation guide](https://cubeplex.ai/docs/deployment/docker-compose)
 - **Kubernetes with Helm**: [installation guide](https://cubeplex.ai/docs/deployment/kubernetes)
-- **Cloud**: sign up at [cubeplex.ai](https://cubeplex.ai)
 
-Both self-hosted modes use the same backend and frontend images. Guides cover
-image builds, configuration, secrets, and verification.
+Both modes use the same backend and frontend images. Guides cover image builds,
+configuration, secrets, and verification.
 
 ## Develop locally
 
