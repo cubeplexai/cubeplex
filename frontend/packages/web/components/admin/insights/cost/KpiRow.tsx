@@ -2,13 +2,20 @@
 
 import { useTranslations } from 'next-intl'
 import type { CostSummaryResponse } from '@cubeplex/core'
-import { formatPercent, percentDelta } from '@/lib/cost/helpers'
+import {
+  formatPercent,
+  formatTokenCount,
+  percentDelta,
+  sumTokensFromSummary,
+} from '@/lib/cost/helpers'
+import type { InsightsMetric } from '@/lib/cost/metricPreference'
 import { cn } from '@/lib/utils'
 
 interface Props {
   summary: CostSummaryResponse
   priorSummary: CostSummaryResponse | null
   rangeDays: number
+  metric: InsightsMetric
 }
 
 function fmtUsd(micro: number, currency: string): string {
@@ -36,20 +43,30 @@ function hitRate(s: CostSummaryResponse | null): number | null {
   return cr / (cr + inp)
 }
 
-export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
+export function KpiRow({ summary, priorSummary, rangeDays, metric }: Props) {
   const t = useTranslations('adminInsights.kpi')
+  const tokens = sumTokensFromSummary(summary)
+  const priorTokens = priorSummary ? sumTokensFromSummary(priorSummary) : null
+
   const cur = {
     cost: summary.total_cost_amount_micro,
     calls: summary.total_calls,
-    avg: summary.total_calls ? summary.total_cost_amount_micro / summary.total_calls : 0,
+    avgCost: summary.total_calls ? summary.total_cost_amount_micro / summary.total_calls : 0,
+    avgTokens: summary.total_calls ? tokens.total / summary.total_calls : 0,
     cache: hitRate(summary),
     users: summary.by_user.length,
+    totalTokens: tokens.total,
+    input: tokens.input,
+    output: tokens.output,
   }
   const prev = {
     cost: priorSummary?.total_cost_amount_micro ?? null,
     calls: priorSummary?.total_calls ?? null,
     cache: hitRate(priorSummary),
     users: priorSummary?.by_user.length ?? null,
+    totalTokens: priorTokens?.total ?? null,
+    input: priorTokens?.input ?? null,
+    output: priorTokens?.output ?? null,
   }
   const delta = (a: number, b: number | null) => (b === null ? null : percentDelta(a, b))
 
@@ -77,12 +94,46 @@ export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
-        <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+        <div className="mt-1 text-lg font-semibold tabular-nums" title={value}>
+          {value}
+        </div>
         <div className={cn('mt-0.5 text-[11px]', color)}>
           {deltaPct === null
             ? t('unchanged')
             : `${isUp ? '↑ ' : isDn ? '↓ ' : ''}${text} ${t('vsPrior', { days: rangeDays })}`}
         </div>
+      </div>
+    )
+  }
+
+  if (metric === 'tokens') {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5">
+        {tile(
+          t('totalTokens'),
+          formatTokenCount(cur.totalTokens),
+          delta(cur.totalTokens, prev.totalTokens),
+          'up-bad',
+        )}
+        {tile(
+          t('inputTokens'),
+          formatTokenCount(cur.input),
+          delta(cur.input, prev.input),
+          'up-bad',
+        )}
+        {tile(
+          t('outputTokens'),
+          formatTokenCount(cur.output),
+          delta(cur.output, prev.output),
+          'up-bad',
+        )}
+        {tile(t('avgTokensPerCall'), formatTokenCount(Math.round(cur.avgTokens)), null, 'neutral')}
+        {tile(
+          t('cacheHitRate'),
+          cur.cache === null ? '—' : formatPercent(cur.cache, 0),
+          delta(cur.cache ?? 0, prev.cache),
+          'up-good',
+        )}
       </div>
     )
   }
@@ -96,7 +147,7 @@ export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
         'up-bad',
       )}
       {tile(t('totalCalls'), fmtNum(cur.calls), delta(cur.calls, prev.calls), 'up-bad')}
-      {tile(t('avgPerCall'), fmtUsd(cur.avg, summary.currency), null, 'neutral')}
+      {tile(t('avgPerCall'), fmtUsd(cur.avgCost, summary.currency), null, 'neutral')}
       {tile(
         t('cacheHitRate'),
         cur.cache === null ? '—' : formatPercent(cur.cache, 0),

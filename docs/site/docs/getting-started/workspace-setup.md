@@ -103,4 +103,4 @@ Your workspace is ready. Here is where to go from here:
 - [Conversations](../guides/conversations/basics.md) — Start chatting with full context on features.
 - [Memory](../guides/memory/overview.md) — Set up shared memory so the agent remembers team knowledge.
 - [Members & roles](../admin/members.md) — Manage organization-wide membership.
-- [Cost tracking](../admin/cost-tracking.md) — Monitor API usage across your organization.
+- [Cost tracking](../admin/cost-tracking.md) — Monitor token usage and cost across your organization (Admin > Insights).

@@ -206,14 +206,17 @@ class BillingRepository:
         workspace_ids: list[str] | None = None,
         models: list[str] | None = None,
         max_series: int = 25,
+        rank_by: Literal["cost", "tokens"] = "cost",
     ) -> list[dict[str, Any]]:
         """2D aggregation: (dimension bucket x time bucket).
 
         The total number of returned series never exceeds ``max_series``. If the
-        underlying data has more than ``max_series`` distinct buckets, the lowest-
-        cost ones are collapsed into a single series with ``bucket="__other"`` so
-        that the total length is ``max_series`` (when more buckets than the cap
-        exist) or ``len(distinct buckets)`` (when fewer).
+        underlying data has more than ``max_series`` distinct buckets, the
+        lowest-ranked ones are collapsed into a single series with
+        ``bucket="__other"`` so that the total length is ``max_series`` (when
+        more buckets than the cap exist) or ``len(distinct buckets)`` (when
+        fewer). Ranking uses cost (default) or token totals
+        (``input_tokens + output_tokens``) when ``rank_by="tokens"``.
         """
         # Time bucket column
         if granularity == "week":
@@ -295,16 +298,20 @@ class BillingRepository:
                 date_str = tb.isoformat()
             else:
                 date_str = str(tb)
+            input_tok = int(r.input_tokens or 0)
+            output_tok = int(r.output_tokens or 0)
+            cost_micro = int(r.cost or 0)
             series_map.setdefault(bucket, {})[date_str] = {
                 "date": date_str,
-                "cost_amount_micro": int(r.cost or 0),
+                "cost_amount_micro": cost_micro,
                 "calls": int(r.calls or 0),
-                "input_tokens": int(r.input_tokens or 0),
-                "output_tokens": int(r.output_tokens or 0),
+                "input_tokens": input_tok,
+                "output_tokens": output_tok,
                 "cache_read_tokens": int(r.cache_read_tokens or 0),
                 "cache_write_tokens": int(r.cache_write_tokens or 0),
             }
-            bucket_totals[bucket] = bucket_totals.get(bucket, 0) + int(r.cost or 0)
+            rank_delta = cost_micro if rank_by == "cost" else input_tok + output_tok
+            bucket_totals[bucket] = bucket_totals.get(bucket, 0) + rank_delta
             # First currency seen for a bucket wins; multi-currency per bucket is
             # out of scope (spec assumes a single currency per org).
             series_currency.setdefault(bucket, r.currency)

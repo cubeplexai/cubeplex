@@ -103,4 +103,4 @@ MCP 连接器让智能体能够与外部服务交互。
 - [对话](../guides/conversations/basics.md) — 开始聊天，并全面了解相关功能。
 - [记忆](../guides/memory/overview.md) — 设置共享记忆，让智能体记住团队知识。
 - [成员和角色](../admin/members.md) — 管理组织范围的成员资格。
-- [成本追踪](../admin/cost-tracking.md) — 监控整个组织的 API 用量。
+- [成本追踪](../admin/cost-tracking.md) — 监控整个组织的 token 用量与成本（Admin > Insights）。

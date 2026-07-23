@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { useCostData, type CostFilters } from '@/hooks/useCostData'
 import { InsightsTopBar } from './InsightsTopBar'
@@ -9,7 +10,12 @@ import { KpiRow } from './cost/KpiRow'
 import { StackedSection, defaultCostColumns, type SummaryRow } from './cost/StackedSection'
 import { CacheSection } from './cost/CacheSection'
 import { PALETTE_WORKSPACE, PALETTE_MODEL, PALETTE_USER, PALETTE_CACHE } from './cost/palettes'
-import { capTimeseries } from '@/lib/cost/helpers'
+import { capTimeseries, sumTokensFromSummary } from '@/lib/cost/helpers'
+import {
+  readInsightsMetric,
+  writeInsightsMetric,
+  type InsightsMetric,
+} from '@/lib/cost/metricPreference'
 import type { CostAggregateRow } from '@cubeplex/core'
 
 function aggRowToSummaryRow(r: CostAggregateRow): SummaryRow {
@@ -27,13 +33,29 @@ function aggRowToSummaryRow(r: CostAggregateRow): SummaryRow {
 
 export function InsightsShell() {
   const t = useTranslations('adminInsights.cost')
+  const tInsights = useTranslations('adminInsights')
+  // Always start at tokens for deterministic SSR/first paint; hydrate from storage after mount.
+  const [metric, setMetric] = useState<InsightsMetric>('tokens')
   const [filters, setFilters] = useState<CostFilters>({
     range: '30d',
     workspaceIds: [],
     models: [],
     granularity: 'day',
   })
-  const data = useCostData(filters)
+
+  useEffect(() => {
+    // Hydrate preference after mount only — do not read localStorage in useState
+    // initializer (SSR/client first paint must stay deterministic as `tokens`).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional post-mount storage hydrate
+    setMetric(readInsightsMetric())
+  }, [])
+
+  const handleMetricChange = (next: InsightsMetric) => {
+    setMetric(next)
+    writeInsightsMetric(next)
+  }
+
+  const data = useCostData(filters, metric)
 
   const availableWorkspaces = useMemo(
     () => (data.summary?.by_workspace ?? []).map((r) => ({ id: r.bucket, name: r.bucket })),
@@ -53,11 +75,19 @@ export function InsightsShell() {
           : 90
       : 30
 
+  const showPricingHint =
+    metric === 'cost' &&
+    data.summary != null &&
+    data.summary.total_cost_amount_micro === 0 &&
+    sumTokensFromSummary(data.summary).total > 0
+
   return (
     <div className="flex flex-col h-full">
       <InsightsTopBar
         fromDate={data.summary?.from_date ?? '…'}
         toDate={data.summary?.to_date ?? '…'}
+        metric={metric}
+        onMetricChange={handleMetricChange}
       />
       <div className="flex flex-1 min-h-0">
         <InsightsFilterSidebar
@@ -72,42 +102,61 @@ export function InsightsShell() {
               {data.error}
             </div>
           )}
+          {showPricingHint && (
+            <div
+              role="status"
+              className="rounded-md border border-warning-border bg-warning-surface px-3 py-2.5 text-sm text-warning-fg"
+            >
+              {tInsights('pricingHint')}{' '}
+              <Link href="/admin/models" className="font-medium underline-offset-2 hover:underline">
+                {tInsights('pricingHintLink')}
+              </Link>
+            </div>
+          )}
           {data.summary && (
-            <KpiRow summary={data.summary} priorSummary={data.priorSummary} rangeDays={rangeDays} />
+            <KpiRow
+              summary={data.summary}
+              priorSummary={data.priorSummary}
+              rangeDays={rangeDays}
+              metric={metric}
+            />
           )}
           {data.summary && data.byWorkspace && (
             <StackedSection
               title={t('byWorkspace')}
-              timeseries={capTimeseries(data.byWorkspace, 10)}
+              timeseries={capTimeseries(data.byWorkspace, 10, metric)}
               tableRows={data.summary.by_workspace.map(aggRowToSummaryRow)}
               palette={PALETTE_WORKSPACE}
               topN={10}
-              columns={defaultCostColumns(t, 'workspace')}
+              metric={metric}
+              columns={defaultCostColumns(t, 'workspace', metric)}
             />
           )}
           {data.summary && data.byModel && (
             <StackedSection
               title={t('byModel')}
-              timeseries={capTimeseries(data.byModel, 10)}
+              timeseries={capTimeseries(data.byModel, 10, metric)}
               tableRows={data.summary.by_model.map(aggRowToSummaryRow)}
               palette={PALETTE_MODEL}
               topN={10}
-              columns={defaultCostColumns(t, 'model')}
+              metric={metric}
+              columns={defaultCostColumns(t, 'model', metric)}
             />
           )}
           {data.summary && data.byUser && (
             <StackedSection
               title={t('byUser')}
-              timeseries={capTimeseries(data.byUser, 8)}
+              timeseries={capTimeseries(data.byUser, 8, metric)}
               tableRows={data.summary.by_user.map(aggRowToSummaryRow)}
               palette={PALETTE_USER}
               topN={8}
-              columns={defaultCostColumns(t, 'user')}
+              metric={metric}
+              columns={defaultCostColumns(t, 'user', metric)}
             />
           )}
           {data.summary && data.byModel && (
             <CacheSection
-              timeseriesByModel={capTimeseries(data.byModel, 5)}
+              timeseriesByModel={capTimeseries(data.byModel, 5, metric)}
               summary={data.summary}
               palette={PALETTE_CACHE}
             />

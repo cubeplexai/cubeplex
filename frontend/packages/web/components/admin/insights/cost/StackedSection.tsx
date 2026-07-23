@@ -5,7 +5,8 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import type { TimeseriesResponse } from '@cubeplex/core'
 import { StackedChart } from './StackedChart'
-import { topNWithOther } from '@/lib/cost/helpers'
+import { formatTokenCount, metricValueOf, topNWithOther } from '@/lib/cost/helpers'
+import type { InsightsMetric } from '@/lib/cost/metricPreference'
 
 export interface Column {
   key: string
@@ -32,6 +33,7 @@ interface Props {
   palette: string[]
   topN: number
   columns: Column[]
+  metric: InsightsMetric
   showAllInitially?: boolean
 }
 
@@ -42,16 +44,16 @@ export function StackedSection({
   palette,
   topN,
   columns,
+  metric,
   showAllInitially,
 }: Props) {
   const t = useTranslations('adminInsights.cost')
   const tInsights = useTranslations('adminInsights')
   const [showAll, setShowAll] = useState(!!showAllInitially)
 
-  const { kept, otherCount } = topNWithOther(tableRows, topN, (r) => r.cost_amount_micro)
-  const visible = showAll
-    ? [...tableRows].sort((a, b) => b.cost_amount_micro - a.cost_amount_micro)
-    : kept
+  const rankOf = (r: SummaryRow) => metricValueOf(r, metric)
+  const { kept, otherCount } = topNWithOther(tableRows, topN, rankOf)
+  const visible = showAll ? [...tableRows].sort((a, b) => rankOf(b) - rankOf(a)) : kept
 
   if (tableRows.length === 0) {
     return (
@@ -70,7 +72,7 @@ export function StackedSection({
         <h2 className="text-sm font-semibold">{title}</h2>
       </div>
       <div className="rounded-md border bg-card p-3">
-        <StackedChart data={timeseries} palette={palette} />
+        <StackedChart data={timeseries} palette={palette} metric={metric} />
       </div>
       <table className="w-full text-xs tabular-nums">
         <thead>
@@ -133,6 +135,7 @@ function fmtUsd(micro: number): string {
 export function defaultCostColumns(
   t: ReturnType<typeof useTranslations>,
   kind: 'workspace' | 'model' | 'user',
+  metric: InsightsMetric = 'cost',
 ): Column[] {
   const base: Column[] = [
     { key: 'bucket', label: t(`columns.${kind}`), render: (r) => r.bucket },
@@ -146,13 +149,15 @@ export function defaultCostColumns(
       key: 'input_tokens',
       label: t('columns.input'),
       align: 'right',
-      render: (r) => r.input_tokens.toLocaleString(),
+      render: (r) =>
+        metric === 'tokens' ? formatTokenCount(r.input_tokens) : r.input_tokens.toLocaleString(),
     },
     {
       key: 'output_tokens',
       label: t('columns.output'),
       align: 'right',
-      render: (r) => r.output_tokens.toLocaleString(),
+      render: (r) =>
+        metric === 'tokens' ? formatTokenCount(r.output_tokens) : r.output_tokens.toLocaleString(),
     },
   ]
   if (kind === 'model') {
@@ -164,11 +169,20 @@ export function defaultCostColumns(
         `${(r.cache_read_tokens / 1e6).toFixed(2)}M / ${(r.cache_write_tokens / 1e6).toFixed(2)}M`,
     })
   }
-  base.push({
-    key: 'cost_amount_micro',
-    label: t('columns.cost'),
-    align: 'right',
-    render: (r) => fmtUsd(r.cost_amount_micro),
-  })
+  if (metric === 'tokens') {
+    base.push({
+      key: 'token_total',
+      label: t('columns.tokens'),
+      align: 'right',
+      render: (r) => formatTokenCount(r.input_tokens + r.output_tokens),
+    })
+  } else {
+    base.push({
+      key: 'cost_amount_micro',
+      label: t('columns.cost'),
+      align: 'right',
+      render: (r) => fmtUsd(r.cost_amount_micro),
+    })
+  }
   return base
 }

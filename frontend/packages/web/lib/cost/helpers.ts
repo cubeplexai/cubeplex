@@ -1,3 +1,8 @@
+import type { CostSummaryResponse, TimeseriesResponse, TimeseriesSeries } from '@cubeplex/core'
+import type { InsightsMetric } from './metricPreference'
+
+export type { InsightsMetric }
+
 export function computeCacheHitRate(args: { input: number; cacheRead: number }): number | null {
   if (args.cacheRead === 0) return null
   const denom = args.input + args.cacheRead
@@ -43,21 +48,59 @@ export function formatPercent(v: number | null, digits = 0): string {
   return `${(v * 100).toFixed(digits)}%`
 }
 
-import type { TimeseriesResponse, TimeseriesSeries } from '@cubeplex/core'
+/** Primary token total for Insights: input + output (cache stays separate). */
+export function tokenTotal(row: { input_tokens: number; output_tokens: number }): number {
+  return row.input_tokens + row.output_tokens
+}
+
+/** Compact token display shared by chat TokenUsageBar and admin Insights. */
+export function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
+}
+
+/** Org-wide token sums from the summary (sums `by_workspace` rows). */
+export function sumTokensFromSummary(summary: CostSummaryResponse): {
+  total: number
+  input: number
+  output: number
+} {
+  let input = 0
+  let output = 0
+  for (const r of summary.by_workspace) {
+    input += r.input_tokens
+    output += r.output_tokens
+  }
+  return { total: input + output, input, output }
+}
+
+export function metricValueOf(
+  row: { cost_amount_micro: number; input_tokens: number; output_tokens: number },
+  metric: InsightsMetric,
+): number {
+  return metric === 'cost' ? row.cost_amount_micro : tokenTotal(row)
+}
 
 /**
- * Cap a timeseries response to at most `n` series by cost-rank, collapsing the rest
+ * Cap a timeseries response to at most `n` series by rank, collapsing the rest
  * (and any pre-existing server-side `__other`) into a single client-side `__other`
  * series. Guarantees the returned series array contains at most one `__other`.
+ *
+ * `metric` controls ranking: cost uses `cost_amount_micro`; tokens uses
+ * `input_tokens + output_tokens` so zero-price traffic still ranks correctly.
  */
-export function capTimeseries(ts: TimeseriesResponse, n: number): TimeseriesResponse {
+export function capTimeseries(
+  ts: TimeseriesResponse,
+  n: number,
+  metric: InsightsMetric = 'cost',
+): TimeseriesResponse {
   const backendOther = ts.series.find((s) => s.bucket === '__other')
   const real = ts.series.filter((s) => s.bucket !== '__other')
   if (real.length <= n - 1 && !backendOther) return ts
-  const ranked = [...real].sort((a, b) => {
-    const sumOf = (s: TimeseriesSeries) => s.points.reduce((acc, p) => acc + p.cost_amount_micro, 0)
-    return sumOf(b) - sumOf(a)
-  })
+  const sumOf = (s: TimeseriesSeries) =>
+    s.points.reduce((acc, p) => acc + metricValueOf(p, metric), 0)
+  const ranked = [...real].sort((a, b) => sumOf(b) - sumOf(a))
   const keep = ranked.slice(0, n - 1)
   const rest = ranked.slice(n - 1)
   const sourcesForOther: TimeseriesSeries[] = backendOther ? [...rest, backendOther] : rest

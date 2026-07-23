@@ -123,6 +123,10 @@ async def get_cost_timeseries(
     to_date: str | None = Query(default=None),
     workspace_ids: str | None = Query(default=None, description="comma-separated"),
     models: str | None = Query(default=None, description="comma-separated provider/model"),
+    rank_by: Literal["cost", "tokens"] = Query(
+        default="cost",
+        description="Rank series for top-N / __other collapse: cost or tokens",
+    ),
 ) -> TimeseriesResponse:
     _, org_id = auth
     since, until = _parse_date_range(from_date, to_date)
@@ -136,6 +140,7 @@ async def get_cost_timeseries(
         granularity=granularity,
         workspace_ids=ws_filter,
         models=model_filter,
+        rank_by=rank_by,
     )
     currency = series_raw[0]["currency"] if series_raw else "USD"
     return TimeseriesResponse(
