@@ -1,13 +1,15 @@
 """Manual force-compact for a conversation (slash ``/compact``).
 
-Reuses cubepi compaction helpers (boundary + fallback summariser). The LLM
-summariser path used mid-run is optional here — force-compact must succeed
-without a live BoundModel when the threshold has not been hit yet.
+Reuses cubepi compaction helpers (boundary + fallback summariser). On success
+also appends a durable **timeline marker** (synthetic user message) so the UI
+history shows where context was compacted — without storing the literal
+``/compact`` user command.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -15,7 +17,7 @@ from typing import Any
 from cubepi.middleware.compaction.boundary import safe_boundary, tail_start_by_tokens
 from cubepi.middleware.compaction.state import CompactionState, message_refs
 from cubepi.middleware.compaction.summarizer import build_fallback_summary
-from cubepi.providers.base import Message
+from cubepi.providers.base import Message, synthetic_user_message
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.config import config as _config
@@ -26,6 +28,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_KEEP_TAIL = 8_000
 _DEFAULT_MIN_COMPACT = 4
 
+# UI + history marker. Empty body so the model gets almost nothing; the
+# frontend keys off synthetic_source == "compaction".
+_COMPACTION_MARKER_SOURCE = "compaction"
+_COMPACTION_MARKER_TEXT = ""
+
 BusyCheck = Callable[[], Awaitable[bool]]
 
 
@@ -35,6 +42,8 @@ class ForceCompactResult:
     compacted: bool
     reason: str | None = None
     boundary: int | None = None
+    """Wire-ready marker message dict for the client to append locally."""
+    marker: dict[str, Any] | None = None
 
 
 def _load_state(value: Any) -> CompactionState | None:
@@ -50,15 +59,29 @@ def _load_state(value: Any) -> CompactionState | None:
     return None
 
 
+def _build_marker(*, boundary: int, source: str = "manual") -> Message:
+    """Synthetic timeline row: not a real user command, durable in history."""
+    msg = synthetic_user_message(_COMPACTION_MARKER_TEXT, source=_COMPACTION_MARKER_SOURCE)
+    # Preserve synthetic flags; add product metadata for the web renderer.
+    meta = dict(msg.metadata or {})
+    meta["kind"] = "compaction"
+    meta["compaction"] = {
+        "source": source,
+        "boundary": boundary,
+    }
+    return msg.model_copy(update={"metadata": meta, "timestamp": time.time()})
+
+
 async def force_compact_conversation(
     conversation_id: str,
     *,
     is_busy: BusyCheck | None = None,
+    source: str = "manual",
 ) -> ForceCompactResult:
     """Summarise older turns into checkpointer ``extra`` without a model call.
 
-    Does **not** rewrite transcript messages. Returns ``compacted=False`` when
-    there is not enough history to form a safe boundary.
+    Does **not** rewrite transcript messages. On success appends a synthetic
+    compaction marker so history UI can show where compact happened.
 
     ``is_busy`` is polled around the load/save window so the route can refuse
     to write when a concurrent agent run claimed the conversation (TOCTOU
@@ -125,14 +148,24 @@ async def force_compact_conversation(
         extra["compaction_fallback_runs"] = 0
         await cp.save_extra(conversation_id, extra)
 
+        marker = _build_marker(boundary=new_boundary, source=source)
+        await cp.append(conversation_id, [marker])
+        marker_wire = marker.model_dump(mode="json")
+
         if await _busy():
-            # Run claimed during save_extra — state may still be a valid prefix
-            # summary, but the client should treat this as conflict.
+            # Run claimed during save/append — state may still be a valid
+            # prefix summary, but the client should treat this as conflict.
             logger.warning(
                 "force_compact race: run became active after save conversation_id=%s",
                 conversation_id,
             )
-            return ForceCompactResult(ok=False, compacted=True, reason="busy_after_save")
+            return ForceCompactResult(
+                ok=False,
+                compacted=True,
+                reason="busy_after_save",
+                boundary=new_boundary,
+                marker=marker_wire,
+            )
 
         logger.info(
             "force_compact conversation_id=%s boundary=%s→%s",
@@ -145,4 +178,5 @@ async def force_compact_conversation(
             compacted=True,
             reason=None,
             boundary=new_boundary,
+            marker=marker_wire,
         )

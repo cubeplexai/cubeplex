@@ -187,6 +187,11 @@ export interface MessageStore {
    * future replay path (bootstrap, history) can share one entry point.
    */
   appendFailoverEvent(conversationId: string, event: FailoverEvent): void
+  /**
+   * Append a single history message (e.g. compaction marker from /compact)
+   * without starting a run. Idempotent when the same ``id`` already exists.
+   */
+  appendHistoryMessage(conversationId: string, message: Message): void
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
@@ -1314,6 +1319,27 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         [conversationId]: [...(s.failoverEvents[conversationId] ?? []), event],
       },
     }))
+  },
+
+  appendHistoryMessage(conversationId, message) {
+    const [normalized] = normalizeMessages([message])
+    if (!normalized) return
+    set((s) => {
+      const existing = s.messages[conversationId] ?? []
+      if (normalized.id && existing.some((m) => m.id === normalized.id)) {
+        return s
+      }
+      // Dedup compaction markers that share the same seq (reload + optimistic).
+      if (normalized.seq != null && existing.some((m) => m.seq === normalized.seq)) {
+        return s
+      }
+      return {
+        messages: {
+          ...s.messages,
+          [conversationId]: [...existing, normalized],
+        },
+      }
+    })
   },
 
   async loadMessages(client: ApiClient, conversationId: string) {

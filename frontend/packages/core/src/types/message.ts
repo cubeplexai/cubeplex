@@ -78,9 +78,16 @@ interface MessageBase {
     steer_id?: string
     // Framework-injected user-role message (cubepi synthetic_user_message):
     // model-facing scaffolding like todo-guard nudges or goal continuations.
-    // Never rendered as a user bubble; synthetic_source is trace-only.
+    // Never rendered as a user bubble. ``synthetic_source === 'compaction'``
+    // is rendered as a timeline CompactionMarker (not a chat bubble).
     synthetic?: boolean
     synthetic_source?: string
+    /** Product kind for special synthetic rows (e.g. compaction marker). */
+    kind?: string
+    compaction?: {
+      source?: string
+      boundary?: number
+    }
     // Stamped on every user message (1:1 included) so a 1:1→group conversion
     // can attribute past messages. The SenderBadge is gated on the conversation
     // being a group chat (is_group_chat), not on the mere presence of these.

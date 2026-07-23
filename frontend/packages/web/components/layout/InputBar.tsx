@@ -10,6 +10,7 @@ import {
   useAttachmentStore,
   createApiClient,
   compactConversation,
+  type Message,
 } from '@cubeplex/core'
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -71,6 +72,7 @@ export function InputBar({
   const send = useMessageStore((s) => s.send)
   const cancelStream = useMessageStore((s) => s.cancelStream)
   const steer = useMessageStore((s) => s.steer)
+  const appendHistoryMessage = useMessageStore((s) => s.appendHistoryMessage)
   const { workspaceId } = useWorkspaceContext()
   const requestOpenShare = useComposerChromeStore((s) => s.requestOpenShare)
   const requestRename = useComposerChromeStore((s) => s.requestRename)
@@ -290,6 +292,11 @@ export function InputBar({
         try {
           const result = await compactConversation(client, id)
           if (result.compacted) {
+            // Durable marker is persisted server-side; append locally so the
+            // timeline updates without a full bootstrap.
+            if (result.marker) {
+              appendHistoryMessage(id, result.marker as Message)
+            }
             toast.success(tSlash('compactSuccess'))
           } else {
             toast.message(tSlash('compactSkipped'))
@@ -309,6 +316,7 @@ export function InputBar({
       workspaceId,
       messageIsStreaming,
       cancelStream,
+      appendHistoryMessage,
       requestRename,
       consumeRenameRequest,
       openMobileMenu,

@@ -14,7 +14,16 @@ const storeMocks = vi.hoisted(() => ({
   clear: vi.fn(),
   hydrate: vi.fn(),
   setWorkspaceId: vi.fn(),
-  compactConversation: vi.fn().mockResolvedValue({ ok: true, compacted: true }),
+  compactConversation: vi.fn().mockResolvedValue({
+    ok: true,
+    compacted: true,
+    marker: {
+      role: 'user',
+      content: [{ type: 'text', text: '' }],
+      metadata: { synthetic: true, synthetic_source: 'compaction', kind: 'compaction' },
+    },
+  }),
+  appendHistoryMessage: vi.fn(),
   state: { isStreaming: false, streamingConversationId: null as string | null },
 }))
 
@@ -41,6 +50,7 @@ vi.mock('@cubeplex/core', () => ({
       steer: typeof storeMocks.steer
       cancelStream: typeof storeMocks.cancelStream
       cancelSteer: typeof storeMocks.cancelSteer
+      appendHistoryMessage: typeof storeMocks.appendHistoryMessage
       pendingSteers: Record<string, unknown[]>
       pendingConfirmMap: Record<string, unknown>
       pendingAsk: unknown | null
@@ -53,6 +63,7 @@ vi.mock('@cubeplex/core', () => ({
       steer: storeMocks.steer,
       cancelStream: storeMocks.cancelStream,
       cancelSteer: storeMocks.cancelSteer,
+      appendHistoryMessage: storeMocks.appendHistoryMessage,
       pendingSteers: {},
       pendingConfirmMap: {},
       pendingAsk: null,
@@ -152,13 +163,21 @@ describe('InputBar slash commands', () => {
     expect(storeMocks.send).not.toHaveBeenCalled()
   })
 
-  it('calls compact on /compact when idle', async () => {
+  it('calls compact on /compact when idle and appends history marker', async () => {
     renderWithIntl(<InputBar conversationId="conv-1" />)
     const textarea = screen.getByTestId('chat-input')
     fireEvent.change(textarea, { target: { value: '/compact' } })
     fireEvent.click(await screen.findByTestId('slash-cmd-compact'))
     await waitFor(() => {
       expect(storeMocks.compactConversation).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(storeMocks.appendHistoryMessage).toHaveBeenCalledWith(
+        'conv-1',
+        expect.objectContaining({
+          metadata: expect.objectContaining({ synthetic_source: 'compaction' }),
+        }),
+      )
     })
     expect(storeMocks.send).not.toHaveBeenCalled()
   })

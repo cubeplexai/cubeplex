@@ -28,6 +28,7 @@ class _FakeCp:
         self._second_messages = second_messages
         self._extra = extra or {}
         self.saved: dict[str, Any] | None = None
+        self.appended: list[Any] | None = None
         self._loads = 0
 
     async def load(self, _thread_id: str) -> SimpleNamespace | None:
@@ -41,6 +42,9 @@ class _FakeCp:
 
     async def save_extra(self, _thread_id: str, extra: dict[str, Any]) -> None:
         self.saved = extra
+
+    async def append(self, _thread_id: str, messages: list[Any]) -> None:
+        self.appended = list(messages)
 
 
 class _CpCtx:
@@ -104,6 +108,11 @@ async def test_force_compact_writes_extra_when_enough_messages() -> None:
     assert cp.saved is not None
     assert "compaction" in cp.saved
     assert cp.saved["compaction_until_msg_index"] == 8
+    assert result.marker is not None
+    assert result.marker["metadata"]["synthetic"] is True
+    assert result.marker["metadata"]["synthetic_source"] == "compaction"
+    assert cp.appended is not None
+    assert len(cp.appended) == 1
 
 
 @pytest.mark.asyncio

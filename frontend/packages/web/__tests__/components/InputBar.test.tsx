@@ -15,6 +15,7 @@ const storeMocks = vi.hoisted(() => ({
   hydrate: vi.fn(),
   setWorkspaceId: vi.fn(),
   compactConversation: vi.fn().mockResolvedValue({ ok: true, compacted: false }),
+  appendHistoryMessage: vi.fn(),
   state: { isStreaming: false, streamingConversationId: null as string | null },
 }))
 
@@ -37,6 +38,7 @@ vi.mock('@cubeplex/core', () => ({
       steer: typeof storeMocks.steer
       cancelStream: typeof storeMocks.cancelStream
       cancelSteer: typeof storeMocks.cancelSteer
+      appendHistoryMessage: typeof storeMocks.appendHistoryMessage
       pendingSteers: Record<string, unknown[]>
       pendingConfirmMap: Record<string, unknown>
       pendingAsk: unknown | null
@@ -49,6 +51,7 @@ vi.mock('@cubeplex/core', () => ({
       steer: storeMocks.steer,
       cancelStream: storeMocks.cancelStream,
       cancelSteer: storeMocks.cancelSteer,
+      appendHistoryMessage: storeMocks.appendHistoryMessage,
       pendingSteers: {},
       pendingConfirmMap: {},
       pendingAsk: null,
