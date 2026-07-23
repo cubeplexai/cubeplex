@@ -77,9 +77,23 @@ MVP. (Optional: overflow menu “Browser fullscreen” later if needed.)
   border/shadow consistent with app dialogs.
 - Chat may be fully covered by backdrop (simpler focus model). Not a
   permanent split layout.
-- `z-index` above chat and side rail.
+- `z-index` above chat and side rail; **above** the artifact rail shell.
+  Nested UI inside the theater (version popover, skill confirm dialogs)
+  must stack **above** the theater content using the same Dialog/Popover
+  primitives’ nested modal support (Base UI / Radix-style nesting). Do not
+  invent a second portal root without verifying z-index vs theater.
 - a11y: `role="dialog"`, `aria-modal="true"`, labelled by artifact name;
-  focus trap; restore focus to Expand button on close.
+  focus trap; restore focus to Expand button on close when still mounted.
+
+### Nested overlays + Esc
+
+- Version popover / dropdown inside theater: open as nested layer; Esc
+  closes the **innermost** overlay first (popover), then a second Esc
+  closes the theater — match existing Dialog + Popover stacking behavior.
+- Skill (or other) confirmation dialogs opened from a preview: must appear
+  above the theater; Esc dismisses the confirm before the theater.
+- Document the intended stack in implementation notes if primitives need
+  `modal` / container props set explicitly.
 
 ### Header control
 
@@ -97,15 +111,34 @@ MVP. (Optional: overflow menu “Browser fullscreen” later if needed.)
    store unless other panels need the same pattern later.
 2. Extract/reuse `PreviewContent` inside `ArtifactExpandDialog` (Dialog
    from `components/ui/dialog` or fixed layer + portal).
-3. When expanded, side rail can keep showing the same preview underneath
-   (simple) or a muted “Expanded” placeholder — either is fine if state
-   stays consistent; prefer **keep mounted underneath** to avoid remount
-   thrash of iframes when possible, or accept remount if iframe focus
-   fights the dialog (pick simplest stable option in implementation).
+3. **Single preview host (required decision):** Do **not** dual-mount
+   heavy previews (HTML iframe, PDF worker, Office) in both the rail and
+   the theater. Choose one of:
+   - **A (preferred):** While `expanded`, rail body shows a lightweight
+     placeholder (“Expanded in preview”) and **only the dialog** mounts
+     `PreviewContent`. Closing expand remounts rail preview (accept
+     remount cost).
+   - **B:** Single `PreviewContent` instance reparented via portal into
+     the dialog body when expanded (harder; only if remount breaks a
+     critical type).
+   Dual-mount is rejected for MVP because of duplicate network/memory,
+   focus fighting, and version desync risk.
 4. Remove or stop wiring `requestFullscreen` / `fullscreenchange` from
    the primary button path.
 5. Works for conversation rail and any host that mounts `ArtifactPanel`
    (artifacts library).
+6. **Navigate-away / selection change (synchronous):** Close expand when
+   any of these become true — do not wait only on a lagging effect after
+   paint of wrong content:
+   - `panelStore` view is no longer this artifact (other panel type, panel
+     close, different artifact id).
+   - Derive close from identity: key dialog by
+     `(conversationId, artifactId)` and set `expanded=false` in the same
+     event path that changes the panel view, **or**
+     `useLayoutEffect`/`useEffect` that clears expand before rendering
+     mismatched props (prefer event-path close).
+   - Focus restore targets Expand only if that button is still mounted;
+     otherwise let Dialog default restore safely.
 
 ### Previews
 
@@ -143,6 +176,8 @@ MVP. (Optional: overflow menu “Browser fullscreen” later if needed.)
 | Theater X | Closes theater only |
 | Backdrop | Covers chat (modal) |
 | Mobile | Hide/no-op expand |
+| Preview mounting | Single host: unmount rail PreviewContent while expanded (A) |
+| Navigate-away | Sync close expand; no stale theater flash |
 
 ## Related
 
