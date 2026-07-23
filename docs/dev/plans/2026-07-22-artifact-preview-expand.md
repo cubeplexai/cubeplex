@@ -56,10 +56,13 @@ interface ArtifactExpandDialogProps {
 **Core logic**:
 
 - Dialog content: header chrome (title, version, download, minimize) +
-  flex body with `PreviewContent`.
+  flex body with `PreviewContent` (only host while expanded).
 - Size: ~`w-[min(90vw,1400px)] h-[90vh]` or equivalent Tailwind.
 - Esc / overlay click → `onOpenChange(false)`.
-- Focus trap via Dialog primitive defaults.
+- Focus trap via Dialog primitive defaults; nested version popover /
+  skill dialogs must stack above (see spec).
+- Key dialog by artifact identity so a prop swap cannot flash wrong
+  content while open.
 
 **Tests intent**: open/close with React Testing Library; Esc closes;
 does not call panel `close` on expand exit.
@@ -78,24 +81,37 @@ does not call panel `close` on expand exit.
    `expanded` boolean state.
 2. Header maximize toggles `setExpanded(true/false)`.
 3. Render `ArtifactExpandDialog` when `expanded`.
-4. On `panelStore` view change away from this artifact: set `expanded`
-   false (effect).
-5. Mobile: do not show expand control below `md` if sheet already fills
+4. While expanded: **do not** mount rail `PreviewContent` (placeholder
+   only). Only the dialog hosts the preview.
+5. On `panelStore` view change away from this artifact **or** artifact id
+   change: set `expanded` false on the same update path (not only a
+   post-paint effect that can flash stale content).
+6. Mobile: do not show expand control below `md` if sheet already fills
    screen (match existing responsive panel behavior).
-6. Keep side panel mounted; expand is overlay.
+7. Keep side **panel shell** mounted; expand is overlay.
 
 **Core logic**:
 
 ```
-Maximize click → expanded=true
-Esc/minimize/backdrop → expanded=false (selection kept)
-Panel X → close() panel store (existing)
+Maximize click → expanded=true (rail preview unmounts; dialog hosts preview)
+Esc/minimize/backdrop/theater X → expanded=false (panelStore selection kept)
+panelStore switch artifact / non-artifact / panel close → expanded=false first
+Panel X → close() panel store (existing) and clear expanded
 ```
 
 **Tests intent**:
 
-- Unit/component: expand opens dialog; exit leaves artifact selected.
-- Manual: html/pdf/image/code in large stage; version switch; download.
+- Component contract (mock or real `panelStore` as used by the panel):
+  open artifact → expand → exit via **Esc, backdrop, minimize, theater X**
+  → assert same `panelStore.view`, artifact id, and selected version remain.
+- Panel header X still closes the whole panel.
+- Navigate-away: while expanded, switch to another artifact or panel type
+  → theater closes; no assertion that old artifact stays selected if the
+  store intentionally changed.
+- Prefer asserting a single `PreviewContent`/iframe host while expanded
+  (no dual iframe) if practical in unit tests.
+- Manual: html/pdf/image/code in large stage; version switch; download;
+  version popover Esc vs theater Esc.
 
 ---
 
