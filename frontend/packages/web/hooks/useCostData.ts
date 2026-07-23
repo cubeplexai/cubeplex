@@ -77,8 +77,19 @@ export function useCostData(filters: CostFilters, metric: InsightsMetric = 'toke
     let cancelled = false
     const { from, to } = resolveDates(filters)
     const prior = priorWindow(from, to)
+    // Clear metric/filter-dependent series immediately so StackedChart does not
+    // reformat / re-rank stale series under the new metric while requests fly.
+    // Summary rows are metric-agnostic field-wise; keep them to avoid KPI flash.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setData((d) => ({ ...d, loading: true, error: null, errors: [] }))
+    setData((d) => ({
+      ...d,
+      loading: true,
+      error: null,
+      errors: [],
+      byWorkspace: null,
+      byModel: null,
+      byUser: null,
+    }))
 
     const wsIds = filters.workspaceIds.length ? filters.workspaceIds : undefined
     const models = filters.models.length ? filters.models : undefined
