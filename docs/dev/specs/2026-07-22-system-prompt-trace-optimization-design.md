@@ -1,9 +1,10 @@
 # System Prompt Trace Optimization — Design
 
-**Status:** Draft  
-**Date:** 2026-07-22  
-**Related:** #391  
-**Discipline doc:** [backend/docs/prompt-cache-discipline.md](../../../backend/docs/prompt-cache-discipline.md)
+**Status:** Draft (seed analysis landed; Phase C still gated)  
+**Date:** 2026-07-22 · seed note 2026-07-23  
+**Related:** #391 · design PR #412  
+**Discipline doc:** [backend/docs/prompt-cache-discipline.md](../../../backend/docs/prompt-cache-discipline.md)  
+**Seed analysis note:** [docs/dev/notes/2026-07-22-system-prompt-trace-review.md](../notes/2026-07-22-system-prompt-trace-review.md)
 
 ## 1. Goal
 
@@ -15,6 +16,29 @@ unconditional growth—while preserving prompt-cache discipline.
 
 This issue is **analysis-first**. Implementation of prompt edits is
 follow-up work driven by measured evidence.
+
+### 1.1 Seed evidence (2026-07-23)
+
+A **local** conversation was measured end-to-end and written up as the
+first Phase A/B artifact (not a full stratified sample):
+
+| | |
+| --- | --- |
+| Conversation | `conv-1m1jE95wSfyYDi` |
+| Latest run (focus) | `fd9890facb3e92805a7a775621000a41` |
+| Prior run | `1a078f8b74a8152fbaede423004d5a47` |
+| Class | Long multi-turn sandbox + skill + PPTX artifact (HITL → build) |
+| Write-up | [2026-07-22-system-prompt-trace-review.md](../notes/2026-07-22-system-prompt-trace-review.md) |
+
+**Headline numbers (latest run only):** ~16 min wall; **37** `chat` calls;
+input tokens **~92k → ~126k** per call; **~4.2M** input tokens summed over
+the run; system message **~37k chars** (widget block alone **~11k**); tool
+schemas **~25k chars**; tool-role history **~145k → ~184k chars** driven by
+`load_skill` + full skill reference `file_read`s. Run **succeeded** (no
+ERROR)—primary issue is **cost/latency context design**, not crash.
+
+Finding ids in the note (**F1–F8**) are the authoritative list; this spec
+only summarizes and links them.
 
 ## 2. Context
 
@@ -167,6 +191,12 @@ docs/dev/notes/2026-07-22-system-prompt-trace-review.md
 (If the note is written on a later day, use that day’s date in the
 filename; keep the slug `system-prompt-trace-review`.)
 
+**Seed revision (2026-07-23):** the file above **exists** and holds the
+measured baselines + findings table for `conv-1m1jE95wSfyYDi` /
+`fd9890…`. Treat it as **Phase A seed + Phase B draft**. Expand the same
+file (or a dated successor that links back) when the stratified sample
+grows; do not start a second unlinked note.
+
 **Must contain:**
 
 - Sample set description (N traces, scenarios, models, env)
@@ -176,6 +206,19 @@ filename; keep the slug `system-prompt-trace-review`.)
 - Recommended PR split (one concern per PR)
 - Baseline metrics before any edit: median/p95 input tokens, cache hit
   proxy, quality spot-checks from the checklist
+
+**Seed findings (summary — full table in the note):**
+
+| id | severity | One-line |
+| --- | --- | --- |
+| F1 | high | Always-on **widget** system prose (~11k) on a non-widget PPTX run |
+| F2 | high | **Skill body + full reference files** stuck in tool history for 37 turns |
+| F3 | high | **Skills catalog** descriptions too long; long org-prefixed names |
+| F4 | medium | **Memory** system block large and off-task for this run |
+| F5 | medium | **Tool schemas** ~25k always-on |
+| F6 | medium | **Cache cliffs** (0% cache_read) on some turns |
+| F7 | low–med | Agent loop inefficiency (many write/execute turns) partly skill-side |
+| F8 | info | Run succeeded — optimize cost path, not “fix crash” |
 
 ### 4.6 Fix principles (Phase C)
 
@@ -203,16 +246,18 @@ filename; keep the slug `system-prompt-trace-review`.)
 
 ### 4.7 Hypotheses to validate (not conclusions)
 
-| Hypothesis | Why it might matter |
-| --- | --- |
-| `WIDGET_GUIDELINES` always-on and oversized | ~12KB; many turns never build widgets |
-| Citation rules long but under-followed | Adherence vs length |
-| Sandbox rules on pure Q&A | Conditional on sandbox/tools |
-| Base “be concise” vs long playbooks | Style conflict |
-| Memory authoring over/under-save | vs reflection oneshot |
-| Loaded skills bloat multi-turn | Token growth |
-| Subagent style guidance high-token / low-impact | Aesthetic vs success |
-| Title/reflection shorter without quality loss | Oneshot × frequency |
+| Hypothesis | Why it might matter | Seed sample (`fd9890…`) |
+| --- | --- | --- |
+| `WIDGET_GUIDELINES` always-on and oversized | ~12KB; many turns never build widgets | **Supported** — see note **F1** |
+| Citation rules long but under-followed | Adherence vs length | **Not exercised** |
+| Sandbox rules on pure Q&A | Conditional on sandbox/tools | **Not exercised** (sandbox needed) |
+| Base “be concise” vs long playbooks | Style conflict | Possible via skill; not primary |
+| Memory authoring over/under-save | vs reflection oneshot | **Partial** — large off-task block **F4** |
+| Loaded skills bloat multi-turn | Token growth | **Supported** — **F2**, **F3** |
+| Subagent style guidance high-token / low-impact | Aesthetic vs success | **Not exercised** |
+| Title/reflection shorter without quality loss | Oneshot × frequency | **Not exercised** |
+
+Update the note’s hypothesis table when new scenario classes are measured.
 
 ### 4.8 Success metrics
 
@@ -246,7 +291,8 @@ formulas are reproducible.
 
 1. Analysis note exists under `docs/dev/notes/` with methodology, findings
    table, prioritized recommendations — and is **reviewed/approved** before
-   Phase C.
+   Phase C. **Seed note present** ([link](../notes/2026-07-22-system-prompt-trace-review.md));
+   approval + stratified expansion still required.
 2. Every finding that meets predeclared impact/confidence thresholds is
    either fixed in a follow-up PR or **explicitly deferred** with rationale.
    There is **no quota** to invent N high-severity rows; zero or one real
