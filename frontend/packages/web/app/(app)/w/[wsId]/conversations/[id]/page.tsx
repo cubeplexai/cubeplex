@@ -51,6 +51,9 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   useEffect(() => {
     usePanelStore.getState().close()
     setActive(conversationId)
+    // Clear unread at the focus boundary (not inside conversationStore.setActive
+    // — that would create a messageStore ↔ conversationStore import cycle).
+    useMessageStore.getState().clearUnread(conversationId)
     // Clear the previous conversation's topic anchor until this one's
     // metadata resolves below — avoids the sidebar auto-expanding the wrong
     // topic during a switch.
@@ -103,6 +106,12 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     })()
     return () => {
       cancelled = true
+      // Leaving the chat page must not leave activeId stuck on this
+      // conversation — otherwise stream terminalization thinks the user is
+      // still "present" on settings / home / another panel.
+      if (useConversationStore.getState().activeId === conversationId) {
+        setActive(null)
+      }
     }
   }, [conversationId, client, wsId, setActive, setActiveTopic, loadArtifacts])
 
@@ -115,6 +124,18 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       usePanelStore.getState().openArtifact(conversationId, focusArtifactId)
     }
   }, [conversationId, focusArtifactId])
+
+  // Tab hidden while on this conversation can mark unread on stream end; clear
+  // again when the user returns to a visible tab still showing this chat.
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') {
+        useMessageStore.getState().clearUnread(conversationId)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [conversationId])
 
   if (status === 'notfound') {
     return (

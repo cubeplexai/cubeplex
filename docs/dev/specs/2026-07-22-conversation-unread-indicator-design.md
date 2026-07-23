@@ -38,13 +38,13 @@ guess which threads updated.
 
 | Approach | Pros | Cons |
 | --- | --- | --- |
-| **A. In-session client `unreadConversationIds` set** (recommended MVP) | Small; no API; enough for single-tab sessions; easy to clear on focus | Lost on full reload; other tabs may miss completion |
-| **B. `localStorage` / `BroadcastChannel` persistence** | Survives reload / multi-tab in same browser | Still not multi-device; more edge cases (stale ids) |
+| **A. In-session client `unreadConversationIds` set** | Small; no API; enough for single-tab sessions; easy to clear on focus | Lost on full reload; other tabs may miss completion |
+| **B. `localStorage` / `BroadcastChannel` persistence** (recommended) | Survives reload / multi-tab in same browser | Still not multi-device; more edge cases (stale ids) |
 | **C. Server-backed last_read / unread** | Multi-device truth | Schema + API + group-chat semantics; issue non-goal |
 
-**Recommendation: A** for MVP, with documented limits. Prefer a Set (or
-record map) on a client store. Optionally upgrade to B later if product
-requires; do not block MVP on C.
+**Recommendation: B** — client store plus `localStorage` + `BroadcastChannel`
+so tabs that do not own the SSE still show/clear the dot, and reload keeps
+the badge. Prefer a record map on `messageStore`. Do not block on C.
 
 ## 4. Design
 
@@ -72,7 +72,8 @@ markUnread(conversationId: string): void
 clearUnread(conversationId: string): void
 ```
 
-MVP: **session memory only** (Zustand default, no persist middleware).
+MVP: **browser-local** — Zustand state hydrated from `localStorage`, mutations
+published via `localStorage` write + `BroadcastChannel` (see §4.6).
 
 ### 4.2 When to mark unread
 
@@ -166,17 +167,18 @@ before or as unread is set).
 - **Non-interference:** pin, rename, delete, group avatars, menu
   unchanged.
 
-### 4.6 Multi-tab / reload (MVP limits — document in code comment + plan)
+### 4.6 Multi-tab / reload
 
-| Scenario | MVP behavior |
+| Scenario | Behavior |
 | --- | --- |
 | Single tab, in-session | Works |
-| Full page reload | Unread set empty (lost) |
-| Second tab without the SSE | May not learn completion |
-| Multi-device | Not supported |
+| Full page reload | Hydrate unread ids from `localStorage` |
+| Second tab without the SSE | Peer publishes full map on mark/clear via `BroadcastChannel` (+ `storage` event fallback) |
+| Multi-device | Not supported (no server state) |
 
-No BroadcastChannel required for MVP. If a one-liner shared storage is
-trivial later, treat as follow-up.
+Tab that owns the SSE calls `markUnread` on terminalization; that publish
+updates every other open tab's store. Opening the conversation on any tab
+clears and re-publishes.
 
 ### 4.7 Explicit non-goals
 
@@ -200,8 +202,8 @@ trivial later, treat as follow-up.
 3. Open A → unread clears.
 4. Unread visible without opening A; pin/rename/avatars/menu intact.
 5. Visible cue + accessible name.
-6. MVP limits (session-only, single-tab SSE) documented in the plan /
-   short code comment near the store fields.
+6. Multi-tab: mark/clear on one tab is reflected on others via
+   `localStorage` + `BroadcastChannel`; multi-device remains out of scope.
 
 ## 7. Open questions (resolved for implementers)
 
@@ -210,6 +212,6 @@ trivial later, treat as follow-up.
 | Fail/cancel mark unread? | Yes if user was away (any non-HITL-pause terminal). |
 | HITL pause mark unread? | No — user still must answer on that conversation. |
 | Require scroll-to-bottom to clear? | No — open/focus is enough. |
-| Persist across reload? | No for MVP. |
+| Persist across reload? | Yes, via `localStorage` (same browser only). |
 | document.visibilityState? | Nice-to-have same PR; route/`activeId` away predicate is required. |
 | `activeId` stale after leaving chat? | Treat non-chat route as away; and/or clear `activeId` on unmount. |

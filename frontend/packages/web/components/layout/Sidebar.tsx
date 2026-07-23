@@ -96,7 +96,9 @@ export function ConversationRow({
   const hasGroupParticipants = useConversationStore(
     (s) => (s.conversationParticipants[convo.id]?.length ?? 0) > 0,
   )
+  // Spinner while streaming; unread only after completion when away.
   const isRunning = useMessageStore((s) => s.isStreaming && s.streamingConversationId === convo.id)
+  const isUnread = useMessageStore((s) => !!s.unreadConversationIds[convo.id])
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(convo.title)
@@ -177,7 +179,10 @@ export function ConversationRow({
     <li>
       <Link
         href={currentWsId ? `/w/${currentWsId}/conversations/${convo.id}` : '/'}
-        onClick={() => setActive(convo.id)}
+        onClick={() => {
+          setActive(convo.id)
+          useMessageStore.getState().clearUnread(convo.id)
+        }}
         className={baseRowClasses}
       >
         {isActive && (
@@ -190,12 +195,17 @@ export function ConversationRow({
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
           {convo.title || tSidebar('untitledChat')}
         </div>
-        {isRunning && (
+        {isRunning ? (
           <Loader2
             className="size-3.5 shrink-0 animate-spin text-muted-foreground"
             aria-label={tSidebar('conversationRunning')}
           />
-        )}
+        ) : isUnread ? (
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-primary"
+            aria-label={tSidebar('conversationUnread')}
+          />
+        ) : null}
         {showGroupIcon && <GroupChatAvatars convoId={convo.id} />}
         <DropdownMenu>
           <DropdownMenuTrigger
