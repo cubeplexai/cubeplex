@@ -11,6 +11,7 @@ import {
   type Topic,
   createApiClient,
   useConversationStore,
+  useMessageStore,
   useTopicStore,
 } from '@cubeplex/core'
 import {
@@ -32,6 +33,7 @@ import { VscMcp } from 'react-icons/vsc'
 import {
   CalendarClock,
   Layers,
+  Loader2,
   type LucideIcon,
   MoreHorizontal,
   Package,
@@ -75,7 +77,7 @@ function GroupChatAvatars({ convoId }: { convoId: string }): React.ReactElement 
   )
 }
 
-function ConversationRow({
+export function ConversationRow({
   convo,
   isActive,
   currentWsId,
@@ -93,6 +95,7 @@ function ConversationRow({
   const hasGroupParticipants = useConversationStore(
     (s) => (s.conversationParticipants[convo.id]?.length ?? 0) > 0,
   )
+  const isRunning = useMessageStore((s) => s.isStreaming && s.streamingConversationId === convo.id)
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(convo.title)
@@ -185,6 +188,12 @@ function ConversationRow({
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
           {convo.title || tSidebar('untitledChat')}
         </div>
+        {isRunning && (
+          <Loader2
+            className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+            aria-label={tSidebar('conversationRunning')}
+          />
+        )}
         {showGroupIcon && <GroupChatAvatars convoId={convo.id} />}
         <DropdownMenu>
           <DropdownMenuTrigger
