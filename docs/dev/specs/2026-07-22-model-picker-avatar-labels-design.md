@@ -77,7 +77,7 @@ Heavier UX; defer unless many models per provider become common.
 ### Workspace preset summary (API)
 
 Extend `WorkspacePresetSummary` with fields resolved from the primary ref
-and the LLM snapshot’s provider map:
+and **DB provider display metadata** (not from `ProviderConfig` alone):
 
 ```text
 key, kind, primary, description, is_default   # existing
@@ -88,15 +88,38 @@ logo_url: str | null      # custom URL if set
 model_id: str | null      # portion after first "/" of primary
 ```
 
-Resolution in `get_workspace_model_presets` (or a small helper):
+**Wire contract:** every new field is optional / nullable (`= None` on the
+backend schema). Older clients ignore extras. Frontend must tolerate missing
+keys (`?? null`).
 
-1. Parse `primary` as `provider_slug/model_id` (first `/` split; tolerate
-   missing slash → slug only / model only as null).
-2. Look up provider in `snap.providers` by slug (same map used for LLM
-   calls).
-3. `logo_url` from provider row/config; `logo` via existing catalog
-   `_resolve_logo(preset_slug)` (reuse helper, do not fork brand tables).
-4. `provider_name` from provider display name for letter fallback + a11y.
+**Important:** `load_llm_snapshot().providers` maps slug → `ProviderConfig`
+used for LLM calls. Today that model has `base_url`, `api_key`, `models`,
+etc. — **not** `logo_url`, `preset_slug`, or display `name`. Implementers
+must not read those attributes from `ProviderConfig` without extending it.
+
+Resolution in `get_workspace_model_presets` (or a small helper) — **pick one
+architecture and document it in code**:
+
+**Preferred (A):** During `get_workspace_model_presets`, load a slim
+provider metadata map for the org (slug → `{name, logo_url, preset_slug}`)
+via a scoped repository/query (or batch read of `Provider` rows already
+loaded for the org). Parse each preset `primary`, join by slug, then:
+
+1. Parse `primary` as `provider_slug/model_id` (first `/` only; nested
+   model ids like `vendor/model/v1` keep everything after the first slash
+   as `model_id`). Missing slash → `provider_slug = primary`, `model_id =
+   null` (or inverse if no slug — never 500).
+2. `logo_url` from DB `Provider.logo_url`.
+3. `logo` via existing catalog `_resolve_logo(provider.preset_slug)` —
+   extract `_resolve_logo` from `admin_providers` into a shared module if
+   needed; do not fork brand tables; pass **DB `preset_slug`**, not the
+   runtime slug alone.
+4. `provider_name` from DB `Provider.name` (display name).
+
+**Alternative (B):** Extend `ProviderConfig` + `_load_providers` to carry
+`name`, `logo_url`, `preset_slug` on the snapshot. Acceptable if chat/LLM
+paths ignore the extra fields and secrets stay as today. Prefer A if
+snapshot bloat / cache invalidation is a concern.
 
 Frontend types (`WorkspacePresetSummary` in web `lib/types/presets.ts` and
 any core mirror) must match.
@@ -105,8 +128,10 @@ any core mirror) must match.
 
 **List row**
 
-- Leading: `ProviderLogo` (`sm`) with `name=provider_name`, `logoUrl`,
-  `logo`.
+- Leading: `ProviderLogo` (`sm`) with
+  `name={provider_name ?? provider_slug ?? primary}` (never null —
+  `ProviderLogo` requires a string for letter fallback + a11y),
+  `logoUrl`, `logo`.
 - Title line: preset display name (`nameOf(p)` — tier i18n / custom key)
   as the **hero** font (not mono primary).
 - Secondary (optional muted truncate): `model_id` only, or omit and put
@@ -114,18 +139,22 @@ any core mirror) must match.
 - Default badge unchanged.
 - Description stays under the title when present.
 - Checkmark retained for active state.
+- Row accessible name / `aria-label`: preset display name + full
+  `primary` (e.g. `"Fast · openai/gpt-4o"`).
 
 **Closed trigger**
 
 - Replace generic `Cpu` with selected preset’s `ProviderLogo` (sm).
 - Keep short name · effort · chevron.
-- `aria-label` / existing picker aria includes enough to name the model
-  (preset name + full `primary` if useful).
+- Trigger `aria-label` must include selected preset display name **and**
+  full `primary` when a preset is selected (not a static generic string
+  alone). Fallback `Cpu` only if no presets.
 
-**Full ref discoverability**
+**Full ref discoverability (concrete)**
 
-- Tooltip or `title` on the row / avatar with full `primary`.
-- Screen readers: do not rely on mono primary alone.
+- Visual: `title={primary}` (or tooltip) on the row and/or avatar.
+- A11y: row + trigger accessible names include full `primary` as above.
+- Do not rely on mono primary as the only visible line.
 
 ### Component reuse
 
@@ -177,6 +206,9 @@ redesign.
 6. i18n/a11y: trigger still clearly names the selection.
 7. API schema + frontend types updated; unit/API tests for summary fields;
    ModelPicker display tests updated.
+8. Endpoint test with **two distinct providers** proves each preset’s
+   `provider_slug` / `logo` / `logo_url` / `model_id` match the referenced
+   provider (no cross-provider logo mix-up).
 
 ## Resolved product choices
 

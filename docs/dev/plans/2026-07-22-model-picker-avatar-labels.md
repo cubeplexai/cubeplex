@@ -19,9 +19,13 @@ React ModelPicker, existing ProviderLogo / lobehub icons.
 
 - `backend/cubeplex/api/schemas/model_presets.py`
 - `backend/cubeplex/api/routes/v1/model_presets.py`
-- Optionally extract logo resolve helper next to admin
-  (`admin_providers._resolve_logo`) into a shared module if import cycles
-  appear — prefer reusing the same function
+- Extract `_resolve_logo` from `admin_providers` into a shared module
+  (e.g. `cubeplex/llm/provider_logo.py` or `services/provider_logo.py`) so
+  workspace routes do not import admin route modules.
+- Either: slim provider metadata query next to the route/service, **or**
+  extend `ProviderConfig` + `_load_providers` with `name` / `logo_url` /
+  `preset_slug` (see design — prefer metadata map if snapshot should stay
+  LLM-call-only).
 
 **Interfaces**:
 
@@ -39,21 +43,27 @@ class WorkspacePresetSummary(BaseModel):
     model_id: str | None = None
 ```
 
-**Core logic** (in `get_workspace_model_presets`):
+All new fields default `None` (additive wire contract).
+
+**Core logic** (in `get_workspace_model_presets`) — **do not** read
+`logo_url` / `preset_slug` / `name` from today’s `ProviderConfig`:
 
 ```
+meta = load_provider_display_meta(session, org_id)
+  # slug -> {name, logo_url, preset_slug} from Provider rows
 for each preset p in snap.model_presets:
-  slug, model_id = split_primary(p.primary)  # first "/"
-  provider = snap.providers.get(slug) if slug else None
-  logo_url = provider.logo_url if provider else None
-  logo = _resolve_logo(provider.preset_slug) if provider else None
-  provider_name = provider.name if provider else slug
-  emit WorkspacePresetSummary(..., logo=..., logo_url=..., ...)
+  slug, model_id = split_primary(p.primary)  # first "/" only
+  m = meta.get(slug) if slug else None
+  logo_url = m.logo_url if m else None
+  logo = _resolve_logo(m.preset_slug) if m else None
+  provider_name = (m.name if m else None) or slug
+  emit WorkspacePresetSummary(
+    ..., provider_slug=slug, provider_name=provider_name,
+    logo=logo, logo_url=logo_url, model_id=model_id)
 ```
 
-Confirm actual attribute names on snapshot provider config (`logo_url`,
-`preset_slug`, `name`) when implementing — map 1:1 from DB-backed snapshot
-fields already loaded for chat.
+If architecture B is chosen instead, extend snapshot load once and map from
+the enriched `ProviderConfig`.
 
 **Tests intent**:
 
@@ -61,6 +71,9 @@ fields already loaded for chat.
   catalog-backed provider and a custom provider with `logo_url`.
 - Custom provider without logo: `logo` null, `logo_url` null, name present.
 - Malformed primary without `/`: graceful nulls, no 500.
+- **Two-provider fixture**: presets referencing A vs B return A’s logo/name
+  for A’s primary and B’s for B’s — assert no cross-wiring.
+- Nested model id after first slash preserved in `model_id`.
 
 ---
 
@@ -72,8 +85,9 @@ fields already loaded for chat.
 - Any `@cubeplex/core` type if presets are duplicated there
 - `frontend/packages/web/lib/api/presets.ts` (passthrough JSON)
 
-**What changes**: Add optional/required fields matching API. Keep backward
-tolerant parsing if needed (`?? null`).
+**What changes**: Add nullable fields matching API. Backward-tolerant
+parsing (`field ?? null`). Before `ProviderLogo`, normalize
+`name = provider_name ?? provider_slug ?? primary`.
 
 **Tests intent**: typecheck; optional schema assert in existing presets
 tests.
@@ -106,11 +120,13 @@ bundle.
 **What changes**:
 
 1. List row: `ProviderLogo` + `nameOf(p)` as hero; demote/remove mono
-   `primary` as main line; tooltip `title={p.primary}`.
+   `primary` as main line; `title={p.primary}`; row `aria-label` includes
+   display name + full `primary`.
 2. Trigger: selected `ProviderLogo` instead of `Cpu` when `selected`
-   exists; fallback `Cpu` only if no presets.
+   exists; fallback `Cpu` only if no presets; trigger aria includes
+   selected display name + `primary`.
 3. Preserve effort slider, selection store, hydration gating for labels.
-4. `aria-pressed` / aria labels remain correct.
+4. `aria-pressed` / aria labels remain correct per above.
 
 **Core logic**: pure presentational mapping from summary fields.
 
@@ -118,6 +134,7 @@ bundle.
 
 - Component test: renders preset name without requiring full primary as
   visible main text; shows logo props when provided.
+- Accessible names include full `primary` on row and trigger.
 - Selection still updates store on click.
 
 ---
