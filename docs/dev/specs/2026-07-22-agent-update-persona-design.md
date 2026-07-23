@@ -72,8 +72,15 @@ persona in the unstable tail.
 | `persona_get` | Return current `system_prompt`, length, and max (8000). |
 | `persona_update` | Full replace of `system_prompt`. Validate max 8000. |
 
-**Authorization (v1):** match settings write — any workspace **member**, same as
-`PUT /settings/agent`. Document shared-workspace impact in tool description.
+**Authorization (v1):** match settings write for **interactive member-originated
+chat runs** — same as `PUT /settings/agent` (`require_member`). Document
+shared-workspace impact in tool description.
+
+**Non-interactive / automation (v1):** do **not** register `persona_update` on
+scheduled, IM-bot, or other automated trigger tool lists. `persona_get` may
+remain read-only if useful; writes require a human-driven interactive run that
+can answer HITL. Revisit automation ownership only in a later phase with
+explicit confirmer identity.
 
 **Write mode (v1):** full document replace only. Append / search-replace can
 come in a later phase once overwrite UX is solid.
@@ -83,22 +90,46 @@ come in a later phase once overwrite UX is solid.
 Recommended v1:
 
 - **Empty → first write:** apply without confirm (still report success clearly).
-- **Non-empty → replace:** require confirmation via existing HITL channel
-  (`ask_user` / confirm card) **before** commit, showing a short summary of the
-  change (length before/after, first ~N chars of new text, note that **all
-  members** of the workspace are affected).
+- **Non-empty → replace:** require confirmation **before** commit, showing a
+  short summary of the change (length before/after, first ~N chars of new text,
+  note that **all members** of the workspace are affected).
 - Agent should call `persona_get` before proposing a replace when the user
   intent is incremental (“add X”) so it can compose a full new document.
 
-Implementation options (choose during implementation with cubepi HITL
-patterns already used for sandbox confirm):
+**Concrete cubepi design (required — not “choose later”):**
 
-1. Tool internally pauses for confirm when previous text non-empty, **or**
-2. Prompt requires agent to `ask_user` first; server still accepts direct
-   writes (weaker).
+Custom tool bodies cannot call HITL by default: `CheckpointedChannel` raises
+`HitlDurabilityNotGuaranteed` when `_in_custom_tool_var` is set unless
+`allow_inside_custom_tool=True`. Sandbox confirm works because it runs in
+**middleware before** the tool body, via `channel.approve(...)`. Cubeplex
+`hitl_resume` serializes **`ask_user`** and **sandbox `approve`** kinds —
+not a free-form unused `confirm` kind for product tools.
 
-**Recommendation:** enforce on the tool path (option 1) so confirmation is not
-skippable by a misbehaving model.
+**Chosen path for v1 (tool-enforced, durable):**
+
+1. Build `persona_update` as a normal agent tool, but when non-empty overwrite
+   is needed, call `channel.ask([...])` **or** `channel.approve(...)` **only if**
+   the channel used for this agent is constructed with
+   `allow_inside_custom_tool=True` **or** the tool is registered as a cubepi
+   builtin that does not set the custom-tool guard (prefer reusing the existing
+   run-level `CheckpointedChannel` with an explicit
+   `allow_inside_custom_tool=True` **only for this channel instance** after
+   verifying sandbox durability still holds).
+2. Prefer **`ask` with a fixed Yes/No schema** mapped to frontend
+   `ask_user_request` (already supported end-to-end), payload including:
+   `previous_hash` / length, `new_length`, preview of new text, workspace-wide
+   warning.
+3. On deny/cancel/timeout → tool result `updated: false`; **no write**.
+4. On approve → re-load persona and apply **optimistic concurrency** (below)
+   before commit.
+
+Do **not** rely on prompt-only “call `ask_user` first” (skippable). Do **not**
+invent a new HITL kind without `hitl_resume` + frontend event wiring.
+
+**Optimistic concurrency:** store the hash (or exact previous text fingerprint)
+observed when the tool started confirmation. At commit, if current
+`system_prompt` differs → return conflict; require `persona_get` + new confirm.
+Cover double-approve and UI-edit-while-pending in tests.
 
 ### When the new persona takes effect
 
@@ -137,12 +168,12 @@ Do not duplicate validation. Extract or call the same path as
 
 | Phase | Deliverable |
 | --- | --- |
-| **1** | `persona_get` + `persona_update` (full replace) + prompt guidance + e2e |
-| **2** | HITL confirm for overwrite; tool result card; settings stale refresh |
+| **1+2 (inseparable)** | `persona_get` + `persona_update` (full replace) **with** tool-enforced HITL on non-empty overwrite + concurrency check + prompt guidance + e2e. **No production path may write a non-empty overwrite without HITL.** |
+| **UI polish** | Tool result card; settings stale refresh (may land with 1+2 or immediately after) |
 | **3** | Patch/append helpers; audit metadata; optional admin-only write policy |
 
-Ship Phase 1+2 together if HITL wiring is small enough to avoid a half-safe
-overwrite path in production.
+**Release gate:** if HITL wiring is blocked, ship **empty-only** first write or
+block non-empty updates entirely — never a silent overwrite API.
 
 ## Acceptance criteria
 

@@ -53,13 +53,17 @@ class PersonaUpdateArgs(BaseModel):
 - update success: `{ "updated": true, "length", "previous_length", ... }`
 - update error: clear message (too long, not confirmed, etc.)
 
-**Phase note**: Unit 2 can implement update as direct write first only if
-Unit 3 lands in the same PR; prefer not to ship non-empty overwrite without
-HITL.
+**Phase note (hard gate):** Units 2 and 3 **must ship in the same PR**. Do not
+merge a non-empty overwrite path without tool-enforced HITL. If HITL is blocked,
+reject non-empty updates or allow empty→first only.
+
+**Registration:** attach write tool only for interactive member runs (see spec).
+Automated/IM tool lists omit `persona_update`.
 
 **Tests**:
 - e2e: tool write → `GET /settings/agent` returns new text
 - unit: max length rejection
+- unit/e2e: non-interactive trigger does not expose write tool
 
 ---
 
@@ -67,19 +71,31 @@ HITL.
 
 **Files**:
 - `persona.py` update path
-- Reuse sandbox HITL / `ask_user` channel already attached on chat agents
+- Reuse run-level `CheckpointedChannel` from `run_manager` (same channel as
+  `ask_user_tool` / sandbox confirm)
+
+**Cubepi constraints (must design against):**
+- Calling HITL from inside a custom tool requires
+  `allow_inside_custom_tool=True` on that channel **or** an equivalent
+  builtin/middleware path; default channel construction rejects it
+  (`HitlDurabilityNotGuaranteed`).
+- Prefer `channel.ask([...])` → existing `ask_user_request` frontend path
+  (supported by `hitl_resume`). Do not invent a new kind without wiring.
 
 **Logic**:
-1. Load current prompt.
-2. If non-empty and new text differs: pause for confirm with summary
-   (workspace-wide warning, length before/after, reason if provided).
-3. On approve → `set_system_prompt`.
-4. On deny → tool result “not updated”.
+1. Load current prompt; compute `previous_hash`.
+2. If non-empty and new text differs: pause for HITL with summary
+   (workspace-wide warning, length before/after, reason if provided,
+   fingerprint of previous text).
+3. On approve → re-read persona; if hash mismatch → conflict tool result
+   (no write); else `set_system_prompt`.
+4. On deny / cancel / timeout → tool result “not updated”.
 
-Empty previous → write immediately.
+Empty previous → write immediately (no HITL).
 
 **Tests**: e2e or integration with HITL channel mock — confirm path commits;
-deny does not.
+deny does not; double-approve / concurrent UI edit yields conflict; custom-tool
+HITL path does not raise durability error.
 
 ---
 
@@ -135,7 +151,7 @@ contains new text (inspect via trace helper or internal test hook).
 ## Delivery order
 
 1. Unit 1 (service extract)
-2. Units 2+3+4 together (tools + HITL + prompt)
+2. Units 2+3+4 **together** (tools + HITL + prompt) — inseparable release
 3. Unit 5 (assembly proof)
 4. Unit 6 (UI polish)
 5. Unit 7 (docs site)
@@ -146,12 +162,16 @@ contains new text (inspect via trace helper or internal test hook).
 - admin-only policy flag
 - audit columns
 - renaming Persona UI label
+- persona writes from scheduled/IM/automated runs (v1)
 
 ## Risks
 
 | Risk | Mitigation |
 | --- | --- |
-| Agent overwrites long persona silently | Tool-enforced HITL when non-empty |
+| Agent overwrites long persona silently | Tool-enforced HITL when non-empty; no Phase-1-only ship |
+| HITL from custom tool durability | Design against `allow_inside_custom_tool` / ask path |
+| Stale confirm overwrites newer UI edit | previous_hash check at commit |
 | Shared workspace surprise | Confirm + tool description |
+| Automation mutates persona | Omit write tool on non-interactive tool lists |
 | Cache cost after update | Accept; document; rare |
 | Settings page stale | Refetch on focus |
