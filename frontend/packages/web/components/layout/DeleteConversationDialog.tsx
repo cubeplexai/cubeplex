@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { createApiClient, useConversationStore } from '@cubeplex/core'
@@ -26,6 +27,16 @@ function describeErr(err: unknown): string {
   return String(err)
 }
 
+/** True when the current route is this conversation's chat page. */
+function isViewingConversation(
+  pathname: string | null,
+  wsId: string | null,
+  conversationId: string,
+): boolean {
+  if (!pathname || !wsId) return false
+  return pathname === `/w/${wsId}/conversations/${conversationId}`
+}
+
 export interface DeleteConversationDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -37,6 +48,7 @@ export interface DeleteConversationDialogProps {
 /**
  * Confirm dialog for soft-deleting a sidebar conversation.
  * Cancel / Esc: no API. Confirm: conversationStore.remove; toast on failure.
+ * Deleting the open conversation navigates to the workspace home.
  */
 export function DeleteConversationDialog({
   open,
@@ -47,6 +59,8 @@ export function DeleteConversationDialog({
 }: DeleteConversationDialogProps): React.ReactElement {
   const t = useTranslations('shellLayout')
   const tSidebar = useTranslations('sidebar')
+  const router = useRouter()
+  const pathname = usePathname()
   const remove = useConversationStore((s) => s.remove)
   const [deleting, setDeleting] = useState(false)
 
@@ -65,6 +79,10 @@ export function DeleteConversationDialog({
     try {
       await remove(buildClient(currentWsId), conversationId)
       onOpenChange(false)
+      // Store clears activeId, but the chat route stays mounted unless we leave.
+      if (currentWsId && isViewingConversation(pathname, currentWsId, conversationId)) {
+        router.replace(`/w/${currentWsId}`)
+      }
     } catch (err) {
       toast.error(t('deleteConversationFailed'), { description: describeErr(err) })
     } finally {
