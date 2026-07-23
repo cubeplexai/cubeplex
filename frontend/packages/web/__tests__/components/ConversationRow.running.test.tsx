@@ -8,6 +8,7 @@ import { ConversationRow } from '../../components/layout/Sidebar'
 const storeMocks = vi.hoisted(() => ({
   isStreaming: false,
   streamingConversationId: null as string | null,
+  unreadConversationIds: {} as Record<string, true>,
   remove: vi.fn(),
   rename: vi.fn(),
   setPin: vi.fn(),
@@ -32,40 +33,61 @@ vi.mock('next/link', () => ({
   ),
 }))
 
-vi.mock('@cubeplex/core', () => ({
-  createApiClient: () => ({
-    setWorkspaceId: vi.fn(),
-  }),
-  useMessageStore: (
-    selector: (state: { isStreaming: boolean; streamingConversationId: string | null }) => unknown,
+// DeleteConversationDialog (rendered by ConversationRow) uses the app router.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/w/ws-1/conversations/c1',
+}))
+
+vi.mock('@cubeplex/core', () => {
+  const useMessageStore = (
+    selector: (state: {
+      isStreaming: boolean
+      streamingConversationId: string | null
+      unreadConversationIds: Record<string, true>
+    }) => unknown,
   ) =>
     selector({
       isStreaming: storeMocks.isStreaming,
       streamingConversationId: storeMocks.streamingConversationId,
+      unreadConversationIds: storeMocks.unreadConversationIds,
+    })
+  useMessageStore.getState = () => ({
+    clearUnread: vi.fn(),
+    isStreaming: storeMocks.isStreaming,
+    streamingConversationId: storeMocks.streamingConversationId,
+    unreadConversationIds: storeMocks.unreadConversationIds,
+  })
+
+  return {
+    createApiClient: () => ({
+      setWorkspaceId: vi.fn(),
     }),
-  useConversationStore: (
-    selector?: (state: {
-      remove: typeof storeMocks.remove
-      rename: typeof storeMocks.rename
-      setPin: typeof storeMocks.setPin
-      setActive: typeof storeMocks.setActive
-      pinPending: Record<string, boolean>
-      conversationParticipants: Record<string, unknown[]>
-    }) => unknown,
-  ) => {
-    const state = {
-      remove: storeMocks.remove,
-      rename: storeMocks.rename,
-      setPin: storeMocks.setPin,
-      setActive: storeMocks.setActive,
-      pinPending: storeMocks.pinPending,
-      conversationParticipants: storeMocks.conversationParticipants,
-    }
-    // ConversationRow both destructures and selects.
-    if (typeof selector === 'function') return selector(state)
-    return state
-  },
-}))
+    useMessageStore,
+    useConversationStore: (
+      selector?: (state: {
+        remove: typeof storeMocks.remove
+        rename: typeof storeMocks.rename
+        setPin: typeof storeMocks.setPin
+        setActive: typeof storeMocks.setActive
+        pinPending: Record<string, boolean>
+        conversationParticipants: Record<string, unknown[]>
+      }) => unknown,
+    ) => {
+      const state = {
+        remove: storeMocks.remove,
+        rename: storeMocks.rename,
+        setPin: storeMocks.setPin,
+        setActive: storeMocks.setActive,
+        pinPending: storeMocks.pinPending,
+        conversationParticipants: storeMocks.conversationParticipants,
+      }
+      // ConversationRow both destructures and selects.
+      if (typeof selector === 'function') return selector(state)
+      return state
+    },
+  }
+})
 
 function makeConvo(overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -95,6 +117,7 @@ describe('ConversationRow running indicator', () => {
     vi.clearAllMocks()
     storeMocks.isStreaming = false
     storeMocks.streamingConversationId = null
+    storeMocks.unreadConversationIds = {}
     storeMocks.pinPending = {}
     storeMocks.conversationParticipants = {}
   })

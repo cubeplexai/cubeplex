@@ -98,7 +98,7 @@ export function ConversationRow({
   )
   // Spinner while streaming; unread only after completion when away.
   const isRunning = useMessageStore((s) => s.isStreaming && s.streamingConversationId === convo.id)
-  const isUnread = useMessageStore((s) => !!s.unreadConversationIds[convo.id])
+  const isUnread = useMessageStore((s) => !!s.unreadConversationIds?.[convo.id])
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(convo.title)
