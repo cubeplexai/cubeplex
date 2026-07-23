@@ -74,10 +74,20 @@ Notes:
 - On normal completion, cancel, or error paths that clear
   `isStreaming` / `streamingConversationId`, the spinner disappears with no
   extra sidebar logic.
-- HITL paused states: follow whatever the store already does for
-  `isStreaming` vs paused. If the stream is considered still active
-  (`streamingConversationId` set), keep the spinner; do not invent a
-  separate “waiting” icon in this issue.
+- **HITL paused (resolved):** Today `finalizePausedStream` / bootstrap set
+  `isStreaming: false` while often leaving `streamingConversationId` set so
+  `MessageList` can still gate the AskUser card. MVP **does not** show the
+  running spinner for paused HITL — the predicate requires `isStreaming ===
+  true` (live stream / tool execution). Waiting-on-user is not “running”; a
+  separate HITL icon is out of scope. Do **not** widen the predicate to
+  “any non-null `streamingConversationId`.”
+- **Stream ownership invariant (store, not a second flag):** Spinner is a
+  pure read of the two flags. Correctness requires that only the **current
+  stream owner** may clear `isStreaming` / `streamingConversationId`. If
+  conversation A is aborted because B starts a send, a late terminal
+  handler for A must not wipe B’s flags. That ownership check belongs in
+  `messageStore` terminal paths if missing; this feature must not paper over
+  it with a parallel “running ids” map.
 
 ### 4.2 UX
 
@@ -146,4 +156,4 @@ Add keys under the existing `sidebar` namespace in
 | --- | --- |
 | Multi-conversation background runs? | Out of scope; current store is single-stream. Spinner tracks that one id. |
 | Server `active_run` on list? | Not for MVP. Revisit only if product requires post-reload running state. |
-| Show spinner during HITL wait? | Match store: if `streamingConversationId` still set, show spinner. |
+| Show spinner during HITL wait? | **No.** Paused HITL has `isStreaming: false`; spinner is live-stream only. |
