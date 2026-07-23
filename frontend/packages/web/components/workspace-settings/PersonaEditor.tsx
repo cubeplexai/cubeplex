@@ -53,6 +53,16 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId])
 
+  // Refetch when the settings page regains focus so agent-driven persona
+  // updates (persona_update tool) don't leave a stale editor open.
+  useEffect(() => {
+    const onFocus = (): void => {
+      void loadAll(client())
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [client, loadAll])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (agentConfig) setDraft(agentConfig.system_prompt)

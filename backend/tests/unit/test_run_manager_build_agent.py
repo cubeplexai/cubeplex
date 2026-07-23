@@ -189,3 +189,101 @@ async def test_build_with_no_sandbox_still_binds_hitl_channel(
     assert isinstance(channel, CheckpointedChannel)
     stored_run_id = getattr(channel, "run_id", None) or getattr(channel, "_run_id", None)
     assert stored_run_id == _RUN_ID
+
+
+async def test_build_registers_persona_tools_for_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive runs get persona_get + persona_update; tools bind the HITL channel."""
+    _agent, tools, _channel = await _build(monkeypatch, sandbox=None)
+    names = {getattr(t, "name", None) for t in tools}
+    assert "persona_get" in names
+    assert "persona_update" in names
+
+
+async def test_build_omits_persona_update_for_non_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduled / automation runs must not expose persona_update."""
+    mock_agent = MagicMock()
+    mock_agent._extra = {}
+    monkeypatch.setattr(
+        "cubeplex.agents.graph.create_cubeplex_agent",
+        MagicMock(return_value=mock_agent),
+    )
+    from cubeplex.llm.config import ProviderConfig
+    from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+
+    snap = LLMSnapshot(
+        providers={
+            "anthropic": ProviderConfig.model_validate(
+                {
+                    "base_url": "https://example.invalid",
+                    "api_key": "k",
+                    "api": "openai-completions",
+                    "models": [
+                        {
+                            "id": "claude-stub",
+                            "name": "claude-stub",
+                            "contextWindow": 128000,
+                            "maxTokens": 32000,
+                        }
+                    ],
+                }
+            ),
+        },
+        model_presets=(
+            ModelPreset(
+                key="default",
+                primary="anthropic/claude-stub",
+                fallbacks=(),
+                kind="tier",
+                is_default=True,
+            ),
+        ),
+        task_routing={},
+    )
+
+    async def _fake_load(*_a: Any, **_kw: Any) -> LLMSnapshot:
+        return snap
+
+    monkeypatch.setattr("cubeplex.llm.snapshot.load_llm_snapshot", _fake_load)
+    mock_bound_model = MagicMock()
+    mock_bound_model.spec.provider_id = "anthropic"
+    mock_bound_model.spec.id = "claude-stub"
+    mock_bound_model.provider = MagicMock()
+    monkeypatch.setattr(
+        "cubeplex.llm.builder.build_chain_model",
+        MagicMock(return_value=mock_bound_model),
+    )
+
+    rm = RunManager(
+        app=_stub_app(),
+        redis=MagicMock(),
+        key_prefix="test_t7",
+        run_event_ttl_seconds=60,
+    )
+    extra_ref_holder: dict[str, Any] = {"extra": None}
+    _agent, tools, _channel = await rm._build_agent_for_conversation(
+        ctx=RunContext(
+            user_id="u1",
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id=_CONV_ID,
+            trigger="schedule",
+        ),
+        conversation_id=_CONV_ID,
+        run_id=_RUN_ID,
+        cp=_stub_cp(),
+        sandbox=None,
+        skill_catalog=None,
+        catalog_session=None,
+        effective_system_prompt="you are a test",
+        extra_ref_holder=extra_ref_holder,
+        sse_queue=MagicMock(),
+        publish_stream_event=MagicMock(),
+        trigger="schedule",
+    )
+    names = {getattr(t, "name", None) for t in tools}
+    assert "persona_get" in names
+    assert "persona_update" not in names

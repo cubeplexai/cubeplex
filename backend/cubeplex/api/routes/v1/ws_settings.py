@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from cubeplex.api.schemas.ws_settings import (
     AgentConfigOut,
@@ -27,12 +25,15 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.config import config as _config
 from cubeplex.db import get_session
-from cubeplex.models.agent_config import AgentConfig
 from cubeplex.repositories.organization import OrganizationRepository
 from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
+)
+from cubeplex.services.agent_config import (
+    get_or_create_agent_config,
+    set_system_prompt,
 )
 from cubeplex.skills.cache import SkillCache
 from cubeplex.skills.frontmatter import InvalidFrontmatterError
@@ -47,41 +48,12 @@ from cubeplex.skills.service import (
 router = APIRouter(prefix="/ws/{workspace_id}/settings", tags=["workspace-settings"])
 
 
-async def _get_or_create_agent_config(
-    session: AsyncSession, org_id: str, workspace_id: str
-) -> AgentConfig:
-    result = await session.execute(
-        select(AgentConfig).where(
-            AgentConfig.org_id == org_id,
-            AgentConfig.workspace_id == workspace_id,
-        )
-    )
-    cfg = result.scalar_one_or_none()
-    if cfg is not None:
-        return cfg
-    try:
-        cfg = AgentConfig(org_id=org_id, workspace_id=workspace_id)
-        session.add(cfg)
-        await session.commit()
-        await session.refresh(cfg)
-        return cfg
-    except IntegrityError:
-        await session.rollback()
-        result = await session.execute(
-            select(AgentConfig).where(
-                AgentConfig.org_id == org_id,
-                AgentConfig.workspace_id == workspace_id,
-            )
-        )
-        return result.scalar_one()
-
-
 @router.get("/agent", response_model=AgentConfigOut)
 async def get_agent_config(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentConfigOut:
-    cfg = await _get_or_create_agent_config(session, ctx.org_id, ctx.workspace_id)
+    cfg = await get_or_create_agent_config(session, ctx.org_id, ctx.workspace_id)
     return AgentConfigOut(system_prompt=cfg.system_prompt)
 
 
@@ -91,11 +63,7 @@ async def update_agent_config(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AgentConfigOut:
-    cfg = await _get_or_create_agent_config(session, ctx.org_id, ctx.workspace_id)
-    cfg.system_prompt = body.system_prompt
-    session.add(cfg)
-    await session.commit()
-    await session.refresh(cfg)
+    cfg = await set_system_prompt(session, ctx.org_id, ctx.workspace_id, body.system_prompt)
     return AgentConfigOut(system_prompt=cfg.system_prompt)
 
 

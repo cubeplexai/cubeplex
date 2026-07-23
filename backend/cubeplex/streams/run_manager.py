@@ -2946,6 +2946,23 @@ class RunManager:
         )
         _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
 
+        # persona_get always; persona_update only on interactive member runs
+        # (HITL overwrite requires a human-driven channel.ask). Same channel
+        # as ask_user so pending_request is durable for overwrite confirms.
+        try:
+            from cubeplex.tools.builtin.persona import create_persona_tools
+
+            _builtin_tools.extend(
+                create_persona_tools(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    channel=sandbox_hitl_channel,
+                    include_update=(trigger == "interactive"),
+                )
+            )
+        except Exception as _exc:
+            logger.warning("persona tools unavailable for cubepi run: {}", _exc)
+
         # 6b. SandboxMiddleware — needs sandbox. Shares the channel built above
         # so the confirm-gate writes to the same pending row the agent sees.
         if sandbox is not None:
@@ -3613,8 +3630,10 @@ class RunManager:
             # show_widget guidelines — appended unconditionally at a fixed spot
             # so the cache prefix stays deterministic (the tool is always
             # registered). See backend/docs/prompt-cache-discipline.md.
+            from cubeplex.prompts.persona import PERSONA_AUTHORING_BLOCK
             from cubeplex.prompts.widget import WIDGET_GUIDELINES
 
+            effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
             final_status = await self._run_cubepi_path(
@@ -4185,8 +4204,10 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to inject available-skills list (respond): {}", exc)
 
+            from cubeplex.prompts.persona import PERSONA_AUTHORING_BLOCK
             from cubeplex.prompts.widget import WIDGET_GUIDELINES
 
+            effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
             await self._run_cubepi_respond_path(
