@@ -23,6 +23,7 @@ import { reasoningFromThinking } from '@/lib/reasoning-control'
 import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
+import { useMobileMenu } from '@/hooks/useMobileMenu'
 import {
   filterCommands,
   parseLeadingCommandToken,
@@ -73,6 +74,8 @@ export function InputBar({
   const { workspaceId } = useWorkspaceContext()
   const requestOpenShare = useComposerChromeStore((s) => s.requestOpenShare)
   const requestRename = useComposerChromeStore((s) => s.requestRename)
+  const consumeRenameRequest = useComposerChromeStore((s) => s.consumeRenameRequest)
+  const openMobileMenu = useMobileMenu((s) => s.open)
   const messageIsStreaming =
     useMessageStore((s) =>
       conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false,
@@ -254,7 +257,17 @@ export function InputBar({
       openModelPicker: () => setModelPickerOpen(true),
       openEffortControl: () => setModelPickerOpen(true),
       startRename: () => {
-        if (conversationId) requestRename(conversationId)
+        if (!conversationId) return
+        // Ensure mobile drawer is open so the sidebar row can receive the request.
+        openMobileMenu()
+        requestRename(conversationId)
+        // If no ConversationRow consumes the request, clear it and notify.
+        window.setTimeout(() => {
+          const pending = useComposerChromeStore.getState().renameRequest
+          if (pending?.conversationId !== conversationId) return
+          consumeRenameRequest(pending.nonce)
+          toast.error(tSlash('renameUnavailable'))
+        }, 400)
       },
       openAttach: () => fileInputRef.current?.click(),
       createNewChat: () => {
@@ -297,6 +310,8 @@ export function InputBar({
       messageIsStreaming,
       cancelStream,
       requestRename,
+      consumeRenameRequest,
+      openMobileMenu,
       requestOpenShare,
       router,
       tSlash,

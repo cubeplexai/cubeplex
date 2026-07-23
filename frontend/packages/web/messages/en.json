@@ -204,6 +204,7 @@
     "compactSuccess": "Conversation context compacted",
     "compactSkipped": "Not enough history to compact yet",
     "compactFailed": "Could not compact conversation",
+    "renameUnavailable": "Could not open rename — try the sidebar menu",
     "commands": {
       "help": { "description": "Show available commands" },
       "new": { "description": "Start a new chat" },

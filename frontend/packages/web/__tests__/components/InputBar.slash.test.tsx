@@ -83,6 +83,11 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
 
+vi.mock('@/hooks/useMobileMenu', () => ({
+  useMobileMenu: (selector: (s: { open: () => void }) => unknown): unknown =>
+    selector({ open: vi.fn() }),
+}))
+
 vi.mock('@/lib/api/presets', () => ({
   fetchWorkspaceModelPresets: vi.fn().mockResolvedValue([
     {

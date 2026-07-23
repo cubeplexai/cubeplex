@@ -204,6 +204,7 @@
     "compactSuccess": "已压缩对话上下文",
     "compactSkipped": "历史消息还不够，暂无法压缩",
     "compactFailed": "压缩对话失败",
+    "renameUnavailable": "无法打开重命名，请从侧边栏菜单操作",
     "commands": {
       "help": { "description": "显示可用命令" },
       "new": { "description": "开始新对话" },
