@@ -28,7 +28,10 @@ run_e2e() {
   local email pass info reg ws csrf slug conv conv_id msg run_id events text
 
   email="e2e-$(date +%s)-$(openssl rand -hex 2)@example.com"
-  pass="correcthorsebatterystaple"
+  # Must satisfy the strictest built-in password policy ("high": upper + lower
+  # + digit + symbol). A plain lowercase passphrase fails register with 400
+  # weak_password on a default deployment.
+  pass="CorrectHorseBatteryStaple7!"
 
   step "1. /api/v1/system/info"
   info=$(curl -fsS "${CURL_OPTS[@]}" "$BASE/api/v1/system/info")
