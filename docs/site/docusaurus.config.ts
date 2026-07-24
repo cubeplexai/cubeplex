@@ -177,7 +177,6 @@ const config: Config = {
         {
           href: 'https://github.com/cubeplexai/cubeplex',
           position: 'right',
-          label: 'GitHub',
           target: '_self',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',
