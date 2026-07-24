@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # Post-install smoke test for cubeplex.
 # Verifies the deployment is correct: rollout, health probes, ingress,
-# Next.js render. Does NOT exercise LLM / sandbox runtime — those have
-# their own test suites.
+# Next.js render. Does NOT exercise LLM / sandbox runtime — that is e2e.sh.
+# Shared HTTP probes: deploy/scripts/lib/http-probes.sh.
 #
 # Usage:
-#   HOST=cubeplex.local NAMESPACE=cubeplex deploy/scripts/smoke-test.sh
+#   HOST=cubeplex.local NAMESPACE=cubeplex INGRESS_IP=<node IP> \
+#     deploy/kubernetes/scripts/smoke-test.sh
 #
 # When HOST is *.local the script expects /etc/hosts to point it at the
-# ingress LB IP. From inside the cluster node we curl ingress-nginx
-# directly with a Host header, no /etc/hosts dance needed.
+# ingress LB IP. --resolve pins it regardless, so no /etc/hosts dance is
+# needed from inside the cluster node.
 set -euo pipefail
+
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../scripts/lib" && pwd)"
+source "$LIB/common.sh"
+source "$LIB/http-probes.sh"
 
 NAMESPACE="${NAMESPACE:-cubeplex}"
 RELEASE="${RELEASE:-cubeplex}"
@@ -18,8 +23,12 @@ HOST="${HOST:-cubeplex.local}"
 INGRESS_IP="${INGRESS_IP:-192.168.1.101}"
 INGRESS_PORT="${INGRESS_PORT:-30019}"
 
-step() { echo; echo "==> $*"; }
-fail() { echo "FAIL: $*" >&2; exit 1; }
+# One ingress fronts both services, so the two origins are the same host.
+BACKEND_BASE="http://$HOST:$INGRESS_PORT"
+FRONTEND_BASE="http://$HOST:$INGRESS_PORT"
+CURL_OPTS=(--noproxy '*' --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP")
+
+disable_proxies
 
 step "1. Rollouts"
 kubectl -n "$NAMESPACE" rollout status \
@@ -49,27 +58,18 @@ if [[ -n "$job" ]]; then
 fi
 
 step "4. Backend /health/live via ingress"
-curl -fsS --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" "http://$HOST:$INGRESS_PORT/health/live" \
-  | tee /tmp/cubeplex-live.json
-grep -q '"status":"ok"' /tmp/cubeplex-live.json \
-  || fail "live probe response unexpected"
+probe_backend_health
 
-step "5. Frontend root page renders"
-body=$(curl -fsS --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" "http://$HOST:$INGRESS_PORT/")
-echo "$body" | head -c 200
-echo
-echo "$body" | grep -qiE "<title>|<html" \
-  || fail "frontend root did not return HTML"
+step "5. Backend /api/v1/system/info via ingress"
+probe_system_info
 
-step "6. Backend API reachable through /api"
-code=$(curl -s -o /dev/null -w '%{http_code}' \
-  --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" \
-  "http://$HOST:$INGRESS_PORT/api/v1/system/status" || true)
-echo "  /api/v1/system/status → HTTP $code"
-[[ "$code" =~ ^(200|401|403|404)$ ]] \
-  || fail "backend /api unreachable (got $code)"
+step "6. Frontend root page renders"
+probe_frontend_root
 
-step "7. Summary"
+step "7. Backend API reachable through /api"
+probe_api_via_frontend
+
+step "8. Summary"
 kubectl -n "$NAMESPACE" get pods,svc,ingress
 echo
 echo "SMOKE TEST PASSED."

@@ -10,8 +10,9 @@
 # Pre-requisites:
 #   * `.env` has OPENSANDBOX_*_TAG / image / api_key filled (see .env.example).
 #   * `config/opensandbox.toml` exists (cp from opensandbox.toml.example).
-#   * config/config.production.local.yaml has `sandbox.enabled: true` and
-#     `sandbox.use_server_proxy: true`.
+#   * config/config.production.local.yaml has `sandbox.enabled: true`,
+#     `sandbox.secure_access: false`, and `sandbox.use_server_proxy: false`
+#     (the example config's defaults — both are required for the docker runtime).
 #   * config/config.production.secrets.yaml has `sandbox.domain`,
 #     `sandbox.image`, `sandbox.api_key` matching the server below.
 #
@@ -26,6 +27,14 @@ services:
     restart: unless-stopped
     environment:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+    # The server reaches the egress sidecar (readiness probe) and the sandbox
+    # containers through the host_ip / eip in opensandbox.toml, which default
+    # to `host.docker.internal`. Linux Docker engines don't resolve that by
+    # default, so wire it to the bridge gateway here too — without it, sandbox
+    # creation fails with "Egress sidecar did not become ready … Name or
+    # service not known" and every tool call errors out.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Docker socket — REQUIRED for the docker runtime. Sandbox containers
       # are spawned via the host docker daemon, NOT inside this service.
