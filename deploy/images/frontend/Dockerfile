@@ -64,8 +64,14 @@ COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/.next/standalone
 COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/.next/static ./packages/web/.next/static
 COPY --from=builder --chown=cubeplex:cubeplex /app/packages/web/public ./packages/web/public
 
+# Rewrites the baked /api/* proxy destination with the runtime CUBEPLEX_API_URL
+# on start (Next bakes rewrites() at build time — see the script).
+COPY --chown=cubeplex:cubeplex deploy/images/frontend/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 USER cubeplex
 
 EXPOSE 3000
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "packages/web/server.js"]
