@@ -145,19 +145,7 @@ const config: Config = {
       items: [
         {
           href: 'https://cubeplex.ai/#product',
-          label: 'Product',
-          position: 'left',
-          target: '_self',
-        },
-        {
-          href: 'https://cubeplex.ai/#capabilities',
-          label: 'Capabilities',
-          position: 'left',
-          target: '_self',
-        },
-        {
-          href: 'https://cubeplex.ai/#self-host',
-          label: 'Self-host',
+          label: 'Products',
           position: 'left',
           target: '_self',
         },
