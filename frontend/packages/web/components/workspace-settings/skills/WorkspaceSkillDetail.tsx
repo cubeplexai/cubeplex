@@ -9,6 +9,7 @@ import { FileText, Files, GitCompare, History } from 'lucide-react'
 import {
   createApiClient,
   deleteWorkspaceSkill,
+  formatSkillLabel,
   installWorkspaceSkill,
   toggleWorkspaceSkill,
   type SkillContent,
@@ -19,6 +20,7 @@ import { useTranslations } from 'next-intl'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SkillCanonicalNameRow } from '@/components/skills/SkillNameHeading'
 import { cn, proseClasses } from '@/lib/utils'
 import type { WorkspaceSkillEntry, WorkspaceSkillState } from '@/hooks/useWorkspaceSkillsCatalog'
 
@@ -500,7 +502,9 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
     <div className="flex w-full flex-col gap-4 p-6">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-xl font-semibold tracking-tight">{skill.name}</h3>
+          <h3 className="text-xl font-semibold tracking-tight">
+            {formatSkillLabel(skill.name).primary}
+          </h3>
           <Badge variant="outline" className="font-mono">
             v{targetVersion}
           </Badge>
@@ -523,6 +527,11 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
             <WorkspaceActions wsId={wsId} skill={skill} onDone={onActionDone} />
           </div>
         </div>
+        <SkillCanonicalNameRow
+          name={skill.name}
+          copyLabel={t('copyCanonical')}
+          copiedLabel={t('copiedCanonical')}
+        />
         {skill.description && (
           <p className="text-sm leading-relaxed text-muted-foreground">{skill.description}</p>
         )}

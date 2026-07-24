@@ -3,6 +3,8 @@
 import { CheckCircle2, CircleSlash, Lock, Package, Plus, Sparkles } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { formatSkillLabel } from '@cubeplex/core'
+
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { WorkspaceSkillEntry, WorkspaceSkillState } from '@/hooks/useWorkspaceSkillsCatalog'
@@ -49,6 +51,7 @@ function StateBadge({ state }: { state: WorkspaceSkillState }) {
 
 export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCardProps) {
   const SourceIcon = skill.source === 'preinstalled' ? Sparkles : Package
+  const label = formatSkillLabel(skill.name)
   return (
     <button
       type="button"
@@ -68,7 +71,12 @@ export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCar
             skill.source === 'preinstalled' ? 'text-primary' : 'text-muted-foreground',
           )}
         />
-        <span className="truncate text-sm font-semibold">{skill.name}</span>
+        <span
+          className="truncate text-sm font-semibold"
+          title={label.isNamespaced ? label.canonical : undefined}
+        >
+          {label.primary}
+        </span>
         <StateBadge state={skill.workspaceState} />
       </div>
       {skill.description && (
