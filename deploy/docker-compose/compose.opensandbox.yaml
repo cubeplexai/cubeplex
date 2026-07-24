@@ -26,6 +26,14 @@ services:
     restart: unless-stopped
     environment:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+    # The server reaches the egress sidecar (readiness probe) and the sandbox
+    # containers through the host_ip / eip in opensandbox.toml, which default
+    # to `host.docker.internal`. Linux Docker engines don't resolve that by
+    # default, so wire it to the bridge gateway here too — without it, sandbox
+    # creation fails with "Egress sidecar did not become ready … Name or
+    # service not known" and every tool call errors out.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Docker socket — REQUIRED for the docker runtime. Sandbox containers
       # are spawned via the host docker daemon, NOT inside this service.
