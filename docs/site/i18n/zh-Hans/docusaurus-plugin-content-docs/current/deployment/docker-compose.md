@@ -349,7 +349,7 @@ CubePlex 会发送 `secureAccess: false`，Docker runtime 就会接受请求。
 |---|---|---|
 | 聊天 → agent 工具调用（在沙箱里执行 bash / 读写文件） | 可以——聊天 → 沙箱 `execute` → `tool_result` 全链路可用 | — |
 | 网络策略（egress 防火墙） | 可以——egress sidecar 会被创建并以 DNS 模式执行策略，但仅当 `[docker].network_mode = "bridge"` | 当 `network_mode=host` 或使用自定义 bridge 网络时会被拒绝 |
-| **文件树面板**（聊天界面） | 可以——**需要 `execd_image` ≥ `v1.0.19`**（`GET /directories/list` 路由在 v1.0.19 才加入；旧的 v1.0.18 返回纯文本 404，会表现为 HTTP 500）。示例配置已 pin 到 v1.0.19。 | — |
+| **文件树面板**（聊天界面） | 可以 | — |
 | **交互式终端面板**（聊天界面） | – | ❌ 不可用。它需要 ttyd 端口的签名端点 URL，而 Docker runtime 拒绝签名路由（`expires` 参数是 Kubernetes 专属），面板返回 503。 |
 | **实时浏览器面板**（Neko，聊天界面） | – | ❌ 不可用。与终端一样依赖签名路由——在 Docker runtime 下返回 503。 |
 | 密钥注入 / env 替换（`cbxref_…` 占位符） | – | ❌ 不可用。它需要后端的 mTLS 凭证交换监听器 + egress CA/客户端证书，这些由 Kubernetes chart 部署（`gen-egress-certs.sh` + egress webhook）。compose overlay 不包含这些，`sandbox.egress_exchange_host` 保持为空，所以注入被禁用。 |
