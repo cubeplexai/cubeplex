@@ -361,20 +361,20 @@ call → `tool_result` works end to end.
 |---|---|---|
 | Chat → agent tool calls (bash / file read-write in the sandbox) | Yes — chat → sandbox `execute` → `tool_result` works end to end | — |
 | Network policy (egress firewall) | Yes — the egress sidecar is created and enforces the policy in DNS mode, but only when `[docker].network_mode = "bridge"` | Rejected when `network_mode=host` or a user-defined bridge network |
+| **File-tree panel** (chat UI) | Yes — **requires `execd_image` ≥ `v1.0.19`** (the `GET /directories/list` route was added in v1.0.19; the older v1.0.18 returns a plain-text 404 that surfaces as HTTP 500). The example config pins v1.0.19. | — |
 | **Interactive terminal panel** (chat UI) | – | ❌ Broken. Needs a signed endpoint URL for the ttyd port; the Docker runtime rejects signed routes (`expires` param is Kubernetes-only), so the panel returns 503. |
 | **Live browser panel** (Neko, chat UI) | – | ❌ Broken. Same signed-route requirement as the terminal — returns 503 under the Docker runtime. |
-| **File-tree panel** (chat UI) | – | ❌ Broken today. The execd `list_directory` response fails to parse under the Docker runtime (HTTP 500). Agent-driven file read/write via tool calls still works — only the UI file browser is affected. |
 | Secret injection / env substitution (`cbxref_…` placeholders) | – | ❌ Not available. It needs the backend mTLS credential-exchange listener + egress CA/client certs that the Kubernetes chart deploys (`gen-egress-certs.sh` + the egress webhook). The compose overlay ships none of that, and `sandbox.egress_exchange_host` stays empty, so injection is disabled. |
 | Signed endpoint URLs (`expires=…`) | – | Not implemented for Docker mode. The terminal + browser panels above depend on these, which is why they don't work. |
 | Server-proxy mode (`use_server_proxy: true`) | – | OpenSandbox v0.1.x drops the port from the proxied endpoint URL. Keep `use_server_proxy: false` (the example default), and the overlay wires `host.docker.internal` via `extra_hosts` on both the backend and the opensandbox-server so they can reach the host-mapped bridge ports of sandbox containers. |
 | `pvc.claimName` volumes | Yes — but treated as Docker named volumes | No CSI features, no ReadWriteMany |
 | Pause / resume (`POST /sandboxes/{id}/pause`, etc.) | Calls Docker `pause`/`unpause` (cgroup freezer) | No checkpoint to disk — paused state is lost on host Docker restart. CubePlex defaults `pause_on_idle: false` for this reason. |
 
-**In short:** under Docker-mode OpenSandbox, the agent can *run* commands and
-read/write files in the sandbox (tool calls work), and the egress firewall is
-enforced — but the interactive chat-UI panels (terminal, live browser, file
-tree) and secret injection require the Kubernetes runtime. For those, deploy
-via the [Kubernetes guide](./kubernetes.md).
+**In short:** under Docker-mode OpenSandbox, the agent can *run* commands,
+read/write files, and browse the file tree in the sandbox, and the egress
+firewall is enforced — but the interactive **terminal** and **live browser**
+panels and **secret injection** require the Kubernetes runtime. For those,
+deploy via the [Kubernetes guide](./kubernetes.md).
 
 The following routes also return `501 Not Implemented` on Docker runtime, even
 though they exist in the OpenAPI spec (CubePlex doesn't call any of them
