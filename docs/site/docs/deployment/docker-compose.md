@@ -361,7 +361,7 @@ call → `tool_result` works end to end.
 |---|---|---|
 | Chat → agent tool calls (bash / file read-write in the sandbox) | Yes — chat → sandbox `execute` → `tool_result` works end to end | — |
 | Network policy (egress firewall) | Yes — the egress sidecar is created and enforces the policy in DNS mode, but only when `[docker].network_mode = "bridge"` | Rejected when `network_mode=host` or a user-defined bridge network |
-| **File-tree panel** (chat UI) | Yes — **requires `execd_image` ≥ `v1.0.19`** (the `GET /directories/list` route was added in v1.0.19; the older v1.0.18 returns a plain-text 404 that surfaces as HTTP 500). The example config pins v1.0.19. | — |
+| **File-tree panel** (chat UI) | Yes | — |
 | **Interactive terminal panel** (chat UI) | – | ❌ Broken. Needs a signed endpoint URL for the ttyd port; the Docker runtime rejects signed routes (`expires` param is Kubernetes-only), so the panel returns 503. |
 | **Live browser panel** (Neko, chat UI) | – | ❌ Broken. Same signed-route requirement as the terminal — returns 503 under the Docker runtime. |
 | Secret injection / env substitution (`cbxref_…` placeholders) | – | ❌ Not available. It needs the backend mTLS credential-exchange listener + egress CA/client certs that the Kubernetes chart deploys (`gen-egress-certs.sh` + the egress webhook). The compose overlay ships none of that, and `sandbox.egress_exchange_host` stays empty, so injection is disabled. |
