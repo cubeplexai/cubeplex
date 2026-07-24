@@ -97,6 +97,8 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
   }
   const nameOf = (p: WorkspacePresetSummary): string =>
     p.kind === 'tier' ? tierName[p.key as ModelTier] : p.key
+  const modelNameOf = (p: WorkspacePresetSummary): string =>
+    p.model_display_name ?? p.model_id ?? modelIdFromPrimary(p.primary) ?? p.primary
   const descOf = (p: WorkspacePresetSummary): string =>
     p.kind === 'tier' ? tierDesc[p.key as ModelTier] : p.description
 
@@ -156,6 +158,7 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
             {presets.map((p) => {
               const active = p.key === effectiveKey
               const label = nameOf(p)
+              const modelName = modelNameOf(p)
               const brand = brandForPreset(p)
               const rowAria = `${label} · ${p.primary}`
               return (
@@ -170,6 +173,19 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
                       active ? 'bg-accent' : 'hover:bg-accent/60',
                     )}
                   >
+                    <ModelBrandLogo brand={brand} label={label} />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      <span className="font-medium">{label}</span>
+                      <span aria-hidden className="mx-1 text-muted-foreground/60">
+                        ·
+                      </span>
+                      <span className="text-muted-foreground">{modelName}</span>
+                    </span>
+                    {p.is_default && (
+                      <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">
+                        {t('defaultPresetBadge')}
+                      </Badge>
+                    )}
                     <Check
                       aria-hidden
                       className={cn(
@@ -177,13 +193,6 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
                         active ? 'text-primary' : 'text-transparent',
                       )}
                     />
-                    <ModelBrandLogo brand={brand} label={label} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-                    {p.is_default && (
-                      <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">
-                        {t('defaultPresetBadge')}
-                      </Badge>
-                    )}
                   </TooltipTrigger>
                   <TooltipContent side="left" sideOffset={8} className="max-w-xs p-2.5">
                     <PresetTooltipBody preset={p} description={descOf(p)} t={t} />
