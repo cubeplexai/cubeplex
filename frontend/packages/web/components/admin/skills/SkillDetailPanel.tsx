@@ -7,10 +7,11 @@ import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FileText, Files, GitCompare, History, Network } from 'lucide-react'
-import type { SkillContent, SkillVersionDetail } from '@cubeplex/core'
+import { formatSkillLabel, type SkillContent, type SkillVersionDetail } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { SkillCanonicalNameRow } from '@/components/skills/SkillNameHeading'
 import { useAdminSkill } from '@/hooks/useAdminSkill'
 import { proseClasses } from '@/lib/utils'
 import { jsonHeaders, readApiError } from '@/lib/csrf'
@@ -470,7 +471,9 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
       {/* Header */}
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-xl font-semibold tracking-tight">{skill.name}</h3>
+          <h3 className="text-xl font-semibold tracking-tight">
+            {formatSkillLabel(skill.name).primary}
+          </h3>
           <Badge variant="outline" className="font-mono">
             v{skill.current_version}
           </Badge>
@@ -491,6 +494,11 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
             <OrgInstallActions key={skill.id} skill={skill} onActionDone={handleActionDone} />
           </div>
         </div>
+        <SkillCanonicalNameRow
+          name={skill.name}
+          copyLabel={t('copyCanonical')}
+          copiedLabel={t('copiedCanonical')}
+        />
         {skill.description && (
           <p className="text-sm leading-relaxed text-muted-foreground">{skill.description}</p>
         )}

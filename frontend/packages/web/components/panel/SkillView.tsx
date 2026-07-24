@@ -4,7 +4,7 @@ import useSWR from 'swr'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { SkillContent } from '@cubeplex/core'
+import { formatSkillLabel, type SkillContent } from '@cubeplex/core'
 import { proseClasses } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
@@ -62,6 +62,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
   })
 
   const displayName = fetched?.name ?? parsed?.skill_name ?? skillNameFromArgs
+  const nameLabel = formatSkillLabel(displayName)
   const displayVersion = fetched?.version ?? parsed?.version ?? null
   const displayContent = fetched?.content ?? parsed?.content ?? ''
   const displayError = parsed?.error ?? (fetchError ? fetchError.message : null)
@@ -72,7 +73,12 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
     <div className="space-y-3 p-4">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">{tPanel('labelPrefix')}</span>
-        <span className="font-mono text-sm font-semibold">{displayName}</span>
+        <span
+          className="font-mono text-sm font-semibold"
+          title={nameLabel.isNamespaced ? nameLabel.canonical : undefined}
+        >
+          {nameLabel.primary}
+        </span>
         {displayVersion && (
           <span className="font-mono text-[11px] text-muted-foreground/80">v{displayVersion}</span>
         )}

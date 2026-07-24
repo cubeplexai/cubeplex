@@ -15,7 +15,7 @@ Every skill has the following attributes:
 
 | Property | Description |
 |---|---|
-| **Name** | Display name shown to users. |
+| **Name** | Identity string for the skill. Preinstalled skills use a short bare slug (e.g. `deep-research`). Uploaded skills use a namespaced form `org-slug:skill-slug` for isolation. In the admin UI, list cards and detail headers show the short skill slug; hover the card or open the detail header to see (and copy) the full canonical name. Agents still load skills with the full name via `load_skill`. |
 | **Description** | What the skill does, shown during discovery and install. |
 | **Keywords** | Tags used for search and categorization. |
 | **Version** | Semantic version string. |

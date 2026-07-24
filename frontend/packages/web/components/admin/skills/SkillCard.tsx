@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, ArrowUpCircle, Package, Sparkles } from 'lucide-react'
-import type { SkillSummary } from '@cubeplex/core'
+import { formatSkillLabel, type SkillSummary } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +36,7 @@ function StateBadge({ state }: { state: SkillSummary['install_state'] }) {
 export function SkillCard({ skill, active, onClick }: SkillCardProps) {
   const t = useTranslations('adminSkills')
   const SourceIcon = skill.source === 'preinstalled' ? Sparkles : Package
+  const label = formatSkillLabel(skill.name)
   return (
     <button
       type="button"
@@ -56,7 +57,12 @@ export function SkillCard({ skill, active, onClick }: SkillCardProps) {
             skill.source === 'preinstalled' ? 'text-primary' : 'text-muted-foreground',
           )}
         />
-        <span className="truncate text-sm font-semibold">{skill.name}</span>
+        <span
+          className="truncate text-sm font-semibold"
+          title={label.isNamespaced ? label.canonical : undefined}
+        >
+          {label.primary}
+        </span>
         <StateBadge state={skill.install_state} />
       </div>
       {skill.description && (
