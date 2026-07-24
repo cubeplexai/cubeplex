@@ -314,7 +314,7 @@ opensandbox:
       level = "INFO"
       [runtime]
       type = "kubernetes"
-      execd_image = "docker.io/opensandbox/execd:v1.0.18"
+      execd_image = "docker.io/opensandbox/execd:v1.0.19"
       [kubernetes]
       namespace = "opensandbox"
       informer_enabled = true
