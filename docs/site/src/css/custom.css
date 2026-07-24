@@ -140,8 +140,7 @@ html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: anti
   font-weight: 600;
 }
 
-.navbar__items--right .clean-btn,
-.navbar__toggle {
+.navbar__items--right .clean-btn {
   width: 40px;
   display: inline-flex;
   align-items: center;
@@ -195,6 +194,13 @@ html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: anti
 @media (max-width: 996px) {
   .navbar__inner {
     width: min(100% - 32px, 1400px);
+  }
+
+  .navbar__toggle {
+    width: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
