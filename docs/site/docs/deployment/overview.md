@@ -48,10 +48,18 @@ OpenAI, most cloud vendors, and self-hosted gateways (vLLM, LiteLLM, Ollama,
 
 ```yaml
 llm:
-  # "<provider_name>/<model_id>" — provider_name must appear under providers.
-  default_model: "openai/gpt-5.6-terra"
-  fallback_models:
-    - "anthropic/claude-opus-4.8"
+  # A default preset is REQUIRED. The backend seeds it from model_presets at
+  # startup and resolves every chat message through it — without one the backend
+  # still boots but chat fails at runtime with NoDefaultPresetError (HTTP 500).
+  # Each tier's primary / fallbacks is "<provider_name>/<model_id>"; the
+  # provider_name must appear under providers below.
+  model_presets:
+    tiers:
+      lite:  { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      flash: { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      pro:   { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      max:   { enabled: false, primary: null, fallbacks: [] }
+    default_preset: pro
   providers:
     # Any OpenAI-compatible chat-completions endpoint.
     openai:
@@ -79,9 +87,12 @@ llm:
           max_tokens: 64000
 ```
 
-- `default_model` / `fallback_models` use `"<provider_name>/<model_id>"`; the
-  `provider_name` must appear under `providers`, and fallbacks are tried in
-  order if `default_model` fails.
+- `model_presets.tiers` defines the selectable model tiers (`lite` / `flash` /
+  `pro` / `max`); `default_preset` picks which tier serves requests that don't
+  ask for a specific one. At least one tier must be enabled. Each `primary` /
+  `fallbacks` entry is `"<provider_name>/<model_id>"`; the `provider_name` must
+  appear under `providers`, and fallbacks are tried in order if `primary` fails.
+  Tiers you don't need can stay `enabled: false`.
 - Each provider declares `base_url`, `api_key`, `api`
   (`openai-completions` | `anthropic-messages` | `openai-responses`), and at
   least one entry in `models`. `base_url` follows each SDK's convention —
@@ -93,7 +104,10 @@ Minimal viable configuration (one provider, one model):
 
 ```yaml
 llm:
-  default_model: "openai/gpt-5.6-terra"
+  model_presets:
+    tiers:
+      pro: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+    default_preset: pro
   providers:
     openai:
       base_url: "https://api.openai.com/v1"
@@ -114,7 +128,10 @@ built-in `preset` instead — it fills in the endpoint and model list for you:
 
 ```yaml
 llm:
-  default_model: "deepseek/deepseek-v4-flash"
+  model_presets:
+    tiers:
+      pro: { enabled: true, primary: "deepseek/deepseek-v4-flash", fallbacks: [] }
+    default_preset: pro
   providers:
     deepseek:
       preset: "deepseek/cn/anthropic-messages"

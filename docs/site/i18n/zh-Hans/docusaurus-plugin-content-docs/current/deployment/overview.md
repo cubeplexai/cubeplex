@@ -44,10 +44,17 @@ Azure OpenAI、大多数云厂商，以及自托管网关（vLLM、LiteLLM、Oll
 
 ```yaml
 llm:
-  # "<provider_name>/<model_id>"——provider_name 必须出现在 providers 下。
-  default_model: "openai/gpt-5.6-terra"
-  fallback_models:
-    - "anthropic/claude-opus-4.8"
+  # 必须配置一个默认 preset。后端在启动时从 model_presets 生成它，聊天路径
+  # 也通过它解析模型——没有默认 preset 时后端仍能启动，但每条消息都会在运行
+  # 时报 NoDefaultPresetError（HTTP 500）。每个 tier 的 primary / fallbacks
+  # 都是 "<provider_name>/<model_id>"，provider_name 必须出现在下方 providers 下。
+  model_presets:
+    tiers:
+      lite:  { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      flash: { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      pro:   { enabled: true,  primary: "openai/gpt-5.6-terra", fallbacks: ["anthropic/claude-opus-4.8"] }
+      max:   { enabled: false, primary: null, fallbacks: [] }
+    default_preset: pro
   providers:
     # 任意 OpenAI 兼容的 chat-completions 端点。
     openai:
@@ -75,9 +82,11 @@ llm:
           max_tokens: 64000
 ```
 
-- `default_model` / `fallback_models` 都用 `"<provider_name>/<model_id>"`；
-  `provider_name` 必须出现在 `providers` 下，fallback 会在 `default_model`
-  失败时按顺序尝试。
+- `model_presets.tiers` 定义可选的模型档位（`lite` / `flash` / `pro` /
+  `max`），`default_preset` 指定未显式指定时用哪个档位。至少要启用一个 tier。
+  每个 `primary` / `fallbacks` 都是 `"<provider_name>/<model_id>"`，
+  `provider_name` 必须出现在 `providers` 下，fallback 会在 `primary` 失败时
+  按顺序尝试。用不到的 tier 可以保持 `enabled: false`。
 - 每个 provider 声明 `base_url`、`api_key`、`api`
   （`openai-completions` | `anthropic-messages` | `openai-responses`），以及
   至少一个 `models` 条目。`base_url` 遵循各 SDK 约定——OpenAI 风格带 `/v1`，
@@ -89,7 +98,10 @@ llm:
 
 ```yaml
 llm:
-  default_model: "openai/gpt-5.6-terra"
+  model_presets:
+    tiers:
+      pro: { enabled: true, primary: "openai/gpt-5.6-terra", fallbacks: [] }
+    default_preset: pro
   providers:
     openai:
       base_url: "https://api.openai.com/v1"
@@ -110,7 +122,10 @@ llm:
 
 ```yaml
 llm:
-  default_model: "deepseek/deepseek-v4-flash"
+  model_presets:
+    tiers:
+      pro: { enabled: true, primary: "deepseek/deepseek-v4-flash", fallbacks: [] }
+    default_preset: pro
   providers:
     deepseek:
       preset: "deepseek/cn/anthropic-messages"
