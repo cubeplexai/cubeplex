@@ -105,10 +105,6 @@ html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: anti
   font-weight: 500;
 }
 
-.navbar__link > svg {
-  display: none;
-}
-
 .header-github-link,
 .navbar__items--right .toggle_Da5Y {
   align-items: center;
@@ -173,6 +169,13 @@ html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: anti
 }
 
 @media (max-width: 996px) {
+  /* Docusaurus fixes this panel to the viewport; without an explicit height,
+     the shared header styles leave its content clipped to the navbar height. */
+  .navbar-sidebar {
+    height: 100dvh;
+    z-index: 300;
+  }
+
   .navbar__inner {
     width: min(100% - 32px, 1400px);
   }
