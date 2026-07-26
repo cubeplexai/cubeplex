@@ -5,15 +5,17 @@ personal no longer follows users across workspaces.
 
 **Architecture:** Personal rows mount on `(owner_user_id, workspace_id)`. All
 reads/injection filter by current workspace. Writes stamp the run’s workspace.
-Reflection and consolidation use the same `MemoryService` path (no global
-personal extract). Server dedup is L0 normalize+exact only.
+Reflection (per-run) and consolidation (gated) use the same `MemoryService`
+path with rewritten scope prompts; consolidation extract is no longer
+hard-coded global personal. Server dedup is L0 normalize+exact only.
 
 **Tech stack:** Postgres + Alembic, `MemoryService` / `MemoryRepository`,
-run_manager reflection hook, consolidation Redis gate, site docs under
-`docs/site/docs/guides/memory/`.
+`reflection_runner` + `run_manager` hook, `memory_consolidation` Redis gate,
+site docs under `docs/site/docs/guides/memory/`.
 
 **Spec:** [2026-07-26-memory-workspace-personal-design.md](../specs/2026-07-26-memory-workspace-personal-design.md)  
-**Issue:** [#419](https://github.com/cubeplexai/cubeplex/issues/419)
+**Issue:** [#419](https://github.com/cubeplexai/cubeplex/issues/419)  
+**PR:** [#420](https://github.com/cubeplexai/cubeplex/pull/420) — **all commits for this work go on this PR**
 
 ---
 
@@ -21,32 +23,23 @@ run_manager reflection hook, consolidation Redis gate, site docs under
 
 **Files**
 
-- `backend/cubeplex/models/memory.py` — document/assert personal may carry
-  `workspace_id` (and org when set).
-- `backend/alembic/versions/<rev>_personal_memory_workspace.py` — autogenerate
-  index changes; data backfill in migration or a short follow-up script under
-  `backend/scripts/dev/` if migration would be too heavy.
+- `backend/cubeplex/models/memory.py` — personal carries `workspace_id` (and org when set).
+- `backend/alembic/versions/<rev>_…py` — index + backfill from source conversation.
 
 **Interfaces**
 
-- Invariant after migration for **new** writes: personal always has
-  `workspace_id`.
-- Index supporting list by `(scope, owner_user_id, workspace_id)`.
-- Backfill: `UPDATE memory_items SET workspace_id = c.workspace_id … FROM
-  conversations c WHERE memory_items.source_conversation_id = c.id AND
-  memory_items.scope = 'PERSONAL' AND memory_items.workspace_id IS NULL`
-  (enum label casing as in DB).
+- New writes: personal always has `workspace_id`.
+- Index `(scope, owner_user_id, workspace_id)` (or equivalent).
+- Backfill from `source_conversation_id → conversations.workspace_id`.
 
 **Core logic**
 
-- Orphans remain NULL; injection excludes them (Unit 2).
-- No content rewrite.
+- Orphans (`workspace_id` NULL) remain; excluded from injection (Unit 2).
 
 **Tests**
 
-- Migration smoke / e2e: after create path, personal row has non-null
-  `workspace_id` (Unit 2 covers create). Backfill correctness can be unit-tested
-  against a fixture session if migration embeds SQL.
+- Create path stamps non-null `workspace_id` (Unit 2). Backfill covered if SQL
+  lives in migration/helpers with a focused test.
 
 ---
 
@@ -54,44 +47,20 @@ run_manager reflection hook, consolidation Redis gate, site docs under
 
 **Files**
 
-- `backend/cubeplex/services/memory.py` — personal create requires
-  `self.workspace_id`; stamp fields; reject if missing.
-- `backend/cubeplex/repositories/memory.py` — personal clause adds
-  `workspace_id == self.workspace_id`; items with NULL workspace_id not readable
-  in normal list/get for injection.
-- `backend/cubeplex/middleware/memory.py` — no special case if repo is correct;
-  verify list calls pass workspace context.
-- API routes that construct `MemoryService` / `MemoryRepository` — ensure
-  workspace from path/deps is always passed for workspace-scoped pages.
+- `backend/cubeplex/services/memory.py`
+- `backend/cubeplex/repositories/memory.py`
+- `backend/cubeplex/middleware/memory.py` (verify only if needed)
+- Memory API deps that construct service/repo
 
 **Interfaces**
 
-- `CreateMemoryInput` unchanged shape; behavior change on personal only.
-- `MemoryPermissionError` or clear validation error when personal write lacks
-  workspace context.
-- `find_exact` / L0 later: same scope key including workspace for personal.
-
-**Core logic**
-
-```
-create(personal):
-  if not workspace_id: raise
-  row.owner_user_id = user_id
-  row.workspace_id = workspace_id
-  row.org_id = org_id  # if available
-```
-
-```
-list personal:
-  scope=personal AND owner=user AND workspace_id=current_ws
-```
+- Personal create without workspace → error.
+- List/get personal: `owner == user AND workspace_id == current`.
 
 **Tests**
 
-- **unit:** create personal without workspace fails; with workspace stamps ids.
-- **unit/e2e:** same user, two workspaces — list/inject in WS2 does not see WS1
-  personal (business invariant: isolation). Prefer e2e if it hits real
-  AsyncSession + app deps; unit with repo session is enough for filter math.
+- unit: stamp / reject.
+- unit or e2e: same user, WS1 vs WS2 isolation on list/inject.
 
 ---
 
@@ -99,104 +68,113 @@ list personal:
 
 **Files**
 
-- `backend/cubeplex/services/memory.py` (or small helper module
-  `memory_normalize.py`) — `normalize_memory_content(str) -> str`.
-- `backend/cubeplex/repositories/memory.py` — `find_exact` uses normalized
-  comparison (or hash column if added in Unit 1).
+- normalize helper + `MemoryService.create` / `find_exact`
 
 **Interfaces**
 
-- Normalize: strip + collapse internal whitespace; document case handling.
-- On hit: return existing row after bump `updated_at` (current exact behavior).
-
-**Core logic**
-
-- Compare within same scope identity (personal includes workspace) and type.
-- No similarity threshold.
+- strip + collapse whitespace; documented case handling.
+- Hit → bump existing, no second row.
 
 **Tests**
 
-- **unit:** `"  foo   bar "` and `"foo bar"` collide; `"raining"` vs `"not
-  raining"` do **not** collide.
+- unit: whitespace collision; `"raining"` vs `"not raining"` do not collide.
 
 ---
 
-## Unit 4 — Reflection + consolidation + prompts
+## Unit 4 — Reflection
 
 **Files**
 
-- `backend/cubeplex/prompts/memory.py` — authoring block: personal = this WS
-  about me; workspace for shared; search-first; drop “ALWAYS personal”.
-- `backend/cubeplex/prompts/reflection_system.py` — same scope story; seed
-  wording.
-- `backend/cubeplex/services/reflection_runner.py` — seed label “this
-  workspace”; load personal filtered by workspace (repo already).
-- `backend/cubeplex/streams/run_manager.py` — only if reflection factory must
-  pass workspace (already has `ctx.workspace_id`).
-- `backend/cubeplex/services/memory_consolidation.py` — stop hard-coding
-  extract → PERSONAL without workspace; apply_ops uses service create with
-  correct scope; prompt + existing list include this-WS personal; extract
-  personal still goes through service (stamps workspace). Prefer allowing
-  extract with scope field in JSON **or** default extract to personal **with**
-  service stamp — never NULL workspace_id.
+- `backend/cubeplex/prompts/reflection_system.py`
+- `backend/cubeplex/services/reflection_runner.py` (seed labels, optional create cap)
+- `backend/cubeplex/streams/run_manager.py` (factory already has workspace; wire
+  create budget / model preset if implemented here)
+- `backend/cubeplex/tools/builtin/memory.py` if create cap is tool-side for
+  reflection only
 
 **Interfaces**
 
-- Consolidation op extract: either
-  - `{"action":"extract","scope":"personal"|"workspace", "type", "content"}`
-    validated allow-list, or
-  - keep type-only extract but always `create(scope=PERSONAL)` via service that
-    stamps workspace (minimum bar). Prefer explicit scope in ops if cheap.
-- merge/archive: may target personal **or** workspace items the user can write;
-  keep safety (no cross-user).
+- Seed: “personal (this workspace)” list via repo (post Unit 2); optional short
+  workspace shared list.
+- Prompt: scope rules per spec §5.4–5.5; remove global-personal default.
+- Create budget: ≤ N `memory_save` successes per reflection run (recommend 2).
+- Model: prefer task preset when configured (optional same PR).
 
 **Core logic**
 
-- Reflection existing items: `list(scope=PERSONAL, …)` after Unit 2 is already
-  workspace-scoped.
-- Consolidation `apply_ops` extract must not write personal with NULL
-  workspace_id.
+- Reflection does not bypass `MemoryService`; personal always stamped.
+- Failures still fire-and-forget.
 
 **Tests**
 
-- **unit:** `apply_ops` extract with service mock/fake stamps workspace (or
-  rejects).
-- **unit:** parse_ops accepts new shape if introduced.
-- Prompt changes: no behavioral test required beyond string presence if
-  useful; prefer not snapshot-flaking full prompts.
+- unit: seed builder labels / only includes current-ws items when given fixtures.
+- unit: create budget stops further saves after N (if implemented).
+- unit: prompt string contains this-workspace scope language (light).
 
 ---
 
-## Unit 5 — Site docs (same PR as behavior)
+## Unit 5 — Consolidation
 
 **Files**
 
+- `backend/cubeplex/services/memory_consolidation.py`
+  (`CONSOLIDATION_SYSTEM`, `parse_ops`, `apply_ops`, existing list load)
+
+**Interfaces**
+
+- extract op: `scope` ∈ {`personal`,`workspace`} **or** documented default
+  mapping; never write personal with NULL `workspace_id`.
+- Existing memory prompt input: this-WS personal + workspace items with ids.
+- merge/archive: personal (this user+ws) or writable workspace items.
+- Prompt: prefer merge/archive; few extracts; this-workspace framing.
+
+**Core logic**
+
+```
+extract:
+  resolve scope (explicit or mapped)
+  service.create(scope=..., ...)  # personal stamps workspace_id
+merge/archive:
+  get(id); allow personal|workspace under write rules
+```
+
+**Tests**
+
+- unit: `parse_ops` with scope field.
+- unit: `apply_ops` extract personal uses service with workspace (mock/fake);
+  no hard-coded path that nulls workspace_id.
+- unit: merge/archive rejects foreign / wrong-scope ids as today.
+
+---
+
+## Unit 6 — Main-agent authoring prompt + site docs
+
+**Files**
+
+- `backend/cubeplex/prompts/memory.py` — `MEMORY_AUTHORING_BLOCK`
 - `docs/site/docs/guides/memory/overview.md`
 - `docs/site/docs/guides/memory/using-memory.md`
 - `docs/site/docs/guides/memory/managing-memory.md`
-- zh-Hans mirrors if they duplicate the same claims
+- zh-Hans mirrors if they copy the old global-personal claims
 
 **Core logic**
 
-- Personal: only you, **current workspace**.
-- Remove “project fact without instruction → personal that follows you
-  everywhere”.
-- Default save guidance matches authoring prompt.
+- Align with spec §5.5 and product definition.
+- No “project fact without instruction → global personal”.
 
 **Tests**
 
-- None automated; review in PR.
+- None automated for docs; prompt presence checks optional.
 
 ---
 
-## Unit 6 — Optional Phase 2 (separate PR)
+## Unit 7 — Optional same-PR enhancements
 
-- Pinned token budget ~1500 (`middleware/memory.py`).
+- Pinned ~1500 token budget (`middleware/memory.py`).
 - `touch_used` when items enter pinned/relevance snapshot.
 - Soft active cap per (user, workspace).
-- Reflection model → cheaper task preset.
 
-Not required to close the isolation invariant.
+Ship only if they stay small; otherwise leave for a later commit on **#420**.
 
 ---
 
@@ -205,16 +183,24 @@ Not required to close the isolation invariant.
 | Spec requirement | Unit |
 |------------------|------|
 | personal `(user, workspace)` mount | 1, 2 |
-| no cross-WS injection | 2 tests |
+| no cross-WS injection | 2 |
 | L0 dedup | 3 |
-| reflection/consolidation aligned | 4 |
-| site docs | 5 |
-| no L1 / no process-state scorer | explicit non-work |
-| Phase 2 budgets | 6 optional |
+| reflection redesign | 4 |
+| consolidation redesign | 5 |
+| authoring + site docs | 6 |
+| optional inject budgets | 7 |
 
-## Suggested PR split
+## Delivery (single PR)
 
-1. **This PR:** spec + plan only — closes [#419](https://github.com/cubeplexai/cubeplex/issues/419) as the design deliverable.
-2. **Code PR A:** Units 1–2 (schema + service/repo isolation + tests).
-3. **Code PR B:** Units 3–5 (L0 dedup, prompts/reflection/consolidation, site docs).
-4. **Code PR C (optional):** Unit 6 Phase 2 injection budgets.
+All work is committed to branch
+`feat/2026-07-26-memory-workspace-personal` and PR **#420**.
+
+Suggested commit order (not separate PRs):
+
+1. Spec/plan (done + updates)
+2. Units 1–2 (schema + isolation)
+3. Unit 3 (L0 dedup)
+4. Units 4–5 (reflection + consolidation)
+5. Unit 6 (authoring + site docs)
+6. Unit 7 if cheap
+7. Tests green; PR ready for review
