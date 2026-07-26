@@ -135,42 +135,144 @@ personal rows never enter the prompt**.
 Memory Center / list APIs for personal must use the same filter (current
 workspace from the route).
 
-### 5. Reflection (post-run, almost every success)
+### 5. Background memory jobs (today vs target)
 
-Keep the fire-and-forget agent shape. Change:
+There are **two** post-run writers besides the main agent’s in-turn
+`memory_save`. Both must be redesigned with the new personal mount; fixing only
+the table shape without changing these jobs will keep flooding each workspace’s
+personal slice.
 
-| Item | Today | Target |
-|------|--------|--------|
-| Existing memory seed | personal only, “global” wording | **This workspace’s** personal (and optionally a short workspace list for awareness) |
-| Prompt scope line | “use personal unless user asked to share” | personal = **about me in this workspace**; shared project/team facts → `workspace` when appropriate; default skip |
-| Create stamp | via MemoryService (will gain workspace_id) | same service factory with **current run’s workspace** |
+```
+Main agent run succeeds
+        │
+        ├─► Reflection     — almost every successful run (fire-and-forget)
+        │
+        └─► Consolidation  — only when Redis gate says due (default 5 runs + 6h)
+```
 
-Still soft: search before save/update. Optional later: max N creates per run;
-cheaper model preset — not required for the first correctness PR.
+#### 5.1 Reflection — current implementation
 
-### 6. Consolidation (gated: default 5 runs + 6h)
+| Piece | Behavior today |
+|-------|----------------|
+| Trigger | `run_manager` after a **successful** main run; `asyncio.create_task`; never blocks the user path |
+| Shape | Detached `cubepi.Agent` with **only** `memory_search` / `memory_save` / `memory_update` |
+| Model | **Same model as the main conversation** (`provider.model(model_id)`) |
+| Timeout | `ReflectionRunner` default **30s**; failures logged and swallowed |
+| Idempotency | In-process `run_id` set (same process won’t reflect twice) |
+| Seed input | Last-turn USER + ASSISTANT text; optional **tool_summaries** for the turn; up to **40** active personal items (recent order, content truncated to 200 chars) |
+| System prompt | `REFLECTION_SYSTEM_PROMPT`: most turns save nothing; search before save; **“Scope: use personal unless the user explicitly said to share with the team.”** |
+| Source stamp | `source_type=REFLECTION` via ContextVar |
+| Side effect | If any save/update succeeded → `UserEventType.MEMORY_UPDATED` for the frontend |
 
-Keep Redis gate and JSON ops. Change:
+**Problems today**
 
-| Item | Today | Target |
-|------|--------|--------|
-| Existing list | personal only (limit 200) | this WS personal (+ workspace items for merge context) |
-| extract scope | **hard-coded PERSONAL** | pass through service with correct scope from op **or** map types to default scope; **never** write global personal |
-| Prompt | “durable PERSONAL memory” | distill **this workspace’s** private (personal) and optionally shared (workspace) durable knowledge; prefer merge/archive over extract |
+1. Default personal + old “global personal” mount → project/tool facts land in
+   personal and follow the user everywhere.
+2. Seed list is labeled “personal, active” with no workspace awareness; after
+   remount, seed must be **this workspace only**.
+3. No hard cap on creates per run (model can spam `memory_save`).
+4. Search-before-save is prompt-only (server L0 exact is the hard fallback).
+5. Using the main chat model is expensive and often verbose → more over-save.
 
-Ops still go through `MemoryService` so L0 dedup and personal workspace stamping apply.
+#### 5.2 Reflection — target design
 
-### 7. Agent authoring prompt
+**Keep:** fire-and-forget, timeout/swallow, memory-only tools, MEMORY_UPDATED
+event, per-run scheduling after success.
 
-Replace “proactive saves are ALWAYS personal” with:
+**Change:**
 
-- **personal** — durable facts about how *I* work **in this workspace**
-  (preferences, corrections about me).
-- **workspace** — shared project facts, procedures, decisions for the team.
-- Before save: `memory_search`; then save / update / archive.
-- Do not save secrets or one-off task state (soft guidance only).
+| Piece | Target |
+|-------|--------|
+| Service factory | Always bound to **current run’s** `user_id` / `org_id` / `workspace_id` so every personal write stamps that workspace |
+| Existing-memory seed | List **this workspace’s** personal (limit still ~40, recent). Optionally append a short list of **this workspace’s** shared items (e.g. 10–20) so reflection can `update`/`skip` instead of re-extracting team facts as personal. Label seed blocks clearly: “personal (this workspace)” / “workspace (shared)” |
+| System prompt | Rewrite scope rules (see §5.4). Keep “when in doubt, do not save” and search-before-save |
+| Create policy (soft in prompt, hard via service) | Prefer `preference` / `correction` about the user into **personal**; project/team durable facts the user would share → **workspace** only when appropriate (or skip if unsure). Never invent org scope in reflection |
+| Create budget (recommended this work) | Cap **successful `memory_save` creates** per reflection run (e.g. **≤ 2**). Updates unlimited. Enforce in tool wrapper or runner listener — not only in prose |
+| Model (recommended this work if cheap) | Use a **task preset** (e.g. existing `summarize` or a dedicated `memory` preset) instead of the main conversation model when a preset is configured; fall back to main model if missing. Document in config |
 
-### 8. Migration / legacy rows
+**Does not change in this work:** reflection remains per-turn (not disabled).
+No requirement that the tool trace prove `memory_search` ran before save.
+
+#### 5.3 Consolidation — current implementation
+
+| Piece | Behavior today |
+|-------|----------------|
+| Trigger | Every finished run calls `note_run`; `should_consolidate` requires **≥ min_runs (default 5)** and **≥ min_hours (default 6)** since last consolidate; Redis lock |
+| Shape | Single `provider.generate` (no tools); model from task preset **`summarize`** |
+| Input | Last **40** checkpoint messages + up to **200** active **personal** items |
+| Output | JSON `{"ops":[...]}` — `extract` / `merge` / `archive`; max **20** ops; `max_output_tokens=1500` |
+| extract | **`scope` hard-coded `MemoryScope.PERSONAL`** in `apply_ops` |
+| merge/archive | Only if `repo.get(id)` is personal (ignores workspace targets) |
+| Prompt | “distill a conversation into durable **PERSONAL** memory” |
+
+**Problems today**
+
+1. Extract always personal → same global dump as reflection, often **stacking** on top of per-turn reflection writes.
+2. Prompt biases toward more extracts; merge/archive underused → growth not cleanup.
+3. Existing list is personal-only and was global; after remount must be per-workspace and should include workspace items if we allow workspace extract/merge.
+
+#### 5.4 Consolidation — target design
+
+**Keep:** Redis gate defaults (5 runs / 6h), lock, oneshot/trace optional, JSON
+ops envelope, apply via `MemoryService` (so L0 dedup + workspace stamp apply).
+
+**Change:**
+
+| Piece | Target |
+|-------|--------|
+| Existing memory input | Active **personal for this workspace** + active **workspace** items (caps e.g. 100 personal + 100 workspace, or 200 total with clear labels and ids) |
+| extract | Ops include **`scope`: `personal` \| `workspace`** (validated). Personal extract goes through service with run’s workspace_id. Workspace extract requires workspace context. **Reject / skip** extract with missing or invalid scope. No more hard-code-only PERSONAL |
+| Default when model omits scope | Prefer **skip** (or map: preference/correction → personal; project_fact/procedure/decision → workspace). Do not invent org in consolidation |
+| merge / archive | Allowed for personal (owner + this WS) **or** workspace items the user can write; still reject foreign ids |
+| Prompt | Distill **this workspace**: private facts about the user (personal) and shared durable project knowledge (workspace). **Prefer merge and archive over extract.** Cap extract ops softly in prompt (e.g. at most a few extracts per pass); most ops should be merge/archive when the list is large |
+| Role vs reflection | Consolidation is the **session-level curator** (merge near-duplicates the model can see, archive clearly stale ids, fill rare misses). Reflection is the **per-turn catch** for clear new preferences/corrections. Both must share the same scope story so they do not double-write global personal |
+
+**Gate timing:** leave min_runs / min_hours as config defaults; no need to change
+unless product wants less frequent extract pressure after prompt changes.
+
+#### 5.5 Shared prompt rules (authoring + reflection + consolidation)
+
+One product story, three surfaces:
+
+**Main agent — `MEMORY_AUTHORING_BLOCK`**
+
+- Drop “proactive saves are ALWAYS `scope=personal`”.
+- personal = durable facts about how *I* work **in this workspace**.
+- workspace = shared project facts / procedures / decisions for the team.
+- org only when the user explicitly asks to share with the organization.
+- Before write: `memory_search`; then save / update / archive.
+- Soft: no secrets, no one-off task state.
+
+**Reflection — `REFLECTION_SYSTEM_PROMPT`**
+
+- Same scope definitions as above.
+- Default: **save nothing**.
+- When saving: personal for user prefs/corrections; workspace only when the
+  fact is clearly shared project knowledge worth the team; if unsure → skip.
+- Always search (or use the seed list) before save; update existing id when
+  related.
+- Remove “use personal unless user said share” as the sole rule.
+
+**Consolidation — `CONSOLIDATION_SYSTEM`**
+
+- Output JSON ops only; scopes on extract.
+- Prefer merge/archive; few extracts.
+- Never secrets; never global personal (no null workspace).
+
+#### 5.6 Dual-write risk and how we accept it
+
+Reflection and consolidation can both write after the same conversation window.
+Mitigations (no L1 similarity):
+
+1. Both go through **L0 normalize exact** on create.
+2. Reflection **create budget** (≤ N saves).
+3. Consolidation **prefers merge** against the seeded id list.
+4. Same workspace key so they at least do not cross-pollute other workspaces.
+
+Semantic near-duplicates may still exist until a human archives them or a
+future LLM merge pass improves — accepted for this design.
+
+### 6. Migration / legacy rows
 
 Existing personal rows have `workspace_id IS NULL`.
 
@@ -182,10 +284,10 @@ Existing personal rows have `workspace_id IS NULL`.
    for launch if orphans are rare.
 3. No bulk content cleanup of dirty power-user histories in this work.
 
-### 9. Site docs
+### 7. Site docs
 
-Update `docs/site/docs/guides/memory/*` (and zh if mirrored) in the same
-implementation PR as behavior changes:
+Update `docs/site/docs/guides/memory/*` (and zh if mirrored) in the **same PR**
+as behavior changes:
 
 - Personal = only you, **in this workspace**.
 - Remove “even project fact defaults to personal that follows you everywhere”
@@ -200,9 +302,13 @@ implementation PR as behavior changes:
 - Process-state content score tables.
 - Bulk archive/rewrite of historical dirty content.
 - Changing type enum membership.
-- Pinned token budget / `touch_used` / soft caps (Phase 2 follow-up; may land
-  in a later PR after scope correctness).
 - Requiring tool-trace proof of `memory_search` before every save.
+- Disabling reflection entirely or redesigning the Redis consolidation gate
+  schedule (defaults stay unless config already overrides).
+
+Optional enhancements that may land in the **same PR** if small, else later
+commits on the same branch: pinned ~1500 token budget, `touch_used` on inject,
+soft active cap per (user, workspace).
 
 ## Success criteria
 
@@ -213,17 +319,18 @@ implementation PR as behavior changes:
    create without workspace context fails.
 3. Second `create` with the same scope key, type, and normalized content does
    not insert a second active row.
-4. Reflection seed text and consolidation extract path do not assume global
-   personal; consolidation extract no longer hard-codes only PERSONAL without
-   workspace stamp.
-5. Site memory guide matches the new personal definition when code ships.
+4. **Reflection:** seed lists this-workspace memory only; personal creates from
+   reflection stamp the run’s workspace; prompt no longer says default global
+   personal.
+5. **Consolidation:** `apply_ops` extract no longer hard-codes global personal;
+   extract either carries validated scope or stamps personal via service with
+   workspace_id; existing-memory input is workspace-scoped; prompt prefers
+   merge/archive.
+6. Site memory guide matches the new personal definition when code ships.
 
-## Phasing (implementation PRs after this design PR)
+## Delivery
 
-| Phase | Deliverable |
-|-------|-------------|
-| **0** | Invariant + migration/backfill + service/repo/inject + tests + site docs |
-| **1** | L0 normalize dedup + authoring/reflection/consolidation prompts + consolidation scope fix |
-| **2** (optional) | Pinned ~1500 token budget, `touch_used`, soft active caps, cheaper reflection model |
-
-This design PR ships the spec (+ plan). Code follows in separate PR(s).
+All design and implementation work for this effort lands on **one branch / one
+PR** ([#420](https://github.com/cubeplexai/cubeplex/pull/420)): iterative
+commits (spec → schema → service → reflection/consolidation → docs/tests), not
+a stack of follow-up PRs.
