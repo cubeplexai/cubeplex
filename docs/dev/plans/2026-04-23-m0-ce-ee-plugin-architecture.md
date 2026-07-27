@@ -1,5 +1,12 @@
 # M0 · CE/EE 插件架构 Implementation Plan
 
+> **⚠️ 本计划的发现机制部分已被取代（2026-07-27）。** 此处实现的 `entry_points` 发现、
+> `plugin_manifest` 版本校验与多候选仲裁均已删除；6 个 Protocol、CE 默认实现、
+> `AdminPanelExtension` 注入保留。取代它的是
+> [`2026-07-27-plugin-seam-simplification.md`](2026-07-27-plugin-seam-simplification.md)，
+> 设计口径见 [`../specs/2026-07-07-oss-ee-split-design.md`](../specs/2026-07-07-oss-ee-split-design.md) §9。
+> 下文按原样保留，作为当时的记录。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Freeze 5 `Protocol` extension interfaces (AuthProvider / PermissionChecker / AuditSink / UserDirectorySyncer / AdminPanelExtension), wire `pip entry_points` discovery + CE default fallback, integrate AuthProvider + PermissionChecker into existing CE flows, hook 3 audit call sites, and stand up the AdminPanelExtension startup scan — all without breaking any existing auth / RBAC test.

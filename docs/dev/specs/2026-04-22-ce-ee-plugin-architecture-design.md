@@ -1,5 +1,14 @@
 # M0 · CE/EE 插件架构设计
 
+> **⚠️ 本文的发现机制已被取代（2026-07-27）。** `entry_points` 发现、`PluginManifest`
+> 与 API 版本校验、多候选仲裁（`resolve_singular` / `resolve_plural`）、`plugins.*`
+> 配置块、占位的 `test-ee-compat` CI 作业均已删除 —— 它们仲裁的是"数量未知、作者未知的
+> 第三方插件"，而 EE 收敛为**同仓 `ee/` 的单个第一方 `cubeplex-ee` 包**后这个群体为空。
+> **仍然有效**：6 个 Protocol 接口、CE 默认实现、`AdminPanelExtension` 的路由/nav/静态
+> 注入。EE 现在由启动时一次可选 `import cubeplex_ee` 装载。当前口径见
+> [`2026-07-07-oss-ee-split-design.md`](2026-07-07-oss-ee-split-design.md) §9。
+> 下文按原样保留，作为当时的记录。
+
 **Status**: Draft · 2026-04-22
 **Owner**: @xfgong
 **Scope**: 冻结 5 个 Protocol 扩展接口、基于 `entry_points` 的发现机制、CE 默认实现、以及 `cubeplex-ee` 插件仓骨架蓝图。Batch 1 内把 AuthProvider 与 PermissionChecker 真接入 CE，AuditSink 以 no-op 默认接入 3 个调用点，其余 2 个 Protocol 仅冻结接口。

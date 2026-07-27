@@ -79,17 +79,17 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # Double Ctrl-C in dev: uvicorn already handles this natively
     # (the second SIGINT flips force_exit and tears the server down).
 
-    # Discover + bind plugin registry; mount AuthProvider routers.
+    # Bind plugin registry; mount AuthProvider routers.
     from typing import cast
 
-    from cubeplex.config import config as _cubeplex_config
     from cubeplex.plugins import get_registry
     from cubeplex.plugins.protocols import AdminPanelExtension
     from cubeplex.plugins.protocols import AuthProvider as _AuthProvider
 
     _reg = get_registry()
-    await _reg.discover()
-    _reg.bind_defaults(config=_cubeplex_config)
+    # EE (the optional cubeplex_ee distribution) registers here; bind_defaults
+    # then fills every slot EE left empty with the CE default.
+    _reg.bind_defaults()
     _auth_provider = _reg.get_auth_provider()
     assert isinstance(_auth_provider, _AuthProvider)
     _auth_routers = _auth_provider.get_auth_routers()

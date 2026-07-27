@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from cubeplex.plugins.protocols import (
-    CUBEPLEX_PLUGIN_API_VERSION,
     AdminNavItem,
     AdminPanelExtension,
     AuditEvent,
@@ -10,29 +9,10 @@ from cubeplex.plugins.protocols import (
     AuthProvider,
     PermissionChecker,
     PermissionResource,
-    PluginManifest,
     SyncResult,
     SyncSchedule,
     UserDirectorySyncer,
 )
-
-
-def test_plugin_manifest_constructs_with_required_fields() -> None:
-    m = PluginManifest(api_version=1, name="test-plugin", version="0.1.0")
-    assert m.api_version == 1
-    assert m.name == "test-plugin"
-    assert m.version == "0.1.0"
-    assert m.description == ""
-
-
-def test_plugin_manifest_accepts_description() -> None:
-    m = PluginManifest(api_version=1, name="x", version="0.1.0", description="Hello")
-    assert m.description == "Hello"
-
-
-def test_api_version_constant_is_int_one() -> None:
-    assert CUBEPLEX_PLUGIN_API_VERSION == 1
-    assert isinstance(CUBEPLEX_PLUGIN_API_VERSION, int)
 
 
 def test_permission_resource_minimal() -> None:

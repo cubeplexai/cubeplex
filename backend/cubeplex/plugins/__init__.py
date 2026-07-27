@@ -1,7 +1,6 @@
-"""CE/EE plugin protocols + entry_points-based discovery."""
+"""CE/EE plugin Protocols + registry binding."""
 
 from cubeplex.plugins.protocols import (
-    CUBEPLEX_PLUGIN_API_VERSION,
     AdminNavItem,
     AdminPanelExtension,
     AuditEvent,
@@ -9,7 +8,6 @@ from cubeplex.plugins.protocols import (
     AuthProvider,
     PermissionChecker,
     PermissionResource,
-    PluginManifest,
     SyncResult,
     SyncSchedule,
     UserDirectorySyncer,
@@ -21,7 +19,6 @@ from cubeplex.plugins.registry import (
 )
 
 __all__ = [
-    "CUBEPLEX_PLUGIN_API_VERSION",
     "AdminNavItem",
     "AdminPanelExtension",
     "AuditEvent",
@@ -29,7 +26,6 @@ __all__ = [
     "AuthProvider",
     "PermissionChecker",
     "PermissionResource",
-    "PluginManifest",
     "PluginRegistry",
     "SyncResult",
     "SyncSchedule",
@@ -41,7 +37,7 @@ __all__ = [
 
 
 def ensure_registry_bound() -> None:
-    """Idempotent: call from app startup or test fixtures to seed defaults."""
+    """Idempotent: call from app startup or test fixtures to seed CE defaults."""
     reg = get_registry()
-    if reg._auth_provider is None:  # not yet bound
+    if not reg.is_bound():
         reg.bind_defaults()

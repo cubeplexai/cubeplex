@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint lint-fix type-check test test-real-llm test-cov test-e2e test-e2e-ci test-contracts migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
+.PHONY: help install dev-install format lint lint-fix type-check test test-real-llm test-cov test-e2e test-e2e-ci migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -12,7 +12,6 @@ help:
 	@echo "  make test-cov          - Run backend tests with coverage report"
 	@echo "  make test-e2e          - Run backend E2E tests"
 	@echo "  make test-e2e-ci       - Run backend E2E tests, writing coverage-e2e.xml for Codecov"
-	@echo "  make test-contracts    - Run plugin contract tests (EE compat)"
 	@echo "  make migrate           - Run Alembic migrations"
 	@echo "  make start             - Start backend server"
 	@echo "  make cleanup-sandboxes - Cleanup leftover test sandboxes"
@@ -75,9 +74,6 @@ test-e2e-ci:
 	@echo "Running backend E2E tests (real_llm tests deselected)..."
 	uv run pytest tests/e2e/ -v -m "not real_llm" --cov-report=xml:coverage-e2e.xml
 	@echo "✓ Backend E2E tests passed"
-
-test-contracts:
-	uv run pytest tests/plugins/test_contracts.py -v --no-cov
 
 migrate:
 	uv run alembic upgrade head

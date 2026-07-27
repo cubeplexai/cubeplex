@@ -476,42 +476,13 @@ jobs:
             frontend/test-results/
             frontend/playwright-report/
 
-  test-ee-compat:
-    name: EE Compat (Layer 1 contract tests)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [gate, changes, backend-check]
-    if: needs.changes.outputs.backend == 'true'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.gate.outputs.sha }}
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-          enable-cache: true
-      - name: Install backend
-        run: make backend-install
-      - name: Run plugin contract tests
-        env:
-          # Contract tests don't touch LLM/sandbox/DB but tests/conftest.py
-          # loads the full config which requires these env vars (see backend-check).
-          CUBEPLEX_E2E_LLM_BASE_URL: http://dummy
-          CUBEPLEX_E2E_LLM_API_KEY: dummy
-          CUBEPLEX_E2E_LLM_MODEL_ID: dummy
-          CUBEPLEX_SANDBOX__DOMAIN: dummy:9000
-          CUBEPLEX_SANDBOX__IMAGE: dummy:image
-          CUBEPLEX_SANDBOX__API_KEY: dummy
-        run: make backend-test-contracts
-
   report:
     name: Finalize CI check run
     if: |
       always() &&
       needs.gate.result == 'success' &&
       github.event_name == 'issue_comment'
-    needs: [gate, changes, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
+    needs: [gate, changes, backend-check, frontend-check, backend-e2e, frontend-e2e]
     runs-on: ubuntu-latest
     permissions:
       checks: write
@@ -523,18 +494,17 @@ jobs:
           FRONTEND_CHECK: ${{ needs.frontend-check.result }}
           BACKEND_E2E: ${{ needs.backend-e2e.result }}
           FRONTEND_E2E: ${{ needs.frontend-e2e.result }}
-          EE_COMPAT: ${{ needs.test-ee-compat.result }}
           CHECK_ID: ${{ needs.gate.outputs.check_run_id }}
         run: |
           conclusion=success
-          for r in "$BACKEND_CHECK" "$FRONTEND_CHECK" "$BACKEND_E2E" "$FRONTEND_E2E" "$EE_COMPAT"; do
+          for r in "$BACKEND_CHECK" "$FRONTEND_CHECK" "$BACKEND_E2E" "$FRONTEND_E2E"; do
             case "$r" in
               failure|cancelled|timed_out)
                 conclusion=failure
                 ;;
             esac
           done
-          summary="backend-check=$BACKEND_CHECK, frontend-check=$FRONTEND_CHECK, backend-e2e=$BACKEND_E2E, frontend-e2e=$FRONTEND_E2E, ee-compat=$EE_COMPAT"
+          summary="backend-check=$BACKEND_CHECK, frontend-check=$FRONTEND_CHECK, backend-e2e=$BACKEND_E2E, frontend-e2e=$FRONTEND_E2E"
           echo "Conclusion: $conclusion ($summary)"
           gh api -X PATCH repos/${{ github.repository }}/check-runs/$CHECK_ID \
             -f status=completed \
