@@ -42,7 +42,15 @@ class _RecordingSandbox(Sandbox):
     def workdir(self) -> str:
         return "/workspace"
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+    ) -> ExecuteResult:
+        del timeout, envs, as_root
         self.commands.append(command)
         return ExecuteResult(output="", exit_code=self._exit_code)
 

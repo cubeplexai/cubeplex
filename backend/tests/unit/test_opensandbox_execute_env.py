@@ -4,11 +4,13 @@ Tests:
 - set_run_env stores the env; execute forwards it via opts.envs.
 - Per-call envs (execute(..., envs=...)) merge on top of run-level env (per-call wins).
 - Empty run env + no per-call envs → opts.envs is None (not an empty dict).
+- Default agent commands run as cubeplex uid/gid 1000; as_root clears them.
+- upload stamps owner/group to the sandbox user.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from opensandbox.models.execd import RunCommandOpts
@@ -16,7 +18,12 @@ from opensandbox.models.execd import RunCommandOpts
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
 
-def _make_backend() -> tuple[OpenSandbox, MagicMock]:
+def _make_backend(
+    *,
+    run_uid: int | None = 1000,
+    run_gid: int | None = 1000,
+    run_user: str | None = "cubeplex",
+) -> tuple[OpenSandbox, MagicMock]:
     """Return an OpenSandbox with a fake _sandbox that records commands.run calls."""
     raw = MagicMock()
     # commands.run is async; capture the opts it receives
@@ -33,9 +40,16 @@ def _make_backend() -> tuple[OpenSandbox, MagicMock]:
         return result
 
     raw.commands.run = fake_run
+    raw.files.write_file = AsyncMock()
     raw.id = "sbx-test"
 
-    backend = OpenSandbox(sandbox=raw, workdir="/workspace")
+    backend = OpenSandbox(
+        sandbox=raw,
+        workdir="/workspace",
+        run_uid=run_uid,
+        run_gid=run_gid,
+        run_user=run_user,
+    )
     # attach run_calls so the test can inspect them
     backend._test_run_calls = run_calls  # type: ignore[attr-defined]
     return backend, raw
@@ -108,3 +122,76 @@ async def test_working_directory_always_set() -> None:
     _, opts = calls[0]
     assert opts is not None
     assert opts.working_directory == "/workspace"
+
+
+@pytest.mark.asyncio
+async def test_default_execute_runs_as_cubeplex_uid() -> None:
+    """Agent commands default to uid/gid 1000 (cubeplex)."""
+    backend, _ = _make_backend()
+
+    await backend.execute("whoami")
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    _, opts = calls[0]
+    assert opts is not None
+    assert opts.uid == 1000
+    assert opts.gid == 1000
+
+
+@pytest.mark.asyncio
+async def test_as_root_clears_uid_gid() -> None:
+    """as_root=True leaves uid/gid unset so the control plane stays root."""
+    backend, _ = _make_backend()
+
+    await backend.execute("whoami", as_root=True)
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    _, opts = calls[0]
+    assert opts is not None
+    assert opts.uid is None
+    assert opts.gid is None
+
+
+@pytest.mark.asyncio
+async def test_start_browser_runs_as_root() -> None:
+    """Browser stack needs root for supervisord privilege drop / chown."""
+    backend, _ = _make_backend()
+
+    await backend.start_browser()
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, opts = calls[0]
+    assert cmd == "/usr/local/bin/start-browser.sh"
+    assert opts is not None
+    assert opts.uid is None
+    assert opts.gid is None
+
+
+@pytest.mark.asyncio
+async def test_upload_sets_owner_to_run_user() -> None:
+    """Uploaded files are owned by the sandbox user so agent can edit them."""
+    backend, raw = _make_backend()
+
+    await backend.upload([("/workspace/hello.txt", b"hi")])
+
+    raw.files.write_file.assert_awaited_once_with(
+        "/workspace/hello.txt",
+        b"hi",
+        owner="cubeplex",
+        group="cubeplex",
+    )
+
+
+@pytest.mark.asyncio
+async def test_null_run_uid_skips_privilege_drop() -> None:
+    """run_uid=None keeps prior root-by-default behaviour."""
+    backend, _ = _make_backend(run_uid=None, run_gid=None, run_user=None)
+
+    await backend.execute("whoami")
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    _, opts = calls[0]
+    assert opts is not None
+    assert opts.uid is None
+    assert opts.gid is None

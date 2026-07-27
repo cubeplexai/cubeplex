@@ -206,6 +206,9 @@ sandbox:
   secure_access: true     # false for docker-runtime OpenSandbox
   ttl: 1800               # idle seconds before cleanup
   ready_timeout: 300      # wait for a sandbox to become ready (covers a cold pull)
+  run_user: "cubeplex"    # agent shell identity inside the container
+  run_uid: 1000           # OpenSandbox RunCommandOpts.uid (null = root)
+  run_gid: 1000
   resource:
     cpu: "2"
     memory: "4Gi"
@@ -217,6 +220,7 @@ sandbox:
 | `sandbox.use_server_proxy` | `true` | Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
 | `sandbox.secure_access` | `true` | Kubernetes ingress-gateway signed URLs. **Must be `false`** on docker-runtime OpenSandbox. |
 | `sandbox.ttl` | `1800` | Idle sandbox is reaped after 30 min. |
+| `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | Agent commands and uploaded files run as this user. Match the sandbox image. Set `run_uid` to `null` to keep the previous root default. Browser stack still starts as root. |
 | `sandbox.resource.cpu` / `memory` | `2` / `4Gi` | Per-sandbox limits. |
 
 ## Streaming

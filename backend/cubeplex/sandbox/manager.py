@@ -170,6 +170,15 @@ class SandboxManager:
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
 
+        # Agent shell identity (OpenSandbox RunCommandOpts.uid/gid). None keeps
+        # the container default (root). Defaults match the cubeplex sandbox image.
+        raw_uid = config.get("sandbox.run_uid", 1000)
+        raw_gid = config.get("sandbox.run_gid", 1000)
+        raw_user = config.get("sandbox.run_user", "cubeplex")
+        self._run_uid: int | None = int(raw_uid) if raw_uid is not None else None
+        self._run_gid: int | None = int(raw_gid) if raw_gid is not None else None
+        self._run_user: str | None = str(raw_user) if raw_user else None
+
         # Resource config
         self._resource_cpu: str = config.get("sandbox.resource.cpu", "100m")
         self._resource_memory: str = config.get("sandbox.resource.memory", "100Mi")
@@ -243,6 +252,16 @@ class SandboxManager:
             api_key=self._api_key,
             request_timeout=timedelta(seconds=request_timeout or self._request_timeout),
             use_server_proxy=self._use_server_proxy,
+        )
+
+    def _wrap_backend(self, raw: opensandbox.Sandbox) -> OpenSandbox:
+        """Attach cubeplex driver defaults (workdir + agent run identity)."""
+        return OpenSandbox(
+            sandbox=raw,
+            workdir=self._workdir,
+            run_uid=self._run_uid,
+            run_gid=self._run_gid,
+            run_user=self._run_user,
         )
 
     async def _renew_provider_ttl(self, sandbox_id: str) -> None:
@@ -730,7 +749,10 @@ class SandboxManager:
             )
             raise SandboxError(f"sandbox {sandbox_id} created but reconnect failed: {exc}") from exc
 
-        backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+        backend = self._wrap_backend(raw_sandbox)
+        # PVC mounts often arrive root-owned; agent runs as cubeplex and needs
+        # write access under workdir. Best-effort, non-fatal.
+        await backend.ensure_workspace_owner()
         # Execute-time egress: set run env on the backend + persist EgressRefs.
         # Env flows via execute (RunCommandOpts), not Sandbox.create.
         if self._exchange_host:
@@ -802,7 +824,7 @@ class SandboxManager:
         if healthy and raw_sandbox is not None:
             await repo.update_activity(record.id)
             logger.info("Reusing healthy sandbox {}", sandbox_id)
-            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+            backend = self._wrap_backend(raw_sandbox)
             if self._exchange_host:
                 await self._apply_egress(
                     session,
@@ -1128,6 +1150,9 @@ class SandboxManager:
                 conn_config=conn_config,
                 resume_timeout=self._resume_timeout,
                 workdir=self._workdir,
+                run_uid=self._run_uid,
+                run_gid=self._run_gid,
+                run_user=self._run_user,
             )
         except Exception as exc:
             # Client-side exceptions (resume_timeout, network blip, transient
@@ -1322,7 +1347,7 @@ class SandboxManager:
         assert row.sandbox_id, "running row must have sandbox_id"  # caller invariant
         sandbox_id = row.sandbox_id
         raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
-        backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
+        backend = self._wrap_backend(raw)
         if self._exchange_host:
             async with self._session_factory() as session:
                 try:
@@ -1374,7 +1399,7 @@ class SandboxManager:
                         connection_config=conn_config,
                         skip_health_check=True,
                     )
-                    backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
+                    backend = self._wrap_backend(raw)
                     if not backend.supports_pause():
                         # Driver can't pause natively — go straight to kill
                         # without flipping the row back to `running` first

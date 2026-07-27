@@ -74,6 +74,7 @@ class Sandbox(ABC):
         *,
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
+        as_root: bool = False,
     ) -> ExecuteResult:
         """Execute a shell command. Returns combined stdout+stderr and exit code.
 
@@ -83,6 +84,10 @@ class Sandbox(ABC):
             envs: Per-call env overrides injected into the command process.
                   Merged with any run-level env set via ``set_run_env``; per-call
                   values win on conflict.
+            as_root: When True, run as the container control-plane user (root)
+                  instead of the sandbox agent user. Used for infra helpers
+                  (browser stack, workspace chown). Ignored by drivers that
+                  have no privilege separation.
         """
         ...
 
@@ -143,9 +148,10 @@ class Sandbox(ABC):
         """Start the on-demand Neko browser stack inside the sandbox (idempotent).
 
         Baked into the sandbox image at ``/usr/local/bin/start-browser.sh``; safe
-        to call repeatedly (no-op if already running).
+        to call repeatedly (no-op if already running). Runs as root so
+        supervisord can chown runtime dirs and drop to the sandbox user.
         """
-        result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120)
+        result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
         if result.exit_code not in (0, None):
             raise RuntimeError(f"failed to start sandbox browser: {result.output}")
 
@@ -157,6 +163,7 @@ class Sandbox(ABC):
             " --exec /usr/bin/ttyd -- -p 7681 -W -w /workspace bash"
             " && sleep 1",
             timeout=30,
+            as_root=True,
         )
         if result.exit_code not in (0, None):
             raise SandboxError(f"failed to start sandbox terminal: {result.output}")

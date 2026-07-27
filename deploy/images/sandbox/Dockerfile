@@ -230,19 +230,22 @@ RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.ya
 # the now-hidden overlay unnecessary. Keep clipboard + fullscreen.
 RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.video-menu li:has(.fa-mouse-pointer),.video-menu li:has(.fa-computer-mouse),.video-menu li:has(.fa-mouse){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
 
-# neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
-# build stays deterministic across base-image variants (never hard-fail).
+# Default sandbox user `cubeplex` at uid/gid 1000 (matches backend agent
+# run_uid/run_gid). Also used by the Neko browser stack (ENV USER below).
+# Remove a pre-existing uid-1000 user conditionally so the build stays
+# deterministic across base-image variants (never hard-fail).
 RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true) \
     && (getent group 1000 && groupdel "$(getent group 1000 | cut -d: -f1)" 2>/dev/null || true) \
-    && groupadd -g 1000 neko \
-    && useradd -u 1000 -g 1000 -m -d /home/neko -s /bin/bash neko \
-    && usermod -aG audio,video neko \
-    && mkdir -p /var/log/neko /tmp/runtime-neko /home/neko/.config/chromium \
-    && chown -R neko:neko /var/log/neko /tmp/runtime-neko /home/neko \
-    && chmod 700 /tmp/runtime-neko
+    && groupadd -g 1000 cubeplex \
+    && useradd -u 1000 -g 1000 -m -d /home/cubeplex -s /bin/bash cubeplex \
+    && usermod -aG audio,video cubeplex \
+    && mkdir -p /var/log/neko /tmp/runtime-neko /home/cubeplex/.config/chromium \
+    && chown -R cubeplex:cubeplex /var/log/neko /tmp/runtime-neko /home/cubeplex \
+    && chmod 700 /tmp/runtime-neko \
+    && chown cubeplex:cubeplex /workspace
 
 # Run Xorg fully rootless (drop the setuid Xorg.wrap) so the neko input socket is
-# owned by the neko user, and load the dummy config from the default path
+# owned by the cubeplex user, and load the dummy config from the default path
 # (Xorg.wrap rejects an absolute -config path).
 RUN rm -f /usr/lib/xorg/Xorg.wrap \
     && cp /etc/neko/xorg.conf /etc/X11/xorg.conf \
@@ -274,7 +277,10 @@ ARG NEKO_TURN_CRED=neko
 # Frontend BrowserView fits the iframe host to the same aspect.
 # First click after cubeplex "Take over" grants control (no in-Neko mouse step).
 # Env wins over /etc/neko/neko.yaml if the image is rebuilt from a newer base.
-ENV USER=neko \
+# USER=cubeplex is for Neko/supervisord child processes (chromium conf uses
+# %(ENV_USER)s). Container control plane stays root; agent commands run as
+# cubeplex via OpenSandbox RunCommandOpts.uid/gid from the backend.
+ENV USER=cubeplex \
     DISPLAY=:99.0 \
     XDG_RUNTIME_DIR=/tmp/runtime-neko \
     NEKO_SERVER_BIND=:8080 \

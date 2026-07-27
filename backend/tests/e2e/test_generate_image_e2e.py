@@ -82,7 +82,15 @@ class _TempLocalSandbox(Sandbox):
     def workdir(self) -> str:
         return "/work"
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+    ) -> ExecuteResult:
+        del envs, as_root
         # Remap path arguments in shell commands (base64, test -e, etc.)
         remapped = command
         for keyword in ("/work/",):
