@@ -12,3 +12,12 @@ async def test_system_info_public_no_auth(unauthenticated_memory_client):
     assert data["deployment_mode"] in ("single_tenant", "multi_tenant")
     assert isinstance(data["version"], str) and data["version"]
     assert isinstance(data["sandbox_enabled"], bool)
+
+
+async def test_system_info_reports_edition(unauthenticated_memory_client):
+    """No license configured in the test env → OSS edition, empty features."""
+    resp = await unauthenticated_memory_client.get("/api/v1/system/info")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["edition"] == "oss"
+    assert data["features"] == []
