@@ -36,6 +36,7 @@ import {
   streamMessages,
   streamRun,
 } from '../api'
+import { shouldAutoOpenArtifactPreview } from '../lib/autoOpenPreview'
 import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
@@ -247,6 +248,24 @@ let activeStreamController: AbortController | null = null
  */
 function ownsStreamingConversation(state: MessageStore, conversationId: string): boolean {
   return state.streamingConversationId === conversationId
+}
+
+/**
+ * Persist an SSE artifact into the artifact store, and optionally open its
+ * preview panel when the preference is on and this conversation is focused.
+ * History/bootstrap never emit these events — only live / reattach streams.
+ */
+async function applyArtifactSseEvent(
+  conversationId: string,
+  artifact: ArtifactEventData['artifact'],
+): Promise<void> {
+  if (!artifact) return
+  const { useArtifactStore } = await import('./artifactStore')
+  useArtifactStore.getState().addOrUpdate(conversationId, artifact)
+  if (shouldAutoOpenArtifactPreview(conversationId, useConversationStore.getState().activeId)) {
+    const { usePanelStore } = await import('./panelStore')
+    usePanelStore.getState().openArtifact(conversationId, artifact.id)
+  }
 }
 
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
@@ -1146,10 +1165,7 @@ async function consumeRunStream(
 
       if (event.type === 'artifact') {
         const artifactData = event.data as unknown as ArtifactEventData
-        if (artifactData.artifact) {
-          const { useArtifactStore } = await import('./artifactStore')
-          useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
-        }
+        await applyArtifactSseEvent(conversationId, artifactData.artifact)
       } else if (event.type === 'citation') {
         const citationData = event.data as unknown as import('../types').CitationData
         useCitationStore.getState().addCitation(conversationId, citationData)
@@ -1795,10 +1811,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
           if (event.type === 'artifact') {
             const artifactData = event.data as unknown as ArtifactEventData
-            if (artifactData.artifact) {
-              const { useArtifactStore } = await import('./artifactStore')
-              useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
-            }
+            await applyArtifactSseEvent(conversationId, artifactData.artifact)
           } else if (event.type === 'citation') {
             const citationData = event.data as unknown as import('../types').CitationData
             useCitationStore.getState().addCitation(conversationId, citationData)

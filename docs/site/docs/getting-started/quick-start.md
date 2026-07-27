@@ -57,7 +57,7 @@ Ask the agent to create something concrete — for example:
 
 > Write a Python script that converts CSV to JSON.
 
-If the agent generates a deliverable, it appears as an **artifact** you can preview, copy, or download.
+If the agent generates a deliverable, it appears as an **artifact**. When you are viewing that conversation, the preview panel opens automatically after the artifact is saved so you can inspect it immediately. You can also open any artifact from its card in the chat.
 
 ## 4. Explore further
 
