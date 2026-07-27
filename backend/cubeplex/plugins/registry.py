@@ -56,12 +56,23 @@ class PluginRegistry:
 
         if self._bound:
             return
-        if self._auth_provider is None:
-            self._auth_provider = DefaultAuthProvider()
-        if self._permission_checker is None:
-            self._permission_checker = DefaultPermissionChecker()
-        self._audit_sinks.append(DefaultAuditSink())
-        self._admin_panel_extensions.append(DefaultAdminPanelExtension())
+        # Construct every default before mutating anything: a constructor that
+        # raises halfway must not leave appended sinks behind for a retry to
+        # duplicate. Today's CE defaults have no __init__ and cannot raise, but
+        # the EE registration that will run just before this can.
+        auth = self._auth_provider if self._auth_provider is not None else DefaultAuthProvider()
+        permissions = (
+            self._permission_checker
+            if self._permission_checker is not None
+            else DefaultPermissionChecker()
+        )
+        audit_sink = DefaultAuditSink()
+        admin_panel = DefaultAdminPanelExtension()
+
+        self._auth_provider = auth
+        self._permission_checker = permissions
+        self._audit_sinks.append(audit_sink)
+        self._admin_panel_extensions.append(admin_panel)
         self._bound = True
         logger.info(
             "plugin registry bound: auth=%s permissions=%s audit_sinks=%d "
