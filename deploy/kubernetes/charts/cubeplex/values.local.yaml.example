@@ -102,5 +102,5 @@ rustfs:
 #     image:
 #       tag: "v0.2.0"                        # same release version as backend/frontend
 #     # MUST match opensandbox-server's configured egress.image exactly:
-#     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
-#     egressImage: "opensandbox/egress:v1.0.12"
+#     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.1.4
+#     egressImage: "opensandbox/egress:v1.1.4"
