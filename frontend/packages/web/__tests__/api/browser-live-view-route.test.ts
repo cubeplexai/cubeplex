@@ -114,4 +114,30 @@ describe('browser live-view route proxy', () => {
       detail: expect.stringContaining('proxy failed'),
     })
   })
+
+  it('returns 504 JSON when the response body stalls after headers', async () => {
+    const stalled = {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      },
+    }
+    const backendFetch = vi.fn(async () => stalled as unknown as Response)
+    vi.stubGlobal('fetch', backendFetch)
+
+    const request = {
+      url: 'http://localhost/api/v1/ws/ws-42/browser/live-view',
+      headers: new Headers(),
+    } as any
+
+    const response = await GET(request, {
+      params: Promise.resolve({ wsId: 'ws-42' }),
+    })
+
+    expect(response.status).toBe(504)
+    await expect(response.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('timed out'),
+    })
+  })
 })

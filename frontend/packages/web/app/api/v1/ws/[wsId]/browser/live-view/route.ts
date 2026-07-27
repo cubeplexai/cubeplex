@@ -63,13 +63,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const qs = new URL(request.url).search
   const url = `${BACKEND_URL}/api/v1/ws/${wsId}/browser/live-view${qs}`
 
-  let backendRes: Response
   try {
-    backendRes = await fetch(url, {
+    // Guard both the upstream wait *and* body consumption: headers can arrive
+    // while the body stalls; AbortSignal.timeout aborts the body stream too.
+    const backendRes = await fetch(url, {
       headers: buildProxyHeaders(request),
       // Never cache a signed live-view URL.
       cache: 'no-store',
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    })
+    const contentType = backendRes.headers.get('content-type') ?? 'application/json'
+    const body = await backendRes.text()
+    const headers = new Headers({ 'Content-Type': contentType })
+    appendSetCookie(headers, backendRes.headers)
+    return new NextResponse(body, {
+      status: backendRes.status,
+      headers,
     })
   } catch (err) {
     if (isTimeoutError(err)) {
@@ -85,13 +94,4 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       { status: 502 },
     )
   }
-
-  const contentType = backendRes.headers.get('content-type') ?? 'application/json'
-  const body = await backendRes.text()
-  const headers = new Headers({ 'Content-Type': contentType })
-  appendSetCookie(headers, backendRes.headers)
-  return new NextResponse(body, {
-    status: backendRes.status,
-    headers,
-  })
 }
