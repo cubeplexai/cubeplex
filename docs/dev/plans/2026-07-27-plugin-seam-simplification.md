@@ -697,24 +697,32 @@ always present; instance attributes moved off the class). Then run
   `bind_defaults()` twice expecting a fresh rebind would now get the first binding. Task 4
   Step 3's run over the moved tests is where that surfaces; `reset_registry_for_tests()`
   remains the correct way to get a clean registry.
-- **Ordering hazard this plan hands to stage 1.** Splitting one `bind_defaults(config=…)`
-  call into "EE registers, then defaults fill the gaps" creates an ordering contract that
-  did not exist before: registration must happen *before* binding. In production that holds
-  trivially — a fresh process, `load_ee()` then `bind_defaults()`. In tests it does not:
-  `backend/tests/conftest.py:75-78` is an autouse fixture that calls
+- **Ordering hazard, found by review and resolved here rather than deferred.** Splitting one
+  `bind_defaults(config=…)` call into "EE registers, then defaults fill the gaps" creates an
+  ordering contract that did not exist before: registration must happen *before* binding.
+  Production holds it trivially — fresh process, `load_ee()` then `bind_defaults()`. Tests
+  do not: `backend/tests/conftest.py:75-78` is an autouse fixture that calls
   `reset_registry_for_tests()` then `ensure_registry_bound()` for **every** test, so the
-  singleton is already bound by the time an app fixture triggers lifespan. Once the dev and
-  CI environments actually have `cubeplex-ee` installed — the normal stage-1 setup —
-  `load_ee()` would try to register into bound slots.
+  singleton is already bound by the time an app fixture triggers lifespan. Once
+  `cubeplex-ee` is actually installed — the normal stage-1 dev setup — `load_ee()` would
+  try to register into bound slots and raise.
 
-  This plan makes that raise, with an actionable message, rather than silently replacing or
-  silently ignoring. The alternative (let registration overwrite a default) would let EE
-  tests pass against CE defaults without anyone noticing, which is a far worse failure than
-  a loud startup error. **Stage 1 must therefore adjust that conftest fixture** so the
-  registry is bound by the app lifespan rather than ahead of it — most likely by having the
-  autouse fixture only reset, and letting unit tests that need a bound registry call
-  `ensure_registry_bound()` themselves. Noted here so stage 1 does not discover it as a
-  mystery failure.
+  The obvious fix, having the fixture only reset and letting lifespan bind, is wrong: the
+  fixture resets per test while a module- or session-scoped app fixture's lifespan runs
+  once, so the registry would stay unbound for every subsequent test in that session and
+  `auth/dependencies.py` would raise "call bind_defaults() first". The rebind is load-bearing.
+
+  Resolved instead by collapsing the sequence into a single function. `ensure_registry_bound()`
+  is now the one startup path — it early-returns when already bound, and stage 1's
+  `load_ee(reg)` goes inside it, above `bind_defaults()`. `api/app.py` calls it too instead
+  of reaching for `bind_defaults()` directly, so app startup and the test fixtures cannot
+  disagree about the order, and registration + binding are always atomic from a caller's
+  point of view. Stage 1 changes one line in one place and the whole test harness inherits
+  it.
+
+  Note what was *not* done: letting `register_*` overwrite a default-bound slot. That would
+  let EE tests silently pass against CE defaults, which is a worse failure than a loud
+  startup error.
 - **Blast radius:** `cubeplex/plugins/` (4 files), `api/app.py` (one block), `config.yaml`
   (one block), `tests/` (5 deleted, 6 moved, 1 added). No models, no migrations, no routes,
   no frontend.

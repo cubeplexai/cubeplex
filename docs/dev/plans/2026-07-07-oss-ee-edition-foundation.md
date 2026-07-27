@@ -768,19 +768,28 @@ def load_ee(registry: PluginRegistry) -> bool:
 (The `load_license` import stays local so `lic_mod.load_license` monkeypatching works and
 module import stays cycle-free.)
 
-- [ ] **Step 4: Call it from app startup**
+- [ ] **Step 4: Wire it into the single startup sequence**
 
-In `backend/cubeplex/api/app.py`, at the EE load point stage 0 leaves behind (where
-`await _reg.discover()` used to sit, ~line 91), before `bind_defaults`:
+Do **not** add the call to `api/app.py`. Stage 0 made
+`cubeplex/plugins/__init__.py::ensure_registry_bound()` the one startup path — app startup
+and the autouse test fixture both go through it — precisely so this call has exactly one
+home. Add it there, above `bind_defaults()`:
 
 ```python
-    from cubeplex.plugins.ee import load_ee
-
-    load_ee(_reg)
+def ensure_registry_bound() -> None:
+    reg = get_registry()
+    if reg.is_bound():
+        return
+    load_ee(reg)          # ← EE registers its implementations first
+    reg.bind_defaults()   # ← CE defaults fill whatever EE left empty
 ```
 
-Order matters: EE registers its implementations on the registry, then `bind_defaults`
-resolves each Protocol slot, falling back to a CE default wherever EE registered nothing.
+Order matters, and it is why this belongs in one function: `register_*` refuses to fill a
+slot twice, so anything registering has to run before the CE fallbacks are seeded. Putting
+the call in `app.py` instead would leave `tests/conftest.py`'s autouse fixture binding CE
+defaults first, and every EE-enabled test would then fail startup with
+`RuntimeError: auth_provider already registered`. See the stage-0 plan's Self-Review for
+the full reasoning.
 
 - [ ] **Step 5: Run tests to verify all pass**
 
