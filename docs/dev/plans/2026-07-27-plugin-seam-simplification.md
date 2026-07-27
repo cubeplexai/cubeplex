@@ -463,7 +463,23 @@ git commit -m "refactor(plugins): replace entry-points discovery with explicit r
 - Move: `backend/tests/plugins/test_default_admin_panel.py` (13) → `backend/tests/unit/`
 - Move: `backend/tests/plugins/test_audit_helper.py` (29) → `backend/tests/unit/`
 - Delete: `backend/tests/plugins/` (the now-empty directory and its `__init__.py`)
+- Delete: `backend/tests/fixtures/fake_plugin/` (the in-tree installable fake plugin)
+- Modify: `backend/Makefile` (drop the `test-contracts` target + `.PHONY` + help line)
+- Modify: `Makefile` (drop `backend-test-contracts` + `.PHONY` + help line)
+- Modify: `.github/workflows/ci.yml` (drop the `test-ee-compat` job and its wiring)
 - Unchanged: `backend/tests/e2e/test_plugin_architecture_e2e.py`
+
+The last four were **not** in the first draft of this plan and were found while executing it.
+`test_contracts.py` does not fake entry-points in-process — it `uv pip install -e`s a real
+fixture package, `backend/tests/fixtures/fake_plugin/`, which publishes entry-points in its
+`entry_points.txt`, then uninstalls it in fixture teardown. That fixture has no other
+consumer. It is also reachable through a dedicated CI job, `test-ee-compat`
+("EE Compat (Layer 1 contract tests)"), which runs `make backend-test-contracts` and is
+listed in the `report` job's `needs` plus its conclusion loop and summary string. Deleting
+the test without unwiring all of that breaks CI. The job was the M-CI placeholder from
+`docs/dev/specs/2026-04-21-v1-oss-release-backlog.md`; with no synthetic wheel there is
+nothing for it to run. Stage 1 can add a "boots with EE / boots without" check, which
+belongs in `backend-e2e` anyway.
 
 The five deletions (611 lines) cover scenarios that can no longer occur: two auth providers
 competing for one slot, a plugin missing its manifest, an `api_version` mismatch, a plugin
@@ -486,11 +502,24 @@ cd backend
 git rm tests/plugins/test_contracts.py tests/plugins/test_registry_manifest.py \
   tests/plugins/test_registry_singular.py tests/plugins/test_registry_plural.py \
   tests/plugins/test_registry_getters.py
+git rm -r tests/fixtures/fake_plugin
 git mv tests/plugins/test_protocols.py tests/plugins/test_default_auth.py \
   tests/plugins/test_default_permissions.py tests/plugins/test_default_audit.py \
   tests/plugins/test_default_admin_panel.py tests/plugins/test_audit_helper.py tests/unit/
 git rm tests/plugins/__init__.py
+rm -rf tests/plugins   # __pycache__ survives git rm
 ```
+
+Then unwire the build and CI references, and confirm none survive:
+
+```bash
+cd .. && grep -rn "test-contracts\|test_contracts\|tests/plugins\|test-ee-compat\|EE_COMPAT" \
+  Makefile backend/Makefile .github/
+python3 -c "import yaml; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(', '.join(d['jobs']))"
+```
+
+Expected: no grep hits, and the job list is `gate, changes, backend-check, frontend-check,
+backend-e2e, frontend-e2e, report`.
 
 - [ ] **Step 3: Fix imports in the moved files and run them**
 
@@ -668,6 +697,24 @@ always present; instance attributes moved off the class). Then run
   `bind_defaults()` twice expecting a fresh rebind would now get the first binding. Task 4
   Step 3's run over the moved tests is where that surfaces; `reset_registry_for_tests()`
   remains the correct way to get a clean registry.
+- **Ordering hazard this plan hands to stage 1.** Splitting one `bind_defaults(config=…)`
+  call into "EE registers, then defaults fill the gaps" creates an ordering contract that
+  did not exist before: registration must happen *before* binding. In production that holds
+  trivially — a fresh process, `load_ee()` then `bind_defaults()`. In tests it does not:
+  `backend/tests/conftest.py:75-78` is an autouse fixture that calls
+  `reset_registry_for_tests()` then `ensure_registry_bound()` for **every** test, so the
+  singleton is already bound by the time an app fixture triggers lifespan. Once the dev and
+  CI environments actually have `cubeplex-ee` installed — the normal stage-1 setup —
+  `load_ee()` would try to register into bound slots.
+
+  This plan makes that raise, with an actionable message, rather than silently replacing or
+  silently ignoring. The alternative (let registration overwrite a default) would let EE
+  tests pass against CE defaults without anyone noticing, which is a far worse failure than
+  a loud startup error. **Stage 1 must therefore adjust that conftest fixture** so the
+  registry is bound by the app lifespan rather than ahead of it — most likely by having the
+  autouse fixture only reset, and letting unit tests that need a bound registry call
+  `ensure_registry_bound()` themselves. Noted here so stage 1 does not discover it as a
+  mystery failure.
 - **Blast radius:** `cubeplex/plugins/` (4 files), `api/app.py` (one block), `config.yaml`
   (one block), `tests/` (5 deleted, 6 moved, 1 added). No models, no migrations, no routes,
   no frontend.

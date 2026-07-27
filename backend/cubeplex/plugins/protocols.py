@@ -1,31 +1,19 @@
-"""Plugin Protocols + supporting dataclasses + version constant.
+"""Plugin Protocols + supporting dataclasses.
 
-CUBEPLEX_PLUGIN_API_VERSION is the single integer plugins must declare via
-their PluginManifest. Mismatch → registry refuses to load the plugin.
+The optional ``cubeplex_ee`` distribution implements these; the CE defaults in
+``plugins/defaults/`` implement them when EE is absent.
 """
 
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from fastapi import APIRouter, Request
 
 if TYPE_CHECKING:
     from cubeplex.models import User
-
-CUBEPLEX_PLUGIN_API_VERSION: Final[int] = 1
-
-
-@dataclass(frozen=True)
-class PluginManifest:
-    """Plugin self-describing metadata. Required entry_point per wheel."""
-
-    api_version: int
-    name: str
-    version: str
-    description: str = ""
 
 
 @dataclass(frozen=True)
