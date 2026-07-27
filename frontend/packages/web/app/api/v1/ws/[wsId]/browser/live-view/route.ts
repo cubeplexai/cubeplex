@@ -21,6 +21,11 @@ const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
 export const maxDuration = 180
 export const dynamic = 'force-dynamic'
 
+// Bound the upstream wait below maxDuration so a hung backend still returns a
+// client-visible JSON error (and SWR can retry) instead of spinning forever.
+// 165s = start_browser 120s + get_or_create/endpoint slack, under the 180s cap.
+export const UPSTREAM_TIMEOUT_MS = 165_000
+
 function buildProxyHeaders(request: NextRequest): HeadersInit {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const cookie = request.headers.get('cookie')
@@ -44,15 +49,42 @@ function appendSetCookie(target: Headers, source: Headers): void {
   if (setCookie) target.append('set-cookie', setCookie)
 }
 
+function isTimeoutError(err: unknown): boolean {
+  // AbortSignal.timeout → TimeoutError (DOMException); AbortController → AbortError.
+  // Do not require `instanceof Error` — DOMException identity can differ across
+  // realms / test environments while still exposing `.name`.
+  if (err == null || typeof err !== 'object') return false
+  const name = (err as { name?: string }).name
+  return name === 'TimeoutError' || name === 'AbortError'
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ wsId: string }> }) {
   const { wsId } = await params
   const qs = new URL(request.url).search
+  const url = `${BACKEND_URL}/api/v1/ws/${wsId}/browser/live-view${qs}`
 
-  const backendRes = await fetch(`${BACKEND_URL}/api/v1/ws/${wsId}/browser/live-view${qs}`, {
-    headers: buildProxyHeaders(request),
-    // Never cache a signed live-view URL.
-    cache: 'no-store',
-  })
+  let backendRes: Response
+  try {
+    backendRes = await fetch(url, {
+      headers: buildProxyHeaders(request),
+      // Never cache a signed live-view URL.
+      cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      return NextResponse.json(
+        {
+          detail: 'sandbox browser live-view timed out waiting for backend; please retry',
+        },
+        { status: 504 },
+      )
+    }
+    return NextResponse.json(
+      { detail: 'sandbox browser live-view proxy failed; please retry' },
+      { status: 502 },
+    )
+  }
 
   const contentType = backendRes.headers.get('content-type') ?? 'application/json'
   const body = await backendRes.text()

@@ -1,4 +1,4 @@
-import { GET } from '../../app/api/v1/ws/[wsId]/browser/live-view/route'
+import { GET, UPSTREAM_TIMEOUT_MS } from '../../app/api/v1/ws/[wsId]/browser/live-view/route'
 
 describe('browser live-view route proxy', () => {
   beforeEach(() => {
@@ -34,6 +34,10 @@ describe('browser live-view route proxy', () => {
       'X-CSRF-Token': 'csrf-token',
     })
     expect(init).toMatchObject({ cache: 'no-store' })
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
+    // Bound must sit under maxDuration (180s) and above start_browser (120s).
+    expect(UPSTREAM_TIMEOUT_MS).toBeGreaterThan(120_000)
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThan(180_000)
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
@@ -66,5 +70,48 @@ describe('browser live-view route proxy', () => {
     expect(response.status).toBe(503)
     expect(response.headers.get('set-cookie')).toContain('cubeplex_auth=refreshed')
     await expect(response.json()).resolves.toEqual({ detail: 'sandbox is starting up' })
+  })
+
+  it('returns 504 JSON when the upstream wait times out', async () => {
+    const timeoutErr = new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    const backendFetch = vi.fn(async () => {
+      throw timeoutErr
+    })
+    vi.stubGlobal('fetch', backendFetch)
+
+    const request = {
+      url: 'http://localhost/api/v1/ws/ws-42/browser/live-view',
+      headers: new Headers(),
+    } as any
+
+    const response = await GET(request, {
+      params: Promise.resolve({ wsId: 'ws-42' }),
+    })
+
+    expect(response.status).toBe(504)
+    await expect(response.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('timed out'),
+    })
+  })
+
+  it('returns 502 JSON when the upstream fetch fails (network)', async () => {
+    const backendFetch = vi.fn(async () => {
+      throw new TypeError('fetch failed')
+    })
+    vi.stubGlobal('fetch', backendFetch)
+
+    const request = {
+      url: 'http://localhost/api/v1/ws/ws-42/browser/live-view',
+      headers: new Headers(),
+    } as any
+
+    const response = await GET(request, {
+      params: Promise.resolve({ wsId: 'ws-42' }),
+    })
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('proxy failed'),
+    })
   })
 })
