@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,7 +24,7 @@ _TRAILING_PUNCT_RE = r"[。！？，；、,.!?;:]+$"
 def normalize_memory_content(content: str) -> str:
     """L0 normalize for exact dedup: trim, collapse whitespace, strip trailing punct."""
     collapsed = re.sub(r"\s+", " ", content.strip())
-    return re.sub(_TRAILING_PUNCT_RE, "", collapsed)
+    return re.sub(_TRAILING_PUNCT_RE, "", collapsed).strip()
 
 
 class MemoryRepository:
@@ -156,11 +157,14 @@ class MemoryRepository:
 
         normalized = normalize_memory_content(content)
 
-        # SQL mirror of normalize_memory_content (order: btrim → collapse ws → punct).
-        content_norm = func.regexp_replace(
-            func.regexp_replace(func.btrim(MemoryItem.content), r"\s+", " ", "g"),
-            _TRAILING_PUNCT_RE,
-            "",
+        # SQL mirror of normalize_memory_content:
+        # btrim → collapse ws → strip trailing punct → btrim again.
+        content_norm = func.btrim(
+            func.regexp_replace(
+                func.regexp_replace(func.btrim(MemoryItem.content), r"\s+", " ", "g"),
+                _TRAILING_PUNCT_RE,
+                "",
+            )
         )
 
         stmt = select(MemoryItem).where(
@@ -190,26 +194,31 @@ class MemoryRepository:
         item.updated_by_user_id = by_user_id
         return await self.update(item)
 
-    async def touch_used_many(self, memory_ids: list[str]) -> None:
+    async def touch_used_many(self, memory_ids: Sequence[str]) -> None:
         """Best-effort batch update of last_used_at for injected memory ids.
 
         Does not re-check scope read ACL beyond the ids list (caller only
         passes ids it just selected from this repo's list). Empty input is a
         no-op. Failures should not block injection; callers may swallow.
+
+        Note: parameter type uses ``Sequence`` (not ``list``) because this
+        class defines a method named ``list`` that would shadow the builtin
+        in annotations for mypy.
         """
         if not memory_ids:
             return
         now = datetime.now(UTC)
         # Distinct preserve order while avoiding duplicate updates.
+        # Avoid annotating with ``list[str]`` — method ``list`` shadows builtin for mypy.
         seen: set[str] = set()
-        ids: list[str] = []
+        unique_ids = []
         for mid in memory_ids:
             if mid and mid not in seen:
                 seen.add(mid)
-                ids.append(mid)
-        stmt = select(MemoryItem).where(MemoryItem.id.in_(ids))  # type: ignore[attr-defined]
+                unique_ids.append(mid)
+        stmt = select(MemoryItem).where(MemoryItem.id.in_(unique_ids))  # type: ignore[attr-defined]
         result = await self.session.execute(stmt)
-        rows = list(result.scalars().all())
+        rows = result.scalars().all()
         if not rows:
             return
         for row in rows:
