@@ -75,7 +75,7 @@ describe('canAutoOpenReplacePanel', () => {
     expect(canAutoOpenReplacePanel({ type: 'closed' }, 'conv-1', 'art-1')).toBe(true)
   })
 
-  it('allows same artifact id (version refresh)', () => {
+  it('allows same artifact id (caller may no-op open to keep user source)', () => {
     expect(
       canAutoOpenReplacePanel(
         { type: 'artifact', conversationId: 'conv-1', artifactId: 'art-1', source: 'user' },
