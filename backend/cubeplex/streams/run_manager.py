@@ -2883,8 +2883,15 @@ class RunManager:
         try:
             from cubeplex.middleware.memory import MemoryMiddleware
 
+            # Group chat: skip personal pinned injection (shared conversation
+            # must not see the sender's private preferences). Relevance
+            # snapshot is already gated earlier via ``not ctx.is_group_chat``.
             cubepi_middleware.append(
-                MemoryMiddleware(repo_factory=_mem_repo_factory, extra_ref=_extra_ref)
+                MemoryMiddleware(
+                    repo_factory=_mem_repo_factory,
+                    extra_ref=_extra_ref,
+                    include_personal=not ctx.is_group_chat,
+                )
             )
         except Exception as _exc:
             logger.warning("MemoryMiddleware unavailable: {}", _exc)

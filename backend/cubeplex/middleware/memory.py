@@ -132,6 +132,9 @@ class MemoryMiddleware(Middleware):
         pinned_token_budget: Approximate token cap for pinned
             (preference + correction) injection into the system prompt.
         pinned_max_items: Hard cap on pinned item count (after ranking).
+        include_personal: When False (group chat), skip personal-scope
+            pinned items so private preferences are not sent to a shared
+            conversation model. Workspace/org pinned items still inject.
     """
 
     def __init__(
@@ -142,12 +145,14 @@ class MemoryMiddleware(Middleware):
         relevance_token_budget: int = 4000,
         pinned_token_budget: int = DEFAULT_PINNED_TOKEN_BUDGET,
         pinned_max_items: int = DEFAULT_PINNED_MAX_ITEMS,
+        include_personal: bool = True,
     ) -> None:
         self._repo_factory = repo_factory
         self._extra_ref = extra_ref
         self._budget = relevance_token_budget
         self._pinned_budget = pinned_token_budget
         self._pinned_max_items = pinned_max_items
+        self._include_personal = include_personal
 
     # ------------------------------------------------------------------
     # cubepi Middleware hooks
@@ -192,6 +197,7 @@ class MemoryMiddleware(Middleware):
                     repo,
                     token_budget=self._pinned_budget,
                     max_items=self._pinned_max_items,
+                    include_personal=self._include_personal,
                 )
                 if pinned_ids:
                     try:
@@ -355,16 +361,22 @@ async def _render_pinned(
     *,
     token_budget: int = DEFAULT_PINNED_TOKEN_BUDGET,
     max_items: int = DEFAULT_PINNED_MAX_ITEMS,
+    include_personal: bool = True,
 ) -> tuple[str, list[str]]:
     """Render active pinned (preference + correction) items under budget.
 
     Selection ranks by correction/confidence/usage; *render* order stays
     deterministic (scope → type → created_at ASC) for prompt-cache stability.
 
+    When ``include_personal`` is False (group chat), personal-scope items are
+    omitted so private preferences never enter a shared conversation prompt.
+
     Returns ``(rendered_text, selected_ids)``. Empty string when nothing to pin.
     """
     all_active = await repo.list(status=MemoryStatus.ACTIVE)
     pinned = [m for m in all_active if m.type in PINNED_TYPES]
+    if not include_personal:
+        pinned = [m for m in pinned if m.scope != MemoryScope.PERSONAL]
     if not pinned:
         return "", []
     selected = _select_pinned(pinned, token_budget=token_budget, max_items=max_items)
