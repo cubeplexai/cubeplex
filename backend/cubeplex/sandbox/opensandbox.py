@@ -189,15 +189,25 @@ class OpenSandbox(Sandbox):
         """Best-effort chown of the workdir to the sandbox user (root only).
 
         PVC mounts often arrive as root-owned; agent commands run as cubeplex
-        and need write access. Safe no-op when run_user is unset.
+        and need write access. Safe no-op when run_user is unset. Never raises:
+        provisioning must not fail solely because chown is unavailable.
         """
         if not self._run_user:
             return
-        result = await self.execute(
-            f"chown -R {self._run_user}:{self._run_user} {self._workdir} 2>/dev/null || true",
-            timeout=60,
-            as_root=True,
-        )
+        try:
+            result = await self.execute(
+                f"chown -R {self._run_user}:{self._run_user} {self._workdir} 2>/dev/null || true",
+                timeout=60,
+                as_root=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "workspace chown for {} failed on sandbox {}: {}",
+                self._workdir,
+                self.id,
+                exc,
+            )
+            return
         if result.exit_code not in (0, None):
             logger.warning(
                 "workspace chown for {} failed on sandbox {}: {}",
