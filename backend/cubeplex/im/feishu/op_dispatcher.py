@@ -6,10 +6,12 @@ hard-codes Feishu rendering logic.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from loguru import logger
 
+from cubeplex.im.feishu.cardkit_client import CardKitStreamingClosed
 from cubeplex.im.outbound import _FloodSignal, note_edit_success, note_flood_strike
 from cubeplex.im.types import RenderState
 
@@ -70,12 +72,24 @@ class FeishuOpDispatcher:
         return True
 
     async def dispatch_stream(self, state: RenderState, text: str) -> bool:
-        """Push a streaming text update to CardKit."""
+        """Push a streaming text update to CardKit.
+
+        When Feishu has closed streaming_mode (300309, typically after the
+        ~10 minute auto-timeout), further ``stream_text`` calls fail forever.
+        Fall back to throttled ``patch_card`` so progressive content still
+        lands; ``finalize`` remains the terminal full replace.
+        """
         cardkit = self._cardkit
         if cardkit is None:
             return False
         if state.card_id is None or state.card_unavailable:
             return False
+
+        # Already know streaming is dead — never call stream_text again.
+        if state.streaming_closed:
+            state.stream_closed_skip_count += 1
+            return await self._throttled_patch_after_stream_closed(state, force=False)
+
         seq = state.card_state.advance_seq()
         from cubeplex.im.feishu.card_renderer import (
             optimize_markdown_style as _optimize,
@@ -92,6 +106,17 @@ class FeishuOpDispatcher:
             )
             note_edit_success(state)
             return True
+        except CardKitStreamingClosed:
+            # First 300309 for this run: one warning, no traceback. Later
+            # stream ops take the streaming_closed branch above (count only).
+            state.streaming_closed = True
+            state.stream_closed_skip_count += 1
+            logger.warning(
+                "[outbound] CardKit streaming mode closed (code=300309) for "
+                "card_id={}; falling back to patch_card until finalize",
+                state.card_id,
+            )
+            return await self._throttled_patch_after_stream_closed(state, force=True)
         except _FloodSignal:
             note_flood_strike(state)
             return False
@@ -136,6 +161,13 @@ class FeishuOpDispatcher:
         cardkit = self._cardkit
         if cardkit is None:
             return False
+        if state.stream_closed_skip_count > 0:
+            logger.info(
+                "[outbound] CardKit streaming was closed; redirected/skipped "
+                "{} stream_text op(s) for card_id={}",
+                state.stream_closed_skip_count,
+                state.card_id,
+            )
         if state.card_id is None or state.card_unavailable:
             if state.card_state.error:
                 await self.emergency_text(f"⚠️ {state.card_state.error}")
@@ -209,6 +241,24 @@ class FeishuOpDispatcher:
                 logger.opt(exception=True).warning("[outbound] cardkit.aclose() raised")
 
     # -- private helpers --
+
+    async def _throttled_patch_after_stream_closed(
+        self,
+        state: RenderState,
+        *,
+        force: bool,
+    ) -> bool:
+        """Full-card patch when stream_text is no longer available.
+
+        ``force=True`` on the first 300309 so the latest cumulative text
+        lands immediately; later redirects respect ``patch_interval`` so a
+        burst of text_deltas does not trip 230020 flood control.
+        """
+        now = time.monotonic()
+        if not force and now - state.last_patch_monotonic < state.patch_interval:
+            return False
+        state.last_patch_monotonic = now
+        return await self.dispatch_patch(state)
 
     async def _maybe_surface_pending_via_emergency(self, state: RenderState) -> None:
         """Surface the HITL prompt via emergency text when patch_card cannot

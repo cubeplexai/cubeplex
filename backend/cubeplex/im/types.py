@@ -216,6 +216,12 @@ class RenderState:
     patch_interval: float = 1.5
     consecutive_flood_strikes: int = 0
     edits_disabled: bool = False
+    # Feishu CardKit auto-closes streaming_mode ~10 minutes after open
+    # (error 300309). Once set, stop stream_text and fall back to patch_card.
+    streaming_closed: bool = False
+    # How many stream_text ops were redirected/skipped after streaming_closed.
+    # Logged once at finalize so the run is not a traceback storm.
+    stream_closed_skip_count: int = 0
     reaction_in_progress_id: str | None = None
     # Bound at tailer start from IMRunQueueItem fields.
     reply_to_id: str | None = None

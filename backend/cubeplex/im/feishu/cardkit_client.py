@@ -23,6 +23,10 @@ _CREATE_RETRY_DELAYS = (0.2, 1.0, 3.0)
 _FINALIZE_RETRY_DELAYS = (0.2, 0.5, 1.0, 3.0, 10.0, 30.0, 30.0, 30.0, 30.0)
 # CardKit rate-limit response code (same as IM patch rate limit).
 _FLOOD_CODE = 230020
+# Streaming element content rejected because streaming_mode is off.
+# Feishu auto-closes streaming ~10 minutes after it was enabled; also set
+# when a prior finalize/settings call already ended the stream window.
+_STREAMING_CLOSED_CODE = 300309
 
 
 class CardKitError(Exception):
@@ -35,6 +39,14 @@ class CardKitCreateError(CardKitError):
 
 class CardKitRateLimit(_FloodSignal):
     """CardKit returned the 230020 throttle response."""
+
+
+class CardKitStreamingClosed(CardKitError):
+    """CardKit returned 300309 — streaming_mode is closed for this card.
+
+    Further ``stream_text`` calls will keep failing; callers should fall
+    back to full-card ``patch_card`` / ``finalize``.
+    """
 
 
 class CardKitClient:
@@ -168,6 +180,8 @@ class CardKitClient:
         code = int(body.get("code", -1))
         if code == _FLOOD_CODE:
             raise CardKitRateLimit(f"stream_text flood (code={code})")
+        if code == _STREAMING_CLOSED_CODE:
+            raise CardKitStreamingClosed(f"stream_text code={code} msg={body.get('msg')}")
         if code != 0:
             raise CardKitError(f"stream_text code={code} msg={body.get('msg')}")
 
@@ -248,4 +262,5 @@ __all__ = [
     "CardKitCreateError",
     "CardKitError",
     "CardKitRateLimit",
+    "CardKitStreamingClosed",
 ]
