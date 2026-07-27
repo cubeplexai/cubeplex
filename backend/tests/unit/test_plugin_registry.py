@@ -81,3 +81,22 @@ def test_registry_instances_do_not_share_state() -> None:
     first.register_audit_sink(_OtherAuditSink())
     second = PluginRegistry()
     assert second.get_audit_sinks() == []
+
+
+def test_failed_bind_leaves_nothing_appended(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raising default must not leave state a retry would duplicate."""
+
+    def _boom() -> object:
+        raise RuntimeError("constructor exploded")
+
+    monkeypatch.setattr("cubeplex.plugins.defaults.admin_panel.DefaultAdminPanelExtension", _boom)
+    reg = PluginRegistry()
+    with pytest.raises(RuntimeError, match="exploded"):
+        reg.bind_defaults()
+    assert reg.is_bound() is False
+    assert reg.get_audit_sinks() == []
+    assert reg.get_admin_panel_extensions() == []
+
+    monkeypatch.undo()
+    reg.bind_defaults()
+    assert len(reg.get_audit_sinks()) == 1
