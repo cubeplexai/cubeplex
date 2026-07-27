@@ -17,6 +17,7 @@ export interface Column {
 
 export interface SummaryRow {
   bucket: string
+  bucket_label?: string | null
   cost_amount_micro: number
   call_count: number
   input_tokens: number
@@ -24,6 +25,11 @@ export interface SummaryRow {
   cache_read_tokens: number
   cache_write_tokens: number
   currency: string
+}
+
+/** Prefer API label; fall back to stable bucket id (or i18n for `__other`). */
+export function displayBucketLabel(row: Pick<SummaryRow, 'bucket' | 'bucket_label'>): string {
+  return row.bucket_label || row.bucket
 }
 
 interface Props {
@@ -138,7 +144,11 @@ export function defaultCostColumns(
   metric: InsightsMetric = 'cost',
 ): Column[] {
   const base: Column[] = [
-    { key: 'bucket', label: t(`columns.${kind}`), render: (r) => r.bucket },
+    {
+      key: 'bucket',
+      label: t(`columns.${kind}`),
+      render: (r) => displayBucketLabel(r),
+    },
     {
       key: 'call_count',
       label: t('columns.calls'),

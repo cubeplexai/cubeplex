@@ -43,11 +43,11 @@ A time-series chart at **daily** or **weekly** granularity, broken down by **wor
 Alongside the org-wide totals, the dashboard breaks usage down for the selected period:
 
 - **By model** — which models drive the most traffic (or spend).
-- **By workspace** — which teams or projects are busiest.
-- **By user** — per-person usage.
+- **By workspace** — which teams or projects are busiest (workspace **name**, not the internal id).
+- **By user** — per-person usage (display name when set, otherwise email).
 - **Cache efficiency** — hit rate from token fields (token-based in both modes).
 
-Each table row shows input/output (and cache where relevant) token counts, call count, and either a token total or cost depending on the active metric.
+Each table row shows input/output (and cache where relevant) token counts, call count, and either a token total or cost depending on the active metric. Workspace and user charts, tables, and filters use the same readable labels.
 
 :::note KPI vs filters
 Summary KPI tiles use **org-wide** totals for the date range. Workspace/model filters currently apply to timeseries charts. Matching filters on the summary is a known follow-up.

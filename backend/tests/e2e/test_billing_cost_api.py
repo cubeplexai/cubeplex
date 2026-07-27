@@ -59,7 +59,12 @@ async def _ensure_workspace(session: AsyncSession, *, ws_id: str, org_id: str) -
         await session.commit()
 
 
-async def _ensure_user(session: AsyncSession, *, user_id: str) -> None:
+async def _ensure_user(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    display_name: str | None = None,
+) -> None:
     existing = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if existing is None:
         session.add(
@@ -68,8 +73,13 @@ async def _ensure_user(session: AsyncSession, *, user_id: str) -> None:
                 email=f"{user_id}@test-billing-cost.local",
                 hashed_password="x",
                 is_active=True,
+                display_name=display_name,
             )
         )
+        await session.commit()
+    elif display_name is not None and existing.display_name != display_name:
+        existing.display_name = display_name
+        session.add(existing)
         await session.commit()
 
 
@@ -133,7 +143,11 @@ async def _seed_events(
             await _ensure_workspace(session, ws_id=ws_id, org_id=org_id)
             seen_ws.add(ws_id)
         if user_id not in seen_users:
-            await _ensure_user(session, user_id=user_id)
+            await _ensure_user(
+                session,
+                user_id=user_id,
+                display_name=r.get("user_display_name"),  # type: ignore[arg-type]
+            )
             seen_users.add(user_id)
         if conv_id not in seen_conv:
             await _ensure_conversation(
@@ -319,6 +333,7 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
                 {
                     "workspace_id": DEFAULT_WS_ID,
                     "user_id": "usr-by-user-a",
+                    "user_display_name": "Alice Admin",
                     "provider": "openai",
                     "model_id": "gpt-4o",
                     "started_at": day,
@@ -331,6 +346,7 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
                 {
                     "workspace_id": DEFAULT_WS_ID,
                     "user_id": "usr-by-user-b",
+                    # No display_name → label falls back to email.
                     "provider": "openai",
                     "model_id": "gpt-4o",
                     "started_at": day,
@@ -353,12 +369,13 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
     assert "by_user" in body, f"missing `by_user` key in response: {body.keys()}"
     by_user = body["by_user"]
     assert isinstance(by_user, list)
-    seeded_buckets = {row["bucket"] for row in by_user}
-    assert {"usr-by-user-a", "usr-by-user-b"}.issubset(seeded_buckets)
+    by_bucket = {row["bucket"]: row for row in by_user}
+    assert {"usr-by-user-a", "usr-by-user-b"}.issubset(by_bucket)
 
     expected_fields = {
         "bucket",
         "bucket_type",
+        "bucket_label",
         "input_tokens",
         "output_tokens",
         "cache_read_tokens",
@@ -372,6 +389,15 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
             f"row missing fields: expected {expected_fields}, got {row.keys()}"
         )
         assert row["bucket_type"] == "user"
+
+    assert by_bucket["usr-by-user-a"]["bucket_label"] == "Alice Admin"
+    assert by_bucket["usr-by-user-b"]["bucket_label"] == "usr-by-user-b@test-billing-cost.local"
+
+    # Workspace label resolves from workspace.name (not the raw public id).
+    by_ws = {row["bucket"]: row for row in body["by_workspace"]}
+    assert DEFAULT_WS_ID in by_ws
+    ws_label = by_ws[DEFAULT_WS_ID]["bucket_label"]
+    assert ws_label is not None and ws_label != DEFAULT_WS_ID
 
 
 async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) -> None:
@@ -421,8 +447,10 @@ async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) 
     assert body["dimension"] == "workspace"
     assert body["granularity"] == "day"
     assert "series" in body and isinstance(body["series"], list)
-    buckets = {s["bucket"] for s in body["series"]}
-    assert {ws_a, ws_b}.issubset(buckets), f"expected both ws buckets, got {buckets}"
+    by_bucket = {s["bucket"]: s for s in body["series"]}
+    assert {ws_a, ws_b}.issubset(by_bucket), f"expected both ws buckets, got {set(by_bucket)}"
+    assert by_bucket[ws_a]["bucket_label"] == f"Test {ws_a}"
+    assert by_bucket[ws_b]["bucket_label"] == f"Test {ws_b}"
 
     # 2. Filtered by workspace_ids=ws_a: only ws_a bucket appears
     resp = await async_client.get(

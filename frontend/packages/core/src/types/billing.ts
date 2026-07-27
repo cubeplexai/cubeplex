@@ -1,6 +1,8 @@
 export interface CostAggregateRow {
   bucket: string
   bucket_type: 'workspace' | 'user' | 'model' | 'day'
+  /** Human-readable name for workspace/user; null when unknown — fall back to `bucket`. */
+  bucket_label?: string | null
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number
@@ -34,6 +36,8 @@ export interface TimeseriesPoint {
 
 export interface TimeseriesSeries {
   bucket: string
+  /** Human-readable name for workspace/user; null when unknown — fall back to `bucket`. */
+  bucket_label?: string | null
   points: TimeseriesPoint[]
   currency: string
 }

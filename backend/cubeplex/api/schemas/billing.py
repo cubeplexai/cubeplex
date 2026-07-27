@@ -9,6 +9,9 @@ from pydantic import BaseModel
 class CostAggregateRow(BaseModel):
     bucket: str  # workspace_id | user_id | "provider/model_id" | "YYYY-MM-DD"
     bucket_type: str  # "workspace" | "user" | "model" | "day"
+    # Human-readable label for workspace/user buckets; None for model/day or
+    # when the entity no longer exists (clients should fall back to `bucket`).
+    bucket_label: str | None = None
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int
@@ -42,6 +45,9 @@ class TimeseriesPoint(BaseModel):
 
 class TimeseriesSeries(BaseModel):
     bucket: str  # workspace_id | user_id | "provider/model_id" | "__other"
+    # Human-readable label for workspace/user series; None for model/__other or
+    # when the entity no longer exists (clients should fall back to `bucket`).
+    bucket_label: str | None = None
     points: list[TimeseriesPoint]
     currency: str
 
