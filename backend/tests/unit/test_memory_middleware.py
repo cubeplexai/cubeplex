@@ -220,6 +220,31 @@ def test_select_pinned_respects_token_budget() -> None:
     assert 1 < len(selected_big) <= 30
 
 
+def test_render_pinned_excludes_personal_when_include_personal_false() -> None:
+    """Group-chat path: personal prefs must not appear in the pinned block."""
+    items = [
+        _mk_item(
+            scope=MemoryScope.PERSONAL,
+            type_=MemoryType.PREFERENCE,
+            content="Call me 宝贝",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+        _mk_item(
+            scope=MemoryScope.WORKSPACE,
+            type_=MemoryType.CORRECTION,
+            content="Use pnpm",
+            created_at=datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+    ]
+    repo = _FakeRepo(items)
+    text, ids = asyncio.run(
+        _render_pinned(repo, include_personal=False)  # type: ignore[arg-type]
+    )
+    assert "宝贝" not in text
+    assert "Use pnpm" in text
+    assert len(ids) == 1
+
+
 def test_select_pinned_prefers_corrections() -> None:
     pref = _mk_item(
         type_=MemoryType.PREFERENCE,
