@@ -312,7 +312,10 @@ export function ArtifactPanel() {
             {t('expandedPlaceholder')}
           </div>
         ) : (
-          <div data-testid="artifact-rail-preview">
+          // h-full min-h-0: keep the height chain so Office iframes / image
+          // carousel (h-full + absolute top-1/2 arrows) fill the rail body.
+          // Without this, percentage heights collapse to content (~150px iframe).
+          <div data-testid="artifact-rail-preview" className="h-full min-h-0">
             <PreviewContent
               artifact={artifact}
               version={currentSelectedVersion}
