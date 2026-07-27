@@ -213,8 +213,10 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         elementRef={groupRef}
       >
         <ResizablePanel
-          defaultSize={panelOpen ? (isSandboxPanel ? 35 : 50) : 100}
-          minSize={isSandboxPanel ? 25 : 30}
+          // Sandbox browser is landscape; a wider rail reduces the tall/flat
+          // letterbox and makes takeover clicks easier to aim (see #424).
+          defaultSize={panelOpen ? (isSandboxPanel ? 28 : 50) : 100}
+          minSize={isSandboxPanel ? 20 : 30}
         >
           {main}
         </ResizablePanel>
@@ -222,7 +224,10 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         {panelOpen && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={isSandboxPanel ? 65 : 50} minSize={25}>
+            <ResizablePanel
+              defaultSize={isSandboxPanel ? 72 : 50}
+              minSize={isSandboxPanel ? 35 : 25}
+            >
               {panelContent}
             </ResizablePanel>
           </>

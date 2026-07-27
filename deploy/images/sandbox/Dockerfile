@@ -268,12 +268,17 @@ ARG NEKO_TURN_URL=turn:192.168.1.208:3478
 ARG NEKO_TURN_USER=neko
 ARG NEKO_TURN_CRED=neko
 
+# Desktop 1280×900 (16:10-ish) instead of Neko's default 1280×720 (16:9).
+# Side-panel live view is tall; a taller virtual desktop fills more of the
+# rail when letterboxed and looks less flat during watch/takeover (#424).
+# Frontend BrowserView fits the iframe host to the same aspect.
 # First click after cubeplex "Take over" grants control (no in-Neko mouse step).
 # Env wins over /etc/neko/neko.yaml if the image is rebuilt from a newer base.
 ENV USER=neko \
     DISPLAY=:99.0 \
     XDG_RUNTIME_DIR=/tmp/runtime-neko \
     NEKO_SERVER_BIND=:8080 \
+    NEKO_DESKTOP_SCREEN=1280x900@30 \
     NEKO_PLUGINS_ENABLED=true \
     NEKO_PLUGINS_DIR=/etc/neko/plugins/ \
     NEKO_SESSION_IMPLICIT_HOSTING=true \
