@@ -67,6 +67,19 @@ def test_task_routing_must_be_available():
         )
 
 
+def test_memory_task_key_is_accepted():
+    from cubeplex.llm.snapshot_schema import TaskKey
+
+    cfg = ModelPresetsConfig.model_validate(
+        {
+            "tiers": _tiers(),
+            "default_preset": "pro",
+            "task_routing": {"memory": "lite", "summarize": "lite"},
+        }
+    )
+    assert cfg.task_routing[TaskKey.memory] == "lite"
+
+
 def test_custom_preset_available_as_default_and_task():
     cfg = ModelPresetsConfig.model_validate(
         {

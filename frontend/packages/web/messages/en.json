@@ -1776,6 +1776,10 @@
       "compaction": {
         "name": "Compaction",
         "hint": "Compresses context when the chat gets long."
+      },
+      "memory": {
+        "name": "Memory",
+        "hint": "Post-turn memory reflection (what to remember). Defaults to Summarize routing when unset, otherwise the default preset."
       }
     },
     "tierEnabled": "Enabled",

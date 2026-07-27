@@ -1,8 +1,8 @@
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
 export type ModelTier = 'lite' | 'flash' | 'pro' | 'max'
-export type TaskKey = 'title' | 'summarize' | 'compaction'
+export type TaskKey = 'title' | 'summarize' | 'compaction' | 'memory'
 export const MODEL_TIERS: ModelTier[] = ['lite', 'flash', 'pro', 'max']
-export const TASK_KEYS: TaskKey[] = ['title', 'summarize', 'compaction']
+export const TASK_KEYS: TaskKey[] = ['title', 'summarize', 'compaction', 'memory']
 
 export interface TierSetting {
   enabled: boolean
