@@ -28,6 +28,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const t = useTranslations('conversationPage')
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
+  const setViewingConversation = useConversationStore((s) => s.setViewingConversation)
   const setActiveTopic = useConversationStore((s) => s.setActiveTopic)
   const conversations = useConversationStore((s) => s.conversations)
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
@@ -51,6 +52,9 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   useEffect(() => {
     usePanelStore.getState().close()
     setActive(conversationId)
+    // Chat-surface focus (auto-open previews, etc.). Distinct from activeId,
+    // which also covers sidebar highlight and home draft creation.
+    setViewingConversation(conversationId)
     // Clear unread at the focus boundary (not inside conversationStore.setActive
     // — that would create a messageStore ↔ conversationStore import cycle).
     useMessageStore.getState().clearUnread(conversationId)
@@ -112,8 +116,19 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       if (useConversationStore.getState().activeId === conversationId) {
         setActive(null)
       }
+      if (useConversationStore.getState().viewingConversationId === conversationId) {
+        setViewingConversation(null)
+      }
     }
-  }, [conversationId, client, wsId, setActive, setActiveTopic, loadArtifacts])
+  }, [
+    conversationId,
+    client,
+    wsId,
+    setActive,
+    setViewingConversation,
+    setActiveTopic,
+    loadArtifacts,
+  ])
 
   // Arriving from the artifacts library with `?artifact=<id>` auto-opens that
   // artifact's preview. Runs after the reset effect above (declaration order),

@@ -44,13 +44,30 @@ export function setAutoOpenArtifactsEnabled(enabled: boolean): void {
  * Whether a live artifact event should open the preview panel.
  *
  * - Preference must be on.
- * - Conversation must be the focused chat (`activeId`), so background streams
- *   on another conversation don't steal the panel.
+ * - Conversation must be the mounted chat surface (`viewingConversationId`),
+ *   not merely sidebar `activeId` (which can linger on home / draft flows).
  */
 export function shouldAutoOpenArtifactPreview(
   conversationId: string,
-  activeConversationId: string | null,
+  viewingConversationId: string | null,
   enabled: boolean = isAutoOpenArtifactsEnabled(),
 ): boolean {
-  return enabled && activeConversationId === conversationId
+  return enabled && viewingConversationId === conversationId
+}
+
+/**
+ * Whether auto-open may replace the current panel view.
+ *
+ * - Closed → open.
+ * - Already showing an artifact for the same conversation → switch / refresh.
+ * - Any other surface (tool, sandbox, attachment, other conversation's
+ *   artifact) → leave the user's choice alone.
+ */
+export function canAutoOpenReplacePanel(
+  view: { type: string; conversationId?: string },
+  conversationId: string,
+): boolean {
+  if (view.type === 'closed') return true
+  if (view.type === 'artifact' && view.conversationId === conversationId) return true
+  return false
 }

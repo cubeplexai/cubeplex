@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
   DEFAULT_AUTO_OPEN_ARTIFACTS,
+  canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
   parseAutoOpenArtifacts,
   setAutoOpenArtifactsEnabled,
@@ -55,7 +56,7 @@ describe('isAutoOpenArtifactsEnabled / setAutoOpenArtifactsEnabled', () => {
 })
 
 describe('shouldAutoOpenArtifactPreview', () => {
-  it('opens when enabled and conversation is focused', () => {
+  it('opens when enabled and chat surface is viewing the conversation', () => {
     expect(shouldAutoOpenArtifactPreview('conv-1', 'conv-1', true)).toBe(true)
   })
 
@@ -63,8 +64,29 @@ describe('shouldAutoOpenArtifactPreview', () => {
     expect(shouldAutoOpenArtifactPreview('conv-1', 'conv-1', false)).toBe(false)
   })
 
-  it('does not open for a non-focused conversation', () => {
+  it('does not open when chat surface is not that conversation', () => {
     expect(shouldAutoOpenArtifactPreview('conv-1', 'conv-other', true)).toBe(false)
     expect(shouldAutoOpenArtifactPreview('conv-1', null, true)).toBe(false)
+  })
+})
+
+describe('canAutoOpenReplacePanel', () => {
+  it('allows closed panel', () => {
+    expect(canAutoOpenReplacePanel({ type: 'closed' }, 'conv-1')).toBe(true)
+  })
+
+  it('allows same-conversation artifact panel (refresh / switch artifact)', () => {
+    expect(canAutoOpenReplacePanel({ type: 'artifact', conversationId: 'conv-1' }, 'conv-1')).toBe(
+      true,
+    )
+  })
+
+  it('blocks other conversation artifact and non-artifact surfaces', () => {
+    expect(canAutoOpenReplacePanel({ type: 'artifact', conversationId: 'conv-2' }, 'conv-1')).toBe(
+      false,
+    )
+    expect(canAutoOpenReplacePanel({ type: 'tool' }, 'conv-1')).toBe(false)
+    expect(canAutoOpenReplacePanel({ type: 'sandbox' }, 'conv-1')).toBe(false)
+    expect(canAutoOpenReplacePanel({ type: 'attachment' }, 'conv-1')).toBe(false)
   })
 })
