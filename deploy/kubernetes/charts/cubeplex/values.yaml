@@ -53,6 +53,8 @@ backend:
     api:
       host: "0.0.0.0"
       port: 8000
+      # Also the origin for the sandbox browser/terminal panels: it must be
+      # browser-reachable AND forward WebSocket (panels proxy Neko/ttyd over WS).
       public_url: "http://cubeplex.local"
     deployment:
       mode: single_tenant

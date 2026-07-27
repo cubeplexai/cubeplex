@@ -32,7 +32,9 @@ data:
         # Defaults to .Values.opensandbox.enabled for the common case.
         enabled: {{ dig "sandbox" "enabled" .Values.opensandbox.enabled .Values.backend }}
         use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}
-        secure_access: {{ dig "sandbox" "secure_access" true .Values.backend }}
+        # Panels flow through cubeplex's token-authed panel reverse proxy (not the
+        # OpenSandbox ingress gateway), so signed secured-endpoint mode is off.
+        secure_access: {{ dig "sandbox" "secure_access" false .Values.backend }}
         {{- if .Values.egress.enabled }}
         # Activates egress secret-injection in SandboxManager (every
         # injection call is gated on `if self._exchange_host:`) and is

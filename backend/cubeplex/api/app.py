@@ -643,10 +643,16 @@ def create_app(
     from cubeplex.config import config as _sandbox_config
 
     if _sandbox_config.get("sandbox.enabled", False):
+        from cubeplex.api.routes import sandbox_panel
         from cubeplex.api.routes.v1 import sandbox_share
 
         app.include_router(ws_browser.router, prefix="/api/v1")
         app.include_router(sandbox_share.router, prefix="/api/v1")
+        # Panel reverse proxy is token-authed and mounted at root (NOT /api/v1):
+        # the panel client's asset/WebSocket sub-resources carry the token in the
+        # path, and it must not sit behind the frontend's /api/* rewrite (which
+        # cannot proxy WebSocket).
+        app.include_router(sandbox_panel.router)
 
     from cubeplex.api.routes.health import router as health_router
 

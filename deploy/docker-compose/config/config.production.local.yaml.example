@@ -8,7 +8,10 @@ production:
     host: "0.0.0.0"
     port: 8000
     # The URL operators / browsers reach the backend at. If you put a
-    # reverse proxy in front, use that URL.
+    # reverse proxy in front, use that URL. This is ALSO the origin for the
+    # sandbox browser/terminal panels: it must be reachable from the end
+    # user's browser AND forward WebSocket (the panels proxy Neko/ttyd over
+    # WS). Leave empty and the panels are unavailable.
     public_url: "http://localhost:8000"
   deployment:
     mode: single_tenant            # single_tenant | multi_tenant
