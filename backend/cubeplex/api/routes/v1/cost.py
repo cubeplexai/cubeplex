@@ -87,15 +87,23 @@ def _user_label(*, display_name: str | None, email: str) -> str:
 async def _bucket_labels(
     session: AsyncSession,
     *,
+    org_id: str,
     dimension: Literal["workspace", "user"],
     buckets: Sequence[str],
 ) -> dict[str, str]:
-    """Resolve public IDs to display labels. Missing entities are omitted."""
+    """Resolve public IDs to display labels. Missing entities are omitted.
+
+    Workspace lookup is org-scoped so a stale/cross-org workspace_id in billing
+    cannot leak another org's workspace name into this admin response.
+    """
     ids = [b for b in buckets if b and b != "__other"]
     if not ids:
         return {}
     if dimension == "workspace":
-        ws_stmt = select(Workspace).where(Workspace.id.in_(ids))  # type: ignore[attr-defined]
+        ws_stmt = select(Workspace).where(
+            Workspace.id.in_(ids),  # type: ignore[attr-defined]
+            Workspace.org_id == org_id,  # type: ignore[arg-type]
+        )
         workspaces = list((await session.execute(ws_stmt)).scalars().all())
         return {ws.id: ws.name for ws in workspaces}
     user_stmt = select(User).where(User.id.in_(ids))  # type: ignore[attr-defined]
@@ -140,11 +148,13 @@ async def get_cost_summary(
 
     ws_labels = await _bucket_labels(
         session,
+        org_id=org_id,
         dimension="workspace",
         buckets=[str(r["bucket"]) for r in by_workspace],
     )
     user_labels = await _bucket_labels(
         session,
+        org_id=org_id,
         dimension="user",
         buckets=[str(r["bucket"]) for r in by_user],
     )
@@ -196,6 +206,7 @@ async def get_cost_timeseries(
     if dimension in ("workspace", "user"):
         labels = await _bucket_labels(
             session,
+            org_id=org_id,
             dimension=dimension,
             buckets=[str(s["bucket"]) for s in series_raw],
         )
