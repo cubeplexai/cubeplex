@@ -44,12 +44,18 @@ class MemorySourceType(StrEnum):
 
 
 class MemoryItem(CubeplexBase, table=True):
-    """Memory item. Scope determines which of org_id/workspace_id/owner_user_id is set."""
+    """Memory item. Scope determines which of org_id/workspace_id/owner_user_id is set.
+
+    Personal is private-to-user **within one workspace** (owner_user_id +
+    workspace_id). It does not cross workspaces. Orphan personal rows may still
+    have workspace_id NULL after migration; the repository excludes them from
+    normal list/injection.
+    """
 
     _PREFIX: ClassVar[str] = PREFIX_MEMORY
     __tablename__ = "memory_items"
     __table_args__ = (
-        Index("ix_memory_personal", "scope", "owner_user_id"),
+        Index("ix_memory_personal", "scope", "owner_user_id", "workspace_id"),
         Index("ix_memory_workspace", "scope", "workspace_id"),
         Index("ix_memory_org", "scope", "org_id"),
         Index("ix_memory_status", "status"),

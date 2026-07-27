@@ -281,13 +281,14 @@ class TestBuildSeedPrompt:
             ("mem-def", "project_fact", "CubePi 是 Agent 框架"),
         ]
         seed = self._runner()._build_seed_prompt(self._inp(existing=items))
-        assert "current memory" in seed
+        assert "this workspace" in seed
+        assert "mem-abc" in seed
         assert "[mem-abc]" in seed
         assert "(preference)" in seed
         assert "用户偏好中文交流" in seed
         assert "[mem-def]" in seed
         # memory block appears BEFORE the turn
-        assert seed.index("current memory") < seed.index("Last turn")
+        assert seed.index("this workspace") < seed.index("Last turn")
 
     def test_existing_memory_content_truncated_to_200_chars(self) -> None:
         long_content = "x" * 300

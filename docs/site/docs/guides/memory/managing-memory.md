@@ -17,7 +17,7 @@ Go to your workspace and open **Memory**. The Memory Center lives at `/w/{worksp
 
 The Memory Center is organized into four tabs:
 
-- **Personal** — Active memories scoped to you.
+- **Personal** — Active memories private to you in this workspace.
 - **Workspace** — Active memories shared across this workspace.
 - **Organization** — Active memories shared across your whole organization.
 - **Archived** — Items you've retired, across all scopes.

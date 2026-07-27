@@ -13,15 +13,15 @@ The most direct way to create a memory is to tell the agent to remember somethin
 
 > "Remember that I like concise answers with code examples."
 
-This becomes a **preference** in your personal memory, applying across all your workspaces.
+This becomes a **preference** in your **personal** memory for **this workspace**
+(private to you; it does not follow you into other workspaces).
 
-By default, the agent saves to **personal** scope. This keeps your memory private to you unless you decide otherwise. So even a project fact saved without further instruction lands in your personal memory:
+**Personal** is for how *you* work here. **Workspace** is for shared project
+knowledge. Prefer telling the agent to save team facts for the workspace:
 
-> "Remember that our API uses snake_case for all response fields."
+> "Remember that our API uses snake_case for all response fields — save that for the workspace."
 
-The agent saves this as a **project_fact** in your personal memory.
-
-To share a memory with your whole team or organization, ask explicitly. The agent only writes workspace or organization scope when you say so:
+To share a memory with your whole team or organization, ask explicitly:
 
 > "Save this for the whole workspace: our API uses snake_case for all response fields."
 
@@ -37,9 +37,10 @@ When the agent gets something wrong, correct it directly:
 >
 > **You:** "We use pnpm, not npm."
 
-The agent saves a **correction** to your personal memory. In future conversations, it will use pnpm without being told again. If you want the whole team to inherit the fix, tell the agent to share it ("save that for the workspace").
-
-Corrections work at any scope, and a personal correction follows you across all your workspaces:
+The agent saves a **correction** to your personal memory in this workspace. In
+future conversations here, it will use pnpm without being told again. If you
+want the whole team to inherit the fix, tell the agent to share it
+("save that for the workspace").
 
 > "That's wrong — I prefer dark mode code blocks, not light."
 
@@ -67,19 +68,23 @@ Here is a practical example of how memory accumulates and helps over time:
 
 ## Scope selection
 
-The agent always defaults new memories to **personal** scope, and infers the *type* from the content. It only writes workspace or organization scope when you explicitly ask it to share:
+The agent chooses scope from context and your instructions. **Personal** stays
+in the current workspace only. Shared project knowledge should use
+**workspace**.
 
-| Content pattern | Default scope | Typical type |
+| Content pattern | Typical scope | Typical type |
 |---|---|---|
 | "I prefer..." / "I like..." | Personal | preference |
-| "Our project uses..." / "The codebase..." | Personal | project_fact |
-| Correcting a mistake | Personal | correction |
-| Agreeing on an approach | Personal | decision |
-| Describing a step-by-step process | Personal | procedure |
+| Correcting how the agent works with *you* | Personal | correction |
+| "Our project uses..." / "The codebase..." | Workspace | project_fact |
+| Agreeing on a team approach | Workspace | decision |
+| Describing a shared deploy/process | Workspace | procedure |
 | "Save this for the workspace: ..." | Workspace | project_fact / procedure / decision |
 | "Save this as an org-wide policy: ..." | Organization | org_policy |
 
-To promote a memory beyond yourself, say so when you ask the agent to remember it ("save that for the whole workspace"). You cannot change the scope of an existing item from the Memory Center, so be explicit up front.
+To promote a memory beyond yourself, say so when you ask the agent to remember
+it ("save that for the whole workspace"). You cannot change the scope of an
+existing item from the Memory Center, so be explicit up front.
 
 ## Tips
 

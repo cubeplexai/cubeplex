@@ -14,16 +14,20 @@ from cubeplex.models.memory import (
     MemoryType,
 )
 
+# Trailing punctuation stripped for L0 exact dedup (keep in sync with SQL below).
+_TRAILING_PUNCT_RE = r"[。！？，；、,.!?;:]+$"
 
-def _strip_trailing_punct(s: str, pattern: str) -> str:
-    """Strip trailing punctuation matching ``pattern`` from ``s``."""
-    return re.sub(pattern, "", s)
+
+def normalize_memory_content(content: str) -> str:
+    """L0 normalize for exact dedup: trim, collapse whitespace, strip trailing punct."""
+    collapsed = re.sub(r"\s+", " ", content.strip())
+    return re.sub(_TRAILING_PUNCT_RE, "", collapsed)
 
 
 class MemoryRepository:
     """Scope-aware memory repository.
 
-    - personal: filter by owner_user_id (org/workspace ignored)
+    - personal: owner_user_id + current workspace_id (orphans with NULL ws excluded)
     - workspace: filter by workspace_id
     - org: filter by org_id
     - all: union of the above for the current request context
@@ -52,7 +56,12 @@ class MemoryRepository:
 
     def _can_read(self, item: MemoryItem) -> bool:
         if item.scope == MemoryScope.PERSONAL:
-            return item.owner_user_id == self.user_id
+            # Orphans (workspace_id NULL) are not injectable/readable in-app.
+            return (
+                item.owner_user_id == self.user_id
+                and self.workspace_id is not None
+                and item.workspace_id == self.workspace_id
+            )
         if item.scope == MemoryScope.WORKSPACE:
             return item.workspace_id == self.workspace_id
         if item.scope == MemoryScope.ORG:
@@ -61,10 +70,11 @@ class MemoryRepository:
 
     def _scope_filter(self, scope: MemoryScope | None) -> Any:
         clauses: list[Any] = []
-        if scope is None or scope == MemoryScope.PERSONAL:
+        if (scope is None or scope == MemoryScope.PERSONAL) and self.workspace_id:
             clauses.append(
                 (MemoryItem.scope == MemoryScope.PERSONAL)
                 & (MemoryItem.owner_user_id == self.user_id)
+                & (MemoryItem.workspace_id == self.workspace_id)
             )
         if (scope is None or scope == MemoryScope.WORKSPACE) and self.workspace_id:
             clauses.append(
@@ -135,39 +145,27 @@ class MemoryRepository:
     async def find_exact(
         self, *, scope: MemoryScope, type_: MemoryType, content: str
     ) -> MemoryItem | None:
-        """Dedup safety net for identical (scope/type/content).
+        """L0 exact dedup within the current scope key (scope/type + mount).
 
-        This catches *mechanical* duplicates — accidental retries, double-saves
-        across main-agent + reflection-agent within the same turn, etc. It is
-        NOT a semantic-similarity check; that's the agent's job via memory_
-        search before deciding to save.
-
-        Content is normalized before comparison so a trailing punctuation
-        difference (the common case: agent A saves "用户喜欢X。" and agent B
-        saves "用户喜欢X") doesn't slip through:
-        - leading/trailing whitespace trimmed
-        - trailing punctuation (CJK + ASCII) stripped
-
-        The Postgres-side normalization uses regexp_replace + btrim so the
-        comparison runs server-side; content has no index anyway, so the
-        cost is one regex per row in the scope-filtered set.
+        Catches mechanical duplicates (retries, double-save). Not semantic.
+        Normalization: strip, collapse whitespace, strip trailing punctuation.
         """
         from sqlalchemy import func
 
-        # Keep this charset in sync with the SQL pattern below.
-        trailing_punct_re = r"[。！？，；、,.!?;:]+$"
-        normalized = _strip_trailing_punct(content.strip(), trailing_punct_re)
+        normalized = normalize_memory_content(content)
+
+        # SQL mirror of normalize_memory_content (order: btrim → collapse ws → punct).
+        content_norm = func.regexp_replace(
+            func.regexp_replace(func.btrim(MemoryItem.content), r"\s+", " ", "g"),
+            _TRAILING_PUNCT_RE,
+            "",
+        )
 
         stmt = select(MemoryItem).where(
             self._scope_filter(scope),
             MemoryItem.status == MemoryStatus.ACTIVE,  # type: ignore[arg-type]
             MemoryItem.type == type_,  # type: ignore[arg-type]
-            func.regexp_replace(
-                func.btrim(MemoryItem.content),
-                trailing_punct_re,
-                "",
-            )
-            == normalized,
+            content_norm == normalized,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
