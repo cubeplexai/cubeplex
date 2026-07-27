@@ -25,8 +25,9 @@ async def test_transform_system_prompt_injects_authoring_without_pinned(monkeypa
     async def _factory():
         yield _Repo()
 
-    async def _empty(repo):
-        return ""
+    async def _empty(repo, **_kwargs):
+        # _render_pinned now returns (text, selected_ids)
+        return "", []
 
     monkeypatch.setattr("cubeplex.middleware.memory._render_pinned", _empty)
 
