@@ -109,8 +109,8 @@ class OpenSandbox(Sandbox):
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         """Write files then chown by numeric uid so agent can edit them.
 
-        Named owner=cubeplex breaks on older sandbox images that only have
-        ``neko`` at uid 1000. Numeric chown works for both identities.
+        The files API typically writes as root; without a follow-up chown the
+        agent (uid 1000) cannot edit the uploaded path.
         """
         if not files:
             return
@@ -195,8 +195,6 @@ class OpenSandbox(Sandbox):
     async def start_terminal(self) -> None:
         """Start ttyd; shell runs as the configured sandbox uid when possible."""
         if self._run_uid is not None:
-            # setpriv by numeric id works on both old (neko@1000) and new
-            # (cubeplex@1000) images; named runuser would break on mismatch.
             gid = self._run_gid if self._run_gid is not None else self._run_uid
             shell = f"setpriv --reuid={self._run_uid} --regid={gid} --clear-groups -- bash"
         elif self._run_user:
@@ -215,20 +213,22 @@ class OpenSandbox(Sandbox):
             raise SandboxError(f"failed to start sandbox terminal: {result.output}")
 
     async def ensure_workspace_owner(self) -> None:
-        """Best-effort chown of the workdir to the sandbox uid (root only).
+        """Best-effort chown of the workdir mount point (non-recursive).
 
-        PVC mounts often arrive as root-owned; agent commands run as uid 1000
-        and need write access. Uses numeric uid so old images (user named
-        ``neko``) and new images (``cubeplex``) both work. Never raises:
-        attach paths must not fail solely because chown is unavailable.
+        Fresh PVC mounts are usually root-owned and mode 755, so uid 1000
+        cannot create files until the mount point itself is chowned. Only the
+        directory is fixed — not a recursive walk of existing content. Never
+        raises: create must not fail solely because chown is unavailable.
         """
         if self._run_uid is None:
             return
         gid = self._run_gid if self._run_gid is not None else self._run_uid
+        # Non-recursive: only the mount point. Agent-created files already land
+        # as run_uid; uploads are chowned per-path in upload().
         try:
             result = await self.execute(
-                f"chown -R {self._run_uid}:{gid} {shlex.quote(self._workdir)} 2>/dev/null || true",
-                timeout=60,
+                f"chown {self._run_uid}:{gid} {shlex.quote(self._workdir)} 2>/dev/null || true",
+                timeout=30,
                 as_root=True,
             )
         except Exception as exc:
