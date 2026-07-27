@@ -1,5 +1,6 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
+import shlex
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -106,14 +107,17 @@ class OpenSandbox(Sandbox):
             return ExecuteResult(output=output, exit_code=exit_code)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
+        """Write files then chown by numeric uid so agent can edit them.
+
+        Named owner=cubeplex breaks on older sandbox images that only have
+        ``neko`` at uid 1000. Numeric chown works for both identities.
+        """
+        if not files:
+            return
         with _as_sandbox_error():
             for path, content in files:
-                await self._sandbox.files.write_file(
-                    path,
-                    content,
-                    owner=self._run_user,
-                    group=self._run_user,
-                )
+                await self._sandbox.files.write_file(path, content)
+        await self._chown_paths([path for path, _ in files])
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         with _as_sandbox_error():
@@ -127,6 +131,28 @@ class OpenSandbox(Sandbox):
                     raise
                 result.append((path, content))
             return result
+
+    async def _chown_paths(self, paths: list[str]) -> None:
+        """Best-effort chown of paths to run_uid:run_gid (root only)."""
+        if self._run_uid is None or not paths:
+            return
+        gid = self._run_gid if self._run_gid is not None else self._run_uid
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        try:
+            result = await self.execute(
+                f"chown {self._run_uid}:{gid} {quoted} 2>/dev/null || true",
+                timeout=60,
+                as_root=True,
+            )
+        except Exception as exc:
+            logger.warning("chown after upload failed on sandbox {}: {}", self.id, exc)
+            return
+        if result.exit_code not in (0, None):
+            logger.warning(
+                "chown after upload failed on sandbox {}: {}",
+                self.id,
+                result.output,
+            )
 
     def _panel_endpoint(self, port: int, expires_in: int) -> BrowserEndpoint:
         """Build a cubeplex-signed panel-proxy URL for a sandbox port.
@@ -167,10 +193,13 @@ class OpenSandbox(Sandbox):
             raise RuntimeError(f"failed to start sandbox browser: {result.output}")
 
     async def start_terminal(self) -> None:
-        """Start ttyd; shell runs as the configured sandbox user when possible."""
-        if self._run_user:
-            # runuser keeps the interactive shell as cubeplex even if ttyd is
-            # launched with root privileges for start-stop-daemon.
+        """Start ttyd; shell runs as the configured sandbox uid when possible."""
+        if self._run_uid is not None:
+            # setpriv by numeric id works on both old (neko@1000) and new
+            # (cubeplex@1000) images; named runuser would break on mismatch.
+            gid = self._run_gid if self._run_gid is not None else self._run_uid
+            shell = f"setpriv --reuid={self._run_uid} --regid={gid} --clear-groups -- bash"
+        elif self._run_user:
             shell = f"runuser -u {self._run_user} -- bash"
         else:
             shell = "bash"
@@ -186,17 +215,19 @@ class OpenSandbox(Sandbox):
             raise SandboxError(f"failed to start sandbox terminal: {result.output}")
 
     async def ensure_workspace_owner(self) -> None:
-        """Best-effort chown of the workdir to the sandbox user (root only).
+        """Best-effort chown of the workdir to the sandbox uid (root only).
 
-        PVC mounts often arrive as root-owned; agent commands run as cubeplex
-        and need write access. Safe no-op when run_user is unset. Never raises:
-        provisioning must not fail solely because chown is unavailable.
+        PVC mounts often arrive as root-owned; agent commands run as uid 1000
+        and need write access. Uses numeric uid so old images (user named
+        ``neko``) and new images (``cubeplex``) both work. Never raises:
+        attach paths must not fail solely because chown is unavailable.
         """
-        if not self._run_user:
+        if self._run_uid is None:
             return
+        gid = self._run_gid if self._run_gid is not None else self._run_uid
         try:
             result = await self.execute(
-                f"chown -R {self._run_user}:{self._run_user} {self._workdir} 2>/dev/null || true",
+                f"chown -R {self._run_uid}:{gid} {shlex.quote(self._workdir)} 2>/dev/null || true",
                 timeout=60,
                 as_root=True,
             )
