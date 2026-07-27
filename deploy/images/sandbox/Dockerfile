@@ -214,14 +214,21 @@ COPY --from=neko /etc/neko /etc/neko
 COPY --from=neko /var/www /var/www
 COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/modules/drivers/dummy_drv.so
 COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
+# Upstream neko.yaml sets implicit_hosting: false (legacy multi-viewer default).
+# Cubeplex owns watch/takeover at the panel layer (BrowserView overlay), so the
+# member must get input on the first click after "Take over" without a second
+# in-Neko mouse/control toggle. See issue #423.
+RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.yaml
 # Trim the embedded Neko client UI:
 # - hide the "open in new window" (popout) control — useless in the panel;
 # - hide every n.eko logo (connect + loading splashes) so none flashes;
-# - hide the player-overlay (the "click to play / unmute" prompt).
+# - hide the player-overlay (the "click to play / unmute" prompt);
+# - hide Neko's host/control mouse chrome (redundant with cubeplex Take over;
+#   with implicit_hosting the interactive toggle is already a no-op status icon).
 # The script forces the <video> muted so it autoplays (browser autoplay policy
 # only allows muted autoplay; volume=0 alone still triggers the prompt), making
 # the now-hidden overlay unnecessary. Keep clipboard + fullscreen.
-RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
+RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.video-menu li:has(.fa-mouse-pointer),.video-menu li:has(.fa-computer-mouse),.video-menu li:has(.fa-mouse){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
 
 # neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
 # build stays deterministic across base-image variants (never hard-fail).
@@ -261,12 +268,15 @@ ARG NEKO_TURN_URL=turn:192.168.1.208:3478
 ARG NEKO_TURN_USER=neko
 ARG NEKO_TURN_CRED=neko
 
+# First click after cubeplex "Take over" grants control (no in-Neko mouse step).
+# Env wins over /etc/neko/neko.yaml if the image is rebuilt from a newer base.
 ENV USER=neko \
     DISPLAY=:99.0 \
     XDG_RUNTIME_DIR=/tmp/runtime-neko \
     NEKO_SERVER_BIND=:8080 \
     NEKO_PLUGINS_ENABLED=true \
     NEKO_PLUGINS_DIR=/etc/neko/plugins/ \
+    NEKO_SESSION_IMPLICIT_HOSTING=true \
     NEKO_WEBRTC_ICELITE=false \
     NEKO_WEBRTC_ICESERVERS_FRONTEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]" \
     NEKO_WEBRTC_ICESERVERS_BACKEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]"

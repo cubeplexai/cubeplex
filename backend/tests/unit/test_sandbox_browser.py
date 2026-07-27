@@ -2,10 +2,29 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
 from cubeplex.sandbox.local import LocalSandbox
+
+# backend/tests/unit → repo root
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_SANDBOX_DOCKERFILE = _REPO_ROOT / "deploy" / "images" / "sandbox" / "Dockerfile"
+
+
+def test_sandbox_image_enables_neko_implicit_hosting() -> None:
+    """Take over must not require a second in-Neko mouse/control click (#423).
+
+    Upstream Neko defaults to ``implicit_hosting: false``. The sandbox image must
+    flip that so the first click after cubeplex "Take over" grants control, and
+    must hide Neko's redundant mouse control chrome in the embed.
+    """
+    text = _SANDBOX_DOCKERFILE.read_text(encoding="utf-8")
+    assert "NEKO_SESSION_IMPLICIT_HOSTING=true" in text
+    assert "implicit_hosting: false/implicit_hosting: true" in text
+    assert "fa-mouse-pointer" in text
 
 
 class _RecordingSandbox(Sandbox):
