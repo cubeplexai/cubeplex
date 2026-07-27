@@ -150,9 +150,8 @@ class ReflectionRunner:
                 for mid, mtype, mcontent in inp.existing_memory_items
             ]
             memory_block = (
-                "Your current memory for this user (personal, active):\n"
-                + "\n".join(lines)
-                + "\n\n"
+                "Active personal memory for this user in **this workspace** "
+                "(does not cross workspaces):\n" + "\n".join(lines) + "\n\n"
             )
 
         tools_block = ""

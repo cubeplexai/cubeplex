@@ -2,7 +2,7 @@
 
 A cheap Redis gate (per-conversation run counter + last-consolidated timestamp +
 lock) decides when to run a single provider.generate pass that distills the
-conversation's recent history into the user's personal memory.
+conversation's recent history into this workspace's personal + workspace memory.
 """
 
 from __future__ import annotations
@@ -108,6 +108,17 @@ from cubeplex.models.memory import (  # noqa: E402
 from cubeplex.services.memory import CreateMemoryInput, MemoryService  # noqa: E402
 
 _VALID_TYPES = {t.value for t in MemoryType}
+_VALID_EXTRACT_SCOPES = {MemoryScope.PERSONAL.value, MemoryScope.WORKSPACE.value}
+
+
+def _default_extract_scope(type_value: str) -> str:
+    """Map type → default scope when the model omits scope."""
+    if type_value in (MemoryType.PREFERENCE.value, MemoryType.CORRECTION.value):
+        return MemoryScope.PERSONAL.value
+    if type_value == MemoryType.ORG_POLICY.value:
+        # Consolidation must not invent org scope without an explicit product path.
+        return MemoryScope.WORKSPACE.value
+    return MemoryScope.WORKSPACE.value
 
 
 def parse_ops(raw: str, *, max_ops: int) -> list[dict[str, Any]] | None:
@@ -127,12 +138,23 @@ def parse_ops(raw: str, *, max_ops: int) -> list[dict[str, Any]] | None:
             continue
         action = op.get("action")
         if action == "extract":
-            if (
-                op.get("type") in _VALID_TYPES
-                and isinstance(op.get("content"), str)
-                and op["content"].strip()
-            ):
-                valid.append(op)
+            type_val = op.get("type")
+            content = op.get("content")
+            if type_val not in _VALID_TYPES or not isinstance(content, str) or not content.strip():
+                continue
+            scope_val = op.get("scope")
+            if scope_val is None:
+                scope_val = _default_extract_scope(str(type_val))
+            if scope_val not in _VALID_EXTRACT_SCOPES:
+                continue
+            valid.append(
+                {
+                    "action": "extract",
+                    "scope": scope_val,
+                    "type": type_val,
+                    "content": content,
+                }
+            )
         elif action == "merge":
             if (
                 isinstance(op.get("id"), str)
@@ -153,16 +175,19 @@ async def apply_ops(
     conversation_id: str,
     run_id: str | None,
 ) -> None:
-    """Apply ops. Scope hard-coded PERSONAL on create; merge/archive verify the
-    target is the user's PERSONAL item (via repo.get) before mutating, so a
-    hallucinated id can't touch a shared item. Source stamped CONSOLIDATION."""
+    """Apply ops via MemoryService.
+
+    extract uses validated scope (personal|workspace); personal creates stamp
+    the service workspace_id. merge/archive allow personal or workspace items
+    the repo can read (hallucinated ids are skipped).
+    """
     for op in ops:
         action = op["action"]
         try:
             if action == "extract":
                 await service.create(
                     CreateMemoryInput(
-                        scope=MemoryScope.PERSONAL,
+                        scope=MemoryScope(op["scope"]),
                         type=MemoryType(op["type"]),
                         content=op["content"].strip(),
                         source_type=MemorySourceType.CONSOLIDATION,
@@ -172,7 +197,10 @@ async def apply_ops(
                 )
             elif action in ("merge", "archive"):
                 target = await service.repo.get(op["id"])
-                if target is None or target.scope != MemoryScope.PERSONAL:
+                if target is None or target.scope not in (
+                    MemoryScope.PERSONAL,
+                    MemoryScope.WORKSPACE,
+                ):
                     continue
                 if action == "merge":
                     await service.update(op["id"], content=op["content"].strip())
@@ -188,17 +216,25 @@ MAX_OPS = 20
 HISTORY_MSG_CAP = 40
 LOCK_TTL_S = 120
 EXTRACT_MODEL_MAX_TOKENS = 1500
+EXISTING_PERSONAL_CAP = 100
+EXISTING_WORKSPACE_CAP = 100
 
 CONSOLIDATION_SYSTEM = (
-    "You distill a conversation into durable PERSONAL memory for one user. Output ONLY\n"
-    'a JSON object: {"ops": [...]}. Each op is one of:\n'
-    '- {"action":"extract","type":<preference|correction|procedure|project_fact|decision|org_policy>,"content":"..."}\n'
+    "You distill a conversation into durable memory for **this workspace**.\n"
+    'Output ONLY a JSON object: {"ops": [...]}. Each op is one of:\n'
+    '- {"action":"extract","scope":"personal"|"workspace","type":'
+    "<preference|correction|procedure|project_fact|decision|org_policy>,"
+    '"content":"..."}\n'
     '- {"action":"merge","id":"<existing memory id>","content":"<updated text>"}\n'
     '- {"action":"archive","id":"<existing memory id>"}\n'
-    "Rules: only durable facts worth recalling in FUTURE conversations; never secrets\n"
-    "or transient task state; prefer merge over a contradictory new extract; dedup\n"
-    f"against the existing items provided; at most {MAX_OPS} ops. If nothing is worth saving,\n"
-    'return {"ops": []}.\n'
+    "Scope: personal = private facts about how this user works **in this "
+    "workspace only** (preferences/corrections). workspace = shared project "
+    "facts/procedures/decisions for the team.\n"
+    "Rules: only durable facts worth recalling in FUTURE conversations in this "
+    "workspace; never secrets or transient task state; **prefer merge and "
+    "archive over extract** when existing items already cover the fact; "
+    f"dedup against the existing items provided; at most {MAX_OPS} ops; "
+    'few extracts. If nothing is worth saving, return {"ops": []}.\n'
 )
 
 
@@ -261,13 +297,26 @@ async def run_consolidation(
 
         async with session_maker() as s:
             repo = MemoryRepository(s, user_id=user_id, org_id=org_id, workspace_id=workspace_id)
-            existing = await repo.list(
-                scope=MemoryScope.PERSONAL, status=MemoryStatus.ACTIVE, limit=200
+            personal = await repo.list(
+                scope=MemoryScope.PERSONAL,
+                status=MemoryStatus.ACTIVE,
+                limit=EXISTING_PERSONAL_CAP,
             )
-        existing_text = "\n".join(f"- [{m.id}] ({m.type.value}) {m.content}" for m in existing)
-
+            workspace_items = await repo.list(
+                scope=MemoryScope.WORKSPACE,
+                status=MemoryStatus.ACTIVE,
+                limit=EXISTING_WORKSPACE_CAP,
+            )
+        personal_text = "\n".join(
+            f"- [{m.id}] (personal/{m.type.value}) {m.content}" for m in personal
+        )
+        workspace_text = "\n".join(
+            f"- [{m.id}] (workspace/{m.type.value}) {m.content}" for m in workspace_items
+        )
         prompt = (
-            f"Existing personal memory items:\n{existing_text or '(none)'}\n\n"
+            "Existing memory in this workspace:\n"
+            f"Personal (private to this user):\n{personal_text or '(none)'}\n\n"
+            f"Workspace (shared):\n{workspace_text or '(none)'}\n\n"
             f"Conversation transcript:\n{history_text}"
         )
         messages: list[Message] = [UserMessage(content=[TextContent(text=prompt)])]

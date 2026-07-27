@@ -1,10 +1,9 @@
-"""Memory injection E2E (issue #64, plan task 8.1).
+"""Memory injection E2E (issue #64, plan task 8.1; updated for workspace-bound personal).
 
-Asserts saved memory items actually shape model behavior:
+Asserts saved memory items actually shape model behavior / visibility:
 
-  1. A personal-scope memory item set in workspace A continues to
-     apply when the same user starts a fresh conversation in
-     workspace B (personal scope crosses workspace boundaries).
+  1. A personal-scope memory item set in workspace A is **not** visible when
+     listing personal memory in workspace B (personal is per-workspace).
   2. A workspace-scope memory item set by user A applies when user B
      (a different member of the same workspace) starts a fresh
      conversation (workspace scope crosses user boundaries).
@@ -12,17 +11,12 @@ Asserts saved memory items actually shape model behavior:
 
 from __future__ import annotations
 
-import re
-
 import httpx
 import pytest
 
 from tests.e2e.memory._helpers import send_message_and_collect_text
 
 pytestmark = pytest.mark.real_llm
-
-# A reply containing at least one CJK Unified Ideograph character.
-_CJK_RE = re.compile(r"[一-鿿]")
 
 
 async def _save_memory(
@@ -39,6 +33,20 @@ async def _save_memory(
         json={"scope": scope, "type": type_, "content": text},
     )
     assert resp.status_code == 201, f"Failed to save memory: {resp.text}"
+
+
+async def _list_memory(
+    client: httpx.AsyncClient, ws_id: str, *, scope: str
+) -> list[dict[str, object]]:
+    resp = await client.get(f"/api/v1/ws/{ws_id}/memory", params={"scope": scope})
+    assert resp.status_code == 200, f"Failed to list memory: {resp.text}"
+    body = resp.json()
+    # API may return {items: [...]} or a bare list depending on version.
+    if isinstance(body, list):
+        return body
+    items = body.get("items")
+    assert isinstance(items, list), f"Unexpected list payload: {body}"
+    return items
 
 
 async def _new_conversation(client: httpx.AsyncClient, ws_id: str, *, title: str) -> str:
@@ -70,36 +78,29 @@ async def _create_workspace(client: httpx.AsyncClient, org_id: str, name: str) -
 
 
 @pytest.mark.asyncio
-async def test_personal_preference_applies_in_different_workspace(
+async def test_personal_preference_isolated_to_workspace(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """A personal-scope preference set in ws A is honored in ws B."""
+    """Personal memory saved in ws A must not appear in ws B's personal list."""
     client, ws_a_id = member_client
 
-    # Create a second workspace in the same org so the same user can
-    # access both via member_client.
     org_id = await _get_user_org_id(client)
     ws_b_id = await _create_workspace(client, org_id, "ws-b-injection-test")
 
-    # Save personal preference in ws_a (any workspace will do for personal scope).
+    marker = "Always reply in 中文 (Chinese) — isolation probe."
     await _save_memory(
         client,
         ws_a_id,
         scope="personal",
         type_="preference",
-        text="Always reply in 中文 (Chinese).",
+        text=marker,
     )
 
-    # Start fresh conversation in ws_b — personal memory should cross workspace.
-    conv_id = await _new_conversation(client, ws_b_id, title="injection-personal")
-    reply = await send_message_and_collect_text(
-        client, ws_b_id, conv_id, "Tell me a fun fact about cats."
-    )
+    items_a = await _list_memory(client, ws_a_id, scope="personal")
+    assert any(i.get("content") == marker for i in items_a), items_a
 
-    assert _CJK_RE.search(reply), (
-        f"Expected the reply to contain Chinese characters because the "
-        f"personal-scope memory said so, but got:\n{reply}"
-    )
+    items_b = await _list_memory(client, ws_b_id, scope="personal")
+    assert not any(i.get("content") == marker for i in items_b), items_b
 
 
 @pytest.mark.asyncio

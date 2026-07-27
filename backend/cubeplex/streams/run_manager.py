@@ -1897,6 +1897,7 @@ class RunManager:
                                 service_factory=_memory_service_factory,
                                 conversation_id=_inp.conversation_id,
                                 run_id=_inp.run_id,
+                                max_creates=2,
                             )
 
                             def _refl_price_lookup(

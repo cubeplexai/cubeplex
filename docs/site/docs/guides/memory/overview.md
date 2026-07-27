@@ -13,7 +13,7 @@ CubePlex organizes memory into three scopes. Each scope controls who can see and
 
 | Tier | Who sees it | Best for |
 |---|---|---|
-| **Personal** | Only you, in any workspace within your org | Individual preferences, corrections, personal notes |
+| **Personal** | Only you, **in the current workspace** | Your preferences and corrections in this workspace |
 | **Workspace** | All members of the workspace | Project facts, team procedures, codebase conventions |
 | **Organization** | Everyone across all workspaces | Company-wide policies, brand guidelines, shared decisions |
 

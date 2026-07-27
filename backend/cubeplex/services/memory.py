@@ -47,7 +47,10 @@ class MemoryService:
 
     def _check_write_scope(self, scope: MemoryScope) -> None:
         if scope == MemoryScope.PERSONAL:
-            return  # any logged-in user can write their own
+            # Personal is private-to-user within the current workspace only.
+            if not self.workspace_id:
+                raise MemoryPermissionError("personal memory requires workspace context")
+            return
         if scope == MemoryScope.WORKSPACE and not self.workspace_id:
             raise MemoryPermissionError("workspace memory requires workspace context")
         if scope == MemoryScope.ORG and not self.org_id:
@@ -58,16 +61,29 @@ class MemoryService:
         if inp.scope in (MemoryScope.WORKSPACE, MemoryScope.ORG):
             screen_shared_content(inp.content)  # raises MemoryScreenError
 
-        # Exact-content dedup
+        # L0 exact-content dedup (normalized)
         existing = await self.repo.find_exact(scope=inp.scope, type_=inp.type, content=inp.content)
         if existing is not None:
             return await self.repo.bump_updated_at(existing, by_user_id=self.user_id)
 
+        if inp.scope == MemoryScope.PERSONAL:
+            org_id = None
+            workspace_id = self.workspace_id
+            owner_user_id = self.user_id
+        elif inp.scope == MemoryScope.WORKSPACE:
+            org_id = self.org_id
+            workspace_id = self.workspace_id
+            owner_user_id = None
+        else:
+            org_id = self.org_id
+            workspace_id = None
+            owner_user_id = None
+
         item = MemoryItem(
             scope=inp.scope,
-            org_id=self.org_id if inp.scope != MemoryScope.PERSONAL else None,
-            workspace_id=self.workspace_id if inp.scope == MemoryScope.WORKSPACE else None,
-            owner_user_id=self.user_id if inp.scope == MemoryScope.PERSONAL else None,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            owner_user_id=owner_user_id,
             type=inp.type,
             content=inp.content,
             confidence=inp.confidence,

@@ -23,9 +23,10 @@ MEMORY_AUTHORING_BLOCK: str = """\
 ## Saving memory
 
 You can persist durable knowledge with the `memory_save` tool so future
-conversations benefit. Build this up over time — don't wait to be asked.
+conversations in this workspace benefit. Build this up over time — don't wait
+to be asked.
 
-**Save PROACTIVELY (scope=personal) when you learn:**
+**What to save (when durable and useful later):**
 - `preference` — the user's style or how they want you to collaborate.
 - `correction` — the user corrects you ("no, don't do X"), OR confirms a
   non-obvious approach worked ("yes, exactly", accepting an unusual choice).
@@ -34,15 +35,21 @@ conversations benefit. Build this up over time — don't wait to be asked.
 - `project_fact` / `decision` — who is doing what, why, or by when; or a settled
   decision. Convert relative dates to absolute (e.g. "Thursday" → "2026-03-05").
 - `procedure` — a reusable workflow worth repeating.
-- `org_policy` — an organization-level rule or policy.
+- `org_policy` — an organization-level rule or policy (only with explicit share).
 
-**Scope:** proactive saves are ALWAYS `scope=personal`. Use `workspace`/`org`
-ONLY when the user explicitly asks to share something with their team/org.
+**Scope:**
+- `personal` — private to this user **in this workspace only** (about how they
+  work here). Does not cross workspaces.
+- `workspace` — shared with workspace members (project facts, team procedures).
+  Use for team/project knowledge, or when the user asks to share with the team.
+- `org` — only when the user explicitly asks to share with the organization.
 
-If the user explicitly asks you to remember something, save it immediately.
+If the user explicitly asks you to remember something, save it immediately
+(choose scope as above).
 
-**Do NOT save:** things trivially derivable from the code or git history; secrets;
-transient task state (use a plan/todo instead). Prefer updating an existing item
-(`memory_update`) over creating a contradictory new one — check first with
-`memory_search`.
+**Before save:** call `memory_search` for related items. Prefer
+`memory_update` (or archive) over creating a contradictory or duplicate row.
+
+**Do NOT save:** things trivially derivable from the code or git history;
+secrets; transient task state (use a plan/todo instead).
 """

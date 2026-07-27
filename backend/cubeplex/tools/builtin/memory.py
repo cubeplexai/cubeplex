@@ -65,13 +65,14 @@ def create_memory_tools(
     service_factory: Callable[[], AbstractAsyncContextManager[MemoryService]],
     conversation_id: str | None = None,
     run_id: str | None = None,
+    max_creates: int | None = None,
 ) -> list[AgentTool]:  # type: ignore[type-arg]
     """Build the three memory cubepi.AgentTool instances backed by a service factory.
 
-    Mirrors cubeplex.tools.builtin.memory.create_memory_tools — same tool names,
-    same schemas, same business logic.  Only the wrapper shape changes: each
-    tool's execute accepts (tool_call_id, args, *, signal, on_update).
+    ``max_creates`` caps successful ``memory_save`` calls (used by reflection to
+    limit per-run extract spam). ``None`` means unlimited.
     """
+    creates_used = 0
 
     async def _memory_save_execute(
         tool_call_id: str,
@@ -80,7 +81,14 @@ def create_memory_tools(
         signal: object = None,
         on_update: object = None,
     ) -> AgentToolResult:
+        nonlocal creates_used
         del tool_call_id, signal, on_update
+        if max_creates is not None and creates_used >= max_creates:
+            result: dict[str, Any] = {
+                "status": "error",
+                "error": f"memory_save create budget exhausted ({max_creates} per run)",
+            }
+            return AgentToolResult(content=[TextContent(text=json.dumps(result))])
         src_type = (
             MemorySourceType.REFLECTION
             if reflection_source_active()
@@ -100,10 +108,11 @@ def create_memory_tools(
                     )
                 )
             except MemoryPermissionError as exc:
-                result: dict[str, Any] = {"status": "error", "error": str(exc)}
+                result = {"status": "error", "error": str(exc)}
             except MemoryScreenError as exc:
                 result = {"status": "rejected", "error": str(exc)}
             else:
+                creates_used += 1
                 result = {"status": "saved", "memory_id": item.id}
         return AgentToolResult(content=[TextContent(text=json.dumps(result))])
 
@@ -164,12 +173,13 @@ def create_memory_tools(
     memory_save = AgentTool(
         name="memory_save",
         description=(
-            "Save a durable knowledge item. scope=personal for the current "
-            "user only; scope=workspace for all members of this workspace; "
-            "scope=org for all members of this organization. Choose type "
-            "carefully: preference (style/behavior), correction (fix a "
-            "repeated mistake), procedure (a workflow), project_fact, "
-            "decision, org_policy."
+            "Save a durable knowledge item. scope=personal is private to the "
+            "current user in this workspace only (does not cross workspaces); "
+            "scope=workspace is shared with workspace members; scope=org is "
+            "organization-wide (only when the user asks). Prefer personal for "
+            "user preferences/corrections; workspace for project/team facts. "
+            "Types: preference, correction, procedure, project_fact, decision, "
+            "org_policy. Call memory_search first to avoid duplicates."
         ),
         parameters=MemorySaveArgs,
         execute=_memory_save_execute,

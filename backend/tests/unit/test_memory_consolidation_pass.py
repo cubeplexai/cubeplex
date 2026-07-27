@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.models.memory import MemoryScope, MemorySourceType
 from cubeplex.services import memory_consolidation as mc
 
 
@@ -59,36 +59,68 @@ def test_parse_ops_filters_invalid_ops_keeps_valid():
     ops = mc.parse_ops(raw, max_ops=10)
     assert ops is not None
     assert [o["action"] for o in ops] == ["extract", "merge", "archive"]
+    assert ops[0]["scope"] == "personal"  # default for preference
+
+
+def test_parse_ops_extract_scope_and_type_defaults():
+    raw = json.dumps(
+        {
+            "ops": [
+                {
+                    "action": "extract",
+                    "scope": "workspace",
+                    "type": "project_fact",
+                    "content": "uses pnpm",
+                },
+                {"action": "extract", "type": "project_fact", "content": "default to ws"},
+                {"action": "extract", "scope": "org", "type": "preference", "content": "no org"},
+            ]
+        }
+    )
+    ops = mc.parse_ops(raw, max_ops=10)
+    assert ops is not None
+    assert len(ops) == 2
+    assert ops[0]["scope"] == "workspace"
+    assert ops[1]["scope"] == "workspace"
 
 
 @pytest.mark.asyncio
-async def test_apply_ops_forces_personal_scope_and_source():
+async def test_apply_ops_extract_respects_scope_and_source():
     svc = _FakeService(items={"m1": _Item(MemoryScope.PERSONAL), "m2": _Item(MemoryScope.PERSONAL)})
     ops = [
-        {"action": "extract", "type": "preference", "content": "likes dark mode"},
+        {
+            "action": "extract",
+            "scope": "personal",
+            "type": "preference",
+            "content": "likes dark mode",
+        },
+        {
+            "action": "extract",
+            "scope": "workspace",
+            "type": "project_fact",
+            "content": "uses pnpm",
+        },
         {"action": "merge", "id": "m1", "content": "merged"},
         {"action": "archive", "id": "m2"},
     ]
     await mc.apply_ops(svc, ops, conversation_id="conv1", run_id="run1")
-    assert len(svc.created) == 1
-    inp = svc.created[0]
-    assert inp.scope == MemoryScope.PERSONAL
-    assert inp.type == MemoryType.PREFERENCE
-    assert inp.source_type == MemorySourceType.CONSOLIDATION
-    assert inp.source_conversation_id == "conv1"
+    assert len(svc.created) == 2
+    assert svc.created[0].scope == MemoryScope.PERSONAL
+    assert svc.created[0].source_type == MemorySourceType.CONSOLIDATION
+    assert svc.created[1].scope == MemoryScope.WORKSPACE
     assert svc.updated == [("m1", "merged")]
     assert svc.archived == ["m2"]
 
 
 @pytest.mark.asyncio
-async def test_apply_ops_skips_non_personal_or_missing_targets():
+async def test_apply_ops_merge_allows_workspace_targets():
     svc = _FakeService(items={"m-ws": _Item(MemoryScope.WORKSPACE)})
     ops = [
-        {"action": "merge", "id": "m-ws", "content": "x"},
+        {"action": "merge", "id": "m-ws", "content": "updated ws fact"},
         {"action": "archive", "id": "m-gone"},
     ]
     await mc.apply_ops(svc, ops, conversation_id="conv1", run_id=None)
-    assert svc.updated == []
+    assert svc.updated == [("m-ws", "updated ws fact")]
     assert svc.archived == []
 
 
