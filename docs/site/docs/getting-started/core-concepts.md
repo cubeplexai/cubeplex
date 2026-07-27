@@ -96,7 +96,7 @@ Artifacts are deliverables the agent produces during a conversation. They go bey
 Artifacts are:
 
 - **Versioned** — the agent can iterate on an artifact across multiple turns.
-- **Previewable** — rendered inline in the conversation.
+- **Previewable** — when you are on the conversation, the preview panel opens automatically after the agent saves an artifact; you can also open any artifact from its card.
 - **Downloadable** — save artifacts to your local machine.
 
 ## Automation

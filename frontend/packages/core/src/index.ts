@@ -10,6 +10,14 @@ export {
   isMarkdownEditable,
   markdownFilename,
 } from './lib/artifactMarkdown'
+export {
+  AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
+  DEFAULT_AUTO_OPEN_ARTIFACTS,
+  isAutoOpenArtifactsEnabled,
+  parseAutoOpenArtifacts,
+  setAutoOpenArtifactsEnabled,
+  shouldAutoOpenArtifactPreview,
+} from './lib/autoOpenPreview'
 export type * from './types/provider'
 export * from './api/providers'
 export { useProvidersStore } from './stores/providersStore'
