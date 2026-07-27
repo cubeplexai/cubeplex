@@ -107,3 +107,21 @@ def test_blockquote_inside_code_fence_untouched() -> None:
 def test_nested_blockquote_markers_preserved() -> None:
     out = optimize_markdown_style("  >> nested quote")
     assert out.strip() == ">> nested quote"
+
+
+def test_four_space_indented_gt_not_hoisted_as_blockquote() -> None:
+    """CommonMark: 4+ spaces before `>` is indented code, not a quote."""
+    md = "para\n    > not a quote\nmore"
+    out = optimize_markdown_style(md)
+    assert "    > not a quote" in out
+    assert not any(ln.startswith(">") and "not a quote" in ln for ln in out.splitlines())
+
+
+def test_hoist_does_not_insert_blank_before_following_list_item() -> None:
+    md = "- item one\n  > quote body\n- item two"
+    out = optimize_markdown_style(md)
+    lines = out.splitlines()
+    idx_quote = next(i for i, ln in enumerate(lines) if ln.startswith(">"))
+    assert lines[idx_quote] == "> quote body"
+    # Next non-empty line should be the following list item without an extra blank.
+    assert lines[idx_quote + 1] == "- item two"
