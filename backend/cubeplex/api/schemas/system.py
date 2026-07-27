@@ -14,3 +14,7 @@ class SystemInfoResponse(BaseModel):
     # Active password policy preset ("low" | "high"). Frontend mirrors the
     # rules for pre-submit UX; the backend remains authoritative.
     password_policy: Literal["low", "high"] = "high"
+    # Edition is computed server-side from the configured license key; the
+    # frontend never holds license logic — it only mirrors these two fields.
+    edition: Literal["oss", "ee"] = "oss"
+    features: list[str] = []
