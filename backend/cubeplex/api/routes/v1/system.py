@@ -22,10 +22,13 @@ async def get_system_info(
     mode = getattr(request.app.state, "deployment_mode", "single_tenant")
     from cubeplex.auth.password_policy import get_password_policy
     from cubeplex.config import config
+    from cubeplex.plugins.license import get_edition, get_features
 
     return SystemInfoResponse(
         deployment_mode=mode,  # type: ignore[arg-type]
         version=_CUBEPLEX_VERSION,
         sandbox_enabled=config.get("sandbox.enabled", False),
         password_policy=get_password_policy(),  # type: ignore[arg-type]
+        edition=get_edition(),
+        features=get_features(),
     )
