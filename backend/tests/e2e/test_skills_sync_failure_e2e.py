@@ -85,11 +85,12 @@ async def test_sync_failure_does_not_write_manifest_and_next_sync_heals(
             *,
             timeout: int | None = None,
             envs: dict[str, str] | None = None,
+            as_root: bool = False,
         ) -> Any:
             if "tar -xzf" in command and not fail_once["done"]:
                 fail_once["done"] = True
                 raise RuntimeError("simulated extract failure")
-            return await original_execute(command, timeout=timeout, envs=envs)
+            return await original_execute(command, timeout=timeout, envs=envs, as_root=as_root)
 
         sandbox.execute = _flaky_execute  # type: ignore[method-assign]
 
@@ -192,11 +193,16 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
         *,
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
+        as_root: bool = False,
     ) -> Any:
+        # Must accept as_root: LazySandbox always forwards it. Dropping the
+        # kwarg raises TypeError after the intentional tar failure; the lazy
+        # retry path then wipes the injected MemSandbox, re-syncs successfully,
+        # and spuriously sets _synced_for_this_run True (F4 false-positive).
         if "tar -xzf" in command and not fail_once["done"]:
             fail_once["done"] = True
             raise RuntimeError("simulated extract failure")
-        return await original_execute(command, timeout=timeout, envs=envs)
+        return await original_execute(command, timeout=timeout, envs=envs, as_root=as_root)
 
     sandbox.execute = _flaky_execute  # type: ignore[method-assign]
 
