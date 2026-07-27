@@ -54,6 +54,8 @@ export type PanelView =
       type: 'artifact'
       conversationId: string
       artifactId: string
+      /** Who opened the panel: user click/deep-link vs auto-open on save. */
+      source: 'user' | 'auto'
     }
   | {
       type: 'attachment'
@@ -74,7 +76,7 @@ export interface PanelStore {
     highlightText?: string,
   ) => void
 
-  openArtifact: (conversationId: string, artifactId: string) => void
+  openArtifact: (conversationId: string, artifactId: string, source?: 'user' | 'auto') => void
 
   openAttachment: (info: AttachmentPanelInfo) => void
 
@@ -107,9 +109,9 @@ export const usePanelStore = create<PanelStore>((set) => ({
       },
     }),
 
-  openArtifact: (conversationId, artifactId) =>
+  openArtifact: (conversationId, artifactId, source = 'user') =>
     set({
-      view: { type: 'artifact', conversationId, artifactId },
+      view: { type: 'artifact', conversationId, artifactId, source },
     }),
 
   openAttachment: (info) =>

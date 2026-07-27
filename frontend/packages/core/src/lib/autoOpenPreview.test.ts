@@ -72,21 +72,46 @@ describe('shouldAutoOpenArtifactPreview', () => {
 
 describe('canAutoOpenReplacePanel', () => {
   it('allows closed panel', () => {
-    expect(canAutoOpenReplacePanel({ type: 'closed' }, 'conv-1')).toBe(true)
+    expect(canAutoOpenReplacePanel({ type: 'closed' }, 'conv-1', 'art-1')).toBe(true)
   })
 
-  it('allows same-conversation artifact panel (refresh / switch artifact)', () => {
-    expect(canAutoOpenReplacePanel({ type: 'artifact', conversationId: 'conv-1' }, 'conv-1')).toBe(
-      true,
-    )
+  it('allows same artifact id (version refresh)', () => {
+    expect(
+      canAutoOpenReplacePanel(
+        { type: 'artifact', conversationId: 'conv-1', artifactId: 'art-1', source: 'user' },
+        'conv-1',
+        'art-1',
+      ),
+    ).toBe(true)
+  })
+
+  it('allows switching artifacts only when current view was auto-opened', () => {
+    expect(
+      canAutoOpenReplacePanel(
+        { type: 'artifact', conversationId: 'conv-1', artifactId: 'art-1', source: 'auto' },
+        'conv-1',
+        'art-2',
+      ),
+    ).toBe(true)
+    expect(
+      canAutoOpenReplacePanel(
+        { type: 'artifact', conversationId: 'conv-1', artifactId: 'art-1', source: 'user' },
+        'conv-1',
+        'art-2',
+      ),
+    ).toBe(false)
   })
 
   it('blocks other conversation artifact and non-artifact surfaces', () => {
-    expect(canAutoOpenReplacePanel({ type: 'artifact', conversationId: 'conv-2' }, 'conv-1')).toBe(
-      false,
-    )
-    expect(canAutoOpenReplacePanel({ type: 'tool' }, 'conv-1')).toBe(false)
-    expect(canAutoOpenReplacePanel({ type: 'sandbox' }, 'conv-1')).toBe(false)
-    expect(canAutoOpenReplacePanel({ type: 'attachment' }, 'conv-1')).toBe(false)
+    expect(
+      canAutoOpenReplacePanel(
+        { type: 'artifact', conversationId: 'conv-2', artifactId: 'art-x', source: 'auto' },
+        'conv-1',
+        'art-1',
+      ),
+    ).toBe(false)
+    expect(canAutoOpenReplacePanel({ type: 'tool' }, 'conv-1', 'art-1')).toBe(false)
+    expect(canAutoOpenReplacePanel({ type: 'sandbox' }, 'conv-1', 'art-1')).toBe(false)
+    expect(canAutoOpenReplacePanel({ type: 'attachment' }, 'conv-1', 'art-1')).toBe(false)
   })
 })

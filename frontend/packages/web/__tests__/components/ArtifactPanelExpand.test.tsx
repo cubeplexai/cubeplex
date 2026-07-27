@@ -162,6 +162,7 @@ describe('ArtifactPanel expand theater', () => {
       type: 'artifact',
       conversationId: 'conv-1',
       artifactId: 'art-1',
+      source: 'user',
     })
   })
 
@@ -179,6 +180,7 @@ describe('ArtifactPanel expand theater', () => {
       type: 'artifact',
       conversationId: 'conv-1',
       artifactId: 'art-1',
+      source: 'user',
     })
   })
 
@@ -194,6 +196,7 @@ describe('ArtifactPanel expand theater', () => {
       type: 'artifact',
       conversationId: 'conv-1',
       artifactId: 'art-1',
+      source: 'user',
     })
 
     // After exit, rail Close dismisses the whole panel.
@@ -226,6 +229,7 @@ describe('ArtifactPanel expand theater', () => {
       type: 'artifact',
       conversationId: 'conv-1',
       artifactId: 'art-1',
+      source: 'user',
     })
   })
 
@@ -284,6 +288,7 @@ describe('ArtifactPanel expand theater', () => {
       type: 'artifact',
       conversationId: 'conv-1',
       artifactId: 'art-1',
+      source: 'user',
     })
   })
 

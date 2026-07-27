@@ -59,15 +59,25 @@ export function shouldAutoOpenArtifactPreview(
  * Whether auto-open may replace the current panel view.
  *
  * - Closed → open.
- * - Already showing an artifact for the same conversation → switch / refresh.
- * - Any other surface (tool, sandbox, attachment, other conversation's
- *   artifact) → leave the user's choice alone.
+ * - Same artifact id → refresh (version bump).
+ * - Another artifact for the same conversation only if the current view was
+ *   itself auto-opened (follow the latest deliverable). User-picked artifacts
+ *   are never clobbered by a different artifact.
+ * - Any other surface (tool, sandbox, attachment, other conversation) → leave
+ *   the user's choice alone.
  */
 export function canAutoOpenReplacePanel(
-  view: { type: string; conversationId?: string },
+  view: {
+    type: string
+    conversationId?: string
+    artifactId?: string
+    source?: 'user' | 'auto'
+  },
   conversationId: string,
+  artifactId: string,
 ): boolean {
   if (view.type === 'closed') return true
-  if (view.type === 'artifact' && view.conversationId === conversationId) return true
-  return false
+  if (view.type !== 'artifact' || view.conversationId !== conversationId) return false
+  if (view.artifactId === artifactId) return true
+  return view.source === 'auto'
 }
