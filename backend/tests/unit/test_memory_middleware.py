@@ -26,6 +26,7 @@ from cubeplex.middleware.memory import (
     _render_block,
     _render_pinned,
     _render_snapshot_text,
+    _select_pinned,
     compute_relevance_snapshot,
 )
 from cubeplex.models.memory import MemoryItem, MemoryScope, MemoryStatus, MemoryType
@@ -65,9 +66,13 @@ class _FakeRepo:
 
     def __init__(self, items: list[MemoryItem] | None = None) -> None:
         self._items: list[MemoryItem] = items or []
+        self.touched_ids: list[str] = []
 
     async def list(self, **_kwargs: Any) -> list[MemoryItem]:
         return list(self._items)
+
+    async def touch_used_many(self, memory_ids: list[str]) -> None:
+        self.touched_ids.extend(memory_ids)
 
 
 def _make_middleware(items: list[MemoryItem] | None = None) -> MemoryMiddleware:
@@ -164,10 +169,11 @@ def test_render_pinned_is_byte_stable_across_calls() -> None:
         ),
     ]
     repo = _FakeRepo(items)
-    a = asyncio.run(_render_pinned(repo))  # type: ignore[arg-type]
-    b = asyncio.run(_render_pinned(repo))  # type: ignore[arg-type]
-    assert a == b
-    assert a  # not empty
+    a_text, a_ids = asyncio.run(_render_pinned(repo))  # type: ignore[arg-type]
+    b_text, b_ids = asyncio.run(_render_pinned(repo))  # type: ignore[arg-type]
+    assert a_text == b_text
+    assert a_ids == b_ids
+    assert a_text  # not empty
 
 
 def test_render_pinned_order_is_deterministic_regardless_of_input_order() -> None:
@@ -188,9 +194,48 @@ def test_render_pinned_order_is_deterministic_regardless_of_input_order() -> Non
     ]
     repo_fwd = _FakeRepo(items)
     repo_rev = _FakeRepo(list(reversed(items)))
-    a = asyncio.run(_render_pinned(repo_fwd))  # type: ignore[arg-type]
-    b = asyncio.run(_render_pinned(repo_rev))  # type: ignore[arg-type]
-    assert a == b
+    a_text, _ = asyncio.run(_render_pinned(repo_fwd))  # type: ignore[arg-type]
+    b_text, _ = asyncio.run(_render_pinned(repo_rev))  # type: ignore[arg-type]
+    assert a_text == b_text
+
+
+def test_select_pinned_respects_token_budget() -> None:
+    """Pinned selection stops before exceeding the char budget (budget * 4)."""
+    items = [
+        _mk_item(
+            type_=MemoryType.PREFERENCE,
+            content="x" * 200,
+            confidence=0.9,
+            created_at=datetime(2026, 1, i, tzinfo=UTC),
+        )
+        for i in range(1, 20)
+    ]
+    # token_budget=50 → char_budget=200; first item cost=200+80=280 > 200,
+    # but first item is always taken when selected is empty.
+    selected = _select_pinned(items, token_budget=50, max_items=30)
+    assert len(selected) == 1
+
+    # Larger budget should fit more items.
+    selected_big = _select_pinned(items, token_budget=500, max_items=30)
+    assert 1 < len(selected_big) <= 30
+
+
+def test_select_pinned_prefers_corrections() -> None:
+    pref = _mk_item(
+        type_=MemoryType.PREFERENCE,
+        content="pref",
+        confidence=1.0,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    corr = _mk_item(
+        type_=MemoryType.CORRECTION,
+        content="corr",
+        confidence=0.5,
+        created_at=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    selected = _select_pinned([pref, corr], token_budget=10, max_items=1)
+    assert len(selected) == 1
+    assert selected[0].type == MemoryType.CORRECTION
 
 
 # ---------------------------------------------------------------------------

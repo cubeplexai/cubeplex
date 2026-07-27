@@ -13,6 +13,10 @@ from cubeplex.models.memory import (
 from cubeplex.repositories.memory import MemoryRepository
 from cubeplex.services.memory_screen import screen_shared_content
 
+# Soft cap on active personal items per (user, workspace). When exceeded,
+# oldest/least-used non-correction items are archived before insert.
+PERSONAL_ACTIVE_SOFT_CAP = 80
+
 
 @dataclass
 class CreateMemoryInput:
@@ -67,6 +71,9 @@ class MemoryService:
             return await self.repo.bump_updated_at(existing, by_user_id=self.user_id)
 
         if inp.scope == MemoryScope.PERSONAL:
+            await self._enforce_personal_soft_cap()
+
+        if inp.scope == MemoryScope.PERSONAL:
             org_id = None
             workspace_id = self.workspace_id
             owner_user_id = self.user_id
@@ -95,6 +102,17 @@ class MemoryService:
             created_by_user_id=self.user_id,
         )
         return await self.repo.add(item)
+
+    async def _enforce_personal_soft_cap(self) -> None:
+        """Archive least-valuable personal items until under soft cap."""
+        while True:
+            n = await self.repo.count(scope=MemoryScope.PERSONAL, status=MemoryStatus.ACTIVE)
+            if n < PERSONAL_ACTIVE_SOFT_CAP:
+                return
+            victim = await self.repo.find_eviction_candidate(scope=MemoryScope.PERSONAL)
+            if victim is None:
+                return
+            await self.archive(victim.id)
 
     async def update(
         self,

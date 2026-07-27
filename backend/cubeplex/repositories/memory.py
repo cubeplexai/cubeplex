@@ -1,5 +1,7 @@
 """Memory repository — scope-aware filtering (no OrgScopedMixin)."""
 
+from __future__ import annotations
+
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -187,3 +189,50 @@ class MemoryRepository:
         item.updated_at = datetime.now(UTC)
         item.updated_by_user_id = by_user_id
         return await self.update(item)
+
+    async def touch_used_many(self, memory_ids: list[str]) -> None:
+        """Best-effort batch update of last_used_at for injected memory ids.
+
+        Does not re-check scope read ACL beyond the ids list (caller only
+        passes ids it just selected from this repo's list). Empty input is a
+        no-op. Failures should not block injection; callers may swallow.
+        """
+        if not memory_ids:
+            return
+        now = datetime.now(UTC)
+        # Distinct preserve order while avoiding duplicate updates.
+        seen: set[str] = set()
+        ids: list[str] = []
+        for mid in memory_ids:
+            if mid and mid not in seen:
+                seen.add(mid)
+                ids.append(mid)
+        stmt = select(MemoryItem).where(MemoryItem.id.in_(ids))  # type: ignore[attr-defined]
+        result = await self.session.execute(stmt)
+        rows = list(result.scalars().all())
+        if not rows:
+            return
+        for row in rows:
+            row.last_used_at = now
+            self.session.add(row)
+        await self.session.commit()
+
+    async def find_eviction_candidate(
+        self, *, scope: MemoryScope = MemoryScope.PERSONAL
+    ) -> MemoryItem | None:
+        """Pick the least-valuable active item for soft-cap eviction.
+
+        Prefer never-used, oldest created, non-correction first.
+        """
+        items = await self.list(scope=scope, status=MemoryStatus.ACTIVE, limit=200)
+        if not items:
+            return None
+        items.sort(
+            key=lambda m: (
+                0 if m.type != MemoryType.CORRECTION else 1,
+                0 if m.last_used_at is None else 1,
+                m.last_used_at.timestamp() if m.last_used_at else 0.0,
+                m.created_at.timestamp(),
+            )
+        )
+        return items[0]
