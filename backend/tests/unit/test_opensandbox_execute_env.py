@@ -169,8 +169,8 @@ async def test_start_browser_runs_as_root() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_chowns_by_uid_not_username() -> None:
-    """Upload writes bytes then chowns by numeric uid (old-image safe)."""
+async def test_upload_chowns_by_uid() -> None:
+    """Upload writes bytes then chowns by numeric uid (files API is root)."""
     backend, raw = _make_backend()
 
     await backend.upload([("/workspace/hello.txt", b"hi")])
@@ -181,8 +181,26 @@ async def test_upload_chowns_by_uid_not_username() -> None:
     cmd, opts = calls[0]
     assert "chown 1000:1000" in cmd
     assert "/workspace/hello.txt" in cmd
+    assert "-R" not in cmd
     assert opts is not None
     assert opts.uid is None  # as_root
+
+
+@pytest.mark.asyncio
+async def test_ensure_workspace_owner_chowns_mount_point_only() -> None:
+    """Create-time fix: chown the workdir, not a recursive tree walk."""
+    backend, _ = _make_backend()
+
+    await backend.ensure_workspace_owner()
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, opts = calls[0]
+    assert cmd.startswith("chown 1000:1000 ")
+    assert "-R" not in cmd
+    assert "/workspace" in cmd
+    assert opts is not None
+    assert opts.uid is None
 
 
 @pytest.mark.asyncio
