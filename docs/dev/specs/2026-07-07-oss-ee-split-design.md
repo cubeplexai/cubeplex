@@ -447,11 +447,12 @@ independently released packages is not.
 
 **Delivery stages** (each independently shippable):
 
-0. **Plugin seam simplification** — §9: delete entry-points discovery and
-   arbitration, keep the Protocols, replace with the single optional import.
-   **This is a prerequisite of stage 1**, because stage 1's license check
-   attaches to the import gate; doing it afterwards means writing that check
-   twice. Plan to be written.
+0. **Plugin seam simplification** —
+   [`docs/dev/plans/2026-07-27-plugin-seam-simplification.md`](../plans/2026-07-27-plugin-seam-simplification.md):
+   delete entry-points discovery and arbitration, keep the Protocols, replace
+   with the single optional import. **This is a prerequisite of stage 1**,
+   because stage 1's license check attaches to the import gate; doing it
+   afterwards means writing that check twice.
 1. **Edition foundation** —
    [`docs/dev/plans/2026-07-07-oss-ee-edition-foundation.md`](../plans/2026-07-07-oss-ee-edition-foundation.md):
    license module + startup enforcement + `/system/info` edition + multi-org

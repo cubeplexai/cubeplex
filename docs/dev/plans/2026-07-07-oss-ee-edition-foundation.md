@@ -14,12 +14,14 @@ backend is the single authority on edition: the frontend only reads
 Multi-org is gated at the only org-creation entrypoint (onboarding full mode) plus the
 existing single-tenant startup consistency check.
 
-**Prerequisite — stage 0 must land first.** Task 3 attaches the license check to the
-`import cubeplex_ee` gate that stage 0 (plugin seam simplification, spec §9) introduces at
-`api/app.py:91`. Executing this plan before stage 0 means writing that check twice, against
-`PluginRegistry.discover()` and then again against the import gate. Stage 0's own plan is
-still to be written; it deletes ~160 lines of entry-points discovery/arbitration from
-`plugins/registry.py` and ~611 lines of now-unreachable tests from `tests/plugins/`.
+**Prerequisite — stage 0 must land first:**
+[`docs/dev/plans/2026-07-27-plugin-seam-simplification.md`](2026-07-27-plugin-seam-simplification.md).
+Task 3 attaches the license check to the `import cubeplex_ee` gate that stage 0 (plugin seam
+simplification, spec §9) introduces at `api/app.py:91`. Executing this plan before stage 0
+means writing that check twice, against `PluginRegistry.discover()` and then again against
+the import gate. Stage 0 also leaves the registry with the `register_*` methods that
+`cubeplex_ee.register()` calls, and with `bind_defaults()` taking no `config=` argument —
+Task 3 Step 4 below assumes both.
 
 **Revised 2026-07-27** against the tree as it stands. Three changes from the 07-07 draft:
 Task 3 moved from `PluginRegistry.discover()` to the import gate (above); Task 7 gates four
