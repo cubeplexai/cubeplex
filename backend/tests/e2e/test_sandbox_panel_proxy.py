@@ -2,7 +2,12 @@
 
 Builds a minimal app carrying only the panel router and forwards it at a
 test-double upstream (a uvicorn server standing in for opensandbox-server's
-server-proxy). No DB / real external systems -> integration.
+server-proxy). It hits a FastAPI app over a real socket -> e2e.
+
+The upstream host and the token secret are injected by monkeypatching the panel
+router's module-level helpers, so the test never touches the global dynaconf
+config (whose lazy `@format` `sandbox.domain` caches on first read and can't be
+re-overridden mid-suite).
 """
 
 from __future__ import annotations
@@ -30,6 +35,17 @@ def _free_port() -> int:
     return port
 
 
+def _wait_accepting(port: int, timeout: float = 15.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError(f"upstream on :{port} never started accepting")
+
+
 @pytest.fixture
 def upstream_port():
     """A stand-in opensandbox-server server-proxy: echoes what it received."""
@@ -54,11 +70,7 @@ def upstream_port():
     server = uvicorn.Server(uvicorn.Config(up, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    for _ in range(200):
-        if server.started:
-            break
-        time.sleep(0.02)
-    assert server.started, "upstream test server failed to start"
+    _wait_accepting(port)
     yield port
     server.should_exit = True
     thread.join(timeout=5)
@@ -66,25 +78,17 @@ def upstream_port():
 
 @pytest.fixture
 def client(upstream_port: int, monkeypatch: pytest.MonkeyPatch):
-    from cubeplex.config import config as cfg
-
-    # sandbox.domain is a lazy `@format {env[CUBEPLEX_SANDBOX__DOMAIN]}` template,
-    # so point it at the upstream via the env var (monkeypatch restores it).
-    monkeypatch.setenv("CUBEPLEX_SANDBOX__DOMAIN", f"127.0.0.1:{upstream_port}")
-    prev_url = cfg.get("api.public_url", "")
-    prev_secret = cfg.get("auth.jwt_secret", "CHANGE_ME")
-    cfg.set("api.public_url", "http://testserver")
-    cfg.set("auth.jwt_secret", _SECRET)
-
     from cubeplex.api.routes import sandbox_panel
+
+    # Inject the upstream + token secret without touching global config, so the
+    # test is immune to whatever `sandbox.domain` other suite tests have cached.
+    monkeypatch.setattr(sandbox_panel, "_server_host", lambda: f"127.0.0.1:{upstream_port}")
+    monkeypatch.setattr(sandbox_panel, "get_panel_secret", lambda: _SECRET)
 
     app = FastAPI()
     app.include_router(sandbox_panel.router)
     with TestClient(app) as test_client:
         yield test_client
-
-    cfg.set("api.public_url", prev_url)
-    cfg.set("auth.jwt_secret", prev_secret)
 
 
 def _token(sid: str = "sbx_1", port: int = 8080) -> str:
