@@ -27,9 +27,10 @@ router = APIRouter(prefix="/ws/{workspace_id}/browser", tags=["ws-browser"])
 
 # Neko HTML5 client URL params, read client-side:
 # - usr/pwd: auto-login (stripped after read). The password is the sandbox
-#   image's fixed Neko user password; with session.implicit_hosting the member
-#   auto-gets control, so the frontend "take over" works without an extra
-#   in-Neko step. The endpoint is per-sandbox access-controlled, so this isn't a
+#   image's fixed Neko user password. The sandbox image enables
+#   session.implicit_hosting (see deploy/images/sandbox/Dockerfile) so the first
+#   click after cubeplex "Take over" grants control — no second in-Neko mouse
+#   toggle. The endpoint is per-sandbox access-controlled, so this isn't a
 #   meaningful secret.
 # - embed/show_side/volume: strip Neko's own chrome (logo bar, side/chat panel)
 #   and mute (muted autoplay avoids the "click to enable audio" overlay) so the
