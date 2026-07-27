@@ -36,10 +36,12 @@ import {
   streamMessages,
   streamRun,
 } from '../api'
-import { shouldAutoOpenArtifactPreview } from '../lib/autoOpenPreview'
+import { canAutoOpenReplacePanel, shouldAutoOpenArtifactPreview } from '../lib/autoOpenPreview'
+import { useArtifactStore } from './artifactStore'
 import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
+import { usePanelStore } from './panelStore'
 import {
   clearUnreadStorage,
   dropLegacyUnreadStorage,
@@ -252,20 +254,23 @@ function ownsStreamingConversation(state: MessageStore, conversationId: string):
 
 /**
  * Persist an SSE artifact into the artifact store, and optionally open its
- * preview panel when the preference is on and this conversation is focused.
+ * preview panel when the preference is on and the chat surface is focused.
  * History/bootstrap never emit these events — only live / reattach streams.
+ *
+ * Sync (no dynamic import) so focus cannot change between the gate check and
+ * openArtifact. Does not clobber a user-chosen non-artifact panel.
  */
-async function applyArtifactSseEvent(
+function applyArtifactSseEvent(
   conversationId: string,
   artifact: ArtifactEventData['artifact'],
-): Promise<void> {
+): void {
   if (!artifact) return
-  const { useArtifactStore } = await import('./artifactStore')
   useArtifactStore.getState().addOrUpdate(conversationId, artifact)
-  if (shouldAutoOpenArtifactPreview(conversationId, useConversationStore.getState().activeId)) {
-    const { usePanelStore } = await import('./panelStore')
-    usePanelStore.getState().openArtifact(conversationId, artifact.id)
-  }
+  const viewingId = useConversationStore.getState().viewingConversationId
+  if (!shouldAutoOpenArtifactPreview(conversationId, viewingId)) return
+  const panel = usePanelStore.getState()
+  if (!canAutoOpenReplacePanel(panel.view, conversationId)) return
+  panel.openArtifact(conversationId, artifact.id)
 }
 
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
@@ -1165,7 +1170,7 @@ async function consumeRunStream(
 
       if (event.type === 'artifact') {
         const artifactData = event.data as unknown as ArtifactEventData
-        await applyArtifactSseEvent(conversationId, artifactData.artifact)
+        applyArtifactSseEvent(conversationId, artifactData.artifact)
       } else if (event.type === 'citation') {
         const citationData = event.data as unknown as import('../types').CitationData
         useCitationStore.getState().addCitation(conversationId, citationData)
@@ -1811,7 +1816,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
           if (event.type === 'artifact') {
             const artifactData = event.data as unknown as ArtifactEventData
-            await applyArtifactSseEvent(conversationId, artifactData.artifact)
+            applyArtifactSseEvent(conversationId, artifactData.artifact)
           } else if (event.type === 'citation') {
             const citationData = event.data as unknown as import('../types').CitationData
             useCitationStore.getState().addCitation(conversationId, citationData)

@@ -13,6 +13,7 @@ export {
 export {
   AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
   DEFAULT_AUTO_OPEN_ARTIFACTS,
+  canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
   parseAutoOpenArtifacts,
   setAutoOpenArtifactsEnabled,

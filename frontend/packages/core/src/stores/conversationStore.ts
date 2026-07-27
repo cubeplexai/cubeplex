@@ -24,6 +24,13 @@ function sortPinnedFirst(list: Conversation[]): Conversation[] {
 export interface ConversationStore {
   conversations: Conversation[]
   activeId: string | null
+  /**
+   * Conversation id of the mounted chat page only. Unlike `activeId` (sidebar
+   * highlight / draft flows), this is set/cleared exclusively by the
+   * conversation route so features like artifact auto-open don't fire on the
+   * home page or artifacts library.
+   */
+  viewingConversationId: string | null
   /** The topic_id of the currently open conversation, or null if it's
    *  topicless / unknown. Lets the sidebar auto-expand the active
    *  conversation's topic even when that conversation falls outside the
@@ -43,6 +50,7 @@ export interface ConversationStore {
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
   generateTitle(client: ApiClient, id: string, content: string): Promise<void>
   setActive(id: string | null): void
+  setViewingConversation(id: string | null): void
   setActiveTopic(topicId: string | null): void
   inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]): Promise<void>
   fetchConversationParticipants(client: ApiClient, conversationId: string): Promise<void>
@@ -51,6 +59,7 @@ export interface ConversationStore {
 export const useConversationStore = create<ConversationStore>((set, get) => ({
   conversations: [],
   activeId: null,
+  viewingConversationId: null,
   activeTopicId: null,
   isLoading: false,
   isFetchingList: false,
@@ -102,6 +111,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
       set((s) => ({
         conversations: s.conversations.filter((c) => c.id !== id),
         activeId: s.activeId === id ? null : s.activeId,
+        viewingConversationId: s.viewingConversationId === id ? null : s.viewingConversationId,
       }))
     } catch (err) {
       set({ error: (err as Error).message })
@@ -156,6 +166,10 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   setActive(id: string | null) {
     set({ activeId: id })
+  },
+
+  setViewingConversation(id: string | null) {
+    set({ viewingConversationId: id })
   },
 
   setActiveTopic(topicId: string | null) {
