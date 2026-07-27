@@ -375,10 +375,11 @@ class LazySandbox(Sandbox):
         *,
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
+        as_root: bool = False,
     ) -> ExecuteResult:
         sandbox = await self._ensure_with_retry()
         try:
-            return await sandbox.execute(command, timeout=timeout, envs=envs)
+            return await sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root)
         except Exception:
             # Sandbox may have died — invalidate and retry once
             async with self._lock:
@@ -388,7 +389,7 @@ class LazySandbox(Sandbox):
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
             await self._ensure_skills_synced(sandbox)
-            return await sandbox.execute(command, timeout=timeout, envs=envs)
+            return await sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         sandbox = await self._ensure_with_retry()

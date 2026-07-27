@@ -136,6 +136,14 @@ default:
     lease_seconds: 300
     resume_timeout: 30
     workdir: "/workspace" # Default working directory for command execution
+    # Agent command identity inside the sandbox (OpenSandbox RunCommandOpts).
+    # Container control plane stays root (browser stack / workspace chown);
+    # agent shell + file writes run as this user. Match the image's cubeplex
+    # user (deploy/images/sandbox/Dockerfile, uid/gid 1000). Set run_uid to
+    # null to keep the previous root default.
+    run_user: "cubeplex"
+    run_uid: 1000
+    run_gid: 1000
     # resource: CPU and memory limits for sandbox containers
     #   cpu: CPU limit (e.g., "100m" = 0.1 core, "1" = 1 core, "2" = 2 cores)
     #   memory: Memory limit (e.g., "100Mi", "512Mi", "2Gi", "4Gi")

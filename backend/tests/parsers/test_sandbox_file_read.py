@@ -15,7 +15,14 @@ class _FakeSandbox(Sandbox):
     def workdir(self) -> str:
         return "/work"
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+    ) -> ExecuteResult:
         raise NotImplementedError
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:

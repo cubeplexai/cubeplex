@@ -32,10 +32,12 @@ class LocalSandbox(Sandbox):
         *,
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
+        as_root: bool = False,
     ) -> ExecuteResult:
-        # envs is accepted for interface compatibility but not applied: LocalSandbox
-        # runs in the host process environment and is not used in production.
-        del envs
+        # envs/as_root accepted for interface compatibility but not applied:
+        # LocalSandbox runs in the host process environment and is not used
+        # in production.
+        del envs, as_root
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,

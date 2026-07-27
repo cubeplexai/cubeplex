@@ -73,6 +73,7 @@ Everything under the sandbox's working directory (`/workspace`) lives on its per
 - **Installed packages persist.** When the agent runs a plain `pip install` or `npm install -g`, the packages land on persistent storage and are still available in later conversations — nothing gets reinstalled on every chat.
 - **Isolated environments work normally.** If a project or skill needs its own Python environment (a conflicting dependency set, a different Python version), the agent can create one with `python -m venv` or `uv`. Environments created under the working directory survive restarts and recreation like any other file.
 - **Everything outside the working directory is temporary.** System locations (`/tmp`, `/opt`, …) are reset when the sandbox is recreated.
+- **Commands run as the non-root `cubeplex` user** (uid 1000), not as root. Prefer installs that write under `/workspace` (the default pip/npm overlays already do). System-wide package managers that need root (for example `apt-get`) will fail unless an operator has arranged elevated access.
 
 ## How the agent organizes files
 

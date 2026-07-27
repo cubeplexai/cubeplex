@@ -92,8 +92,9 @@ class MemSandbox(Sandbox):
         *,
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
+        as_root: bool = False,
     ) -> ExecuteResult:
-        del timeout, envs
+        del timeout, envs, as_root
         # Process each ``&&``-separated token in ORDER so that:
         #   mkdir -p ... → rm -rf <old> → tar -xzf ... → rm -f tgz
         # mirrors what the real sandbox shell does.  Extracting the tar first
