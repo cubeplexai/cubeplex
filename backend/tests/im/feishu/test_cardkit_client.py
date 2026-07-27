@@ -114,6 +114,26 @@ async def test_stream_text_raises_ratelimit_on_230020() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_text_raises_streaming_closed_on_300309() -> None:
+    def handler(_: Request) -> Response:
+        return Response(
+            200,
+            json={"code": 300309, "msg": "ErrMsg: streaming mode is closed; "},
+        )
+
+    client = _build_client(MockTransport(handler))
+    from cubeplex.im.feishu.cardkit_client import CardKitStreamingClosed
+
+    with pytest.raises(CardKitStreamingClosed):
+        await client.stream_text(
+            card_id="AAQA",
+            element_id="streaming_content",
+            content="x",
+            sequence=1,
+        )
+
+
+@pytest.mark.asyncio
 async def test_patch_card_sends_full_json() -> None:
     captured: dict[str, object] = {}
 
