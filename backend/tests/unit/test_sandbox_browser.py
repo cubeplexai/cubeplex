@@ -73,39 +73,6 @@ async def test_local_sandbox_start_browser_is_noop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
-    """OpenSandbox.get_browser_endpoint signs port 8080 and maps the result."""
-    from cubeplex.sandbox.opensandbox import OpenSandbox
-
-    class _FakeSigned:
-        # OpenSandbox returns a scheme-qualified host/path with no query string.
-        endpoint = "https://signed.example/sandboxes/sb-1/proxy/8080"
-        headers: dict[str, str] = {}
-
-    class _FakeInner:
-        id = "sb-1"
-
-        def __init__(self) -> None:
-            self.calls: list[tuple[int, int]] = []
-
-        async def get_signed_endpoint(self, port: int, expires: int) -> _FakeSigned:
-            self.calls.append((port, expires))
-            return _FakeSigned()
-
-    inner = _FakeInner()
-    sb = OpenSandbox(sandbox=inner)  # type: ignore[arg-type]
-    ep = await sb.get_browser_endpoint(expires_in=1800)
-
-    # A trailing slash is appended so the Neko client's relative asset/WS paths
-    # resolve under .../proxy/8080/ instead of dropping the port segment.
-    assert ep.url == "https://signed.example/sandboxes/sb-1/proxy/8080/"
-    assert ep.headers == {}
-    assert len(inner.calls) == 1
-    port, _expires = inner.calls[0]
-    assert port == 8080
-
-
-@pytest.mark.asyncio
 async def test_opensandbox_translates_provider_error_to_sandbox_error() -> None:
     """The driver must not leak opensandbox's own exception type to callers."""
     from opensandbox.exceptions.sandbox import SandboxInternalException
@@ -116,12 +83,12 @@ async def test_opensandbox_translates_provider_error_to_sandbox_error() -> None:
     class _FailingInner:
         id = "sb-1"
 
-        async def get_signed_endpoint(self, port: int, expires: int):
+        async def pause(self) -> None:
             raise SandboxInternalException("Network connectivity error")
 
     sb = OpenSandbox(sandbox=_FailingInner())  # type: ignore[arg-type]
     with pytest.raises(SandboxError):
-        await sb.get_browser_endpoint()
+        await sb.pause()
 
 
 @pytest.mark.asyncio

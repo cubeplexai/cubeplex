@@ -283,16 +283,12 @@ backend:
 | 使用外部已有 OpenSandbox | `opensandbox.enabled: false`；`backend.sandbox.enabled: true`；`backend.secrets.sandbox.domain` 填外部地址 |
 | 不使用 sandbox（仅对话） | `opensandbox.enabled: false`；`backend.sandbox.enabled` 留空（跟随 `opensandbox.enabled` → false） |
 
-backend 默认要求 `sandbox.secure_access: true`——它要求 sandbox 访问走一个
-签过名的路由令牌，这需要部署 OpenSandbox 的 `gateway`/`ingress` 组件
-（`opensandbox.opensandbox-server.server.gateway.enabled: true`，本文档
-未涉及）。如果你不打算部署这个 gateway，就得把这个要求关掉，否则 backend
-根本创建不了 sandbox：
-```yaml
-backend:
-  sandbox:
-    secure_access: false
-```
+backend 默认 `sandbox.secure_access: false`。浏览器和终端面板**不再**走
+OpenSandbox 的 `gateway`/`ingress` 组件——它们通过 cubeplex 自己的、带 token
+鉴权的面板反向代理转发（和 docker 模式同一条路径），所以你无需部署 gateway、
+也无需管理 OSEP-0011 签名密钥。面板的来源地址是 `api.public_url`，它必须
+**浏览器可达且能转发 WebSocket**（面板通过 WS 代理 Neko/ttyd）——就是你给
+backend 配的那个 URL。
 
 如果你的节点池跑的是 CRI-O（参见[镜像名相关的故障排查条目](#imageinspecterror--short-name-mode-is-enforcing-returns-ambiguous-list)），
 OpenSandbox subchart 自己的镜像也需要同样加上 `docker.io/` 前缀，而且它的

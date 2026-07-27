@@ -1,6 +1,5 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -12,6 +11,11 @@ from opensandbox.exceptions import SandboxException as _ProviderError
 from opensandbox.models.execd import RunCommandOpts
 
 from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox, SandboxError
+from cubeplex.sandbox.panel_token import (
+    get_panel_base_url,
+    get_panel_secret,
+    sign_panel_token,
+)
 
 
 @contextmanager
@@ -96,57 +100,37 @@ class OpenSandbox(Sandbox):
                 result.append((path, content))
             return result
 
-    # OpenSandbox infrastructure headers that are irrelevant for browser/Neko access.
-    # The signed URL embeds the gateway auth; these headers are only meaningful for
-    # server-to-server calls (egress proxy, secure-access token) and cannot be sent
-    # by an iframe anyway. Strip them so they don't trigger the 501 safeguard in
-    # ws_browser.get_live_view.
-    _BROWSER_IRRELEVANT_HEADERS: frozenset[str] = frozenset(
-        h.lower() for h in ("OPENSANDBOX-EGRESS-AUTH", "OpenSandbox-Secure-Access")
-    )
+    def _panel_endpoint(self, port: int, expires_in: int) -> BrowserEndpoint:
+        """Build a cubeplex-signed panel-proxy URL for a sandbox port.
+
+        The token lives in the URL path so the panel client's relative asset and
+        WebSocket requests all carry the credential (an iframe/WS sub-resource
+        can't attach auth headers). The cubeplex backend reverse-proxy route
+        verifies it and forwards to the cluster-internal opensandbox-server;
+        see docs/dev/specs/2026-07-26-sandbox-panel-proxy-design.md.
+        """
+        base = get_panel_base_url()
+        if not base:
+            raise SandboxError(
+                "sandbox panel is unavailable: backend public URL "
+                "(api.public_url) is not configured"
+            )
+        token = sign_panel_token(
+            sandbox_id=self._sandbox.id,
+            port=port,
+            secret=get_panel_secret(),
+            ttl=timedelta(seconds=expires_in),
+        )
+        # Trailing slash keeps the panel client's relative paths resolving under
+        # the token prefix (drop it and they'd resolve one level up, losing the
+        # token) — the same reason the previous signed-URL path appended one.
+        return BrowserEndpoint(url=f"{base}/sandbox-panel/{token}/", headers={})
 
     async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
-        with _as_sandbox_error():
-            expires = int(time.time()) + expires_in
-            endpoint = await self._sandbox.get_signed_endpoint(self.BROWSER_PORT, expires)
-            url = endpoint.endpoint
-            # OpenSandbox returns a scheme-less host/path; an iframe needs a full URL.
-            if not url.startswith(("http://", "https://")):
-                protocol = getattr(self._sandbox.connection_config, "protocol", "http")
-                url = f"{protocol}://{url}"
-            # A trailing slash after the .../proxy/<port> path is REQUIRED: the Neko
-            # client uses relative asset/WS paths, so without it they resolve against
-            # .../proxy/ (dropping the port) and the proxy returns 401 — the client JS
-            # never loads and only the static login shell shows.
-            if not url.endswith("/"):
-                url += "/"
-            headers = {
-                k: v
-                for k, v in (endpoint.headers or {}).items()
-                if k.lower() not in self._BROWSER_IRRELEVANT_HEADERS
-            }
-            return BrowserEndpoint(url=url, headers=headers)
+        return self._panel_endpoint(self.BROWSER_PORT, expires_in)
 
     async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
-        with _as_sandbox_error():
-            expires = int(time.time()) + expires_in
-            endpoint = await self._sandbox.get_signed_endpoint(self.TERMINAL_PORT, expires)
-            url = endpoint.endpoint
-            if not url.startswith(("http://", "https://")):
-                protocol = getattr(
-                    self._sandbox.connection_config,
-                    "protocol",
-                    "http",
-                )
-                url = f"{protocol}://{url}"
-            if not url.endswith("/"):
-                url += "/"
-            headers = {
-                k: v
-                for k, v in (endpoint.headers or {}).items()
-                if k.lower() not in self._BROWSER_IRRELEVANT_HEADERS
-            }
-            return BrowserEndpoint(url=url, headers=headers)
+        return self._panel_endpoint(self.TERMINAL_PORT, expires_in)
 
     async def close(self) -> None:
         pass

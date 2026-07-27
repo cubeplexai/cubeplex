@@ -301,17 +301,13 @@ Three typical layouts:
 | External OpenSandbox | `opensandbox.enabled: false`; `backend.sandbox.enabled: true`; `backend.secrets.sandbox.domain` points at the external host |
 | No sandbox (chat-only) | `opensandbox.enabled: false`; leave `backend.sandbox.enabled` unset (it follows `opensandbox.enabled` → false) |
 
-The backend defaults to `sandbox.secure_access: true` — it expects sandbox
-access to go through a signed route token, which requires the OpenSandbox
-`gateway`/`ingress` component to be deployed
-(`opensandbox.opensandbox-server.server.gateway.enabled: true`, not covered
-here). If you're not deploying that gateway, disable the requirement or the
-backend can't create sandboxes at all:
-```yaml
-backend:
-  sandbox:
-    secure_access: false
-```
+The backend defaults to `sandbox.secure_access: false`. Browser and terminal
+panels do **not** go through the OpenSandbox `gateway`/`ingress` component —
+they flow through cubeplex's own token-authenticated panel reverse proxy (the
+same path used in docker mode), so you don't need to deploy the gateway or
+manage OSEP-0011 signing keys. The panels' origin is `api.public_url`, which
+must be **browser-reachable and forward WebSocket** (the panels proxy Neko/ttyd
+over WS) — the same URL you already set for the backend.
 
 If your node pool runs CRI-O (see the [image-name troubleshooting
 entry](#imageinspecterror--short-name-mode-is-enforcing-returns-ambiguous-list)),

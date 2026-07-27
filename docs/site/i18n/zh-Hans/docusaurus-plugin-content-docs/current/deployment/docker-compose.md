@@ -350,18 +350,18 @@ CubePlex 会发送 `secureAccess: false`，Docker runtime 就会接受请求。
 | 聊天 → agent 工具调用（在沙箱里执行 bash / 读写文件） | 可以——聊天 → 沙箱 `execute` → `tool_result` 全链路可用 | — |
 | 网络策略（egress 防火墙） | 可以——egress sidecar 会被创建并以 DNS 模式执行策略，但仅当 `[docker].network_mode = "bridge"` | 当 `network_mode=host` 或使用自定义 bridge 网络时会被拒绝 |
 | **文件树面板**（聊天界面） | 可以 | — |
-| **交互式终端面板**（聊天界面） | – | ❌ 不可用。它需要 ttyd 端口的签名端点 URL，而 Docker runtime 拒绝签名路由（`expires` 参数是 Kubernetes 专属），面板返回 503。 |
-| **实时浏览器面板**（Neko，聊天界面） | – | ❌ 不可用。与终端一样依赖签名路由——在 Docker runtime 下返回 503。 |
+| **交互式终端面板**（聊天界面） | 可以——通过后端的面板反向代理转发 | 需要把 `api.public_url` 设成用户浏览器可达、且能转发 WebSocket 的后端 URL |
+| **实时浏览器面板**（Neko，聊天界面） | 可以——与终端走同一条面板代理 | 同样需要 `api.public_url` |
 | 密钥注入 / env 替换（`cbxref_…` 占位符） | – | ❌ 不可用。它需要后端的 mTLS 凭证交换监听器 + egress CA/客户端证书，这些由 Kubernetes chart 部署（`gen-egress-certs.sh` + egress webhook）。compose overlay 不包含这些，`sandbox.egress_exchange_host` 保持为空，所以注入被禁用。 |
-| 签名端点 URL（`expires=…`） | – | Docker 模式未实现。上面的终端 + 浏览器面板依赖它，所以它们无法工作。 |
 | server-proxy 模式（`use_server_proxy: true`） | – | OpenSandbox v0.1.x 在代理端点 URL 中会丢失端口号。保持 `use_server_proxy: false`（示例默认值），overlay 通过 `extra_hosts` 在 backend 和 opensandbox-server 上都配置 `host.docker.internal`，让它们能访问沙箱容器在主机上映射的 bridge 端口。 |
 | `pvc.claimName` 数据卷 | 可以——但被当作 Docker 命名卷处理 | 没有 CSI 特性，不支持 ReadWriteMany |
 | 暂停 / 恢复（`POST /sandboxes/{id}/pause` 等） | 调用 Docker 的 `pause`/`unpause`（cgroup freezer） | 没有落盘的 checkpoint——主机 Docker 重启后暂停状态会丢失。因此 CubePlex 默认 `pause_on_idle: false`。 |
 
 **一句话总结：** 在 Docker 模式的 OpenSandbox 下，agent 可以在沙箱里*执行*
-命令、读写文件、浏览文件树，egress 防火墙也会生效——但聊天界面里的
-交互式**终端**和**实时浏览器**面板、以及**密钥注入**都需要 Kubernetes
-runtime。这些功能请改用 [Kubernetes 部署指南](./kubernetes.md)。
+命令、读写文件、浏览文件树，还能打开交互式**终端**和**实时浏览器**面板——
+这些都通过后端的面板反向代理转发，所以要把 `api.public_url` 设成浏览器可达、
+能转发 WebSocket 的后端 URL。只有**密钥注入**仍然需要 Kubernetes runtime；那项
+请改用 [Kubernetes 部署指南](./kubernetes.md)。
 
 以下路由在 Docker runtime 上也会返回 `501 Not Implemented`，尽管它们出现
 在 OpenAPI 规范中（CubePlex 目前都没有调用）：`POST /pools` 及相关的
