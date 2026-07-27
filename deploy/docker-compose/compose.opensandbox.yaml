@@ -23,7 +23,7 @@
 
 services:
   opensandbox-server:
-    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:latest}
+    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:v0.2.2}
     restart: unless-stopped
     environment:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml

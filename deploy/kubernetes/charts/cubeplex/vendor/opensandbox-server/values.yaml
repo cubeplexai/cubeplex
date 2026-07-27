@@ -28,7 +28,7 @@ server:
   # image names and tags) — applies to server, ingress, execd, and egress below.
   image:
     repository: opensandbox/server
-    tag: "v0.1.14"
+    tag: "v0.2.2"
 
   # -- Server Service configuration
   service:
@@ -67,7 +67,7 @@ server:
       nodePort: ""
     image:
       repository: opensandbox/ingress
-      tag: "v1.0.7"
+      tag: "v1.0.10"
     replicaCount: 2
     port: 28888
     dataplaneNamespace: "opensandbox"
@@ -101,7 +101,7 @@ configToml: |
 
   [runtime]
   type = "kubernetes"
-  execd_image = "opensandbox/execd:v1.0.19"
+  execd_image = "opensandbox/execd:v1.0.21"
 
   [kubernetes]
   kubeconfig_path = ""
@@ -114,5 +114,5 @@ configToml: |
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
   
   [egress]
-  image = "opensandbox/egress:v1.0.12"
+  image = "opensandbox/egress:v1.1.4"
   mode = "dns+nft"
