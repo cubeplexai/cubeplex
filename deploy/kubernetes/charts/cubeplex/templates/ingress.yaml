@@ -35,6 +35,18 @@ spec:
                 name: {{ include "cubeplex.backend.fullname" . }}
                 port:
                   number: {{ .Values.backend.service.port }}
+          # Sandbox browser/terminal panels: the panel URL is rooted at
+          # api.public_url (this ingress host) and reverse-proxies HTTP + WebSocket
+          # to opensandbox-server. It's served by the backend at root (not /api),
+          # so it needs its own path — otherwise it falls through to the frontend
+          # and 404s. ingress-nginx forwards the WS Upgrade on this path by default.
+          - path: /sandbox-panel
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "cubeplex.backend.fullname" . }}
+                port:
+                  number: {{ .Values.backend.service.port }}
           - path: /
             pathType: Prefix
             backend:
