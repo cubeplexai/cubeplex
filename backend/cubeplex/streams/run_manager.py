@@ -1885,14 +1885,15 @@ class RunManager:
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
                             from cubepi import Agent
 
-                            from cubeplex.llm.builder import build_chain_model
                             from cubeplex.llm.config import ModelCost
-                            from cubeplex.llm.resolver import resolve_task_preset
                             from cubeplex.middleware.cost import (
                                 CostMiddleware as _ReflCostMw,
                             )
                             from cubeplex.prompts.reflection_system import (
                                 REFLECTION_SYSTEM_PROMPT,
+                            )
+                            from cubeplex.services.reflection_model import (
+                                resolve_reflection_model,
                             )
 
                             _mem_tools = create_memory_tools(
@@ -1919,16 +1920,11 @@ class RunManager:
                             # falls back to summarize routing, then org default.
                             # Only if snapshot resolution fails use the chat model.
                             assert _snap_ref is not None
-                            try:
-                                _mem_preset = resolve_task_preset(_snap_ref, "memory")
-                                _refl_model = build_chain_model(_snap_ref, _mem_preset)
-                            except Exception:
-                                logger.opt(exception=True).debug(
-                                    "reflection: task preset resolve failed; "
-                                    "using conversation model run_id={}",
-                                    run_id,
-                                )
-                                _refl_model = _provider_ref.model(model_id)
+                            _refl_model = resolve_reflection_model(
+                                _snap_ref,
+                                fallback_model=_provider_ref.model(model_id),
+                                run_id=run_id,
+                            )
 
                             _refl_mw: list[Any] = [
                                 _ReflCostMw(
