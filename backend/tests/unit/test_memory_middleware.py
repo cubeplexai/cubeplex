@@ -220,6 +220,49 @@ def test_select_pinned_respects_token_budget() -> None:
     assert 1 < len(selected_big) <= 30
 
 
+@pytest.mark.asyncio
+async def test_transform_system_prompt_skips_personal_in_group_mode() -> None:
+    items = [
+        _mk_item(
+            scope=MemoryScope.PERSONAL,
+            type_=MemoryType.PREFERENCE,
+            content="SECRET_PREF",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+        _mk_item(
+            scope=MemoryScope.WORKSPACE,
+            type_=MemoryType.CORRECTION,
+            content="TEAM_CORR",
+            created_at=datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+    ]
+    repo = _FakeRepo(items)
+
+    @asynccontextmanager
+    async def _factory():  # type: ignore[return]
+        yield repo
+
+    mw = MemoryMiddleware(repo_factory=_factory, include_personal=False)
+    out = await mw.transform_system_prompt("base", ctx=object())
+    assert "SECRET_PREF" not in out
+    assert "TEAM_CORR" in out
+    assert repo.touched_ids  # touch_used fired for injected items
+
+
+@pytest.mark.asyncio
+async def test_compute_relevance_touches_selected_ids() -> None:
+    item = _mk_item(
+        type_=MemoryType.PROJECT_FACT,
+        content="fact-1",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    repo = _FakeRepo([item])
+    snap = await compute_relevance_snapshot(repo)  # type: ignore[arg-type]
+    assert snap is not None
+    assert item.id in repo.touched_ids
+    assert item.id in snap["memory_ids"]
+
+
 def test_render_pinned_excludes_personal_when_include_personal_false() -> None:
     """Group-chat path: personal prefs must not appear in the pinned block."""
     items = [
