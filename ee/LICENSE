@@ -1,0 +1,26 @@
+The cubeplex Enterprise license (the "Enterprise License")
+Copyright (c) 2026 cubeplex
+
+With regard to the cubeplex software located in this "ee/" directory and any
+software that this directory's build artifacts are distributed as part of:
+
+This software and associated documentation files (the "Software") may only be
+used in production if you (and any entity that you represent) hold a valid
+cubeplex Enterprise license key for the correct number of user seats, and only
+for the duration and scope of that license. Development of the Software itself
+and evaluation in non-production environments are permitted.
+
+You are NOT permitted to copy, modify, merge, publish, distribute, sublicense
+or sell the Software except as allowed by the terms of your Enterprise license
+agreement.
+
+All third-party components incorporated into this Software are licensed under
+the original license provided by the owner of the applicable component.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
