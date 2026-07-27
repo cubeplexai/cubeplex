@@ -9,6 +9,7 @@ from cubeplex.models.memory import (
     MemoryItem,
     MemoryScope,
     MemorySourceType,
+    MemoryStatus,
     MemoryType,
 )
 from cubeplex.models.workspace import Workspace
@@ -225,3 +226,49 @@ async def test_personal_memory_isolated_per_workspace(
     assert len(items_a) == 1
     assert items_a[0].content == "Respond in Chinese."
     assert items_a[0].workspace_id == ws_a.id
+
+
+async def test_personal_soft_cap_evicts_oldest(
+    db_session: AsyncSession,
+    seed_user: User,
+    seed_workspace: Workspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When active personal count hits soft cap, least-valuable items are archived."""
+    monkeypatch.setattr("cubeplex.services.memory.PERSONAL_ACTIVE_SOFT_CAP", 3)
+
+    repo = MemoryRepository(
+        db_session,
+        user_id=seed_user.id,
+        org_id=seed_workspace.org_id,
+        workspace_id=seed_workspace.id,
+    )
+    svc = MemoryService(
+        repo,
+        user_id=seed_user.id,
+        org_id=seed_workspace.org_id,
+        workspace_id=seed_workspace.id,
+    )
+    for i in range(3):
+        await svc.create(
+            CreateMemoryInput(
+                scope=MemoryScope.PERSONAL,
+                type=MemoryType.PREFERENCE,
+                content=f"pref-{i}",
+            )
+        )
+    assert await repo.count(scope=MemoryScope.PERSONAL) == 3
+
+    await svc.create(
+        CreateMemoryInput(
+            scope=MemoryScope.PERSONAL,
+            type=MemoryType.PREFERENCE,
+            content="pref-new",
+        )
+    )
+    active = await repo.list(scope=MemoryScope.PERSONAL, status=MemoryStatus.ACTIVE)
+    assert len(active) == 3
+    contents = {m.content for m in active}
+    assert "pref-new" in contents
+    # At least one of the early items should have been archived.
+    assert len(contents & {"pref-0", "pref-1", "pref-2"}) == 2

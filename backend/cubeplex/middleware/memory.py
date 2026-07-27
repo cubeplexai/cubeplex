@@ -58,6 +58,10 @@ RELEVANCE_TYPES = {
     MemoryType.ORG_POLICY,
 }
 
+# Pinned injection budget (preference + correction). Coarse char proxy: 4 chars ≈ 1 token.
+DEFAULT_PINNED_TOKEN_BUDGET = 1500
+DEFAULT_PINNED_MAX_ITEMS = 30
+
 
 def _render_block(items: list[MemoryItem]) -> str:
     """Render a sorted memory block. Deterministic (cache-stable)."""
@@ -125,6 +129,9 @@ class MemoryMiddleware(Middleware):
             compatible.
         relevance_token_budget: Approximate token cap for the relevance
             tier.  Coarse char-based proxy: ``budget * 4`` chars.
+        pinned_token_budget: Approximate token cap for pinned
+            (preference + correction) injection into the system prompt.
+        pinned_max_items: Hard cap on pinned item count (after ranking).
     """
 
     def __init__(
@@ -133,10 +140,14 @@ class MemoryMiddleware(Middleware):
         repo_factory: Callable[[], AbstractAsyncContextManager[MemoryRepository]],
         extra_ref: Callable[[], dict[str, Any]] | None = None,
         relevance_token_budget: int = 4000,
+        pinned_token_budget: int = DEFAULT_PINNED_TOKEN_BUDGET,
+        pinned_max_items: int = DEFAULT_PINNED_MAX_ITEMS,
     ) -> None:
         self._repo_factory = repo_factory
         self._extra_ref = extra_ref
         self._budget = relevance_token_budget
+        self._pinned_budget = pinned_token_budget
+        self._pinned_max_items = pinned_max_items
 
     # ------------------------------------------------------------------
     # cubepi Middleware hooks
@@ -177,7 +188,17 @@ class MemoryMiddleware(Middleware):
         else:
             # First call this conversation — render from DB and freeze.
             async with self._repo_factory() as repo:
-                pinned_text = await _render_pinned(repo)
+                pinned_text, pinned_ids = await _render_pinned(
+                    repo,
+                    token_budget=self._pinned_budget,
+                    max_items=self._pinned_max_items,
+                )
+                if pinned_ids:
+                    try:
+                        await repo.touch_used_many(pinned_ids)
+                    except Exception:
+                        # Injection must not fail if usage touch fails.
+                        pass
             if extra is not None:
                 extra[_EXTRA_PINNED_KEY] = pinned_text
 
@@ -277,6 +298,12 @@ async def compute_relevance_snapshot(
         selected.append(m)
         used += cost
 
+    if selected and hasattr(repo, "touch_used_many"):
+        try:
+            await repo.touch_used_many([m.id for m in selected])
+        except Exception:
+            pass
+
     rendered = _render_block(selected)
     return {
         "captured_at": datetime.now(UTC).isoformat(),
@@ -289,20 +316,63 @@ async def compute_relevance_snapshot(
 # Private helpers
 
 
-async def _render_pinned(repo: MemoryRepository) -> str:
-    """Render active pinned (preference + correction) items.
+def _select_pinned(
+    items: list[MemoryItem],
+    *,
+    token_budget: int,
+    max_items: int,
+) -> list[MemoryItem]:
+    """Rank pinned items, then apply token + count caps.
 
-    Pure deterministic render: scope → type → created_at ASC.
-    No time fields, no random ordering — safe to include in cache-eligible
-    prefix.
+    Ranking for *selection* (not render order): correction first, then
+    confidence DESC, last_used_at DESC, created_at DESC.
+    """
+    ranked = sorted(
+        items,
+        key=lambda m: (
+            0 if m.type == MemoryType.CORRECTION else 1,
+            -m.confidence,
+            -(m.last_used_at.timestamp() if m.last_used_at else 0.0),
+            -m.created_at.timestamp(),
+        ),
+    )
+    char_budget = token_budget * 4
+    selected: list[MemoryItem] = []
+    used = 0
+    for m in ranked:
+        if len(selected) >= max_items:
+            break
+        cost = len(m.content) + 80
+        if selected and used + cost > char_budget:
+            break
+        selected.append(m)
+        used += cost
+    return selected
+
+
+async def _render_pinned(
+    repo: MemoryRepository,
+    *,
+    token_budget: int = DEFAULT_PINNED_TOKEN_BUDGET,
+    max_items: int = DEFAULT_PINNED_MAX_ITEMS,
+) -> tuple[str, list[str]]:
+    """Render active pinned (preference + correction) items under budget.
+
+    Selection ranks by correction/confidence/usage; *render* order stays
+    deterministic (scope → type → created_at ASC) for prompt-cache stability.
+
+    Returns ``(rendered_text, selected_ids)``. Empty string when nothing to pin.
     """
     all_active = await repo.list(status=MemoryStatus.ACTIVE)
     pinned = [m for m in all_active if m.type in PINNED_TYPES]
-    # Stable sort: scope > type > created_at ASC (append-only)
-    pinned.sort(key=lambda m: (m.scope.value, m.type.value, m.created_at))
     if not pinned:
-        return ""
-    return "\n" + _render_block(pinned)
+        return "", []
+    selected = _select_pinned(pinned, token_budget=token_budget, max_items=max_items)
+    if not selected:
+        return "", []
+    # Stable render sort: scope > type > created_at ASC
+    selected.sort(key=lambda m: (m.scope.value, m.type.value, m.created_at))
+    return "\n" + _render_block(selected), [m.id for m in selected]
 
 
 def _last_user_idx(messages: list[Message]) -> int:
