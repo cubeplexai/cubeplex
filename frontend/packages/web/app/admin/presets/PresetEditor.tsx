@@ -55,11 +55,13 @@ const TASK_NAME_KEY = {
   title: 'taskRouting.title.name',
   summarize: 'taskRouting.summarize.name',
   compaction: 'taskRouting.compaction.name',
+  memory: 'taskRouting.memory.name',
 } as const
 const TASK_HINT_KEY = {
   title: 'taskRouting.title.hint',
   summarize: 'taskRouting.summarize.hint',
   compaction: 'taskRouting.compaction.hint',
+  memory: 'taskRouting.memory.hint',
 } as const
 
 interface ApiError {

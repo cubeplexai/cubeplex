@@ -107,6 +107,27 @@ def test_resolve_task_preset_falls_back_to_default_when_routing_empty():
     assert resolve_task_preset(_snap(default), "compaction") is default
 
 
+def test_resolve_memory_task_falls_back_to_summarize_routing():
+    """Unset memory routing reuses summarize when configured (cheap reflection)."""
+    default = ModelPreset(key="pro", primary="a/b", fallbacks=(), kind="tier", is_default=True)
+    mini = ModelPreset(key="lite", primary="c/d", fallbacks=(), kind="tier", is_default=False)
+    snap = _snap(default, mini, task_routing={"summarize": "lite"})
+    assert resolve_task_preset(snap, "memory") is mini
+
+
+def test_resolve_memory_task_prefers_explicit_memory_routing():
+    default = ModelPreset(key="pro", primary="a/b", fallbacks=(), kind="tier", is_default=True)
+    mini = ModelPreset(key="lite", primary="c/d", fallbacks=(), kind="tier", is_default=False)
+    flash = ModelPreset(key="flash", primary="e/f", fallbacks=(), kind="tier", is_default=False)
+    snap = _snap(
+        default,
+        mini,
+        flash,
+        task_routing={"summarize": "lite", "memory": "flash"},
+    )
+    assert resolve_task_preset(snap, "memory") is flash
+
+
 def test_resolve_broken_ref_raises():
     snap = LLMSnapshot(
         providers={},  # no providers → every ref is broken

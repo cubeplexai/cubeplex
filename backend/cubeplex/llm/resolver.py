@@ -39,7 +39,17 @@ def resolve_model_preset(snap: LLMSnapshot, key: str | None) -> ModelPreset:
 
 
 def resolve_task_preset(snap: LLMSnapshot, task: str) -> ModelPreset:
+    """Resolve the preset for an internal task (title / summarize / …).
+
+    Lookup order:
+    1. ``snap.task_routing[task]`` when set and the preset exists.
+    2. For ``task == "memory"`` only: fall back to ``task_routing["summarize"]``
+       when memory is unset (cheap default for reflection).
+    3. Org default preset.
+    """
     key = snap.task_routing.get(task)
+    if key is None and task == "memory":
+        key = snap.task_routing.get("summarize")
     if key is not None:
         for p in snap.model_presets:
             if p.key == key:

@@ -1885,7 +1885,9 @@ class RunManager:
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
                             from cubepi import Agent
 
+                            from cubeplex.llm.builder import build_chain_model
                             from cubeplex.llm.config import ModelCost
+                            from cubeplex.llm.resolver import resolve_task_preset
                             from cubeplex.middleware.cost import (
                                 CostMiddleware as _ReflCostMw,
                             )
@@ -1913,6 +1915,21 @@ class RunManager:
                                         return cost
                                 return None
 
+                            # Prefer task_routing["memory"] (admin presets page);
+                            # falls back to summarize routing, then org default.
+                            # Only if snapshot resolution fails use the chat model.
+                            assert _snap_ref is not None
+                            try:
+                                _mem_preset = resolve_task_preset(_snap_ref, "memory")
+                                _refl_model = build_chain_model(_snap_ref, _mem_preset)
+                            except Exception:
+                                logger.opt(exception=True).debug(
+                                    "reflection: task preset resolve failed; "
+                                    "using conversation model run_id={}",
+                                    run_id,
+                                )
+                                _refl_model = _provider_ref.model(model_id)
+
                             _refl_mw: list[Any] = [
                                 _ReflCostMw(
                                     org_id=ctx.org_id,
@@ -1924,7 +1941,7 @@ class RunManager:
                             ]
 
                             return Agent(
-                                model=_provider_ref.model(model_id),
+                                model=_refl_model,
                                 system_prompt=REFLECTION_SYSTEM_PROMPT,
                                 tools=_mem_tools,
                                 middleware=_refl_mw,

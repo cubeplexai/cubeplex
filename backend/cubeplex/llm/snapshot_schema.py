@@ -27,6 +27,8 @@ class TaskKey(StrEnum):
     title = "title"  # type: ignore[assignment]  # name shadows str.title method
     summarize = "summarize"
     compaction = "compaction"
+    # Post-run memory reflection agent (and related memory extract work).
+    memory = "memory"
 
 
 _TIER_NAMES: frozenset[str] = frozenset(t.value for t in ModelTier)
