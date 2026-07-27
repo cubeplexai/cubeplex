@@ -21,6 +21,7 @@ from cubeplex.models import OrgRole, Role, User, Workspace
 from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox.manager import SandboxManager
+from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 
@@ -90,7 +91,7 @@ async def _login_extra(app: Any, email: str, password: str) -> httpx.AsyncClient
     assert login.status_code in (200, 204), login.text
     me = await c.get("/api/v1/auth/me")
     assert me.status_code == 200, me.text
-    csrf = c.cookies.get("cubeplex_csrf_50") or c.cookies.get("cubeplex_csrf")
+    csrf = c.cookies.get(csrf_cookie_name())
     if csrf:
         c.headers["X-CSRF-Token"] = csrf
     return c
