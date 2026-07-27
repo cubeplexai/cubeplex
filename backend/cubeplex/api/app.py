@@ -82,14 +82,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # Bind plugin registry; mount AuthProvider routers.
     from typing import cast
 
-    from cubeplex.plugins import get_registry
+    from cubeplex.plugins import ensure_registry_bound, get_registry
     from cubeplex.plugins.protocols import AdminPanelExtension
     from cubeplex.plugins.protocols import AuthProvider as _AuthProvider
 
+    # Single entry point shared with the test fixtures: EE registers (once it
+    # exists), then CE defaults fill the empty slots. See plugins/__init__.py.
+    ensure_registry_bound()
     _reg = get_registry()
-    # EE (the optional cubeplex_ee distribution) registers here; bind_defaults
-    # then fills every slot EE left empty with the CE default.
-    _reg.bind_defaults()
     _auth_provider = _reg.get_auth_provider()
     assert isinstance(_auth_provider, _AuthProvider)
     _auth_routers = _auth_provider.get_auth_routers()
