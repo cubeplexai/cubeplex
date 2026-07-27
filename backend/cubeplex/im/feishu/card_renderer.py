@@ -48,6 +48,53 @@ _VALID_IMAGE_KEY_RE = re.compile(r"^img_[A-Za-z0-9_-]+$")
 _ASCII_CITATION_RE = re.compile(r"\[(\d+(?:-\d+)?)\](?!\()")
 _CN_CITATION_RE = re.compile(r"【(\d+(?:-\d+)?)】")
 
+# Markdown blockquote line: optional indent, one or more `>`, optional
+# whitespace, then body. Feishu CardKit renders top-level `> quote` fine,
+# but list-nested / indented blockquotes (common agent output under
+# "- **建议回复:**") often drop the quote body entirely in the client.
+_BLOCKQUOTE_LINE_RE = re.compile(r"^(\s*)(>+)(?:[ \t]+(.*)|())$")
+
+
+def _normalize_blockquotes(text: str) -> str:
+    """Hoist blockquotes to column-0 CommonMark form Feishu renders reliably.
+
+    Keeps quote semantics (`>` markers). Consecutive quote lines stay one
+    block; blank lines are inserted so a preceding list item does not
+    swallow the quote as nested content.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        match = _BLOCKQUOTE_LINE_RE.match(lines[i])
+        if match is None:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        block: list[str] = []
+        while i < n:
+            match = _BLOCKQUOTE_LINE_RE.match(lines[i])
+            if match is None:
+                break
+            markers = match.group(2)
+            body = (match.group(3) or "").rstrip()
+            if body:
+                # Feishu docs: keep a space after `>`.
+                block.append(f"{markers} {body.lstrip()}")
+            else:
+                block.append(markers)
+            i += 1
+
+        if out and out[-1].strip() != "":
+            out.append("")
+        out.extend(block)
+        if i < n and lines[i].strip() != "":
+            out.append("")
+
+    return "\n".join(out)
+
 
 def optimize_markdown_style(
     text: str,
@@ -56,9 +103,10 @@ def optimize_markdown_style(
 ) -> str:
     """Sanitize cubepi markdown for Feishu CardKit's markdown element.
 
-    Demotes headings, spaces tables, strips invalid image refs, and
-    rewrites citation markers to inline links. Code blocks are protected
-    from all rewrites.
+    Demotes headings, spaces tables, strips invalid image refs, rewrites
+    citation markers to inline links, and normalizes blockquotes so
+    list-nested quotes still render. Code blocks are protected from all
+    rewrites.
     """
     citations = citation_index or {}
 
@@ -104,6 +152,10 @@ def optimize_markdown_style(
 
     body = _ASCII_CITATION_RE.sub(_rewrite_ascii_citation, body)
     body = _CN_CITATION_RE.sub(_rewrite_cn_citation, body)
+
+    # After other rewrites: lift indented / list-nested `>` to top-level so
+    # CardKit actually paints the quote body (see _normalize_blockquotes).
+    body = _normalize_blockquotes(body)
 
     # Restore code blocks verbatim.
     for i, fence in enumerate(fences):
