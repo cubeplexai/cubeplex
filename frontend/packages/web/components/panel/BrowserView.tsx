@@ -41,7 +41,16 @@ export function BrowserView({
   refreshRef,
   conversationId,
 }: BrowserViewProps) {
-  const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled, conversationId)
+  const { url, loading, error, validating, refresh } = useBrowserLiveView(
+    workspaceId,
+    enabled,
+    conversationId,
+  )
+  // Keep "Connecting…" up while the first request is in flight OR while SWR is
+  // retrying a transient failure (cold-start 503 / brief proxy blip). Only show
+  // the hard error after retries are exhausted and we still have no URL.
+  const showConnecting = !url && (loading || (Boolean(error) && validating))
+  const showError = Boolean(error) && !url && !validating
   const close = usePanelStore((s) => s.close)
   const [takeover, setTakeover] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -134,12 +143,12 @@ export function BrowserView({
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        {loading && (
+        {showConnecting && (
           <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
             Connecting to the sandbox browser…
           </div>
         )}
-        {error && (
+        {showError && error && (
           <div className="absolute inset-0 grid place-items-center px-4 text-center text-sm text-destructive">
             Could not open the sandbox browser. {error.message}
           </div>

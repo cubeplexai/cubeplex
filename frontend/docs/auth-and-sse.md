@@ -67,6 +67,23 @@ scoping rides in the URL path, **not a header**.
 **Gotcha:** Next.js rewrite buffers SSE if `compress` is on. Keep
 `compress: false`.
 
+## Long-running API proxies (browser live-view)
+
+`next.config.ts` rewrites `/api/*` to the backend with a **hardcoded ~30s
+http-proxy timeout**. Anything slower (sandbox browser cold start can be
+30–120s) dies as `socket hang up` / `ECONNRESET` even when the backend later
+returns 200 — the UI then shows a proxy 500.
+
+Long-running endpoints that must wait on the backend use a **filesystem
+route handler** under `app/api/...` so they take precedence over the rewrite
+fallback and are not bound by that 30s ceiling:
+
+- `app/api/v1/ws/[wsId]/browser/live-view/route.ts` — sandbox Neko live-view
+  URL mint (`maxDuration = 180`)
+
+Same pattern as the SSE/messages handlers above. Prefer a dedicated route
+handler over raising a global rewrite timeout.
+
 ## Deployment Mode (M9)
 
 The backend exposes `GET /api/v1/system/info` (public, pre-login)
