@@ -169,18 +169,20 @@ async def test_start_browser_runs_as_root() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_sets_owner_to_run_user() -> None:
-    """Uploaded files are owned by the sandbox user so agent can edit them."""
+async def test_upload_chowns_by_uid_not_username() -> None:
+    """Upload writes bytes then chowns by numeric uid (old-image safe)."""
     backend, raw = _make_backend()
 
     await backend.upload([("/workspace/hello.txt", b"hi")])
 
-    raw.files.write_file.assert_awaited_once_with(
-        "/workspace/hello.txt",
-        b"hi",
-        owner="cubeplex",
-        group="cubeplex",
-    )
+    raw.files.write_file.assert_awaited_once_with("/workspace/hello.txt", b"hi")
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, opts = calls[0]
+    assert "chown 1000:1000" in cmd
+    assert "/workspace/hello.txt" in cmd
+    assert opts is not None
+    assert opts.uid is None  # as_root
 
 
 @pytest.mark.asyncio

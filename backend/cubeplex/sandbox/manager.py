@@ -17,6 +17,7 @@ under the workspace PVC so they survive pause/resume and kill+recreate.
 
 import asyncio
 import hashlib
+import inspect
 import re
 import time
 from dataclasses import dataclass
@@ -263,6 +264,22 @@ class SandboxManager:
             run_gid=self._run_gid,
             run_user=self._run_user,
         )
+
+    async def _finalize_backend(self, backend: OpenSandbox) -> OpenSandbox:
+        """Post-attach fixups before handing the backend to callers.
+
+        Reconciles /workspace ownership so agent (uid 1000) can write PVC
+        content left root-owned by prior root-default deployments. Runs on
+        create, healthy reuse, and resume — not only first provision.
+
+        Tolerates non-async stubs (unit tests that return a MagicMock backend).
+        """
+        ensure = getattr(backend, "ensure_workspace_owner", None)
+        if callable(ensure):
+            maybe = ensure()
+            if inspect.isawaitable(maybe):
+                await maybe
+        return backend
 
     async def _renew_provider_ttl(self, sandbox_id: str) -> None:
         """Best-effort extend the provider-side expiration so the OpenSandbox
@@ -749,10 +766,7 @@ class SandboxManager:
             )
             raise SandboxError(f"sandbox {sandbox_id} created but reconnect failed: {exc}") from exc
 
-        backend = self._wrap_backend(raw_sandbox)
-        # PVC mounts often arrive root-owned; agent runs as cubeplex and needs
-        # write access under workdir. Best-effort, non-fatal.
-        await backend.ensure_workspace_owner()
+        backend = await self._finalize_backend(self._wrap_backend(raw_sandbox))
         # Execute-time egress: set run env on the backend + persist EgressRefs.
         # Env flows via execute (RunCommandOpts), not Sandbox.create.
         if self._exchange_host:
@@ -824,7 +838,7 @@ class SandboxManager:
         if healthy and raw_sandbox is not None:
             await repo.update_activity(record.id)
             logger.info("Reusing healthy sandbox {}", sandbox_id)
-            backend = self._wrap_backend(raw_sandbox)
+            backend = await self._finalize_backend(self._wrap_backend(raw_sandbox))
             if self._exchange_host:
                 await self._apply_egress(
                     session,
@@ -1145,14 +1159,16 @@ class SandboxManager:
                 user_id=user_id,
             )
         try:
-            backend = await OpenSandbox.connect_or_resume(
-                record.sandbox_id,
-                conn_config=conn_config,
-                resume_timeout=self._resume_timeout,
-                workdir=self._workdir,
-                run_uid=self._run_uid,
-                run_gid=self._run_gid,
-                run_user=self._run_user,
+            backend = await self._finalize_backend(
+                await OpenSandbox.connect_or_resume(
+                    record.sandbox_id,
+                    conn_config=conn_config,
+                    resume_timeout=self._resume_timeout,
+                    workdir=self._workdir,
+                    run_uid=self._run_uid,
+                    run_gid=self._run_gid,
+                    run_user=self._run_user,
+                )
             )
         except Exception as exc:
             # Client-side exceptions (resume_timeout, network blip, transient
@@ -1347,7 +1363,7 @@ class SandboxManager:
         assert row.sandbox_id, "running row must have sandbox_id"  # caller invariant
         sandbox_id = row.sandbox_id
         raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
-        backend = self._wrap_backend(raw)
+        backend = await self._finalize_backend(self._wrap_backend(raw))
         if self._exchange_host:
             async with self._session_factory() as session:
                 try:
