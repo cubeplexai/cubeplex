@@ -269,8 +269,8 @@ function applyArtifactSseEvent(
   const viewingId = useConversationStore.getState().viewingConversationId
   if (!shouldAutoOpenArtifactPreview(conversationId, viewingId)) return
   const panel = usePanelStore.getState()
-  if (!canAutoOpenReplacePanel(panel.view, conversationId)) return
-  panel.openArtifact(conversationId, artifact.id)
+  if (!canAutoOpenReplacePanel(panel.view, conversationId, artifact.id)) return
+  panel.openArtifact(conversationId, artifact.id, 'auto')
 }
 
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
