@@ -48,19 +48,25 @@ _VALID_IMAGE_KEY_RE = re.compile(r"^img_[A-Za-z0-9_-]+$")
 _ASCII_CITATION_RE = re.compile(r"\[(\d+(?:-\d+)?)\](?!\()")
 _CN_CITATION_RE = re.compile(r"【(\d+(?:-\d+)?)】")
 
-# Markdown blockquote line: optional indent, one or more `>`, optional
-# whitespace, then body. Feishu CardKit renders top-level `> quote` fine,
-# but list-nested / indented blockquotes (common agent output under
-# "- **建议回复:**") often drop the quote body entirely in the client.
-_BLOCKQUOTE_LINE_RE = re.compile(r"^(\s*)(>+)(?:[ \t]+(.*)|())$")
+# Markdown blockquote line: 0–3 spaces of indent (CommonMark), one or more
+# `>`, optional whitespace, then body. Feishu CardKit renders top-level
+# `> quote` fine, but list-nested blockquotes (common agent output under
+# "- **建议回复:**" with two-space indent) often drop the quote body.
+# Four+ spaces before `>` is indented code — leave it alone.
+_BLOCKQUOTE_LINE_RE = re.compile(r"^(\s{0,3})(>+)(?:[ \t]+(.*)|())$")
+# After hoisting a quote, do not insert a blank line before the next list
+# item so multi-item lists are not split harder than the quote break requires.
+_LIST_ITEM_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s")
 
 
 def _normalize_blockquotes(text: str) -> str:
     """Hoist blockquotes to column-0 CommonMark form Feishu renders reliably.
 
     Keeps quote semantics (`>` markers). Consecutive quote lines stay one
-    block; blank lines are inserted so a preceding list item does not
-    swallow the quote as nested content.
+    block; a blank line is inserted before the quote so a preceding list
+    item does not swallow it as nested content. A trailing blank is only
+    added when the next line is not a list item (avoids splitting
+    multi-item lists more than necessary).
     """
     lines = text.split("\n")
     out: list[str] = []
@@ -90,7 +96,7 @@ def _normalize_blockquotes(text: str) -> str:
         if out and out[-1].strip() != "":
             out.append("")
         out.extend(block)
-        if i < n and lines[i].strip() != "":
+        if i < n and lines[i].strip() != "" and not _LIST_ITEM_LINE_RE.match(lines[i]):
             out.append("")
 
     return "\n".join(out)
