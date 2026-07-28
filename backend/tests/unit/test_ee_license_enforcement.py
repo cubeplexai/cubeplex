@@ -1,5 +1,6 @@
 """Unit: startup refuses to load cubeplex_ee without a valid license."""
 
+import importlib.metadata
 from datetime import UTC, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 
@@ -38,7 +39,13 @@ def _present(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No importable module and no leftover distribution metadata."""
     monkeypatch.setattr("cubeplex.plugins.ee.importlib.util.find_spec", lambda name: None)
+
+    def no_dist(name: str) -> object:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr("cubeplex.plugins.ee.importlib.metadata.distribution", no_dist)
 
 
 def test_ee_absent_runs_as_oss(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,4 +118,24 @@ def test_import_error_from_inside_ee_is_not_swallowed(monkeypatch: pytest.Monkey
     monkeypatch.setattr("cubeplex.plugins.ee.importlib.import_module", raise_inner_import)
     monkeypatch.setattr(lic_mod, "load_license", lambda: _valid_license())
     with pytest.raises(ImportError, match="some_ee_dependency"):
+        load_ee(SimpleNamespace())
+
+
+def test_metadata_only_install_is_reported_not_silently_downgraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial uninstall leaves dist metadata with the module files gone.
+
+    find_spec() returns None there, identical to never-installed, so the metadata
+    is what separates "this deployment never bought EE" from "this deployment's
+    EE install is damaged". Treating the second as OSS is the same silent
+    downgrade as the exc.name bug, just in a narrower disguise.
+    """
+    monkeypatch.setattr("cubeplex.plugins.ee.importlib.util.find_spec", lambda name: None)
+    monkeypatch.setattr(
+        "cubeplex.plugins.ee.importlib.metadata.distribution",
+        lambda name: SimpleNamespace(version="0.1"),
+    )
+    monkeypatch.setattr(lic_mod, "load_license", lambda: _valid_license())
+    with pytest.raises(RuntimeError, match="cannot be imported"):
         load_ee(SimpleNamespace())

@@ -8,6 +8,7 @@ mandatory — see docs/dev/specs/2026-07-07-oss-ee-split-design.md §8.
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 import importlib.util
 import logging
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EE_MODULE = "cubeplex_ee"
+EE_DISTRIBUTION = "cubeplex-ee"
 
 
 def load_ee(registry: PluginRegistry) -> bool:
@@ -30,7 +32,18 @@ def load_ee(registry: PluginRegistry) -> bool:
     # is indistinguishable from "not installed" — that would silently hand a
     # paying deployment the OSS feature set with nothing in the logs.
     if importlib.util.find_spec(EE_MODULE) is None:
-        return False  # OSS build: the distribution isn't installed.
+        # No importable module. Distinguish "never installed" from "installed and
+        # then damaged": a partial uninstall can leave dist metadata behind with
+        # the module files gone, and treating that as OSS is the same silent
+        # downgrade in a narrower disguise.
+        try:
+            importlib.metadata.distribution(EE_DISTRIBUTION)
+        except importlib.metadata.PackageNotFoundError:
+            return False  # OSS build: the distribution isn't installed.
+        raise RuntimeError(
+            f"{EE_DISTRIBUTION} is installed (distribution metadata present) but "
+            f"{EE_MODULE} cannot be imported; reinstall or fully uninstall it"
+        )
 
     # From here EE exists, so every import failure is a broken install and must
     # surface rather than degrade.
