@@ -37,3 +37,21 @@ async def org_count(session: AsyncSession) -> int:
 async def user_count(session: AsyncSession) -> int:
     """Return the total number of registered users."""
     return int((await session.execute(select(func.count()).select_from(User))).scalar_one())
+
+
+class MultiOrgNotLicensedError(Exception):
+    """A second org was requested but the license lacks the multi_org feature."""
+
+
+async def ensure_additional_org_allowed(session: AsyncSession) -> None:
+    """Gate org creation beyond the first. single_tenant callers only.
+
+    OSS self-hosting is one organization; running several isolated orgs in one
+    deployment is an EE feature. Bootstrapping the first org is never gated.
+    """
+    from cubeplex.plugins.license import FEATURE_MULTI_ORG, has_feature
+
+    if await org_count(session) == 0:
+        return
+    if not has_feature(FEATURE_MULTI_ORG):
+        raise MultiOrgNotLicensedError
