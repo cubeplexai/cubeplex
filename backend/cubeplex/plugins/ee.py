@@ -8,6 +8,7 @@ mandatory — see docs/dev/specs/2026-07-07-oss-ee-split-design.md §8.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
 from typing import TYPE_CHECKING
 
@@ -23,15 +24,17 @@ def load_ee(registry: PluginRegistry) -> bool:
     """Import EE if installed and hand it the license. Returns whether EE loaded."""
     from cubeplex.plugins.license import load_license
 
-    try:
-        module = importlib.import_module(EE_MODULE)
-    except ImportError as exc:
-        if getattr(exc, "name", None) == EE_MODULE:
-            return False  # OSS build: the distribution simply isn't installed.
-        # EE *is* installed but failed to import — a broken dependency inside it,
-        # say. Degrading to OSS here would hand a paying deployment the free
-        # feature set with nothing in the logs to explain it.
-        raise
+    # Presence is decided by the module finder, not by catching ImportError.
+    # exc.name is not a reliable discriminator: a cubeplex_ee whose __init__ does
+    # `from . import missing` raises ImportError with name == "cubeplex_ee", which
+    # is indistinguishable from "not installed" — that would silently hand a
+    # paying deployment the OSS feature set with nothing in the logs.
+    if importlib.util.find_spec(EE_MODULE) is None:
+        return False  # OSS build: the distribution isn't installed.
+
+    # From here EE exists, so every import failure is a broken install and must
+    # surface rather than degrade.
+    module = importlib.import_module(EE_MODULE)
 
     lic = load_license()
     if lic is None:

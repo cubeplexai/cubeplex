@@ -43,15 +43,27 @@ class MultiOrgNotLicensedError(Exception):
     """A second org was requested but the license lacks the multi_org feature."""
 
 
+class OrgSetupInProgressError(Exception):
+    """Another request holds the singleton-org setup lock."""
+
+
 async def ensure_additional_org_allowed(session: AsyncSession) -> None:
     """Gate org creation beyond the first. single_tenant callers only.
 
     OSS self-hosting is one organization; running several isolated orgs in one
     deployment is an EE feature. Bootstrapping the first org is never gated.
+
+    Takes the same advisory lock the registration path uses, because counting and
+    creating have to be one decision: two concurrent full-mode onboardings with
+    different slugs would otherwise both read zero orgs and create one each, and
+    the unique constraint on the slug would not catch it. The lock is
+    transaction-scoped, so it is held until the org insert commits.
     """
     from cubeplex.plugins.license import FEATURE_MULTI_ORG, has_feature
 
-    if await org_count(session) == 0:
-        return
-    if not has_feature(FEATURE_MULTI_ORG):
+    if has_feature(FEATURE_MULTI_ORG):
+        return  # Unlimited orgs — nothing to serialize.
+    if not await acquire_setup_lock(session):
+        raise OrgSetupInProgressError
+    if await org_count(session) > 0:
         raise MultiOrgNotLicensedError
