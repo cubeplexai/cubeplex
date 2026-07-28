@@ -107,6 +107,35 @@ Local E2E runs the `development` env. Required files (both gitignored):
 them in place, `uv run pytest tests/e2e/` runs cleanly with no
 command-line env vars.
 
+### Frontend E2E and the EE-gated admin pages
+
+`admin-sso.spec.ts` and `admin-insights.spec.ts` drive admin pages wrapped in
+`<EEGate>`, so the backend they talk to has to report `edition=ee` or those
+specs see the "Enterprise feature" card instead of the page. Mint a throwaway
+license into the shell that starts the backend:
+
+```bash
+cd backend
+set -a; eval "$(uv run python scripts/dev/license_keygen.py dev-env)"; set +a
+python main.py
+```
+
+The `set -a` matters. `dev-env` prints bare `NAME=value` lines (the format
+`$GITHUB_ENV` needs), and `eval` on those creates shell variables that child
+processes do not inherit — without `set -a` the server starts and quietly reports
+`edition: oss`.
+
+`dev-env` generates a keypair, signs a short-lived key, and prints
+`CUBEPLEX_LICENSE__KEY` plus `CUBEPLEX_LICENSE__PUBLIC_KEY_HEX`. Nothing is
+persisted — there is no committed secret and nothing to expire. CI does the same
+in the `frontend-e2e` job, where appending to `$GITHUB_ENV` handles the export.
+
+Confirm it took effect before blaming a spec:
+
+```bash
+curl -s localhost:8000/api/v1/system/info | grep -o '"edition":"[a-z]*"'
+```
+
 In a fresh worktree, copy them in before the first test run:
 
 ```bash
