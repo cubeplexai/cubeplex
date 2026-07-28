@@ -54,6 +54,7 @@ async def complete_onboarding(
 ) -> OnboardingResponse:
     from cubeplex.auth.singleton_org import (
         MultiOrgNotLicensedError,
+        OrgSetupInProgressError,
         ensure_additional_org_allowed,
     )
     from cubeplex.auth.users import _bootstrap_org_and_workspace, _bootstrap_workspace_in_org
@@ -103,6 +104,11 @@ async def complete_onboarding(
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="multi_org_requires_license",
+                    ) from exc
+                except OrgSetupInProgressError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="setup_in_progress",
                     ) from exc
             _, ws = await _bootstrap_org_and_workspace(
                 session,
