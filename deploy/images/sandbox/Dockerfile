@@ -249,7 +249,8 @@ RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/d
 # (Xorg.wrap rejects an absolute -config path).
 RUN rm -f /usr/lib/xorg/Xorg.wrap \
     && cp /etc/neko/xorg.conf /etc/X11/xorg.conf \
-    && sed -i 's# -config /etc/neko/xorg.conf##' /etc/neko/supervisord.conf
+    && sed -i 's# -config /etc/neko/xorg.conf##' /etc/neko/supervisord.conf \
+    && sed -i 's/chown=root:neko/chown=root:root/' /etc/neko/supervisord.conf
 
 # Stream the image's own Playwright Chromium (version-matched to Playwright so
 # CDP per-page sessions work); stable symlink to the versioned binary.
