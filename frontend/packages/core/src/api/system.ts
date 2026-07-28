@@ -5,6 +5,9 @@ export interface SystemInfoResponse {
   version: string
   sandbox_enabled?: boolean
   password_policy?: 'low' | 'high'
+  /** Backend-computed edition. The frontend holds no license logic. */
+  edition?: 'oss' | 'ee'
+  features?: string[]
 }
 
 export async function fetchSystemInfo(client: ApiClient): Promise<SystemInfoResponse> {

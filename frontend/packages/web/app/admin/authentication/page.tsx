@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/management/PageHeader'
 import { SSOConfigForm } from '@/components/admin/SSOConfigForm'
 import { SSOStatusPanel } from '@/components/admin/SSOStatusPanel'
 import { SSOIdentitiesList } from '@/components/admin/SSOIdentitiesList'
+import { EEGate } from '@/components/admin/EEGate'
 
 interface OrgInfo {
   id: string
@@ -30,7 +31,7 @@ interface OrgInfo {
   slug: string
 }
 
-export default function AdminAuthenticationPage() {
+function AdminAuthenticationPageContent() {
   const t = useTranslations('adminAuthentication')
   const client = useMemo(() => createApiClient(''), [])
   const [connection, setConnection] = useState<SsoConnectionResponse | null>(null)
@@ -136,5 +137,13 @@ function EmptyState({ onClick }: { onClick: () => void }) {
         {t('configure')}
       </Button>
     </section>
+  )
+}
+
+export default function AdminAuthenticationPage() {
+  return (
+    <EEGate>
+      <AdminAuthenticationPageContent />
+    </EEGate>
   )
 }

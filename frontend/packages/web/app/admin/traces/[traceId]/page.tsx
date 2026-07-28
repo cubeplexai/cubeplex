@@ -10,6 +10,7 @@ import { SpanDetail } from '@/components/admin/traces/SpanDetail'
 import { SpanTree } from '@/components/admin/traces/SpanTree'
 import type { SpanNode, TraceDetail } from '@/components/admin/traces/types'
 import { getAdminTraceDetail } from '@/lib/api/admin-traces'
+import { EEGate } from '@/components/admin/EEGate'
 
 function findSpan(root: SpanNode, id: string): SpanNode | null {
   if (root.span_id === id) return root
@@ -33,7 +34,7 @@ function sumTokens(node: SpanNode): { input: number; output: number } {
   return { input, output }
 }
 
-export default function AdminTraceDetailPage({ params }: { params: Promise<{ traceId: string }> }) {
+function AdminTraceDetailPageContent({ params }: { params: Promise<{ traceId: string }> }) {
   const { traceId } = use(params)
   const t = useTranslations('adminTraces')
   const router = useRouter()
@@ -122,5 +123,13 @@ export default function AdminTraceDetailPage({ params }: { params: Promise<{ tra
       </div>
       <div className="overflow-y-auto">{selected ? <SpanDetail node={selected} /> : null}</div>
     </div>
+  )
+}
+
+export default function AdminTraceDetailPage(props: { params: Promise<{ traceId: string }> }) {
+  return (
+    <EEGate>
+      <AdminTraceDetailPageContent {...props} />
+    </EEGate>
   )
 }

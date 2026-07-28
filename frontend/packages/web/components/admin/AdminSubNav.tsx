@@ -25,6 +25,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
+import { useEdition } from '@cubeplex/core/hooks/useEdition'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
 import { cn } from '@/lib/utils'
 
@@ -32,6 +33,8 @@ type NavLeaf = {
   href: string
   label: string
   icon: LucideIcon
+  /** EE-only entry: hidden unless /system/info reports edition 'ee'. */
+  ee?: boolean
 }
 
 type NavGroup = {
@@ -39,6 +42,7 @@ type NavGroup = {
   label: string
   icon: LucideIcon
   children: NavLeaf[]
+  ee?: boolean
 }
 
 type NavEntry = NavLeaf | NavGroup
@@ -122,12 +126,13 @@ export function AdminSubNav() {
   const tLayout = useTranslations('adminLayout')
   const pathname = usePathname() ?? ''
   const { extensions } = useAdminExtensions()
+  const { edition } = useEdition()
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
 
   const ENTRIES: NavEntry[] = [
     { href: '/admin/settings', label: t('settings'), icon: Settings },
     { href: '/admin/members', label: t('members'), icon: Users },
-    { href: '/admin/authentication', label: t('authentication'), icon: Shield },
+    { href: '/admin/authentication', label: t('authentication'), icon: Shield, ee: true },
     {
       key: 'models',
       label: t('groupModels'),
@@ -158,8 +163,8 @@ export function AdminSubNav() {
         { href: '/admin/sandbox-env', label: t('sandboxEnv'), icon: KeyRound },
       ],
     },
-    { href: '/admin/insights', label: t('insights'), icon: BarChart3 },
-    { href: '/admin/traces', label: t('traces'), icon: Activity },
+    { href: '/admin/insights', label: t('insights'), icon: BarChart3, ee: true },
+    { href: '/admin/traces', label: t('traces'), icon: Activity, ee: true },
   ]
 
   // A group defaults to open when it holds the active route; an explicit
@@ -178,13 +183,15 @@ export function AdminSubNav() {
     })),
   )
 
+  const visibleEntries = ENTRIES.filter((entry) => edition === 'ee' || !entry.ee)
+
   return (
     <nav
       aria-label={tLayout('subNavAria')}
       className="w-56 border-r border-border bg-card flex flex-col shrink-0"
     >
       <ul className="space-y-0.5 flex-1 overflow-y-auto p-2">
-        {ENTRIES.map((entry) =>
+        {visibleEntries.map((entry) =>
           isGroup(entry) ? (
             <NavGroupItem
               key={entry.key}
