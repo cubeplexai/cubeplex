@@ -11,6 +11,22 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG APT_MIRROR_HOST=
 ARG PIP_INDEX_URL=https://pypi.org/simple/
 ARG PIP_TRUSTED_HOST=
+ARG NPM_REGISTRY=
+
+# Optional build-time HTTP proxy, empty (direct) by default. Needed only where
+# the build host can't reach the public internet and there is no mirror knob —
+# the GitHub CLI keyring/repo and the Playwright browser CDN. Docker exports
+# these into every RUN, so list internal apt/pip/npm mirror hosts in NO_PROXY:
+#   --build-arg HTTPS_PROXY=http://10.0.0.1:7890 --build-arg NO_PROXY=mirror.internal
+# Lowercase defaults track the uppercase ones (curl and apt read either case).
+# Deliberately ARG, never ENV: an ENV would bake the proxy into the sandbox
+# runtime, where every agent HTTP call would then try to use it.
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG NO_PROXY=
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
 
 # Set environment variables early. Deliberately NOT exporting VIRTUAL_ENV:
 # a global VIRTUAL_ENV=/opt/venv makes uv/poetry treat /opt/venv as the active
@@ -88,8 +104,9 @@ RUN mkdir -p /etc \
         printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /etc/pip.conf; \
     fi
 
-# Configure npm registry
-RUN npm config set registry https://registry.npmmirror.com \
+# Configure npm. Upstream registry by default; NPM_REGISTRY selects a mirror,
+# same knob the backend/frontend images take (build-and-push.sh passes it).
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
     && npm config set fetch-retries 5 \
     && npm config set fetch-retry-mintimeout 20000 \
     && npm config set fetch-retry-maxtimeout 120000 \
@@ -97,11 +114,15 @@ RUN npm config set registry https://registry.npmmirror.com \
 
 # GitHub CLI (gh) from the official apt repo — Ubuntu's own repo lags and the
 # aliyun mirror doesn't carry it. Follows the upstream install instructions.
-RUN mkdir -p -m 755 /etc/apt/keyrings \
-    && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    && cat $out | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+# cli.github.com has no mirror; set HTTPS_PROXY at build time if it is blocked.
+# The -s check fails the build on a truncated key rather than leaving an empty
+# keyring that turns into a confusing "Unable to locate package gh" later.
+RUN mkdir -p -m 755 /etc/apt/keyrings /etc/apt/sources.list.d \
+    && curl -fsSL --connect-timeout 30 --max-time 120 \
+        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+        https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    && [ -s /etc/apt/keyrings/githubcli-archive-keyring.gpg ] \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && mkdir -p -m 755 /etc/apt/sources.list.d \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update \
     && apt-get install -y gh \

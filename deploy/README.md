@@ -29,6 +29,7 @@ deploy/
 │   ├── backend/Dockerfile
 │   ├── frontend/Dockerfile
 │   └── sandbox/               # agent sandbox image (Dockerfile + neko browser + fonts)
+│       └── build.sh           # local build: mirrors, proxy, font staging
 ├── scripts/lib/               # verification logic shared by both targets
 │   ├── common.sh              # step/fail helpers, proxy handling
 │   ├── http-probes.sh         # smoke probes (health, system info, frontend)
@@ -62,14 +63,33 @@ The Dockerfiles accept build-time mirror knobs (`APT_MIRROR_HOST`,
 passes them through from the operator's environment. See the install
 guide for the full list.
 
-The sandbox Dockerfile uses the official `ubuntu:24.04` and public PyPI images
-by default. Private or mirrored sources can be selected explicitly when
-building it:
+The sandbox Dockerfile defaults to the official `ubuntu:24.04`, public PyPI and
+public npm. Private or mirrored sources are selected explicitly when building
+it:
 
 ```bash
 docker build --build-arg BASE_IMAGE=registry.example.com/library/ubuntu:24.04 \
   --build-arg PIP_INDEX_URL=https://pypi.example.com/simple/ \
+  --build-arg NPM_REGISTRY=https://registry.example.com/npm/ \
   -f deploy/images/sandbox/Dockerfile deploy/images/sandbox
 ```
+
+Two sources have no mirror knob: the GitHub CLI apt repo and the Playwright
+browser CDN. Where those are unreachable, pass a proxy instead, and list the
+mirror hosts in `NO_PROXY` so their traffic stays direct. These are build args
+only — never `ENV` — so nothing is baked into the running sandbox, where a
+stale proxy would break every agent HTTP call:
+
+```bash
+docker build --build-arg HTTPS_PROXY=http://10.0.0.1:7890 \
+  --build-arg NO_PROXY=registry.example.com \
+  -f deploy/images/sandbox/Dockerfile deploy/images/sandbox
+```
+
+For local builds `deploy/images/sandbox/build.sh` wraps both: it stages the
+fonts the Dockerfile expects, pulls the Neko base through a mirror, and takes
+the proxy from your shell — rewriting a loopback address to the docker bridge,
+since a build container cannot reach the host's `127.0.0.1`. `MIRROR=none` and
+`PROXY=none` opt out; `PUSH=1` pushes.
 
 Design notes: [docs/dev/specs/2026-06-10-helm-deploy-design.md](../docs/dev/specs/2026-06-10-helm-deploy-design.md).
