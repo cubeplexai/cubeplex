@@ -19,6 +19,7 @@ from cryptography.fernet import Fernet
 
 from cubeplex.credentials.encryption import FernetBackend
 from cubeplex.middleware import sandbox as sandbox_mw
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox.manager import SandboxManager
 
 _ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
@@ -349,3 +350,45 @@ async def test_command_confirm_routes_through_hitl_channel(
     res = await _mw(ch_cx).before_tool_call(_Ctx(), signal=None)
     assert res is not None and res.block is True
     assert res.hitl_trace["decision"] == "cancelled"
+
+
+async def test_ensure_running_revives_after_container_reaped(
+    fake_opensandbox: None,
+    session_factory: Any,
+    seeded_org_ws_user: tuple[str, str, str, str],
+) -> None:
+    """A preview URL minted before the container is reaped still resolves.
+
+    The nonce carries ``UserSandbox.id``, which is revived in place, rather
+    than ``sandbox_id``, which is nulled out on terminate. Looking up by the
+    container ID made the download fail once the sandbox was reaped.
+    """
+    del fake_opensandbox  # autouse via parameter
+    org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
+    mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
+    attachment = await mgr.get_or_create(
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
+    record_id = attachment.user_sandbox_id
+    original_container_id = attachment.sandbox.id
+
+    async with session_factory() as s:
+        repo = UserSandboxRepository(s, org_id=org_id, workspace_id=ws_a)
+        await repo.mark_terminated(record_id, clear_sandbox_id=True)
+
+    revived = await mgr.ensure_running(record_id)
+
+    assert revived.user_sandbox_id == record_id
+    assert revived.sandbox.id != original_container_id
+    async with session_factory() as s:
+        status = (
+            await s.execute(
+                sa.text("SELECT status FROM user_sandboxes WHERE id=:i"),
+                {"i": record_id},
+            )
+        ).scalar_one()
+    assert status == "running"

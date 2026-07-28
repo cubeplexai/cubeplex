@@ -593,6 +593,35 @@ class SandboxManager:
 
             raise SandboxError(f"unreachable status {record.status!r}")
 
+    async def ensure_running(self, user_sandbox_id: str) -> SandboxAttachment:
+        """Return a running sandbox for an existing row, reviving it if needed.
+
+        Entry point for callers that hold our stable ``UserSandbox.id`` but no
+        scope context -- notably the public preview download, whose nonce is
+        minted long before the file is fetched and must survive the container
+        being paused or reaped in between. ``UserSandbox.sandbox_id`` is not
+        usable as that handle: it is the opensandbox container ID and is
+        cleared on terminate, whereas the row is revived in place.
+
+        ``get_by_id_system`` is a cross-scope PK lookup; the row's own scope
+        tuple re-enters ``get_or_create``, which owns all revive/resume/race
+        handling.
+        """
+        async with self._session_factory() as session:
+            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+            if row is None or row.deleted_at is not None:
+                raise SandboxError(f"sandbox record {user_sandbox_id} not found")
+            scope_type, scope_id = row.scope_type, row.scope_id
+            user_id, org_id, workspace_id = row.user_id, row.org_id, row.workspace_id
+
+        return await self.get_or_create(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=user_id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+
     async def _provision_new_container(
         self,
         session: AsyncSession,
@@ -669,7 +698,7 @@ class SandboxManager:
             )
 
             raw_sandbox = await opensandbox.Sandbox.create(
-                record.image,
+                policy.default_image,
                 connection_config=create_conn_config,
                 timeout=timedelta(seconds=self._ttl),
                 volumes=volumes,
@@ -694,7 +723,9 @@ class SandboxManager:
                 timedelta(milliseconds=200),
             )
 
-            await repo.promote_to_running(record.id, sandbox_id=sandbox_id)
+            await repo.promote_to_running(
+                record.id, sandbox_id=sandbox_id, image=policy.default_image
+            )
             promoted = True
         except ProviderSandboxError as exc:
             if not promoted:

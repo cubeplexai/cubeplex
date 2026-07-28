@@ -51,6 +51,9 @@ function pivot(
 
 export function StackedChart({ data, palette, height = 200, metric = 'cost' }: Props) {
   const { rows, buckets } = pivot(data, metric)
+  const labelByBucket = Object.fromEntries(
+    data.series.map((s) => [s.bucket, s.bucket_label || s.bucket]),
+  )
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -78,6 +81,7 @@ export function StackedChart({ data, palette, height = 200, metric = 'cost' }: P
             key={b}
             type="monotone"
             dataKey={b}
+            name={labelByBucket[b] ?? b}
             stackId="usage"
             stroke={palette[Math.min(i, palette.length - 1)]}
             fill={palette[Math.min(i, palette.length - 1)]}

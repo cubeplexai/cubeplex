@@ -2,12 +2,13 @@
 
 import csv
 import io
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from datetime import UTC, date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.schemas.billing import (
@@ -19,7 +20,7 @@ from cubeplex.api.schemas.billing import (
 )
 from cubeplex.auth.dependencies import current_active_user, resolve_current_org_id
 from cubeplex.db import get_session
-from cubeplex.models import User
+from cubeplex.models import User, Workspace
 from cubeplex.repositories import (
     BillingRepository,
     OrganizationMembershipRepository,
@@ -78,6 +79,51 @@ def _parse_date_range(
     return since, until
 
 
+def _user_label(*, display_name: str | None, email: str) -> str:
+    name = (display_name or "").strip()
+    return name if name else email
+
+
+async def _bucket_labels(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    dimension: Literal["workspace", "user"],
+    buckets: Sequence[str],
+) -> dict[str, str]:
+    """Resolve public IDs to display labels. Missing entities are omitted.
+
+    Workspace lookup is org-scoped so a stale/cross-org workspace_id in billing
+    cannot leak another org's workspace name into this admin response.
+    """
+    ids = [b for b in buckets if b and b != "__other"]
+    if not ids:
+        return {}
+    if dimension == "workspace":
+        ws_stmt = select(Workspace).where(
+            Workspace.id.in_(ids),  # type: ignore[attr-defined]
+            Workspace.org_id == org_id,  # type: ignore[arg-type]
+        )
+        workspaces = list((await session.execute(ws_stmt)).scalars().all())
+        return {ws.id: ws.name for ws in workspaces}
+    user_stmt = select(User).where(User.id.in_(ids))  # type: ignore[attr-defined]
+    users = list((await session.execute(user_stmt)).scalars().all())
+    return {u.id: _user_label(display_name=u.display_name, email=u.email) for u in users}
+
+
+def _with_labels(
+    rows: list[dict[str, Any]],
+    labels: dict[str, str],
+) -> list[CostAggregateRow]:
+    return [
+        CostAggregateRow(
+            **row,
+            bucket_label=labels.get(str(row["bucket"])),
+        )
+        for row in rows
+    ]
+
+
 @router.get("/summary", response_model=CostSummaryResponse)
 async def get_cost_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -100,15 +146,28 @@ async def get_cost_summary(
     total_cost = sum(r["cost_amount_micro"] for r in by_workspace if r["currency"] == currency)
     total_calls = sum(r["call_count"] for r in by_workspace)
 
+    ws_labels = await _bucket_labels(
+        session,
+        org_id=org_id,
+        dimension="workspace",
+        buckets=[str(r["bucket"]) for r in by_workspace],
+    )
+    user_labels = await _bucket_labels(
+        session,
+        org_id=org_id,
+        dimension="user",
+        buckets=[str(r["bucket"]) for r in by_user],
+    )
+
     return CostSummaryResponse(
         from_date=since.date(),
         to_date=until.date(),
         total_cost_amount_micro=total_cost,
         currency=currency,
         total_calls=total_calls,
-        by_workspace=[CostAggregateRow(**r) for r in by_workspace],
+        by_workspace=_with_labels(by_workspace, ws_labels),
         by_model=[CostAggregateRow(**r) for r in by_model],
-        by_user=[CostAggregateRow(**r) for r in by_user],
+        by_user=_with_labels(by_user, user_labels),
         by_day=[CostAggregateRow(**r) for r in by_day],
     )
 
@@ -143,6 +202,14 @@ async def get_cost_timeseries(
         rank_by=rank_by,
     )
     currency = series_raw[0]["currency"] if series_raw else "USD"
+    labels: dict[str, str] = {}
+    if dimension in ("workspace", "user"):
+        labels = await _bucket_labels(
+            session,
+            org_id=org_id,
+            dimension=dimension,
+            buckets=[str(s["bucket"]) for s in series_raw],
+        )
     return TimeseriesResponse(
         from_date=since.date(),
         to_date=until.date(),
@@ -152,6 +219,7 @@ async def get_cost_timeseries(
         series=[
             TimeseriesSeries(
                 bucket=s["bucket"],
+                bucket_label=labels.get(str(s["bucket"])),
                 currency=s["currency"],
                 points=[TimeseriesPoint(**p) for p in s["points"]],
             )

@@ -79,6 +79,11 @@ async def panel_http(token: str, request: Request, full_path: str = "") -> Respo
     if request.url.query:
         target = f"{target}?{request.url.query}"
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
+    # Force identity encoding to prevent opensandbox-server double-compression:
+    # ttyd (libwebsockets) compresses when gzip is accepted, then opensandbox's nginx
+    # compresses again, producing a corrupt/truncated response. httpx also adds its own
+    # accept-encoding by default, so we must override explicitly here.
+    fwd_headers["accept-encoding"] = "identity"
     body = await request.body()
 
     # trust_env=False: opensandbox-server is an internal service — forwarding must
@@ -93,6 +98,15 @@ async def panel_http(token: str, request: Request, full_path: str = "") -> Respo
         await client.aclose()
         logger.warning("panel http upstream unreachable ({}): {}", target, exc)
         return Response(status_code=502, content=b"sandbox panel upstream unavailable")
+
+    if upstream.status_code >= 400:
+        # Consume the error body so httpx can release the connection, then return
+        # a plain error response instead of streaming raw JSON from opensandbox-server
+        # (e.g. {"code":"KUBERNETES::SANDBOX_NOT_FOUND",...}) into the browser iframe.
+        body = await upstream.aread()
+        await upstream.aclose()
+        await client.aclose()
+        return Response(status_code=upstream.status_code, content=body)
 
     resp_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _HOP_BY_HOP}
 

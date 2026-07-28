@@ -21,6 +21,7 @@ import type { CostAggregateRow } from '@cubeplex/core'
 function aggRowToSummaryRow(r: CostAggregateRow): SummaryRow {
   return {
     bucket: r.bucket,
+    bucket_label: r.bucket_label ?? null,
     cost_amount_micro: r.cost_amount_micro,
     call_count: r.call_count,
     input_tokens: r.input_tokens,
@@ -58,7 +59,11 @@ export function InsightsShell() {
   const data = useCostData(filters, metric)
 
   const availableWorkspaces = useMemo(
-    () => (data.summary?.by_workspace ?? []).map((r) => ({ id: r.bucket, name: r.bucket })),
+    () =>
+      (data.summary?.by_workspace ?? []).map((r) => ({
+        id: r.bucket,
+        name: r.bucket_label || r.bucket,
+      })),
     [data.summary],
   )
   const availableModels = useMemo(

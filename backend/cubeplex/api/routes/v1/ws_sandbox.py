@@ -513,29 +513,25 @@ async def create_sandbox_preview_token(
             detail=(f"Office preview not supported for extension '{ext}'"),
         )
 
-    manager = get_sandbox_manager()
-    scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
+    scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
-    try:
-        attachment = await manager.get_or_create(
-            scope_type=scope_type,
-            scope_id=scope_id,
-            user_id=owner_user_id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-        )
-        sandbox = attachment.sandbox
-    except SandboxError as exc:
+    # Minting a URL must not start a container: the viewer may never fetch it.
+    # The download endpoint revives the row on demand, so record the stable
+    # UserSandbox.id here rather than the container ID, which goes away with
+    # the container.
+    repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+    if record is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="sandbox unavailable",
-        ) from exc
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no sandbox for this scope",
+        )
 
     nonce = secrets.token_hex(32)
     payload = orjson.dumps(
         {
-            "sandbox_id": sandbox.id,
+            "user_sandbox_id": record.id,
             "file_path": path,
             "org_id": ctx.org_id,
             "workspace_id": ctx.workspace_id,

@@ -1,9 +1,11 @@
 """Public sandbox file download -- nonce-gated, no auth.
 
-The nonce IS the auth. Tokens are bound to (sandbox_id, file_path) and
+The nonce IS the auth. Tokens are bound to (user_sandbox_id, file_path) and
 expire after 5 minutes (see ws_sandbox.create_sandbox_preview_token).
 The endpoint proxies the file from the live sandbox in real time -- no
-temp storage.
+temp storage. Binding to our own row ID rather than the opensandbox
+container ID lets the fetch revive a sandbox that was paused or reaped
+between minting the URL and the viewer following it.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from cubeplex.cache import RedisHandle, redis_dep
+from cubeplex.sandbox import SandboxError
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
@@ -39,18 +42,19 @@ async def sandbox_file_download(
             detail="download link expired",
         )
     payload = orjson.loads(raw)
-    sandbox_id = str(payload["sandbox_id"])
+    user_sandbox_id = str(payload["user_sandbox_id"])
     file_path = str(payload["file_path"])
 
-    # Reconnect to the sandbox by ID. The manager's connection
-    # config carries the API key and domain -- no user context
-    # needed.
+    # The nonce records our stable UserSandbox.id, so a container that was
+    # paused or reaped since the URL was minted is revived here rather than
+    # failing the fetch.
     manager = get_sandbox_manager()
-    conn_config = manager._build_connection_config()  # noqa: SLF001
     try:
-        sandbox = await OpenSandbox.connect_or_resume(sandbox_id, conn_config=conn_config)
-        raw_sdk = sandbox._sandbox  # noqa: SLF001
-        stream = await raw_sdk.files.read_bytes_stream(file_path)
+        attachment = await manager.ensure_running(user_sandbox_id)
+        sandbox = attachment.sandbox
+        if not isinstance(sandbox, OpenSandbox):
+            raise SandboxError("file download requires OpenSandbox backend")
+        stream = await sandbox._sandbox.files.read_bytes_stream(file_path)  # noqa: SLF001
     except Exception as exc:
         logger.warning("sandbox proxy download failed: {}", exc)
         raise HTTPException(

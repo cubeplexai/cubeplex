@@ -15,14 +15,14 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.6",
     "@eslint/js": "^9.39.5",
-    "@playwright/test": "^1.61.1",
-    "@typescript-eslint/eslint-plugin": "^8.64.0",
-    "@typescript-eslint/parser": "^8.64.0",
+    "@playwright/test": "^1.62.0",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
     "dotenv": "^17.4.2",
     "eslint": "^9.15.0",
-    "eslint-config-next": "16.2.10",
-    "globals": "^17.7.0",
-    "prettier": "^3.9.5",
+    "eslint-config-next": "16.2.12",
+    "globals": "^17.8.0",
+    "prettier": "^3.9.6",
     "typescript": "^6.0.3"
   }
 }
