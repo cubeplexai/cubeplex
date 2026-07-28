@@ -433,6 +433,16 @@ jobs:
           aws --endpoint-url http://127.0.0.1:9000 \
             s3 mb s3://cubeplex-test --region us-east-1
 
+      - name: Mint an ephemeral EE license for the gated admin specs
+        # admin-sso and admin-insights drive pages behind <EEGate>, so the backend
+        # they talk to has to report edition=ee. The keypair is generated here and
+        # thrown away: nothing is committed, and there is no key that expires out
+        # from under CI later.
+        run: |
+          cd backend
+          uv run python scripts/dev/license_keygen.py dev-env --features multi_org \
+            >> "$GITHUB_ENV"
+
       - name: Alembic migrate
         run: make backend-migrate
 
