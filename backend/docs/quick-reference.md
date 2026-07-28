@@ -119,10 +119,16 @@ uv pip install -e ee          # work on it
 uv pip uninstall cubeplex-ee  # back to the default surface
 ```
 
+It is declared as a **dependency group**, not an extra, on purpose:
+`make dev-install` runs `uv sync --all-extras`, which would drag an extra in and
+leave nothing for the import gate to gate. The declarative equivalent of the
+commands above is `uv sync --all-extras --group licensed` — both flags, since
+`--group` alone re-resolves the environment and drops the test dependencies.
+
 With it installed, startup requires a licence key: that is the gate doing its
 job, not a bug. The test suite is written against the default install and a few
-tests assert that surface directly, so either uninstall the extra before running
-tests, or mint a key for the shell (`license_keygen.py dev-env`, see above).
+tests assert that surface directly, so either uninstall it before running tests,
+or mint a key for the shell (`license_keygen.py dev-env`, see above).
 `tests/conftest.py` fails fast with both options spelled out if you forget.
 
 ### Frontend E2E and the EE-gated admin pages
