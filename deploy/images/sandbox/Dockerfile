@@ -59,6 +59,7 @@ RUN if [ -n "$APT_MIRROR_HOST" ]; then \
         git \
         unzip \
         zip \
+        sudo \
         fonts-noto \
         fonts-liberation \
         fonts-noto-cjk \
