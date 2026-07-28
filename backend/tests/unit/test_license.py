@@ -5,9 +5,13 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from cubeplex.plugins.license import (
+    LICENSE_PUBLIC_KEYS,
     License,
     LicenseError,
     parse_license_key,
@@ -145,6 +149,19 @@ def test_unprovisioned_signing_key_degrades_to_oss(
     lic_mod.reset_license_cache_for_tests()
     assert lic_mod.get_edition() == "oss"
     lic_mod.reset_license_cache_for_tests()
+
+
+def test_shipped_public_keys_are_wellformed() -> None:
+    """A typo in the shipped table would only surface when a customer's key fails.
+
+    Catch it at CI time instead: every entry must be a usable Ed25519 point.
+    """
+    assert LICENSE_PUBLIC_KEYS, "no signing key provisioned; EE can never be licensed"
+    for kid, hex_key in LICENSE_PUBLIC_KEYS.items():
+        assert kid and kid.strip() == kid, f"suspicious kid {kid!r}"
+        raw = bytes.fromhex(hex_key)
+        assert len(raw) == 32, f"{kid}: expected 32 bytes, got {len(raw)}"
+        Ed25519PublicKey.from_public_bytes(raw)
 
 
 def test_missing_kid_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> None:
