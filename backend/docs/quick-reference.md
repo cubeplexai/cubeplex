@@ -66,6 +66,12 @@ The actual entry points loaded by `config.py`:
 - `CUBEPLEX_SANDBOX__IMAGE`
 - `CUBEPLEX_SANDBOX__API_KEY`
 - `CUBEPLEX_LOG_LEVEL` (default `INFO`)
+- `CUBEPLEX_LICENSE__KEY` (`license.key`) — EE license key (`CPX1.…`); absent or
+  invalid → OSS edition, with a warning. Verified offline in
+  `cubeplex/plugins/license.py` against the `kid` named in the key.
+- `CUBEPLEX_LICENSE__PUBLIC_KEY_HEX` (`license.public_key_hex`) — bypasses the
+  `kid` lookup and verifies against this key instead. **Tests/dev only** (pair
+  with `scripts/dev/license_keygen.py`); never set in production.
 
 Test env (`config.test.yaml`):
 
