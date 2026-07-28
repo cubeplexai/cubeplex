@@ -669,7 +669,7 @@ class SandboxManager:
             )
 
             raw_sandbox = await opensandbox.Sandbox.create(
-                record.image,
+                policy.default_image,
                 connection_config=create_conn_config,
                 timeout=timedelta(seconds=self._ttl),
                 volumes=volumes,
@@ -694,7 +694,9 @@ class SandboxManager:
                 timedelta(milliseconds=200),
             )
 
-            await repo.promote_to_running(record.id, sandbox_id=sandbox_id)
+            await repo.promote_to_running(
+                record.id, sandbox_id=sandbox_id, image=policy.default_image
+            )
             promoted = True
         except ProviderSandboxError as exc:
             if not promoted:

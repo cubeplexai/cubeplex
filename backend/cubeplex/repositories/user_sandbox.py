@@ -95,12 +95,16 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         record.sandbox_id = sandbox_id
         await self.session.commit()
 
-    async def promote_to_running(self, record_id: str, *, sandbox_id: str) -> None:
+    async def promote_to_running(
+        self, record_id: str, *, sandbox_id: str, image: str | None = None
+    ) -> None:
         record = await self.get(record_id)
         if record is None:
             raise ValueError(f"sandbox record {record_id} vanished mid-create")
         record.sandbox_id = sandbox_id
         record.status = "running"
+        if image is not None:
+            record.image = image
         await self.session.commit()
 
     async def delete_record(self, record_id: str) -> None:
