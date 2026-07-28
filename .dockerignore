@@ -1,0 +1,15 @@
+# Build context is the repo root for the backend / frontend / egress-webhook
+# images. Patterns match the full path relative to the context root (Docker,
+# unlike git, does not match a bare name at every level), so nested matches
+# need an explicit **/ prefix.
+.git
+.worktrees
+.claude
+tmp
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.egg-info
+**/.venv
+**/.env
+**/.next
