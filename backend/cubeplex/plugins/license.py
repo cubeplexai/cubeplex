@@ -36,20 +36,19 @@ logger = logging.getLogger(__name__)
 # Trusted signing public keys, keyed by the ``kid`` a license carries (raw
 # Ed25519, 32 bytes, hex). Private halves never enter this repo.
 #
-# To rotate: add the new id alongside the old one, ship that build, re-issue
+# To rotate: generate the new keypair on a machine you control, outside any
+# agent session or shared transcript — the private half is the only thing that
+# can sign customer licenses, and it is not recoverable if lost:
+#
+#     cd backend && uv run python scripts/dev/license_keygen.py genkey --kid prod-2027
+#
+# Add the printed entry alongside the current one, ship that build, re-issue
 # customer keys under the new id, then drop the old entry in a later release.
-# Both are accepted while the window is open.
-#
-# NOT YET PROVISIONED. Generate the keypair on a machine you control, outside any
-# agent session or shared transcript — the private half is the only thing that can
-# sign customer licenses:
-#
-#     cd backend && uv run python scripts/dev/license_keygen.py genkey --kid prod-2026
-#
-# Paste the printed entry here; store the private half in a password manager.
-# Until then any configured license.key fails verification and the deployment
-# runs as OSS, which is the safe direction.
-LICENSE_PUBLIC_KEYS: dict[str, str] = {}
+# Both are accepted while the window is open. Never remove an id while licenses
+# signed under it are still within their expires_at.
+LICENSE_PUBLIC_KEYS: dict[str, str] = {
+    "prod-2026": "8a1d54622d710a2d882301144fc0d0ec58873474c8b6875b22a464ebef1c1ce4",
+}
 
 _KEY_PREFIX = "CPX1"
 
