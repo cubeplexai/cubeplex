@@ -72,6 +72,38 @@ from cubeplex.plugins import (  # noqa: E402
 )
 
 
+def _reject_unlicensed_optional_package() -> None:
+    """Turn one real misconfiguration into one readable message.
+
+    The suite is written against the default install, where the optional
+    `cubeplex-ee` extra is absent — several tests assert that surface directly.
+    With the extra installed and no key configured, startup refuses to proceed
+    (by design), and because binding happens in an autouse fixture that surfaces
+    as a setup error on every single test. Catch it once instead.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("cubeplex_ee") is None:
+        return
+    from cubeplex.plugins.license import load_license
+
+    if load_license() is not None:
+        return
+    raise pytest.UsageError(
+        "cubeplex-ee is installed in this environment but no licence key is "
+        "configured, so application startup refuses to run and every test would "
+        "fail during setup.\n"
+        "  Run the suite against the default install:  uv pip uninstall cubeplex-ee\n"
+        "  Or supply a key for this shell:             "
+        'eval "$(uv run python scripts/dev/license_keygen.py dev-env)"\n'
+        "Note the second path puts the backend in the licensed edition, which a "
+        "few tests assert against explicitly."
+    )
+
+
+_reject_unlicensed_optional_package()
+
+
 @pytest.fixture(autouse=True)
 def _bind_plugin_registry():
     reset_registry_for_tests()

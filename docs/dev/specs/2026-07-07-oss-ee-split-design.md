@@ -29,6 +29,11 @@ open-source release.
   the OSS image contains EE code is a deferrable build decision, not an
   architectural one. Separate distribution remains the starting point.
 
+- **2026-07-28** — moved the commercial directory from the repository root to
+  `backend/ee/` and settled the dev wiring (§11): an opt-in extra plus a path
+  source, no root project and no uv workspace. Retired the packaging open
+  question.
+
 ## 1. Problem
 
 cubeplex already contains a production-grade CE/EE plugin seam
@@ -426,40 +431,53 @@ the web bundle.
 ## 11. Repository & Delivery Structure
 
 ```
-LICENSE                  Apache-2.0 (root; governs everything outside ee/)
-ee/
-  LICENSE                commercial notice (EULA; lawyer pass before first sale)
-  README.md              what lives here, how the wheel is built
-  pyproject.toml         name = "cubeplex-ee"
+LICENSE                    Apache-2.0 (root; governs everything outside backend/ee/)
+backend/ee/
+  LICENSE                  commercial notice (EULA; lawyer pass before first sale)
+  README.md                what lives here, how the wheel is built
+  pyproject.toml           name = "cubeplex-ee"
   src/cubeplex_ee/
-    __init__.py          register(registry, *, license) -> None
-    sso/ cost/ audit/    EE features, added stage by stage
+    __init__.py            register(registry, *, license) -> None
+    sso/ cost/ audit/      EE features, added stage by stage
 ```
 
-`ee/` is the **source location and license boundary**; `cubeplex_ee` is the
-**installed package name**. They are deliberately different — see the end of §8
-for the naming rationale.
+`backend/ee/` is the **source location and license boundary**; `cubeplex_ee` is
+the **installed package name**. They are deliberately different — see the end of
+§8 for the naming rationale.
 
-**Dev-environment wiring is unresolved in detail.** As of 2026-07-27 there is
-no root `pyproject.toml` and no uv workspace: the backend is a single
-hatchling package at `backend/pyproject.toml` with a flat (non-src) layout, so
-`ee/` cannot simply be declared a workspace member. Two options, to be settled
-when Task 1 of the stage-1 plan runs:
+**Location: under `backend/`, revised 2026-07-28.** The first draft put `ee/` at
+the repository root, following PostHog and GitLab. It moved because those two
+carry EE code in more than one language, and this one does not: everything EE
+will hold for the foreseeable stages is Python, and Python in this repository
+lives under `backend/`. Root placement would also have needed the path
+dependency to reach up a level. If EE ever ships its own admin UI sources — the
+`AdminPanelExtension.get_static_path()` hook exists for exactly that — those are
+frontend sources under a Python tree, and the question reopens then rather than
+being pre-solved now.
 
-- Add a `[tool.uv.sources]` path entry plus an optional dependency group in
-  `backend/pyproject.toml`, pointing at `../ee` as editable. No restructuring;
-  the preferred starting point.
-- Introduce a root `pyproject.toml` with
-  `[tool.uv.workspace] members = ["backend", "ee"]`. Conceptually cleaner, but
-  it moves the lockfile and changes how backend dependencies resolve — a real
-  toolchain change for a packaging detail.
+**Dev-environment wiring, settled 2026-07-28.** No root `pyproject.toml` and no
+uv workspace were needed. `backend/pyproject.toml` declares an opt-in extra plus
+a path source:
 
-Either way, dev machines run EE with a locally minted license key, and the OSS
-container image simply does not install `cubeplex-ee`. And per §8, if separate
-packaging turns out to cost more than it is worth, shipping `cubeplex_ee` inside
-the OSS image and letting the license check be the gate is a build-config change
-with no application-code consequences — this is not a decision the codebase gets
-locked into.
+```toml
+[project.optional-dependencies]
+licensed = ["cubeplex-ee"]
+
+[tool.uv.sources]
+cubeplex-ee = { path = "ee", editable = true }
+```
+
+The extra is absent from a default install, which is what keeps the import gate
+meaningful. `cubeplex-ee` declares no dependency on `cubeplex`: it is only ever
+installed beside it and imports it at call time, so declaring it would create a
+resolution cycle between two path-linked projects in one repository.
+
+Dev machines run EE with a locally minted license key, and the OSS container
+image simply does not install `cubeplex-ee`. Per §8, if separate packaging ever
+costs more than it is worth, shipping `cubeplex_ee` inside the OSS image and
+letting the license check be the gate is a build-config change with no
+application-code consequences — this is not a decision the codebase gets locked
+into.
 
 **EE migration lineage: one shared alembic lineage.** EE tables
 (`sso_connection`, `external_identity`) keep their migrations in the main
@@ -534,9 +552,6 @@ before pricing copy is written.
 
 - **EULA text** — `ee/LICENSE` ships as an n8n-style notice; needs legal
   review before the first commercial sale (not before open-sourcing).
-- **Dev-environment packaging** — path source vs. uv workspace (§11). Settle
-  when stage 1 Task 1 runs. Low-stakes: the fallback (ship EE in the OSS image,
-  license check is the gate) needs no application changes.
 - **Seat limits** — whether the first paid tier needs a `max_users` claim in
   the key, or ships unlimited-seat feature keys. The format supports adding the
   claim later either way.

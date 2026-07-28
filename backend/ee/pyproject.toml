@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cubeplex-ee"
+version = "0.3.0"
+description = "Commercially licensed cubeplex features"
+readme = "README.md"
+requires-python = ">=3.12"
+# `cubeplex` is deliberately absent from dependencies. This package is only ever
+# installed alongside it and imports it at call time, never at module import;
+# declaring it would create a resolution cycle between two path-linked projects
+# in the same repository.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/cubeplexai/cubeplex"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cubeplex_ee"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
