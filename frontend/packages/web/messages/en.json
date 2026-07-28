@@ -1695,7 +1695,9 @@
     "subNavAria": "Admin sub-nav",
     "avatarMenuAria": "Admin account menu",
     "comingSoon": "Not available in this build",
-    "backlogRefPrefix": "Owner: {ref}"
+    "backlogRefPrefix": "Owner: {ref}",
+    "eeOnlyTitle": "Enterprise feature",
+    "eeOnlyDescription": "This page requires a cubeplex Enterprise license."
   },
   "adminPresets": {
     "discard": "Discard",

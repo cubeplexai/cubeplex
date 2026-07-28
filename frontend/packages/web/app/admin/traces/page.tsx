@@ -20,6 +20,7 @@ import {
   getAdminFilterOptionsByIds,
   listAdminTraces,
 } from '@/lib/api/admin-traces'
+import { EEGate } from '@/components/admin/EEGate'
 
 // Tempo hard-caps search ranges at 168h on this deployment (see backend
 // list_traces) - keep every preset comfortably under that.
@@ -83,7 +84,7 @@ async function resolveMissingNames(
   }
 }
 
-export default function AdminTracesPage() {
+function AdminTracesPageContent() {
   const t = useTranslations('adminTraces')
   const router = useRouter()
   const sp = useSearchParams()
@@ -299,5 +300,13 @@ export default function AdminTracesPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function AdminTracesPage() {
+  return (
+    <EEGate>
+      <AdminTracesPageContent />
+    </EEGate>
   )
 }
