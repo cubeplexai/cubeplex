@@ -335,11 +335,15 @@ async def lifespan(_app: FastAPI):  # type: ignore
                 await _session.execute(select(func.count()).select_from(Organization))
             ).scalar_one()
         if int(_count) > 1:
-            raise RuntimeError(
-                f"single_tenant requires exactly 0 or 1 orgs in DB; found "
-                f"{int(_count)}. Switch to multi_tenant or clean up the DB "
-                "before starting."
-            )
+            from cubeplex.plugins.license import FEATURE_MULTI_ORG, has_feature
+
+            if not has_feature(FEATURE_MULTI_ORG):
+                raise RuntimeError(
+                    f"single_tenant requires exactly 0 or 1 orgs in DB; found "
+                    f"{int(_count)}. Multiple orgs need an EE license with the "
+                    "multi_org feature. Install a license key, switch to "
+                    "multi_tenant, or clean up the DB before starting."
+                )
 
     # Egress exchange mTLS listener (production only). Served on its own port so
     # the per-sandbox client-cert identity cannot be reached via the public API.

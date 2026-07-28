@@ -52,6 +52,10 @@ async def complete_onboarding(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OnboardingResponse:
+    from cubeplex.auth.singleton_org import (
+        MultiOrgNotLicensedError,
+        ensure_additional_org_allowed,
+    )
     from cubeplex.auth.users import _bootstrap_org_and_workspace, _bootstrap_workspace_in_org
 
     # Any org membership?
@@ -88,6 +92,18 @@ async def complete_onboarding(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="org_name_and_slug_required",
                 )
+            # multi_tenant creates one org per user by design and is our own
+            # licensed deployment; gating it would break the per-user bootstrap
+            # for no enforcement value.
+            mode = getattr(request.app.state, "deployment_mode", "single_tenant")
+            if mode == "single_tenant":
+                try:
+                    await ensure_additional_org_allowed(session)
+                except MultiOrgNotLicensedError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="multi_org_requires_license",
+                    ) from exc
             _, ws = await _bootstrap_org_and_workspace(
                 session,
                 user_id=user.id,
