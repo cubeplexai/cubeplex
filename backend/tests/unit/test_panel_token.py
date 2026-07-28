@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import time
 from datetime import timedelta
 
@@ -13,6 +15,14 @@ from cubeplex.sandbox.panel_token import (
 )
 
 _SECRET = "test-secret-for-panel-tokens"
+
+
+def _b64url_decode(segment: str) -> bytes:
+    return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 class TestPanelToken:
@@ -59,7 +69,15 @@ class TestPanelToken:
             sandbox_id="sbx_1", port=8080, secret=_SECRET, ttl=timedelta(hours=1)
         )
         header, payload, sig = token.split(".")
-        # Flip the last char of the signature to simulate tampering.
-        bad_sig = sig[:-1] + ("A" if sig[-1] != "A" else "B")
+        # Re-point the token at a different port, keeping the original signature.
+        # Editing the base64 text directly is not safe here: a 32-byte HMAC encodes
+        # to 43 base64 chars, whose last char carries only 4 significant bits, so
+        # four different characters decode to identical bytes and "flipping" one of
+        # them is silently a no-op.
+        claims = json.loads(_b64url_decode(payload))
+        assert claims["port"] == 8080
+        claims["port"] = 9090
+        bad_payload = _b64url_encode(json.dumps(claims, separators=(",", ":")).encode())
+        assert bad_payload != payload
         with pytest.raises(ValueError, match="Invalid or expired"):
-            verify_panel_token(f"{header}.{payload}.{bad_sig}", secret=_SECRET)
+            verify_panel_token(f"{header}.{bad_payload}.{sig}", secret=_SECRET)
