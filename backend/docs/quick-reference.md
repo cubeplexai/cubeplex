@@ -107,6 +107,24 @@ Local E2E runs the `development` env. Required files (both gitignored):
 them in place, `uv run pytest tests/e2e/` runs cleanly with no
 command-line env vars.
 
+### Working on the commercially licensed package
+
+`backend/ee/` builds `cubeplex-ee`, a separate distribution exposing the top-level
+`cubeplex_ee` package. It is an opt-in extra, absent from a default install —
+which is what keeps the import gate in `cubeplex/plugins/ee.py` meaningful.
+
+```bash
+cd backend
+uv pip install -e ee          # work on it
+uv pip uninstall cubeplex-ee  # back to the default surface
+```
+
+With it installed, startup requires a licence key: that is the gate doing its
+job, not a bug. The test suite is written against the default install and a few
+tests assert that surface directly, so either uninstall the extra before running
+tests, or mint a key for the shell (`license_keygen.py dev-env`, see above).
+`tests/conftest.py` fails fast with both options spelled out if you forget.
+
 ### Frontend E2E and the EE-gated admin pages
 
 `admin-sso.spec.ts` and `admin-insights.spec.ts` drive admin pages wrapped in

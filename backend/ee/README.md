@@ -1,6 +1,6 @@
-# cubeplex Enterprise (`ee/`)
+# cubeplex Enterprise (`backend/ee/`)
 
-Everything under `ee/` is **not** Apache-2.0. It is source-visible but governed by
+Everything under `backend/ee/` is **not** Apache-2.0. It is source-visible but governed by
 [`ee/LICENSE`](./LICENSE): production use requires a valid cubeplex Enterprise license
 key (delivered as `CUBEPLEX_LICENSE__KEY`; verified offline by
 `backend/cubeplex/plugins/license.py`).
@@ -12,8 +12,8 @@ imports it if present and hands it the parsed license. Installing or removing it
 modifies OSS code. Planned residents: SSO (SAML/OIDC), fine-grained RBAC, persistent
 audit sinks, trace viewer, cost reporting, and multi-org support.
 
-The rest of this repository (outside `ee/`) is Apache-2.0 — see the root
-[`LICENSE`](../LICENSE).
+The rest of this repository (outside `backend/ee/`) is Apache-2.0 — see the root
+[`LICENSE`](../../LICENSE).
 
 ## Status
 
@@ -22,4 +22,4 @@ planted ahead of the relocations so that every later move lands on a settled lic
 story rather than establishing one mid-surgery. The distribution's `pyproject.toml`
 arrives with the first EE feature (stage 2 — cost extraction).
 
-Design and staging: [`docs/dev/specs/2026-07-07-oss-ee-split-design.md`](../docs/dev/specs/2026-07-07-oss-ee-split-design.md).
+Design and staging: [`docs/dev/specs/2026-07-07-oss-ee-split-design.md`](../../docs/dev/specs/2026-07-07-oss-ee-split-design.md).

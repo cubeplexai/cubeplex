@@ -973,6 +973,9 @@ dev = [
     { name = "pre-commit" },
     { name = "ruff" },
 ]
+licensed = [
+    { name = "cubeplex-ee" },
+]
 test = [
     { name = "httpx" },
     { name = "pytest" },
@@ -999,6 +1002,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "cubepi", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubepi.git?rev=c63c545b16122d2a72cec558851cefe90337bd41" },
+    { name = "cubeplex-ee", marker = "extra == 'licensed'", editable = "ee" },
     { name = "dingtalk-stream", specifier = ">=0.24.3" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "dynaconf", specifier = ">=3.2.11" },
@@ -1042,7 +1046,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=11,<17" },
     { name = "yarl", specifier = ">=1.23.0" },
 ]
-provides-extras = ["dev", "test"]
+provides-extras = ["dev", "licensed", "test"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1052,6 +1056,11 @@ dev = [
     { name = "respx", specifier = ">=0.23.1" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260408" },
 ]
+
+[[package]]
+name = "cubeplex-ee"
+version = "0.3.0"
+source = { editable = "ee" }
 
 [[package]]
 name = "dependency-injector"
