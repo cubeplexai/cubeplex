@@ -26,6 +26,7 @@ def _valid_license() -> lic_mod.License:
         features=frozenset({"multi_org"}),
         issued_at=now,
         expires_at=now + timedelta(days=30),
+        kid="test-2026",
     )
 
 
