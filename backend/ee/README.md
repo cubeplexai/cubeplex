@@ -23,3 +23,14 @@ story rather than establishing one mid-surgery. The distribution's `pyproject.to
 arrives with the first EE feature (stage 2 — cost extraction).
 
 Design and staging: [`docs/dev/specs/2026-07-07-oss-ee-split-design.md`](../../docs/dev/specs/2026-07-07-oss-ee-split-design.md).
+
+## Installing it for development
+
+```bash
+cd backend && uv pip install -e ee
+```
+
+Declared as the `licensed` dependency group in `backend/pyproject.toml`, not as
+an optional extra — `uv sync --all-extras` must not pull it in, or the import
+gate in `cubeplex/plugins/ee.py` has nothing left to gate. Details in
+`backend/docs/quick-reference.md`.

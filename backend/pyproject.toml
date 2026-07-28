@@ -61,9 +61,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff>=0.8.0", "mypy>=1.8.0", "pre-commit>=3.6.0"]
-# Opt-in extra. Absent from a default install, which is what keeps the
-# import gate in cubeplex/plugins/ee.py meaningful.
-licensed = ["cubeplex-ee"]
 test = [
     "pytest>=7.4.0",
     "pytest-asyncio>=1.3.0",
@@ -194,6 +191,12 @@ cubeplex-ee = { path = "ee", editable = true }
 cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "c63c545b16122d2a72cec558851cefe90337bd41" }
 
 [dependency-groups]
+# Deliberately a group and not an extra: `uv sync --all-extras` (what
+# `make dev-install` runs) would pull an extra in, and this must stay out
+# of the default environment or the import gate in
+# cubeplex/plugins/ee.py has nothing to gate. Opt in with
+# `uv sync --group licensed`.
+licensed = ["cubeplex-ee"]
 dev = [
     "aiosqlite>=0.20",
     "babel>=2.18.0",
