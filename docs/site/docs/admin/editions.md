@@ -36,10 +36,10 @@ licensed `features`, and the Enterprise pages appear in the admin sidebar. Witho
 CubePlex runs as OSS: Enterprise pages are hidden from navigation and show an "Enterprise
 feature" notice if you navigate to them directly.
 
-<!-- SCREENSHOT-PLACEHOLDER: /img/admin/ee-gate-card.png — an Enterprise admin page in an
-     OSS deployment, showing the "Enterprise feature" card. Capture at /admin/authentication
-     with no license configured. Left as a comment rather than a live <img> so the published
-     page does not render a broken image. -->
+![Admin sidebar without the Enterprise entries, and the "Enterprise feature" notice in place of the page body](/img/admin/ee-gate-card.png)
+
+Note what the sidebar does and does not list: Authentication, Insights, and Traces are
+absent, while everything OSS — including IM connectors — stays.
 
 
 ## If a key is rejected
