@@ -266,6 +266,17 @@ RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/d
     && chmod 700 /tmp/runtime-neko \
     && chown cubeplex:cubeplex /workspace
 
+# Passwordless root for the sandbox user. The web terminal runs as cubeplex
+# (setpriv --reuid, see SandboxService.start_terminal) so that files it creates
+# stay writable by the agent, which runs as the same uid — this is what makes
+# `sudo apt install` work there. Consequence: uid 1000 is no longer a privilege
+# boundary against the agent, since agent commands share that uid. The container
+# is the boundary. Matched by username, not group: setpriv --clear-groups wipes
+# supplementary groups, so a `sudo` group membership would not survive.
+RUN echo 'cubeplex ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-cubeplex \
+    && chmod 0440 /etc/sudoers.d/90-cubeplex \
+    && visudo -c
+
 # Run Xorg fully rootless (drop the setuid Xorg.wrap) so the neko input socket is
 # owned by the cubeplex user, and load the dummy config from the default path
 # (Xorg.wrap rejects an absolute -config path).
