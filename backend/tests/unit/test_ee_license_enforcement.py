@@ -30,19 +30,26 @@ def _valid_license() -> lic_mod.License:
     )
 
 
+def _present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make find_spec report cubeplex_ee as installed."""
+    monkeypatch.setattr(
+        "cubeplex.plugins.ee.importlib.util.find_spec", lambda name: SimpleNamespace(name=name)
+    )
+
+
+def _absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cubeplex.plugins.ee.importlib.util.find_spec", lambda name: None)
+
+
 def test_ee_absent_runs_as_oss(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exactly what the import machinery raises when the dist isn't installed."""
-
-    def raise_missing(name: str) -> ModuleType:
-        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
-
-    monkeypatch.setattr("cubeplex.plugins.ee.importlib.import_module", raise_missing)
+    _absent(monkeypatch)
     monkeypatch.setattr(lic_mod, "load_license", lambda: None)
     assert load_ee(SimpleNamespace()) is False
 
 
 def test_ee_present_without_license_refuses_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
+    _present(monkeypatch)
     monkeypatch.setattr(
         "cubeplex.plugins.ee.importlib.import_module", lambda name: _fake_ee_module(calls)
     )
@@ -54,6 +61,7 @@ def test_ee_present_without_license_refuses_boot(monkeypatch: pytest.MonkeyPatch
 
 def test_ee_present_with_license_registers(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
+    _present(monkeypatch)
     monkeypatch.setattr(
         "cubeplex.plugins.ee.importlib.import_module", lambda name: _fake_ee_module(calls)
     )
@@ -66,6 +74,7 @@ def test_ee_present_with_license_registers(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_ee_without_register_entry_point_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """A cubeplex_ee that doesn't expose register() is a broken install, not OSS."""
+    _present(monkeypatch)
     monkeypatch.setattr(
         "cubeplex.plugins.ee.importlib.import_module", lambda name: ModuleType(EE_MODULE)
     )
@@ -74,8 +83,27 @@ def test_ee_without_register_entry_point_is_rejected(monkeypatch: pytest.MonkeyP
         load_ee(SimpleNamespace())
 
 
+def test_broken_ee_install_is_not_mistaken_for_oss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The failure exc.name cannot distinguish, so presence must not depend on it.
+
+    A cubeplex_ee whose __init__ does `from . import missing` raises ImportError
+    with name == "cubeplex_ee" — identical to "not installed". Degrading there
+    would hand a paying deployment the OSS feature set with nothing in the logs.
+    """
+    _present(monkeypatch)
+
+    def raise_self_named(name: str) -> ModuleType:
+        raise ImportError(f"cannot import name 'missing' from {name!r}", name=name)
+
+    monkeypatch.setattr("cubeplex.plugins.ee.importlib.import_module", raise_self_named)
+    monkeypatch.setattr(lic_mod, "load_license", lambda: _valid_license())
+    with pytest.raises(ImportError, match="missing"):
+        load_ee(SimpleNamespace())
+
+
 def test_import_error_from_inside_ee_is_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A broken dependency inside cubeplex_ee must not silently look like OSS."""
+    _present(monkeypatch)
 
     def raise_inner_import(name: str) -> ModuleType:
         raise ImportError("No module named 'some_ee_dependency'", name="some_ee_dependency")

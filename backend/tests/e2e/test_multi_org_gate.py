@@ -1,11 +1,13 @@
 """E2E: single_tenant caps organizations at 1 unless the license has multi_org."""
 
+import asyncio
 import secrets
 
 import httpx
 import pytest
 from fastapi_users.schemas import BaseUserCreate
 from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -118,3 +120,42 @@ async def test_first_org_is_never_gated(
     client = fresh_db_unauth_client_single_tenant
     monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     await _create_first_org(client)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_onboarding_cannot_create_two_orgs(
+    fresh_db_unauth_client_single_tenant: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two in-flight full-mode onboardings must not both win.
+
+    Both requests read org_count() == 0 before either commits, so without
+    serialization each creates its own org. Distinct slugs mean the unique
+    constraint does not save us. The deployment then holds two orgs unlicensed
+    and its next restart fails the startup consistency check.
+    """
+    client = fresh_db_unauth_client_single_tenant
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
+
+    email = f"racer-{secrets.token_hex(4)}@example.com"
+    password = "StrongPass1!"
+    resp = await client.post("/api/v1/auth/register", json={"email": email, "password": password})
+    assert resp.status_code == 201, resp.text
+    await _login(client, email, password)
+
+    first, second = await asyncio.gather(
+        client.post("/api/v1/onboarding", json=_onboard_body(f"a{secrets.token_hex(4)}")),
+        client.post("/api/v1/onboarding", json=_onboard_body(f"b{secrets.token_hex(4)}")),
+        return_exceptions=True,
+    )
+    codes = sorted(r.status_code for r in (first, second) if isinstance(r, httpx.Response))
+    created = [c for c in codes if c == 201]
+    assert len(created) == 1, f"expected exactly one org creation, got {codes}"
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        async with engine.begin() as conn:
+            total = (await conn.execute(text("SELECT count(*) FROM organizations"))).scalar_one()
+    finally:
+        await engine.dispose()
+    assert int(total) == 1, f"single_tenant ended up with {total} orgs"
