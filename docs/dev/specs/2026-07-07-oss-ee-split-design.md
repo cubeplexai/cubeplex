@@ -17,6 +17,11 @@ open-source release.
   the OSS build" question. Rewrote §8.1 — enforcement moves off
   `PluginRegistry.discover()`. Corrected §10 from five gated pages to four.
   Settled the EE alembic lineage question in §11. Recorded two defects in §12.
+- **2026-07-27 (key format)** — added a required `kid` claim and a
+  `kid -> public key` table so the signing key can be rotated without a flag
+  day, and renamed the prefix `CBX1` -> `CPX1`. Recorded that offline
+  verification rules out revocation, leaving `expires_at` as the only time
+  bound. Default validity stays 365 days.
 - **2026-07-27 (later)** — surveyed prior art (§9, "Prior art"): four comparable
   Python projects all use the same top-level-module + `try: import` gate, which
   confirmed the mechanism. That survey also corrected §8: the top-level package
@@ -196,21 +201,41 @@ buyer sees, which bears on whether the boundary is compelling — see §12.2.
 
 ## 7. License Key Design
 
-**Format:** `CBX1.<b64url(payload-json)>.<b64url(signature)>`
+**Format:** `CPX1.<b64url(payload-json)>.<b64url(signature)>`
 
 - Ed25519 signature over the exact payload bytes (no JSON canonicalization
-  needed — verify what was signed).
-- Payload claims: `licensee: str`, `features: list[str]`,
+  needed — verify what was signed). Ed25519 keys are 32 bytes, giving a
+  ~128-bit security level — the same strength as RSA-3072 at a tenth the size.
+- Payload claims: `kid: str`, `licensee: str`, `features: list[str]`,
   `issued_at`, `expires_at` (ISO-8601, timezone-aware, required).
-- The production public key is embedded as a constant in
-  `cubeplex/plugins/license.py`. The private key never enters the repo.
-- Version prefix `CBX1` allows a future format change without ambiguity.
+- Trusted signing public keys live in `LICENSE_PUBLIC_KEYS`, a
+  `kid -> public-key-hex` table in `cubeplex/plugins/license.py`. Private keys
+  never enter the repo.
+- Version prefix `CPX1` allows a future *format* change without ambiguity;
+  `kid` covers *key* changes, which are a different axis.
+
+**Key rotation (added 2026-07-27).** The table holds more than one entry at a
+time, so rotating means shipping a build that trusts both the outgoing and
+incoming ids, re-issuing customer keys under the new id, then dropping the old
+entry in a later release. Without `kid` a leaked signing key would force a flag
+day: one embedded constant, every deployment upgraded at once, and old keys
+still valid on anything not yet upgraded.
+
+The `kid` is read before the signature is verified, which is safe — it can only
+select among keys the build already trusts, and a wrong selection fails
+verification. This mirrors how JWT `kid` headers work.
+
+**Revocation is out of reach, by construction.** Offline verification (§3.2,
+air-gapped deployments) means there is nothing to call to invalidate an issued
+key. `expires_at` is the only time bound, so it doubles as soft revocation.
+Default validity is 365 days; shortening it is the lever if revocation
+responsiveness ever matters more than renewal friction.
 
 **Configuration:** `license.key` (`CUBEPLEX_LICENSE__KEY`). A second key,
-`license.public_key_hex` (`CUBEPLEX_LICENSE__PUBLIC_KEY_HEX`), overrides the
-embedded signer public key so tests and dev environments can mint their own
-keys with `backend/scripts/dev/license_keygen.py`; production deployments
-never set it.
+`license.public_key_hex` (`CUBEPLEX_LICENSE__PUBLIC_KEY_HEX`), bypasses the
+`kid` table entirely so tests and dev environments can mint keys under any id
+with `backend/scripts/dev/license_keygen.py`; production deployments never set
+it.
 
 **Semantics:**
 

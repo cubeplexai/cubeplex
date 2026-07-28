@@ -18,23 +18,29 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+TEST_KID = "test-2026"
+
+
 def _make_key(
     private_key: Ed25519PrivateKey,
     *,
+    kid: str | None = TEST_KID,
     licensee: str = "Acme Corp",
     features: list[str] | None = None,
     issued_at: datetime | None = None,
     expires_at: datetime | None = None,
 ) -> str:
     now = datetime.now(UTC)
-    payload = {
+    payload: dict[str, object] = {
         "licensee": licensee,
         "features": features if features is not None else ["multi_org"],
         "issued_at": (issued_at or now).isoformat(),
         "expires_at": (expires_at or (now + timedelta(days=365))).isoformat(),
     }
+    if kid is not None:
+        payload["kid"] = kid
     raw = json.dumps(payload, separators=(",", ":")).encode()
-    return f"CBX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
+    return f"CPX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
 
 
 @pytest.fixture
@@ -86,13 +92,14 @@ def test_naive_timestamp_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> Non
     """tz-aware only: a naive expires_at must not be silently treated as UTC."""
     private_key, public_hex = keypair
     payload = {
+        "kid": TEST_KID,
         "licensee": "Acme Corp",
         "features": ["multi_org"],
         "issued_at": datetime.now(UTC).isoformat(),
         "expires_at": (datetime.now(UTC) + timedelta(days=30)).replace(tzinfo=None).isoformat(),
     }
     raw = json.dumps(payload, separators=(",", ":")).encode()
-    key = f"CBX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
+    key = f"CPX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
     with pytest.raises(LicenseError, match="timezone-aware"):
         parse_license_key(key, public_key_hex=public_hex)
 
@@ -102,9 +109,9 @@ def test_naive_timestamp_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> Non
     [
         "",
         "garbage",
-        "CBX1.onlytwo",
+        "CPX1.onlytwo",
         "CBX9.YQ.YQ",  # wrong prefix
-        "CBX1.!!!.YQ",  # bad base64
+        "CPX1.!!!.YQ",  # bad base64
     ],
 )
 def test_malformed_keys_rejected(bad: str, keypair: tuple[Ed25519PrivateKey, str]) -> None:
@@ -117,7 +124,7 @@ def test_non_json_payload_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> No
     """A correctly signed non-JSON payload must still be refused."""
     private_key, public_hex = keypair
     raw = b"not json at all"
-    key = f"CBX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
+    key = f"CPX1.{_b64url(raw)}.{_b64url(private_key.sign(raw))}"
     with pytest.raises(LicenseError):
         parse_license_key(key, public_key_hex=public_hex)
 
@@ -129,7 +136,7 @@ def test_unprovisioned_signing_key_degrades_to_oss(
     import cubeplex.plugins.license as lic_mod
 
     private_key, _ = keypair
-    monkeypatch.setattr(lic_mod, "LICENSE_PUBLIC_KEY_HEX", "")
+    monkeypatch.setattr(lic_mod, "LICENSE_PUBLIC_KEYS", {})
     with pytest.raises(LicenseError, match="no license signing public key"):
         parse_license_key(_make_key(private_key))
 
@@ -138,6 +145,45 @@ def test_unprovisioned_signing_key_degrades_to_oss(
     lic_mod.reset_license_cache_for_tests()
     assert lic_mod.get_edition() == "oss"
     lic_mod.reset_license_cache_for_tests()
+
+
+def test_missing_kid_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> None:
+    """kid is required: without it there is no way to rotate the signer."""
+    private_key, public_hex = keypair
+    with pytest.raises(LicenseError, match="kid"):
+        parse_license_key(_make_key(private_key, kid=None), public_key_hex=public_hex)
+
+
+def test_unknown_kid_rejected(keypair: tuple[Ed25519PrivateKey, str]) -> None:
+    """A key signed under a retired/unknown id must not verify against the table."""
+    import cubeplex.plugins.license as lic_mod
+
+    private_key, public_hex = keypair
+    keys = {"prod-2027": public_hex}
+    with pytest.raises(lic_mod.LicenseError, match="unknown"):
+        parse_license_key(_make_key(private_key, kid="prod-2026"), public_keys=keys)
+
+
+def test_kid_selects_the_matching_key(keypair: tuple[Ed25519PrivateKey, str]) -> None:
+    """Two signers accepted at once — the rotation window."""
+    old_private, old_public = keypair
+    new_private = Ed25519PrivateKey.generate()
+    new_public = new_private.public_key().public_bytes_raw().hex()
+    keys = {"prod-2026": old_public, "prod-2027": new_public}
+
+    assert parse_license_key(_make_key(old_private, kid="prod-2026"), public_keys=keys)
+    assert parse_license_key(_make_key(new_private, kid="prod-2027"), public_keys=keys)
+
+
+def test_kid_cannot_borrow_another_keys_signature(
+    keypair: tuple[Ed25519PrivateKey, str],
+) -> None:
+    """Pointing a kid at a trusted entry does not make a foreign signature valid."""
+    _, old_public = keypair
+    attacker = Ed25519PrivateKey.generate()
+    keys = {"prod-2026": old_public}
+    with pytest.raises(LicenseError, match="signature"):
+        parse_license_key(_make_key(attacker, kid="prod-2026"), public_keys=keys)
 
 
 def test_load_license_missing_key_is_oss(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,7 +220,7 @@ def test_load_license_invalid_key_degrades_to_oss(
     import cubeplex.plugins.license as lic_mod
 
     _, public_hex = keypair
-    values = {"license.key": "CBX1.bogus.bogus", "license.public_key_hex": public_hex}
+    values = {"license.key": "CPX1.bogus.bogus", "license.public_key_hex": public_hex}
     monkeypatch.setattr(lic_mod, "_config_get", lambda k: values.get(k))
     lic_mod.reset_license_cache_for_tests()
     assert lic_mod.load_license() is None
