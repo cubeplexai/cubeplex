@@ -40,6 +40,12 @@
       "import": "./src/hooks/useDeploymentMode.ts",
       "default": "./src/hooks/useDeploymentMode.ts"
     },
+    "./hooks/useEdition": {
+      "types": "./src/hooks/useEdition.ts",
+      "source": "./src/hooks/useEdition.ts",
+      "import": "./src/hooks/useEdition.ts",
+      "default": "./src/hooks/useEdition.ts"
+    },
     "./hooks/useUserEvents": {
       "types": "./src/hooks/useUserEvents.ts",
       "source": "./src/hooks/useUserEvents.ts",

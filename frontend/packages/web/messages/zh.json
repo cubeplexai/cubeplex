@@ -1695,7 +1695,9 @@
     "subNavAria": "管理后台二级导航",
     "avatarMenuAria": "管理后台账号菜单",
     "comingSoon": "本版本不可用",
-    "backlogRefPrefix": "实现归属：{ref}"
+    "backlogRefPrefix": "实现归属：{ref}",
+    "eeOnlyTitle": "企业版功能",
+    "eeOnlyDescription": "此页面需要 cubeplex 企业版 license。"
   },
   "adminPresets": {
     "discard": "放弃更改",
