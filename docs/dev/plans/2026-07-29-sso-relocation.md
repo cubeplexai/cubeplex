@@ -7,6 +7,17 @@ Stage 2 moved cost reporting into the licensed package. This stage moves SAML
 and OIDC single sign-on. It is the last of the planned relocations, and the
 first one that touches unauthenticated request paths.
 
+**Revised 2026-07-29 after review.** Six things the first draft got wrong, all
+verified against the code before being accepted: `sso.py` cannot move wholesale
+because OSS Google login lazily imports two helpers out of it (§3.1); deleting
+modules needs named cleanup edits or the default install stops importing at all
+(§3.2); uninstalling the package with an active connection row locks an org out
+of both login methods (§3.3); SSO needs **two** mount objects and rewritten
+router prefixes, not one (§4); `test_sso_routes.py` splits rather than moving
+(§6); and the public SSO path is written in eight places across two languages,
+not one (§8). The namespacing rationale in §4 was also wrong on its own terms —
+corrected there after measuring it.
+
 ## 1. What "done" means
 
 On a default install (licensed package absent):
@@ -91,11 +102,68 @@ Every file that mentions SSO, and where it lands. "→ licensed" means it moves 
 | File | Lines | Why it moves |
 |---|---|---|
 | `api/routes/v1/admin_sso.py` | 825 | The EE admin CRUD surface, whole file |
-| `api/routes/v1/sso.py` | 574 | Minus `org-info`, see below |
+| `api/routes/v1/sso.py` | 574 | **Partially** — three pieces stay, see §3.1 |
 | `sso/saml.py` | 178 | Every function takes an `SSOConnection` |
 | `sso/attribute_mapping.py` | 73 | Only caller is `sso.py` |
 | `repositories/sso_connection.py` | 57 | Only caller is `admin_sso.py` (the CLI uses `select()` directly) |
 | `sso/oidc.py:oidc_config_from_connection` | ~15 | The one function in `oidc.py` that takes an `SSOConnection` |
+
+### 3.1 `sso.py` is not a wholesale move
+
+Three things in that file are core, and the review of this plan is what caught
+the second one.
+
+- **`_enforce_forced_sso_for_user`** — refuses a login when the user belongs to
+  an org with active forced SSO and this flow didn't use it. `social_login.py:171`
+  imports it **lazily, inside `google_callback`**. Move the file and OSS Google
+  login raises `ImportError` at the moment a user finishes signing in — not at
+  startup, where a test would see it. It is also a security control, so shipping
+  it in the licensed package and importing it back into core inverts the
+  boundary.
+- **`_login_and_redirect`** — issues the session cookie via `auth_backend` and
+  redirects. Core auth, same lazy import, same failure.
+- **`get_org_info`** (`/auth/org-info/{slug}`) — the OSS login page calls it.
+
+Extract all three into core before deleting anything. `_enforce_forced_sso_for_user`
+belongs beside the near-duplicate guard already in `auth.py` (both refuse login
+when an org has active SSO) — worth putting them in one module, though actually
+unifying the two queries is a separate change, not this one.
+
+### 3.2 Cleanup edits, named explicitly
+
+Deleting a module is not the whole edit. These must be in the diff or the
+default install won't import at all:
+
+- `repositories/__init__.py:30,60` eagerly imports and re-exports
+  `SSOConnectionRepository`. Leaving it turns every `cubeplex.repositories`
+  import — most routes and services — into `ModuleNotFoundError`.
+- `api/app.py` statically imports and mounts `sso` and `admin_sso`
+  (lines ~546, ~585, ~602 and the `admin_sso` include). Both go.
+- `models/__init__.py` is **not** touched: the models stay (§2.1).
+
+### 3.3 Uninstalling the package with active rows must fail loudly
+
+The claim that the SSO table is "always empty" on a default install holds for a
+fresh install and is **false for a downgrade**. If an org activates SSO and the
+package is then removed — a botched upgrade, or a deliberate downgrade — the row
+survives in the shared database and the deployment reaches a state where:
+
+- `org-info` still reports `sso_enabled: true`, so the login page shows an SSO
+  button,
+- password login still refuses with the forced-SSO error,
+- and `/api/v1/_extensions/cubeplex_ee/sso/*` 404s.
+
+Every member of that org loses both login methods, with nothing in the logs
+naming the cause.
+
+Add the symmetric startup check to the one stage 1 already has. Stage 1 refuses
+to boot when the package is installed without a valid key; this refuses to boot
+when an `active` or `testing` connection exists and the package is absent. The
+error names the two ways out: reinstall the package, or run the break-glass
+`disable-sso`, which works precisely because §3 keeps that CLI in core.
+
+Ignoring the row instead would silently disable forced SSO — a security control
+downgrading itself on a packaging accident. Fail fast.
 
 ### Stays in core
 
@@ -168,19 +236,62 @@ for _ext_obj in _reg.get_route_extensions():
         )
 ```
 
+### Both mount objects, and the exact final URLs
+
+SSO needs **two** extension objects, not one. The first draft of this section
+described only the `RouteExtension` and left the admin CRUD surface unmounted —
+`/api/v1/admin/sso/*` would simply have stopped existing while §8 pointed the
+frontend at a path nothing served.
+
+`cubeplex_ee.register()` registers both:
+
+| Object | Protocol | Router prefix | Final URL |
+|---|---|---|---|
+| `SSOAdminPanel` | `AdminPanelExtension` | `/sso` | `/api/v1/admin/_extensions/cubeplex_ee/sso/*` |
+| `SSOLoginRoutes` | `RouteExtension` | `/sso` | `/api/v1/_extensions/cubeplex_ee/sso/*` |
+
+The prefixes must be **rewritten, not inherited**. The routers carry
+`prefix="/admin/sso"` and `prefix="/auth"` today; moving them mechanically would
+produce `/api/v1/admin/_extensions/cubeplex_ee/admin/sso/...` and
+`/api/v1/_extensions/cubeplex_ee/auth/sso/initiate` — neither of which is what
+§8 points the frontend at, and the second is not what gets registered with the
+IdP. Set both to `/sso` and assert every final URL through a real lifespan
+mount, not by reading the source.
+
+Resulting login-flow paths, which are also the strings the IdP is configured
+with — see §8 for the eight places they are currently written:
+
+```
+POST /api/v1/_extensions/cubeplex_ee/sso/initiate
+GET  /api/v1/_extensions/cubeplex_ee/sso/oidc/callback
+POST /api/v1/_extensions/cubeplex_ee/sso/saml/acs
+GET  /api/v1/_extensions/cubeplex_ee/sso/saml/metadata/{sso_id}
+```
+
 ### Why a namespaced prefix rather than the current paths
 
 The alternative — let the extension mount at `/api/v1` verbatim, keeping
-`/api/v1/auth/sso/*` unchanged — reads as the smaller change but hands any
-installed package the ability to shadow a core route. FastAPI resolves
-first-match-wins, so an extension router with a colliding path silently takes
-over a core endpoint depending on mount order. Guarding that needs a startup
-path-collision check, which is more machinery than the namespace it replaces.
+`/api/v1/auth/sso/*` unchanged — reads as the smaller change.
 
-Reserving `/_extensions/` makes collisions impossible by construction and is
-symmetric with what stage 2 already established. The cost is that the SAML ACS
-URL changes, which is an externally-registered URL — acceptable only because
-nothing has shipped. Choose the path once here and treat it as frozen.
+**Corrected after measuring it.** The first version of this section claimed an
+unprefixed extension could shadow a core route and take over a core endpoint.
+That is false with the current mount order: core routers register inside
+`create_app()`, extensions mount later in lifespan, and Starlette matches in
+registration order, so a colliding extension path *loses*. Probed directly by
+mounting a stand-in that declares `/api/v1/system/info` without a prefix — the
+response still came from core.
+
+The namespace is still the right choice, for two smaller and true reasons.
+Losing the collision is itself a silent bug: the extension serves a route that
+never receives a request, with no error anywhere. And relying on "core registers
+first" makes correctness a load-order property that nothing asserts — one
+refactor that mounts extensions earlier would turn it into the hijack the first
+draft wrongly claimed. Prefixing removes the question in both directions, and is
+symmetric with what stage 2 established.
+
+The cost is that the SAML ACS URL changes, which is an externally-registered
+URL — acceptable only because nothing has shipped. Choose the path once here and
+treat it as frozen.
 
 ### Why not implement `AuthProvider` instead
 
@@ -200,13 +311,18 @@ much cheaper than that risk.
 SSO also does not need the slot's actual purpose: it issues the same session
 cookie core already understands, so `authenticate()` needs no override at all.
 
-### What PR 1 tests, and what it leaves to PR 2
+### What PR 1 tests
 
-PR 1 covers the OSS-facing half: the registry binds no route extension by
-default, and `/api/v1/_extensions/*` 404s on a real app. It does **not** build a
-throwaway app with a stand-in extension to prove the prefix is applied — PR 2
-mounts a real router through the same loop and asserts its URL in the licensed
-lane, which is the same proof without the scaffolding.
+Both halves. The OSS side: the registry binds no route extension by default, and
+`/api/v1/_extensions/*` 404s on a real app. The positive side: a stand-in
+extension registered before lifespan is reachable under its prefix and nowhere
+else.
+
+The positive test was initially deferred to PR 2 on the argument that a real
+router would prove the same thing. Codecov disagreed — the mount loop is new
+code with no covering test — and it was right to: writing the test is what
+surfaced the false shadowing rationale above. `create_app()` is a factory and the
+mount happens in lifespan, so registering first costs about twenty lines.
 
 `cubeplex_ee.__init__._Registry` mirrors the host registry so mypy catches drift.
 Its `register_route_extension` member lands in PR 2, with the call that needs it.
@@ -269,9 +385,21 @@ Same three-bucket shape as stage 2.
 `pytest.importorskip("cubeplex_ee")`:
 
 - `tests/unit/test_admin_sso_routes.py` (the largest single file here),
-  `test_sso_routes.py`, `test_sso_saml.py`, `test_sso_attribute_mapping.py`,
+  `test_sso_saml.py`, `test_sso_attribute_mapping.py`,
   `test_sso_connection_repository.py`
 - `tests/e2e/test_sso_admin.py` — every test hits `/api/v1/admin/sso`
+
+**`test_sso_routes.py` splits — it does not move wholesale.** It imports
+`_enforce_forced_sso_for_user` and `_login_and_redirect`, which §3.1 keeps in
+core because OSS Google login calls them. Moving the file would delete
+default-lane coverage of a forced-SSO security control. Its `sso_initiate` /
+`sso_oidc_callback` / `sso_saml_acs` cases go to the licensed lane; the two
+two helper-focused cases stay in the default lane, following their code.
+
+The `_policy_for` tests added in PR 1 go to the **licensed** lane, because
+`_policy_for` itself moves: reading `status` and `provisioning` is exactly the
+enterprise policy §5 pushed out of core. `EnterpriseLoginPolicy` and its
+consumer tests stay in core.
 
 **Split, like `billing_fixtures.py` in stage 2:**
 
@@ -319,8 +447,30 @@ Playwright split is still deferred; note it, don't fix it here.
 
 ## 8. Frontend
 
-`frontend/packages/core/src/api/sso.ts` holds every URL and is the only file
-with real changes:
+**Corrected: `sso.ts` is not the only file.** The first draft said it was. The
+public SSO paths are written in **eight** places across two languages, and the
+ones a real login depends on most are not in the API client at all.
+
+`frontend/packages/web/components/admin/SSOConfigForm.tsx:231-234` builds the
+three URLs an administrator copies into their identity provider:
+
+```ts
+const redirectUri   = `${origin}/api/v1/auth/sso/oidc/callback`
+const spAcsUrl      = `${origin}/api/v1/auth/sso/saml/acs`
+const spMetadataUrl = `${origin}/api/v1/auth/sso/saml/metadata/${connection.id}`
+```
+
+and `api/routes/v1/sso.py` writes the same paths five more times (lines 195,
+207, 276, 370, 473) to build the `redirect_uri` it sends the IdP and the ACS URL
+it puts in SAML metadata. Miss any one and admin CRUD still passes, API client
+tests still pass, and real OIDC/SAML login fails at the IdP — where no test
+looks.
+
+Centralize the public SSO base path on each side (one constant in the licensed
+package, one in the web package) so the API calls, the displayed copy-paste
+URLs, the backend-generated metadata, and the tests cannot drift apart.
+
+`frontend/packages/core/src/api/sso.ts` holds the API-client URLs:
 
 - 11 admin calls: `/api/v1/admin/sso/*` → `/api/v1/admin/_extensions/cubeplex_ee/sso/*`
 - 1 login call: `/api/v1/auth/sso/initiate` → `/api/v1/_extensions/cubeplex_ee/sso/initiate`
@@ -332,11 +482,11 @@ Also:
   prefixes; add `/api/v1/_extensions/cubeplex_ee/sso/`.
 - `core/src/api/__tests__/sso.test.ts` asserts exact URLs — update.
 - `__tests__/e2e/sso-login.spec.ts:64` mocks `**/api/v1/auth/org-info/…` —
-  unchanged, since that endpoint stays.
-- Backend redirect targets: `sso.py` builds IdP `redirect_uri`s from
-  `public_base_url` plus its own route paths. Those strings move with the file,
-  but grep for hardcoded `/auth/sso/` in the moved code — a stale literal here
-  fails only at the IdP, which no unit test will catch.
+  unchanged, since that endpoint stays. Its **initiate** mock in the same file
+  does change, as do the old-path mocks in `admin-sso.spec.ts`.
+- After the move, `grep -rn "/auth/sso/"` across `backend/` and `frontend/` must
+  return nothing. A stale literal here fails only at the IdP, which no test in
+  either suite reaches.
 
 `/admin/authentication` is already `<EEGate>`-wrapped from stage 1, so page
 gating needs nothing. Long term the licensed package supplies its own nav entry
@@ -374,15 +524,34 @@ round. They ride together, as separate commits.
 PR 2 is the one that needs a review pass: it is where a stale path literal or a
 test left in the wrong lane would hide.
 
+### Cutover
+
+PR 2 changes public URLs, so backend and frontend must ship together and any
+configured identity provider must be updated to the new callback and ACS URLs by
+hand. A rollout where the two artifacts move independently leaves SSO login
+broken in both directions — old frontend calling removed paths, or new frontend
+calling paths that don't exist yet.
+
+The review of this plan proposed a staged transition where the licensed package
+temporarily accepts both old and new callback paths. **Declining that**: the
+project has not shipped, so there is no deployment carrying live IdP
+registrations to protect, and the repo rule is to cut over cleanly rather than
+add compatibility shims. What it does need is the operator-facing note — the
+same IdP reconfiguration step belongs in the PR description, because existing
+dev and staging IdP registrations will break silently otherwise.
+
 ## 11. Risks
 
 | Risk | Detection |
 |---|---|
 | Autogenerate wants to drop the SSO tables | `alembic revision --autogenerate` on a default install must produce an empty diff. Run it; don't reason about it. |
-| A stale `/auth/sso/` literal in moved code | Grep the moved files for the old prefix after the move; the SAML ACS URL is only exercised end-to-end |
+| A stale `/auth/sso/` literal | `grep -rn "/auth/sso/" backend/ frontend/` returns nothing after the move. Eight sites today (§8) — the IdP-facing ones fail where no test looks. |
+| OSS Google login broken by the move | It lazily imports two helpers out of `sso.py` (§3.1), so the break appears at callback time, not import time. `test_social_login_routes.py` must stay in the default lane and stay green. |
 | A licensed test left in the default lane | The default lane must stay green with the package uninstalled — the stage-1 conftest guard turns a silent skip into a `UsageError` |
+| A core module still importing a deleted one | §3.2 names them; `uv run python -c "import cubeplex.api.app"` on a default install is the cheap check |
 | Password login broken by the auth-provider slot | Not applicable by construction once §4 uses its own slot — that is the reason for the choice |
 | `frontend-e2e` green for the wrong reason | It installs the package, so it cannot catch an OSS regression. The 404 test in §6 is what covers that. |
+| Downgrade leaves an org with no way in | §3.3's startup check; assert it with an e2e test that seeds an active row on a default install and expects a boot failure naming `disable-sso` |
 
 ## 12. Out of scope
 

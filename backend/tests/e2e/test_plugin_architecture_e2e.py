@@ -119,3 +119,65 @@ async def test_workspace_rename_emits_audit_event(
     assert any("workspace.renamed" in m for m in messages), (
         f"no audit log for workspace.renamed; captured: {messages}"
     )
+
+
+@pytest.mark.asyncio
+async def test_route_extension_mounts_under_reserved_namespace() -> None:
+    """A registered RouteExtension is reachable, and only under its own prefix.
+
+    Registers a stand-in rather than waiting for a real licensed router, because
+    the mount loop is the thing under test. The extension deliberately also
+    declares a path core already owns: prefixing means that path lands under the
+    extension's namespace instead of colliding, so neither router is ambiguous
+    about what it serves.
+    """
+    import httpx as _httpx
+    from fastapi import APIRouter, FastAPI
+
+    from cubeplex.plugins import get_registry, reset_registry_for_tests
+    from tests.e2e.conftest import _lifespan_context, _make_memory_test_app
+
+    router = APIRouter()
+
+    @router.get("/ping")
+    async def _ping() -> dict[str, str]:
+        return {"pong": "yes"}
+
+    # A path core already serves. Prefixing relocates it rather than colliding.
+    @router.get("/api/v1/system/info")
+    async def _collides() -> dict[str, str]:
+        return {"from_extension": "yes"}
+
+    class _StandInExtension:
+        def get_router(self) -> APIRouter:
+            return router
+
+    reset_registry_for_tests()
+    try:
+        get_registry().register_route_extension(_StandInExtension())
+        app: FastAPI = _make_memory_test_app()
+        app.state.deployment_mode = "multi_tenant"
+        async with _lifespan_context(app):
+            transport = _httpx.ASGITransport(app=app)
+            async with _httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                # __module__ of a class defined in this test file is the test module,
+                # so the prefix is derived from its top-level package: "tests".
+                resp = await c.get("/api/v1/_extensions/tests/ping")
+                assert resp.status_code == 200
+                assert resp.json() == {"pong": "yes"}
+
+                # Unprefixed, the extension is not reachable at all.
+                assert (await c.get("/ping")).status_code == 404
+
+                # The colliding declaration lands inside the namespace...
+                nested = await c.get("/api/v1/_extensions/tests/api/v1/system/info")
+                assert nested.json() == {"from_extension": "yes"}
+
+                # ...and core's own path is untouched. Mount order alone would
+                # also give core this one, since it registers first; the prefix
+                # is what stops that from being a load-order coincidence.
+                info = await c.get("/api/v1/system/info")
+                assert info.status_code == 200
+                assert "from_extension" not in info.json()
+    finally:
+        reset_registry_for_tests()
