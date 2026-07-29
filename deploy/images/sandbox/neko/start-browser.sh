@@ -7,6 +7,13 @@
 # time a live view is requested; repeat calls are a no-op.
 set -eu
 
+# Everything below needs root: the lock and pidfile live in /var/run, the
+# runtime dirs get chowned, and supervisord drops privileges itself. The
+# backend calls this with as_root=True, but agent commands run as
+# sandbox.run_uid (1000) — so re-exec through sudo instead of dying on the
+# first write, which also broke the "already running" fast path below.
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+
 PIDFILE=/var/run/neko-supervisord.pid
 SUPERVISORD_CONF=/etc/neko/supervisord.conf
 
