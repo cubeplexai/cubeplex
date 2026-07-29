@@ -23,7 +23,7 @@ from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.objectstore.artifact_paths import (
     artifact_file_key_candidates,
-    artifact_version_prefix_candidates,
+    list_artifact_version_objects,
 )
 from cubeplex.repositories import (
     ArtifactRepository,
@@ -199,26 +199,21 @@ async def download_artifact(
     target_version = version or artifact.version
     try:
         store = get_objectstore_client()
-        prefix = ""
-        keys: list[str] = []
-        for candidate in artifact_version_prefix_candidates(
-            artifact_id, target_version, artifact.conversation_id
-        ):
-            keys = await store.list_objects(candidate)
-            if keys:
-                prefix = candidate
-                break
+        objects = await list_artifact_version_objects(
+            store, artifact_id, target_version, artifact.conversation_id
+        )
 
-        if not keys:
+        if not objects:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No files found for this artifact version",
             )
 
-        if len(keys) == 1:
+        if len(objects) == 1:
             # Single file — download and return directly
-            data, content_type = await store.download_file(keys[0])
-            filename = keys[0].rsplit("/", 1)[-1]
+            relative_path, key = objects[0]
+            data, content_type = await store.download_file(key)
+            filename = relative_path.rsplit("/", 1)[-1]
             media_type = artifact.mime_type or content_type or "application/octet-stream"
             return Response(
                 content=data,
@@ -229,10 +224,9 @@ async def download_artifact(
         # Multiple files — create a tar archive in memory
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
-            for key in keys:
+            for relative_path, key in objects:
                 data, _ = await store.download_file(key)
-                rel_name = key[len(prefix) :]
-                info = tarfile.TarInfo(name=rel_name)
+                info = tarfile.TarInfo(name=relative_path)
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
         buf.seek(0)
@@ -286,15 +280,9 @@ async def list_artifact_files(
     target_version = version or artifact.version
     try:
         store = get_objectstore_client()
-        prefix = ""
-        keys: list[str] = []
-        for candidate in artifact_version_prefix_candidates(
-            artifact_id, target_version, artifact.conversation_id
-        ):
-            keys = await store.list_objects(candidate)
-            if keys:
-                prefix = candidate
-                break
+        objects = await list_artifact_version_objects(
+            store, artifact_id, target_version, artifact.conversation_id
+        )
     except Exception as e:
         logger.error("Error listing artifact files: {}", e)
         raise HTTPException(
@@ -302,7 +290,7 @@ async def list_artifact_files(
             detail="Failed to list artifact files",
         ) from None
 
-    rel_files = [k[len(prefix) :] for k in keys]
+    rel_files = [relative_path for relative_path, _ in objects]
     if filter == "image":
         rel_files = [
             f for f in rel_files if "." in f and f.rsplit(".", 1)[-1].lower() in IMAGE_EXTENSIONS

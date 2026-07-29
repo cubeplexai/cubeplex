@@ -157,7 +157,16 @@ def _mock_store(*, objects: list[str] | None = None, list_error: Exception | Non
     if list_error is not None:
         store.list_objects = AsyncMock(side_effect=list_error)
     else:
-        store.list_objects = AsyncMock(return_value=objects if objects is not None else ["a.md"])
+        stored = objects if objects is not None else ["a.md"]
+
+        async def list_objects(prefix: str) -> list[str]:
+            return [
+                key if key.startswith("artifacts/") else f"{prefix}{key}"
+                for key in stored
+                if not key.startswith("artifacts/") or key.startswith(prefix)
+            ]
+
+        store.list_objects = AsyncMock(side_effect=list_objects)
     store.upload_file = AsyncMock()
     store.delete_file = AsyncMock()
     return store

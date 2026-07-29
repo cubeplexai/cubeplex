@@ -1,5 +1,7 @@
 """E2E tests for the artifact file-list endpoint."""
 
+import io
+import tarfile
 from collections.abc import AsyncIterator
 
 import pytest
@@ -78,6 +80,14 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             f"artifacts/{_CONV}/{_ART}/v3/legacy.png",
             b"\x89PNG\r\n\x1a\n-legacy",
         )
+        await store.upload_file(
+            f"artifacts/{_CONV}/{_ART}/v3/only-legacy.png",
+            b"\x89PNG\r\n\x1a\n-only-legacy",
+        )
+        await store.upload_file(
+            f"artifacts/{_ART}/v3/legacy.png",
+            b"\x89PNG\r\n\x1a\n-canonical",
+        )
         yield
     finally:
         store = get_objectstore_client()
@@ -92,6 +102,8 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             except Exception:
                 pass
         await store.delete_file(f"artifacts/{_CONV}/{_ART}/v3/legacy.png")
+        await store.delete_file(f"artifacts/{_CONV}/{_ART}/v3/only-legacy.png")
+        await store.delete_file(f"artifacts/{_ART}/v3/legacy.png")
         async with maker() as s:
             await s.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": _ART})
             await s.execute(text("DELETE FROM conversations WHERE id = :id"), {"id": _CONV})
@@ -224,13 +236,25 @@ def test_existing_legacy_version_remains_readable_during_migration(
         params={"version": 3},
     )
     assert files.status_code == 200, files.text
-    assert files.json()["files"] == ["legacy.png"]
+    assert files.json()["files"] == ["legacy.png", "only-legacy.png"]
 
     preview = client.get(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/preview/v3/legacy.png"
     )
     assert preview.status_code == 200, preview.text
-    assert preview.content == b"\x89PNG\r\n\x1a\n-legacy"
+    assert preview.content == b"\x89PNG\r\n\x1a\n-canonical"
+
+    download = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/download",
+        params={"version": 3},
+    )
+    assert download.status_code == 200, download.text
+    with tarfile.open(fileobj=io.BytesIO(download.content)) as archive:
+        assert archive.getnames() == ["legacy.png", "only-legacy.png"]
+        canonical = archive.extractfile("legacy.png")
+        legacy = archive.extractfile("only-legacy.png")
+        assert canonical is not None and canonical.read().endswith(b"-canonical")
+        assert legacy is not None and legacy.read().endswith(b"-only-legacy")
 
 
 def test_files_filter_image_empty_when_only_non_image(
