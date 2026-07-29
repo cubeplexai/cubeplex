@@ -29,6 +29,11 @@ DOCKER=(docker)
 PROXY="${PROXY:-${HTTPS_PROXY:-${HTTP_PROXY:-}}}"
 [[ "$PROXY" == none ]] && PROXY=""
 
+# stage-fonts.sh runs on this machine, not in a container, so it needs the
+# address as given — before the docker-bridge rewrite below, which is only
+# meaningful inside the build container.
+HOST_PROXY="$PROXY"
+
 # A loopback proxy is unreachable from the build container — 127.0.0.1 there is
 # the container itself — so point it at the docker bridge gateway. Requires the
 # proxy to listen on more than loopback; the preflight below catches it if not.
@@ -43,12 +48,25 @@ if [[ "$PROXY" == *127.0.0.1* || "$PROXY" == *localhost* ]]; then
   fi
 fi
 
-# One cheap probe beats discovering it 20 minutes into the build. Uses the base
-# image, which is local by then, and bash's /dev/tcp so nothing extra is needed.
+# One cheap probe beats discovering it 20 minutes into the build: bash's
+# /dev/tcp from a container, so nothing extra is needed. Only a definitive
+# refusal clears the proxy — if the probe itself can't run we keep it, since
+# guessing wrong here silently builds direct and fails 20 minutes later.
 if [[ -n "$PROXY" ]]; then
-  HP="${PROXY#*://}"; HP="${HP%/}"
-  if ! "${DOCKER[@]}" run --rm "$BASE_IMAGE" \
-      timeout 5 bash -c "< /dev/tcp/${HP%%:*}/${HP##*:}" 2>/dev/null; then
+  # Strip scheme, any path, and userinfo: user:pass@host:port must probe host.
+  HP="${PROXY#*://}"; HP="${HP%%/*}"; HP="${HP##*@}"
+  PHOST="${HP%%:*}"; PPORT="${HP##*:}"
+  if [[ "$PPORT" == "$PHOST" ]]; then
+    [[ "$PROXY" == https://* ]] && PPORT=443 || PPORT=80
+  fi
+  # The daemon pulls without our build-args, so on a restricted network this
+  # may fail; that's not evidence about the proxy, hence the guard below.
+  "${DOCKER[@]}" image inspect "$BASE_IMAGE" >/dev/null 2>&1 \
+    || "${DOCKER[@]}" pull "$BASE_IMAGE" >/dev/null 2>&1 || true
+  if ! "${DOCKER[@]}" image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+    echo "==> skipping proxy preflight ($BASE_IMAGE not available locally)"
+  elif ! "${DOCKER[@]}" run --rm "$BASE_IMAGE" \
+      timeout 5 bash -c "< /dev/tcp/$PHOST/$PPORT" 2>/dev/null; then
     echo "!!  $PROXY not reachable from a container; building direct" >&2
     PROXY=""
   fi
@@ -94,7 +112,13 @@ done
 # ~54MB of OFL fonts, downloaded not committed. COPY fonts/ fails without them.
 if [[ -z "$(ls -A fonts 2>/dev/null)" ]]; then
   echo "==> staging fonts"
-  ./stage-fonts.sh
+  # curl reads http_proxy/https_proxy, not PROXY — without these an explicit
+  # `PROXY=… ./build.sh` downloads direct and every font silently lands as MISS.
+  HTTP_PROXY="$HOST_PROXY" HTTPS_PROXY="$HOST_PROXY" \
+    http_proxy="$HOST_PROXY" https_proxy="$HOST_PROXY" ./stage-fonts.sh
+  # stage-fonts.sh reports MISS per font but still exits 0; an empty fonts/ would
+  # otherwise build an image with no premium fonts at all.
+  [[ -n "$(ls -A fonts 2>/dev/null)" ]] || { echo "!!  no fonts staged" >&2; exit 1; }
 fi
 
 if [[ "$MIRROR" == cn ]] && ! "${DOCKER[@]}" image inspect "$NEKO_REF" >/dev/null 2>&1; then
