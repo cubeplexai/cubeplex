@@ -1,6 +1,11 @@
 import type { CostAggregateRow, CostSummaryResponse, TimeseriesResponse } from '../types/billing'
 import { toApiError, type ApiClient } from './client'
 
+// Cost reporting is served by the optional package, mounted by the host under
+// /api/v1/admin/_extensions/<distribution>/. Kept as one constant so a future
+// relocation is a single edit rather than five.
+const COST_API_BASE = '/api/v1/admin/_extensions/cubeplex_ee/cost'
+
 export async function fetchCostSummary(
   client: ApiClient,
   params: { from?: string; to?: string } = {},
@@ -9,7 +14,7 @@ export async function fetchCostSummary(
   if (params.from) query.set('from_date', params.from)
   if (params.to) query.set('to_date', params.to)
 
-  const res = await client.get(`/api/v1/admin/cost/summary?${query}`)
+  const res = await client.get(`${COST_API_BASE}/summary?${query}`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<CostSummaryResponse>
 }
@@ -24,7 +29,7 @@ export async function fetchWorkspaceCost(
   if (params.to) query.set('to_date', params.to)
   if (params.group_by) query.set('group_by', params.group_by)
 
-  const res = await client.get(`/api/v1/admin/cost/by-workspace/${wsId}?${query}`)
+  const res = await client.get(`${COST_API_BASE}/by-workspace/${wsId}?${query}`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<CostAggregateRow[]>
 }
@@ -34,8 +39,8 @@ export function buildExportUrl(wsId?: string, params: { from?: string; to?: stri
   if (params.from) query.set('from_date', params.from)
   if (params.to) query.set('to_date', params.to)
   const base = wsId
-    ? `/api/v1/admin/cost/by-workspace/${wsId}/export.csv`
-    : '/api/v1/admin/cost/export.csv'
+    ? `${COST_API_BASE}/by-workspace/${wsId}/export.csv`
+    : `${COST_API_BASE}/export.csv`
   return `${base}?${query}`
 }
 
@@ -68,7 +73,7 @@ export async function fetchCostTimeseries(
   if (params.rank_by) {
     query.set('rank_by', params.rank_by)
   }
-  const res = await client.get(`/api/v1/admin/cost/timeseries?${query}`)
+  const res = await client.get(`${COST_API_BASE}/timeseries?${query}`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<TimeseriesResponse>
 }

@@ -16,7 +16,9 @@ test.describe('Admin Insights page', () => {
     })
     const cookies = await page.context().cookies()
     const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
-    const resp = await request.get('/api/v1/admin/cost/export.csv', {
+    // Reporting is served by the optional package under the host's extension
+    // mount; this job installs it and mints a key.
+    const resp = await request.get('/api/v1/admin/_extensions/cubeplex_ee/cost/export.csv', {
       headers: { Cookie: cookieStr },
     })
     expect(resp.status()).toBe(200)

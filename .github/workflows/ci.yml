@@ -320,6 +320,31 @@ jobs:
         # untested even when it's covered here.
         run: make backend-test-e2e-ci
 
+      - name: Pytest e2e (licensed lane)
+        # The default environment has no optional package, so tests/e2e/licensed/
+        # skips itself there — which means the authorisation and validation
+        # contracts for the relocated cost routes would otherwise be checked
+        # nowhere. Runs on one shard only: it is a handful of tests and sharding
+        # them would just install the package four times. Reuses the services this
+        # job already stood up rather than duplicating postgres/redis/rustfs.
+        #
+        # Both sync flags: `--group` alone re-resolves and drops test deps.
+        if: matrix.shard == 0
+        run: |
+          cd backend
+          uv sync --all-extras --group licensed
+          uv run python scripts/dev/license_keygen.py dev-env --features multi_org \
+            >> "$GITHUB_ENV"
+
+      - name: Pytest e2e (licensed lane — run)
+        if: matrix.shard == 0
+        run: |
+          cd backend
+          # `env -u`, not blanking: the shard gate checks `is None`, so an empty
+          # string gets past it and then fails int("") with a UsageError.
+          env -u CUBEPLEX_E2E_SHARD_INDEX -u CUBEPLEX_E2E_SHARD_TOTAL \
+            uv run pytest tests/e2e/licensed/ --no-cov -q
+
       - name: Cleanup leftover test sandboxes
         if: always()
         run: make backend-cleanup-sandboxes
@@ -433,13 +458,16 @@ jobs:
           aws --endpoint-url http://127.0.0.1:9000 \
             s3 mb s3://cubeplex-test --region us-east-1
 
-      - name: Mint an ephemeral EE license for the gated admin specs
-        # admin-sso and admin-insights drive pages behind <EEGate>, so the backend
-        # they talk to has to report edition=ee. The keypair is generated here and
-        # thrown away: nothing is committed, and there is no key that expires out
-        # from under CI later.
+      - name: Install the optional package and mint an ephemeral licence
+        # admin-sso and admin-insights drive pages behind <EEGate>, and
+        # admin-insights now calls cost endpoints the optional package serves, so
+        # this backend needs both the package and a key. `--group` on its own
+        # re-resolves and drops the test dependencies, hence both flags. The
+        # keypair is generated here and thrown away: nothing is committed, and
+        # there is no key that expires out from under CI later.
         run: |
           cd backend
+          uv sync --all-extras --group licensed
           uv run python scripts/dev/license_keygen.py dev-env --features multi_org \
             >> "$GITHUB_ENV"
 
