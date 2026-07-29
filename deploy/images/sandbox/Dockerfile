@@ -146,14 +146,10 @@ RUN npm install -g \
     playwright@1.59.0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure vim
-RUN printf 'set ts=4\n\
-set encoding=utf-8\n\
-set expandtab\n\
-set autoindent\n\
-set hlsearch\n\
-set termencoding=utf-8\n\
-set fileencodings=utf8\n' > /etc/vimrc
+# Configure vim. Must be /etc/vim/vimrc.local, not /etc/vimrc: Debian builds vim
+# with SYS_VIMRC_FILE=/etc/vim/vimrc, so an /etc/vimrc is read by nobody (the
+# settings this replaces never took effect — tabstop stayed 8).
+COPY vimrc /etc/vim/vimrc.local
 
 # Enable colored ls/grep for all interactive shells (ttyd runs non-login bash).
 # Set TERM fallback so dircolors can generate LS_COLORS even when the parent
