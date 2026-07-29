@@ -39,6 +39,14 @@ open-source release.
   only the HTTP layer moved. Corrected §11: the `cubeplex.cost_middleware` seam is
   not built and the reason is recorded.
 
+- **2026-07-29 (stage 3 planning)** — corrected §11 stage 3 on three points
+  while writing
+  [the plan](../plans/2026-07-29-sso-relocation.md): the SSO models stay in
+  core (moving them contradicts the shared-lineage decision recorded in the same
+  section), `resolve_identity`'s remaining coupling is the reverse of the one
+  described, and the relocation needs a second mount seam because SSO's login
+  endpoints are unauthenticated and cannot live under `/admin/`.
+
 ## 1. Problem
 
 cubeplex already contains a production-grade CE/EE plugin seam
@@ -527,12 +535,30 @@ independently released packages is not.
    (`register_cost_middleware`) plus a change to `run_manager.py`, which imports
    `CostMiddleware` directly. That is a hot path governed by
    `backend/docs/prompt-cache-discipline.md` and belongs in its own change.
-3. **SSO relocation** — move `SSOConnection` / `ExternalIdentity` models,
-   `sso/`, and SSO routes into `cubeplex_ee`, and decouple `social_login`
-   (Google, stays OSS) from `sso/identity.py:resolve_identity` so it no longer
-   takes an `SSOConnection`. With the lineage question settled above, this is a
-   relocation plus one contained refactor, not migration surgery. Plan to be
-   written.
+3. **SSO relocation** —
+   [`docs/dev/plans/2026-07-29-sso-relocation.md`](../plans/2026-07-29-sso-relocation.md).
+   The SSO routes (`sso.py`, `admin_sso.py`), the `SSOConnection`-shaped helpers
+   (`sso/saml.py`, `sso/attribute_mapping.py`,
+   `repositories/sso_connection.py`) and one function out of `sso/oidc.py` move
+   into `cubeplex_ee`.
+
+   **Corrected 2026-07-29, three points the first draft got wrong.** The models
+   do **not** move: the shared lineage settled above is implemented by
+   `alembic/env.py` importing `cubeplex.models`, so a model that leaves that
+   package makes autogenerate emit `DROP TABLE` for a table holding customer
+   configuration. `ExternalIdentity` additionally stays because Google social
+   login writes it. Second, the `resolve_identity` decoupling described here is
+   already done — `social_login` passes no `SSOConnection` — while the coupling
+   that remains runs the other way: core reads the connection's `status` and
+   `provisioning` values, so EE provisioning policy is hardcoded in the OSS
+   package. Third, `AdminPanelExtension` cannot carry these routes, because four
+   of the five public SSO endpoints are unauthenticated login-flow endpoints
+   (`/auth/sso/initiate`, the OIDC callback, the SAML ACS, SAML metadata) and do
+   not belong under `/admin/`; a sibling `RouteExtension` slot mounts them at
+   `/api/v1/_extensions/<pkg>/`. `GET /auth/org-info/{slug}` stays in core — the
+   OSS login page calls it — as do the break-glass `disable-sso` / `list-sso`
+   CLI commands, which must keep working when the SSO package is the broken
+   thing.
 
 Ordering rationale: stage 0 shapes the seam stage 1 enforces on; stage 1 builds
 the machinery stages 2–3 gate on; stages 2–3 are relocations once the machinery
