@@ -12,8 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.auth.users import UserManager
-from cubeplex.models import ExternalIdentity, Organization, SSOConnection, User
+from cubeplex.models import ExternalIdentity, Organization, User
 from cubeplex.sso.identity import (
+    EnterpriseLoginPolicy,
     SSOLoginRejected,
     SSOProvisioningDenied,
     resolve_identity,
@@ -96,27 +97,19 @@ async def test_resolve_rejects_cross_org_takeover_via_email_match(
     _, victim = await make_org_with_user(email="victim@corp.com")
     # Attacker controls SSO connection in Org B (different org, invite_only).
     org_b, _attacker_admin = await make_org_with_user(email="attacker@evil.com")
-    sso_b = SSOConnection(
-        org_id=org_b.id,
-        protocol="oidc",
-        display_name="Evil SSO",
-        status="active",
-        provisioning="invite_only",
-        config={},
-    )
-    sso_session.add(sso_b)
-    await sso_session.commit()
 
     with pytest.raises(SSOProvisioningDenied):
         await resolve_identity(
             sso_session,
             user_manager=sso_user_manager,
             provider_type="oidc_sso",
-            provider_id=sso_b.id,
+            provider_id="sso-evil",
             external_id="evil-sub-1",
             external_email="victim@corp.com",
             email_verified=True,
-            sso_connection=sso_b,
+            policy=EnterpriseLoginPolicy(
+                org_id=org_b.id, connection_active=True, auto_provision=False
+            ),
         )
 
 
@@ -158,21 +151,11 @@ async def test_resolve_rejects_link_for_ex_member(
 ) -> None:
     """SSO callback must not log in a user who's no longer in the org."""
     org, user = await make_org_with_user(email="alumnus@corp.com")
-    conn = SSOConnection(
-        org_id=org.id,
-        protocol="oidc",
-        display_name="T",
-        status="active",
-        provisioning="auto",
-        config={},
-    )
-    sso_session.add(conn)
-    await sso_session.flush()
     sso_session.add(
         ExternalIdentity(
             user_id=user.id,
             provider_type="oidc_sso",
-            provider_id=conn.id,
+            provider_id="sso-alumni",
             external_id="x",
             external_email="alumnus@corp.com",
         )
@@ -190,11 +173,13 @@ async def test_resolve_rejects_link_for_ex_member(
             sso_session,
             user_manager=sso_user_manager,
             provider_type="oidc_sso",
-            provider_id=conn.id,
+            provider_id="sso-alumni",
             external_id="x",
             external_email="alumnus@corp.com",
             email_verified=True,
-            sso_connection=conn,
+            policy=EnterpriseLoginPolicy(
+                org_id=org.id, connection_active=True, auto_provision=True
+            ),
         )
     assert exc_info.value.code == "not_org_member"
 
@@ -203,24 +188,18 @@ async def test_resolve_rejects_link_for_ex_member(
 async def test_resolve_denies_invite_only_provisioning(
     sso_session: AsyncSession, sso_user_manager: UserManager
 ) -> None:
-    conn = SSOConnection(
-        org_id="org-test",
-        protocol="oidc",
-        display_name="Test",
-        status="active",
-        provisioning="invite_only",
-        config={},
-    )
     with pytest.raises(SSOProvisioningDenied):
         await resolve_identity(
             sso_session,
             user_manager=sso_user_manager,
             provider_type="oidc_sso",
-            provider_id=conn.id,
+            provider_id="sso-test",
             external_id="oidc-sub-new",
             external_email="noprovision@corp.com",
             email_verified=True,
-            sso_connection=conn,
+            policy=EnterpriseLoginPolicy(
+                org_id="org-test", connection_active=True, auto_provision=False
+            ),
         )
 
 
@@ -264,21 +243,11 @@ async def test_resolve_rejects_when_sso_connection_disabled(
     make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
 ) -> None:
     org, user = await make_org_with_user(email="disabled@corp.com")
-    conn = SSOConnection(
-        org_id=org.id,
-        protocol="oidc",
-        display_name="T",
-        status="inactive",
-        provisioning="auto",
-        config={},
-    )
-    sso_session.add(conn)
-    await sso_session.flush()
     sso_session.add(
         ExternalIdentity(
             user_id=user.id,
             provider_type="oidc_sso",
-            provider_id=conn.id,
+            provider_id="sso-disabled",
             external_id="x",
             external_email="disabled@corp.com",
         )
@@ -290,10 +259,12 @@ async def test_resolve_rejects_when_sso_connection_disabled(
             sso_session,
             user_manager=sso_user_manager,
             provider_type="oidc_sso",
-            provider_id=conn.id,
+            provider_id="sso-disabled",
             external_id="x",
             external_email="disabled@corp.com",
             email_verified=True,
-            sso_connection=conn,
+            policy=EnterpriseLoginPolicy(
+                org_id=org.id, connection_active=False, auto_provision=True
+            ),
         )
     assert exc_info.value.code == "sso_connection_inactive"
