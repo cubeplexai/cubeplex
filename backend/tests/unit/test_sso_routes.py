@@ -18,6 +18,7 @@ from starlette.requests import Request
 from cubeplex.api.routes.v1.sso import (
     _enforce_forced_sso_for_user,
     _login_and_redirect,
+    _policy_for,
     sso_initiate,
     sso_oidc_callback,
     sso_saml_acs,
@@ -33,6 +34,46 @@ from cubeplex.models import (
 from cubeplex.sso.state import SSOStateStore
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_active"),
+    [("active", True), ("testing", True), ("inactive", False), ("draft", False)],
+)
+def test_policy_for_translates_status_to_active(status: str, expected_active: bool) -> None:
+    """Only active/testing connections may sign a user in.
+
+    The identity path reads this boolean instead of the connection, so an error
+    here silently admits logins through a deactivated IdP.
+    """
+    conn = SSOConnection(
+        org_id="org-1",
+        protocol="oidc",
+        display_name="T",
+        status=status,
+        provisioning="auto",
+        config={},
+    )
+    policy = _policy_for(conn)
+    assert policy.connection_active is expected_active
+    assert policy.org_id == "org-1"
+
+
+@pytest.mark.parametrize(
+    ("provisioning", "expected_auto"),
+    [("auto", True), ("invite_only", False)],
+)
+def test_policy_for_translates_provisioning(provisioning: str, expected_auto: bool) -> None:
+    """invite_only is the only value that blocks auto-provisioning."""
+    conn = SSOConnection(
+        org_id="org-1",
+        protocol="oidc",
+        display_name="T",
+        status="active",
+        provisioning=provisioning,
+        config={},
+    )
+    assert _policy_for(conn).auto_provision is expected_auto
 
 
 def _make_request(redis: fakeredis.aioredis.FakeRedis) -> Request:

@@ -21,7 +21,6 @@ from cubeplex.api.routes.v1.auth import UserCreate
 from cubeplex.models.external_identity import ExternalIdentity
 from cubeplex.models.membership import Membership, Role
 from cubeplex.models.organization_membership import OrganizationMembership, OrgRole
-from cubeplex.models.sso_connection import SSOConnection
 from cubeplex.models.user import User
 from cubeplex.models.workspace import Workspace
 from cubeplex.repositories.external_identity import ExternalIdentityRepository
@@ -56,6 +55,24 @@ class ResolvedIdentity:
     created: bool  # True if user was just created
 
 
+@dataclass(frozen=True)
+class EnterpriseLoginPolicy:
+    """What an enterprise connection asserts about a login in progress.
+
+    Built by whoever owns the connection record; this module only reads the
+    three answers. Keeping the connection itself out of here is what lets the
+    enterprise provisioning rules — which statuses may sign in, what
+    ``invite_only`` means — live with the connection rather than being hardcoded
+    in the shared identity path.
+
+    Social logins pass no policy at all.
+    """
+
+    org_id: str
+    connection_active: bool
+    auto_provision: bool
+
+
 async def resolve_identity(
     session: AsyncSession,
     *,
@@ -67,7 +84,7 @@ async def resolve_identity(
     email_verified: bool,
     avatar_url: str | None = None,
     claims: dict[str, Any] | None = None,
-    sso_connection: SSOConnection | None = None,
+    policy: EnterpriseLoginPolicy | None = None,
     request: Request | None = None,
 ) -> ResolvedIdentity:
     """Find or create a user for the given external identity.
@@ -85,7 +102,7 @@ async def resolve_identity(
           - Enterprise SSO: check provisioning policy, then create the
             user via UserManager.create() so the existing
             on_after_register bootstrap fires.
-          - Social login (sso_connection is None): create the user via
+          - Social login (policy is None): create the user via
             UserManager.create() — bootstrap creates the user's personal
             org and workspace.
     3. Not found AND NOT email_verified → reject (no auto-link, no
@@ -107,14 +124,14 @@ async def resolve_identity(
         if user is None or not user.is_active:
             raise SSOLoginRejected("user_inactive")
 
-        if sso_connection is not None:
-            if sso_connection.status not in {"active", "testing"}:
+        if policy is not None:
+            if not policy.connection_active:
                 raise SSOLoginRejected("sso_connection_inactive")
             still_member = (
                 await session.execute(
                     select(OrganizationMembership).where(
                         OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
-                        OrganizationMembership.org_id == sso_connection.org_id,  # type: ignore[arg-type]
+                        OrganizationMembership.org_id == policy.org_id,  # type: ignore[arg-type]
                     )
                 )
             ).scalar_one_or_none()
@@ -143,7 +160,7 @@ async def resolve_identity(
 
     created = False
     if user is None:
-        if sso_connection is not None and sso_connection.provisioning == "invite_only":
+        if policy is not None and not policy.auto_provision:
             raise SSOProvisioningDenied(
                 "Auto-provisioning is disabled for this organization. Contact your administrator."
             )
@@ -178,9 +195,9 @@ async def resolve_identity(
             user.avatar_kind = "sso"
             session.add(user)
 
-        if sso_connection is not None:
-            await _provision_org_membership(session, user, sso_connection)
-    elif sso_connection is not None:
+        if policy is not None:
+            await _provision_org_membership(session, user, policy.org_id)
+    elif policy is not None:
         # Existing user, enterprise SSO. Linking by verified email alone is
         # not enough — without this membership check, an attacker who runs
         # any registered org's SSO with a claim of email=<victim> would
@@ -189,17 +206,17 @@ async def resolve_identity(
             await session.execute(
                 select(OrganizationMembership).where(
                     OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
-                    OrganizationMembership.org_id == sso_connection.org_id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id == policy.org_id,  # type: ignore[arg-type]
                 )
             )
         ).scalar_one_or_none()
         if already_member is None:
-            if sso_connection.provisioning == "invite_only":
+            if not policy.auto_provision:
                 raise SSOProvisioningDenied(
                     "Auto-provisioning is disabled for this organization. "
                     "Contact your administrator."
                 )
-            await _provision_org_membership(session, user, sso_connection)
+            await _provision_org_membership(session, user, policy.org_id)
 
     if not created and _should_sso_overwrite_avatar(user, avatar_url):
         user.avatar_url = avatar_url
@@ -223,11 +240,9 @@ async def resolve_identity(
 async def _provision_org_membership(
     session: AsyncSession,
     user: User,
-    sso_connection: SSOConnection,
+    org_id: str,
 ) -> None:
     """Add user to the SSO connection's org with MEMBER role + first workspace."""
-    org_id = sso_connection.org_id
-
     existing_membership = (
         await session.execute(
             select(OrganizationMembership).where(

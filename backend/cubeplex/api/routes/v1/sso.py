@@ -29,7 +29,12 @@ from cubeplex.models.sso_connection import SSOConnection
 from cubeplex.models.user import User
 from cubeplex.models.workspace import Workspace
 from cubeplex.sso.attribute_mapping import AttributeMappingError, apply_mapping
-from cubeplex.sso.identity import SSOLoginRejected, SSOProvisioningDenied, resolve_identity
+from cubeplex.sso.identity import (
+    EnterpriseLoginPolicy,
+    SSOLoginRejected,
+    SSOProvisioningDenied,
+    resolve_identity,
+)
 from cubeplex.sso.oidc import (
     OIDCValidationError,
     build_authorize_url,
@@ -91,6 +96,15 @@ def _frontend_base_url() -> str:
 def _http_host_from_base(base: str) -> str:
     """Extract the host[:port] segment from ``public_base_url`` for python3-saml."""
     return base.split("://", 1)[1].split("/")[0]
+
+
+def _policy_for(conn: SSOConnection) -> EnterpriseLoginPolicy:
+    """Translate a connection row into the three answers identity resolution needs."""
+    return EnterpriseLoginPolicy(
+        org_id=conn.org_id,
+        connection_active=conn.status in {"active", "testing"},
+        auto_provision=conn.provisioning != "invite_only",
+    )
 
 
 async def _resolve_sso_connection(
@@ -295,7 +309,7 @@ async def sso_oidc_callback(
             email_verified=True,
             avatar_url=mapped.avatar,
             claims=mapped.raw,
-            sso_connection=conn,
+            policy=_policy_for(conn),
             request=request,
         )
     except SSOLoginRejected as exc:
@@ -417,7 +431,7 @@ async def sso_saml_acs(
             email_verified=saml_email_verified,
             avatar_url=mapped.avatar,
             claims=mapped.raw,
-            sso_connection=conn,
+            policy=_policy_for(conn),
             request=request,
         )
     except SSOLoginRejected as exc:
