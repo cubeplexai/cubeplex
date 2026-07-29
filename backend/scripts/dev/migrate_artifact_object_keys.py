@@ -24,6 +24,21 @@ from cubeplex.objectstore import get_objectstore_client
 from cubeplex.objectstore.artifact_paths import artifact_root_prefix
 
 
+def missing_object_copies(
+    source_prefix: str,
+    destination_prefix: str,
+    source_keys: list[str],
+    destination_keys: list[str],
+) -> list[tuple[str, str]]:
+    existing = set(destination_keys)
+    copies: list[tuple[str, str]] = []
+    for source_key in source_keys:
+        destination_key = f"{destination_prefix}{source_key[len(source_prefix) :]}"
+        if destination_key not in existing:
+            copies.append((source_key, destination_key))
+    return copies
+
+
 async def migrate(*, delete_source: bool) -> tuple[int, int]:
     async with async_session_maker() as session:
         artifacts = list((await session.execute(select(Artifact))).scalars().all())
@@ -39,19 +54,26 @@ async def migrate(*, delete_source: bool) -> tuple[int, int]:
             skipped += 1
             continue
 
-        for source_key in source_keys:
-            relative_path = source_key[len(source_prefix) :]
-            destination_key = f"{destination_prefix}{relative_path}"
+        destination_keys = await store.list_objects(destination_prefix)
+        copies = missing_object_copies(
+            source_prefix,
+            destination_prefix,
+            source_keys,
+            destination_keys,
+        )
+        for source_key, destination_key in copies:
             data, content_type = await store.download_file(source_key)
             await store.upload_file(destination_key, data, content_type)
             copied += 1
-            if delete_source:
+        if delete_source:
+            for source_key in source_keys:
                 await store.delete_file(source_key)
 
         logger.info(
-            "Migrated artifact {}: {} object(s){}",
+            "Migrated artifact {}: {} copied, {} already canonical{}",
             artifact.id,
-            len(source_keys),
+            len(copies),
+            len(source_keys) - len(copies),
             " and deleted legacy keys" if delete_source else "",
         )
 
