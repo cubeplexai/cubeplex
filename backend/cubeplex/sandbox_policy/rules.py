@@ -105,6 +105,33 @@ def split_shell_command(command: str) -> list[str]:
     return pieces
 
 
+# The sandbox image ships passwordless sudo, so `sudo rm -rf /` has to hit the
+# same rule as `rm -rf /`. These options take a value, which would otherwise
+# look like the command being run.
+_PRIV_RUNNERS = frozenset({"sudo", "doas"})
+_PRIV_OPT_WITH_VALUE = frozenset({"-u", "-g", "-p", "-C", "-r", "-t", "-T", "-U", "-h", "-c"})
+
+
+def strip_privilege_runner(command: str) -> str:
+    """Return ``command`` with a leading ``sudo``/``doas`` and its options removed.
+
+    ``sudo -u root rm -rf /`` → ``rm -rf /``. Returns "" for a bare runner with
+    no command. Callers match the original too, so a rule written against
+    ``sudo *`` still fires.
+    """
+    head, _, rest = command.partition(" ")
+    if head not in _PRIV_RUNNERS:
+        return command
+    tokens = rest.split()
+    i = 0
+    while i < len(tokens) and tokens[i].startswith("-"):
+        if tokens[i] == "--":
+            i += 1
+            break
+        i += 2 if tokens[i] in _PRIV_OPT_WITH_VALUE else 1
+    return " ".join(tokens[i:])
+
+
 def _matches(command: str, pattern: str) -> bool:
     """Glob-match a single command against a rule pattern.
 
@@ -143,10 +170,17 @@ def evaluate_command(command: str, rules: list[dict[str, Any]]) -> tuple[Command
     strongest: tuple[CommandAction, str | None] = ("allow", None)
     strongest_rank = _ACTION_RANK["allow"]
     for sub in subcommands:
-        action, pattern = _eval_single(sub, rules)
-        if _ACTION_RANK[action] < strongest_rank:
-            strongest = (action, pattern)
-            strongest_rank = _ACTION_RANK[action]
+        # Both forms: the raw fragment keeps `sudo *` rules working, the
+        # stripped one stops sudo being used to slip past every other rule.
+        variants = [sub]
+        elevated = strip_privilege_runner(sub)
+        if elevated and elevated != sub:
+            variants.append(elevated)
+        for variant in variants:
+            action, pattern = _eval_single(variant, rules)
+            if _ACTION_RANK[action] < strongest_rank:
+                strongest = (action, pattern)
+                strongest_rank = _ACTION_RANK[action]
     return strongest
 
 

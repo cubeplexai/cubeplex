@@ -73,6 +73,30 @@ def test_confirm_subcommand_propagates_when_no_deny() -> None:
     assert evaluate_command("ls && git push origin", CONFIRM_PUSH)[0] == "confirm"
 
 
+def test_sudo_cannot_slip_a_denied_command_past_a_rule() -> None:
+    """The sandbox image ships passwordless sudo, so every rule has to survive
+    a `sudo` prefix — otherwise an org's deny list is bypassed by typing four
+    extra characters."""
+    assert evaluate_command("sudo rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("sudo -u root rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("sudo -n -E rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("sudo -- rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("doas rm -rf /workspace", DENY_RM)[0] == "deny"
+    # Also inside a chain, and combined with the control-keyword peeling.
+    assert evaluate_command("ls && sudo rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("exec sudo rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("ls && sudo git push origin", CONFIRM_PUSH)[0] == "confirm"
+    # Sudo on something innocuous is still allowed.
+    assert evaluate_command("sudo ls -la", DENY_RM)[0] == "allow"
+
+
+def test_rule_written_against_sudo_itself_still_matches() -> None:
+    """Stripping the runner must not blind a rule that targets sudo directly."""
+    deny_sudo = [{"action": "deny", "pattern": "sudo *"}]
+    assert evaluate_command("sudo apt-get install foo", deny_sudo)[0] == "deny"
+    assert evaluate_command("apt-get install foo", deny_sudo)[0] == "allow"
+
+
 def _egress(p):
     return [(r.action, r.target) for r in (p.egress or [])]
 
