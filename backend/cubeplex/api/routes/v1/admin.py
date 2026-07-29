@@ -13,7 +13,6 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.api.routes.v1.cost import router as cost_router
 from cubeplex.auth.dependencies import (
     current_active_user,
     require_org_admin,
@@ -114,6 +113,3 @@ async def update_org(
         ip=request.client.host if request.client else None,
     )
     return {"id": org.id, "name": org.name, "slug": org.slug}
-
-
-router.include_router(cost_router)

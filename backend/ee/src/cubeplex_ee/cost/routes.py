@@ -1,4 +1,10 @@
-"""Admin cost/billing endpoints. All routes require org-admin access."""
+"""Cost reporting endpoints. All routes require org-admin access.
+
+Mounted by the host under /api/v1/admin/_extensions/cubeplex_ee/ when this
+package is installed and licensed, so an unlicensed deployment does not serve
+them at all. The write path that produces the rows read here stays in core
+(cubeplex/middleware/cost.py).
+"""
 
 import csv
 import io
@@ -11,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.api.schemas.billing import (
+from cubeplex_ee.cost.schemas import (
     CostAggregateRow,
     CostSummaryResponse,
     TimeseriesPoint,
@@ -27,7 +33,7 @@ from cubeplex.repositories import (
     WorkspaceRepository,
 )
 
-router = APIRouter(prefix="/cost", tags=["cost"])
+router = APIRouter(prefix="/cost", tags=["admin", "cost"])
 
 _EXPORT_FIELDS: list[str] = [
     "started_at",

@@ -96,10 +96,17 @@ async def test_send_message_creates_billing_event(
 
 
 @pytest.mark.asyncio
-async def test_cost_summary_endpoint_returns_data(
+async def test_real_run_records_usage(
     async_client: httpx.AsyncClient,
 ) -> None:
-    """After a message is sent, /admin/cost/summary returns non-zero total_calls."""
+    """A real run writes a usage row.
+
+    This used to poll /admin/cost/summary, but reporting moved into the optional
+    package and is not installed in this lane — so the read-back would 404 here
+    regardless of whether the write worked. The write is the core invariant worth
+    guarding nightly; reading it back is covered against seeded data in
+    tests/e2e/licensed/test_cost_routes.py, which needs no live model call.
+    """
     resp = await async_client.post(
         f"/api/v1/ws/{_DEFAULT_WS}/conversations",
         params={"title": "cost summary test"},
@@ -118,13 +125,20 @@ async def test_cost_summary_endpoint_returns_data(
             if line.startswith("data: ") and '"type":"done"' in line:
                 break
 
-    async def _summary_has_calls() -> int:
-        s = await async_client.get("/api/v1/admin/cost/summary")
-        assert s.status_code == 200
-        return int(s.json().get("total_calls", 0))
+    async def _billing_rows() -> int:
+        async with _db_session() as session:
+            return int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(BillingEvent)
+                        .where(BillingEvent.conversation_id == conv_id)
+                    )
+                ).scalar_one()
+            )
 
     await await_until(
-        _summary_has_calls,
+        _billing_rows,
         timeout=5.0,
-        message="/admin/cost/summary stayed at total_calls=0 after stream done",
+        message="no billing row written for the conversation after stream done",
     )
