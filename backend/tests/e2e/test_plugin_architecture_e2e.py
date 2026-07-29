@@ -44,6 +44,14 @@ async def test_ce_defaults_load_after_lifespan(
     exts = reg.get_admin_panel_extensions()
     assert all(isinstance(e, DefaultAdminPanelExtension) for e in exts)
 
+    # RouteExtension has no CE default, so the reserved namespace stays empty on
+    # an OSS deployment. The positive path — a registered extension actually
+    # mounting under it — is proven by the licensed lane, which mounts a real
+    # router there rather than a stand-in.
+    assert reg.get_route_extensions() == []
+    resp = await _client.get("/api/v1/_extensions/anything")
+    assert resp.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_admin_extensions_manifest_ce_is_empty(

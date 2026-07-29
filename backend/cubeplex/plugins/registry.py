@@ -22,6 +22,7 @@ class PluginRegistry:
         self._audit_sinks: list[object] = []
         self._user_directory_syncers: list[object] = []
         self._admin_panel_extensions: list[object] = []
+        self._route_extensions: list[object] = []
         self._bound = False
 
     # ---------------- EE registration surface ---------------- #
@@ -44,6 +45,9 @@ class PluginRegistry:
 
     def register_admin_panel_extension(self, ext: object) -> None:
         self._admin_panel_extensions.append(ext)
+
+    def register_route_extension(self, ext: object) -> None:
+        self._route_extensions.append(ext)
 
     # ---------------- CE fallback ---------------- #
 
@@ -73,15 +77,20 @@ class PluginRegistry:
         self._permission_checker = permissions
         self._audit_sinks.append(audit_sink)
         self._admin_panel_extensions.append(admin_panel)
+        # No CE default for route extensions: an OSS deployment genuinely has
+        # none, and the mount loop over an empty list is the correct no-op.
+        # AdminPanelExtension has one only because the nav manifest endpoint
+        # needs something to ask.
         self._bound = True
         logger.info(
             "plugin registry bound: auth=%s permissions=%s audit_sinks=%d "
-            "syncers=%d admin_extensions=%d",
+            "syncers=%d admin_extensions=%d route_extensions=%d",
             type(self._auth_provider).__name__,
             type(self._permission_checker).__name__,
             len(self._audit_sinks),
             len(self._user_directory_syncers),
             len(self._admin_panel_extensions),
+            len(self._route_extensions),
         )
 
     def is_bound(self) -> bool:
@@ -107,6 +116,9 @@ class PluginRegistry:
 
     def get_admin_panel_extensions(self) -> list[object]:
         return self._admin_panel_extensions
+
+    def get_route_extensions(self) -> list[object]:
+        return self._route_extensions
 
 
 # Module-level singleton, populated by app startup.

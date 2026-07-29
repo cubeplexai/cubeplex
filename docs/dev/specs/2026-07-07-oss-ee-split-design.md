@@ -45,7 +45,10 @@ open-source release.
   core (moving them contradicts the shared-lineage decision recorded in the same
   section), `resolve_identity`'s remaining coupling is the reverse of the one
   described, and the relocation needs a second mount seam because SSO's login
-  endpoints are unauthenticated and cannot live under `/admin/`.
+  endpoints are unauthenticated and cannot live under `/admin/`. That seam is a
+  seventh Protocol, `RouteExtension`, mounting at `/api/v1/_extensions/<pkg>/`
+  with no CE default — the first addition to the interface set since stage 0
+  trimmed it.
 
 ## 1. Problem
 
