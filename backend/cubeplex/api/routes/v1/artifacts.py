@@ -21,7 +21,10 @@ from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.config import config
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
-from cubeplex.objectstore.artifact_paths import artifact_file_key, artifact_version_prefix
+from cubeplex.objectstore.artifact_paths import (
+    artifact_file_key_candidates,
+    artifact_version_prefix_candidates,
+)
 from cubeplex.repositories import (
     ArtifactRepository,
     ArtifactVersionRepository,
@@ -194,11 +197,17 @@ async def download_artifact(
         )
 
     target_version = version or artifact.version
-    prefix = artifact_version_prefix(artifact_id, target_version)
-
     try:
         store = get_objectstore_client()
-        keys = await store.list_objects(prefix)
+        prefix = ""
+        keys: list[str] = []
+        for candidate in artifact_version_prefix_candidates(
+            artifact_id, target_version, artifact.conversation_id
+        ):
+            keys = await store.list_objects(candidate)
+            if keys:
+                prefix = candidate
+                break
 
         if not keys:
             raise HTTPException(
@@ -275,11 +284,17 @@ async def list_artifact_files(
         )
 
     target_version = version or artifact.version
-    prefix = artifact_version_prefix(artifact_id, target_version)
-
     try:
         store = get_objectstore_client()
-        keys = await store.list_objects(prefix)
+        prefix = ""
+        keys: list[str] = []
+        for candidate in artifact_version_prefix_candidates(
+            artifact_id, target_version, artifact.conversation_id
+        ):
+            keys = await store.list_objects(candidate)
+            if keys:
+                prefix = candidate
+                break
     except Exception as e:
         logger.error("Error listing artifact files: {}", e)
         raise HTTPException(
@@ -390,6 +405,8 @@ async def create_preview_token(
     nonce = secrets.token_hex(32)
     payload = orjson.dumps(
         {
+            "org_id": ctx.org_id,
+            "workspace_id": ctx.workspace_id,
             "artifact_id": artifact_id,
             "version": target_version,
             "filename": filename,
@@ -446,11 +463,24 @@ async def preview_artifact_file(
             detail="Invalid file path",
         )
 
-    key = artifact_file_key(artifact_id, version, file_path)
-
     try:
         store = get_objectstore_client()
-        data, stored_content_type = await store.download_file(key)
+        for key in artifact_file_key_candidates(
+            artifact_id, version, file_path, artifact.conversation_id
+        ):
+            try:
+                data, stored_content_type = await store.download_file(key)
+                break
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code", "") not in ("NoSuchKey", "404"):
+                    raise
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File not found: {file_path}",
+            )
+    except HTTPException:
+        raise
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code in ("NoSuchKey", "404"):

@@ -10,12 +10,24 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError
 
 from cubeplex.im import artifacts as artifacts_mod
 from cubeplex.im.artifacts import IMArtifactDispatcher
 from cubeplex.im.card_model import CardState
 
 pytestmark = pytest.mark.asyncio
+
+
+class _LegacyArtifactStore:
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def download_file(self, key: str) -> tuple[bytes, str]:
+        self.keys.append(key)
+        if key.startswith("artifacts/art-"):
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return b"legacy", "application/octet-stream"
 
 
 class _FakeRedis:
@@ -86,7 +98,27 @@ def _artifact(atype: str, art_id: str = "art-1") -> dict[str, Any]:
         "name": f"{art_id}.bin",
         "version": 1,
         "entry_file": "out.xlsx",
+        "conversation_id": "conv-1",
     }
+
+
+async def test_native_download_falls_back_to_owner_conversation_legacy_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _LegacyArtifactStore()
+    monkeypatch.setattr(artifacts_mod, "get_objectstore_client", lambda: store)
+
+    path = await artifacts_mod.download_artifact_to_tempfile(_artifact("document"))
+
+    assert path is not None
+    try:
+        assert path.read_bytes() == b"legacy"
+        assert store.keys == [
+            "artifacts/art-1/v1/out.xlsx",
+            "artifacts/conv-1/art-1/v1/out.xlsx",
+        ]
+    finally:
+        path.unlink(missing_ok=True)
 
 
 async def test_file_artifact_sent_natively_and_not_share_linked(

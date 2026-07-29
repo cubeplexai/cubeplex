@@ -173,3 +173,26 @@ class TestOTKPublicDownload:
         tampered = path.rsplit("/", 1)[0] + "/evil.docx"
         r2 = await client.get(tampered)
         assert r2.status_code == 404
+
+    async def test_download_reads_owner_conversation_legacy_key_during_migration(
+        self, office_client: tuple[httpx.AsyncClient, str, str, str]
+    ) -> None:
+        client, ws_id, art_id, conv_id = office_client
+        store = get_objectstore_client()
+        canonical_key = f"artifacts/{art_id}/v1/report.docx"
+        legacy_key = f"artifacts/{conv_id}/{art_id}/v1/report.docx"
+        await store.delete_file(canonical_key)
+        await store.upload_file(legacy_key, b"legacy office document")
+        try:
+            token_url = (
+                f"/api/v1/ws/{ws_id}/conversations/{conv_id}/artifacts/{art_id}/preview-token"
+            )
+            token_response = await client.post(token_url)
+            assert token_response.status_code == 200, token_response.text
+            path = token_response.json()["download_url"].replace("http://test", "")
+
+            download = await client.get(path)
+            assert download.status_code == 200, download.text
+            assert download.content == b"legacy office document"
+        finally:
+            await store.delete_file(legacy_key)

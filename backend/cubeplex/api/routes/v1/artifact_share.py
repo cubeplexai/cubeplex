@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
-from cubeplex.objectstore.artifact_paths import artifact_file_key
+from cubeplex.objectstore.artifact_paths import artifact_file_key_candidates
 from cubeplex.repositories import ArtifactRepository
 from cubeplex.services.artifact_share import resolve_share_token
 
@@ -195,11 +195,21 @@ async def share_file(
     target = file_path
     if not target:
         target = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
-    key = artifact_file_key(artifact_id, version, target)
-
     try:
         store = get_objectstore_client()
-        data, stored_content_type = await store.download_file(key)
+        for key in artifact_file_key_candidates(
+            artifact_id, version, target, artifact.conversation_id
+        ):
+            try:
+                data, stored_content_type = await store.download_file(key)
+                break
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code", "") not in ("NoSuchKey", "404"):
+                    raise
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="file not found")
+    except HTTPException:
+        raise
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchKey", "404"):

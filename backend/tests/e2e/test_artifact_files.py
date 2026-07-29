@@ -74,6 +74,10 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             ("2_v2.png", b"\x89PNG\r\n\x1a\n-v2-second"),
         ):
             await store.upload_file(f"artifacts/{_ART}/v2/{name}", data)
+        await store.upload_file(
+            f"artifacts/{_CONV}/{_ART}/v3/legacy.png",
+            b"\x89PNG\r\n\x1a\n-legacy",
+        )
         yield
     finally:
         store = get_objectstore_client()
@@ -87,6 +91,7 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                 await store.delete_file(f"artifacts/{_ART}/v2/{name}")
             except Exception:
                 pass
+        await store.delete_file(f"artifacts/{_CONV}/{_ART}/v3/legacy.png")
         async with maker() as s:
             await s.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": _ART})
             await s.execute(text("DELETE FROM conversations WHERE id = :id"), {"id": _CONV})
@@ -209,6 +214,23 @@ def test_preview_version_uses_artifact_prefix(_seed: None, client: TestClient) -
     )
     assert res.status_code == 200, res.text
     assert res.content == b"\x89PNG\r\n\x1a\n-v2-first"
+
+
+def test_existing_legacy_version_remains_readable_during_migration(
+    _seed: None, client: TestClient
+) -> None:
+    files = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/files",
+        params={"version": 3},
+    )
+    assert files.status_code == 200, files.text
+    assert files.json()["files"] == ["legacy.png"]
+
+    preview = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/preview/v3/legacy.png"
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.content == b"\x89PNG\r\n\x1a\n-legacy"
 
 
 def test_files_filter_image_empty_when_only_non_image(
