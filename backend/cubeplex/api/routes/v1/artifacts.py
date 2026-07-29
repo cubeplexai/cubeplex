@@ -21,6 +21,7 @@ from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.config import config
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_file_key, artifact_version_prefix
 from cubeplex.repositories import (
     ArtifactRepository,
     ArtifactVersionRepository,
@@ -193,7 +194,7 @@ async def download_artifact(
         )
 
     target_version = version or artifact.version
-    prefix = f"artifacts/{conversation_id}/{artifact_id}/v{target_version}/"
+    prefix = artifact_version_prefix(artifact_id, target_version)
 
     try:
         store = get_objectstore_client()
@@ -274,7 +275,7 @@ async def list_artifact_files(
         )
 
     target_version = version or artifact.version
-    prefix = f"artifacts/{conversation_id}/{artifact_id}/v{target_version}/"
+    prefix = artifact_version_prefix(artifact_id, target_version)
 
     try:
         store = get_objectstore_client()
@@ -332,7 +333,6 @@ async def create_share_token(
         key_prefix=rh.key_prefix,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
-        conversation_id=conversation_id,
         artifact_id=artifact_id,
         version=artifact.version,
         name=artifact.name,
@@ -390,7 +390,6 @@ async def create_preview_token(
     nonce = secrets.token_hex(32)
     payload = orjson.dumps(
         {
-            "conversation_id": conversation_id,
             "artifact_id": artifact_id,
             "version": target_version,
             "filename": filename,
@@ -447,7 +446,7 @@ async def preview_artifact_file(
             detail="Invalid file path",
         )
 
-    key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{file_path}"
+    key = artifact_file_key(artifact_id, version, file_path)
 
     try:
         store = get_objectstore_client()

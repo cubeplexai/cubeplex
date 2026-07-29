@@ -25,7 +25,6 @@ async def mint_share_token(
     key_prefix: str,
     org_id: str,
     workspace_id: str,
-    conversation_id: str,
     artifact_id: str,
     version: int,
     name: str | None = None,
@@ -51,7 +50,6 @@ async def mint_share_token(
         {
             "org_id": org_id,
             "workspace_id": workspace_id,
-            "conversation_id": conversation_id,
             "artifact_id": artifact_id,
             "version": version,
             "name": name,

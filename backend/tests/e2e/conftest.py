@@ -863,7 +863,7 @@ async def _seed_skill_artifact(workspace_id: str, *, skill_md: bytes) -> tuple[s
         await test_engine.dispose()
 
     store = get_objectstore_client()
-    prefix = f"artifacts/{conv_id}/{artifact_id}/v1/"
+    prefix = f"artifacts/{artifact_id}/v1/"
     await store.upload_file(f"{prefix}SKILL.md", skill_md)
     return artifact_id, conv_id
 
