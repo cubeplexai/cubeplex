@@ -21,7 +21,7 @@ from cubeplex.models import (
     WorkspaceSkillBinding,
 )
 from cubeplex.objectstore import get_objectstore_client
-from cubeplex.objectstore.artifact_paths import artifact_version_prefix_candidates
+from cubeplex.objectstore.artifact_paths import list_artifact_version_objects
 from cubeplex.repositories.artifact import ArtifactRepository
 from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
@@ -267,18 +267,12 @@ class SkillPublishService:
             )
 
         store = get_objectstore_client()
-        prefix = ""
-        keys: list[str] = []
-        for candidate in artifact_version_prefix_candidates(
-            artifact.id, artifact.version, artifact.conversation_id
-        ):
-            keys = await store.list_objects(candidate)
-            if keys:
-                prefix = candidate
-                break
+        objects = await list_artifact_version_objects(
+            store, artifact.id, artifact.version, artifact.conversation_id
+        )
         files: dict[str, bytes] = {}
-        for key in keys:
-            rel = key[len(prefix) :].lstrip("/")
+        for rel, key in objects:
+            rel = rel.lstrip("/")
             if not rel:
                 continue
             data, _ = await store.download_file(key)

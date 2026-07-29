@@ -1,5 +1,7 @@
 """Contracts for conversation-independent artifact object keys."""
 
+import pytest
+
 from cubeplex.objectstore.artifact_paths import (
     artifact_file_key,
     artifact_file_key_candidates,
@@ -7,6 +9,7 @@ from cubeplex.objectstore.artifact_paths import (
     artifact_staging_prefix,
     artifact_version_prefix,
     artifact_version_prefix_candidates,
+    list_artifact_version_objects,
 )
 
 
@@ -28,3 +31,21 @@ def test_read_candidates_fall_back_to_the_owner_conversation_legacy_key() -> Non
         "artifacts/art-123/v4/slides/index.html",
         "artifacts/conv-owner/art-123/v4/slides/index.html",
     )
+
+
+@pytest.mark.asyncio
+async def test_partial_migration_merges_prefixes_with_canonical_files_winning() -> None:
+    class Store:
+        async def list_objects(self, prefix: str) -> list[str]:
+            return {
+                "artifacts/art-123/v4/": ["artifacts/art-123/v4/index.html"],
+                "artifacts/conv-owner/art-123/v4/": [
+                    "artifacts/conv-owner/art-123/v4/index.html",
+                    "artifacts/conv-owner/art-123/v4/style.css",
+                ],
+            }[prefix]
+
+    assert await list_artifact_version_objects(Store(), "art-123", 4, "conv-owner") == [
+        ("index.html", "artifacts/art-123/v4/index.html"),
+        ("style.css", "artifacts/conv-owner/art-123/v4/style.css"),
+    ]
