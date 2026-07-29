@@ -26,6 +26,8 @@ def _input(**overrides: object) -> MCPEffectiveInput:
         "auth_required": True,
         "oauth_supported": False,
         "discovery_status": "ok",
+        "discovery_last_error": None,
+        "has_cached_tools": False,
         "credential_policy": "org",
         "grant": MCPGrantInput(
             scope="org", status="valid", has_refresh=False, auth_method="static"
@@ -191,6 +193,42 @@ def test_cross_scope_grant_treated_as_missing_for_policy_scope() -> None:
 
 def test_discovery_failed_after_auth_gates_pass() -> None:
     result = compute_effective_state(_input(discovery_status="error"))
+    assert result.usable is False
+    assert result.reason == "discovery_failed"
+
+
+def test_transient_discovery_failure_keeps_last_good_cache_usable() -> None:
+    result = compute_effective_state(
+        _input(
+            discovery_status="error",
+            discovery_last_error="TimeoutError: TimeoutError()",
+            has_cached_tools=True,
+        )
+    )
+    assert result.usable is True
+    assert result.reason == "usable"
+    assert result.credential_availability == "available"
+
+
+def test_http_timeout_keeps_last_good_cache_usable() -> None:
+    result = compute_effective_state(
+        _input(
+            discovery_status="error",
+            discovery_last_error="ReadTimeout: timed out",
+            has_cached_tools=True,
+        )
+    )
+    assert result.usable is True
+
+
+def test_credential_discovery_failure_does_not_serve_cached_tools() -> None:
+    result = compute_effective_state(
+        _input(
+            discovery_status="error",
+            discovery_last_error="credential_resolution_failed: missing credential",
+            has_cached_tools=True,
+        )
+    )
     assert result.usable is False
     assert result.reason == "discovery_failed"
 

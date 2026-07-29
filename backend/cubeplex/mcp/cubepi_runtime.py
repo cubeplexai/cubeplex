@@ -305,6 +305,8 @@ def _build_tools_from_cache(
 
 
 _cache_refresh_in_flight: set[str] = set()
+_cache_refresh_last_attempt: dict[str, float] = {}
+_CACHE_REFRESH_RETRY_COOLDOWN_SECONDS = 300.0
 
 
 def schedule_tools_cache_refresh(
@@ -320,11 +322,12 @@ def schedule_tools_cache_refresh(
     """Kick detached re-discovery for installs whose ``tools_cache`` is stale.
 
     Never blocks or raises into the send path. Debounced per install via an
-    in-process set; the TTL gate (``mcp.tools_cache_ttl_hours``, default 24)
-    bounds cross-process stampedes to one refresh per process per TTL.
+    in-process set and a five-minute retry cooldown; the TTL gate
+    (``mcp.tools_cache_ttl_hours``, default 24) bounds normal refreshes.
     """
     from datetime import UTC, datetime
     from datetime import timedelta as _td
+    from time import monotonic
 
     from cubeplex.config import config as _cfg
 
@@ -335,6 +338,7 @@ def schedule_tools_cache_refresh(
     if ttl_hours <= 0:
         return
     now = datetime.now(UTC)
+    monotonic_now = monotonic()
 
     async def _refresh_one(spec: MCPRuntimeConnectorSpec) -> None:
         from cubeplex.credentials.dependencies import build_credential_service
@@ -382,7 +386,14 @@ def schedule_tools_cache_refresh(
             continue
         if spec.connector_id in _cache_refresh_in_flight:
             continue
+        last_attempt = _cache_refresh_last_attempt.get(spec.connector_id)
+        if (
+            last_attempt is not None
+            and monotonic_now - last_attempt < _CACHE_REFRESH_RETRY_COOLDOWN_SECONDS
+        ):
+            continue
         _cache_refresh_in_flight.add(spec.connector_id)
+        _cache_refresh_last_attempt[spec.connector_id] = monotonic_now
         task = asyncio.create_task(
             _refresh_one(spec), name=f"mcp-cache-refresh:{spec.connector_id}"
         )

@@ -226,6 +226,13 @@ async def test_401_then_success_after_forced_refresh(
     assert token_mgr.force_calls == 1
     assert seen_auth == ["Bearer stale-token", "Bearer fresh-token"]
     assert await _grant_status(db_session_maker, grant_id) == "valid"
+    async with db_session_maker() as session:
+        from cubeplex.models.mcp import MCPConnector
+
+        connector = await session.get(MCPConnector, connector_id)
+        assert connector is not None
+        assert connector.last_discovered_at is not None
+        assert connector.last_discovered_at.tzinfo is not None
 
 
 async def test_401_and_refresh_failure_marks_reauthorization_required(

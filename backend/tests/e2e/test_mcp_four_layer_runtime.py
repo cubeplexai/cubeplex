@@ -29,7 +29,8 @@ from cubeplex.mcp.effective import (
     MCPEffectiveConnectorService,
     MCPRuntimeConnectorSpec,
 )
-from cubeplex.models import Workspace
+from cubeplex.models import Credential, MCPCredentialGrant, Workspace
+from cubeplex.models.mcp import MCPConnector
 from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
@@ -130,6 +131,70 @@ async def test_noauth_runtime_spec_returns_install_without_grant_lookup(
     assert spec.refresh_credential_id is None
 
     grant_spy.assert_not_awaited()
+
+
+async def test_active_tools_serves_cache_after_transient_discovery_failure(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A timeout refreshing known tools must not remove them from the agent registry."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    tpl_resp = await client.post(
+        "/api/v1/admin/mcp/templates",
+        json={
+            "name": f"Stale Cache {suffix}",
+            "server_url": f"https://stale-cache-{suffix}.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "static",
+            "default_credential_policy": "workspace",
+        },
+    )
+    assert tpl_resp.status_code == 201, tpl_resp.text
+    dist_resp = await client.post(
+        f"/api/v1/admin/mcp/templates/{tpl_resp.json()['template_id']}/distribute",
+        json={"enable_existing": True, "auto_enroll": False},
+    )
+    assert dist_resp.status_code == 200, dist_resp.text
+    connector_id = dist_resp.json()["connector"]["connector_id"]
+
+    async with db_maker() as session:
+        connector = await session.get(MCPConnector, connector_id)
+        assert connector is not None
+        credential = Credential(
+            org_id=connector.org_id,
+            kind="mcp_static_token",
+            name=f"stale-cache-{suffix}",
+            value_encrypted=b"opaque",
+        )
+        session.add(credential)
+        await session.flush()
+        session.add(
+            MCPCredentialGrant(
+                org_id=connector.org_id,
+                connector_id=connector_id,
+                grant_scope="workspace",
+                workspace_id=workspace_id,
+                auth_method="static",
+                credential_id=credential.id,
+                grant_status="valid",
+            )
+        )
+        connector.tools_cache = [
+            {
+                "name": "search",
+                "description": "Search cached content",
+                "input_schema": {"type": "object"},
+            }
+        ]
+        connector.discovery_status = "error"
+        connector.last_error = "TimeoutError: TimeoutError()"
+        await session.commit()
+
+    response = await client.get(f"/api/v1/ws/{workspace_id}/mcp/active-tools")
+    assert response.status_code == 200, response.text
+    matching = [item for item in response.json()["items"] if item["connector_id"] == connector_id]
+    assert [item["bare_name"] for item in matching] == ["search"]
 
 
 async def test_org_connector_only_visible_in_workspace_with_state_row(

@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from cubepi.mcp.http_loader import _open_session
@@ -532,11 +533,13 @@ async def discover_tools_for_install(
     install.discovery_metadata = await _build_discovery_metadata(discovered)
     install.discovery_status = "ok"
     install.last_error = None
+    install.last_discovered_at = datetime.now(UTC)
     if connector is not None:
         connector.tools_cache = tools_cache_raw
         connector.discovery_metadata = install.discovery_metadata
         connector.discovery_status = install.discovery_status
         connector.last_error = install.last_error
+        connector.last_discovered_at = install.last_discovered_at
         await connector_repo.update(connector)
     await install_repo.update(install)
     return DiscoveryResult(
