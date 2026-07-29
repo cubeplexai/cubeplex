@@ -356,6 +356,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
                     "multi_tenant, or clean up the DB before starting."
                 )
 
+    # SSO configured with nothing to serve it strands that org; log it rather
+    # than refusing to boot. See report_unserviceable_sso for why.
+    from cubeplex.auth.external_login import report_unserviceable_sso
+    from cubeplex.db import async_session_maker as _sso_session_maker
+
+    async with _sso_session_maker() as _sso_session:
+        await report_unserviceable_sso(_sso_session)
+
     # Egress exchange mTLS listener (production only). Served on its own port so
     # the per-sandbox client-cert identity cannot be reached via the public API.
     _egress_listener = None
@@ -554,7 +562,6 @@ def create_app(
         admin_sandboxes,
         admin_skill_registries,
         admin_skills,
-        admin_sso,
         admin_traces,
         artifacts_router,
         attachments_router,
@@ -586,14 +593,12 @@ def create_app(
         ws_triggers,
     )
     from cubeplex.api.routes.v1 import avatars as avatars_routes
+    from cubeplex.api.routes.v1 import org_info as org_info_routes
     from cubeplex.api.routes.v1 import (
         org_invites as org_invites_routes,
     )
     from cubeplex.api.routes.v1 import (
         social_login as social_login_routes,
-    )
-    from cubeplex.api.routes.v1 import (
-        sso as sso_routes,
     )
 
     app.include_router(system.router, prefix="/api/v1")
@@ -610,8 +615,8 @@ def create_app(
     app.include_router(public_attachments.router, prefix="/api/v1")
     app.include_router(avatars_routes.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
-    app.include_router(sso_routes.router, prefix="/api/v1")
     app.include_router(social_login_routes.router, prefix="/api/v1")
+    app.include_router(org_info_routes.router, prefix="/api/v1")
     from cubeplex.api.routes.v1 import admin_im, artifact_share, im_ingress, im_link, ws_im
 
     app.include_router(artifact_share.router, prefix="/api/v1")
@@ -633,7 +638,6 @@ def create_app(
     app.include_router(admin_sandboxes.router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_callback_router, prefix="/api/v1")
     app.include_router(admin_skill_registries.router, prefix="/api/v1")
-    app.include_router(admin_sso.router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
     app.include_router(ws_mcp.router, prefix="/api/v1")

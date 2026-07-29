@@ -13,7 +13,6 @@ import pytest
 from joserfc import jwt as jose_jwt
 from joserfc.jwk import RSAKey
 
-from cubeplex.models.sso_connection import SSOConnection
 from cubeplex.sso.oidc import (
     OIDCConfig,
     OIDCUserInfo,
@@ -21,7 +20,6 @@ from cubeplex.sso.oidc import (
     build_authorize_url,
     discover_oidc_endpoints,
     exchange_code,
-    oidc_config_from_connection,
 )
 
 ISSUER = "https://idp.example.com"
@@ -182,59 +180,6 @@ def test_build_authorize_url_respects_custom_scopes() -> None:
     )
     qs = parse_qs(urlparse(url).query)
     assert qs["scope"] == ["openid email groups"]
-
-
-# ----------------------------------------------------------------------
-# oidc_config_from_connection
-# ----------------------------------------------------------------------
-
-
-def test_oidc_config_from_connection_maps_fields() -> None:
-    conn = SSOConnection(
-        org_id="org-test",
-        protocol="oidc",
-        display_name="Acme OIDC",
-        status="active",
-        provisioning="auto",
-        config={
-            "issuer": ISSUER,
-            "authorization_endpoint": AUTHZ_ENDPOINT,
-            "token_endpoint": TOKEN_ENDPOINT,
-            "jwks_uri": JWKS_URI,
-            "client_id": CLIENT_ID,
-            "userinfo_endpoint": USERINFO_ENDPOINT,
-            "scopes": ["openid", "email"],
-            "attribute_mapping": {"email": "preferred_email"},
-        },
-    )
-    cfg = oidc_config_from_connection(conn)
-    assert cfg.issuer == ISSUER
-    assert cfg.authorization_endpoint == AUTHZ_ENDPOINT
-    assert cfg.token_endpoint == TOKEN_ENDPOINT
-    assert cfg.jwks_uri == JWKS_URI
-    assert cfg.client_id == CLIENT_ID
-    assert cfg.userinfo_endpoint == USERINFO_ENDPOINT
-    assert cfg.scopes == ("openid", "email")
-    assert cfg.attribute_mapping == {"email": "preferred_email"}
-
-
-def test_oidc_config_from_connection_defaults_scopes_when_missing() -> None:
-    conn = SSOConnection(
-        org_id="org-test",
-        protocol="oidc",
-        display_name="Acme",
-        config={
-            "issuer": ISSUER,
-            "authorization_endpoint": AUTHZ_ENDPOINT,
-            "token_endpoint": TOKEN_ENDPOINT,
-            "jwks_uri": JWKS_URI,
-            "client_id": CLIENT_ID,
-        },
-    )
-    cfg = oidc_config_from_connection(conn)
-    assert cfg.scopes == ("openid", "email", "profile")
-    assert cfg.userinfo_endpoint is None
-    assert cfg.attribute_mapping is None
 
 
 # ----------------------------------------------------------------------

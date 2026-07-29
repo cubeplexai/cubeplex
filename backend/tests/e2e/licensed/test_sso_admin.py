@@ -14,6 +14,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
 pytestmark = pytest.mark.e2e
 
 
@@ -34,13 +36,13 @@ async def test_admin_sso_crud_lifecycle(
     client, _ws = admin_client
 
     # Initially no SSO connection.
-    resp = await client.get("/api/v1/admin/sso")
+    resp = await client.get("/api/v1/admin/_extensions/cubeplex_ee/sso")
     assert resp.status_code == 200, resp.text
     assert resp.json() is None
 
     # Create with an OIDC config + client secret (exercises vault store).
     resp = await client.post(
-        "/api/v1/admin/sso",
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
         json={
             "protocol": "oidc",
             "display_name": "Test OIDC SSO",
@@ -66,13 +68,13 @@ async def test_admin_sso_crud_lifecycle(
     assert created["display_name"] == "Test OIDC SSO"
 
     # Get returns the same row.
-    resp = await client.get("/api/v1/admin/sso")
+    resp = await client.get("/api/v1/admin/_extensions/cubeplex_ee/sso")
     assert resp.status_code == 200
     assert resp.json()["id"] == sso_id
 
     # Update display name + provisioning.
     resp = await client.put(
-        f"/api/v1/admin/sso/{sso_id}",
+        f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}",
         json={"display_name": "Renamed SSO", "provisioning": "invite_only"},
     )
     assert resp.status_code == 200, resp.text
@@ -81,30 +83,30 @@ async def test_admin_sso_crud_lifecycle(
     assert body["provisioning"] == "invite_only"
 
     # Activate.
-    resp = await client.post(f"/api/v1/admin/sso/{sso_id}/activate")
+    resp = await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/activate")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "active"
 
     # Re-activate from `active` is a no-op rejection (only from testing/inactive).
-    resp = await client.post(f"/api/v1/admin/sso/{sso_id}/activate")
+    resp = await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/activate")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "invalid_status_transition"
 
     # Delete while active is refused.
-    resp = await client.delete(f"/api/v1/admin/sso/{sso_id}")
+    resp = await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "deactivate_before_delete"
 
     # Deactivate, then delete succeeds.
-    resp = await client.post(f"/api/v1/admin/sso/{sso_id}/deactivate")
+    resp = await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/deactivate")
     assert resp.status_code == 200
     assert resp.json()["status"] == "inactive"
 
-    resp = await client.delete(f"/api/v1/admin/sso/{sso_id}")
+    resp = await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")
     assert resp.status_code == 204
 
     # Gone.
-    resp = await client.get("/api/v1/admin/sso")
+    resp = await client.get("/api/v1/admin/_extensions/cubeplex_ee/sso")
     assert resp.status_code == 200
     assert resp.json() is None
 
@@ -126,11 +128,11 @@ async def test_admin_sso_duplicate_rejected(
             "jwks_uri": "https://a.example.com/jwks",
         },
     }
-    resp = await client.post("/api/v1/admin/sso", json=payload)
+    resp = await client.post("/api/v1/admin/_extensions/cubeplex_ee/sso", json=payload)
     assert resp.status_code == 201, resp.text
 
     resp = await client.post(
-        "/api/v1/admin/sso",
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
         json={**payload, "display_name": "Second"},
     )
     assert resp.status_code == 409
@@ -144,7 +146,7 @@ async def test_admin_sso_deactivate_requires_active(
     """Deactivate is only valid from `active` — testing → deactivate is 409."""
     client, _ws = admin_client
     resp = await client.post(
-        "/api/v1/admin/sso",
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
         json={
             "protocol": "oidc",
             "display_name": "Test SSO",
@@ -160,7 +162,7 @@ async def test_admin_sso_deactivate_requires_active(
     assert resp.status_code == 201
     sso_id = resp.json()["id"]
     # status is `testing` here; deactivate must reject.
-    resp = await client.post(f"/api/v1/admin/sso/{sso_id}/deactivate")
+    resp = await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/deactivate")
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "invalid_status_transition"
 
@@ -171,10 +173,10 @@ async def test_admin_sso_requires_admin(
 ) -> None:
     """Non-admin members cannot read or write the admin SSO endpoint."""
     client, _ws = member_client
-    resp = await client.get("/api/v1/admin/sso")
+    resp = await client.get("/api/v1/admin/_extensions/cubeplex_ee/sso")
     assert resp.status_code in (401, 403), resp.text
     resp = await client.post(
-        "/api/v1/admin/sso",
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
         json={
             "protocol": "oidc",
             "display_name": "Forbidden",
@@ -189,6 +191,8 @@ async def test_admin_sso_unknown_id_returns_404(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
     client, _ws = admin_client
-    resp = await client.post("/api/v1/admin/sso/sso_does_not_exist/activate")
+    resp = await client.post(
+        "/api/v1/admin/_extensions/cubeplex_ee/sso/sso_does_not_exist/activate"
+    )
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "sso_not_found"

@@ -342,8 +342,10 @@ jobs:
           cd backend
           # `env -u`, not blanking: the shard gate checks `is None`, so an empty
           # string gets past it and then fails int("") with a UsageError.
+          # Both paths, explicitly: a licensed test directory that no command
+          # names runs nowhere — importorskip hides it from the default lane too.
           env -u CUBEPLEX_E2E_SHARD_INDEX -u CUBEPLEX_E2E_SHARD_TOTAL \
-            uv run pytest tests/e2e/licensed/ --no-cov -q
+            uv run pytest tests/e2e/licensed/ tests/unit/licensed/ --no-cov -q
 
       - name: Cleanup leftover test sandboxes
         if: always()

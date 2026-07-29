@@ -1,5 +1,6 @@
-"""SSO authentication routes.
+"""Enterprise SSO login routes (SAML / OIDC).
 
+Mounted by ``SSOLoginRoutes`` under ``/api/v1/_extensions/cubeplex_ee/sso``.
 All routes are public (pre-login). The SSO flow ends by issuing the same
 JWT cookie as password login — downstream systems (workspace scoping,
 CSRF, RequestContext) are unchanged.
@@ -12,23 +13,22 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from fastapi_users.authentication import Strategy
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.auth.jwt import auth_backend
+from cubeplex.auth.external_login import (
+    enforce_forced_sso_for_user,
+    frontend_base_url,
+    login_and_redirect,
+)
 from cubeplex.auth.users import get_user_manager
 from cubeplex.config import config
 from cubeplex.db import get_session
 from cubeplex.mcp.oauth.pkce import generate_pkce
-from cubeplex.models.membership import Membership
 from cubeplex.models.organization import Organization
-from cubeplex.models.organization_membership import OrganizationMembership
 from cubeplex.models.sso_connection import SSOConnection
-from cubeplex.models.user import User
-from cubeplex.models.workspace import Workspace
-from cubeplex.sso.attribute_mapping import AttributeMappingError, apply_mapping
+from cubeplex_ee.sso.attribute_mapping import AttributeMappingError, apply_mapping
 from cubeplex.sso.identity import (
     EnterpriseLoginPolicy,
     SSOLoginRejected,
@@ -39,16 +39,21 @@ from cubeplex.sso.oidc import (
     OIDCValidationError,
     build_authorize_url,
     exchange_code,
-    oidc_config_from_connection,
 )
-from cubeplex.sso.saml import (
+from cubeplex_ee.sso.oidc_config import oidc_config_from_connection
+from cubeplex_ee.sso.saml import (
     build_authn_request_url,
     generate_sp_metadata,
     validate_response,
 )
 from cubeplex.sso.state import SSOStateExpired, SSOStateInvalid, SSOStateStore
 
-router = APIRouter(prefix="/auth", tags=["sso"])
+# The mount point, spelled once. It is also what an administrator registers
+# with their identity provider, so a drifted copy fails at the IdP rather
+# than in any test. SSOConfigForm.tsx holds the frontend half.
+PUBLIC_BASE_PATH = "/api/v1/_extensions/cubeplex_ee/sso"
+
+router = APIRouter(prefix="/sso", tags=["sso"])
 
 
 class SSOInitiateRequest(BaseModel):
@@ -57,12 +62,6 @@ class SSOInitiateRequest(BaseModel):
 
 class SSOInitiateResponse(BaseModel):
     redirect_url: str
-
-
-class OrgInfoResponse(BaseModel):
-    org_name: str
-    sso_enabled: bool
-    sso_protocol: str | None = None
 
 
 def _get_state_store(request: Request) -> SSOStateStore:
@@ -76,19 +75,6 @@ def _base_url() -> str:
     if "://" not in url:
         # Misconfiguration: surfaces as a clean 500 with a known code
         # instead of an opaque IndexError from string-splitting later.
-        raise HTTPException(500, detail={"code": "app_base_url_missing_scheme"})
-    return url
-
-
-def _frontend_base_url() -> str:
-    """Frontend origin — for browser redirects that land on a Next.js page
-    (post-login workspace home, SSO error page). Distinct from
-    ``_base_url()`` (``public_base_url``), which is the backend origin used
-    for IdP redirect URIs. They differ whenever the backend is reached via
-    a proxy/ingress that isn't the same origin the browser loads the SPA
-    from (e.g. local dev behind the cubeparser.cn ingress)."""
-    url = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
-    if "://" not in url:
         raise HTTPException(500, detail={"code": "app_base_url_missing_scheme"})
     return url
 
@@ -142,36 +128,7 @@ async def _resolve_sso_connection(
     return conn, org
 
 
-@router.get("/org-info/{org_slug}", response_model=OrgInfoResponse)
-async def get_org_info(
-    org_slug: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> OrgInfoResponse:
-    org = (
-        await session.execute(
-            select(Organization).where(
-                Organization.slug == org_slug  # type: ignore[arg-type]
-            )
-        )
-    ).scalar_one_or_none()
-    if org is None:
-        raise HTTPException(404, detail="org_not_found")
-    conn = (
-        await session.execute(
-            select(SSOConnection).where(
-                SSOConnection.org_id == org.id,  # type: ignore[arg-type]
-                SSOConnection.status.in_(["active", "testing"]),  # type: ignore[attr-defined]
-            )
-        )
-    ).scalar_one_or_none()
-    return OrgInfoResponse(
-        org_name=org.name,
-        sso_enabled=conn is not None,
-        sso_protocol=conn.protocol if conn else None,
-    )
-
-
-@router.post("/sso/initiate", response_model=SSOInitiateResponse)
+@router.post("/initiate", response_model=SSOInitiateResponse)
 async def sso_initiate(
     body: SSOInitiateRequest,
     request: Request,
@@ -192,7 +149,7 @@ async def sso_initiate(
         )
         await store.attach_pkce(state=state, verifier=pkce.verifier)
 
-        redirect_uri = f"{base}/api/v1/auth/sso/oidc/callback"
+        redirect_uri = f"{base}{PUBLIC_BASE_PATH}/oidc/callback"
         url = build_authorize_url(
             oidc_config_from_connection(conn),
             redirect_uri=redirect_uri,
@@ -204,7 +161,7 @@ async def sso_initiate(
 
     if conn.protocol == "saml":
         sp_entity_id = f"{base}/saml/{org.slug}"
-        sp_acs_url = f"{base}/api/v1/auth/sso/saml/acs"
+        sp_acs_url = f"{base}{PUBLIC_BASE_PATH}/saml/acs"
         request_data: dict[str, Any] = {
             "https": "on" if base.startswith("https") else "off",
             "http_host": _http_host_from_base(base),
@@ -235,7 +192,7 @@ async def sso_initiate(
     raise HTTPException(400, detail="unsupported protocol")
 
 
-@router.get("/sso/oidc/callback")
+@router.get("/oidc/callback")
 async def sso_oidc_callback(
     code: Annotated[str, Query()],
     state: Annotated[str, Query()],
@@ -273,7 +230,7 @@ async def sso_oidc_callback(
         userinfo = await exchange_code(
             oidc_config_from_connection(conn),
             code=code,
-            redirect_uri=f"{base}/api/v1/auth/sso/oidc/callback",
+            redirect_uri=f"{base}{PUBLIC_BASE_PATH}/oidc/callback",
             code_verifier=verifier,
             client_secret=client_secret,
             expected_nonce=payload.nonce,
@@ -317,11 +274,11 @@ async def sso_oidc_callback(
     except SSOProvisioningDenied:
         return _sso_error_redirect("sso_provisioning_denied")
 
-    await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
-    return await _login_and_redirect(request, session, result.user)
+    await enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
+    return await login_and_redirect(request, session, result.user)
 
 
-@router.post("/sso/saml/acs")
+@router.post("/saml/acs")
 async def sso_saml_acs(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -367,7 +324,7 @@ async def sso_saml_acs(
         )
     ).scalar_one()
     sp_entity_id = f"{base}/saml/{org.slug}"
-    sp_acs_url = f"{base}/api/v1/auth/sso/saml/acs"
+    sp_acs_url = f"{base}{PUBLIC_BASE_PATH}/saml/acs"
 
     request_data = {
         "https": "on" if base.startswith("https") else "off",
@@ -439,11 +396,11 @@ async def sso_saml_acs(
     except SSOProvisioningDenied:
         return _sso_error_redirect("sso_provisioning_denied")
 
-    await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
-    return await _login_and_redirect(request, session, result.user)
+    await enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
+    return await login_and_redirect(request, session, result.user)
 
 
-@router.get("/sso/saml/metadata/{sso_id}")
+@router.get("/saml/metadata/{sso_id}")
 async def sso_saml_metadata(
     sso_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -470,7 +427,7 @@ async def sso_saml_metadata(
     xml = generate_sp_metadata(
         conn,
         sp_entity_id=f"{base}/saml/{org.slug}",
-        sp_acs_url=f"{base}/api/v1/auth/sso/saml/acs",
+        sp_acs_url=f"{base}{PUBLIC_BASE_PATH}/saml/acs",
     )
     return Response(content=xml, media_type="application/xml")
 
@@ -495,87 +452,6 @@ async def _get_client_secret(request: Request, session: AsyncSession, conn: SSOC
     return plaintext.decode()
 
 
-async def _enforce_forced_sso_for_user(
-    session: AsyncSession,
-    user: User,
-    *,
-    allowed_org_id: str | None,
-) -> None:
-    """Reject login when the user belongs to any org with active forced SSO
-    and the current login flow didn't use SSO for one of those orgs.
-
-    Policy:
-    - Password login and Google social login pass ``allowed_org_id=None``;
-      if the user belongs to any forced-SSO org, reject.
-    - Enterprise SSO callbacks pass ``allowed_org_id=conn.org_id``; if
-      that org is one of the user's forced-SSO orgs, this login satisfies
-      enforcement and is allowed. (Without this, a user in TWO forced-SSO
-      orgs could never log in — strict per-org enforcement is impossible
-      because the JWT cookie is global.)
-    - If the SSO callback is for an org the user is NOT a forced-SSO
-      member of (cross-org), enforcement still blocks the login so that
-      a user in forced-SSO Org A cannot authenticate through some
-      unrelated Org B's SSO.
-    """
-    rows = (
-        await session.execute(
-            select(SSOConnection.org_id)  # type: ignore[call-overload]
-            .join(
-                OrganizationMembership,
-                OrganizationMembership.org_id == SSOConnection.org_id,
-            )
-            .where(
-                OrganizationMembership.user_id == user.id,
-                SSOConnection.status == "active",
-            )
-        )
-    ).all()
-    forced_orgs = {row[0] for row in rows}
-    if not forced_orgs:
-        return
-    if allowed_org_id is not None and allowed_org_id in forced_orgs:
-        return
-    raise HTTPException(
-        403,
-        detail={
-            "code": "sso_required",
-            "message": "Your organization requires SSO login.",
-        },
-    )
-
-
-async def _login_and_redirect(request: Request, session: AsyncSession, user: User) -> Response:
-    """Issue the JWT cookie and redirect to the frontend workspace home."""
-    strategy: Strategy[User, str] = auth_backend.get_strategy()  # type: ignore[assignment]
-    login_response = await auth_backend.login(strategy, user)
-
-    # Pick a workspace the user is actually a member of. Filtering by
-    # Membership.user_id is critical — picking any workspace in the org
-    # would land just-provisioned SSO users into an unrelated workspace.
-    ws = (
-        await session.execute(
-            select(Workspace)
-            .join(Membership, Membership.workspace_id == Workspace.id)  # type: ignore[arg-type]
-            .where(
-                Membership.user_id == user.id,  # type: ignore[arg-type]
-                Workspace.archived_at.is_(None),  # type: ignore[union-attr]
-            )
-            .order_by(Workspace.created_at)  # type: ignore[arg-type]
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
-    base = _frontend_base_url()
-    redirect_to = f"{base}/w/{ws.id}" if ws else base
-
-    redirect_resp = RedirectResponse(url=redirect_to, status_code=302)
-    for header_name in ("set-cookie",):
-        values = login_response.headers.getlist(header_name)
-        for v in values:
-            redirect_resp.headers.append(header_name, v)
-    return redirect_resp
-
-
 def _sso_error_redirect(error_code: str) -> RedirectResponse:
     """Redirect to the frontend SSO error page instead of returning raw JSON.
 
@@ -584,5 +460,5 @@ def _sso_error_redirect(error_code: str) -> RedirectResponse:
     """
     from urllib.parse import quote
 
-    base = _frontend_base_url()
+    base = frontend_base_url()
     return RedirectResponse(url=f"{base}/sso/callback?error={quote(error_code)}", status_code=302)

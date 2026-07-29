@@ -31,9 +31,9 @@ from cubeplex.db import get_session
 from cubeplex.models import User
 from cubeplex.models.sso_connection import SSOConnection
 from cubeplex.repositories.external_identity import ExternalIdentityRepository
-from cubeplex.repositories.sso_connection import SSOConnectionRepository
+from cubeplex_ee.sso.repository import SSOConnectionRepository
 
-router = APIRouter(prefix="/admin/sso", tags=["admin-sso"])
+router = APIRouter(prefix="/sso", tags=["admin", "admin-sso"])
 
 
 # --- request / response models ---------------------------------------------

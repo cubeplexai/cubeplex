@@ -22,7 +22,7 @@ from cubeplex.api.routes.v1.social_login import (
     google_authorize,
     google_callback,
 )
-from cubeplex.api.routes.v1.sso import _enforce_forced_sso_for_user
+from cubeplex.auth.external_login import enforce_forced_sso_for_user
 from cubeplex.config import config
 from cubeplex.models import Organization, SSOConnection, User
 from cubeplex.sso.state import SSOStateStore
@@ -218,7 +218,7 @@ async def test_forced_sso_blocks_google_login_for_member_of_sso_org(
 ) -> None:
     """A user belonging to an org with active enterprise SSO must NOT be
     able to log in via Google — the social callback calls
-    ``_enforce_forced_sso_for_user(allowed_org_id=None)`` and that must
+    ``enforce_forced_sso_for_user(allowed_org_id=None)`` and that must
     raise 403 ``sso_required``."""
     org, user = await make_org_with_user(email="member@enterprise.com")
     sso_session.add(
@@ -234,7 +234,7 @@ async def test_forced_sso_blocks_google_login_for_member_of_sso_org(
     await sso_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        await _enforce_forced_sso_for_user(sso_session, user, allowed_org_id=None)
+        await enforce_forced_sso_for_user(sso_session, user, allowed_org_id=None)
     assert exc_info.value.status_code == 403
     assert isinstance(exc_info.value.detail, dict)
     assert exc_info.value.detail["code"] == "sso_required"

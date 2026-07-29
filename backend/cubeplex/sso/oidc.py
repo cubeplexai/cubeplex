@@ -13,8 +13,6 @@ from joserfc.jwk import KeySet
 from joserfc.jwt import JWTClaimsRegistry
 from joserfc.jwt import decode as jwt_decode
 
-from cubeplex.models.sso_connection import SSOConnection
-
 
 class OIDCValidationError(Exception):
     """Raised when ID token validation (sig/iss/aud/exp/nonce) fails."""
@@ -22,10 +20,10 @@ class OIDCValidationError(Exception):
 
 @dataclass(frozen=True)
 class OIDCConfig:
-    """Minimal OIDC IdP config — usable by both enterprise SSO (built from
-    a persisted ``SSOConnection.config``) and Google social login (built
-    from the cubeplex app config). The OIDC client takes this dataclass so
-    the social-login path never has to fake an ORM row."""
+    """Minimal OIDC IdP config — usable by both enterprise SSO (built from a
+    persisted connection row by the licensed package) and Google social login
+    (built from the cubeplex app config). The OIDC client takes this dataclass so
+    neither path has to fake the other's shape."""
 
     issuer: str
     authorization_endpoint: str
@@ -35,21 +33,6 @@ class OIDCConfig:
     userinfo_endpoint: str | None = None
     scopes: tuple[str, ...] = ("openid", "email", "profile")
     attribute_mapping: dict[str, str] | None = None
-
-
-def oidc_config_from_connection(connection: SSOConnection) -> OIDCConfig:
-    """Build an OIDCConfig from a persisted SSOConnection's JSONB config."""
-    cfg = connection.config
-    return OIDCConfig(
-        issuer=cfg["issuer"],
-        authorization_endpoint=cfg["authorization_endpoint"],
-        token_endpoint=cfg["token_endpoint"],
-        jwks_uri=cfg["jwks_uri"],
-        client_id=cfg["client_id"],
-        userinfo_endpoint=cfg.get("userinfo_endpoint"),
-        scopes=tuple(cfg.get("scopes", ["openid", "email", "profile"])),
-        attribute_mapping=cfg.get("attribute_mapping"),
-    )
 
 
 @dataclass(frozen=True)

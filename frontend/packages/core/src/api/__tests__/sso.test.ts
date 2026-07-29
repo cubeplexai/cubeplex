@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  SSO_ADMIN_BASE,
+  SSO_PUBLIC_BASE,
   activateSsoConnection,
   createSsoConnection,
   deactivateSsoConnection,
@@ -62,14 +64,14 @@ describe('SSO public API', () => {
   it('initiateSsoLogin posts with null slug when omitted (single-tenant)', async () => {
     const client = mockClient({ ok: true, body: { redirect_url: 'https://idp/x' } })
     const out = await initiateSsoLogin(client)
-    expect(client.post).toHaveBeenCalledWith('/api/v1/auth/sso/initiate', { org_slug: null })
+    expect(client.post).toHaveBeenCalledWith(`${SSO_PUBLIC_BASE}/initiate`, { org_slug: null })
     expect(out.redirect_url).toBe('https://idp/x')
   })
 
   it('initiateSsoLogin sends slug when provided', async () => {
     const client = mockClient({ ok: true, body: { redirect_url: 'https://idp/y' } })
     await initiateSsoLogin(client, 'acme')
-    expect(client.post).toHaveBeenCalledWith('/api/v1/auth/sso/initiate', { org_slug: 'acme' })
+    expect(client.post).toHaveBeenCalledWith(`${SSO_PUBLIC_BASE}/initiate`, { org_slug: 'acme' })
   })
 
   it('getGoogleAuthorizeUrl hits the social route', async () => {
@@ -89,7 +91,7 @@ describe('SSO admin API', () => {
   it('getOrgSso returns null when body is empty', async () => {
     const client = mockClient({ ok: true, text: '' })
     const out = await getOrgSso(client)
-    expect(client.get).toHaveBeenCalledWith('/api/v1/admin/sso')
+    expect(client.get).toHaveBeenCalledWith(SSO_ADMIN_BASE)
     expect(out).toBeNull()
   })
 
@@ -121,7 +123,7 @@ describe('SSO admin API', () => {
       client_secret: 'shh',
     })
     expect(client.post).toHaveBeenCalledWith(
-      '/api/v1/admin/sso',
+      SSO_ADMIN_BASE,
       expect.objectContaining({ protocol: 'oidc', display_name: 'IdP', client_secret: 'shh' }),
     )
   })
@@ -130,7 +132,7 @@ describe('SSO admin API', () => {
     const client = mockClient({ ok: true, body: { id: 'sso_1' } })
     await updateSsoConnection(client, 'sso_1', { display_name: 'Renamed' })
     expect(client.put).toHaveBeenCalledWith(
-      '/api/v1/admin/sso/sso_1',
+      `${SSO_ADMIN_BASE}/sso_1`,
       expect.objectContaining({ display_name: 'Renamed' }),
     )
   })
@@ -138,37 +140,37 @@ describe('SSO admin API', () => {
   it('deleteSsoConnection DELETEs the connection', async () => {
     const client = mockClient({ ok: true, status: 204 })
     await deleteSsoConnection(client, 'sso_1')
-    expect(client.del).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1')
+    expect(client.del).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1`)
   })
 
   it('activateSsoConnection posts to /activate with empty body', async () => {
     const client = mockClient({ ok: true, body: { id: 'sso_1', status: 'active' } })
     await activateSsoConnection(client, 'sso_1')
-    expect(client.post).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1/activate', {})
+    expect(client.post).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1/activate`, {})
   })
 
   it('deactivateSsoConnection posts to /deactivate', async () => {
     const client = mockClient({ ok: true, body: { id: 'sso_1', status: 'inactive' } })
     await deactivateSsoConnection(client, 'sso_1')
-    expect(client.post).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1/deactivate', {})
+    expect(client.post).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1/deactivate`, {})
   })
 
   it('listSsoIdentities GETs without query when no params', async () => {
     const client = mockClient({ ok: true, body: [] })
     await listSsoIdentities(client, 'sso_1')
-    expect(client.get).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1/identities')
+    expect(client.get).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1/identities`)
   })
 
   it('listSsoIdentities appends pagination params', async () => {
     const client = mockClient({ ok: true, body: [] })
     await listSsoIdentities(client, 'sso_1', { limit: 25, offset: 50 })
-    expect(client.get).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1/identities?limit=25&offset=50')
+    expect(client.get).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1/identities?limit=25&offset=50`)
   })
 
   it('unlinkSsoIdentity DELETEs the identity', async () => {
     const client = mockClient({ ok: true, status: 204 })
     await unlinkSsoIdentity(client, 'sso_1', 'eid_42')
-    expect(client.del).toHaveBeenCalledWith('/api/v1/admin/sso/sso_1/identities/eid_42')
+    expect(client.del).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/sso_1/identities/eid_42`)
   })
 
   it('discoverOidcEndpoints posts the issuer_url', async () => {
@@ -182,7 +184,7 @@ describe('SSO admin API', () => {
       },
     })
     const out = await discoverOidcEndpoints(client, 'https://idp')
-    expect(client.post).toHaveBeenCalledWith('/api/v1/admin/sso/discover-oidc', {
+    expect(client.post).toHaveBeenCalledWith(`${SSO_ADMIN_BASE}/discover-oidc`, {
       issuer_url: 'https://idp',
     })
     expect(out.token_endpoint).toBe('https://idp/token')

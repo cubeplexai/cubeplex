@@ -26,7 +26,7 @@ async function mockSystemInfo(page: import('@playwright/test').Page, mode: strin
 }
 
 async function mockSsoInitiate(page: import('@playwright/test').Page): Promise<void> {
-  await page.route('**/api/v1/auth/sso/initiate', async (route: Route) => {
+  await page.route('**/api/v1/_extensions/cubeplex_ee/sso/initiate', async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
