@@ -55,7 +55,7 @@ class _FakeConnector:
         return "msg-1" if self.chat_ok else None
 
 
-async def _make_temp(_conv: str, _artifact: dict[str, Any], *, size: int = 100) -> Path:
+async def _make_temp(_artifact: dict[str, Any], *, size: int = 100) -> Path:
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         tmp.write(b"x" * size)
         return Path(tmp.name)
@@ -130,8 +130,8 @@ async def test_terminal_delivery_is_idempotent(monkeypatch: pytest.MonkeyPatch) 
 async def test_oversize_file_falls_back_to_share_link(monkeypatch: pytest.MonkeyPatch) -> None:
     """Over the platform cap → no native send, a share-link message instead."""
 
-    async def _big(_c: str, _a: dict[str, Any]) -> Path:
-        return await _make_temp(_c, _a, size=40 * 1024 * 1024)  # > 30MB Feishu cap
+    async def _big(_a: dict[str, Any]) -> Path:
+        return await _make_temp(_a, size=40 * 1024 * 1024)  # > 30MB Feishu cap
 
     monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _big)
     conn = _FakeConnector(send_ok=True)
@@ -189,7 +189,7 @@ async def test_exception_during_delivery_releases_claim(
     share-link minting leaked the NX claim.
     """
 
-    async def _boom(_c: str, _a: dict[str, Any]) -> Path:
+    async def _boom(_a: dict[str, Any]) -> Path:
         raise RuntimeError("objectstore exploded")
 
     monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _boom)

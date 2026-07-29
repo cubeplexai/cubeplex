@@ -10,6 +10,7 @@ from loguru import logger
 
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_file_key
 from cubeplex.utils.http import content_disposition
 
 router = APIRouter(prefix="/public/artifacts", tags=["public-artifacts"])
@@ -43,10 +44,9 @@ async def public_download(
             detail="Filename mismatch",
         )
 
-    conversation_id: str = payload["conversation_id"]
     artifact_id: str = payload["artifact_id"]
     version: int = payload["version"]
-    obj_key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{stored_filename}"
+    obj_key = artifact_file_key(artifact_id, version, stored_filename)
 
     try:
         store = get_objectstore_client()

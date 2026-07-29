@@ -16,6 +16,7 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_root_prefix
 from cubeplex.repositories import ArtifactRepository, ConversationRepository
 
 router = APIRouter(prefix="/ws/{workspace_id}/artifacts", tags=["ws-artifacts"])
@@ -63,14 +64,17 @@ async def delete_workspace_artifact(
     if (await conv_repo.get_by_id(artifact.conversation_id)) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
-    conversation_id = artifact.conversation_id
+    prefixes = {
+        artifact_root_prefix(artifact_id),
+        f"artifacts/{artifact.conversation_id}/{artifact_id}/",
+    }
     await art_repo.delete_with_versions(artifact)
 
-    prefix = f"artifacts/{conversation_id}/{artifact_id}/"
     try:
         store = get_objectstore_client()
-        for key in await store.list_objects(prefix):
-            await store.delete_file(key)
+        for prefix in prefixes:
+            for key in await store.list_objects(prefix):
+                await store.delete_file(key)
     except Exception as e:  # storage cleanup is best-effort; rows are already gone
         logger.error("Artifact {} storage cleanup failed: {}", artifact_id, e)
 

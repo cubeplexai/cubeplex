@@ -28,6 +28,7 @@ from cubeplex.im.artifact_delivery import artifact_outbound_kind, outbound_size_
 from cubeplex.im.card_model import ArtifactItem, CardState
 from cubeplex.im.types import OutboundConnector
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_file_key
 from cubeplex.services.artifact_share import mint_share_token as _default_mint
 
 MintShareToken = Callable[..., Awaitable[str]]
@@ -37,9 +38,7 @@ MintShareToken = Callable[..., Awaitable[str]]
 _SEND_TIMEOUT = 60.0
 
 
-async def download_artifact_to_tempfile(
-    conversation_id: str, artifact: dict[str, Any]
-) -> Path | None:
+async def download_artifact_to_tempfile(artifact: dict[str, Any]) -> Path | None:
     """Download an artifact's bytes from the object store to a temp file.
 
     Shared by the inline-image path and the native-file path. Returns the temp
@@ -57,7 +56,7 @@ async def download_artifact_to_tempfile(
         return None
     # Build the key OUTSIDE the try so a key-construction bug propagates rather
     # than masquerading as a benign 'object missing → share-link' fallback.
-    key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{filename}"
+    key = artifact_file_key(artifact_id, version, filename)
     try:
         store = get_objectstore_client()
         data, _ctype = await store.download_file(key)
@@ -121,7 +120,7 @@ class IMArtifactDispatcher:
         await self._fill_share_url(item, artifact)
 
     async def _fill_image_key(self, item: ArtifactItem, artifact: dict[str, Any]) -> None:
-        tmp_path = await download_artifact_to_tempfile(self.conversation_id, artifact)
+        tmp_path = await download_artifact_to_tempfile(artifact)
         if tmp_path is None:
             await self._fill_share_url(item, artifact)
             return
@@ -148,7 +147,6 @@ class IMArtifactDispatcher:
             key_prefix=self.redis_key_prefix,
             org_id=self.org_id,
             workspace_id=self.workspace_id,
-            conversation_id=self.conversation_id,
             artifact_id=item.id,
             version=version,
             name=item.name,
@@ -215,7 +213,7 @@ class IMArtifactDispatcher:
                 artifact_type=str(artifact.get("artifact_type") or ""),
                 name=str(artifact.get("name") or "file"),
             )
-        tmp_path = await download_artifact_to_tempfile(self.conversation_id, artifact)
+        tmp_path = await download_artifact_to_tempfile(artifact)
         if tmp_path is None:
             return await self._fallback_link(item, artifact)
         ok = False

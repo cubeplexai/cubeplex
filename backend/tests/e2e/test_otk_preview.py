@@ -78,7 +78,7 @@ async def _seed_office_artifact(
         await test_engine.dispose()
 
     store = get_objectstore_client()
-    key = f"artifacts/{conv_id}/{artifact_id}/v1/{filename}"
+    key = f"artifacts/{artifact_id}/v1/{filename}"
     await store.upload_file(key, file_bytes)
     return artifact_id, conv_id
 

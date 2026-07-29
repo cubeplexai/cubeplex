@@ -12,6 +12,7 @@ import shlex
 from loguru import logger
 
 from cubeplex.models.artifact import Artifact
+from cubeplex.objectstore.artifact_paths import artifact_version_prefix
 from cubeplex.sandbox.base import Sandbox
 
 
@@ -96,7 +97,7 @@ async def register_artifact_from_sandbox(
         from cubeplex.objectstore import get_objectstore_client
 
         store = get_objectstore_client()
-        key_prefix = f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
+        key_prefix = artifact_version_prefix(artifact.id, artifact.version)
         await store.upload_from_sandbox(sandbox, path, key_prefix)
     except Exception:
         logger.exception("Failed to upload artifact {} to object storage (non-fatal)", artifact.id)

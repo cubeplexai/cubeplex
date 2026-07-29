@@ -21,6 +21,7 @@ from cubeplex.models import (
     WorkspaceSkillBinding,
 )
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_version_prefix
 from cubeplex.repositories.artifact import ArtifactRepository
 from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
@@ -265,7 +266,7 @@ class SkillPublishService:
                 f"artifact {artifact_id!r} has type {artifact.artifact_type!r}, expected 'skill'"
             )
 
-        prefix = f"artifacts/{artifact.conversation_id}/{artifact.id}/v{artifact.version}/"
+        prefix = artifact_version_prefix(artifact.id, artifact.version)
         store = get_objectstore_client()
         keys = await store.list_objects(prefix)
         files: dict[str, bytes] = {}

@@ -87,16 +87,16 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             await s.commit()
 
         await store.upload_file(
-            f"artifacts/{_CONV}/{_ART}/v1/guide.md",
+            f"artifacts/{_ART}/v1/guide.md",
             b"# Hello\n",
             content_type="text/markdown",
         )
         yield
     finally:
         for key in (
-            f"artifacts/{_CONV}/{_ART}/v1/guide.md",
-            f"artifacts/{_CONV}/{_ART}/v2/guide.md",
-            f"artifacts/{_CONV}/{_ART}/v3/guide.md",
+            f"artifacts/{_ART}/v1/guide.md",
+            f"artifacts/{_ART}/v2/guide.md",
+            f"artifacts/{_ART}/v3/guide.md",
         ):
             try:
                 await store.delete_file(key)

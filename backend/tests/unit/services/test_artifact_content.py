@@ -166,7 +166,7 @@ def _mock_store(*, objects: list[str] | None = None, list_error: Exception | Non
 @pytest.mark.asyncio
 async def test_update_happy_path_no_sandbox(db_session: AsyncSession) -> None:
     art_id = await _seed_md_artifact(db_session)
-    store = _mock_store(objects=[f"artifacts/conv-1/{art_id}/v1/guide.md"])
+    store = _mock_store(objects=[f"artifacts/{art_id}/v1/guide.md"])
     with (
         patch(
             "cubeplex.services.artifact_content.get_objectstore_client",

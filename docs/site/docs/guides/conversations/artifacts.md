@@ -74,7 +74,7 @@ At the top of the chat area, a collapsible **Artifacts** bar shows all artifacts
 
 The agent can update an artifact across multiple turns. When you say "make the header blue" or "add a footer to the page," the agent creates a **new version** of the existing artifact rather than a separate artifact.
 
-Versioned artifacts show a version badge (e.g., "v3") on their card. In the artifact panel, click the version badge to open a dropdown listing all versions with timestamps. Select any version to preview it or download that specific version.
+Versioned artifacts show a version badge (e.g., "v3") on their card. In the artifact panel, click the version badge to open a dropdown listing all versions with timestamps. Select any version to preview it or download that specific version. Each version keeps its own stored files, so later updates do not change what an earlier version opens.
 
 ## Downloading artifacts
 

@@ -17,7 +17,7 @@ pytestmark = pytest.mark.asyncio
 
 _CONV = "conv-artfiles"
 _ART = "art-artfiles"
-_PREFIX = f"artifacts/{_CONV}/{_ART}/v1/"
+_PREFIX = f"artifacts/{_ART}/v1/"
 
 
 @pytest_asyncio.fixture
@@ -73,7 +73,7 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             ("1_v2.png", b"\x89PNG\r\n\x1a\n-v2-first"),
             ("2_v2.png", b"\x89PNG\r\n\x1a\n-v2-second"),
         ):
-            await store.upload_file(f"artifacts/{_CONV}/{_ART}/v2/{name}", data)
+            await store.upload_file(f"artifacts/{_ART}/v2/{name}", data)
         yield
     finally:
         store = get_objectstore_client()
@@ -84,7 +84,7 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                 pass
         for name in ("1_v2.png", "2_v2.png"):
             try:
-                await store.delete_file(f"artifacts/{_CONV}/{_ART}/v2/{name}")
+                await store.delete_file(f"artifacts/{_ART}/v2/{name}")
             except Exception:
                 pass
         async with maker() as s:
@@ -132,7 +132,7 @@ def test_files_cross_workspace_404(_seed: None, client: TestClient) -> None:
 
 _CONV2 = "conv-nonimg"
 _ART2 = "art-nonimg"
-_PREFIX2 = f"artifacts/{_CONV2}/{_ART2}/v1/"
+_PREFIX2 = f"artifacts/{_ART2}/v1/"
 
 
 @pytest_asyncio.fixture
@@ -190,8 +190,8 @@ async def _seed_non_image(client: TestClient) -> AsyncIterator[None]:
         await engine.dispose()
 
 
-def test_files_version_param(_seed: None, client: TestClient) -> None:
-    """?version=N returns files from that version's prefix."""
+def test_files_version_param_uses_artifact_prefix(_seed: None, client: TestClient) -> None:
+    """?version=N resolves objects using only the artifact id and version."""
     res = client.get(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/files",
         params={"version": 2, "filter": "image"},
@@ -200,6 +200,15 @@ def test_files_version_param(_seed: None, client: TestClient) -> None:
     body = res.json()
     assert body["version"] == 2
     assert body["files"] == ["1_v2.png", "2_v2.png"]
+
+
+def test_preview_version_uses_artifact_prefix(_seed: None, client: TestClient) -> None:
+    """Preview serves a requested version without a conversation storage prefix."""
+    res = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/preview/v2/1_v2.png"
+    )
+    assert res.status_code == 200, res.text
+    assert res.content == b"\x89PNG\r\n\x1a\n-v2-first"
 
 
 def test_files_filter_image_empty_when_only_non_image(

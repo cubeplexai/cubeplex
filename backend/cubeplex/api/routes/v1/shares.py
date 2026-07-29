@@ -193,7 +193,7 @@ async def create_share(
         is_active=False,
     )
 
-    await copy_artifacts_to_share(share.id, body.conversation_id, artifacts_data)
+    await copy_artifacts_to_share(share.id, artifacts_data)
 
     share = await share_repo.activate(share.id)
     return _serialize(share)

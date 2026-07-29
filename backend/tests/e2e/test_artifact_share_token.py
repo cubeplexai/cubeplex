@@ -1,9 +1,11 @@
 """Integration tests for the public artifact share-token + preview page (Task 11)."""
 
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from cubeplex.config import config as _cubeplex_config
+from cubeplex.objectstore import get_objectstore_client
 from cubeplex.services.artifact_share import (
     SHARE_TTL_SECONDS,
     mint_share_token,
@@ -95,9 +98,12 @@ async def _seeded_artifact() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
                 {"id": _ART_ID, "org": _ORG_ID, "ws": _WS_ID, "conv": _CONV_ID},
             )
             await session.commit()
+        store = get_objectstore_client()
+        await store.upload_file(f"artifacts/{_ART_ID}/v1/report.md", b"shared report")
         try:
             yield maker
         finally:
+            await store.delete_file(f"artifacts/{_ART_ID}/v1/report.md")
             async with maker() as session:
                 await session.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": _ART_ID})
                 await session.execute(
@@ -118,7 +124,6 @@ async def test_mint_and_resolve_roundtrip(
         key_prefix=key_prefix,
         org_id=_ORG_ID,
         workspace_id=_WS_ID,
-        conversation_id=_CONV_ID,
         artifact_id=_ART_ID,
         version=1,
         ttl_seconds=60,
@@ -129,7 +134,7 @@ async def test_mint_and_resolve_roundtrip(
     assert payload is not None
     assert payload["org_id"] == _ORG_ID
     assert payload["workspace_id"] == _WS_ID
-    assert payload["conversation_id"] == _CONV_ID
+    assert "conversation_id" not in payload
     assert payload["artifact_id"] == _ART_ID
     assert payload["version"] == 1
 
@@ -141,6 +146,33 @@ async def test_resolve_returns_none_for_unknown_nonce(_redis: Redis) -> None:
         redis=_redis, key_prefix="share-test-prefix", nonce="does-not-exist"
     )
     assert out is None
+
+
+async def test_share_file_needs_no_conversation_in_token(
+    _redis: Redis,
+    _seeded_artifact: async_sessionmaker[AsyncSession],
+    client: TestClient,
+) -> None:
+    key_prefix = (
+        f"{_cubeplex_config.get('redis.key_prefix', 'cubeplex')}:"
+        f"{os.getenv('ENV_FOR_DYNACONF', 'development')}"
+    )
+    nonce = await mint_share_token(
+        redis=_redis,
+        key_prefix=key_prefix,
+        org_id=_ORG_ID,
+        workspace_id=_WS_ID,
+        artifact_id=_ART_ID,
+        version=1,
+        entry_file="report.md",
+        ttl_seconds=60,
+    )
+
+    response = client.get(f"/api/v1/public/artifacts/share/{nonce}/file/report.md")
+    assert response.status_code == 200, response.text
+    assert response.content == b"shared report"
+
+    await _redis.delete(f"{key_prefix}:share:{nonce}")
 
 
 async def test_default_ttl_constant_is_seven_days() -> None:

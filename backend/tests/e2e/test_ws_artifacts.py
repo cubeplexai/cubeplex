@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from cubeplex.db.engine import _build_database_url
+from cubeplex.objectstore import get_objectstore_client
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.asyncio
@@ -44,7 +45,10 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                 ),
                 {"id": _STRANGER_ID, "email": f"{_STRANGER_ID}@example.com"},
             )
-            for conv_id, uid in ((_MY_CONV, my_user_id), (_OTHER_CONV, _STRANGER_ID)):
+            for conv_id, uid in (
+                (_MY_CONV, my_user_id),
+                (_OTHER_CONV, _STRANGER_ID),
+            ):
                 await s.execute(
                     text(
                         "INSERT INTO conversations (id, org_id, workspace_id,"
@@ -79,8 +83,20 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                     },
                 )
             await s.commit()
+        store = get_objectstore_client()
+        await store.upload_file(f"artifacts/{_MY_CONV}/{_MY_ART}/v1/f", b"v1")
+        await store.upload_file(f"artifacts/{_MY_ART}/v2/f", b"v2")
         yield
     finally:
+        store = get_objectstore_client()
+        for key in (
+            f"artifacts/{_MY_CONV}/{_MY_ART}/v1/f",
+            f"artifacts/{_MY_ART}/v2/f",
+        ):
+            try:
+                await store.delete_file(key)
+            except Exception:
+                pass
         async with maker() as s:
             await s.execute(
                 text("DELETE FROM artifacts WHERE id IN (:a, :b)"), {"a": _MY_ART, "b": _OTHER_ART}
@@ -114,11 +130,14 @@ def test_list_name_search(_seed: None, client: TestClient) -> None:
     assert _MY_ART in {a["id"] for a in res.json()["artifacts"]}
 
 
-def test_delete_accessible_artifact(_seed: None, client: TestClient) -> None:
+async def test_delete_accessible_artifact(_seed: None, client: TestClient) -> None:
     res = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/artifacts/{_MY_ART}")
     assert res.status_code == 204
     after = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/artifacts")
     assert _MY_ART not in {a["id"] for a in after.json()["artifacts"]}
+    store = get_objectstore_client()
+    assert await store.list_objects(f"artifacts/{_MY_CONV}/{_MY_ART}/") == []
+    assert await store.list_objects(f"artifacts/{_MY_ART}/") == []
 
 
 def test_delete_inaccessible_artifact_404(_seed: None, client: TestClient) -> None:

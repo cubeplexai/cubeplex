@@ -1,7 +1,7 @@
 """Public artifact preview page + file-content endpoint (no auth; nonce-gated).
 
 The nonce IS the auth. Tokens are bound to ``(org_id, workspace_id,
-conversation_id, artifact_id, version)`` and expire after 7 days (see
+artifact_id, version)`` and expire after 7 days (see
 ``services/artifact_share.py``). A leaked link exposes one artifact for
 ≤ 1 week — bounded blast radius.
 """
@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import artifact_file_key
 from cubeplex.repositories import ArtifactRepository
 from cubeplex.services.artifact_share import resolve_share_token
 
@@ -54,13 +55,12 @@ async def share_page(
         return HTMLResponse(_expired_html(), status_code=status.HTTP_404_NOT_FOUND)
     org_id = str(payload["org_id"])
     workspace_id = str(payload["workspace_id"])
-    conversation_id = str(payload["conversation_id"])
     artifact_id = str(payload["artifact_id"])
     version = int(str(payload["version"]))
 
     repo = ArtifactRepository(session, org_id=org_id, workspace_id=workspace_id)
     artifact = await repo.get_by_id(artifact_id)
-    if artifact is None or artifact.conversation_id != conversation_id:
+    if artifact is None:
         return HTMLResponse(
             _expired_html("Artifact not found"), status_code=status.HTTP_404_NOT_FOUND
         )
@@ -170,7 +170,7 @@ async def share_file(
 ) -> Response:
     """Serve a single file from the artifact behind ``nonce``.
 
-    Auth is the nonce alone — the bound (org, workspace, conv, artifact,
+    Auth is the nonce alone — the bound (org, workspace, artifact,
     version) is what the request was signed for. Path-traversal is rejected
     inline; only files under the artifact's object-store key prefix are
     reachable, even with a tampered ``file_path``.
@@ -182,13 +182,12 @@ async def share_file(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid file path")
     org_id = str(payload["org_id"])
     workspace_id = str(payload["workspace_id"])
-    conversation_id = str(payload["conversation_id"])
     artifact_id = str(payload["artifact_id"])
     version = int(str(payload["version"]))
 
     repo = ArtifactRepository(session, org_id=org_id, workspace_id=workspace_id)
     artifact = await repo.get_by_id(artifact_id)
-    if artifact is None or artifact.conversation_id != conversation_id:
+    if artifact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
 
     # If the caller asked for the entry_file by name, accept that; otherwise
@@ -196,7 +195,7 @@ async def share_file(
     target = file_path
     if not target:
         target = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
-    key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{target}"
+    key = artifact_file_key(artifact_id, version, target)
 
     try:
         store = get_objectstore_client()

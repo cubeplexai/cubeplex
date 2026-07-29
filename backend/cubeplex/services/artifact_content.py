@@ -25,6 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.models.artifact import Artifact
 from cubeplex.models.artifact_version import ArtifactVersion
 from cubeplex.objectstore import get_objectstore_client
+from cubeplex.objectstore.artifact_paths import (
+    artifact_file_key,
+    artifact_staging_prefix,
+    artifact_version_prefix,
+)
 from cubeplex.repositories import ArtifactRepository
 
 MAX_CONTENT_BYTES = 2_000_000
@@ -155,7 +160,7 @@ async def update_artifact_content(
         )
 
     store = get_objectstore_client()
-    current_prefix = f"artifacts/{conversation_id}/{artifact_id}/v{artifact.version}/"
+    current_prefix = artifact_version_prefix(artifact_id, artifact.version)
     try:
         existing = await store.list_objects(current_prefix)
     except Exception as exc:
@@ -172,10 +177,8 @@ async def update_artifact_content(
         )
 
     next_version = expected_version + 1
-    staging_key = (
-        f"artifacts/{conversation_id}/{artifact_id}/staging/{secrets.token_hex(16)}/{filename}"
-    )
-    final_key = f"artifacts/{conversation_id}/{artifact_id}/v{next_version}/{filename}"
+    staging_key = f"{artifact_staging_prefix(artifact_id, secrets.token_hex(16))}{filename}"
+    final_key = artifact_file_key(artifact_id, next_version, filename)
     mime = artifact.mime_type or mimetypes.guess_type(filename)[0] or "text/markdown"
 
     # Staging first: durable copy until final key is written under the row lock.
