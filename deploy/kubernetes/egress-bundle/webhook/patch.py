@@ -13,6 +13,10 @@ from typing import Any
 _MITM_CONFDIR = "/var/lib/mitmproxy/.mitmproxy"
 _ADDON_PATH = "/etc/egress-inject/inject.py"
 
+# The MITM CA as a real file on the shared trust dir. Read by the sandbox image's
+# launch-chrome.sh, which imports it into Chromium's NSS store — keep the two in sync.
+_SHARED_CA_PATH = "/etc/ssl/certs/cubeplex-egress-ca.pem"
+
 # OpenSandbox owns sandbox pods via a BatchSandbox CR (the per-sandbox path also
 # uses Sandbox); both live under the sandbox.opensandbox.io API group.
 _SANDBOX_OWNER_KINDS = frozenset({"BatchSandbox", "Sandbox"})
@@ -112,8 +116,14 @@ def build_pod_patch(
         {
             "name": "egress-ca-trust",
             "image": egress_image,  # has update-ca-certificates + the tools
+            # The second cp is what the sandbox browser reads. update-ca-certificates
+            # only leaves /etc/ssl/certs/cubeplex-egress.pem -> /usr/local/share/...,
+            # a symlink whose target lives in THIS container's filesystem layer and so
+            # dangles once the init container dies. Dropping the cert itself into the
+            # shared trust dir gives Chromium's NSS import a real file to read.
             "command": ["/bin/sh", "-c",
                         "cp /etc/egress-ca-pub/ca.pem /usr/local/share/ca-certificates/cubeplex-egress.crt "
+                        f"&& cp /etc/egress-ca-pub/ca.pem {_SHARED_CA_PATH} "
                         "&& update-ca-certificates"],
             "volumeMounts": [
                 {"name": "egress-ca-pub", "mountPath": "/etc/egress-ca-pub", "readOnly": True},
