@@ -124,10 +124,34 @@ the second one.
   redirects. Core auth, same lazy import, same failure.
 - **`get_org_info`** (`/auth/org-info/{slug}`) — the OSS login page calls it.
 
-Extract all three into core before deleting anything. `_enforce_forced_sso_for_user`
-belongs beside the near-duplicate guard already in `auth.py` (both refuse login
-when an org has active SSO) — worth putting them in one module, though actually
-unifying the two queries is a separate change, not this one.
+Extract before deleting anything. Concretely, a new core module
+`cubeplex/auth/external_login.py` — "finish a login that arrived from an external
+identity provider", which is exactly what both callers are doing — holding:
+
+| Moved out of `sso.py` | Who calls it afterwards |
+|---|---|
+| `enforce_forced_sso_for_user` | OSS Google callback (`allowed_org_id=None`); EE SSO callbacks (`allowed_org_id=conn.org_id`) |
+| `login_and_redirect` | both, as the last step of a successful callback |
+| `_frontend_base_url` | dependency of `login_and_redirect`; EE's `_sso_error_redirect` also needs it |
+
+`get_org_info` is a route, not a helper, so it goes to a small core
+`api/routes/v1/org_info.py` with its own router rather than into this module.
+
+No cycle: this module imports `auth.jwt`, models, and config only. It does not
+import `api/routes/v1/auth.py`, which is what keeps the existing
+`sso/identity.py` → `routes/v1/auth.py` (`UserCreate`) edge harmless.
+
+**`_base_url` is not in the list.** `social_login.py:48` already defines its own
+copy, so Google's `redirect_uri` does not depend on `sso.py` at all. The
+duplication is pre-existing; flag it, don't fold it into this change.
+
+**The two forced-SSO guards are near-duplicates but not identical**, so do not
+merge them here. Both select active connections joined to the user's org
+memberships, and both raise 403 `sso_required`. But the password-login guard in
+`auth.py` also joins `Organization` to put `login_url: /login/{slug}` in the
+response, while this one takes `allowed_org_id` so an SSO callback can satisfy
+enforcement for its own org. Unifying them changes a response payload the
+frontend reads and needs its own before/after — a separate change.
 
 ### 3.2 Cleanup edits, named explicitly
 
@@ -546,7 +570,7 @@ dev and staging IdP registrations will break silently otherwise.
 |---|---|
 | Autogenerate wants to drop the SSO tables | `alembic revision --autogenerate` on a default install must produce an empty diff. Run it; don't reason about it. |
 | A stale `/auth/sso/` literal | `grep -rn "/auth/sso/" backend/ frontend/` returns nothing after the move. Eight sites today (§8) — the IdP-facing ones fail where no test looks. |
-| OSS Google login broken by the move | It lazily imports two helpers out of `sso.py` (§3.1), so the break appears at callback time, not import time. `test_social_login_routes.py` must stay in the default lane and stay green. |
+| OSS Google login broken by the move | It lazily imports two helpers out of `sso.py` (§3.1), so the break appears at callback time, not import time — a green import and a green startup prove nothing. `test_social_login_routes.py` stays in the default lane; additionally run the whole Google callback with the package uninstalled, since that is the only path that executes the lazy import. |
 | A licensed test left in the default lane | The default lane must stay green with the package uninstalled — the stage-1 conftest guard turns a silent skip into a `UsageError` |
 | A core module still importing a deleted one | §3.2 names them; `uv run python -c "import cubeplex.api.app"` on a default install is the cheap check |
 | Password login broken by the auth-provider slot | Not applicable by construction once §4 uses its own slot — that is the reason for the choice |
