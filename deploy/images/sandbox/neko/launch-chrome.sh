@@ -20,29 +20,12 @@ if [ -f "$PREFS" ]; then
 fi
 
 # Install the egress MITM CA into Chromium's NSS store so HTTPS interception
-# doesn't show "Not Secure".
-#
-# The obvious source — /etc/ssl/certs/cubeplex-egress.pem — is a dangling
-# symlink in the main sandbox container: OpenSandbox's egress-ca-trust init
-# container `cp`s the cert to /usr/local/share/ca-certificates/ in its OWN
-# filesystem layer, then runs update-ca-certificates, which writes symlinks
-# to the shared ca-trust emptyDir mounted on /etc/ssl/certs. The symlinks
-# survive the init container's death; the target file does not. So
-# /etc/ssl/certs/cubeplex-egress.pem -> /usr/local/share/ca-certificates/
-# cubeplex-egress.crt points at nothing in the sandbox container.
-#
-# update-ca-certificates also concatenates every cert into
-# /etc/ssl/certs/ca-certificates.crt, and THAT file IS on the shared volume.
-# So we extract the cert from the bundle by subject CN.
-BUNDLE=/etc/ssl/certs/ca-certificates.crt
-MITM_CA=/tmp/cubeplex-egress-ca.pem
-if [ -f "$BUNDLE" ]; then
-    openssl crl2pkcs7 -nocrl -certfile "$BUNDLE" 2>/dev/null \
-        | openssl pkcs7 -print_certs -outform PEM 2>/dev/null \
-        | sed -n '/subject=CN = cubeplex-egress-mitm-ca/,/-----END CERTIFICATE-----/p' \
-        | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' \
-        > "$MITM_CA"
-fi
+# doesn't show "Not Secure". The egress-ca-trust init container drops the cert
+# here as a real file on the shared trust dir (see the webhook's patch.py).
+# Don't be tempted by /etc/ssl/certs/cubeplex-egress.pem next to it: that one is
+# a symlink into the init container's own filesystem layer, so it dangles here.
+# Absent whenever egress interception is off, hence the -s guard.
+MITM_CA=/etc/ssl/certs/cubeplex-egress-ca.pem
 
 if [ -s "$MITM_CA" ]; then
     # Chromium <91 read ~/.pki/nssdb; modern (XDG) Chromium reads

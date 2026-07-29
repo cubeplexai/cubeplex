@@ -117,6 +117,27 @@ def test_patch_sets_mitm_env_and_mounts_and_initcontainer():
     assert "egress-inject" in blob  # addon configmap mount
 
 
+def test_ca_trust_init_writes_cert_as_real_file_on_shared_dir():
+    """The sandbox browser imports the MITM CA from a real file on the shared trust
+    dir. update-ca-certificates alone only leaves a symlink into the init
+    container's own layer, which dangles once it exits — so Chromium found nothing
+    and every intercepted HTTPS site showed a cert warning. The path is a contract
+    with the sandbox image's launch-chrome.sh."""
+    ops = build_pod_patch(
+        POD, sandbox_id="sbx-1", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    init = next(op["value"] for op in ops if op["path"] == "/spec/initContainers")
+    ca_trust = next(c for c in init if c["name"] == "egress-ca-trust")
+    script = ca_trust["command"][-1]
+    assert "cp /etc/egress-ca-pub/ca.pem /etc/ssl/certs/cubeplex-egress-ca.pem" in script
+    # Must land on the volume the app containers share, not a container-local path.
+    assert any(
+        m["name"] == "ca-trust" and m["mountPath"] == "/etc/ssl/certs"
+        for m in ca_trust["volumeMounts"]
+    )
+
+
 def test_patch_mounts_ca_trust_on_all_app_containers():
     """I4: every non-egress container gets the ca-trust volumeMount."""
     ops = build_pod_patch(
