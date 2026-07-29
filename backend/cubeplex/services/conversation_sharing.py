@@ -8,7 +8,7 @@ from typing import Any
 from loguru import logger
 
 from cubeplex.agents.checkpointer import shared_checkpointer
-from cubeplex.objectstore.artifact_paths import artifact_version_prefix
+from cubeplex.objectstore.artifact_paths import artifact_version_prefix_candidates
 from cubeplex.objectstore.client import get_objectstore_client
 
 _ATTACHMENT_KEEP_KEYS = {"filename", "mime_type", "size"}
@@ -71,10 +71,17 @@ async def copy_artifacts_to_share(
     for art in artifacts:
         art_id = art["id"]
         version = art.get("version", 1)
-        src_prefix = artifact_version_prefix(art_id, version)
         dst_prefix = f"shares/{share_id}/artifacts/{art_id}/v{version}/"
 
-        keys = await store.list_objects(src_prefix)
+        src_prefix = ""
+        keys: list[str] = []
+        for candidate in artifact_version_prefix_candidates(
+            art_id, version, str(art.get("conversation_id") or "") or None
+        ):
+            keys = await store.list_objects(candidate)
+            if keys:
+                src_prefix = candidate
+                break
         for key in keys:
             data, content_type = await store.download_file(key)
             rel = key[len(src_prefix) :]

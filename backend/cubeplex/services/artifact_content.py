@@ -28,7 +28,7 @@ from cubeplex.objectstore import get_objectstore_client
 from cubeplex.objectstore.artifact_paths import (
     artifact_file_key,
     artifact_staging_prefix,
-    artifact_version_prefix,
+    artifact_version_prefix_candidates,
 )
 from cubeplex.repositories import ArtifactRepository
 
@@ -160,9 +160,14 @@ async def update_artifact_content(
         )
 
     store = get_objectstore_client()
-    current_prefix = artifact_version_prefix(artifact_id, artifact.version)
     try:
-        existing = await store.list_objects(current_prefix)
+        existing: list[str] = []
+        for current_prefix in artifact_version_prefix_candidates(
+            artifact_id, artifact.version, artifact.conversation_id
+        ):
+            existing = await store.list_objects(current_prefix)
+            if existing:
+                break
     except Exception as exc:
         logger.exception("Failed listing artifact objects for {}", artifact_id)
         raise ArtifactContentError(

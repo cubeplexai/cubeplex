@@ -28,7 +28,7 @@ from cubeplex.im.artifact_delivery import artifact_outbound_kind, outbound_size_
 from cubeplex.im.card_model import ArtifactItem, CardState
 from cubeplex.im.types import OutboundConnector
 from cubeplex.objectstore import get_objectstore_client
-from cubeplex.objectstore.artifact_paths import artifact_file_key
+from cubeplex.objectstore.artifact_paths import artifact_file_key_candidates
 from cubeplex.services.artifact_share import mint_share_token as _default_mint
 
 MintShareToken = Callable[..., Awaitable[str]]
@@ -56,18 +56,27 @@ async def download_artifact_to_tempfile(artifact: dict[str, Any]) -> Path | None
         return None
     # Build the key OUTSIDE the try so a key-construction bug propagates rather
     # than masquerading as a benign 'object missing → share-link' fallback.
-    key = artifact_file_key(artifact_id, version, filename)
-    try:
-        store = get_objectstore_client()
-        data, _ctype = await store.download_file(key)
-    except (ClientError, BotoCoreError, OSError, ValueError):
-        # Covers missing object (ClientError) AND transient network/endpoint
-        # errors (BotoCoreError: EndpointConnectionError/ConnectTimeoutError) so
-        # a blip degrades to a share-link instead of stranding the artifact. A
-        # key-construction bug (built above, outside the try) still propagates.
-        logger.opt(exception=True).warning(
-            "[IM artifacts] objectstore download failed for {}", artifact_id
-        )
+    store = get_objectstore_client()
+    for key in artifact_file_key_candidates(
+        artifact_id, version, filename, str(artifact.get("conversation_id") or "") or None
+    ):
+        try:
+            data, _ctype = await store.download_file(key)
+            break
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code", "") in ("NoSuchKey", "404"):
+                continue
+            logger.opt(exception=True).warning(
+                "[IM artifacts] objectstore download failed for {}", artifact_id
+            )
+            return None
+        except (BotoCoreError, OSError, ValueError):
+            logger.opt(exception=True).warning(
+                "[IM artifacts] objectstore download failed for {}", artifact_id
+            )
+            return None
+    else:
+        logger.warning("[IM artifacts] objectstore file missing for {}", artifact_id)
         return None
     suffix = Path(filename).suffix
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -98,6 +107,10 @@ class IMArtifactDispatcher:
     _file_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     async def handle(self, artifact: dict[str, Any]) -> None:
+        artifact = {
+            **artifact,
+            "conversation_id": artifact.get("conversation_id") or self.conversation_id,
+        }
         artifact_id = str(artifact.get("id") or "")
         if not artifact_id:
             return

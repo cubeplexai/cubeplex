@@ -175,5 +175,38 @@ async def test_share_file_needs_no_conversation_in_token(
     await _redis.delete(f"{key_prefix}:share:{nonce}")
 
 
+async def test_share_file_reads_owner_conversation_legacy_key_during_migration(
+    _redis: Redis,
+    _seeded_artifact: async_sessionmaker[AsyncSession],
+    client: TestClient,
+) -> None:
+    store = get_objectstore_client()
+    canonical_key = f"artifacts/{_ART_ID}/v1/report.md"
+    legacy_key = f"artifacts/{_CONV_ID}/{_ART_ID}/v1/report.md"
+    await store.delete_file(canonical_key)
+    await store.upload_file(legacy_key, b"legacy shared report")
+    key_prefix = (
+        f"{_cubeplex_config.get('redis.key_prefix', 'cubeplex')}:"
+        f"{os.getenv('ENV_FOR_DYNACONF', 'development')}"
+    )
+    nonce = await mint_share_token(
+        redis=_redis,
+        key_prefix=key_prefix,
+        org_id=_ORG_ID,
+        workspace_id=_WS_ID,
+        artifact_id=_ART_ID,
+        version=1,
+        entry_file="report.md",
+        ttl_seconds=60,
+    )
+    try:
+        response = client.get(f"/api/v1/public/artifacts/share/{nonce}/file/report.md")
+        assert response.status_code == 200, response.text
+        assert response.content == b"legacy shared report"
+    finally:
+        await _redis.delete(f"{key_prefix}:share:{nonce}")
+        await store.delete_file(legacy_key)
+
+
 async def test_default_ttl_constant_is_seven_days() -> None:
     assert SHARE_TTL_SECONDS == 60 * 60 * 24 * 7

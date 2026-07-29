@@ -155,6 +155,23 @@ Every deployment needs three auth secrets, regardless of mode:
 
 All three are required — both installers fail fast if any is empty.
 
+## Upgrading artifact object keys
+
+Releases that switch artifact storage from
+`artifacts/{conversation_id}/{artifact_id}/...` to
+`artifacts/{artifact_id}/...` keep reading the owner-conversation legacy key
+while migration is in progress. Use this rollout order:
+
+1. Deploy the new backend so both canonical and legacy reads are available.
+2. Run `python scripts/dev/migrate_artifact_object_keys.py` inside a backend
+   container. The command is idempotent and retains legacy objects by default.
+3. Verify artifact download, preview, sharing, and skill publication.
+4. Optionally rerun the command with `--delete-source` to remove copied legacy
+   objects.
+
+Objects historically written below a conversation other than the artifact's
+owner are not discovered automatically and require manual recovery.
+
 ## Next steps
 
 - [Docker Compose install guide](./docker-compose.md)
