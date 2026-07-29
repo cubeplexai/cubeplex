@@ -114,9 +114,15 @@ class RouteExtension(Protocol):
 
     Mounted under ``/api/v1/_extensions/<pkg>/``, where ``<pkg>`` is the
     top-level module name — the same rule ``AdminPanelExtension`` uses one level
-    down. The namespace is reserved rather than letting extensions mount at
-    ``/api/v1`` directly: FastAPI resolves first-match-wins, so a router free to
-    choose its own paths can shadow a core endpoint depending on mount order.
+    down.
+
+    The namespace is reserved rather than letting extensions mount at ``/api/v1``
+    directly. Not because an extension could hijack a core path — routes are
+    matched in registration order and core registers first, so today it would
+    lose the collision — but because that protection is a load-order accident
+    nobody enforces, and because losing silently is its own bug: an extension
+    would serve a dead route with no error anywhere. Prefixing makes ownership
+    unambiguous in both directions.
     """
 
     def get_router(self) -> APIRouter | None: ...
