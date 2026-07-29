@@ -1,0 +1,24 @@
+" Sandbox vim defaults. Installed as /etc/vim/vimrc.local, which Debian's stock
+" /etc/vim/vimrc sources last so these win over the distro defaults and survive
+" a vim package upgrade.
+set nocompatible
+syntax on
+filetype plugin indent on
+
+set number
+set cursorline
+set showcmd
+set wildmenu
+
+set tabstop=4
+set shiftwidth=4
+set expandtab
+set autoindent
+
+set hlsearch
+set incsearch
+set ignorecase
+set smartcase
+
+set encoding=utf-8
+set fileencodings=utf-8,ucs-bom,gb18030,gbk,gb2312
