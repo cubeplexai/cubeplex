@@ -27,7 +27,6 @@ from cubeplex.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubeplex.repositories.sso_connection import SSOConnectionRepository
 from cubeplex.repositories.topic import TopicRepository
 from cubeplex.repositories.trigger import TriggerEventRepository, TriggerRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
@@ -57,7 +56,6 @@ __all__ = [
     "OrganizationRepository",
     "SkillRepository",
     "SkillVersionRepository",
-    "SSOConnectionRepository",
     "TopicRepository",
     "TriggerEventRepository",
     "TriggerRepository",

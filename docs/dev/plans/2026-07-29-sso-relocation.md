@@ -461,9 +461,14 @@ uv run pytest tests/e2e/licensed/ tests/unit/licensed/ --no-cov -q
 
 `tests/unit/licensed/` is the right home for these despite touching a session:
 they build their own `sqlite+aiosqlite:///:memory:` engine per test, so they
-depend on no external system and belong in `unit/` by the placement rule. Both
-Makefiles' test targets need the same path added — check `make check-ci` locally
-with the package installed, not just CI.
+depend on no external system and belong in `unit/` by the placement rule.
+
+**Corrected: the Makefiles need no change.** This section first said both needed
+the path added. `backend/Makefile:102` runs
+`pytest --ignore=tests/e2e --ignore=tests/diagnostic`, so it already collects
+`tests/unit/licensed/` — where `importorskip` skips it on a default install and
+runs it on a licensed one. Only the explicit CI lane, which names its directory,
+had to learn the second path.
 
 `admin-sso.spec.ts` and `sso-login.spec.ts` run in `frontend-e2e`, which installs
 the package, so they keep passing. The deliberately-deferred OSS/licensed

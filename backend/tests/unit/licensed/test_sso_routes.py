@@ -1,7 +1,9 @@
-"""Unit tests for SSO auth routes.
+"""Unit tests for the enterprise SSO route handlers.
 
-Focus: security-critical guards that don't need a full IdP simulation.
-End-to-end OIDC/SAML flows are covered by Task 15 E2E.
+Focus: security-critical guards that don't need a full IdP simulation. The
+shared login helpers these handlers call afterwards (forced-SSO enforcement,
+cookie issue + redirect) stayed in core and are tested in
+tests/unit/test_external_login.py.
 """
 
 from __future__ import annotations
@@ -12,26 +14,19 @@ from typing import Any
 import fakeredis.aioredis
 import pytest
 import pytest_asyncio
-from fastapi import HTTPException
 from starlette.requests import Request
 
-from cubeplex.api.routes.v1.sso import (
-    _enforce_forced_sso_for_user,
-    _login_and_redirect,
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
+from cubeplex_ee.sso.routes import (  # noqa: E402
     _policy_for,
     sso_initiate,
     sso_oidc_callback,
     sso_saml_acs,
 )
-from cubeplex.models import (
-    Membership,
-    Organization,
-    Role,
-    SSOConnection,
-    User,
-    Workspace,
-)
-from cubeplex.sso.state import SSOStateStore
+
+from cubeplex.models import Organization, SSOConnection, User  # noqa: E402
+from cubeplex.sso.state import SSOStateStore  # noqa: E402
 
 pytestmark = pytest.mark.asyncio
 
@@ -127,51 +122,12 @@ async def org_with_oidc_sso(
     return org, conn
 
 
-# --- org-info ---------------------------------------------------------------
-
-
-async def test_org_info_returns_sso_enabled(
-    sso_session: Any,
-    org_with_oidc_sso: tuple[Organization, SSOConnection],
-) -> None:
-    from cubeplex.api.routes.v1.sso import get_org_info
-
-    org, _ = org_with_oidc_sso
-    resp = await get_org_info(org.slug, sso_session)
-    assert resp.org_name == org.name
-    assert resp.sso_enabled is True
-    assert resp.sso_protocol == "oidc"
-
-
-async def test_org_info_no_sso(
-    sso_session: Any,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    from cubeplex.api.routes.v1.sso import get_org_info
-
-    org, _ = await make_org_with_user(email="solo@example.com")
-    resp = await get_org_info(org.slug, sso_session)
-    assert resp.sso_enabled is False
-    assert resp.sso_protocol is None
-
-
-async def test_org_info_404_for_unknown_slug(sso_session: Any) -> None:
-    from cubeplex.api.routes.v1.sso import get_org_info
-
-    with pytest.raises(HTTPException) as exc_info:
-        await get_org_info("does-not-exist", sso_session)
-    assert exc_info.value.status_code == 404
-
-
-# --- initiate ---------------------------------------------------------------
-
-
 async def test_initiate_oidc_returns_authorize_url_with_state_and_nonce(
     sso_session: Any,
     fake_redis: fakeredis.aioredis.FakeRedis,
     org_with_oidc_sso: tuple[Organization, SSOConnection],
 ) -> None:
-    from cubeplex.api.routes.v1.sso import SSOInitiateRequest
+    from cubeplex_ee.sso.routes import SSOInitiateRequest
 
     org, conn = org_with_oidc_sso
     request = _make_request(fake_redis)
@@ -337,139 +293,3 @@ async def test_saml_acs_rejects_non_saml_state(
 
 
 # --- forced SSO enforcement ------------------------------------------------
-
-
-async def test_enforce_forced_sso_blocks_when_allowed_org_is_none(
-    sso_session: Any,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    """A user in an org with active SSO must not log in via a path that
-    doesn't go through that org (e.g. social login)."""
-    org, user = await make_org_with_user(email="member@corp.com")
-    sso_session.add(
-        SSOConnection(
-            org_id=org.id,
-            protocol="oidc",
-            display_name="C",
-            status="active",
-            provisioning="auto",
-            config={},
-        )
-    )
-    await sso_session.commit()
-
-    with pytest.raises(HTTPException) as exc_info:
-        await _enforce_forced_sso_for_user(sso_session, user, allowed_org_id=None)
-    assert exc_info.value.status_code == 403
-    assert isinstance(exc_info.value.detail, dict)
-    assert exc_info.value.detail["code"] == "sso_required"
-
-
-async def test_enforce_forced_sso_blocks_when_allowed_org_is_different(
-    sso_session: Any,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    org, user = await make_org_with_user(email="m@corp.com")
-    sso_session.add(
-        SSOConnection(
-            org_id=org.id,
-            protocol="oidc",
-            display_name="C",
-            status="active",
-            provisioning="auto",
-            config={},
-        )
-    )
-    await sso_session.commit()
-
-    with pytest.raises(HTTPException) as exc_info:
-        await _enforce_forced_sso_for_user(sso_session, user, allowed_org_id="org-some-other")
-    assert exc_info.value.status_code == 403
-
-
-async def test_enforce_forced_sso_passes_when_allowed_org_matches(
-    sso_session: Any,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    org, user = await make_org_with_user(email="m2@corp.com")
-    sso_session.add(
-        SSOConnection(
-            org_id=org.id,
-            protocol="oidc",
-            display_name="C",
-            status="active",
-            provisioning="auto",
-            config={},
-        )
-    )
-    await sso_session.commit()
-
-    # Should NOT raise
-    await _enforce_forced_sso_for_user(sso_session, user, allowed_org_id=org.id)
-
-
-async def test_enforce_forced_sso_ignores_testing_status(
-    sso_session: Any,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    """`testing` status connections must not trigger the forced-SSO block —
-    only `active` does."""
-    org, user = await make_org_with_user(email="t@corp.com")
-    sso_session.add(
-        SSOConnection(
-            org_id=org.id,
-            protocol="oidc",
-            display_name="C",
-            status="testing",
-            provisioning="auto",
-            config={},
-        )
-    )
-    await sso_session.commit()
-
-    await _enforce_forced_sso_for_user(sso_session, user, allowed_org_id=None)
-
-
-# --- _login_and_redirect: workspace pick by membership ---------------------
-
-
-async def test_login_and_redirect_picks_workspace_user_belongs_to(
-    sso_session: Any,
-    fake_redis: fakeredis.aioredis.FakeRedis,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    """The SSO redirect must land on a workspace where the user has a
-    Membership — not just any workspace in the org."""
-    org, user = await make_org_with_user(email="ws-user@example.com")
-
-    # Workspace the user is NOT a member of — must not be picked.
-    other_ws = Workspace(org_id=org.id, name="Other WS")
-    sso_session.add(other_ws)
-    await sso_session.flush()
-
-    # Workspace the user IS a member of.
-    my_ws = Workspace(org_id=org.id, name="My WS")
-    sso_session.add(my_ws)
-    await sso_session.flush()
-    sso_session.add(Membership(user_id=user.id, workspace_id=my_ws.id, role=Role.MEMBER))
-    await sso_session.commit()
-
-    request = _make_request(fake_redis)
-    resp = await _login_and_redirect(request, sso_session, user)
-    assert resp.status_code == 302
-    location = resp.headers["location"]
-    assert f"/w/{my_ws.id}" in location
-    assert other_ws.id not in location
-
-
-async def test_login_and_redirect_falls_back_to_base_when_no_membership(
-    sso_session: Any,
-    fake_redis: fakeredis.aioredis.FakeRedis,
-    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
-) -> None:
-    _, user = await make_org_with_user(email="no-ws@example.com")
-    request = _make_request(fake_redis)
-    resp = await _login_and_redirect(request, sso_session, user)
-    assert resp.status_code == 302
-    # No workspace was a membership target → redirect to base URL.
-    assert "/w/" not in resp.headers["location"]

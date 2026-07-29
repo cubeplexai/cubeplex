@@ -41,6 +41,8 @@ class _Registry(Protocol):
 
     def register_admin_panel_extension(self, ext: object) -> None: ...
 
+    def register_route_extension(self, ext: object) -> None: ...
+
 
 def register(registry: _Registry, *, license: License | Any) -> None:
     """Bind this package's implementations onto the host registry.
@@ -51,6 +53,7 @@ def register(registry: _Registry, *, license: License | Any) -> None:
     verified it, and per-feature checks belong to whichever feature needs them.
     """
     from cubeplex_ee.cost import CostPanel
+    from cubeplex_ee.sso import SSOAdminPanel, SSOLoginRoutes
 
     features = sorted(getattr(license, "features", ()) or ())
     logger.info(
@@ -60,6 +63,8 @@ def register(registry: _Registry, *, license: License | Any) -> None:
         features,
     )
     registry.register_admin_panel_extension(CostPanel())
+    registry.register_admin_panel_extension(SSOAdminPanel())
+    registry.register_route_extension(SSOLoginRoutes())
 
 
 __all__ = ["__version__", "register"]

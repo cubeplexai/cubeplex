@@ -8,10 +8,11 @@ These are the security-critical operator paths: once an org's SSO is
 
 Notes:
 
-- We POST ``/api/v1/admin/sso/.../activate`` through the same admin client
-  to mutate connection state — there is no separate write helper for
-  ``status`` outside the admin route, which matches what the operator
-  actually has access to.
+- Connection rows are written directly rather than through the admin route.
+  That surface moved into the optional package, and the invariant here is an
+  open-source one that has to hold without it — so this file must run on a
+  default install. The one case that did need the admin route now lives in
+  tests/e2e/licensed/test_sso_enforcement_admin_path.py.
 - ``ws_member_client`` lives in the same workspace and org as the default
   admin user, so flipping that org's SSO to ``active`` blocks the member's
   password login. Distinct from ``member_client`` which lives in its own
@@ -60,47 +61,6 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
         cwd=os.path.join(os.path.dirname(__file__), "..", ".."),
         check=False,
     )
-
-
-async def _create_and_activate_sso(client: httpx.AsyncClient) -> str:
-    """Create an OIDC SSO connection then activate it. Returns sso_id."""
-    resp = await client.post(
-        "/api/v1/admin/sso",
-        json={
-            "protocol": "oidc",
-            "display_name": "Corp SSO",
-            "config": {
-                "client_id": "corp-client",
-                "issuer": "https://corp.example.com",
-                "authorization_endpoint": "https://corp.example.com/authorize",
-                "token_endpoint": "https://corp.example.com/token",
-                "jwks_uri": "https://corp.example.com/jwks",
-            },
-            "client_secret": "corp-secret",
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    sso_id: str = resp.json()["id"]
-    resp = await client.post(f"/api/v1/admin/sso/{sso_id}/activate")
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "active"
-    return sso_id
-
-
-@pytest.mark.asyncio
-async def test_admin_route_round_trip_creates_and_activates_sso(
-    admin_client: tuple[httpx.AsyncClient, str],
-) -> None:
-    """The admin can drive create → activate via the real HTTP routes.
-
-    Used as a baseline: the rest of the file then writes SSOConnection rows
-    directly against the same database with a stable user (the default
-    seeded user) to exercise the login enforcement path without depending
-    on the admin's randomized credentials.
-    """
-    admin_c, _ws = admin_client
-    sso_id = await _create_and_activate_sso(admin_c)
-    assert sso_id
 
 
 @pytest.mark.asyncio

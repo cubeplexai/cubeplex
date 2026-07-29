@@ -28,7 +28,10 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from cubeplex.api.routes.v1 import admin_sso
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
+from cubeplex_ee.sso import admin_routes as admin_sso
+
 from cubeplex.credentials.encryption import FernetBackend
 from cubeplex.models import (
     Credential,

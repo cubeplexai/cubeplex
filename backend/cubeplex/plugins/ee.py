@@ -22,6 +22,16 @@ EE_MODULE = "cubeplex_ee"
 EE_DISTRIBUTION = "cubeplex-ee"
 
 
+def is_ee_installed() -> bool:
+    """Whether the licensed distribution is importable.
+
+    Same finder-based test ``load_ee`` uses, exposed separately for callers that
+    need to know without triggering a load — the startup consistency check in
+    ``cubeplex.auth.external_login`` runs long after registration.
+    """
+    return importlib.util.find_spec(EE_MODULE) is not None
+
+
 def load_ee(registry: PluginRegistry) -> bool:
     """Import EE if installed and hand it the license. Returns whether EE loaded."""
     from cubeplex.plugins.license import load_license

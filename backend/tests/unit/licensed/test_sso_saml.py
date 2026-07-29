@@ -7,15 +7,19 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from cubeplex.models.sso_connection import SSOConnection
-from cubeplex.sso.saml import (
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
+from cubeplex_ee.sso.saml import (
     build_authn_request_url,
     generate_sp_metadata,
     parse_idp_metadata_xml,
     validate_response,
 )
 
-FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "sso" / "saml"
+from cubeplex.models.sso_connection import SSOConnection
+
+# tests/unit/licensed/ -> tests/ ; the extra .parent is the licensed subdir
+FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures" / "sso" / "saml"
 
 IDP_ENTITY_ID = "https://idp.example.com/saml/metadata"
 IDP_SSO_URL = "https://idp.example.com/saml/sso"

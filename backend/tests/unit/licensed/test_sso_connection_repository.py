@@ -6,8 +6,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
+from cubeplex_ee.sso.repository import SSOConnectionRepository
+
 from cubeplex.models.sso_connection import SSOConnection
-from cubeplex.repositories.sso_connection import SSOConnectionRepository
 
 
 @pytest.fixture

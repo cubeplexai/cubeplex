@@ -42,11 +42,13 @@ export interface ApiClient {
 
 const WS_NEUTRAL_PREFIXES = [
   '/api/v1/auth/',
-  // SSO + social-login are pre-login flows under /auth/ — listed explicitly
-  // so they're discoverable when reviewing neutral surface area.
-  '/api/v1/auth/sso/',
+  // Social login and the org lookup are pre-login flows under /auth/ — listed
+  // explicitly so they're discoverable when reviewing neutral surface area.
   '/api/v1/auth/social/',
   '/api/v1/auth/org-info/',
+  // Enterprise SSO's login flow is also pre-login, but it is served by the
+  // optional package under the reserved namespace rather than under /auth/.
+  '/api/v1/_extensions/cubeplex_ee/sso/',
   '/api/v1/workspaces',
   '/api/v1/admin',
   '/api/v1/shares',

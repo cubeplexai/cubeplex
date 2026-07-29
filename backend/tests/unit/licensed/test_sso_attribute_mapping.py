@@ -2,7 +2,9 @@
 
 import pytest
 
-from cubeplex.sso.attribute_mapping import (
+pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
+
+from cubeplex_ee.sso.attribute_mapping import (
     AttributeMappingError,
     apply_mapping,
 )

@@ -17,6 +17,10 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.auth.external_login import (
+    enforce_forced_sso_for_user,
+    login_and_redirect,
+)
 from cubeplex.auth.users import get_user_manager
 from cubeplex.config import config
 from cubeplex.db import get_session
@@ -168,10 +172,5 @@ async def google_callback(
 
     # Forced-SSO must also block social login: if the resolved user
     # belongs to any org with active enterprise SSO, refuse.
-    from cubeplex.api.routes.v1.sso import (
-        _enforce_forced_sso_for_user,
-        _login_and_redirect,
-    )
-
-    await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=None)
-    return await _login_and_redirect(request, session, result.user)
+    await enforce_forced_sso_for_user(session, result.user, allowed_org_id=None)
+    return await login_and_redirect(request, session, result.user)

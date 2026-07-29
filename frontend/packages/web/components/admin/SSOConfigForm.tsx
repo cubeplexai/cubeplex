@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { Copy, Search } from 'lucide-react'
 import {
   ApiError,
+  SSO_PUBLIC_BASE,
   createApiClient,
   createSsoConnection,
   discoverOidcEndpoints,
@@ -228,10 +229,15 @@ export function SSOConfigForm({ connection, orgSlug, onUpdated }: SSOConfigFormP
 
   // Deterministic SP URLs — mirror backend/api/routes/v1/sso.py.
   const origin = originOf()
-  const redirectUri = `${origin}/api/v1/auth/sso/oidc/callback`
-  const spAcsUrl = `${origin}/api/v1/auth/sso/saml/acs`
+  // These three are copied by an administrator into their identity provider, so
+  // they must track the backend mount exactly. SSO_PUBLIC_BASE is the single
+  // source; the backend's half is routes.PUBLIC_BASE_PATH.
+  const redirectUri = `${origin}${SSO_PUBLIC_BASE}/oidc/callback`
+  const spAcsUrl = `${origin}${SSO_PUBLIC_BASE}/saml/acs`
   const spEntityId = orgSlug ? `${origin}/saml/${orgSlug}` : ''
-  const spMetadataUrl = connection ? `${origin}/api/v1/auth/sso/saml/metadata/${connection.id}` : ''
+  const spMetadataUrl = connection
+    ? `${origin}${SSO_PUBLIC_BASE}/saml/metadata/${connection.id}`
+    : ''
 
   const update = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setState((s) => ({ ...s, [key]: value }))
