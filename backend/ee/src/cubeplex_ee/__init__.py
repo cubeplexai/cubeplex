@@ -6,7 +6,7 @@ The host imports this package once during startup and calls :func:`register`,
 handing over the verified licence. Nothing here is imported by the core package,
 which is what lets the core run without this distribution installed at all.
 
-No features live here yet. The relocations that fill it in are staged in
+The relocations that fill it in are staged in
 ``docs/dev/specs/2026-07-07-oss-ee-split-design.md`` §11.
 """
 
@@ -50,6 +50,8 @@ def register(registry: _Registry, *, license: License | Any) -> None:
     is passed in rather than re-read from configuration: the host has already
     verified it, and per-feature checks belong to whichever feature needs them.
     """
+    from cubeplex_ee.cost import CostPanel
+
     features = sorted(getattr(license, "features", ()) or ())
     logger.info(
         "licensed package %s active for %s (features=%s)",
@@ -57,7 +59,7 @@ def register(registry: _Registry, *, license: License | Any) -> None:
         getattr(license, "licensee", "unknown"),
         features,
     )
-    # Feature registration lands here as each relocation ships.
+    registry.register_admin_panel_extension(CostPanel())
 
 
 __all__ = ["__version__", "register"]
