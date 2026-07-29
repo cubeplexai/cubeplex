@@ -17,6 +17,11 @@ class _OtherAuthProvider:
         return []
 
 
+class _OtherRouteExtension:
+    def get_router(self) -> None:
+        return None
+
+
 class _OtherAuditSink:
     async def record(self, event: object) -> None:
         return None
@@ -30,6 +35,9 @@ def test_ce_only_binds_every_default() -> None:
     assert any(isinstance(s, DefaultAuditSink) for s in reg.get_audit_sinks())
     assert reg.get_user_directory_syncers() == []
     assert all(isinstance(e, DefaultAdminPanelExtension) for e in reg.get_admin_panel_extensions())
+    # No CE default here on purpose: an OSS deployment mounts no extra routers,
+    # which is what makes /api/v1/_extensions/ empty rather than merely unused.
+    assert reg.get_route_extensions() == []
 
 
 def test_registered_auth_provider_wins_over_default() -> None:
@@ -48,6 +56,14 @@ def test_registered_audit_sink_is_added_alongside_default() -> None:
     sinks = reg.get_audit_sinks()
     assert sink in sinks
     assert any(isinstance(s, DefaultAuditSink) for s in sinks)
+
+
+def test_registered_route_extension_is_the_only_one() -> None:
+    reg = PluginRegistry()
+    ext = _OtherRouteExtension()
+    reg.register_route_extension(ext)
+    reg.bind_defaults()
+    assert reg.get_route_extensions() == [ext]
 
 
 def test_double_registration_of_singular_slot_raises() -> None:

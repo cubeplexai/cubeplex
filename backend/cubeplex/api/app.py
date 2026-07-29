@@ -83,7 +83,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     from typing import cast
 
     from cubeplex.plugins import ensure_registry_bound, get_registry
-    from cubeplex.plugins.protocols import AdminPanelExtension
+    from cubeplex.plugins.protocols import AdminPanelExtension, RouteExtension
     from cubeplex.plugins.protocols import AuthProvider as _AuthProvider
 
     # Single entry point shared with the test fixtures: EE registers (once it
@@ -123,6 +123,17 @@ async def lifespan(_app: FastAPI):  # type: ignore
         "Mounted {} AdminPanelExtension(s)",
         len(_reg.get_admin_panel_extensions()),
     )
+
+    # Routers that belong outside the admin surface — see RouteExtension. The
+    # reserved /_extensions/ namespace is what keeps an extension from shadowing
+    # a core path.
+    for _route_ext_obj in _reg.get_route_extensions():
+        _route_ext = cast(RouteExtension, _route_ext_obj)
+        _route_ext_router = _route_ext.get_router()
+        if _route_ext_router is not None:
+            _pkg = type(_route_ext).__module__.split(".")[0]
+            _app.include_router(_route_ext_router, prefix=f"/api/v1/_extensions/{_pkg}")
+    logger.info("Mounted {} RouteExtension(s)", len(_reg.get_route_extensions()))
 
     # MCP tools are assembled per agent run from DB-backed catalog/installs;
     # the legacy global registry loader was removed in M2.

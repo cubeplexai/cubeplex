@@ -101,3 +101,22 @@ class AdminPanelExtension(Protocol):
     def get_nav_items(self) -> list[AdminNavItem]: ...
 
     def get_static_path(self) -> Path | None: ...
+
+
+@runtime_checkable
+class RouteExtension(Protocol):
+    """A router mounted outside the admin surface.
+
+    ``AdminPanelExtension`` covers everything reachable from the admin panel,
+    which is authenticated and org-scoped. Some licensed features also need
+    endpoints that are neither: SSO's login flow is called by the browser before
+    any session exists, and by the identity provider itself.
+
+    Mounted under ``/api/v1/_extensions/<pkg>/``, where ``<pkg>`` is the
+    top-level module name — the same rule ``AdminPanelExtension`` uses one level
+    down. The namespace is reserved rather than letting extensions mount at
+    ``/api/v1`` directly: FastAPI resolves first-match-wins, so a router free to
+    choose its own paths can shadow a core endpoint depending on mount order.
+    """
+
+    def get_router(self) -> APIRouter | None: ...

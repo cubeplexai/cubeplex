@@ -200,6 +200,17 @@ much cheaper than that risk.
 SSO also does not need the slot's actual purpose: it issues the same session
 cookie core already understands, so `authenticate()` needs no override at all.
 
+### What PR 1 tests, and what it leaves to PR 2
+
+PR 1 covers the OSS-facing half: the registry binds no route extension by
+default, and `/api/v1/_extensions/*` 404s on a real app. It does **not** build a
+throwaway app with a stand-in extension to prove the prefix is applied — PR 2
+mounts a real router through the same loop and asserts its URL in the licensed
+lane, which is the same proof without the scaffolding.
+
+`cubeplex_ee.__init__._Registry` mirrors the host registry so mypy catches drift.
+Its `register_route_extension` member lands in PR 2, with the call that needs it.
+
 ## 5. Decoupling `resolve_identity`
 
 Replace the `sso_connection: SSOConnection | None` parameter with a value object
