@@ -60,6 +60,8 @@ class MCPEffectiveInput:
     auth_required: bool
     oauth_supported: bool
     discovery_status: str
+    discovery_last_error: str | None
+    has_cached_tools: bool
     credential_policy: CredentialPolicy
     grant: MCPGrantInput | None
     transport: str
@@ -80,6 +82,31 @@ def _missing_grant_reason(policy: CredentialPolicy) -> MCPEffectiveReason:
     if policy == "user":
         return "user_needs_connection"
     return "missing_org_grant"
+
+
+_TRANSIENT_DISCOVERY_ERROR_TYPES = {
+    "BrokenResourceError",
+    "ConnectError",
+    "ConnectionError",
+    "EndOfStream",
+    "NetworkError",
+    "ProtocolError",
+    "ReadError",
+    "RemoteProtocolError",
+    "TimeoutError",
+}
+
+
+def _cached_tools_survive_discovery_error(value: MCPEffectiveInput) -> bool:
+    error = value.discovery_last_error or ""
+    error_type = error.partition(":")[0]
+    transient = (
+        error_type in _TRANSIENT_DISCOVERY_ERROR_TYPES
+        or error_type.endswith("Timeout")
+        or (error_type == "HTTPStatusError" and "Server error '5" in error)
+        or (error_type == "HTTPStatusError" and "Client error '429" in error)
+    )
+    return value.has_cached_tools and transient
 
 
 def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
@@ -103,7 +130,7 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
         return MCPEffectiveResult(False, "grant_expired", "missing")
     if value.grant.scope != value.credential_policy:
         return MCPEffectiveResult(False, _missing_grant_reason(value.credential_policy), "missing")
-    if value.discovery_status == "error":
+    if value.discovery_status == "error" and not _cached_tools_survive_discovery_error(value):
         return MCPEffectiveResult(False, "discovery_failed", "missing")
     return MCPEffectiveResult(True, "usable", "available")
 
@@ -322,6 +349,8 @@ class MCPEffectiveConnectorService:
                     auth_required=auth_required,
                     oauth_supported=oauth_supported,
                     discovery_status=connector.discovery_status,
+                    discovery_last_error=connector.last_error,
+                    has_cached_tools=bool(connector.tools_cache),
                     credential_policy=_cast_policy(policy),
                     grant=grant_input,
                     transport=connector.transport,

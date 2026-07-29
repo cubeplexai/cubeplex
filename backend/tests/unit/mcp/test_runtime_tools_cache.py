@@ -15,6 +15,7 @@ trip per send. These tests protect the two invariants that matter:
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -23,7 +24,12 @@ from typing import Any
 import httpx
 import pytest
 
-from cubeplex.mcp.cubepi_runtime import _build_tools_from_cache, _make_refresh_auth_callback
+from cubeplex.mcp import cubepi_runtime
+from cubeplex.mcp.cubepi_runtime import (
+    _build_tools_from_cache,
+    _make_refresh_auth_callback,
+    schedule_tools_cache_refresh,
+)
 from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 _WEATHER_SCHEMA: dict[str, Any] = {
@@ -102,6 +108,43 @@ def test_empty_cache_returns_none_for_live_fallback() -> None:
 def test_nameless_entries_are_skipped_and_all_nameless_falls_back() -> None:
     spec = _make_spec([{"description": "no name"}, {"name": ""}])
     assert _build_tools_from_cache(spec=spec, headers={}, server_url=spec.server_url) is None
+
+
+def test_automatic_cache_refresh_has_failure_cooldown(monkeypatch: Any) -> None:
+    """A failed detached refresh must not be retried on every agent message."""
+    created: list[object] = []
+
+    def fake_create_task(coro: object, *, name: str) -> object:
+        assert name.startswith("mcp-cache-refresh:")
+        created.append(coro)
+        assert hasattr(coro, "close")
+        coro.close()  # type: ignore[attr-defined]
+        return object()
+
+    monkeypatch.setattr(asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(cubepi_runtime, "_cache_refresh_in_flight", set())
+    monkeypatch.setattr(cubepi_runtime, "_cache_refresh_last_attempt", {})
+    spec = replace(
+        _make_spec(_PING_CACHE),
+        org_id="org_test",
+        workspace_id="ws_test",
+        last_discovered_at=None,
+    )
+    kwargs = {
+        "specs": [spec],
+        "actor_user_id": "usr_test",
+        "encryption_backend": object(),
+        "http_client": object(),
+        "metadata_discovery": object(),
+        "redis": object(),
+        "signer": object(),
+    }
+
+    schedule_tools_cache_refresh(**kwargs)  # type: ignore[arg-type]
+    cubepi_runtime._cache_refresh_in_flight.clear()  # first attempt completed
+    schedule_tools_cache_refresh(**kwargs)  # type: ignore[arg-type]
+
+    assert len(created) == 1
 
 
 # ---------------------------------------------------------------------------

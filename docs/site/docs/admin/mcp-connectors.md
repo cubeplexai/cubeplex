@@ -126,7 +126,7 @@ A template can carry both OAuth and static credentials at the same time — for 
 
 When a workspace first enables a template (creating the connector row), CubePlex connects to the MCP server, lists its tools, and stores the tool list on the connector row. Agent runs use this cached list — they do not re-contact the server on every message, which keeps chat startup fast even with many connectors active. Actually calling a tool always goes to the live server.
 
-The cache refreshes automatically in the background when it is older than 24 hours (config key `mcp.tools_cache_ttl_hours`; set `0` to disable background refresh). If a server changed its tools and you do not want to wait, use **Retry discovery** on the template's detail page to refresh immediately.
+The cache refreshes automatically in the background when it is older than 24 hours (config key `mcp.tools_cache_ttl_hours`; set `0` to disable background refresh). A transient timeout or disconnect during that refresh keeps the last successful tool list available to agents and retries after a short cooldown on later agent runs. Authentication failures still block the connector until its credential is fixed. If a server changed its tools and you do not want to wait, use **Retry discovery** on the template's detail page to refresh immediately; manual retries do not wait for the automatic-refresh cooldown.
 
 ## Workspace state visibility
 
