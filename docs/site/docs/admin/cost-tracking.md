@@ -7,6 +7,15 @@ title: Cost Tracking
 
 CubePlex tracks LLM token usage across your organization so you can monitor load and spending. The usage dashboard is available at **Admin > Insights** (`/admin/insights`; `/admin/cost` redirects there).
 
+:::info Reporting requires an Enterprise licence
+
+What gets recorded does not depend on your edition — every deployment tracks usage on every
+call, and the data is yours in your own database. The dashboard and CSV export that read it
+back are Enterprise features. Without a licence the Insights page shows an "Enterprise
+feature" notice; see [Editions & Licensing](./editions.md).
+
+:::
+
 ## What is tracked
 
 Every LLM call made through CubePlex records:

@@ -7,6 +7,14 @@ title: 成本跟踪
 
 CubePlex 会跟踪整个组织的 LLM token 用量，帮助你监控负载与支出。用量仪表板位于 **Admin > Insights**（`/admin/insights`；`/admin/cost` 会重定向到此处）。
 
+:::info 报表功能需要企业版 license
+
+**记录**什么与版本无关 —— 任何部署都会记录每次调用的用量，数据存在你自己的数据库里。读取这些数据的仪表板和
+CSV 导出属于企业版功能。没有 license 时 Insights 页面会显示"企业版功能"提示，参见
+[版本与授权](./editions.md)。
+
+:::
+
 ## 跟踪内容
 
 通过 CubePlex 发起的每次 LLM 调用都会记录：

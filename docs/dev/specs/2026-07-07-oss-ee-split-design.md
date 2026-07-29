@@ -34,6 +34,11 @@ open-source release.
   source, no root project and no uv workspace. Retired the packaging open
   question.
 
+- **2026-07-28 (stage 2)** — cost reporting relocated. Corrected §6:
+  `repositories/billing.py` stays in core because the write path imports it, so
+  only the HTTP layer moved. Corrected §11: the `cubeplex.cost_middleware` seam is
+  not built and the reason is recorded.
+
 ## 1. Problem
 
 cubeplex already contains a production-grade CE/EE plugin seam
@@ -194,8 +199,18 @@ Two things worth knowing about those three:
 `social_login.py` (Google) and `admin_extensions.py` (the plugin mount point).
 
 **Backend data and service layer moving to EE:** `models/sso_connection.py`,
-`models/external_identity.py`, `sso/`, `schemas/billing.py`,
-`repositories/billing.py`.
+`models/external_identity.py`, `sso/`, `schemas/billing.py`.
+
+**Correction (2026-07-28, stage 2 as built):** `repositories/billing.py` was
+listed here and does **not** move. `middleware/cost.py` imports it for the write
+path, which stays OSS, and the class splits cleanly — `insert_llm_event` /
+`record_fallback_failure` are written by core, while `get_workspace_spend`,
+`get_org_spend`, `get_timeseries` and `stream_events_for_export` are read only by
+the relocated routes. Only the HTTP layer moved. The four read methods sit unused
+in an unlicensed build, which is the same trade already accepted for the two empty
+SSO tables in §11: inert without a route in front of them, and cheaper than cutting
+a cohesive repository across the licence line. Billing models and migrations stay
+core for the same reason.
 
 **Gates that add a check without moving code:** the multi-org count check, and
 license verification at EE load.
@@ -500,10 +515,18 @@ independently released packages is not.
    [`docs/dev/plans/2026-07-07-oss-ee-edition-foundation.md`](../plans/2026-07-07-oss-ee-edition-foundation.md):
    license module + startup enforcement + `/system/info` edition + multi-org
    gate + frontend scaffolding + repo licenses.
-2. **Cost extraction** — add the `cubeplex.cost_middleware` seam (OSS keeps
-   the basic counter middleware; EE swaps in the enhanced one) and move the
-   cost read path (`cost.py` routes, billing schemas and repo reports) into
-   `cubeplex_ee`, mounted via `AdminPanelExtension`. Plan to be written.
+2. **Cost extraction** — done, see
+   [`docs/dev/plans/2026-07-28-cost-relocation.md`](../plans/2026-07-28-cost-relocation.md).
+   The `cost.py` routes and billing schemas moved into `cubeplex_ee` and mount via
+   `AdminPanelExtension` at
+   `/api/v1/admin/_extensions/cubeplex_ee/cost/*`; the repository did not move
+   (see §6). **The `cubeplex.cost_middleware` seam described here was not built and
+   should not be:** stage 0 deleted entry-points discovery, so there is no group
+   mechanism, and there is no enhanced middleware to swap in — a seam for it would
+   be dead scaffolding. If one is ever specified it needs a registry slot
+   (`register_cost_middleware`) plus a change to `run_manager.py`, which imports
+   `CostMiddleware` directly. That is a hot path governed by
+   `backend/docs/prompt-cache-discipline.md` and belongs in its own change.
 3. **SSO relocation** — move `SSOConnection` / `ExternalIdentity` models,
    `sso/`, and SSO routes into `cubeplex_ee`, and decouple `social_login`
    (Google, stays OSS) from `sso/identity.py:resolve_identity` so it no longer
