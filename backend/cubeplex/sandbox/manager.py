@@ -160,13 +160,6 @@ class SandboxManager:
         # mid-turn activity bumps so chatty tool loops don't hammer the DB.
         self._touch_cache: dict[str, datetime] = {}
 
-        # Per-sandbox locks serialising ``_apply_egress`` so two concurrent
-        # ``get_or_create`` calls hitting the same running sandbox can't
-        # interleave their revoke + re-add and leave egress refs half-wired
-        # (codex P2 round 14). In-process only; multi-worker deployments
-        # need DB-level serialisation (out of scope here).
-        self._egress_locks: dict[str, asyncio.Lock] = {}
-
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
 
@@ -326,7 +319,7 @@ class SandboxManager:
         sandbox_id: str,
         injection: InjectionResult | None = None,
     ) -> None:
-        """Resolve vault secrets, set run env on the backend, and refresh EgressRefs.
+        """Resolve vault secrets, set run env on the backend, and persist EgressRefs.
 
         Called on both the reuse and create-new paths whenever egress injection is
         enabled (``self._exchange_host != ""``).  On reuse, this makes env always
@@ -349,32 +342,26 @@ class SandboxManager:
         # will pass these as per-command envs via RunCommandOpts.
         backend.set_run_env(injection.env)
 
-        # Serialise the revoke + re-add per sandbox_id so two concurrent
-        # ``_apply_egress`` calls can't interleave (A.revoke, A.add(a1),
-        # B.revoke nukes a1, A.add(a2), B.add(b1), B.add(b2)) and leave A
-        # holding placeholders for refs that B revoked. Lock is in-process —
-        # multi-worker deployments need DB-level serialisation.
-        lock = self._egress_locks.setdefault(sandbox_id, asyncio.Lock())
-        async with lock:
-            # Revoke any prior refs for this sandbox, then persist a fresh set.
-            # Revoke-then-add ensures the exchange endpoint never sees stale refs
-            # after a secret rotation or re-resolve.
-            ref_repo = EgressRefRepository(session)
-            await ref_repo.revoke_for_sandbox(sandbox_id)
-            expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
-            for b in injection.bindings:
-                await ref_repo.add(
-                    EgressRef(
-                        ref_hash=b["ref_hash"],
-                        sandbox_id=sandbox_id,
-                        org_id=org_id,
-                        workspace_id=workspace_id,
-                        user_id=user_id,
-                        run_id=None,
-                        bindings=[b],
-                        expires_at=expires_at,
-                    )
+        # Earlier generations stay valid on purpose: ttyd inherits its env once at
+        # start, so revoking here kills the terminal's copy while ``execute`` moves
+        # on to the new one. Generations of a sandbox are equivalent anyway — the
+        # exchange resolves hosts/credential live by ``env_var_id`` and fails closed
+        # once the entry is deleted. Teardown still revokes.
+        ref_repo = EgressRefRepository(session)
+        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+        for b in injection.bindings:
+            await ref_repo.add(
+                EgressRef(
+                    ref_hash=b["ref_hash"],
+                    sandbox_id=sandbox_id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    run_id=None,
+                    bindings=[b],
+                    expires_at=expires_at,
                 )
+            )
 
     async def resolve_command_rules(self, org_id: str) -> list[dict[str, Any]]:
         """Return the org's effective ``command_rules`` for middleware enforcement.

@@ -171,12 +171,13 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     assert ref.bindings[0]["env_name"] == "GITHUB_TOKEN"
 
 
-async def test_reuse_path_sets_run_env_and_refreshes_refs(
+async def test_reuse_path_sets_run_env_and_keeps_prior_refs_valid(
     session_factory: async_sessionmaker[AsyncSession],
     mock_encryption_backend: Any,
 ) -> None:
-    """Reusing a healthy sandbox: set_run_env is called with fresh placeholders
-    and prior EgressRefs are revoked then re-persisted."""
+    """Reusing a healthy sandbox mints fresh placeholders without revoking the
+    prior generation: a running terminal froze that copy in its environ at start
+    and can never be handed the new one."""
     # Seed a stale EgressRef for the existing sandbox
     async with session_factory() as seed_session:
         old_placeholder = mint_placeholder()
@@ -251,18 +252,22 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
         f"GITHUB_TOKEN must be a cbxref_ placeholder, got {github_val!r}"
     )
 
-    # Stale ref must be revoked; fresh ref persisted
+    # Both generations must be exchangeable: the old one is what a terminal
+    # started before this attach is still holding.
     async with session_factory() as check_session:
         refs = (await check_session.execute(select(EgressRef))).scalars().all()
 
-    # One revoked (old) + one new valid ref
     statuses = {r.ref_hash: r.status for r in refs}
-    assert any(s == "revoked" for s in statuses.values()), "Stale ref must be revoked"
-    assert any(s == "valid" for s in statuses.values()), "Fresh ref must be persisted"
+    assert statuses[hash_placeholder(old_placeholder)] == "valid", (
+        "Prior generation must stay valid — revoking it breaks a running terminal"
+    )
+    assert statuses[hash_placeholder(github_val)] == "valid", "Fresh ref must be persisted"
     valid_refs = [r for r in refs if r.status == "valid"]
-    assert len(valid_refs) == 1
-    assert valid_refs[0].sandbox_id == "sbx-reuse"
-    assert valid_refs[0].bindings[0]["env_name"] == "GITHUB_TOKEN"
+    assert len(valid_refs) == 2
+    fresh = [r for r in valid_refs if r.bindings]
+    assert len(fresh) == 1
+    assert fresh[0].sandbox_id == "sbx-reuse"
+    assert fresh[0].bindings[0]["env_name"] == "GITHUB_TOKEN"
 
 
 async def test_create_without_exchange_host_skips_injection(
