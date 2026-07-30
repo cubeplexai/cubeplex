@@ -192,19 +192,20 @@ async def test_login_and_redirect_falls_back_to_base_when_no_membership(
     assert "/w/" not in resp.headers["location"]
 
 
-async def test_unserviceable_sso_log_names_both_recovery_paths(
+async def test_unserviceable_sso_log_separates_active_from_testing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The log line is the whole value of the check, so assert its content here
-    rather than in the e2e test, where other tests' rows decide which orgs the
-    truncated list happens to name.
+    """Active and testing have different consequences, so the log must not merge
+    them: enforce_forced_sso_for_user refuses passwords for active only, so a
+    testing org's users can still sign in. Telling an operator otherwise sends
+    them to disable a connection that is costing them nothing.
     """
     import logging
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from cubeplex.auth.external_login import report_unserviceable_sso
 
-    rows = [(f"org-{i}",) for i in range(7)]
+    rows = [("org-a", "active"), ("org-t", "testing")]
     result = MagicMock()
     result.all.return_value = rows
     session = AsyncMock()
@@ -214,8 +215,36 @@ async def test_unserviceable_sso_log_names_both_recovery_paths(
         with caplog.at_level(logging.ERROR, logger="cubeplex.auth.external_login"):
             affected = await report_unserviceable_sso(session)
 
+    assert affected == ["org-a", "org-t"]
+
+    active_line = next(rec.getMessage() for rec in caplog.records if "org-a" in rec.getMessage())
+    testing_line = next(rec.getMessage() for rec in caplog.records if "org-t" in rec.getMessage())
+    assert active_line is not testing_line, "the two statuses must be reported separately"
+
+    assert "cannot sign in at all" in active_line
+    assert "disable-sso" in active_line, "the locked-out case needs the recovery command"
+    assert "unaffected" in testing_line
+    assert "disable-sso" not in testing_line, "no urgent action for a testing connection"
+
+
+async def test_unserviceable_sso_log_truncates_a_long_org_list(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All ids come back; the log names a few and counts the rest."""
+    import logging
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from cubeplex.auth.external_login import report_unserviceable_sso
+
+    result = MagicMock()
+    result.all.return_value = [(f"org-{i}", "active") for i in range(7)]
+    session = AsyncMock()
+    session.execute.return_value = result
+
+    with patch("cubeplex.plugins.ee.is_ee_installed", return_value=False):
+        with caplog.at_level(logging.ERROR, logger="cubeplex.auth.external_login"):
+            affected = await report_unserviceable_sso(session)
+
     assert affected == sorted(f"org-{i}" for i in range(7))
-    text = caplog.text
-    assert "disable-sso" in text, "operator needs the recovery command"
-    assert "cubeplex-ee" in text, "operator needs to know which package is missing"
-    assert "and 2 more" in text, "7 orgs, 5 named: the count must not be dropped"
+    assert "and 2 more" in caplog.text, "7 orgs, 5 named: the count must not be dropped"
+    assert "cubeplex-ee" in caplog.text, "operator needs to know which package is missing"

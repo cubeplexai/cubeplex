@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 _MAX_ORGS_IN_LOG = 5
 
 
+def _summarize(org_ids: list[str]) -> str:
+    if len(org_ids) <= _MAX_ORGS_IN_LOG:
+        return ", ".join(org_ids)
+    return f"{', '.join(org_ids[:_MAX_ORGS_IN_LOG])}, and {len(org_ids) - _MAX_ORGS_IN_LOG} more"
+
+
 def frontend_base_url() -> str:
     """Frontend origin — for browser redirects that land on a Next.js page
     (post-login workspace home, SSO error page). Distinct from the backend
@@ -51,6 +57,11 @@ async def report_unserviceable_sso(session: AsyncSession) -> list[str]:
     Returns every affected org id — all of them, not the handful the log names —
     so a caller can act on the set and a test can assert about one org without
     depending on what else is in the database. Empty when all is well.
+
+    Reports ``active`` and ``testing`` separately: only ``active`` makes
+    ``enforce_forced_sso_for_user`` refuse a password, so only those users are
+    locked out entirely. Conflating the two sends an operator to disable a
+    connection that is costing them nothing.
 
     Removing the licensed package does not remove its rows — the table is core
     owned and shares the migration lineage. A deployment that downgrades with a
@@ -78,28 +89,42 @@ async def report_unserviceable_sso(session: AsyncSession) -> list[str]:
 
     rows = (
         await session.execute(
-            select(SSOConnection.org_id).where(  # type: ignore[call-overload]
+            select(SSOConnection.org_id, SSOConnection.status).where(  # type: ignore[call-overload]
                 SSOConnection.status.in_(["active", "testing"])  # type: ignore[attr-defined]
             )
         )
     ).all()
-    org_ids = sorted({str(r[0]) for r in rows})
-    if not org_ids:
+    if not rows:
         return []
 
-    shown = ", ".join(org_ids[:_MAX_ORGS_IN_LOG])
-    if len(org_ids) > _MAX_ORGS_IN_LOG:
-        shown += f", and {len(org_ids) - _MAX_ORGS_IN_LOG} more"
-    logger.error(
-        "%d organization(s) have SSO active or in testing (%s) but the cubeplex-ee "
-        "distribution is not installed, so no route can serve them and the affected "
-        "users cannot log in with a password either. Reinstall cubeplex-ee with a "
-        "valid license key, or run `cubeplex-cli admin disable-sso <org-slug>` for "
-        "each org to release them.",
-        len(org_ids),
-        shown,
-    )
-    return org_ids
+    # Split by status, because the two consequences differ and an operator acting
+    # on this message needs to know which one they have. enforce_forced_sso_for_user
+    # refuses passwords for `active` only, so a `testing` org still has working
+    # password login — it has merely lost a connection it was validating, and
+    # disabling it is not urgent.
+    stranded = sorted({str(r[0]) for r in rows if str(r[1]) == "active"})
+    testing_only = sorted({str(r[0]) for r in rows if str(r[1]) == "testing"} - set(stranded))
+
+    if stranded:
+        logger.error(
+            "%d organization(s) have SSO active (%s) but the cubeplex-ee distribution "
+            "is not installed. No route can serve their SSO, and password login is "
+            "still refused for their members, so those users cannot sign in at all. "
+            "Reinstall cubeplex-ee with a valid license key, or run "
+            "`cubeplex-cli admin disable-sso <org-slug>` for each org to restore "
+            "password login.",
+            len(stranded),
+            _summarize(stranded),
+        )
+    if testing_only:
+        logger.error(
+            "%d organization(s) have SSO in testing (%s) but the cubeplex-ee "
+            "distribution is not installed, so those connections cannot be "
+            "exercised. Password login for their members is unaffected.",
+            len(testing_only),
+            _summarize(testing_only),
+        )
+    return sorted(set(stranded) | set(testing_only))
 
 
 async def enforce_forced_sso_for_user(

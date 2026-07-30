@@ -6,13 +6,16 @@ has its own third copy. All three feed URLs that an administrator pastes into an
 identity provider, so a mismatch produces a working admin UI, a green test suite,
 and a login that fails at the IdP — the one place nothing here can see.
 
-These tests exist to turn that into a test failure instead.
+These tests exist to turn that into a test failure instead. They assert both the
+constants and the URLs the handlers actually emit — a matching constant proves
+nothing if a handler builds its URL some other way.
 """
 
 from __future__ import annotations
 
 import pathlib
 import re
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -22,6 +25,14 @@ pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional 
 from cubeplex_ee.sso.routes import PUBLIC_BASE_PATH  # noqa: E402
 
 pytestmark = pytest.mark.e2e
+
+
+@pytest.fixture
+def _bypass_ssrf_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The create route resolves config URLs to refuse SSRF targets, and
+    example.com endpoints do not resolve. Same rationale as test_sso_admin.py."""
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
+
 
 # backend/tests/e2e/licensed/<file> -> repo root is five levels up.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -83,3 +94,111 @@ async def test_authorize_redirect_uri_points_at_the_mounted_callback(
     path = redirect_uri[len(base) :]
     assert path in schema["paths"], f"redirect_uri path {path!r} is not served"
     assert redirect_uri.count("/api/v1") == 1, f"malformed join: {redirect_uri}"
+
+
+@pytest.mark.asyncio
+async def test_initiate_emits_a_redirect_uri_the_app_serves(
+    admin_client: tuple[httpx.AsyncClient, str],
+    _bypass_ssrf_guard: None,
+) -> None:
+    """Parse the real authorize URL rather than rebuilding it.
+
+    The OIDC initiate test asserts state, nonce and PKCE but never looks at
+    redirect_uri, so a handler that builds it from anything other than the mount
+    point passes everything else. This drives the actual endpoint and pulls the
+    parameter the IdP will be given.
+    """
+    client, _ws_id = admin_client
+    schema = (await client.get("/openapi.json")).json()
+
+    created = await client.post(
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
+        json={
+            "protocol": "oidc",
+            "display_name": "Path Agreement OIDC",
+            "config": {
+                "client_id": "pa-client",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/authorize",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            "client_secret": "pa-secret",
+        },
+    )
+    assert created.status_code == 201, created.text
+    sso_id = created.json()["id"]
+    try:
+        activated = await client.post(
+            f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/activate"
+        )
+        assert activated.status_code == 200, activated.text
+
+        # The test app runs multi_tenant, so initiate needs the org's slug.
+        from sqlalchemy import select
+
+        from cubeplex.models import Organization
+        from tests.e2e.billing_fixtures import _db_session
+
+        async with _db_session() as db:
+            slug = (
+                await db.execute(
+                    select(Organization.slug).where(
+                        Organization.id == created.json()["org_id"]  # type: ignore[arg-type]
+                    )
+                )
+            ).scalar_one()
+
+        resp = await client.post(f"{PUBLIC_BASE_PATH}/initiate", json={"org_slug": slug})
+        assert resp.status_code == 200, resp.text
+        query = parse_qs(urlparse(resp.json()["redirect_url"]).query)
+        redirect_uri = query["redirect_uri"][0]
+
+        served = urlparse(redirect_uri).path
+        assert served in schema["paths"], (
+            f"initiate handed the IdP redirect_uri={redirect_uri!r}, whose path "
+            f"{served!r} this app does not serve"
+        )
+    finally:
+        await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/deactivate")
+        await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")
+
+
+@pytest.mark.asyncio
+async def test_saml_metadata_advertises_an_acs_the_app_serves(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """The published metadata is what the IdP is configured from.
+
+    The SAML unit test calls generate_sp_metadata with URLs it invents, so it
+    cannot catch a wrong ACS in what the endpoint actually publishes.
+    """
+    client, _ws_id = admin_client
+    schema = (await client.get("/openapi.json")).json()
+
+    created = await client.post(
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
+        json={
+            "protocol": "saml",
+            "display_name": "Path Agreement SAML",
+            "config": {
+                "idp_entity_id": "https://idp.example.com/saml",
+                "idp_sso_url": "https://idp.example.com/saml/sso",
+                "idp_certificate": "MIIBogus",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    sso_id = created.json()["id"]
+    try:
+        resp = await client.get(f"/api/v1/_extensions/cubeplex_ee/sso/saml/metadata/{sso_id}")
+        assert resp.status_code == 200, resp.text
+        acs_matches = re.findall(r'Location="([^"]+)"', resp.text)
+        assert acs_matches, f"no Location in published metadata: {resp.text[:300]}"
+        for location in acs_matches:
+            path = urlparse(location).path
+            assert path in schema["paths"], (
+                f"metadata advertises {location!r}, whose path {path!r} is not served"
+            )
+    finally:
+        await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")
