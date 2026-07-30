@@ -122,6 +122,33 @@ class SandboxAttachment:
     user_sandbox_id: str
 
 
+@dataclass(frozen=True)
+class _EgressGeneration:
+    """One process's minted placeholders for a sandbox, kept so re-attaching can
+    renew them instead of minting a new generation every time.
+
+    ``signature`` is what the placeholders were minted for; when it still matches
+    the freshly resolved env there is nothing to re-mint.
+    """
+
+    signature: tuple[tuple[str, str, bool, str | None], ...]
+    env: dict[str, str]
+    ref_hashes: tuple[str, ...]
+
+
+def _egress_signature(resolved: list[ResolvedEnv]) -> tuple[tuple[str, str, bool, str | None], ...]:
+    """What a generation is valid for.
+
+    Secrets contribute no value: the placeholder stands in for whatever the
+    credential currently holds, and the exchange reads that live, so rotating a
+    secret must NOT force a new generation. Plain entries carry their value into
+    the sandbox directly, so a change there does.
+    """
+    return tuple(
+        sorted((r.id, r.env_name, r.is_secret, None if r.is_secret else r.value) for r in resolved)
+    )
+
+
 class SandboxManager:
     """Manages sandbox lifecycle: create, reuse, and cleanup."""
 
@@ -159,6 +186,12 @@ class SandboxManager:
         # In-process cache of (sandbox_id -> last_touch_at) used to throttle
         # mid-turn activity bumps so chatty tool loops don't hammer the DB.
         self._touch_cache: dict[str, datetime] = {}
+
+        # Placeholders this process minted, per sandbox. Lets a re-attach renew its
+        # own generation rather than mint another one; without it a busy sandbox
+        # accumulates a generation per attach (measured: 86/hour), each of which the
+        # keepalive then has to keep renewing. Evicted on teardown.
+        self._egress_generations: dict[str, _EgressGeneration] = {}
 
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
@@ -332,10 +365,28 @@ class SandboxManager:
         Network policy is NOT touched here — it is structural and can only be set
         at sandbox creation time.
         """
+        ref_repo = EgressRefRepository(session)
+        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+        signature: tuple[tuple[str, str, bool, str | None], ...] | None = None
+
         if injection is None:
             resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
             resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
             await self._decrypt_env_values(session, org_id=org_id, resolved=resolved)
+            signature = _egress_signature(resolved)
+
+            # Re-attaching to a sandbox this process already minted for: renew that
+            # generation instead of adding another. The row count doubles as a
+            # liveness check — if a teardown we didn't see revoked them, fall through
+            # and mint rather than hand back placeholders the exchange will reject.
+            cached = self._egress_generations.get(sandbox_id)
+            if cached is not None and cached.signature == signature:
+                renewed = await ref_repo.extend_for_hashes(cached.ref_hashes, expires_at)
+                if renewed == len(cached.ref_hashes):
+                    backend.set_run_env(cached.env)
+                    return
+                self._egress_generations.pop(sandbox_id, None)
+
             injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
 
         # Push the placeholder env into the backend — every subsequent execute call
@@ -347,8 +398,6 @@ class SandboxManager:
         # on to the new one. Generations of a sandbox are equivalent anyway — the
         # exchange resolves hosts/credential live by ``env_var_id`` and fails closed
         # once the entry is deleted. Teardown still revokes.
-        ref_repo = EgressRefRepository(session)
-        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
         for b in injection.bindings:
             await ref_repo.add(
                 EgressRef(
@@ -362,6 +411,23 @@ class SandboxManager:
                     expires_at=expires_at,
                 )
             )
+
+        if signature is not None:
+            self._egress_generations[sandbox_id] = _EgressGeneration(
+                signature=signature,
+                env=dict(injection.env),
+                ref_hashes=tuple(b["ref_hash"] for b in injection.bindings),
+            )
+
+    async def _revoke_egress(self, session: AsyncSession, sandbox_id: str) -> None:
+        """Revoke a sandbox's refs and forget the generation this process minted.
+
+        Paired so a teardown can't leave the memo pointing at revoked rows. The
+        cache-hit path re-checks anyway, but dropping the entry here is what keeps
+        the dict from growing with every sandbox this process ever saw.
+        """
+        await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+        self._egress_generations.pop(sandbox_id, None)
 
     async def resolve_command_rules(self, org_id: str) -> list[dict[str, Any]]:
         """Return the org's effective ``command_rules`` for middleware enforcement.
@@ -793,7 +859,7 @@ class SandboxManager:
                     sandbox_id,
                 )
                 await repo.mark_terminated(record.id)
-                await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+                await self._revoke_egress(session, sandbox_id)
                 raise
         return backend
 
@@ -860,7 +926,7 @@ class SandboxManager:
         # the subsequent revive path's ``promote_to_running`` overwrites it.
         await repo.mark_terminated(record.id, clear_sandbox_id=True)
         if self._exchange_host:
-            await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+            await self._revoke_egress(session, sandbox_id)
         raise SandboxError(f"sandbox {sandbox_id} unhealthy, will revive")
 
     async def _await_provisioning_winner(
@@ -1272,7 +1338,7 @@ class SandboxManager:
                     record.sandbox_id,
                 )
                 await repo.mark_terminated(record.id)
-                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                await self._revoke_egress(session, record.sandbox_id)
                 raise
         try:
             await backend.renew(self._ttl)
@@ -1384,7 +1450,7 @@ class SandboxManager:
                     )
                     repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
                     await repo.mark_terminated(row.id)
-                    await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+                    await self._revoke_egress(session, sandbox_id)
                     raise
         return backend
 
@@ -1688,7 +1754,7 @@ class SandboxManager:
             # revoke below is unaffected (mark_terminated mutates a fresh row).
             await scoped_repo.mark_terminated(record.id, clear_sandbox_id=True)
             if self._exchange_host and record.sandbox_id:
-                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                await self._revoke_egress(session, record.sandbox_id)
         else:
             await scoped_repo.mark_kill_pending(record.id)
 

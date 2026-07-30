@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubeplex.models import EgressRef
+from cubeplex.repositories.egress_ref import EgressRefRepository
 from cubeplex.sandbox.manager import SandboxAttachment, SandboxManager
 from cubeplex.sandbox_env.placeholder import PLACEHOLDER_RE, hash_placeholder, mint_placeholder
 from cubeplex.services.sandbox_env import ResolvedEnv
@@ -75,6 +76,73 @@ _RESOLVED_ENVS = [
         value="info",
     ),
 ]
+
+
+async def _attach_existing(
+    manager: SandboxManager,
+    *,
+    sandbox_id: str,
+    resolved: list[ResolvedEnv],
+) -> Any:
+    """Run one reuse-path get_or_create against an already-running sandbox."""
+    record = MagicMock()
+    record.id = "rec-reuse"
+    record.sandbox_id = sandbox_id
+    record.status = "running"
+    record.image = "ubuntu:22.04"
+    record.org_id = "org-1"
+    record.workspace_id = "ws-1"
+
+    async def fake_connect(sid: str, **kwargs: Any) -> Any:
+        fake = MagicMock()
+
+        async def healthy() -> bool:
+            return True
+
+        fake.is_healthy = healthy
+        fake.id = sid
+        return fake
+
+    with (
+        patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            return_value=record,
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.update_activity",
+            return_value=None,
+        ),
+        patch("cubeplex.services.sandbox_env.SandboxEnvResolver.resolve", return_value=resolved),
+        patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
+    ):
+        attachment = await manager.get_or_create(
+            scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
+    return attachment.sandbox
+
+
+def _plain(value: str) -> list[ResolvedEnv]:
+    """_RESOLVED_ENVS with the plain entry's value swapped."""
+    secret, plain = _RESOLVED_ENVS
+    return [
+        secret,
+        ResolvedEnv(
+            id=plain.id,
+            env_name=plain.env_name,
+            is_secret=False,
+            hosts=None,
+            header_names=None,
+            credential_id=plain.credential_id,
+            value=value,
+        ),
+    ]
+
+
+async def _valid_refs(session_factory: async_sessionmaker[AsyncSession]) -> list[EgressRef]:
+    async with session_factory() as session:
+        rows = (await session.execute(select(EgressRef))).scalars().all()
+    return [r for r in rows if r.status == "valid"]
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +336,88 @@ async def test_reuse_path_sets_run_env_and_keeps_prior_refs_valid(
     assert len(fresh) == 1
     assert fresh[0].sandbox_id == "sbx-reuse"
     assert fresh[0].bindings[0]["env_name"] == "GITHUB_TOKEN"
+
+
+async def test_reattach_with_unchanged_env_reuses_the_same_generation(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """Minting per attach is what made a busy sandbox accumulate generations (86/h
+    measured), each of which the keepalive then had to keep renewing. When the
+    resolved env is unchanged there is nothing to re-mint: hand back the same
+    placeholders and renew the rows already backing them.
+
+    A secret rotation is this case too — the placeholder stands in for whatever the
+    credential currently holds, and the exchange reads that live.
+    """
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    first = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_RESOLVED_ENVS)
+    second = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_RESOLVED_ENVS)
+
+    assert first._run_env["GITHUB_TOKEN"] == second._run_env["GITHUB_TOKEN"]
+    refs = await _valid_refs(session_factory)
+    assert len(refs) == 1, f"expected one generation, got {len(refs)}"
+
+
+async def test_changing_a_plain_value_mints_a_new_generation(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """A plain entry's value goes into the sandbox verbatim, so a change to it has
+    to reach the next attach rather than being served from the memo."""
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    first = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_plain("info"))
+    second = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_plain("debug"))
+
+    assert second._run_env["LOG_LEVEL"] == "debug"
+    assert first._run_env["GITHUB_TOKEN"] != second._run_env["GITHUB_TOKEN"]
+    assert len(await _valid_refs(session_factory)) == 2
+
+
+async def test_a_revoked_generation_is_reminted_rather_than_served_from_memo(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """Another worker's teardown revokes the rows without this process hearing about
+    it. Serving the memo then would hand out placeholders the exchange rejects —
+    exactly the silent failure this branch exists to remove — so the renewal's row
+    count is checked and a short count forces a fresh mint."""
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    first = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_RESOLVED_ENVS)
+
+    async with session_factory() as session:
+        await EgressRefRepository(session).revoke_for_sandbox("sbx-reuse")
+
+    second = await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_RESOLVED_ENVS)
+
+    assert first._run_env["GITHUB_TOKEN"] != second._run_env["GITHUB_TOKEN"]
+    refs = await _valid_refs(session_factory)
+    assert len(refs) == 1
+    assert refs[0].ref_hash == hash_placeholder(second._run_env["GITHUB_TOKEN"])
+
+
+async def test_teardown_forgets_the_memo(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """The memo is keyed by sandbox_id and must not outlive the sandbox, or a
+    long-lived process accumulates an entry for every sandbox it ever saw."""
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    await _attach_existing(manager, sandbox_id="sbx-reuse", resolved=_RESOLVED_ENVS)
+    assert "sbx-reuse" in manager._egress_generations
+
+    async with session_factory() as session:
+        await manager._revoke_egress(session, "sbx-reuse")
+
+    assert "sbx-reuse" not in manager._egress_generations
 
 
 async def test_create_without_exchange_host_skips_injection(
