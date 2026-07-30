@@ -108,6 +108,24 @@ async def test_env_file_is_written_before_ttyd_starts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_file_is_published_by_rename_never_truncated_in_place() -> None:
+    """`> target` empties the file before base64 writes a byte. A shell starting in
+    that window sources a partial file — the silent half-configured terminal this
+    whole change exists to prevent. Publish via rename so a reader sees one or the
+    other, never a torn file."""
+    backend, commands = _make_backend()
+    backend.set_run_env({"TOKEN": "cbxref_AAAA"})
+
+    await backend._write_terminal_env()
+
+    command = commands[0]
+    target = "/run/cubeplex/sandbox-env.sh"
+    assert f"> {target}" not in command, "must not redirect onto the live file"
+    assert f'mv -f "$tmp" {target}' in command
+    assert "mktemp" in command, "concurrent writers need separate scratch files"
+
+
+@pytest.mark.asyncio
 async def test_empty_env_still_rewrites_the_file() -> None:
     """Rewritten in full every time, so a deleted entry stops being exported."""
     backend, commands = _make_backend()

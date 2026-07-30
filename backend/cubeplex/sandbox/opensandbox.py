@@ -223,10 +223,17 @@ class OpenSandbox(Sandbox):
         # base64 so neither a value nor a name can break out of the write command.
         payload = base64.b64encode(("\n".join(lines) + "\n").encode()).decode()
         directory = _TERMINAL_ENV_FILE.rsplit("/", 1)[0]
+        # Publish by rename, never by truncating in place: `> file` empties it before
+        # base64 writes a byte, and a shell starting in that window would source a
+        # partial file — the same silent half-configured terminal this is meant to
+        # prevent. mktemp keeps two concurrent writers off each other's scratch file,
+        # and rename(2) is atomic, so a reader sees the old file or the new one.
         result = await self.execute(
             f"mkdir -p {directory}"
-            f" && printf %s {shlex.quote(payload)} | base64 -d > {_TERMINAL_ENV_FILE}"
-            f" && chmod 0644 {_TERMINAL_ENV_FILE}",
+            f" && tmp=$(mktemp {directory}/.sandbox-env.XXXXXX)"
+            f' && printf %s {shlex.quote(payload)} | base64 -d > "$tmp"'
+            ' && chmod 0644 "$tmp"'
+            f' && mv -f "$tmp" {_TERMINAL_ENV_FILE}',
             timeout=30,
             as_root=True,
         )
