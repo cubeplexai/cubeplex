@@ -22,6 +22,11 @@ def test_concrete_network_subclasses_are_transient() -> None:
     request = httpx.Request("POST", "https://mcp.example.com")
     assert mcp_discovery._is_transient_discovery_error(httpx.WriteError("reset", request=request))
     assert mcp_discovery._is_transient_discovery_error(ConnectionResetError())
+    grouped = ExceptionGroup(
+        "cleanup then network failure",
+        [RuntimeError("cleanup failed"), httpx.WriteError("reset", request=request)],
+    )
+    assert mcp_discovery._is_transient_discovery_error(grouped)
 
 
 def test_http_auth_error_is_not_transient() -> None:
@@ -29,6 +34,11 @@ def test_http_auth_error_is_not_transient() -> None:
     response = httpx.Response(401, request=request)
     error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
     assert not mcp_discovery._is_transient_discovery_error(error)
+    grouped = ExceptionGroup(
+        "network noise and auth failure",
+        [httpx.WriteError("reset", request=request), error],
+    )
+    assert not mcp_discovery._is_transient_discovery_error(grouped)
 
 
 @pytest.mark.asyncio

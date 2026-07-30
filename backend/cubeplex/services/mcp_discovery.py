@@ -81,15 +81,21 @@ def _format_discovery_error(exc: BaseException) -> str:
 
 def _is_transient_discovery_error(exc: BaseException) -> bool:
     """Classify the live exception before formatting erases its hierarchy."""
-    inner = exc
-    while isinstance(inner, BaseExceptionGroup) and inner.exceptions:
-        inner = inner.exceptions[0]
-    if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):
-        return True
-    if isinstance(inner, (httpx.NetworkError, httpx.RemoteProtocolError)):
-        return True
-    if isinstance(inner, httpx.HTTPStatusError):
-        return inner.response.status_code == 429 or inner.response.status_code >= 500
+    if is_unauthorized_error(exc):
+        return False
+    stack: list[BaseException] = [exc]
+    while stack:
+        inner = stack.pop()
+        if isinstance(inner, BaseExceptionGroup):
+            stack.extend(inner.exceptions)
+            continue
+        if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):
+            return True
+        if isinstance(inner, (httpx.NetworkError, httpx.RemoteProtocolError)):
+            return True
+        if isinstance(inner, httpx.HTTPStatusError):
+            if inner.response.status_code == 429 or inner.response.status_code >= 500:
+                return True
     return False
 
 
