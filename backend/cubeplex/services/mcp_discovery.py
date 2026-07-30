@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import anyio
 import httpx
 from cubepi.mcp.http_loader import _open_session
 from loguru import logger
@@ -84,14 +85,24 @@ def _is_transient_discovery_error(exc: BaseException) -> bool:
     if is_unauthorized_error(exc):
         return False
     stack: list[BaseException] = [exc]
+    leaves: list[BaseException] = []
     while stack:
         inner = stack.pop()
         if isinstance(inner, BaseExceptionGroup):
             stack.extend(inner.exceptions)
             continue
+        leaves.append(inner)
+    for inner in leaves:
+        if isinstance(inner, httpx.HTTPStatusError):
+            status = inner.response.status_code
+            if 400 <= status < 500 and status != 429:
+                return False
+    for inner in leaves:
         if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):
             return True
         if isinstance(inner, (httpx.NetworkError, httpx.RemoteProtocolError)):
+            return True
+        if isinstance(inner, (anyio.EndOfStream, anyio.BrokenResourceError)):
             return True
         if isinstance(inner, httpx.HTTPStatusError):
             if inner.response.status_code == 429 or inner.response.status_code >= 500:
