@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import shlex
 import subprocess
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -46,6 +47,11 @@ def _written_script(command: str) -> str:
     """Recover the file contents from the base64 the write command carries."""
     tokens = shlex.split(command)
     return base64.b64decode(tokens[tokens.index("%s") + 1]).decode()
+
+
+def _localised(command: str, tmp_path: Path) -> str:
+    """Retarget the command at a local directory so it can run outside a sandbox."""
+    return command.replace("/run/cubeplex", str(tmp_path))
 
 
 def _eval(script: str, var: str) -> str:
@@ -123,6 +129,38 @@ async def test_file_is_published_by_rename_never_truncated_in_place() -> None:
     assert f"> {target}" not in command, "must not redirect onto the live file"
     assert f'mv -f "$tmp" {target}' in command
     assert "mktemp" in command, "concurrent writers need separate scratch files"
+
+
+@pytest.mark.asyncio
+async def test_generated_command_publishes_the_file_for_real(tmp_path: Path) -> None:
+    """Run the command the sandbox would run, against a local directory."""
+    backend, commands = _make_backend()
+    backend.set_run_env({"TOKEN": "cbxref_AAAA"})
+
+    await backend._write_terminal_env()
+
+    subprocess.run(["sh", "-c", _localised(commands[0], tmp_path)], check=True)
+    published = tmp_path / "sandbox-env.sh"
+    assert published.read_text() == "export TOKEN=cbxref_AAAA\n"
+    assert published.stat().st_mode & 0o777 == 0o644
+    assert list(tmp_path.glob(".sandbox-env.*")) == [], "scratch file must not survive"
+
+
+@pytest.mark.asyncio
+async def test_failed_publication_leaves_no_scratch_file(tmp_path: Path) -> None:
+    """The && chain stops mid-way on failure; without cleanup every retry — a
+    full disk, a missing base64 — would strand another scratch file in /run."""
+    backend, commands = _make_backend()
+    backend.set_run_env({"TOKEN": "cbxref_AAAA"})
+
+    await backend._write_terminal_env()
+
+    broken = _localised(commands[0], tmp_path).replace("base64 -d", "false")
+    result = subprocess.run(["sh", "-c", broken])
+
+    assert result.returncode != 0
+    assert list(tmp_path.glob(".sandbox-env.*")) == []
+    assert not (tmp_path / "sandbox-env.sh").exists(), "a failed write must not publish"
 
 
 @pytest.mark.asyncio

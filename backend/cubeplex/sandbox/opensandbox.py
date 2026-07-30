@@ -228,9 +228,12 @@ class OpenSandbox(Sandbox):
         # partial file — the same silent half-configured terminal this is meant to
         # prevent. mktemp keeps two concurrent writers off each other's scratch file,
         # and rename(2) is atomic, so a reader sees the old file or the new one.
+        # The trap fires on the failure paths, where the && chain stops with the scratch
+        # file still on disk; after a successful rename there is nothing left to remove.
         result = await self.execute(
             f"mkdir -p {directory}"
             f" && tmp=$(mktemp {directory}/.sandbox-env.XXXXXX)"
+            " && trap 'rm -f \"$tmp\"' EXIT"
             f' && printf %s {shlex.quote(payload)} | base64 -d > "$tmp"'
             ' && chmod 0644 "$tmp"'
             f' && mv -f "$tmp" {_TERMINAL_ENV_FILE}',
