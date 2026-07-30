@@ -122,6 +122,10 @@ class SandboxAttachment:
     user_sandbox_id: str
 
 
+# (env_var_id, env_name, is_secret, value-if-plain) per entry — see _egress_signature.
+EgressSignature = tuple[tuple[str, str, bool, str | None], ...]
+
+
 @dataclass(frozen=True)
 class _EgressGeneration:
     """One process's minted placeholders for a sandbox, kept so re-attaching can
@@ -131,12 +135,13 @@ class _EgressGeneration:
     the freshly resolved env there is nothing to re-mint.
     """
 
-    signature: tuple[tuple[str, str, bool, str | None], ...]
+    signature: EgressSignature
     env: dict[str, str]
     ref_hashes: tuple[str, ...]
+    stored_at: datetime
 
 
-def _egress_signature(resolved: list[ResolvedEnv]) -> tuple[tuple[str, str, bool, str | None], ...]:
+def _egress_signature(resolved: list[ResolvedEnv]) -> EgressSignature:
     """What a generation is valid for.
 
     Secrets contribute no value: the placeholder stands in for whatever the
@@ -190,7 +195,7 @@ class SandboxManager:
         # Placeholders this process minted, per sandbox. Lets a re-attach renew its
         # own generation rather than mint another one; without it a busy sandbox
         # accumulates a generation per attach (measured: 86/hour), each of which the
-        # keepalive then has to keep renewing. Evicted on teardown.
+        # keepalive then has to keep renewing. Teardown evicts; age bounds the rest.
         self._egress_generations: dict[str, _EgressGeneration] = {}
 
         # Sandbox workdir
@@ -351,6 +356,7 @@ class SandboxManager:
         user_id: str,
         sandbox_id: str,
         injection: InjectionResult | None = None,
+        signature: EgressSignature | None = None,
     ) -> None:
         """Resolve vault secrets, set run env on the backend, and persist EgressRefs.
 
@@ -360,14 +366,15 @@ class SandboxManager:
         ref-persist block.
 
         When ``injection`` is supplied by the caller (pre-resolved pre-create),
-        it is reused directly so the vault is not resolved twice.
+        it is reused directly so the vault is not resolved twice; pass ``signature``
+        alongside it so the created generation is memoised like any other, instead
+        of the next attach having to mint a second one.
 
         Network policy is NOT touched here — it is structural and can only be set
         at sandbox creation time.
         """
         ref_repo = EgressRefRepository(session)
         expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
-        signature: tuple[tuple[str, str, bool, str | None], ...] | None = None
 
         if injection is None:
             resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
@@ -376,9 +383,11 @@ class SandboxManager:
             signature = _egress_signature(resolved)
 
             # Re-attaching to a sandbox this process already minted for: renew that
-            # generation instead of adding another. The row count doubles as a
-            # liveness check — if a teardown we didn't see revoked them, fall through
-            # and mint rather than hand back placeholders the exchange will reject.
+            # generation instead of adding another. The row count tells us whether
+            # those rows are still valid, which catches a teardown this process
+            # already missed — best effort, not a guarantee: a teardown committing
+            # after the renew still leaves the caller holding dead placeholders,
+            # exactly as an attach racing a teardown always could.
             cached = self._egress_generations.get(sandbox_id)
             if cached is not None and cached.signature == signature:
                 renewed = await ref_repo.extend_for_hashes(cached.ref_hashes, expires_at)
@@ -413,11 +422,28 @@ class SandboxManager:
             )
 
         if signature is not None:
+            self._prune_egress_generations()
             self._egress_generations[sandbox_id] = _EgressGeneration(
                 signature=signature,
                 env=dict(injection.env),
                 ref_hashes=tuple(b["ref_hash"] for b in injection.bindings),
+                stored_at=datetime.now(UTC),
             )
+
+    def _prune_egress_generations(self) -> None:
+        """Drop memo entries older than the ref TTL.
+
+        Teardown evicts, but only in the process that ran it: another worker's
+        cleanup leaves this process holding an entry for a sandbox it will never
+        attach to again, so eviction alone does not bound the dict. An entry is
+        worthless once its rows would have expired anyway, which makes age the
+        natural bound — what survives is the sandboxes this process attached to
+        within one TTL window.
+        """
+        cutoff = datetime.now(UTC) - timedelta(seconds=self._ttl)
+        stale = [k for k, v in self._egress_generations.items() if v.stored_at < cutoff]
+        for key in stale:
+            del self._egress_generations[key]
 
     async def _revoke_egress(self, session: AsyncSession, sandbox_id: str) -> None:
         """Revoke a sandbox's refs and forget the generation this process minted.
@@ -706,6 +732,7 @@ class SandboxManager:
         sandbox_id: str | None = None
         promoted = False
         injection: InjectionResult | None = None
+        signature: EgressSignature | None = None
         try:
             volumes: list[Volume] | None = None
             if self._volume_enabled:
@@ -739,6 +766,7 @@ class SandboxManager:
                 resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=record.org_id))
                 resolved = await resolver.resolve(workspace_id=record.workspace_id, user_id=user_id)
                 await self._decrypt_env_values(session, org_id=record.org_id, resolved=resolved)
+                signature = _egress_signature(resolved)
                 injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
 
             # Egress network policy: assembled from the admin-authored rules +
@@ -849,6 +877,7 @@ class SandboxManager:
                     user_id=user_id,
                     sandbox_id=sandbox_id,
                     injection=injection,
+                    signature=signature,
                 )
             except Exception:
                 # Egress setup failed after the row is already `running`.

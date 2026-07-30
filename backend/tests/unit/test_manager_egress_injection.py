@@ -13,6 +13,7 @@ network_policy still goes into Sandbox.create (egress allow-list is structural).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -418,6 +419,62 @@ async def test_teardown_forgets_the_memo(
         await manager._revoke_egress(session, "sbx-reuse")
 
     assert "sbx-reuse" not in manager._egress_generations
+
+
+async def test_memo_is_bounded_by_age_not_only_by_teardown(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """Teardown evicts only in the process that ran it. When another worker cleans a
+    sandbox up, this process is never told and never attaches again, so eviction
+    alone leaves an entry per historical sandbox. Age has to bound it."""
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    await _attach_existing(manager, sandbox_id="sbx-old", resolved=_RESOLVED_ENVS)
+    # That sandbox was torn down by someone else; this process only ever sees its
+    # entry go stale.
+    aged = manager._egress_generations["sbx-old"]
+    manager._egress_generations["sbx-old"] = replace(
+        aged, stored_at=datetime.now(UTC) - timedelta(seconds=manager._ttl + 60)
+    )
+
+    await _attach_existing(manager, sandbox_id="sbx-new", resolved=_RESOLVED_ENVS)
+
+    assert "sbx-old" not in manager._egress_generations
+    assert "sbx-new" in manager._egress_generations
+
+
+async def test_created_sandbox_memoises_its_first_generation(
+    session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
+) -> None:
+    """The create path pre-resolves and mints before calling _apply_egress. Without
+    passing the signature along, that generation isn't memoised and the very next
+    attach mints a second one for no reason."""
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+    manager._exchange_host = "egress-exchange.internal"
+
+    with (
+        patch("opensandbox.Sandbox.create", new=AsyncMock(return_value=_make_fake_sandbox())),
+        patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            return_value=None,
+        ),
+        patch(
+            "cubeplex.services.sandbox_env.SandboxEnvResolver.resolve", return_value=_RESOLVED_ENVS
+        ),
+        patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
+    ):
+        attachment = await manager.get_or_create(
+            scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
+
+    created = attachment.sandbox
+    assert "sbx-new" in manager._egress_generations
+    memo = manager._egress_generations["sbx-new"]
+    assert memo.env["GITHUB_TOKEN"] == created._run_env["GITHUB_TOKEN"]  # type: ignore[attr-defined]
 
 
 async def test_create_without_exchange_host_skips_injection(
