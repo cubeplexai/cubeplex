@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 
@@ -29,6 +30,14 @@ def test_concrete_network_subclasses_are_transient() -> None:
     assert mcp_discovery._is_transient_discovery_error(grouped)
 
 
+def test_anyio_disconnects_are_transient_inside_exception_groups() -> None:
+    grouped = ExceptionGroup(
+        "cleanup then AnyIO disconnects",
+        [RuntimeError("cleanup failed"), anyio.EndOfStream(), anyio.BrokenResourceError()],
+    )
+    assert mcp_discovery._is_transient_discovery_error(grouped)
+
+
 def test_http_auth_error_is_not_transient() -> None:
     request = httpx.Request("POST", "https://mcp.example.com")
     response = httpx.Response(401, request=request)
@@ -39,6 +48,28 @@ def test_http_auth_error_is_not_transient() -> None:
         [httpx.WriteError("reset", request=request), error],
     )
     assert not mcp_discovery._is_transient_discovery_error(grouped)
+
+
+def test_hard_http_4xx_takes_precedence_over_network_noise() -> None:
+    request = httpx.Request("POST", "https://mcp.example.com")
+    response = httpx.Response(403, request=request)
+    error = httpx.HTTPStatusError("forbidden", request=request, response=response)
+    grouped = ExceptionGroup(
+        "hard response and network noise",
+        [httpx.WriteError("reset", request=request), error],
+    )
+    assert not mcp_discovery._is_transient_discovery_error(grouped)
+
+
+def test_http_429_remains_transient_with_network_noise() -> None:
+    request = httpx.Request("POST", "https://mcp.example.com")
+    response = httpx.Response(429, request=request)
+    error = httpx.HTTPStatusError("rate limited", request=request, response=response)
+    grouped = ExceptionGroup(
+        "retryable response and network noise",
+        [httpx.WriteError("reset", request=request), error],
+    )
+    assert mcp_discovery._is_transient_discovery_error(grouped)
 
 
 @pytest.mark.asyncio
