@@ -61,10 +61,11 @@ def test_hard_http_4xx_takes_precedence_over_network_noise() -> None:
     assert not mcp_discovery._is_transient_discovery_error(grouped)
 
 
-def test_http_429_remains_transient_with_network_noise() -> None:
+@pytest.mark.parametrize("status", [408, 429])
+def test_retryable_http_4xx_remains_transient_with_network_noise(status: int) -> None:
     request = httpx.Request("POST", "https://mcp.example.com")
-    response = httpx.Response(429, request=request)
-    error = httpx.HTTPStatusError("rate limited", request=request, response=response)
+    response = httpx.Response(status, request=request)
+    error = httpx.HTTPStatusError("retryable response", request=request, response=response)
     grouped = ExceptionGroup(
         "retryable response and network noise",
         [httpx.WriteError("reset", request=request), error],
