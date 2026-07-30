@@ -41,7 +41,9 @@ jobs:
         run: |
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # <app semver>-<YYMMDD>: the semver ties the image to the application
+          # release it ships with, the date lets it be rebuilt within one release.
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]{6}$ ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Stage fonts

@@ -8,9 +8,10 @@ Application releases use one semver across these committed fields:
 - `frontend/package.json` → `version`;
 - `frontend/packages/core/package.json` → `version`;
 - `frontend/packages/web/package.json` → `version`;
-- `deploy/kubernetes/charts/cubeplex/Chart.yaml` → `version` and `appVersion`.
+- `deploy/kubernetes/charts/cubeplex/Chart.yaml` → `version` and `appVersion`;
+- `deploy/images/sandbox/VERSION` → the semver half of `<semver>-<YYMMDD>`.
 
-`scripts/check-version-consistency.sh v0.3.0` verifies the six fields above.
+`scripts/check-version-consistency.sh v0.3.0` verifies the seven fields above.
 Two more code-level refs are NOT checked by the script and must be bumped by
 hand (the build or the pre-push gate fails if they are missed):
 
@@ -23,31 +24,38 @@ hand (the build or the pre-push gate fails if they are missed):
 `backend-check-ci` hook rewrites `uv.lock` mid-run, pre-commit flags "files
 were modified by this hook", and the push is rejected.
 
-The sandbox has an independent version in:
+The sandbox image is versioned in:
 
 ```text
 deploy/images/sandbox/VERSION
 ```
 
-If the sandbox Dockerfile, fonts, browser/runtime dependencies, or other image
-inputs change, increment this value. A sandbox build publishes
-`sandbox-v<version>` and never overwrites an existing version tag. At release,
-`release.yml` promotes that image to `cubeplex-sandbox:v<semver>` (a tag alias,
-no rebuild) so every service image shares the one application version; an
-ordinary application release reuses the existing sandbox build.
+The format is `<app semver>-<YYMMDD>`, e.g. `0.3.0-260729`. The semver half must
+equal the application version — `check-version-consistency.sh` enforces it as
+`sandboxImage`. The date half is the image's own rev: bump it whenever the
+sandbox Dockerfile, fonts, browser/runtime dependencies, or other image inputs
+change, so the same application release can carry more than one sandbox build.
+
+A sandbox build publishes `sandbox-v<version>` and never overwrites an existing
+version tag. At release, `release.yml` promotes that image to
+`cubeplex-sandbox:v<semver>` (a tag alias, no rebuild) so every service image
+shares the one application version; an ordinary application release reuses the
+existing sandbox build.
 
 ## Release preparation PR
 
 From a feature branch:
 
 1. Bump the application version to the target (e.g. `0.3.0`) in every version
-   source listed above - the six checked fields PLUS `app.py`, `system.py`, and
+   source listed above - the seven checked fields PLUS `app.py`, `system.py`, and
    the regenerated `uv.lock`. Match the prior release commit's file set.
-2. Bump `deploy/images/sandbox/VERSION` only when sandbox inputs changed. If you
-   bump it, merging this PR to `main` triggers `sandbox-image.yml` to build the
-   new `sandbox-v<version>`; that build must appear before `release.yml` can
-   promote it (release.yml polls, but only after the build is triggered).
-3. Run `scripts/check-version-consistency.sh v0.3.0` (checks the six fields).
+2. Set the semver half of `deploy/images/sandbox/VERSION` to the same target;
+   it is checked, so a stale one fails the release. Bump the date half only when
+   sandbox inputs changed. If the value changes at all, merging this PR to `main`
+   triggers `sandbox-image.yml` to build the new `sandbox-v<version>`; that build
+   must appear before `release.yml` can promote it (release.yml polls, but only
+   after the build is triggered).
+3. Run `scripts/check-version-consistency.sh v0.3.0` (checks the seven fields).
 4. Push. The pre-push hook runs the full CI-equivalent `backend-check-ci` +
    `frontend-check-ci` (~3 min). GitHub's SSH closes the idle connection while
    the hook runs, so push with keepalive:

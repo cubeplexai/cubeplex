@@ -139,7 +139,10 @@ GitHub 较慢，可以在构建时覆盖：
 ### sandbox 镜像的版本
 
 sandbox 镜像很重，所以单独构建（`sandbox-image.yml`），只在其输入变化时才构建，
-由 `deploy/images/sandbox/VERSION` 追踪、打上 `sandbox-v<version>` tag。发版时
+由 `deploy/images/sandbox/VERSION` 追踪、打上 `sandbox-v<version>` tag。该版本号
+形如 `<应用 semver>-<YYMMDD>`，例如 `0.3.0-260729`：semver 表示镜像属于哪个应用
+版本、且必须与之一致；日期后缀则让同一个版本内可以多次重建镜像，而不会与已发布
+的 tag 冲突。发版时
 `release.yml` 会把该镜像**提升**为 `cubeplex-sandbox:v<semver>`（只是 tag 别名，
 不重新构建），使四个服务镜像共用同一个发布版本。因此 chart 的默认 sandbox 镜像
 是 `cubeplex-sandbox:v<appVersion>`，与其余保持一致。

@@ -14,6 +14,10 @@ core=$(node -p "require('./frontend/packages/core/package.json').version")
 web=$(node -p "require('./frontend/packages/web/package.json').version")
 chart=$(sed -nE 's/^version: ([^ ]+)$/\1/p' deploy/kubernetes/charts/cubeplex/Chart.yaml | head -1)
 app=$(sed -nE 's/^appVersion: \"([^\"]+)\"$/\1/p' deploy/kubernetes/charts/cubeplex/Chart.yaml | head -1)
+# deploy/images/sandbox/VERSION is <app semver>-<YYMMDD>; only the semver is a
+# release version. The date suffix is free to differ — it exists so the image can
+# be rebuilt within one release — so compare the prefix and ignore it.
+sandbox=$(sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+)-[0-9]{6}$/\1/p' deploy/images/sandbox/VERSION | head -1)
 
 declare -A versions=(
   [backend]="$backend"
@@ -22,6 +26,7 @@ declare -A versions=(
   [web]="$web"
   [chart]="$chart"
   [appVersion]="$app"
+  [sandboxImage]="$sandbox"
 )
 
 for name in "${!versions[@]}"; do
