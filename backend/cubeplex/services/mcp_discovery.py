@@ -95,7 +95,7 @@ def _is_transient_discovery_error(exc: BaseException) -> bool:
     for inner in leaves:
         if isinstance(inner, httpx.HTTPStatusError):
             status = inner.response.status_code
-            if 400 <= status < 500 and status != 429:
+            if 400 <= status < 500 and status not in {408, 429}:
                 return False
     for inner in leaves:
         if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):

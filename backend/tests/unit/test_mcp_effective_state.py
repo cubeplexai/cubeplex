@@ -27,7 +27,7 @@ def _input(**overrides: object) -> MCPEffectiveInput:
         "oauth_supported": False,
         "discovery_status": "ok",
         "discovery_last_error": None,
-        "discovery_error_transient": False,
+        "discovery_error_transient": None,
         "has_cached_tools": False,
         "credential_policy": "org",
         "grant": MCPGrantInput(
@@ -232,6 +232,19 @@ def test_structured_transient_network_error_keeps_last_good_cache_usable() -> No
         )
     )
     assert result.usable is True
+
+
+def test_structured_hard_error_overrides_legacy_transient_message() -> None:
+    result = compute_effective_state(
+        _input(
+            discovery_status="error",
+            discovery_last_error="ReadTimeout: timed out before HTTP 403",
+            discovery_error_transient=False,
+            has_cached_tools=True,
+        )
+    )
+    assert result.usable is False
+    assert result.reason == "discovery_failed"
 
 
 def test_credential_discovery_failure_does_not_serve_cached_tools() -> None:

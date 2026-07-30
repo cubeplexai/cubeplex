@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from cubeplex.mcp.exceptions import OAuthRefreshFailed
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
@@ -61,7 +61,7 @@ class MCPEffectiveInput:
     oauth_supported: bool
     discovery_status: str
     discovery_last_error: str | None
-    discovery_error_transient: bool
+    discovery_error_transient: bool | None
     has_cached_tools: bool
     credential_policy: CredentialPolicy
     grant: MCPGrantInput | None
@@ -107,7 +107,9 @@ def _cached_tools_survive_discovery_error(value: MCPEffectiveInput) -> bool:
         or (error_type == "HTTPStatusError" and "Server error '5" in error)
         or (error_type == "HTTPStatusError" and "Client error '429" in error)
     )
-    return value.has_cached_tools and (value.discovery_error_transient or legacy_transient)
+    if value.discovery_error_transient is not None:
+        return value.has_cached_tools and value.discovery_error_transient
+    return value.has_cached_tools and legacy_transient
 
 
 def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
@@ -351,8 +353,9 @@ class MCPEffectiveConnectorService:
                     oauth_supported=oauth_supported,
                     discovery_status=connector.discovery_status,
                     discovery_last_error=connector.last_error,
-                    discovery_error_transient=bool(
-                        connector.discovery_metadata.get("last_error_transient", False)
+                    discovery_error_transient=cast(
+                        bool | None,
+                        connector.discovery_metadata.get("last_error_transient"),
                     ),
                     has_cached_tools=bool(connector.tools_cache),
                     credential_policy=_cast_policy(policy),
