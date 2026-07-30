@@ -27,6 +27,7 @@ def _input(**overrides: object) -> MCPEffectiveInput:
         "oauth_supported": False,
         "discovery_status": "ok",
         "discovery_last_error": None,
+        "discovery_error_transient": False,
         "has_cached_tools": False,
         "credential_policy": "org",
         "grant": MCPGrantInput(
@@ -215,6 +216,18 @@ def test_http_timeout_keeps_last_good_cache_usable() -> None:
         _input(
             discovery_status="error",
             discovery_last_error="ReadTimeout: timed out",
+            has_cached_tools=True,
+        )
+    )
+    assert result.usable is True
+
+
+def test_structured_transient_network_error_keeps_last_good_cache_usable() -> None:
+    result = compute_effective_state(
+        _input(
+            discovery_status="error",
+            discovery_last_error="WriteError: connection reset",
+            discovery_error_transient=True,
             has_cached_tools=True,
         )
     )
