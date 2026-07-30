@@ -156,6 +156,14 @@ COPY vimrc /etc/vim/vimrc.local
 # process (start-stop-daemon) hasn't set it yet.
 RUN printf 'export TERM="${TERM:-xterm-256color}"\neval "$(dircolors -b)"\nalias ls="ls --color=auto"\nalias grep="grep --color=auto"\n' >> /etc/bash.bashrc
 
+# Sandbox env vault entries, refreshed by start_terminal before each (re)connect.
+# ttyd freezes its own environ at start, so the file is how a new terminal picks
+# up entries added since. Absent when egress injection is off, hence the guard —
+# `if` rather than `[ -r … ] &&` so an absent file doesn't leave bashrc, and the
+# first prompt's $?, non-zero. Must be bash.bashrc: ttyd runs non-login bash, so
+# /etc/profile.d is never read.
+RUN printf 'if [ -r /run/cubeplex/sandbox-env.sh ]; then . /run/cubeplex/sandbox-env.sh; fi\n' >> /etc/bash.bashrc
+
 # Create virtual environment and install common Python packages
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \

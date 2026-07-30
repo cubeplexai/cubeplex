@@ -1,5 +1,7 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
+import base64
+import re
 import shlex
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,6 +19,16 @@ from cubeplex.sandbox.panel_token import (
     get_panel_secret,
     sign_panel_token,
 )
+
+# Sourced by /etc/bash.bashrc in the sandbox image — keep the two in sync.
+# /run is container-local: writing under /workspace would strand placeholders on
+# the user's PVC, where they outlive the sandbox that minted them.
+_TERMINAL_ENV_FILE = "/run/cubeplex/sandbox-env.sh"
+
+# Deliberately not imported from the service that validates env_name on write:
+# this is the last gate before a name becomes shell code, so it re-checks
+# independently and skips anything a pre-validation row might already carry.
+_POSIX_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @contextmanager
@@ -192,8 +204,39 @@ class OpenSandbox(Sandbox):
         if result.exit_code not in (0, None):
             raise RuntimeError(f"failed to start sandbox browser: {result.output}")
 
+    async def _write_terminal_env(self) -> None:
+        """Drop the injected env where a terminal shell can source it.
+
+        ttyd inherits its environment once, when it starts, and a process's
+        environ cannot be rewritten afterwards — so a shell it forks can never be
+        handed a later generation of placeholders. Writing the env to a file that
+        the image's /etc/bash.bashrc sources means each new terminal reads the
+        current one, with no ttyd restart and no session interrupted.
+
+        Rewritten in full every time so a deleted entry disappears too.
+        """
+        lines = [
+            f"export {name}={shlex.quote(value)}"
+            for name, value in sorted(self._run_env.items())
+            if _POSIX_NAME_RE.fullmatch(name)
+        ]
+        # base64 so neither a value nor a name can break out of the write command.
+        payload = base64.b64encode(("\n".join(lines) + "\n").encode()).decode()
+        directory = _TERMINAL_ENV_FILE.rsplit("/", 1)[0]
+        result = await self.execute(
+            f"mkdir -p {directory}"
+            f" && printf %s {shlex.quote(payload)} | base64 -d > {_TERMINAL_ENV_FILE}"
+            f" && chmod 0644 {_TERMINAL_ENV_FILE}",
+            timeout=30,
+            as_root=True,
+        )
+        if result.exit_code not in (0, None):
+            raise SandboxError(f"failed to write sandbox terminal env: {result.output}")
+
     async def start_terminal(self) -> None:
         """Start ttyd; shell runs as the configured sandbox uid when possible."""
+        # Before ttyd, so the first shell of a fresh sandbox already sees the env.
+        await self._write_terminal_env()
         if self._run_uid is not None:
             gid = self._run_gid if self._run_gid is not None else self._run_uid
             shell = f"setpriv --reuid={self._run_uid} --regid={gid} --clear-groups -- bash"
