@@ -180,14 +180,36 @@ survives in the shared database and the deployment reaches a state where:
 Every member of that org loses both login methods, with nothing in the logs
 naming the cause.
 
-Add the symmetric startup check to the one stage 1 already has. Stage 1 refuses
-to boot when the package is installed without a valid key; this refuses to boot
-when an `active` or `testing` connection exists and the package is absent. The
-error names the two ways out: reinstall the package, or run the break-glass
-`disable-sso`, which works precisely because §3 keeps that CLI in core.
+Report it at startup, naming the affected orgs and both ways out: reinstall the
+package, or run the break-glass `disable-sso`, which works precisely because §3
+keeps that CLI in core.
 
-Ignoring the row instead would silently disable forced SSO — a security control
-downgrading itself on a packaging accident. Fail fast.
+**Reversed during implementation: this logs, it does not refuse to boot.** Both
+the review and this plan first called for a hard failure, symmetric with the
+stage-1 check that refuses to start when the package is present without a key.
+Two things changed that.
+
+The argument for failing fast was that tolerating the row silently disables
+forced SSO. It does not. The row is still there and `enforce_forced_sso_for_user`
+still reads it, so the security control keeps working whether or not the process
+starts — nothing is silently weakened by continuing. What a hard failure actually
+buys is operator attention, and an ERROR naming the orgs and the fix buys that
+too.
+
+What it costs is worse than what it buys: in a multi-tenant deployment one
+stranded org takes every other org down with it. And the failure mode showed up
+immediately — the licensed test lane left active rows in the shared test
+database, and the next default-lane run could not start a single app. In
+production that shape is a stale row bricking a boot.
+
+Stage 1's check stays hard, and the asymmetry is deliberate: there the package is
+present and about to run unlicensed code, so there is no partial state worth
+preserving.
+
+The function returns every affected org id and logs only the first few. Returning
+the full set is what lets a test assert about its own org without depending on
+what else is in the database — the first version asserted on the log text and
+failed by run order.
 
 ### Stays in core
 
