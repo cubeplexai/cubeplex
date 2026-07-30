@@ -61,6 +61,7 @@ class MCPEffectiveInput:
     oauth_supported: bool
     discovery_status: str
     discovery_last_error: str | None
+    discovery_error_transient: bool
     has_cached_tools: bool
     credential_policy: CredentialPolicy
     grant: MCPGrantInput | None
@@ -100,13 +101,13 @@ _TRANSIENT_DISCOVERY_ERROR_TYPES = {
 def _cached_tools_survive_discovery_error(value: MCPEffectiveInput) -> bool:
     error = value.discovery_last_error or ""
     error_type = error.partition(":")[0]
-    transient = (
+    legacy_transient = (
         error_type in _TRANSIENT_DISCOVERY_ERROR_TYPES
         or error_type.endswith("Timeout")
         or (error_type == "HTTPStatusError" and "Server error '5" in error)
         or (error_type == "HTTPStatusError" and "Client error '429" in error)
     )
-    return value.has_cached_tools and transient
+    return value.has_cached_tools and (value.discovery_error_transient or legacy_transient)
 
 
 def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
@@ -350,6 +351,9 @@ class MCPEffectiveConnectorService:
                     oauth_supported=oauth_supported,
                     discovery_status=connector.discovery_status,
                     discovery_last_error=connector.last_error,
+                    discovery_error_transient=bool(
+                        connector.discovery_metadata.get("last_error_transient", False)
+                    ),
                     has_cached_tools=bool(connector.tools_cache),
                     credential_policy=_cast_policy(policy),
                     grant=grant_input,

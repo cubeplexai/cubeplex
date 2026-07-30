@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import httpx
 from cubepi.mcp.http_loader import _open_session
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +77,20 @@ def _format_discovery_error(exc: BaseException) -> str:
     name = type(inner).__name__
     msg = str(inner) or repr(inner)
     return f"{name}: {msg}"
+
+
+def _is_transient_discovery_error(exc: BaseException) -> bool:
+    """Classify the live exception before formatting erases its hierarchy."""
+    inner = exc
+    while isinstance(inner, BaseExceptionGroup) and inner.exceptions:
+        inner = inner.exceptions[0]
+    if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):
+        return True
+    if isinstance(inner, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        return True
+    if isinstance(inner, httpx.HTTPStatusError):
+        return inner.response.status_code == 429 or inner.response.status_code >= 500
+    return False
 
 
 @dataclass(frozen=True)
@@ -415,9 +430,14 @@ async def discover_tools_for_install(
     except Exception as exc:  # noqa: BLE001
         install.discovery_status = "error"
         install.last_error = f"credential_resolution_failed: {_format_discovery_error(exc)}"[:2048]
+        install.discovery_metadata = {
+            **dict(install.discovery_metadata or {}),
+            "last_error_transient": False,
+        }
         if connector is not None:
             connector.discovery_status = install.discovery_status
             connector.last_error = install.last_error
+            connector.discovery_metadata = install.discovery_metadata
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
@@ -430,9 +450,14 @@ async def discover_tools_for_install(
     if resolved is None:
         install.discovery_status = "error"
         install.last_error = "Auth header resolution failed"
+        install.discovery_metadata = {
+            **dict(install.discovery_metadata or {}),
+            "last_error_transient": False,
+        }
         if connector is not None:
             connector.discovery_status = install.discovery_status
             connector.last_error = install.last_error
+            connector.discovery_metadata = install.discovery_metadata
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
@@ -444,12 +469,17 @@ async def discover_tools_for_install(
         )
     headers, server_url = resolved
 
-    async def _persist_error(message: str) -> DiscoveryResult:
+    async def _persist_error(message: str, *, transient: bool = False) -> DiscoveryResult:
         install.discovery_status = "error"
         install.last_error = message[:2048]
+        install.discovery_metadata = {
+            **dict(install.discovery_metadata or {}),
+            "last_error_transient": transient,
+        }
         if connector is not None:
             connector.discovery_status = install.discovery_status
             connector.last_error = install.last_error
+            connector.discovery_metadata = install.discovery_metadata
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
@@ -488,7 +518,7 @@ async def discover_tools_for_install(
             and token_mgr is not None
         )
         if not refreshable:
-            return await _persist_error(formatted)
+            return await _persist_error(formatted, transient=_is_transient_discovery_error(exc))
         assert grant is not None  # narrowed by `refreshable`
         try:
             fresh_token = await token_mgr.get_access_token_for_grant(
@@ -516,7 +546,10 @@ async def discover_tools_for_install(
                 with suppress(Exception):
                     grant.grant_status = "expired"
                     await grant_repo.update(grant)
-            return await _persist_error(_format_discovery_error(retry_exc))
+            return await _persist_error(
+                _format_discovery_error(retry_exc),
+                transient=_is_transient_discovery_error(retry_exc),
+            )
 
     tools_cache_raw: list[dict[str, Any]] = [_tool_to_dict(t) for t in discovered.tools]
     # Strip orphan citation mapping keys whose tool no longer exists in

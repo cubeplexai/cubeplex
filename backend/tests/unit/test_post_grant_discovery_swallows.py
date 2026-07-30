@@ -12,9 +12,23 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 from cubeplex.services import mcp_discovery
+
+
+def test_concrete_network_subclasses_are_transient() -> None:
+    request = httpx.Request("POST", "https://mcp.example.com")
+    assert mcp_discovery._is_transient_discovery_error(httpx.WriteError("reset", request=request))
+    assert mcp_discovery._is_transient_discovery_error(ConnectionResetError())
+
+
+def test_http_auth_error_is_not_transient() -> None:
+    request = httpx.Request("POST", "https://mcp.example.com")
+    response = httpx.Response(401, request=request)
+    error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
+    assert not mcp_discovery._is_transient_discovery_error(error)
 
 
 @pytest.mark.asyncio
