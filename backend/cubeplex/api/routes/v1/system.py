@@ -31,4 +31,5 @@ async def get_system_info(
         password_policy=get_password_policy(),  # type: ignore[arg-type]
         edition=get_edition(),
         features=get_features(),
+        public_base_url=str(config.get("public_base_url", "")).rstrip("/"),
     )

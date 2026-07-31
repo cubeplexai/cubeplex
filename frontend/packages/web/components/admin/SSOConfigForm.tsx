@@ -18,10 +18,13 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { Copy, Search } from 'lucide-react'
+import useSWR from 'swr'
 import {
   ApiError,
   SSO_PUBLIC_BASE,
   createApiClient,
+  fetchSystemInfo,
+  type SystemInfoResponse,
   createSsoConnection,
   discoverOidcEndpoints,
   updateSsoConnection,
@@ -207,6 +210,24 @@ function originOf(): string {
   return window.location.origin
 }
 
+/**
+ * Origin to advertise to the identity provider.
+ *
+ * Must be the backend's `public_base_url`, not the browser's origin: the IdP
+ * calls the API directly, and the two differ whenever the SPA is served from a
+ * different host or port (the local-dev default). Falling back to the browser
+ * origin keeps the field populated if the backend has not been configured, which
+ * is the same value it used to show unconditionally.
+ */
+function useIdpOrigin(): string {
+  const { data } = useSWR<SystemInfoResponse>(
+    '/api/v1/system/info',
+    () => fetchSystemInfo(createApiClient('')),
+    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false },
+  )
+  return data?.public_base_url || originOf()
+}
+
 async function copyToClipboard(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
@@ -227,8 +248,8 @@ export function SSOConfigForm({ connection, orgSlug, onUpdated }: SSOConfigFormP
 
   const isEdit = connection !== null
 
-  // Deterministic SP URLs — mirror backend/api/routes/v1/sso.py.
-  const origin = originOf()
+  // Deterministic SP URLs — mirror ee/src/cubeplex_ee/sso/routes.py.
+  const origin = useIdpOrigin()
   // These three are copied by an administrator into their identity provider, so
   // they must track the backend mount exactly. SSO_PUBLIC_BASE is the single
   // source; the backend's half is routes.PUBLIC_BASE_PATH.
@@ -556,6 +577,7 @@ export function SSOConfigForm({ connection, orgSlug, onUpdated }: SSOConfigFormP
               label={t('oidc.redirectUri')}
               value={redirectUri}
               help={t('oidc.redirectUriHelp')}
+              testId="sso-redirect-uri"
             />
           </div>
         </section>
@@ -760,7 +782,17 @@ function FieldRow({
   )
 }
 
-function CopyField({ label, value, help }: { label: string; value: string; help?: string }) {
+function CopyField({
+  label,
+  value,
+  help,
+  testId,
+}: {
+  label: string
+  value: string
+  help?: string
+  testId?: string
+}) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
@@ -768,6 +800,7 @@ function CopyField({ label, value, help }: { label: string; value: string; help?
         <Input
           value={value}
           readOnly
+          data-testid={testId}
           className="font-mono text-xs"
           onFocus={(e) => e.target.select()}
         />

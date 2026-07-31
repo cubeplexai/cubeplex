@@ -205,7 +205,7 @@ async def test_unserviceable_sso_log_separates_active_from_testing(
 
     from cubeplex.auth.external_login import report_unserviceable_sso
 
-    rows = [("org-a", "active"), ("org-t", "testing")]
+    rows = [("acme", "active"), ("beta-testing-co", "testing")]
     result = MagicMock()
     result.all.return_value = rows
     session = AsyncMock()
@@ -215,14 +215,19 @@ async def test_unserviceable_sso_log_separates_active_from_testing(
         with caplog.at_level(logging.ERROR, logger="cubeplex.auth.external_login"):
             affected = await report_unserviceable_sso(session)
 
-    assert affected == ["org-a", "org-t"]
+    assert affected == ["acme", "beta-testing-co"]
 
-    active_line = next(rec.getMessage() for rec in caplog.records if "org-a" in rec.getMessage())
-    testing_line = next(rec.getMessage() for rec in caplog.records if "org-t" in rec.getMessage())
+    active_line = next(rec.getMessage() for rec in caplog.records if "acme" in rec.getMessage())
+    testing_line = next(
+        rec.getMessage() for rec in caplog.records if "beta-testing-co" in rec.getMessage()
+    )
     assert active_line is not testing_line, "the two statuses must be reported separately"
 
     assert "cannot sign in at all" in active_line
-    assert "disable-sso" in active_line, "the locked-out case needs the recovery command"
+    # The command has to be runnable as printed: the console script is
+    # `cubeplex`, the flag is --org-slug, and the value must be a slug the
+    # operator can actually pass — not the org id the query used to log.
+    assert "cubeplex admin disable-sso --org-slug acme" in active_line
     assert "unaffected" in testing_line
     assert "disable-sso" not in testing_line, "no urgent action for a testing connection"
 

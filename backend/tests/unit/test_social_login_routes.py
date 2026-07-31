@@ -238,3 +238,132 @@ async def test_forced_sso_blocks_google_login_for_member_of_sso_org(
     assert exc_info.value.status_code == 403
     assert isinstance(exc_info.value.detail, dict)
     assert exc_info.value.detail["code"] == "sso_required"
+
+
+# --- the callback driven to completion --------------------------------------
+#
+# Every other google_callback test above rejects before the token exchange —
+# bad protocol, missing nonce, missing PKCE. None of them reach resolve_identity,
+# the forced-SSO guard, or the cookie issue, so deleting any of those three from
+# the callback left the whole suite green. These two drive the real path with
+# only exchange_code (the outer IdP call) stubbed.
+
+
+@pytest_asyncio.fixture
+def _google_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_get = config.get
+
+    # dynaconf's get() takes extra kwargs (parent=...), so pass them through
+    # rather than pinning a signature that isn't ours.
+    def fake_get(key: str, default: Any = None, *args: Any, **kwargs: Any) -> Any:
+        overrides = {
+            "social_login.google.enabled": True,
+            "social_login.google.client_id": "test-client-id",
+            "social_login.google.client_secret": "test-secret",
+        }
+        if key in overrides:
+            return overrides[key]
+        return real_get(key, default, *args, **kwargs)
+
+    monkeypatch.setattr(config, "get", fake_get)
+
+
+async def _drive_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    session: Any,
+    user_manager: Any,
+    redis: fakeredis.aioredis.FakeRedis,
+    email: str,
+) -> Any:
+    """Issue real state + PKCE, stub only the IdP exchange, run the callback."""
+    from cubeplex.sso.oidc import OIDCUserInfo
+
+    async def fake_exchange(cfg: Any, **kwargs: Any) -> OIDCUserInfo:
+        return OIDCUserInfo(
+            sub="google-sub-real",
+            email=email,
+            email_verified=True,
+            name="Real User",
+            claims={"name": "Real User"},
+        )
+
+    monkeypatch.setattr("cubeplex.api.routes.v1.social_login.exchange_code", fake_exchange)
+
+    store = _store(redis)
+    state = await store.issue(
+        sso_connection_id=None, protocol="google", org_id=None, oidc_nonce="n"
+    )
+    await store.attach_pkce(state=state, verifier="verifier-123")
+
+    return await google_callback(
+        code="auth-code",
+        state=state,
+        request=_make_request(redis),
+        session=session,
+        user_manager=user_manager,
+    )
+
+
+async def test_google_callback_completes_and_issues_a_session(
+    sso_session: Any,
+    sso_user_manager: Any,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+    _google_enabled: None,
+) -> None:
+    """The whole open-source callback: exchange -> resolve_identity -> forced-SSO
+    check -> cookie + redirect. This is the path that reaches into
+    cubeplex.auth.external_login, which the SSO relocation moved."""
+    resp = await _drive_callback(
+        monkeypatch,
+        session=sso_session,
+        user_manager=sso_user_manager,
+        redis=fake_redis,
+        email="brand-new@example.com",
+    )
+
+    assert resp.status_code == 302
+    assert resp.headers.get("location", "").startswith("http")
+    set_cookie = resp.headers.getlist("set-cookie")
+    assert set_cookie, "a completed social login must issue the session cookie"
+
+
+async def test_google_callback_is_blocked_by_forced_sso(
+    sso_session: Any,
+    sso_user_manager: Any,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+    monkeypatch: pytest.MonkeyPatch,
+    _google_enabled: None,
+) -> None:
+    """Forced SSO must survive the relocation as an actual callback behaviour.
+
+    The sibling test above asserts enforce_forced_sso_for_user in isolation, which
+    stays green even if the callback stops calling it. This one fails if the call
+    is removed.
+    """
+    org, user = await make_org_with_user(email="locked@enterprise.com")
+    sso_session.add(
+        SSOConnection(
+            org_id=org.id,
+            protocol="oidc",
+            display_name="Enterprise OIDC",
+            status="active",
+            provisioning="auto",
+            config={},
+        )
+    )
+    await sso_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _drive_callback(
+            monkeypatch,
+            session=sso_session,
+            user_manager=sso_user_manager,
+            redis=fake_redis,
+            email=user.email,
+        )
+    assert exc_info.value.status_code == 403
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["code"] == "sso_required"

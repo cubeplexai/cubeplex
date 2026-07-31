@@ -24,6 +24,7 @@ from cubeplex_ee.sso.routes import (  # noqa: E402
     sso_oidc_callback,
     sso_saml_acs,
 )
+from fastapi import HTTPException  # noqa: E402
 
 from cubeplex.models import Organization, SSOConnection, User  # noqa: E402
 from cubeplex.sso.state import SSOStateStore  # noqa: E402
@@ -293,3 +294,193 @@ async def test_saml_acs_rejects_non_saml_state(
 
 
 # --- forced SSO enforcement ------------------------------------------------
+
+
+# --- the enterprise callback driven to completion ---------------------------
+#
+# The handler tests above stop at malformed state, so none of them reach the
+# handoff this relocation created: EE resolves the identity, then calls back into
+# the core module for forced-SSO enforcement and cookie issue. Only exchange_code
+# — the outer IdP call — is stubbed here.
+#
+# Both cases sign in a user who is *already* a member of the connection's org.
+# That is not just convenience: `uq_org_membership_owner` is declared with
+# `postgresql_where`, which SQLite ignores, so under the unit-test engine it
+# degrades into a plain unique index on org_id and no org can hold a second
+# member. Auto-provisioning a new user into an existing org is therefore only
+# testable against Postgres.
+
+
+async def _drive_oidc_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    session: Any,
+    user_manager: Any,
+    redis: fakeredis.aioredis.FakeRedis,
+    conn: SSOConnection,
+    email: str,
+) -> Any:
+    from cubeplex_ee.sso import routes
+
+    from cubeplex.sso.oidc import OIDCUserInfo
+
+    async def fake_exchange(cfg: Any, **kwargs: Any) -> OIDCUserInfo:
+        return OIDCUserInfo(
+            sub="ent-sub-1",
+            email=email,
+            email_verified=True,
+            name="Enterprise User",
+            claims={"sub": "ent-sub-1", "email": email, "name": "Enterprise User"},
+        )
+
+    monkeypatch.setattr(routes, "exchange_code", fake_exchange)
+
+    async def fake_secret(request: Any, session: Any, conn: Any) -> str:
+        return "client-secret"
+
+    monkeypatch.setattr(routes, "_get_client_secret", fake_secret)
+
+    # Same secret the handler's own store uses, or consume() rejects the state.
+    from cubeplex.config import config
+
+    store = SSOStateStore(
+        redis=redis, secret_key=config.get("auth.jwt_secret", "CHANGE_ME").encode()
+    )
+    state = await store.issue(
+        sso_connection_id=conn.id, protocol="oidc", org_id=conn.org_id, oidc_nonce="n"
+    )
+    await store.attach_pkce(state=state, verifier="verifier-123")
+
+    return await routes.sso_oidc_callback(
+        code="auth-code",
+        state=state,
+        request=_make_request(redis),
+        session=session,
+        user_manager=user_manager,
+    )
+
+
+async def test_enterprise_oidc_callback_completes_and_issues_a_session(
+    sso_session: Any,
+    sso_user_manager: Any,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    org_with_oidc_sso: tuple[Organization, SSOConnection],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exchange -> mapping -> resolve_identity -> forced-SSO -> cookie + redirect.
+
+    resolve_identity, enforce_forced_sso_for_user and login_and_redirect all live
+    in the open-source package; this is the only test that proves the licensed
+    callback still reaches them after the split.
+    """
+    _org, conn = org_with_oidc_sso
+    resp = await _drive_oidc_callback(
+        monkeypatch,
+        session=sso_session,
+        user_manager=sso_user_manager,
+        redis=fake_redis,
+        conn=conn,
+        email="admin@acme.com",  # the org_with_oidc_sso fixture's existing member
+    )
+    assert resp.status_code == 302
+    assert resp.headers.getlist("set-cookie"), "a completed SSO login must set the session cookie"
+
+
+async def test_enterprise_oidc_callback_passes_its_own_org_to_forced_sso(
+    sso_session: Any,
+    sso_user_manager: Any,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    org_with_oidc_sso: tuple[Organization, SSOConnection],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """allowed_org_id must be the connection's org, not None.
+
+    Passing None — the value the Google path uses — would make every enterprise
+    login through a forced-SSO org fail, because the org that forces SSO is the
+    very one the user is authenticating against.
+    """
+    _org, conn = org_with_oidc_sso
+    assert conn.status == "active", "fixture must be a forced-SSO connection"
+
+    resp = await _drive_oidc_callback(
+        monkeypatch,
+        session=sso_session,
+        user_manager=sso_user_manager,
+        redis=fake_redis,
+        conn=conn,
+        email="admin@acme.com",
+    )
+    # A 302 to the workspace, not the SSO error page.
+    assert resp.status_code == 302
+    assert "/sso/callback?error=" not in resp.headers.get("location", "")
+
+
+async def test_enterprise_callback_refuses_a_forced_sso_user_from_another_org(
+    sso_session: Any,
+    sso_user_manager: Any,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member of forced-SSO org A must not sign in through org B's *testing* IdP.
+
+    This is the case that makes deleting the enforce_forced_sso_for_user call
+    detectable. The sibling tests sign in a member of the connection's own org,
+    where the guard is meant to let them through, so removing it leaves them green.
+
+    Org B's connection is `testing` on purpose. `forced_orgs` counts only `active`
+    connections, so provisioning the victim into B does not make B satisfy their
+    forced-SSO obligation — and an admin's half-configured test connection must
+    not become a way around org A's requirement. With B `active` instead, the
+    guard correctly permits the login, which is why that variant proves nothing.
+    """
+    org_a, victim = await make_org_with_user(email="victim@corp-a.com")
+    sso_session.add(
+        SSOConnection(
+            org_id=org_a.id,
+            protocol="oidc",
+            display_name="Corp A SSO",
+            status="active",
+            provisioning="auto",
+            config={},
+        )
+    )
+
+    # Org B is created without a member: SQLite collapses the partial
+    # owner-uniqueness index into a plain one (see the note above), so an org that
+    # already has a member cannot take the provisioned victim.
+    org_b = Organization(name="Corp B", slug="corp-b")
+    sso_session.add(org_b)
+    await sso_session.flush()
+    conn_b = SSOConnection(
+        org_id=org_b.id,
+        protocol="oidc",
+        display_name="Corp B SSO",
+        status="testing",
+        provisioning="auto",
+        config={
+            "issuer": "https://idp-b.example.com",
+            "authorization_endpoint": "https://idp-b.example.com/authorize",
+            "token_endpoint": "https://idp-b.example.com/token",
+            "jwks_uri": "https://idp-b.example.com/jwks",
+            "client_id": "corp-b-client",
+        },
+    )
+    sso_session.add(conn_b)
+    await sso_session.commit()
+    await sso_session.refresh(conn_b)
+
+    # enforce_forced_sso_for_user raises HTTPException(403); the callback does not
+    # catch it, so it propagates rather than becoming an error redirect.
+    with pytest.raises(HTTPException) as exc_info:
+        await _drive_oidc_callback(
+            monkeypatch,
+            session=sso_session,
+            user_manager=sso_user_manager,
+            redis=fake_redis,
+            conn=conn_b,
+            email=victim.email,
+        )
+    assert exc_info.value.status_code == 403
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["code"] == "sso_required"

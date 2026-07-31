@@ -251,4 +251,41 @@ test.describe('Admin SSO Authentication page', () => {
     await expect.poll(() => unlinkCalled, { timeout: 5_000 }).toBe(true)
     await expect(page.getByText('alice@example.com')).toHaveCount(0)
   })
+
+  test('the IdP redirect URI is built from the backend origin, not the browser origin', async ({
+    page,
+  }) => {
+    // The two differ in every deployment where the SPA is served separately from
+    // the API — the local-dev default. The form used to render
+    // window.location.origin, so an administrator copied a redirect_uri the IdP
+    // would never call and enterprise login simply failed. Only a rendered-page
+    // check catches this: the backend-side tests compare paths and never see the
+    // origin the browser would substitute.
+    const BACKEND_ORIGIN = 'https://api.cubeplex.example'
+
+    await registerAndLand(page)
+    await mockNoSso(page)
+    await page.route('**/api/v1/system/info', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          deployment_mode: 'multi_tenant',
+          version: '0.0.0-test',
+          edition: 'ee',
+          features: [],
+          public_base_url: BACKEND_ORIGIN,
+        }),
+      })
+    })
+
+    await page.goto('/admin/authentication')
+    await expect(page.getByTestId('sso-empty')).toBeVisible({ timeout: 10_000 })
+    await page.getByTestId('sso-configure').click()
+    await expect(page.getByTestId('sso-oidc-section')).toBeVisible()
+
+    await expect(page.getByTestId('sso-redirect-uri')).toHaveValue(
+      `${BACKEND_ORIGIN}/api/v1/_extensions/cubeplex_ee/sso/oidc/callback`,
+    )
+  })
 })
