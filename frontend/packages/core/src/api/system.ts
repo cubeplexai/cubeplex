@@ -8,6 +8,12 @@ export interface SystemInfoResponse {
   /** Backend-computed edition. The frontend holds no license logic. */
   edition?: 'oss' | 'ee'
   features?: string[]
+  /**
+   * Origin the backend hands identity providers, from `public_base_url`.
+   * Distinct from the browser's origin whenever the SPA is served separately
+   * from the API — which is the local-dev default (:3000 vs :8000).
+   */
+  public_base_url?: string
 }
 
 export async function fetchSystemInfo(client: ApiClient): Promise<SystemInfoResponse> {

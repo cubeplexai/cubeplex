@@ -18,3 +18,9 @@ class SystemInfoResponse(BaseModel):
     # frontend never holds license logic — it only mirrors these two fields.
     edition: Literal["oss", "ee"] = "oss"
     features: list[str] = []
+    # The origin the backend tells identity providers to call back on, from
+    # `public_base_url`. The admin SSO form must build its copy-paste IdP URLs
+    # from this, not from the browser's origin: those differ whenever the SPA is
+    # served from somewhere other than the API (local dev is :3000 vs :8000), and
+    # a redirect_uri the IdP does not recognise fails the login.
+    public_base_url: str = ""

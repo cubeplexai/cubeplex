@@ -231,3 +231,73 @@ async def test_saml_metadata_advertises_an_acs_the_app_serves(
             )
     finally:
         await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")
+
+
+@pytest.mark.asyncio
+async def test_the_form_and_the_idp_would_receive_the_same_origin(
+    admin_client: tuple[httpx.AsyncClient, str],
+    _bypass_ssrf_guard: None,
+) -> None:
+    """Whole URLs, not just paths — the origin is where this used to be wrong.
+
+    The form built its copy-paste URLs from the browser's origin while the backend
+    hands the IdP `public_base_url`. Those differ whenever the SPA is served
+    separately from the API, which is the local-dev default (:3000 vs :8000), so
+    an administrator pasted a redirect_uri the IdP would never be called on. Path
+    comparison cannot see that; this compares the full string the form renders
+    against the full string the authorize request carries.
+    """
+    client, _ws_id = admin_client
+    info = (await client.get("/api/v1/system/info")).json()
+    form_origin = info["public_base_url"]
+    assert form_origin, "system/info must publish the origin the form renders"
+
+    created = await client.post(
+        "/api/v1/admin/_extensions/cubeplex_ee/sso",
+        json={
+            "protocol": "oidc",
+            "display_name": "Origin Agreement",
+            "config": {
+                "client_id": "oa-client",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/authorize",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            "client_secret": "oa-secret",
+        },
+    )
+    assert created.status_code == 201, created.text
+    sso_id = created.json()["id"]
+    try:
+        assert (
+            await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/activate")
+        ).status_code == 200
+
+        from sqlalchemy import select
+
+        from cubeplex.models import Organization
+        from tests.e2e.billing_fixtures import _db_session
+
+        async with _db_session() as db:
+            slug = (
+                await db.execute(
+                    select(Organization.slug).where(
+                        Organization.id == created.json()["org_id"]  # type: ignore[arg-type]
+                    )
+                )
+            ).scalar_one()
+
+        resp = await client.post(f"{PUBLIC_BASE_PATH}/initiate", json={"org_slug": slug})
+        assert resp.status_code == 200, resp.text
+        sent_to_idp = parse_qs(urlparse(resp.json()["redirect_url"]).query)["redirect_uri"][0]
+
+        # Exactly what SSOConfigForm renders.
+        shown_in_form = f"{form_origin}{PUBLIC_BASE_PATH}/oidc/callback"
+        assert shown_in_form == sent_to_idp, (
+            f"the admin form would show {shown_in_form!r} but the IdP is sent "
+            f"{sent_to_idp!r}; a login configured from the form would be rejected"
+        )
+    finally:
+        await client.post(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}/deactivate")
+        await client.delete(f"/api/v1/admin/_extensions/cubeplex_ee/sso/{sso_id}")

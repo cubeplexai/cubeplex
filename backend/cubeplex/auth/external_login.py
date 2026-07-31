@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.auth.jwt import auth_backend
 from cubeplex.config import config
 from cubeplex.models.membership import Membership
+from cubeplex.models.organization import Organization
 from cubeplex.models.organization_membership import OrganizationMembership
 from cubeplex.models.sso_connection import SSOConnection
 from cubeplex.models.user import User
@@ -54,9 +55,10 @@ def frontend_base_url() -> str:
 async def report_unserviceable_sso(session: AsyncSession) -> list[str]:
     """Log loudly when SSO is configured but nothing can serve it.
 
-    Returns every affected org id — all of them, not the handful the log names —
-    so a caller can act on the set and a test can assert about one org without
-    depending on what else is in the database. Empty when all is well.
+    Returns every affected org **slug** — all of them, not the handful the log
+    names — so a caller can act on the set and a test can assert about one org
+    without depending on what else is in the database. Empty when all is well.
+    Slugs rather than ids because the recovery command takes a slug.
 
     Reports ``active`` and ``testing`` separately: only ``active`` makes
     ``enforce_forced_sso_for_user`` refuse a password, so only those users are
@@ -87,11 +89,14 @@ async def report_unserviceable_sso(session: AsyncSession) -> list[str]:
     if is_ee_installed():
         return []
 
+    # Slugs, not ids: the recovery command below takes --org-slug, and an
+    # operator reading this during an outage has no way to turn one into the
+    # other. Logging the id alone made the instruction impossible to follow.
     rows = (
         await session.execute(
-            select(SSOConnection.org_id, SSOConnection.status).where(  # type: ignore[call-overload]
-                SSOConnection.status.in_(["active", "testing"])  # type: ignore[attr-defined]
-            )
+            select(Organization.slug, SSOConnection.status)  # type: ignore[call-overload]
+            .join(SSOConnection, SSOConnection.org_id == Organization.id)
+            .where(SSOConnection.status.in_(["active", "testing"]))  # type: ignore[attr-defined]
         )
     ).all()
     if not rows:
@@ -111,10 +116,11 @@ async def report_unserviceable_sso(session: AsyncSession) -> list[str]:
             "is not installed. No route can serve their SSO, and password login is "
             "still refused for their members, so those users cannot sign in at all. "
             "Reinstall cubeplex-ee with a valid license key, or run "
-            "`cubeplex-cli admin disable-sso <org-slug>` for each org to restore "
-            "password login.",
+            "`%s` to restore password login.",
             len(stranded),
             _summarize(stranded),
+            " && ".join(f"cubeplex admin disable-sso --org-slug {slug}" for slug in stranded[:3])
+            + (" && ..." if len(stranded) > 3 else ""),
         )
     if testing_only:
         logger.error(

@@ -44,7 +44,7 @@ async def test_active_connection_without_the_package_is_reported() -> None:
             # Asserted about this org only. Other tests write active rows into the
             # same database, so asserting on the whole set — or on the log text,
             # which names just the first few — would pass or fail by run order.
-            assert "org-downgrade-1" in await report_unserviceable_sso(session)
+            assert "downgrade-1" in await report_unserviceable_sso(session)
         finally:
             await session.execute(
                 delete(SSOConnection).where(
@@ -76,7 +76,7 @@ async def test_inactive_connection_is_not_reported() -> None:
         session.add(conn)
         await session.commit()
         try:
-            assert "org-downgrade-2" not in await report_unserviceable_sso(session)
+            assert "downgrade-2" not in await report_unserviceable_sso(session)
         finally:
             await session.execute(
                 delete(SSOConnection).where(
