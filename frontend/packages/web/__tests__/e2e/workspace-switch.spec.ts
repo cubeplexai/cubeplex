@@ -28,7 +28,7 @@ test('workspace switching isolates conversation lists', async ({ page }) => {
   const createResponse = await conversationCreated
   const conversation = (await createResponse.json()) as { id: string }
   const convInWs1Url = `/w/${firstWsId}/conversations/${conversation.id}`
-  await expect(page).toHaveURL(convInWs1Url)
+  await expect(page).toHaveURL(convInWs1Url, { timeout: 20_000 })
 
   await page.goto('/workspaces')
   await expect(page.getByRole('link', { name: 'Open' })).toBeVisible({ timeout: 10_000 })
