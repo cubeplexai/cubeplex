@@ -149,7 +149,11 @@ Empty / unset → upstream.
 
 The sandbox image is heavy, so it's built separately (`sandbox-image.yml`) only
 when its inputs change, tracked by `deploy/images/sandbox/VERSION` and tagged
-`sandbox-v<version>`. At release, `release.yml` **promotes** that built image to
+`sandbox-v<version>`. That version is `<app semver>-<YYMMDD>`, e.g.
+`0.3.0-260729`: the semver says which application release the image belongs to
+and must match it, while the date lets the image be rebuilt more than once
+within a release without colliding with an already-published tag. At release,
+`release.yml` **promotes** that built image to
 `cubeplex-sandbox:v<semver>` (a tag alias, no rebuild) so all four service
 images share one release version. The chart's default sandbox image is
 therefore `cubeplex-sandbox:v<appVersion>`, matching the rest.

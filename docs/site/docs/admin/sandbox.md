@@ -116,7 +116,13 @@ Consequences of this design:
 - **The real secret never exists inside the sandbox.** Code, files, and execution logs only ever see the placeholder — so secrets cannot end up in the agent's output or run logs.
 - **Substitution happens outside the sandbox**, inside the egress proxy, so the secret is never written to any sandbox process or log.
 - **Encrypted at rest.** The value lives in the credential vault and is only decrypted by the proxy at request time, for the verified sandbox, for an allowed host.
-- **A leaked placeholder is useless.** It resolves only for its own sandbox and its allowed hosts, and is revoked when the run ends.
+- **A leaked placeholder is useless.** It resolves only for its own sandbox and its allowed hosts, and is revoked when that sandbox is torn down.
+
+### Variables in the sandbox terminal
+
+The same variables are available in the sandbox **Terminal** panel, so a command you run by hand behaves like one the agent runs. Secrets appear there as their placeholder, exactly as they do to agent code.
+
+A terminal session reads the variables once, when it opens. If you add or change a variable while a terminal is open, click **refresh** on the panel — the reconnected session picks up the new set. Sessions already open keep working with what they had.
 
 ### Common use cases
 

@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -208,3 +209,40 @@ async def test_exchange_malformed_placeholder_returns_422(
         headers={"x-egress-dev-token": _DEV_TOKEN, "x-egress-sandbox-id": sandbox_id},
     )
     assert r.status_code == 422, r.text
+
+
+async def test_exchange_works_for_a_superseded_generation(
+    egress_client: tuple[httpx.AsyncClient, str, str],
+) -> None:
+    """Re-attaching a sandbox mints a newer placeholder generation. The older one
+    must keep exchanging: a terminal started before the re-attach froze that copy
+    in its environ and can never be handed the newer one."""
+    client, placeholder, sandbox_id = egress_client
+
+    async with _cubeplex_db.async_session_maker() as session:
+        prior = (
+            await session.execute(
+                select(EgressRef).where(EgressRef.sandbox_id == sandbox_id)  # type: ignore[arg-type]
+            )
+        ).scalar_one()
+        newer = mint_placeholder()
+        session.add(
+            EgressRef(
+                ref_hash=hash_placeholder(newer),
+                sandbox_id=sandbox_id,
+                org_id=prior.org_id,
+                workspace_id=prior.workspace_id,
+                user_id=prior.user_id,
+                run_id=None,
+                bindings=[{**b, "ref_hash": hash_placeholder(newer)} for b in prior.bindings],
+            )
+        )
+        await session.commit()
+
+    r = await client.post(
+        "/api/v1/internal/egress/exchange",
+        json={"placeholder": placeholder, "host": "api.github.com"},
+        headers={"x-egress-dev-token": _DEV_TOKEN, "x-egress-sandbox-id": sandbox_id},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["secret"] == "secret_value_e2e"

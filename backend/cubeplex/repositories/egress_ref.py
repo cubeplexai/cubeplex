@@ -1,6 +1,7 @@
 """Repository for EgressRef. Lookups by ref_hash are global (the exchange
 caller is a sidecar, not an org-scoped user); writes/revokes are by sandbox."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
@@ -43,6 +44,33 @@ class EgressRefRepository:
             .values(status="revoked")
         )
         await self.session.commit()
+
+    async def extend_for_hashes(self, ref_hashes: Sequence[str], expires_at: datetime) -> int:
+        """Renew one specific generation. Returns how many rows were still valid.
+
+        Unlike :meth:`extend_expiry_for_sandbox` this names the refs instead of the
+        sandbox, so a caller renews the generation it is actually holding rather
+        than every generation the sandbox ever minted. Expired-but-valid rows are
+        renewed on purpose — that is the same revival the sandbox-wide keepalive
+        relies on, just narrowed to one generation.
+
+        The count lets the caller notice that its generation was revoked (a
+        teardown it didn't see) and mint a fresh one instead of handing out
+        placeholders the exchange will reject.
+        """
+        if not ref_hashes:
+            return 0
+        result = await self.session.execute(
+            update(EgressRef)
+            .where(
+                EgressRef.ref_hash.in_(ref_hashes),  # type: ignore[attr-defined]
+                EgressRef.status == "valid",  # type: ignore[arg-type]
+            )
+            .values(expires_at=expires_at)
+        )
+        await self.session.commit()
+        # An UPDATE always yields a CursorResult; the base Result type doesn't say so.
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def extend_expiry_for_sandbox(self, sandbox_id: str, expires_at: datetime) -> None:
         """Push out expires_at for a sandbox's still-valid refs.

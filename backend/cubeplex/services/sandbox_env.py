@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from cubeplex.models import SandboxEnvVar
@@ -12,6 +13,11 @@ from cubeplex.services.credential import CredentialService
 
 SANDBOX_ENV_KIND = "sandbox_env"
 _SCOPE_RANK = {"user": 3, "workspace": 2, "org": 1}
+
+# Names reach the sandbox as shell code (see the terminal's sandbox-env.sh), so
+# anything outside a POSIX name is an injection vector — and an org/workspace
+# entry is authored by an admin but runs in every member's sandbox.
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class SandboxEnvShapeError(ValueError):
@@ -34,6 +40,11 @@ def _validate_scope_shape(scope: str, workspace_id: str | None, user_id: str | N
             raise SandboxEnvShapeError("scope='user' requires workspace_id and user_id")
     else:
         raise SandboxEnvShapeError(f"unknown scope: {scope!r}")
+
+
+def _validate_env_name(env_name: str) -> None:
+    if not _ENV_NAME_RE.fullmatch(env_name):
+        raise SandboxEnvShapeError(f"env_name {env_name!r} must match [A-Za-z_][A-Za-z0-9_]*")
 
 
 def _validate_value_shape(
@@ -93,6 +104,7 @@ class SandboxEnvService:
         header_names: list[str] | None,
         secret_value: str | None,
     ) -> str:
+        _validate_env_name(env_name)
         _validate_scope_shape(scope, workspace_id, user_id)
         _validate_value_shape(is_secret, hosts, secret_value, None)
 
