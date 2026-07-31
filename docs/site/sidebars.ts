@@ -104,6 +104,8 @@ const sidebars: SidebarsConfig = {
         'admin/skills-management',
         'admin/sandbox',
         'admin/cost-tracking',
+        'admin/editions',
+        'admin/authentication',
       ],
     },
   ],
