@@ -22,6 +22,7 @@ import pytest
 
 pytest.importorskip("cubeplex_ee", reason="enterprise SSO lives in the optional package")
 
+from cubeplex_ee.sso.admin_routes import router as admin_router  # noqa: E402
 from cubeplex_ee.sso.routes import PUBLIC_BASE_PATH  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -55,6 +56,34 @@ async def test_declared_base_path_matches_where_the_router_is_mounted(
             f"PUBLIC_BASE_PATH is {PUBLIC_BASE_PATH!r} but nothing is mounted at "
             f"{PUBLIC_BASE_PATH}{suffix}; the IdP would be handed a 404"
         )
+
+
+@pytest.mark.asyncio
+async def test_frontend_and_backend_agree_on_the_admin_base(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """The admin base is the other half, and nothing else pins it.
+
+    admin-sso.spec.ts mocks its requests with globs written as the same literal,
+    so a find-replace that moves the constant and the mocks together leaves the
+    Playwright suite green while the backend still serves the old path.
+    """
+    client, _ws_id = admin_client
+    schema = (await client.get("/openapi.json")).json()
+
+    source = _FRONTEND_SSO_TS.read_text()
+    match = re.search(r"export const SSO_ADMIN_BASE = '([^']+)'", source)
+    assert match is not None, f"SSO_ADMIN_BASE not found in {_FRONTEND_SSO_TS}"
+    admin_base = match.group(1)
+
+    assert admin_base in schema["paths"], (
+        f"frontend SSO_ADMIN_BASE is {admin_base!r} but nothing is served there"
+    )
+    # And it is genuinely this package's admin router, not some other match.
+    assert f"{admin_base}/discover-oidc" in schema["paths"]
+    assert any(r.path == "/sso/discover-oidc" for r in admin_router.routes), (
+        "admin router prefix changed; the frontend constant would need to follow"
+    )
 
 
 @pytest.mark.asyncio
