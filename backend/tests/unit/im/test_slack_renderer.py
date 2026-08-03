@@ -72,6 +72,49 @@ async def test_dispatch_stream_skips_empty_segment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_hitl_streams_new_message() -> None:
+    """After ask_user is answered, stream post_hitl_content as a new message.
+
+    Regression: offset was set to len(streaming_content) while only reading
+    streaming_content, so every post-HITL edit was empty (invalid_blocks).
+    """
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    state.card_state.streaming_content = "Pick one:"
+    d, conn = _make_dispatcher(state)
+    await d.dispatch_create(state)
+
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Pick one?",
+        choices=[("A", "a", "default")],
+        question_id="qid",
+        answer_key="k",
+        resolved_choice="A",
+    )
+    state.card_state.hitl_resolved = True
+    await d.dispatch_patch(state)
+    assert state.bot_message_id is None
+    assert d.sent_char_offset == 0
+
+    conn.send_message.reset_mock()
+    conn.edit_message.reset_mock()
+    state.card_state.post_hitl_content = "那"
+    ok = await d.dispatch_stream(state, "那")
+    assert ok is True
+    conn.send_message.assert_awaited()
+    assert "那" in conn.send_message.await_args.args[0]
+
+    state.card_state.post_hitl_content = "那就玩真心话大冒险吧"
+    ok = await d.dispatch_stream(state, "那就玩真心话大冒险吧")
+    assert ok is True
+    conn.edit_message.assert_awaited()
+    assert "那就玩真心话大冒险吧" in conn.edit_message.await_args.args[1]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_finalize() -> None:
     state = _make_state()
     state.card_state.streaming_content = "Final answer"
