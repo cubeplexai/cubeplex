@@ -68,10 +68,10 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
-    "@types/react": "^19.2.14",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
     "@vitest/ui": "^4.1.10",
-    "jsdom": "^30.0.0",
+    "jsdom": "^30.0.1",
     "react": "19.2.8",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
