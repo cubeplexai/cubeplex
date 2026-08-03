@@ -292,7 +292,11 @@ class SlackConnector:
             return False
 
     async def add_reaction(self, message_ts: str, emoji: str) -> bool:
-        """Add an emoji reaction to a message."""
+        """Add an emoji reaction to a message.
+
+        ``already_reacted`` is treated as success — callers may re-add
+        defensively after a partial path.
+        """
         if self._client is None or not self._channel_id:
             return False
         try:
@@ -302,12 +306,18 @@ class SlackConnector:
                 name=emoji,
             )
             return True
-        except Exception:
+        except Exception as exc:
+            if self._slack_api_error_is(exc, "already_reacted"):
+                return True
             logger.opt(exception=True).warning("[Slack] add_reaction failed")
             return False
 
     async def remove_reaction(self, message_ts: str, emoji: str) -> bool:
-        """Remove an emoji reaction from a message."""
+        """Remove an emoji reaction from a message.
+
+        ``no_reaction`` is treated as success — finalize and
+        ``on_processing_complete`` may both clear the hourglass.
+        """
         if self._client is None or not self._channel_id:
             return False
         try:
@@ -317,7 +327,9 @@ class SlackConnector:
                 name=emoji,
             )
             return True
-        except Exception:
+        except Exception as exc:
+            if self._slack_api_error_is(exc, "no_reaction"):
+                return True
             logger.opt(exception=True).warning("[Slack] remove_reaction failed")
             return False
 
@@ -397,3 +409,22 @@ class SlackConnector:
         """Check if an exception indicates a Slack rate-limit error."""
         msg = str(exc).lower()
         return "ratelimited" in msg or "rate_limited" in msg
+
+    @staticmethod
+    def _slack_api_error_is(exc: Exception, code: str) -> bool:
+        """True when ``exc`` is a SlackApiError whose ``error`` field is ``code``."""
+        data = getattr(exc, "response", None)
+        if data is None:
+            return code in str(exc)
+        # slack_sdk AsyncSlackResponse is mapping-like: data["error"] or .data
+        try:
+            if hasattr(data, "get"):
+                err = data.get("error")
+                if err == code:
+                    return True
+            body = getattr(data, "data", None)
+            if isinstance(body, dict) and body.get("error") == code:
+                return True
+        except Exception:
+            pass
+        return code in str(exc)
