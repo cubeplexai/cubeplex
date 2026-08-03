@@ -14,6 +14,19 @@ _SLACK_SECTION_LIMIT = 3000
 _SPLIT_THRESHOLD = 2800
 
 
+def _active_stream_text(card_state: Any) -> str:
+    """Text currently being streamed to Slack.
+
+    After HITL resolves, cubepi continues into ``post_hitl_content`` while
+    the pre-HITL answer stays in ``streaming_content``. Slack posts the
+    follow-up as a *new* message under the buttons, so we stream only the
+    post-HITL buffer (DingTalk concatenates; Slack/Discord reset the message).
+    """
+    if getattr(card_state, "hitl_resolved", False):
+        return str(card_state.post_hitl_content or "")
+    return str(card_state.streaming_content or "")
+
+
 class SlackOpDispatcher:
     """Dispatches outbound ops to Slack via Block Kit messages."""
 
@@ -30,7 +43,7 @@ class SlackOpDispatcher:
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
-        text = s.card_state.streaming_content
+        text = _active_stream_text(s.card_state)
         if not text:
             text = "..."
         current_segment = text[self.sent_char_offset :]
@@ -53,7 +66,7 @@ class SlackOpDispatcher:
         s = self._state
         if s.bot_message_id is None:
             return await self.dispatch_create(state)
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         current_segment = full_content[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
@@ -98,9 +111,12 @@ class SlackOpDispatcher:
             await self._send_pending_input_buttons(pending)
             self._pending_input_sent_id = pending_id
         if pending is not None and pending.resolved_choice is not None:
+            # New Slack message for the post-HITL answer — reset offset so we
+            # stream ``post_hitl_content`` from the start (not from the old
+            # pre-HITL streaming_content length, which made every edit empty).
             s.card_id = None
             s.bot_message_id = None
-            self.sent_char_offset = len(s.card_state.streaming_content)
+            self.sent_char_offset = 0
         return True
 
     async def _send_pending_input_buttons(self, pending: Any) -> None:
@@ -148,7 +164,7 @@ class SlackOpDispatcher:
 
     async def dispatch_finalize(self, state: Any) -> bool:
         s = self._state
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         if s.card_state.error:
             error_suffix = f"\n\n⚠️ {s.card_state.error}"
             full_content = (full_content + error_suffix) if full_content else error_suffix
