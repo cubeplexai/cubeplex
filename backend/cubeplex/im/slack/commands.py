@@ -1,10 +1,38 @@
-"""Slack slash commands: /link, /new, /reset."""
+"""Slack slash commands: /link, /new, /reset.
+
+Also exposes ``parse_link_command`` so the Socket Mode gateway can intercept
+plain-text ``/link`` / ``link`` messages (when the slash command is not
+registered in the Slack app console, or the user types it as a DM).
+"""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from loguru import logger
+
+# Slack auto-linkifies bare emails as ``<mailto:user@host|user@host>``
+# (or just ``<mailto:user@host>``). Unwrap before matching so typed and
+# auto-linked forms both work.
+_SLACK_MAILTO_RE = re.compile(
+    r"<mailto:([^|>]+)(?:\|[^>]*)?>",
+    re.IGNORECASE,
+)
+_LINK_RE = re.compile(
+    r"^\s*/?link\s+(\S+@\S+\.\S+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _unwrap_slack_mailto(text: str) -> str:
+    return _SLACK_MAILTO_RE.sub(r"\1", text)
+
+
+def parse_link_command(text: str) -> str | None:
+    """Extract email from a /link or link text command. None if not a match."""
+    m = _LINK_RE.match(_unwrap_slack_mailto(text or ""))
+    return m.group(1).strip().lower() if m else None
 
 
 def register_commands(
@@ -19,13 +47,17 @@ def register_commands(
     @app.command("/link")  # type: ignore[untyped-decorator]
     async def cmd_link(ack: Any, command: dict[str, Any], respond: Any) -> None:
         await ack()
-        email = (command.get("text") or "").strip()
+        raw_text = (command.get("text") or "").strip()
+        email = parse_link_command(f"/link {raw_text}") if raw_text else None
         if not email:
-            await respond(
-                "Usage: `/link you@example.com`",
-                response_type="ephemeral",
-            )
-            return
+            # Slash-command text is only the argument; accept bare email too.
+            email = _unwrap_slack_mailto(raw_text).strip().lower() if raw_text else ""
+            if not email or "@" not in email:
+                await respond(
+                    "Usage: `/link you@example.com`",
+                    response_type="ephemeral",
+                )
+                return
 
         sender_ref = command.get("user_id", "")
         if not sender_ref:

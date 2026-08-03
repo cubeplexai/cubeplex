@@ -132,6 +132,33 @@ class SlackGateway:
             format_reset_reply,
             parse_reset_command,
         )
+        from cubeplex.im.slack.commands import parse_link_command
+
+        gate_connector = SlackConnector(
+            bot_user_id=bot_user_id,
+            client=self._client,
+            channel_id=parsed.channel_id,
+            thread_ts=parsed.reply_to_id,
+        )
+
+        # Text-form /link (or bare ``link``) — intercept before identity gate
+        # so the user gets a bind URL instead of an agent reply. Needed when
+        # the Slack app has no slash-command registration, or the user types
+        # the command as a normal DM / @mention message.
+        link_email = parse_link_command(parsed.text)
+        if link_email is not None:
+            try:
+                await self._handle_text_link(
+                    email=link_email,
+                    sender_ref=parsed.sender_ref or parsed.sender_open_id or "",
+                    channel_id=parsed.channel_id,
+                    reply_to_id=parsed.reply_to_id,
+                    account=account,
+                    connector=gate_connector,
+                )
+            except Exception:
+                logger.exception("[Slack] /link handler failed for {}", parsed.platform_event_id)
+            return
 
         if parse_reset_command(parsed.text):
             try:
@@ -141,25 +168,13 @@ class SlackGateway:
                     channel_id=parsed.channel_id,
                     scope_key=parsed.scope_key,
                 )
-                gate = SlackConnector(
-                    bot_user_id=bot_user_id,
-                    client=self._client,
-                    channel_id=parsed.channel_id,
-                    thread_ts=parsed.reply_to_id,
-                )
-                await gate.send_to_chat(
+                await gate_connector.send_to_chat(
                     parsed.channel_id, parsed.reply_to_id, format_reset_reply(outcome)
                 )
             except Exception:
                 logger.exception("[Slack] /new handler failed for {}", parsed.platform_event_id)
             return
 
-        gate_connector = SlackConnector(
-            bot_user_id=bot_user_id,
-            client=self._client,
-            channel_id=parsed.channel_id,
-            thread_ts=parsed.reply_to_id,
-        )
         try:
             result = await ingest(
                 parsed,
@@ -175,6 +190,46 @@ class SlackGateway:
             )
         except Exception:
             logger.exception("[Slack] ingest failed for {}", parsed.platform_event_id)
+
+    async def _handle_text_link(
+        self,
+        *,
+        email: str,
+        sender_ref: str,
+        channel_id: str,
+        reply_to_id: str | None,
+        account: Any,
+        connector: SlackConnector,
+    ) -> None:
+        """Reply with an identity-link confirmation URL for a text /link command."""
+        if not sender_ref:
+            await connector.send_to_chat(
+                channel_id, reply_to_id, "Could not determine your user ID."
+            )
+            return
+        try:
+            from cubeplex.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
+
+            token = sign_link_token(
+                im_user_id=sender_ref,
+                email=email,
+                account_id=account.id,
+                workspace_id=account.workspace_id,
+                platform="slack",
+                secret=get_jwt_secret(),
+            )
+        except Exception:
+            logger.opt(exception=True).warning("[Slack] sign_link_token failed")
+            await connector.send_to_chat(channel_id, reply_to_id, "Failed to generate link.")
+            return
+
+        base = get_frontend_base_url()
+        url = f"{base}/im-link?token={token}"
+        await connector.send_to_chat(
+            channel_id,
+            reply_to_id,
+            f"Click to complete linking:\n{url}",
+        )
 
     async def stop(self) -> None:
         if self._handler is not None:

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from cubeplex.im.slack.connector import SlackConnector
 from cubeplex.im.types import DM_SCOPE_KEY
 
@@ -127,3 +131,33 @@ class TestSlackConnectorParseInbound:
         event = self.connector.parse_inbound(raw)
         assert event is not None
         assert event.inbound_message_id == "9999.1111"
+
+
+class TestSlackConnectorLifecycleHooks:
+    """Hourglass is added at tailer start (on_processing_start), matching
+    Feishu/Discord timing — not delayed until first streamed content."""
+
+    @pytest.mark.asyncio
+    async def test_processing_start_adds_hourglass(self) -> None:
+        from unittest.mock import AsyncMock
+
+        c = SlackConnector(bot_user_id="UBOT", channel_id="C1")
+        c.add_reaction = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        c.remove_reaction = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        state = SimpleNamespace(inbound_message_id="1234.5678")
+        await c.on_processing_start(state)
+        c.add_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
+        await c.on_processing_complete(state)
+        c.remove_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
+        c.remove_reaction.reset_mock()
+        await c.on_processing_failed(state)
+        c.remove_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
+
+    @pytest.mark.asyncio
+    async def test_processing_start_skips_without_inbound_id(self) -> None:
+        from unittest.mock import AsyncMock
+
+        c = SlackConnector(bot_user_id="UBOT", channel_id="C1")
+        c.add_reaction = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        await c.on_processing_start(SimpleNamespace(inbound_message_id=None))
+        c.add_reaction.assert_not_awaited()
