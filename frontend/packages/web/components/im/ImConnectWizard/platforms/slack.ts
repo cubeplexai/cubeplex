@@ -24,6 +24,11 @@ export const slackDescriptor: PlatformDescriptor = {
         'channels:history',
         'im:history',
         'im:read',
+        // Private file download (url_private_download) requires files:read;
+        // without it Slack returns a 200 HTML sign-in page and inbound drops.
+        'files:read',
+        // Outbound agent artifacts → files_upload_v2.
+        'files:write',
         'reactions:read',
         'reactions:write',
         'users:read',
@@ -39,6 +44,13 @@ export const slackDescriptor: PlatformDescriptor = {
       key: 'appToken',
       labelKey: 'im.wizard.slack.prereq.appToken',
       items: ['connections:write'],
+    },
+    {
+      // Socket Mode only changes delivery transport — without these bot
+      // event subscriptions Slack never pushes mentions/DMs over the socket.
+      key: 'events',
+      labelKey: 'im.wizard.slack.prereq.events',
+      items: ['app_mention', 'message.im'],
     },
     {
       key: 'install',

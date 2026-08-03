@@ -2473,13 +2473,14 @@
         "prereq": {
           "app": "Create a Slack App at api.slack.com/apps",
           "scopes": "Add these Bot Token Scopes in OAuth & Permissions",
-          "socketMode": "Enable Socket Mode in the app settings",
-          "appToken": "Generate an App-Level Token with this scope",
-          "install": "Install the app to your workspace and copy the Bot Token"
+          "socketMode": "Settings → Socket Mode → enable",
+          "appToken": "Settings → Basic Information → App-Level Tokens → generate a token with this scope (xapp-…; not under Install App). Enabling Socket Mode may also prompt you to create one.",
+          "events": "Event Subscriptions → enable → Subscribe to bot events (no Request URL needed with Socket Mode)",
+          "install": "Install App → Install / Reinstall to Workspace (required after scopes/events), then copy Bot User OAuth Token (xoxb-…)"
         },
         "field": {
           "botToken": "Bot Token (xoxb-...)",
-          "appToken": "App Token (xapp-...)"
+          "appToken": "App-Level Token (xapp-...)"
         }
       },
       "teams": {

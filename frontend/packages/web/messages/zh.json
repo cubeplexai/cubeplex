@@ -2473,13 +2473,14 @@
         "prereq": {
           "app": "在 api.slack.com/apps 创建 Slack 应用",
           "scopes": "在 OAuth & Permissions 中添加以下 Bot Token Scopes",
-          "socketMode": "在应用设置中启用 Socket Mode",
-          "appToken": "生成具有此 scope 的 App-Level Token",
-          "install": "将应用安装到你的工作区并复制 Bot Token"
+          "socketMode": "Settings → Socket Mode → 开启",
+          "appToken": "Settings → Basic Information → App-Level Tokens → 生成带此 scope 的 token（xapp-…；不在 Install App 里）。开启 Socket Mode 时也可能直接引导你创建。",
+          "events": "Event Subscriptions → 开启 → Subscribe to bot events（Socket Mode 下无需填写 Request URL）",
+          "install": "Install App → Install / Reinstall to Workspace（改 scopes/事件后必须 reinstall），然后复制 Bot User OAuth Token（xoxb-…）"
         },
         "field": {
           "botToken": "Bot Token (xoxb-...)",
-          "appToken": "App Token (xapp-...)"
+          "appToken": "App-Level Token (xapp-...)"
         }
       },
       "teams": {

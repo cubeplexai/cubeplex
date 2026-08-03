@@ -45,8 +45,8 @@ class SlackOpDispatcher:
             return False
         s.card_id = msg_ts
         s.bot_message_id = msg_ts
-        if s.inbound_message_id:
-            await self._connector.add_reaction(s.inbound_message_id, "hourglass_flowing_sand")
+        # Processing hourglass is added in SlackConnector.on_processing_start
+        # (tailer start), not here — waiting until first content made it feel late.
         return True
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:

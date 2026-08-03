@@ -40,7 +40,8 @@ async def test_dispatch_create() -> None:
     assert ok is True
     assert state.bot_message_id is not None
     conn.send_message.assert_awaited_once()
-    conn.add_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
+    # Hourglass is owned by on_processing_start, not first content create.
+    conn.add_reaction.assert_not_awaited()
 
 
 @pytest.mark.asyncio
