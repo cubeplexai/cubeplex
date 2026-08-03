@@ -19,7 +19,7 @@ jobs:
   labeler:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/labeler@v6
+      - uses: actions/labeler@v7
         with:
           # Only remove labels that are defined in labeler.yml and no longer match.
           # Manually applied labels (e.g. skip-changelog, breaking) are left alone.
