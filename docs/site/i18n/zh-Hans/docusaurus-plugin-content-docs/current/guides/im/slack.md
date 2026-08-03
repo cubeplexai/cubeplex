@@ -121,15 +121,48 @@ Slack 使用 **Socket Mode** 运行——CubePlex 会向 Slack 打开持久出�
 
 ## 对话命令
 
-Slack 会注册以下原生斜杠命令（如果使用斜杠形式，请在 Slack 应用中创建相应的斜杠命令；也可以输入文本消息）：
+CubePlex 把 `/link`、`/new`、`/reset` 当作 **Slack 原生斜杠命令**处理——需要你在 Slack 应用里创建对应命令。也支持纯文本形式（**线程内只能用文本**，见下文）。
+
+### 在 Slack 应用中注册斜杠命令
+
+打开 Slack 应用设置 → **Slash Commands**，按需创建：
+
+| 命令 | 简短描述（示例） | Usage hint |
+|---|---|---|
+| `/link` | 将 Slack 身份关联到 CubePlex | `you@example.com` |
+| `/new` | 开始全新 CubePlex 对话 | （可空） |
+| `/reset` | 与 `/new` 相同 | （可空） |
+
+已启用 **Socket Mode** 时 **不需要** 可用的公网 Request URL——事件走 socket。创建命令时 Slack 可能仍要求填一个占位 URL。
+
+- Bot 已有 **`commands`** scope 时，**仅新建 slash command 一般不需要 reinstall**。
+- **首次添加** `commands`（或其他）scope 时需要 **Reinstall**，并在 bot token 变化时更新 CubePlex 绑定。
+
+### 命令一览
 
 | 命令 | 效果 |
 |---|---|
-| `/link <email>` | 将 Slack 身份关联到 CubePlex 账户（参阅[步骤 8](#step-8--link-your-identity)）。私下回复。 |
-| `/new` | 开始全新对话；下一条消息会开始一个新对话。使用斜杠形式时私下回复。 |
+| `/link <email>` | 将 Slack 身份关联到 CubePlex 账户（参阅[步骤 8](#step-8--link-your-identity)）。仅你可见的私下回复。 |
+| `/new` | 开始全新对话；下一条消息会开始新对话。斜杠形式为私下回复。 |
 | `/reset` | 与 `/new` 相同。 |
 
-你也可以将 `/new`、`/reset` 或 `新对话` 作为普通消息输入（在频道中请 @ 机器人）。此路径不需要注册 Slack 斜杠命令。
+### 斜杠命令在线程（thread）中不可用
+
+这是 **Slack 平台限制**，不是 CubePlex 的问题：**开发者创建的 slash command 无法在 message thread 内调用**。线程里通常只有 Slack 内置命令（以及 Giphy 等少数特例）可用。在线程中输入 `/link` 往往会看到「不支持在线程中使用」类提示。
+
+| 场景 | 斜杠形式（`/link`、`/new`…） | 文本形式 |
+|---|---|---|
+| 频道主时间线 | ✅ | ✅ — `@bot /new` 或 `@bot 新对话` |
+| 与 bot 的私信 | ✅ | ✅ — `link you@example.com`（也可不带前导 `/`） |
+| **线程内部** | ❌ | ✅ — `@bot /new`、`@bot 新对话`，或继续 `@bot …` 对话 |
+
+**线程内建议**
+
+- 继续对话：直接 **`@bot …`**（同一 Slack 线程对应同一 CubePlex 对话）。
+- 重置对话：在线程里发普通消息 **`@bot /new`** 或 **`@bot 新对话`**（不要用斜杠命令菜单）。
+- 关联身份：优先在 **私信** 或 **频道主窗口** 使用 `/link`。
+
+若未注册 slash command，Slack 会把以 `/` 开头的输入当成无效命令。此时可发 **`link you@example.com`**（不要前导 `/`）。
 
 ## 轮换凭据
 

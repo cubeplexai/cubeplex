@@ -78,6 +78,10 @@ CubePlex 为五个平台提供连接器代码。它们的成熟度 **并不** �
 | `/link <email>` | 将聊天身份关联到 CubePlex 账户（参阅[身份关联](#identity-linking)）。 | 所有平台。在 Slack 和 Discord 上是原生斜杠命令；在 Feishu、DingTalk 和 Teams 上是文本消息。中文别名 `绑定 <email>` 仅在 Feishu 上可用。 |
 | `/new`（别名 `/reset`、`新对话`） | 开始全新对话——移除当前聊天范围的对话绑定，使机器人在你的下一条消息时重新开始。 | 所有平台。在 Discord 和 Slack 上是原生斜杠命令；在 Feishu、DingTalk 和 Teams 上是文本消息（Slack 中也可作为普通 `@bot /new` 消息）。中文别名 `新对话` 在所有接受文本形式的平台中可用。 |
 
+:::note Slack 斜杠命令与线程
+Slack **自定义 slash command 无法在 message thread 内使用**（平台限制）。线程里请发普通消息 `@bot /new` / `@bot 新对话`；`/link` 请在私信或频道主时间线使用。详见 [Slack 设置 → 对话命令](./slack.md#对话命令)。
+:::
+
 有关准确的命令形式，请参阅各平台的设置指南。
 
 ## 频道绑定模式 {#channel-binding-modes}

@@ -208,14 +208,26 @@ class SlackConnector:
     # ------------------------------------------------------------------
 
     def _make_section_blocks(self, text: str) -> list[dict[str, Any]]:
-        """Build Block Kit section blocks, truncating text to the limit."""
-        mrkdwn_text = markdown_to_slack_mrkdwn(text)[:_SECTION_CHAR_LIMIT]
+        """Build Block Kit section blocks, truncating text to the limit.
+
+        Slack rejects empty ``section.text.text`` (``invalid_blocks`` /
+        ``must be more than 0 characters``). Always emit at least a placeholder.
+        """
+        mrkdwn_text = (markdown_to_slack_mrkdwn(text) or "").strip()[:_SECTION_CHAR_LIMIT]
+        if not mrkdwn_text:
+            mrkdwn_text = "…"
         return [
             {
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": mrkdwn_text},
             }
         ]
+
+    @staticmethod
+    def _fallback_text(text: str) -> str:
+        """Notification/fallback string; Slack wants non-empty when blocks are set."""
+        stripped = (text or "").strip()
+        return stripped[:_SECTION_CHAR_LIMIT] if stripped else "…"
 
     async def send_message(self, text: str) -> str | None:
         """Post a Block Kit message. Returns the message ``ts``."""
@@ -226,7 +238,7 @@ class SlackConnector:
             kwargs: dict[str, Any] = {
                 "channel": self._channel_id,
                 "blocks": blocks,
-                "text": text[:_SECTION_CHAR_LIMIT],
+                "text": self._fallback_text(text),
             }
             if self._thread_ts:
                 kwargs["thread_ts"] = self._thread_ts
@@ -237,16 +249,23 @@ class SlackConnector:
             return None
 
     async def edit_message(self, message_ts: str, text: str) -> bool:
-        """Update an existing message. Raises SlackRateLimitError on 429."""
+        """Update an existing message. Raises SlackRateLimitError on 429.
+
+        Empty ``text`` is treated as a no-op success: stream flushes can land
+        with ``current_segment == ""`` after a segment split; calling
+        ``chat.update`` with an empty section block is rejected by Slack.
+        """
         if self._client is None or not self._channel_id:
             return False
+        if not (text or "").strip():
+            return True
         try:
             blocks = self._make_section_blocks(text)
             await self._client.chat_update(
                 channel=self._channel_id,
                 ts=message_ts,
                 blocks=blocks,
-                text=text[:_SECTION_CHAR_LIMIT],
+                text=self._fallback_text(text),
             )
             return True
         except Exception as exc:

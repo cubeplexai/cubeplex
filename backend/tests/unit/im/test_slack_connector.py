@@ -165,6 +165,28 @@ class TestSlackConnectorLifecycleHooks:
         c.add_reaction.assert_not_awaited()
 
 
+class TestSlackEmptyMessageBlocks:
+    """Slack rejects section blocks with empty text (invalid_blocks)."""
+
+    def test_make_section_blocks_never_empty(self) -> None:
+        c = SlackConnector(bot_user_id="UBOT")
+        blocks = c._make_section_blocks("")
+        assert blocks[0]["text"]["text"] == "…"
+        blocks = c._make_section_blocks("   ")
+        assert blocks[0]["text"]["text"] == "…"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_skips_empty_text(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        client = MagicMock()
+        client.chat_update = AsyncMock()
+        c = SlackConnector(bot_user_id="UBOT", client=client, channel_id="C1")
+        assert await c.edit_message("1234.5678", "") is True
+        assert await c.edit_message("1234.5678", "   ") is True
+        client.chat_update.assert_not_awaited()
+
+
 class TestSlackReactionIdempotency:
     """finalize + on_processing_complete both clear hourglass — second
     remove must not log a hard failure."""
