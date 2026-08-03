@@ -18,8 +18,6 @@ from cubeplex.im.types import (
     BindingMode,
     InboundAttachmentRef,
     InboundEvent,
-    make_channel_scope,
-    make_participant_scope,
     make_thread_participant_scope,
     make_thread_scope,
 )
@@ -175,20 +173,28 @@ class SlackConnector:
                 text=text,
             )
 
-        # Channel @mention (not in a thread)
+        # Channel @mention that is NOT yet inside a thread (no thread_ts, or
+        # Slack's root-of-thread shape where thread_ts == ts).
+        #
+        # Outbound replies with thread_ts=this message's ts, so the user keeps
+        # chatting in the same Slack thread. Subsequent app_mentions then
+        # arrive with thread_ts=ts and must hit the branch above with the SAME
+        # scope. Keying the root as channel/participant scope forked a second
+        # conversation+topic on the first in-thread reply.
         if event_type == "app_mention":
+            root_ts = thread_ts or ts
             if binding_mode == "shared":
-                scope_key = make_channel_scope()
+                scope_key = make_thread_scope(root_ts)
             else:
-                scope_key = make_participant_scope(user)
+                scope_key = make_thread_participant_scope(user, root_ts)
             return InboundEvent(
                 platform="slack",
                 account_external_id="",
                 platform_event_id=platform_event_id,
                 channel_id=channel,
                 scope_key=scope_key,
-                scope_kind="channel",
-                reply_to_id=ts,
+                scope_kind="thread",
+                reply_to_id=root_ts,
                 inbound_message_id=ts,
                 sender_ref=sender_ref,
                 sender_open_id=sender_open_id,
