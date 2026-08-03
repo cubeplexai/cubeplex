@@ -1,0 +1,26 @@
+# Auto-label PRs via actions/labeler (paths + branch name).
+# Config: .github/labeler.yml
+#
+# Uses pull_request_target so GITHUB_TOKEN can write labels on fork PRs.
+# This job must not checkout or run untrusted PR code.
+name: Pull Request Labeler
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Create labels listed in .github/labeler.yml if missing in the repo.
+  issues: write
+
+jobs:
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v6
+        with:
+          # Only remove labels that are defined in labeler.yml and no longer match.
+          # Manually applied labels (e.g. skip-changelog, breaking) are left alone.
+          sync-labels: true
