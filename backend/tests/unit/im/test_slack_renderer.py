@@ -57,6 +57,21 @@ async def test_dispatch_stream_edits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_stream_skips_empty_segment() -> None:
+    """No new chars since last offset → do not chat.update with empty blocks."""
+    state = _make_state()
+    state.card_state.streaming_content = "Hello"
+    d, conn = _make_dispatcher(state)
+    await d.dispatch_create(state)
+    conn.edit_message.reset_mock()
+    # Offset already at end of content (e.g. after a segment split).
+    d.sent_char_offset = len(state.card_state.streaming_content)
+    ok = await d.dispatch_stream(state, "Hello")
+    assert ok is True
+    conn.edit_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_finalize() -> None:
     state = _make_state()
     state.card_state.streaming_content = "Final answer"

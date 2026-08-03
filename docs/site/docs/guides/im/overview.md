@@ -78,6 +78,10 @@ Command support differs by platform — not every command exists everywhere.
 | `/link <email>` | Links your chat identity to your CubePlex account (see [Identity linking](#identity-linking)). | All platforms. Native slash command on Slack and Discord; a text message on Feishu, DingTalk, and Teams. The Chinese alias `绑定 <email>` works on Feishu only. |
 | `/new` (alias `/reset`, `新对话`) | Starts a fresh conversation — drops the current conversation binding for the chat scope you're in, so the bot starts clean on your next message. | All platforms. Native slash command on Discord and Slack; a text message on Feishu, DingTalk, and Teams (and as a plain `@bot /new` message on Slack). The Chinese alias `新对话` works everywhere the text form is accepted. |
 
+:::note Slack slash commands and threads
+Custom slash commands on Slack **cannot run inside message threads** (Slack platform limit). Use a plain `@bot /new` / `@bot 新对话` message in the thread, or run `/link` from a DM or the channel main timeline. Details: [Slack setup → Conversation commands](./slack.md#conversation-commands).
+:::
+
 See each platform's setup guide for the exact command form.
 
 ## Channel binding modes

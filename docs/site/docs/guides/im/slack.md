@@ -121,15 +121,48 @@ Once linked (or auto-resolved), the bot replies in-channel and edits its message
 
 ## Conversation commands
 
-Slack registers these native slash commands (create matching slash commands in the Slack app if you use the slash form; typed messages also work):
+CubePlex handles `/link`, `/new`, and `/reset` as **native Slack slash commands** when you create them on the Slack app. Plain-text forms work too (and are required inside threads — see below).
+
+### Register slash commands in the Slack app
+
+In the Slack app settings open **Slash Commands** and create each command you want to use:
+
+| Command | Short description (example) | Usage hint |
+|---|---|---|
+| `/link` | Link Slack identity to CubePlex | `you@example.com` |
+| `/new` | Start a fresh CubePlex conversation | *(empty)* |
+| `/reset` | Same as `/new` | *(empty)* |
+
+With **Socket Mode** enabled you do **not** need a working public Request URL — events arrive over the socket. Slack may still require a placeholder URL when creating the command.
+
+- If the bot already has the **`commands`** scope, **creating slash commands does not require reinstall**.
+- If you **add** the `commands` scope (or other scopes) for the first time, **reinstall** the app and update the bot token in CubePlex if it changed.
+
+### Command reference
 
 | Command | Effect |
 |---|---|
-| `/link <email>` | Link your Slack identity to your CubePlex account (see [Step 8](#step-8--link-your-identity)). Replies privately. |
+| `/link <email>` | Link your Slack identity to your CubePlex account (see [Step 8](#step-8--link-your-identity)). Replies privately (ephemeral). |
 | `/new` | Start a fresh conversation; your next message begins a new one. Replies privately for the slash form. |
 | `/reset` | Same as `/new`. |
 
-You can also type `/new`, `/reset`, or `新对话` as a normal message (in a channel, @ the bot). That path does not require a Slack slash-command registration.
+### Slash commands do not work in threads
+
+This is a **Slack platform limit**, not a CubePlex bug: **developer-created slash commands cannot be invoked inside message threads**. Only Slack built-ins (and a few special apps such as Giphy) work in threads. In a thread you will typically see *“/link is not supported in threads”*.
+
+| Context | Slash form (`/link`, `/new`, …) | Text form |
+|---|---|---|
+| Channel main timeline | ✅ | ✅ — `@bot /new` or `@bot 新对话` |
+| DM with the bot | ✅ | ✅ — `link you@example.com` (no leading `/` also works) |
+| **Inside a thread** | ❌ | ✅ — `@bot /new`, `@bot 新对话`, or keep chatting with `@bot …` |
+
+**Tips for threads**
+
+- Keep talking with **`@bot …`** (same Slack thread stays one CubePlex conversation).
+- To reset in a thread: **`@bot /new`** or **`@bot 新对话`** as a normal message (not the slash-command picker).
+- Prefer **DM** or the **channel main timeline** for `/link`.
+
+Plain-text `link you@example.com` (without a leading `/`) is useful when Slack intercepts bare `/link` as an unknown command because the slash command was never registered.
 
 ## Rotating credentials
 

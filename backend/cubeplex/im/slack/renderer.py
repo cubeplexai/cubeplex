@@ -72,6 +72,10 @@ class SlackOpDispatcher:
                     s.bot_message_id = msg_ts
             note_edit_success(s)
             return True
+        # After a split (or a stream tick with no new chars), segment can be
+        # empty — skip the edit rather than posting invalid empty blocks.
+        if not current_segment:
+            return True
         try:
             ok = await self._connector.edit_message(s.bot_message_id, current_segment)
         except SlackRateLimitError:
