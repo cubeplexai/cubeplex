@@ -161,3 +161,36 @@ class TestSlackConnectorLifecycleHooks:
         c.add_reaction = AsyncMock(return_value=True)  # type: ignore[method-assign]
         await c.on_processing_start(SimpleNamespace(inbound_message_id=None))
         c.add_reaction.assert_not_awaited()
+
+
+class TestSlackReactionIdempotency:
+    """finalize + on_processing_complete both clear hourglass — second
+    remove must not log a hard failure."""
+
+    @pytest.mark.asyncio
+    async def test_remove_reaction_no_reaction_is_success(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        class FakeSlackApiError(Exception):
+            def __init__(self) -> None:
+                super().__init__("no_reaction")
+                self.response = {"error": "no_reaction"}
+
+        client = MagicMock()
+        client.reactions_remove = AsyncMock(side_effect=FakeSlackApiError())
+        c = SlackConnector(bot_user_id="UBOT", client=client, channel_id="C1")
+        assert await c.remove_reaction("1234.5678", "hourglass_flowing_sand") is True
+
+    @pytest.mark.asyncio
+    async def test_add_reaction_already_reacted_is_success(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        class FakeSlackApiError(Exception):
+            def __init__(self) -> None:
+                super().__init__("already_reacted")
+                self.response = {"error": "already_reacted"}
+
+        client = MagicMock()
+        client.reactions_add = AsyncMock(side_effect=FakeSlackApiError())
+        c = SlackConnector(bot_user_id="UBOT", client=client, channel_id="C1")
+        assert await c.add_reaction("1234.5678", "hourglass_flowing_sand") is True
