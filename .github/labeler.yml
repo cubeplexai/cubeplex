@@ -1,0 +1,53 @@
+# PR auto-labels for actions/labeler.
+# Matched labels feed `.github/release.yml` changelog categories.
+# Docs: https://github.com/actions/labeler
+
+# ---------------------------------------------------------------------------
+# Type labels (from branch name — cubeplex: feat/ | fix/ | docs/)
+# ---------------------------------------------------------------------------
+
+enhancement:
+  - head-branch: ['^feat/', '^feature/']
+
+bug:
+  - head-branch: ['^fix/', '^bugfix/', '^bug/']
+
+documentation:
+  - any:
+    - head-branch: ['^docs/']
+    - changed-files:
+      - any-glob-to-any-file:
+        - 'docs/**'
+        - '**/*.md'
+        - 'backend/docs/**'
+        - 'frontend/docs/**'
+        - 'deploy/**/*.md'
+
+# ---------------------------------------------------------------------------
+# Area labels (from changed paths)
+# ---------------------------------------------------------------------------
+
+backend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'backend/**'
+      - 'benchmarks/**'
+
+frontend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'frontend/**'
+
+deploy:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'deploy/**'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/**'
+      - '.github/dependabot.yml'
+      - 'scripts/**'
+      - 'Makefile'
+      - 'backend/Makefile'
