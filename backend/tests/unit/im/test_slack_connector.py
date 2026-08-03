@@ -66,8 +66,10 @@ class TestSlackConnectorParseInbound:
         )
         event = self.connector.parse_inbound(raw)
         assert event is not None
-        assert event.scope_key == "u:U111"
-        assert event.scope_kind == "channel"
+        # Root channel @bot is a thread root keyed by its own ts so follow-up
+        # replies in the opened Slack thread share the same conversation.
+        assert event.scope_key == "u:U111|t:1234567890.123456"
+        assert event.scope_kind == "thread"
         assert event.text == "what is 2+2?"
         assert event.reply_to_id == "1234567890.123456"
 

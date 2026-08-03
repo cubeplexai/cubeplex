@@ -54,19 +54,27 @@ class TestScopeKeySelection:
         assert event is not None
         assert event.scope_key == DM_SCOPE_KEY
 
-    def test_channel_mention_isolated_mode(self) -> None:
-        """Isolated mode: channel mention scope_key is per-user ('u:...')."""
-        raw = _make_event(text="<@UBOT> hi")
+    def test_channel_mention_isolated_mode_is_thread_root(self) -> None:
+        """Isolated mode: root channel @bot is keyed as a thread by its own ts.
+
+        Bot replies open a Slack thread on that ts; follow-ups reuse the same
+        scope instead of forking a second conversation/topic.
+        """
+        raw = _make_event(text="<@UBOT> hi", ts="1234567890.123456")
         event = self.connector.parse_inbound(raw, binding_mode="isolated")
         assert event is not None
-        assert event.scope_key == "u:U111"
+        assert event.scope_key == "u:U111|t:1234567890.123456"
+        assert event.scope_kind == "thread"
+        assert event.reply_to_id == "1234567890.123456"
 
-    def test_channel_mention_shared_mode(self) -> None:
-        """Shared mode: channel mention scope_key is channel-level ('ch')."""
-        raw = _make_event(text="<@UBOT> hi")
+    def test_channel_mention_shared_mode_is_thread_root(self) -> None:
+        """Shared mode: root channel @bot is thread-scoped by its own ts."""
+        raw = _make_event(text="<@UBOT> hi", ts="1234567890.123456")
         event = self.connector.parse_inbound(raw, binding_mode="shared")
         assert event is not None
-        assert event.scope_key == "ch"
+        assert event.scope_key == "t:1234567890.123456"
+        assert event.scope_kind == "thread"
+        assert event.reply_to_id == "1234567890.123456"
 
     def test_thread_mention_isolated_mode(self) -> None:
         """Isolated mode: thread mention scope_key includes both user and thread."""
@@ -91,9 +99,27 @@ class TestScopeKeySelection:
         assert event.scope_key == "t:1234567890.000000"
         assert "u:" not in event.scope_key
 
+    def test_root_and_thread_reply_share_scope(self) -> None:
+        """Root @bot + first in-thread @bot must produce the same scope_key."""
+        root_ts = "1234567890.000000"
+        root = self.connector.parse_inbound(
+            _make_event(text="<@UBOT> hi", ts=root_ts),
+            binding_mode="isolated",
+        )
+        reply = self.connector.parse_inbound(
+            _make_event(
+                text="<@UBOT> follow up",
+                thread_ts=root_ts,
+                ts="1234567891.111111",
+            ),
+            binding_mode="isolated",
+        )
+        assert root is not None and reply is not None
+        assert root.scope_key == reply.scope_key == f"u:U111|t:{root_ts}"
+
     def test_default_binding_mode_is_isolated(self) -> None:
         """Calling without binding_mode must match isolated behavior exactly."""
-        raw = _make_event(text="<@UBOT> hi")
+        raw = _make_event(text="<@UBOT> hi", ts="9999.0001")
         default_event = self.connector.parse_inbound(raw)
         explicit_event = self.connector.parse_inbound(raw, binding_mode="isolated")
         assert default_event is not None
