@@ -16,7 +16,7 @@ set -eu
 
 # sudo resets USER to root, but neko/chromium.conf expands %(ENV_USER)s into its
 # `user=` and HOME directives — losing it runs Chromium and openbox as root and
-# leaves a root-owned profile on the PVC that cubeplex can never write again.
+# leaves a root-owned profile on the PVC that CubePlex can never write again.
 export USER="${SUDO_USER:-${USER:-cubeplex}}"
 
 PIDFILE=/var/run/neko-supervisord.pid

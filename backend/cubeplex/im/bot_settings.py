@@ -70,9 +70,9 @@ def wants_topic(settings: IMBotSettings) -> bool:
 
 def bot_display_name(config: dict[str, Any] | None) -> str:
     """The bot's display name for Topic titles. Mirrors the per-platform
-    ``RenderState.bot_name`` fallback (config ``bot_app_name`` → "cubeplex")."""
+    ``RenderState.bot_name`` fallback (config ``bot_app_name`` → "CubePlex")."""
     name = (config or {}).get("bot_app_name")
-    return str(name) if name else "cubeplex"
+    return str(name) if name else "CubePlex"
 
 
 def im_topic_title(*, scope_kind: str, bot_name: str, channel_name: str | None) -> str:

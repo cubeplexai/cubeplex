@@ -55,7 +55,7 @@ _REJECTION_NOT_MEMBER = (
 
 _REJECTION_LINK_REQUIRED = (
     "I don't know who you are yet. Please run:\n"
-    "  /link <your-cubeplex-email>\n"
+    "  /link <your-email>\n"
     "to bind your IM account, then try again."
 )
 

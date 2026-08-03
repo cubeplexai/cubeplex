@@ -1,6 +1,6 @@
-# cubeplex on docker-compose — Install Guide
+# CubePlex on docker-compose — Install Guide
 
-`docker compose up -d` deploys cubeplex (backend + frontend + Postgres +
+`docker compose up -d` deploys CubePlex (backend + frontend + Postgres +
 Redis + rustfs S3 store) on one host, using the same container images as the
 Kubernetes deployment mode — only the orchestration differs.
 

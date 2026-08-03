@@ -550,7 +550,7 @@ _CATALOG_RAW: list[MCPConnectorTemplateSeedEntry] = [
     MCPConnectorTemplateSeedEntry(
         slug="webtools",
         name="WebTools",
-        provider="Cubeplex",
+        provider="CubePlex",
         description="Self-hosted WebTools MCP server: web_search and web_fetch.",
         server_url="http://localhost:8020/api/webtools",
         transport="streamable_http",

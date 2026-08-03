@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Phase-2 end-to-end: run ONE WildClawBench task through cubeplex and grade it.
+"""Phase-2 end-to-end: run ONE WildClawBench task through CubePlex and grade it.
 
-Pure cubeplex HTTP — uses the new POST /ws/{ws}/sandbox/exec and
+Pure CubePlex HTTP — uses the new POST /ws/{ws}/sandbox/exec and
 POST /ws/{ws}/sandbox/files/upload endpoints (authenticated by the workspace
 API key), so no kubectl / opensandbox coupling.
 
@@ -11,7 +11,7 @@ Pipeline:
      /tmp_workspace -> /workspace/.wcb  (the tasks hardcode /tmp_workspace paths,
      but /workspace is the only PVC-backed, recycle-surviving dir)
   3. upload task input/* into the sandbox
-  4. drive the agent (SSE) with the task prompt; save cubeplex SSE + convert to
+  4. drive the agent (SSE) with the task prompt; save CubePlex SSE + convert to
      an OpenClaw-JSONL transcript
   5. upload gt/* + the transcript + transcript_loader.py + a grade runner
   6. exec: install grade deps, run the task's grade() with the OpenRouter judge

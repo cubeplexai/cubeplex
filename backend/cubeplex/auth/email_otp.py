@@ -98,7 +98,7 @@ async def issue_otp(email: str) -> str:
 
     await get_email_service().send(
         to=email,
-        subject="Your cubeplex verification code",
+        subject="Your CubePlex verification code",
         template="email_otp_verification",
         context={"code": code, "ttl_minutes": str(_ttl() // 60)},
     )

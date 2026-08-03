@@ -62,7 +62,7 @@ class FeishuPlatform:
             reply_to_id=queue_item.reply_to_id,
         )
         state = RenderState(
-            bot_name="cubeplex",
+            bot_name="CubePlex",
             run_id=run_id,
             reply_to_id=queue_item.reply_to_id,
             inbound_message_id=queue_item.inbound_message_id,

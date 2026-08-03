@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live e2e against a deployed cubeplex, reached through the ingress.
+# Live e2e against a deployed CubePlex, reached through the ingress.
 # Shared logic: deploy/scripts/lib.
 #
 # Usage:

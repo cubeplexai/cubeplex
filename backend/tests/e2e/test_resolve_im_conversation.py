@@ -394,7 +394,7 @@ async def test_isolated_topic_mode_creates_per_sender_topic(
         ).scalar_one()
         assert topic.creator_user_id == _USER  # sender owns their own topic
         # DM title is the bot's display name.
-        assert topic.title == "cubeplex"
+        assert topic.title == "CubePlex"
         assert topic.attributes["im"]["scope_kind"] == "dm"
         owner_tp = (
             await session.execute(
@@ -614,7 +614,7 @@ async def test_dm_on_shared_account_stays_isolated(
             await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
         assert topic.creator_user_id == _USER  # sender owns it, not the bot
-        assert topic.title == "cubeplex"  # DM title is the bot name
+        assert topic.title == "CubePlex"  # DM title is the bot name
         conv = (
             await session.execute(
                 select(Conversation).where(Conversation.id == resolved.conversation_id)

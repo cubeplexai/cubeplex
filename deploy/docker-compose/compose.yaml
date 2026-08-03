@@ -1,4 +1,4 @@
-# cubeplex single-host docker-compose deployment.
+# CubePlex single-host docker-compose deployment.
 #
 # Variables come from .env (operator copies from .env.example). Images
 # default to the public prebuilt releases on GHCR

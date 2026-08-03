@@ -63,7 +63,7 @@ class TeamsPlatform:
             graph_client=graph_client,
         )
 
-        bot_name = (account.config or {}).get("bot_app_name") or "cubeplex"
+        bot_name = (account.config or {}).get("bot_app_name") or "CubePlex"
         state = RenderState(
             bot_name=bot_name,
             run_id=run_id,

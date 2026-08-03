@@ -96,7 +96,7 @@ Script path:
 ## Dependencies (install only when needed)
 Prefer `uv` for dependency management.
 
-Optional Python packages for local notebook execution are included in the Cubeplex sandbox image:
+Optional Python packages for local notebook execution are included in the CubePlex sandbox image:
 
 ```bash
 uv pip install jupyterlab ipykernel

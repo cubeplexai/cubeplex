@@ -1,4 +1,4 @@
-# Contributing to cubeplex
+# Contributing to CubePlex
 
 Thanks for your interest! This doc covers how to set up your local environment so commits and pushes pass CI on the first try.
 

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for the cubeplex FastAPI backend.
+# Multi-stage build for the CubePlex FastAPI backend.
 #
 # Stage 1 (builder): pip-install all deps from a pre-resolved requirements
 #   file into /app/.venv. The requirements file is generated on the host
@@ -70,7 +70,7 @@ COPY backend/scripts ./scripts
 COPY backend/skills ./skills
 COPY backend/config.yaml backend/config.development.yaml backend/config.production.yaml backend/config.test.yaml ./
 
-# cubeplex itself runs from /app via `python main.py` (which imports
+# CubePlex itself runs from /app via `python main.py` (which imports
 # `cubeplex.*` from the same directory). No pip install of the project is
 # needed — keeping the source uninstalled also avoids pulling in hatchling
 # and re-validating pyproject metadata at build time.

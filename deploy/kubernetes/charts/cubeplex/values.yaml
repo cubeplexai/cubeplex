@@ -1,4 +1,4 @@
-# cubeplex umbrella chart — DEFAULTS ONLY.
+# CubePlex umbrella chart — DEFAULTS ONLY.
 # Real secrets, model api_keys, OSS keys, and the operator-specific sandbox
 # image / domain live in `values.local.yaml` (gitignored).
 #
@@ -97,7 +97,7 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 
-# Storage class for cubeplex's PVCs. Points at /work (1.8 T) on node-1 so
+# Storage class for CubePlex's PVCs. Points at /work (1.8 T) on node-1 so
 # we don't fill the 51 G root partition where the default openebs SC lives.
 storageClass:
   create: true

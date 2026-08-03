@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for the cubeplex Next.js frontend.
+# Multi-stage build for the CubePlex Next.js frontend.
 #
 # Stage 1 (builder): pnpm install + build all workspace packages, produce
 #   the Next.js standalone output (gated by NEXT_OUTPUT=standalone in

@@ -265,7 +265,7 @@ class DingtalkGateway:
 
         await reply.reply_markdown(
             title="Link your account",
-            text=f"Click to bind your cubeplex account:\n\n[Link your account]({url})",
+            text=f"Click to bind your CubePlex account:\n\n[Link your account]({url})",
             open_conversation_id=conversation_id,
         )
 

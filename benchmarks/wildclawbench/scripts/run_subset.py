@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run a representative WildClawBench subset through cubeplex and aggregate.
+"""Run a representative WildClawBench subset through CubePlex and aggregate.
 
 Downloads each task's workspace data from HuggingFace, runs it through the
-single-task pipeline (run_one_task.py) over pure cubeplex HTTP, collects the
+single-task pipeline (run_one_task.py) over pure CubePlex HTTP, collects the
 per-task score.json, and prints a per-category + overall summary in the spirit
 of WildClawBench's own print_global_summary.
 
@@ -108,7 +108,7 @@ def main() -> int:
     by_cat: dict[str, list[float]] = defaultdict(list)
     overall: list[float] = []
     print("\n" + "=" * 60)
-    print("  WildClawBench subset — cubeplex / " + args.model_key)
+    print("  WildClawBench subset — CubePlex / " + args.model_key)
     print("=" * 60)
     for r in results:
         s = r["score"]

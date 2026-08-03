@@ -54,7 +54,7 @@ class DiscordPlatform:
         )
         cfg = account.config or {}
         state = RenderState(
-            bot_name=cfg.get("bot_app_name") or "cubeplex",
+            bot_name=cfg.get("bot_app_name") or "CubePlex",
             run_id=run_id,
             reply_to_id=queue_item.reply_to_id,
             inbound_message_id=queue_item.inbound_message_id,

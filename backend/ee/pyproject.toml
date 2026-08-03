@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cubeplex-ee"
 version = "0.3.0"
-description = "Commercially licensed cubeplex features"
+description = "Commercially licensed CubePlex features"
 readme = "README.md"
 requires-python = ">=3.12"
 # `cubeplex` is deliberately absent from dependencies. This package is only ever

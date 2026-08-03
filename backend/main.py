@@ -1,5 +1,5 @@
 """
-Entry point for cubeplex Backend.
+Entry point for CubePlex Backend.
 
 Starts the FastAPI application with uvicorn.
 """

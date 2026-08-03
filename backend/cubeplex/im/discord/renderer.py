@@ -156,7 +156,7 @@ class DiscordOpDispatcher:
         if send_with_view is not None:
             msg_id = await send_with_view(text, view)
         if msg_id is None:
-            notice = "_(请在 cubeplex 网页端继续。)_"
+            notice = "_(请在 CubePlex 网页端继续。)_"
             await self._connector.send_message(f"{text}\n\n{notice}")
 
     async def dispatch_finalize(self, state: Any) -> bool:

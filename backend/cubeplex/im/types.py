@@ -1,6 +1,6 @@
 """Platform-agnostic IM transport types.
 
-The `scope_key` contract is the load-bearing design choice: cubeplex does
+The `scope_key` contract is the load-bearing design choice: CubePlex does
 not interpret what's inside the string, but every connector composes it
 from the same helpers so a (group × user) session in Feishu is byte-for-byte
 identical to a (group × user) session in any other connector — no typos

@@ -1,4 +1,4 @@
-"""Commercially licensed cubeplex features.
+"""Commercially licensed CubePlex features.
 
 Governed by ``backend/ee/LICENSE``, not the repository's Apache-2.0 licence.
 

@@ -81,7 +81,7 @@ async def test_tailer_registers_responder_after_ask_user_request() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -133,7 +133,7 @@ async def test_tailer_does_not_register_for_non_pending_events() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -181,7 +181,7 @@ async def test_tailer_registers_for_sandbox_confirm_request() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
@@ -233,7 +233,7 @@ async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
         async def _send_emergency_text(self, _: str) -> str | None:
             return None
 
-    state = RenderState(bot_name="cubeplex", run_id="run_30m")
+    state = RenderState(bot_name="CubePlex", run_id="run_30m")
     connector = _FakeConnector()
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(

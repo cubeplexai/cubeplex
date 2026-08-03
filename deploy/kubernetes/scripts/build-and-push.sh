@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build cubeplex images and push them to a Docker registry. The default tag is
+# Build CubePlex images and push them to a Docker registry. The default tag is
 # `<YYMMDD>-<branch>-<short-sha>`, derived from the source commit.
 #
 # Usage:

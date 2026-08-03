@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""One-shot cubeplex setup for a benchmark-only account.
+"""One-shot CubePlex setup for a benchmark-only account.
 
-Run this once per cubeplex deployment. It:
+Run this once per CubePlex deployment. It:
 
 1. Registers a new user (default email is `bench-<timestamp>@example.com`).
 2. Logs in via cookie + CSRF to mint a Bearer API key.
@@ -32,7 +32,7 @@ CSRF_HEADER = "X-CSRF-Token"
 
 
 def _csrf_cookie(session: requests.Session) -> str:
-    """Return the CSRF cookie value, looking it up by suffix (cubeplex uses
+    """Return the CSRF cookie value, looking it up by suffix (CubePlex uses
     `cubeplex_csrf_<slot>` in worktrees).
     """
     for name, value in session.cookies.items():
@@ -153,7 +153,7 @@ def bootstrap(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Bootstrap a benchmark-only cubeplex account.",
+        description="Bootstrap a benchmark-only CubePlex account.",
     )
     parser.add_argument(
         "--base-url",
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--key-label",
         default="swebench-harness",
-        help="Label for the minted API key (shown in the cubeplex settings UI).",
+        help="Label for the minted API key (shown in the CubePlex settings UI).",
     )
     parser.add_argument(
         "--image",

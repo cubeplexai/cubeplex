@@ -5,7 +5,7 @@ from cubeplex.im.types import RenderState
 
 
 def _state() -> RenderState:
-    return RenderState(bot_name="cubeplex", run_id="run_1")
+    return RenderState(bot_name="CubePlex", run_id="run_1")
 
 
 def test_first_text_delta_emits_card_create() -> None:

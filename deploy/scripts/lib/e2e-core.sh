@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live e2e against a deployed cubeplex, shared by the compose and kubernetes
+# Live e2e against a deployed CubePlex, shared by the compose and kubernetes
 # entry points. Sourced, never executed. Requires common.sh first.
 #
 # Exercises the auth + chat path: register → resolve workspace → create

@@ -127,7 +127,7 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
 
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
-    state = RenderState(bot_name="cubeplex", run_id=run_id, inbound_message_id="om_inbound_e2e")
+    state = RenderState(bot_name="CubePlex", run_id=run_id, inbound_message_id="om_inbound_e2e")
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,
@@ -192,7 +192,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
 
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
-    state = RenderState(bot_name="cubeplex", run_id=run_id, inbound_message_id="om_inbound_err")
+    state = RenderState(bot_name="CubePlex", run_id=run_id, inbound_message_id="om_inbound_err")
     dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,

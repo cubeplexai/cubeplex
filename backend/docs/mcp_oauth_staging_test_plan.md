@@ -38,7 +38,7 @@ DCR-supporting connectors additionally run scenario E.
 3. Click the connector card → Install Drawer.
 4. Choose "Connect with OAuth".
 5. Complete the vendor auth flow (consent screen → vendor redirects
-   back to the cubeplex callback).
+   back to the CubePlex callback).
 6. **Verify:** drawer dismisses, success toast, install row appears in
    `GET /api/v1/admin/mcp/catalog` with `installed_org_wide=true,
    authed=true`.
@@ -74,7 +74,7 @@ DCR-supporting connectors additionally run scenario E.
 ### Scenario D — Server-side revocation
 
 1. In the vendor's connected-apps UI (e.g. GitHub → Settings →
-   Applications), revoke the cubeplex app's access for the test user.
+   Applications), revoke the CubePlex app's access for the test user.
 2. Trigger an agent run that calls a tool on the connector.
 3. **Verify:** the refresh attempt fails (4xx from the AS); the install
    row flips to `authed=false` with `last_error` populated; the UI
@@ -92,7 +92,7 @@ install row references the catalog row).
    pre-registered `oauth_static_client_id`.
 2. Trigger Scenario A.
 3. **Verify network:** the OAuth-start step hits the AS metadata's
-   `/register` endpoint with the cubeplex redirect URI in
+   `/register` endpoint with the CubePlex redirect URI in
    `redirect_uris`.
 4. **Verify DB:** the resulting install row's `oauth_client_config`
    contains a freshly minted `client_id`. The encrypted

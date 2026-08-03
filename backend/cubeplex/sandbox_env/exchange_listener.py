@@ -48,7 +48,7 @@ def build_exchange_app(
     from cubeplex.api.routes import internal_egress
 
     app = FastAPI(
-        title="cubeplex egress exchange",
+        title="CubePlex egress exchange",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

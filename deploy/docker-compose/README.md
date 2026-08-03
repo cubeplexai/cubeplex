@@ -1,11 +1,11 @@
-# cubeplex on docker-compose
+# CubePlex on docker-compose
 
-Single-host deployment of cubeplex (backend, frontend, Postgres, Redis,
+Single-host deployment of CubePlex (backend, frontend, Postgres, Redis,
 rustfs object store) with `docker compose up -d`.
 
 - **Install guide:** [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
   — also covers the two optional overlays: OpenSandbox sandbox execution
-  (what it deploys, and which cubeplex features docker runtime mode can and
+  (what it deploys, and which CubePlex features docker runtime mode can and
   can't serve) and docling document parsing (combined or standalone).
 - Uses the **same backend / frontend images** as the kubernetes mode;
   build them once with `deploy/kubernetes/scripts/build-and-push.sh`.

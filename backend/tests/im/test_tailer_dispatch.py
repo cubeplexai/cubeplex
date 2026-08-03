@@ -78,7 +78,7 @@ def _new_tailer(
 
 @pytest.mark.asyncio
 async def test_dispatch_card_create_creates_entity_and_sends_init_message() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_state.streaming_content = "hello"
     cardkit = _FakeCardKit()
     conn = _FakeConnector()
@@ -94,7 +94,7 @@ async def test_dispatch_card_create_creates_entity_and_sends_init_message() -> N
 
 @pytest.mark.asyncio
 async def test_dispatch_stream_text_uses_monotonic_sequence() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_id = "AAQA"
     state.card_state.streaming_content = "hello world"
     cardkit = _FakeCardKit()
@@ -111,7 +111,7 @@ async def test_dispatch_stream_text_uses_monotonic_sequence() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_patch_card_sends_full_json() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_id = "AAQA"
     state.card_state.streaming_content = "x"
     cardkit = _FakeCardKit()
@@ -126,7 +126,7 @@ async def test_dispatch_patch_card_sends_full_json() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_finalize_sets_streaming_mode_false() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_id = "AAQA"
     state.card_state.streaming_content = "done"
     state.card_state.finalized = True
@@ -142,7 +142,7 @@ async def test_dispatch_finalize_sets_streaming_mode_false() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_card_create_failure_engages_emergency_text() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_state.streaming_content = "Partial answer text"
 
     class _BrokenCardKit(_FakeCardKit):
@@ -169,7 +169,7 @@ async def test_dispatch_card_create_failure_surfaces_pending_input() -> None:
     """
     from cubeplex.im.feishu.card_model import PendingInput
 
-    state = RenderState(bot_name="cubeplex", run_id="run_pending")
+    state = RenderState(bot_name="CubePlex", run_id="run_pending")
     state.card_state.pending_input = PendingInput(
         kind="ask_user",
         run_id="run_pending",
@@ -203,7 +203,7 @@ async def test_dispatch_patch_card_failure_surfaces_pending_via_emergency() -> N
     """
     from cubeplex.im.feishu.card_model import PendingInput
 
-    state = RenderState(bot_name="cubeplex", run_id="run_p")
+    state = RenderState(bot_name="CubePlex", run_id="run_p")
     state.card_id = "AAQA"
     state.card_state.pending_input = PendingInput(
         kind="ask_user",
@@ -239,7 +239,7 @@ async def test_dispatch_finalize_exception_falls_back_to_emergency_text() -> Non
     """If cardkit.finalize raises (e.g. token-provider error in _headers),
     the buffered final answer must still reach the user via emergency text.
     """
-    state = RenderState(bot_name="cubeplex", run_id="run_f")
+    state = RenderState(bot_name="CubePlex", run_id="run_f")
     state.card_id = "AAQA"
     state.card_state.streaming_content = "Here is the final answer."
 
@@ -257,7 +257,7 @@ async def test_dispatch_finalize_exception_falls_back_to_emergency_text() -> Non
 
 @pytest.mark.asyncio
 async def test_dispatch_with_card_unavailable_no_ops() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     state.card_unavailable = True
     cardkit = _FakeCardKit()
     conn = _FakeConnector()

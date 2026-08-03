@@ -1697,7 +1697,7 @@
     "comingSoon": "Not available in this build",
     "backlogRefPrefix": "Owner: {ref}",
     "eeOnlyTitle": "Enterprise feature",
-    "eeOnlyDescription": "This page requires a cubeplex Enterprise license."
+    "eeOnlyDescription": "This page requires a CubePlex Enterprise license."
   },
   "adminPresets": {
     "discard": "Discard",

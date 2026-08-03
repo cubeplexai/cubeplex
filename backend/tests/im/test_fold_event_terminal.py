@@ -5,7 +5,7 @@ from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubeplex", run_id="run_1")
+    s = RenderState(bot_name="CubePlex", run_id="run_1")
     s.card_id = "AAQA"
     return s
 
@@ -392,7 +392,7 @@ def test_error_finalizes_with_message() -> None:
 
 
 def test_first_event_stamps_run_start_monotonic() -> None:
-    state = RenderState(bot_name="cubeplex", run_id="run_1")
+    state = RenderState(bot_name="CubePlex", run_id="run_1")
     assert state.card_state.run_start_monotonic == 0.0
     fold_event({"type": "text_delta", "data": {"content": "."}}, state, now=42.0)
     assert state.card_state.run_start_monotonic == 42.0

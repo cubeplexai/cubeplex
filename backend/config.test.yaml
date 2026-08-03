@@ -1,4 +1,4 @@
-# Test Configuration for cubeplex
+# Test Configuration for CubePlex
 # Used by CI e2e and local e2e dev.
 # All endpoints, keys, model ids are injected via environment variables.
 # Real values are kept in GitHub Secrets (CI) or local .env (dev).

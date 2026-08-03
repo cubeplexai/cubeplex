@@ -139,7 +139,7 @@ class SlackOpDispatcher:
         text = pending.question or "Please choose:"
         msg_ts = await self._connector.send_message_with_blocks(blocks, text=text)
         if msg_ts is None:
-            notice = "_(Please continue in the cubeplex web UI.)_"
+            notice = "_(Please continue in the CubePlex web UI.)_"
             await self._connector.send_message(f"{text}\n\n{notice}")
 
     async def dispatch_finalize(self, state: Any) -> bool:

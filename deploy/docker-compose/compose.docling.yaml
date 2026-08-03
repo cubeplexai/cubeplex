@@ -15,7 +15,7 @@
 # 2. Standalone, on its own host (for example a dedicated GPU box shared by
 #    multiple projects) — copy just this file there and run it on its own:
 #      docker compose -f compose.docling.yaml --profile gpu up -d
-#    Then point cubeplex's backend at it from wherever it runs:
+#    Then point CubePlex's backend at it from wherever it runs:
 #      parsers:
 #        docling_serve:
 #          base_url: "http://<that host>:<DOCLING_CU130_PORT>"

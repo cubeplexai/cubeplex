@@ -312,11 +312,11 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # instead of a bogus button. The user answers through the web client.
         if not choices:
             if multi_question:
-                notice = "_(此问需多题作答，请在 cubeplex 网页端继续。)_"
+                notice = "_(此问需多题作答，请在 CubePlex 网页端继续。)_"
             elif multi_select:
-                notice = "_(多选题需在 cubeplex 网页端作答。)_"
+                notice = "_(多选题需在 CubePlex 网页端作答。)_"
             else:
-                notice = "_(此问题需要文本输入；请在 cubeplex 网页端继续。)_"
+                notice = "_(此问题需要文本输入；请在 CubePlex 网页端继续。)_"
             prompt = f"{prompt}\n\n{notice}" if prompt else notice
         state.card_state.pending_input = PendingInput(
             kind="ask_user",

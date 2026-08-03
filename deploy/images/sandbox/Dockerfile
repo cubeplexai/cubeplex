@@ -212,7 +212,7 @@ ENV HOME=/workspace
 
 # ---------------------------------------------------------------------------
 # Neko browser-takeover stack (started on demand, see neko/start-browser.sh).
-# Lets a user watch and take over the sandbox browser from the cubeplex frontend
+# Lets a user watch and take over the sandbox browser from the CubePlex frontend
 # while the agent drives the same Chromium over CDP.
 # ---------------------------------------------------------------------------
 RUN apt-get update \
@@ -241,7 +241,7 @@ COPY --from=neko /var/www /var/www
 COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/modules/drivers/dummy_drv.so
 COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
 # Upstream neko.yaml sets implicit_hosting: false (legacy multi-viewer default).
-# Cubeplex owns watch/takeover at the panel layer (BrowserView overlay), so the
+# CubePlex owns watch/takeover at the panel layer (BrowserView overlay), so the
 # member must get input on the first click after "Take over" without a second
 # in-Neko mouse/control toggle. See issue #423.
 RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.yaml
@@ -249,7 +249,7 @@ RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.ya
 # - hide the "open in new window" (popout) control — useless in the panel;
 # - hide every n.eko logo (connect + loading splashes) so none flashes;
 # - hide the player-overlay (the "click to play / unmute" prompt);
-# - hide Neko's host/control mouse chrome (redundant with cubeplex Take over;
+# - hide Neko's host/control mouse chrome (redundant with CubePlex Take over;
 #   with implicit_hosting the interactive toggle is already a no-op status icon).
 # The script forces the <video> muted so it autoplays (browser autoplay policy
 # only allows muted autoplay; volume=0 alone still triggers the prompt), making
@@ -313,7 +313,7 @@ ARG NEKO_TURN_CRED=neko
 # Side-panel live view is tall; a taller virtual desktop fills more of the
 # rail when letterboxed and looks less flat during watch/takeover (#424).
 # Frontend BrowserView fits the iframe host to the same aspect.
-# First click after cubeplex "Take over" grants control (no in-Neko mouse step).
+# First click after CubePlex "Take over" grants control (no in-Neko mouse step).
 # Env wins over /etc/neko/neko.yaml if the image is rebuilt from a newer base.
 # USER=cubeplex is for Neko/supervisord child processes (chromium conf uses
 # %(ENV_USER)s). Container control plane stays root; agent commands run as

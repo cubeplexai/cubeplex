@@ -140,7 +140,7 @@ def run_instance(
                             usage[k] = usage.get(k, 0) + int(data[k])
                 elif etype == "model_failover":
                     # The LLM-side rate-limit/quota signal lives HERE, not in an
-                    # `error` event: cubeplex emits model_failover as each model
+                    # `error` event: CubePlex emits model_failover as each model
                     # in the preset chain is tried. When the LAST one fails
                     # (next_ref is null) with a 429, the run is dead — surface
                     # that as the error so --stop-on-rate-limit can catch it,

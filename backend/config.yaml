@@ -1,4 +1,4 @@
-# Base Configuration for cubeplex
+# Base Configuration for CubePlex
 default:
   env: default
   debug: false
@@ -78,8 +78,8 @@ default:
     providers: {}
 
   # Sandbox Configuration
-  # Note: Sandbox lifecycle is managed by cubeplex's SandboxManager (cleanup_expired task).
-  # opensandbox timeout is set to None (disabled) — cubeplex controls termination via TTL.
+  # Note: Sandbox lifecycle is managed by CubePlex's SandboxManager (cleanup_expired task).
+  # opensandbox timeout is set to None (disabled) — CubePlex controls termination via TTL.
   sandbox:
     enabled: true
     # domain: "localhost:8090"
@@ -92,7 +92,7 @@ default:
     use_server_proxy: true
     # secure_access: Whether to request OpenSandbox's signed-URL secured
     #   endpoint mode on create. Left false: browser/terminal panels no longer
-    #   use OpenSandbox's ingress gateway — they flow through cubeplex's own
+    #   use OpenSandbox's ingress gateway — they flow through CubePlex's own
     #   token-authed panel reverse proxy (same path for docker and k8s), and the
     #   docker backend rejects secureAccess=True outright. See
     #   docs/dev/specs/2026-07-26-sandbox-panel-proxy-design.md.

@@ -14,7 +14,7 @@ This skill guides you through building a publishable skill bundle and installing
 
 ## Workflow
 
-A cubeplex skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
+A CubePlex skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
 
 1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. One paragraph of context is enough.
 

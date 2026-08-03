@@ -1,4 +1,4 @@
-# Chinese translations for cubeplex backend
+# Chinese translations for CubePlex backend
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"

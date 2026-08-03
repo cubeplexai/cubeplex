@@ -1,4 +1,4 @@
-"""Base system prompt for the cubeplex agent."""
+"""Base system prompt for the CubePlex agent."""
 
 BASE_SYSTEM_PROMPT = """You are an AI assistant that helps users accomplish tasks using tools. You respond with text and tool calls.
 

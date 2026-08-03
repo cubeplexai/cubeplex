@@ -19,8 +19,8 @@ async def register_commands(bot: commands.Bot) -> None:
     async def cmd_reset(interaction: discord.Interaction) -> None:
         await _reset_conversation(interaction, bot)
 
-    @bot.tree.command(name="link", description="Link your Discord account to cubeplex")
-    @discord.app_commands.describe(email="Your cubeplex account email")
+    @bot.tree.command(name="link", description="Link your Discord account to CubePlex")
+    @discord.app_commands.describe(email="Your CubePlex account email")
     async def cmd_link(interaction: discord.Interaction, email: str) -> None:
         await _initiate_link(interaction, bot, email=email)
 

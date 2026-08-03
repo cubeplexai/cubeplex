@@ -1697,7 +1697,7 @@
     "comingSoon": "本版本不可用",
     "backlogRefPrefix": "实现归属：{ref}",
     "eeOnlyTitle": "企业版功能",
-    "eeOnlyDescription": "此页面需要 cubeplex 企业版 license。"
+    "eeOnlyDescription": "此页面需要 CubePlex 企业版 license。"
   },
   "adminPresets": {
     "discard": "放弃更改",

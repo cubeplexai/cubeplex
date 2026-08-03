@@ -1,7 +1,7 @@
-# cubeplex Enterprise (`backend/ee/`)
+# CubePlex Enterprise (`backend/ee/`)
 
 Everything under `backend/ee/` is **not** Apache-2.0. It is source-visible but governed by
-[`ee/LICENSE`](./LICENSE): production use requires a valid cubeplex Enterprise license
+[`ee/LICENSE`](./LICENSE): production use requires a valid CubePlex Enterprise license
 key (delivered as `CUBEPLEX_LICENSE__KEY`; verified offline by
 `backend/cubeplex/plugins/license.py`).
 

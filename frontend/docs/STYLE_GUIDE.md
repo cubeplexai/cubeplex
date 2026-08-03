@@ -1,4 +1,4 @@
-# Cubeplex Frontend 样式指南
+# CubePlex Frontend 样式指南
 
 > 本文档基于 cubetrace/frontend 的设计系统整理而成，所有前端开发需遵循此规范。
 

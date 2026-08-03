@@ -287,7 +287,7 @@ backend:
 | 不使用 sandbox（仅对话） | `opensandbox.enabled: false`；`backend.sandbox.enabled` 留空（跟随 `opensandbox.enabled` → false） |
 
 backend 默认 `sandbox.secure_access: false`。浏览器和终端面板**不再**走
-OpenSandbox 的 `gateway`/`ingress` 组件——它们通过 cubeplex 自己的、带 token
+OpenSandbox 的 `gateway`/`ingress` 组件——它们通过 CubePlex 自己的、带 token
 鉴权的面板反向代理转发（和 docker 模式同一条路径），所以你无需部署 gateway、
 也无需管理 OSEP-0011 签名密钥。面板的来源地址是 `api.public_url`，它必须
 **浏览器可达且能转发 WebSocket**（面板通过 WS 代理 Neko/ttyd）——就是你给
@@ -903,7 +903,7 @@ opensandbox:
 
 ## 9. 云厂商兼容性
 
-cubeplex 需要具备完整 kubelet 的 Kubernetes 节点池，具体来说是为了支持
+CubePlex 需要具备完整 kubelet 的 Kubernetes 节点池，具体来说是为了支持
 **init container** 和 **subPath volume mount**（见上文）。下表按厂商和
 服务类型列出兼容情况。
 
@@ -917,7 +917,7 @@ cubeplex 需要具备完整 kubelet 的 Kubernetes 节点池，具体来说是�
 ### 预期可用
 
 以下服务均运行完整 kubelet 并实现标准 Pod API，预期 init container 和
-subPath mount 的行为与 OCI 托管节点池一致。尚未针对实际 cubeplex 部署
+subPath mount 的行为与 OCI 托管节点池一致。尚未针对实际 CubePlex 部署
 逐一验证。
 
 | 厂商 | 服务 |
@@ -937,7 +937,7 @@ subPath mount 的行为与 OCI 托管节点池一致。尚未针对实际 cubepl
 | AWS | EKS on Fargate | ⚠️ 部分支持 | Fargate 支持 init container，但仅支持静态 PV，不支持动态供给（参见 [Fargate storage](https://docs.aws.amazon.com/eks/latest/userguide/fargate-pod-configuration.html#fargate-storage)）。chart 默认的 StorageClass 需要动态供给，因此 Fargate 需要手动预先创建 PV，本文未涵盖该配置；使用常规 EC2 支撑的 node group 的 EKS 则没有此限制。 |
 
 **OCI 虚拟节点：** 如果你的 OCI 集群只有虚拟节点，必须加一个托管节点池才能跑
-cubeplex。虚拟节点是为无状态微服务和突发负载优化的，不适合 cubeplex 这类
+CubePlex。虚拟节点是为无状态微服务和突发负载优化的，不适合 CubePlex 这类
 依赖数据库的应用。
 
 **给 OCI Kubernetes 加托管节点池**（用 CLI，`oci ce node-pool create`——
@@ -965,7 +965,7 @@ oci ce node-pool create \
 **chart 不支持在 backend/frontend 的 Deployment 上设置
 `nodeSelector`/`nodeAffinity`**——没有对应的 values 字段。不要想着靠这个
 把 Pod 定向调度到新节点池上。正确做法是让虚拟节点对**新** Pod
-不可调度——cubeplex 自己的 Pod 不带任何特殊 toleration，这样就够了：
+不可调度——CubePlex 自己的 Pod 不带任何特殊 toleration，这样就够了：
 
 ```bash
 kubectl taint node <虚拟节点IP> virtual-node=true:NoSchedule   # 每个虚拟节点跑一遍

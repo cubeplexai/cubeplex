@@ -135,7 +135,7 @@ class TeamsOpDispatcher:
         msg_id = await self._connector.send_card(card)
         if msg_id is None:
             text = pending.question or "Please choose:"
-            notice = "_(Please continue in the cubeplex web UI.)_"
+            notice = "_(Please continue in the CubePlex web UI.)_"
             await self._connector.send_message(f"{text}\n\n{notice}")
 
     async def dispatch_finalize(self, state: Any) -> bool:

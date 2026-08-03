@@ -462,7 +462,7 @@ class TestIMResumeRefusesTopicConversation:
 
 
 class TestSenderAttributionViaCubepi:
-    """Sender attribution moved to cubepi (provider boundary). Cubeplex sets
+    """Sender attribution moved to cubepi (provider boundary). CubePlex sets
     ``metadata.sender_display_name`` on the UserMessage and cubepi's
     ``apply_sender_attribution`` rewrites the first text block. This smoke
     test pins the contract so a bad cubepi pin bump fails here, not deep

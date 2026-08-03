@@ -1,6 +1,6 @@
 # MCP Catalog + OAuth (M2)
 
-This document describes how cubeplex manages and runs remote MCP
+This document describes how CubePlex manages and runs remote MCP
 connectors. It is a working reference for operators and engineers; the
 authoritative source for design decisions remains the spec at
 `docs/dev/specs/2026-05-08-mcp-catalog-oauth-design.md`.

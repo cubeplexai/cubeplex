@@ -280,7 +280,7 @@ class FeishuOpDispatcher:
         kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
         await self.emergency_text(
             f"{kind_label}\n\n{pending.question}\n\n"
-            f"_(卡片更新暂时不可用；请在 cubeplex 网页端继续。)_"[:4000]
+            f"_(卡片更新暂时不可用；请在 CubePlex 网页端继续。)_"[:4000]
         )
 
     async def _emergency_card_create_fallback(self, state: RenderState) -> None:
@@ -298,5 +298,5 @@ class FeishuOpDispatcher:
         if pending is not None and pending.resolved_choice is None:
             kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
             await self.emergency_text(
-                f"{kind_label}\n\n{pending.question}\n\n_(请在 cubeplex 网页端继续。)_"[:4000]
+                f"{kind_label}\n\n{pending.question}\n\n_(请在 CubePlex 网页端继续。)_"[:4000]
             )

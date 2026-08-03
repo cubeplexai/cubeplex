@@ -1,6 +1,6 @@
 # Frontend Quick Reference
 
-Reference content for the cubeplex frontend monorepo. For workflow
+Reference content for the CubePlex frontend monorepo. For workflow
 discipline, hard rules, and skill triggers, see the root
 [AGENTS.md](../../AGENTS.md). For auth, CSRF, SSE, and deployment-mode
 behavior, see [auth-and-sse.md](auth-and-sse.md).

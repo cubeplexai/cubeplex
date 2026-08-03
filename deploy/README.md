@@ -1,6 +1,6 @@
-# cubeplex deployment
+# CubePlex deployment
 
-Artifacts for deploying cubeplex to your own infrastructure.
+Artifacts for deploying CubePlex to your own infrastructure.
 
 ## Pick a target
 

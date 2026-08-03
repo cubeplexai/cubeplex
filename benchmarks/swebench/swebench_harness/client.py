@@ -29,7 +29,7 @@ class CubePlexConfig:
 
 
 class CubePlexAPIError(RuntimeError):
-    """Raised when cubeplex returns a non-2xx response."""
+    """Raised when CubePlex returns a non-2xx response."""
 
     def __init__(self, status: int, body: str, *, method: str, url: str) -> None:
         super().__init__(f"{method} {url} -> {status}: {body[:300]}")

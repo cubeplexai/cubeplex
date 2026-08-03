@@ -5,7 +5,7 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
   # Cluster-scoped — keep the release identity in the name so multiple
-  # cubeplex installs in the same cluster don't collide.
+  # CubePlex installs in the same cluster don't collide.
   name: {{ printf "%s-egress-inject" .Release.Name | quote }}
   labels:
     {{- include "cubeplex.labels" . | nindent 4 }}

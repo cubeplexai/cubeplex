@@ -5,12 +5,12 @@
 [server]
 host = "0.0.0.0"
 port = 8090
-# API key matches `sandbox.api_key` in cubeplex's
-# config.production.secrets.yaml. The cubeplex SDK sends it as
+# API key matches `sandbox.api_key` in CubePlex's
+# config.production.secrets.yaml. The CubePlex SDK sends it as
 # OPEN-SANDBOX-API-KEY header.
 api_key = "REPLACE_ME"
 # `eip` is the host/IP the server includes in sandbox endpoint URLs.
-# When cubeplex runs in a sibling container and talks via the docker
+# When CubePlex runs in a sibling container and talks via the docker
 # network, "host.docker.internal" works on macOS/Windows and on Linux
 # Docker engines that expose it. On Linux without host.docker.internal,
 # set this to the LAN IP of the host running compose.
@@ -29,11 +29,11 @@ execd_image = "opensandbox/execd:v1.0.21"
 
 [egress]
 # Egress sidecar image used when a sandbox is created with networkPolicy.
-# Required for cubeplex (cubeplex always passes a network_policy).
+# Required for CubePlex (CubePlex always passes a network_policy).
 image = "opensandbox/egress:v1.1.4"
 
 [docker]
-# `bridge` is REQUIRED for cubeplex — host mode disables networkPolicy.
+# `bridge` is REQUIRED for CubePlex — host mode disables networkPolicy.
 network_mode = "bridge"
 # When opensandbox-server runs in a container, this is the host address
 # returned to clients for bridge-mode sandbox endpoints. Same advice as
@@ -56,6 +56,6 @@ pids_limit = 4096
 [ingress]
 # `direct`: SDK clients hit sandbox container ports directly via
 # host-mapped bridge addresses. `proxy`: server proxies all traffic.
-# cubeplex sets `use_server_proxy: true` in its config — leave this as
-# direct AND set the proxy on the cubeplex side.
+# CubePlex sets `use_server_proxy: true` in its config — leave this as
+# direct AND set the proxy on the CubePlex side.
 mode = "direct"

@@ -1,6 +1,6 @@
-# cubeplex on Kubernetes (Helm)
+# CubePlex on Kubernetes (Helm)
 
-One `helm upgrade --install` deploys the cubeplex backend, frontend, and
+One `helm upgrade --install` deploys the CubePlex backend, frontend, and
 the infrastructure they need (Postgres, Redis, rustfs, optionally the
 alibaba OpenSandbox umbrella) into a single namespace.
 

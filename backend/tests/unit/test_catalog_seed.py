@@ -288,7 +288,7 @@ async def test_seed_persists_tool_citation_defaults(
         MCPConnectorTemplateSeedEntry(
             slug="webtools-test",
             name="WebTools Test",
-            provider="Cubeplex",
+            provider="CubePlex",
             description="test entry",
             server_url="http://example.com/mcp",
             transport="streamable_http",

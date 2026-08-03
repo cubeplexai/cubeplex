@@ -10,7 +10,7 @@ from cubeplex.im.feishu.card_renderer import render
 
 
 def _empty_state() -> CardState:
-    return CardState(bot_name="cubeplex", run_id="run_1")
+    return CardState(bot_name="CubePlex", run_id="run_1")
 
 
 def test_empty_card_has_skeleton_and_no_panels() -> None:

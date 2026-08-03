@@ -30,7 +30,7 @@ def _env_or_die(name: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="swebench-run",
-        description="Drive cubeplex over its HTTP API to produce SWE-bench Verified predictions.",
+        description="Drive CubePlex over its HTTP API to produce SWE-bench Verified predictions.",
     )
     parser.add_argument(
         "--instances",
@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     client = CubePlexClient(cfg)
     me = client.whoami()
-    print(f"[bench] cubeplex: base={cfg.base_url} user={me.get('email','?')} ws={cfg.workspace_id}", flush=True)
+    print(f"[bench] CubePlex: base={cfg.base_url} user={me.get('email','?')} ws={cfg.workspace_id}", flush=True)
 
     run_name = args.run_name or f"{_utc_stamp()}-mini"
     out_dir = Path(args.out_root) / run_name

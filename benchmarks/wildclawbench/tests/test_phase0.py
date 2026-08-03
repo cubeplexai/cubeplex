@@ -1,7 +1,7 @@
 """Phase-0 validation: parser parity + transcript-converter fidelity.
 
 These run WITHOUT the WildClawBench docker images — they only need the cloned
-WildClawBench source repo and a recorded cubeplex SSE trace. Run:
+WildClawBench source repo and a recorded CubePlex SSE trace. Run:
 
     WCB_REPO=~/benchmarks/wildclawbench/repo \
     CUBEPLEX_SSE=<path/to/a/sse.jsonl> \

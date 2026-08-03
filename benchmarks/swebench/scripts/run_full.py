@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate a full SWE-bench Verified run sharded across N cubeplex workspaces.
+"""Orchestrate a full SWE-bench Verified run sharded across N CubePlex workspaces.
 
 Each shard is a separate workspace (= its own sandbox PVC / pod), running a
 slice of the 500 instances serially via `swebench-run`. Shards run in

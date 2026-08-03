@@ -307,7 +307,7 @@ Three typical layouts:
 
 The backend defaults to `sandbox.secure_access: false`. Browser and terminal
 panels do **not** go through the OpenSandbox `gateway`/`ingress` component —
-they flow through cubeplex's own token-authenticated panel reverse proxy (the
+they flow through CubePlex's own token-authenticated panel reverse proxy (the
 same path used in docker mode), so you don't need to deploy the gateway or
 manage OSEP-0011 signing keys. The panels' origin is `api.public_url`, which
 must be **browser-reachable and forward WebSocket** (the panels proxy Neko/ttyd
@@ -938,7 +938,7 @@ A fuller annotated template lives at
 
 ## 9. Cloud Provider Compatibility
 
-cubeplex requires a Kubernetes node pool with a full kubelet, specifically for
+CubePlex requires a Kubernetes node pool with a full kubelet, specifically for
 **init container** and **subPath volume mount** support (see above). The
 tables below summarize compatibility by provider and service.
 
@@ -954,7 +954,7 @@ tables below summarize compatibility by provider and service.
 The following run a full kubelet and implement the standard Pod API, so init
 containers and subPath mounts are expected to work the same way as on OCI's
 managed node pools. These have not been independently verified against a live
-cubeplex deployment.
+CubePlex deployment.
 
 | Provider | Service |
 |---|---|
@@ -973,8 +973,8 @@ cubeplex deployment.
 | AWS | EKS on Fargate | ⚠️ Partial | Fargate supports init containers, but only static PV provisioning, not dynamic (see [Fargate storage](https://docs.aws.amazon.com/eks/latest/userguide/fargate-pod-configuration.html#fargate-storage)). The chart's default StorageClass requires dynamic provisioning, so Fargate would need a manually pre-provisioned PV, which this guide does not cover. Standard EC2-backed EKS node groups do not have this restriction. |
 
 **OCI Virtual Nodes:** If your OCI cluster uses only virtual nodes, you must add a managed
-node pool to run cubeplex. Virtual nodes are optimized for stateless microservices and burst
-workloads, not for database-backed applications like cubeplex.
+node pool to run CubePlex. Virtual nodes are optimized for stateless microservices and burst
+workloads, not for database-backed applications like CubePlex.
 
 **To add a managed node pool to OCI Kubernetes** (CLI, via `oci ce node-pool create` —
 the OCI Console → Container Engine → your cluster → Node Pools → Create Node Pool wizard
@@ -1000,8 +1000,8 @@ those). If a shape returns `Out of host capacity`, just retry with a different s
 
 **The chart does not support `nodeSelector`/`nodeAffinity`** on the backend/frontend
 Deployments — there's no values field for it. Don't try to target the new node pool that
-way. Instead, keep cubeplex pods off the virtual nodes by making the virtual nodes
-unschedulable for **new** pods, which is enough since cubeplex's own pods carry no
+way. Instead, keep CubePlex pods off the virtual nodes by making the virtual nodes
+unschedulable for **new** pods, which is enough since CubePlex's own pods carry no
 special tolerations:
 
 ```bash

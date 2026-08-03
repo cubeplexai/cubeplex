@@ -22,7 +22,7 @@ def register_commands(
         email = (command.get("text") or "").strip()
         if not email:
             await respond(
-                "Usage: `/link your-cubeplex-email@example.com`",
+                "Usage: `/link you@example.com`",
                 response_type="ephemeral",
             )
             return

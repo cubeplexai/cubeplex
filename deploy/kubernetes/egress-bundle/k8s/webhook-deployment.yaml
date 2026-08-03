@@ -33,7 +33,7 @@ spec:
             # server's configured egress.image value exactly.
             - name: EGRESS_IMAGE
               value: "EGRESS_IMAGE_PLACEHOLDER"
-            # Full URL of the cubeplex exchange endpoint.  Injected into each
+            # Full URL of the CubePlex exchange endpoint.  Injected into each
             # patched sidecar container so inject.py can reach the endpoint.
             - name: EGRESS_EXCHANGE_URL
               value: "https://egress-exchange.cubeplex.internal/api/v1/internal/egress/exchange"

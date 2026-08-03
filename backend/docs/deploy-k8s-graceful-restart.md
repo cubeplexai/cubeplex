@@ -1,6 +1,6 @@
 # K8s Deployment — Graceful Restart
 
-The cubeplex backend drains in-flight LangGraph runs on `SIGTERM` before
+The CubePlex backend drains in-flight LangGraph runs on `SIGTERM` before
 exiting. To get zero-downtime rolling restarts, pair this with a long
 termination grace period and the split health probes.
 

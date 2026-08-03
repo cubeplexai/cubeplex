@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Phase-1 smoke test: can cubeplex spin up & drive a sandbox on the WildClawBench image?
+"""Phase-1 smoke test: can CubePlex spin up & drive a sandbox on the WildClawBench image?
 
 Verifies the core integration assumption: opensandbox injects execd into an
-ARBITRARY image (here wildclawbench-ubuntu), so cubeplex can drive an agent whose
+ARBITRARY image (here wildclawbench-ubuntu), so CubePlex can drive an agent whose
 sandbox == the WildClawBench tool environment.
 
 Steps (uses a workspace API key, which is org-admin in single_tenant):

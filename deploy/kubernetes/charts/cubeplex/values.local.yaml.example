@@ -1,4 +1,4 @@
-# Operator-local overrides for cubeplex helm install.
+# Operator-local overrides for CubePlex helm install.
 # Copy this file to `values.local.yaml` on the operator workstation (NOT
 # committed — gitignored via `*.local.yaml`). Fill in real secrets and
 # model provider keys.

@@ -178,13 +178,13 @@ class DingtalkOpDispatcher:
                 )
             else:
                 await self._connector.reply_markdown(
-                    title="cubeplex",
+                    title="CubePlex",
                     text=full_content[:4000],
                     open_conversation_id=self._open_conversation_id,
                 )
         elif full_content:
             await self._connector.reply_markdown(
-                title="cubeplex",
+                title="CubePlex",
                 text=full_content[:4000],
                 open_conversation_id=self._open_conversation_id,
             )
@@ -193,7 +193,7 @@ class DingtalkOpDispatcher:
     # ---- fallbacks -------------------------------------------------------
 
     async def _emergency_pending_input(self, pending: Any) -> None:
-        text = pending.question or "Please continue in the cubeplex web UI."
+        text = pending.question or "Please continue in the CubePlex web UI."
         if pending.choices:
             labels = ", ".join(label for label, _, _ in pending.choices)
             text = f"{text}\n\nOptions: {labels}\n\n_(Please answer in the web UI.)_"
@@ -202,7 +202,7 @@ class DingtalkOpDispatcher:
     async def emergency_text(self, text: str) -> None:
         try:
             await self._connector.reply_markdown(
-                title="cubeplex",
+                title="CubePlex",
                 text=text[:4000],
                 open_conversation_id=self._open_conversation_id,
             )
