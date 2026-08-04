@@ -86,13 +86,16 @@ class SlackOpDispatcher:
             self.sent_char_offset += split_at
             remaining = full_content[self.sent_char_offset :]
             if remaining:
+                # New message for the next segment. Keep offset at the start of
+                # this segment so later stream edits repaint the full cumulative
+                # text (same pattern as Discord/Teams). Advancing past the
+                # remainder would make the next chat.update replace the new
+                # message with only the delta suffix and drop prior text.
                 posted = remaining[:_SLACK_SECTION_LIMIT]
                 msg_ts = await self._connector.send_message(posted)
                 if msg_ts:
                     s.card_id = msg_ts
                     s.bot_message_id = msg_ts
-                    # Advance so drain loops know how much is already on Slack.
-                    self.sent_char_offset += len(posted)
             note_edit_success(s)
             return True
         # After a split (or a stream tick with no new chars), segment can be
@@ -129,7 +132,11 @@ class SlackOpDispatcher:
             if rid != self._hitl_reset_qid:
                 s.card_id = None
                 s.bot_message_id = None
-                self.sent_char_offset = 0
+                # post_hitl_content is cumulative across multiple HITL turns in
+                # one run. Pin offset to the current buffer end so the next
+                # message only paints text produced after this resolution
+                # (avoids reposting the first continuation on the second HITL).
+                self.sent_char_offset = len(str(s.card_state.post_hitl_content or ""))
                 self._hitl_reset_qid = rid
         return True
 
