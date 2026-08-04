@@ -591,6 +591,11 @@ class OutboundRunTailer:
                         except Exception:
                             logger.opt(exception=True).warning("artifact dispatch failed")
                     if op is None:
+                        # Debounced text_deltas return None but still mutate
+                        # card_state; refresh any pending stream so Feishu
+                        # (which paints ``op.text``) does not ship a stale prefix.
+                        if pending_stream is not None and pending_stream.kind == "stream_text":
+                            pending_stream = self._refresh_stream_op(pending_stream)
                         continue
                     if op.kind == "stream_text" and not op.final:
                         pending_stream = op
@@ -598,7 +603,9 @@ class OutboundRunTailer:
                     if pending_stream is not None:
                         # Terminal finalize/error supersedes intermediate stream.
                         if not op.final:
-                            await self._dispatch_op(pending_stream, is_terminal=False)
+                            await self._dispatch_op(
+                                self._refresh_stream_op(pending_stream), is_terminal=False
+                            )
                         pending_stream = None
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     try:
@@ -627,7 +634,9 @@ class OutboundRunTailer:
                                     "[outbound] deliver_terminal_files raised"
                                 )
                 if pending_stream is not None and not done:
-                    await self._dispatch_op(pending_stream, is_terminal=False)
+                    await self._dispatch_op(
+                        self._refresh_stream_op(pending_stream), is_terminal=False
+                    )
                 if done:
                     return
         finally:
@@ -645,6 +654,25 @@ class OutboundRunTailer:
                     await self._dispatcher.aclose()
                 except Exception:
                     logger.opt(exception=True).warning("[outbound] dispatcher.aclose() raised")
+
+    def _refresh_stream_op(self, op: OutboundOp) -> OutboundOp:
+        """Re-read accumulated stream text so a coalesced op is not stale.
+
+        Feishu's dispatcher paints ``op.text``; Slack/Discord re-read state but
+        keep ``op.text`` honest for all platforms. Debounced deltas mutate
+        ``card_state`` while returning ``None``, so the held op must be updated
+        before dispatch.
+        """
+        if op.kind != "stream_text":
+            return op
+        cs = self._state.card_state
+        if cs.hitl_resolved:
+            text = cs.post_hitl_content or ""
+            element_id = "post_hitl_content"
+        else:
+            text = cs.streaming_content or ""
+            element_id = "streaming_content"
+        return OutboundOp(kind="stream_text", element_id=element_id, text=text)
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
         """Delegate one OutboundOp to the injected OpDispatcher.

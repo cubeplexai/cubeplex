@@ -177,33 +177,31 @@ class SlackOpDispatcher:
             links = "\n".join(f"📎 [{a.name}]({a.share_url})" for a in artifacts if a.share_url)
             if links:
                 full_content = f"{full_content}\n\n{links}" if full_content else links
-        if not full_content:
-            if s.inbound_message_id:
-                await self._connector.remove_reaction(
-                    s.inbound_message_id, "hourglass_flowing_sand"
-                )
-            return True
-        remaining = full_content[self.sent_char_offset :]
-        if s.bot_message_id is not None and len(remaining) <= _SLACK_SECTION_LIMIT:
-            try:
-                await self._connector.edit_message(s.bot_message_id, remaining)
-            except Exception:
-                logger.opt(exception=True).warning("[Slack] finalize edit failed")
-                await self.emergency_text(remaining[:4000])
-        else:
-            while remaining:
-                chunk = remaining[:_SLACK_SECTION_LIMIT]
-                remaining = remaining[_SLACK_SECTION_LIMIT:]
-                if s.bot_message_id and not self.sent_char_offset:
-                    try:
-                        await self._connector.edit_message(s.bot_message_id, chunk)
-                    except Exception:
-                        await self._connector.send_message(chunk)
-                else:
-                    msg_ts = await self._connector.send_message(chunk)
-                    if msg_ts:
-                        s.bot_message_id = msg_ts
-                self.sent_char_offset += len(chunk)
+        if full_content:
+            remaining = full_content[self.sent_char_offset :]
+            if s.bot_message_id is not None and len(remaining) <= _SLACK_SECTION_LIMIT:
+                try:
+                    await self._connector.edit_message(s.bot_message_id, remaining)
+                except Exception:
+                    logger.opt(exception=True).warning("[Slack] finalize edit failed")
+                    await self.emergency_text(remaining[:4000])
+            else:
+                while remaining:
+                    chunk = remaining[:_SLACK_SECTION_LIMIT]
+                    remaining = remaining[_SLACK_SECTION_LIMIT:]
+                    if s.bot_message_id and not self.sent_char_offset:
+                        try:
+                            await self._connector.edit_message(s.bot_message_id, chunk)
+                        except Exception:
+                            await self._connector.send_message(chunk)
+                    else:
+                        msg_ts = await self._connector.send_message(chunk)
+                        if msg_ts:
+                            s.bot_message_id = msg_ts
+                    self.sent_char_offset += len(chunk)
+        # Always clear processing markers — including empty post-HITL success
+        # (HITL answer then done with no further text) so the hourglass is
+        # not left hanging without a white_check_mark.
         if s.inbound_message_id:
             await self._connector.remove_reaction(s.inbound_message_id, "hourglass_flowing_sand")
             if not s.card_state.error:
