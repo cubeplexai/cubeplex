@@ -569,6 +569,15 @@ class OutboundRunTailer:
                 if not events:
                     continue
                 done = False
+                # Coalesce consecutive ``stream_text`` ops in a batch. Each
+                # stream dispatch is a slow platform round-trip (Slack
+                # chat.update often 200–500ms+). When the tailer is catching
+                # up after the model finished, folding many deltas then
+                # awaiting every intermediate edit makes IM lag far behind
+                # the web UI. Keep only the latest stream_text; drop it if a
+                # terminal finalize follows in the same batch (finalize
+                # already carries the full content).
+                pending_stream: OutboundOp | None = None
                 for ev in events:
                     last_id = ev.event_id
                     op = fold_event(ev.payload, self._state, now=time.monotonic())
@@ -583,6 +592,14 @@ class OutboundRunTailer:
                             logger.opt(exception=True).warning("artifact dispatch failed")
                     if op is None:
                         continue
+                    if op.kind == "stream_text" and not op.final:
+                        pending_stream = op
+                        continue
+                    if pending_stream is not None:
+                        # Terminal finalize/error supersedes intermediate stream.
+                        if not op.final:
+                            await self._dispatch_op(pending_stream, is_terminal=False)
+                        pending_stream = None
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     try:
                         await self.maybe_register_awaiting_responder(ev_payload=ev.payload)
@@ -609,6 +626,8 @@ class OutboundRunTailer:
                                 logger.opt(exception=True).warning(
                                     "[outbound] deliver_terminal_files raised"
                                 )
+                if pending_stream is not None and not done:
+                    await self._dispatch_op(pending_stream, is_terminal=False)
                 if done:
                     return
         finally:
