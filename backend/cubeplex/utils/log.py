@@ -99,6 +99,10 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     # which floods the log when running with debug on.
     "websockets",
     "lark_oapi",
+    # Slack Socket Mode (slack_sdk + bolt) logs every sdk-ping-pong / PING /
+    # PONG and most HTTP request/response bodies at DEBUG.
+    "slack_sdk",
+    "slack_bolt",
 )
 
 
