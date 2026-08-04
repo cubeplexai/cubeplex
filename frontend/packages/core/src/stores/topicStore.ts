@@ -12,6 +12,7 @@ import {
   upgradeToTopic,
   createTopicConversation,
   setTopicPin,
+  updateTopic,
 } from '../api'
 
 export interface TopicWithParticipants {
@@ -36,6 +37,7 @@ export interface TopicStore {
     body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
   ): Promise<{ topicId: string; conversationId: string }>
   remove(client: ApiClient, topicId: string): Promise<void>
+  rename(client: ApiClient, topicId: string, title: string): Promise<void>
   setPin(client: ApiClient, topicId: string, isPinned: boolean): Promise<void>
   addMembers(client: ApiClient, topicId: string, userIds: string[]): Promise<void>
   removeMember(client: ApiClient, topicId: string, userId: string): Promise<void>
@@ -168,6 +170,13 @@ export const useTopicStore = create<TopicStore>((set) => ({
         topicConversations: nextConversations,
       }
     })
+  },
+
+  async rename(client, topicId, title) {
+    const { topic } = await updateTopic(client, topicId, { title })
+    set((s) => ({
+      topics: s.topics.map((t) => (t.id === topicId ? { ...t, ...topic } : t)),
+    }))
   },
 
   async setPin(client, topicId, isPinned) {

@@ -254,9 +254,10 @@ class TestTopicCRUD:
         assert resp.status_code == 404, resp.text
 
     @pytest.mark.anyio
-    async def test_update_topic_owner_only(
+    async def test_update_topic_title_any_participant(
         self, four_layer_admin_and_member: FourLayerFixture
     ) -> None:
+        """Any participant may rename; non-participants still cannot."""
         (admin_c, ws_id, _), (member_c, _, member_uid) = four_layer_admin_and_member
         create_resp = await admin_c.post(
             f"/api/v1/ws/{ws_id}/topics",
@@ -264,14 +265,15 @@ class TestTopicCRUD:
         )
         topic_id = create_resp.json()["topic"]["id"]
 
-        # Member cannot update
+        # Member can rename
         resp = await member_c.patch(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}",
-            json={"title": "Hacked"},
+            json={"title": "Member Rename"},
         )
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["topic"]["title"] == "Member Rename"
 
-        # Owner can
+        # Owner can too
         resp = await admin_c.patch(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}",
             json={"title": "New Title"},

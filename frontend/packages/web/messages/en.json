@@ -123,6 +123,7 @@
     "newGroupChat": "New Group Chat",
     "newTopic": "New Topic",
     "newConversation": "New conversation in this topic",
+    "renameTopic": "Rename",
     "members": "{count} members",
     "owner": "Owner",
     "member": "Member",

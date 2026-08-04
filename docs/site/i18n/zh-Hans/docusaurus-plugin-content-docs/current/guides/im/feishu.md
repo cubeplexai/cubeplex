@@ -46,7 +46,7 @@ CubePlex 通过同一个连接器支持两个版本——绑定时请选择 **Fe
 | `cardkit:card:read` 和 `cardkit:card:write` | 是 | 流式发送交互式卡片回复。 |
 | `im:message.reactions:read` 和 `im:message.reactions:write_only` | 是 | 读取和更新连接器使用的消息反应。 |
 | `contact:contact.base:readonly` | 是 | CubePlex 连接向导要求的范围。 |
-| `im:chat:readonly`（或 `im:chat:read` / `im:chat`） | 群组标题建议授予 | 通过 `GET /open-apis/im/v1/chats/:chat_id` 查询群组显示名称。没有此权限时，标题会保持为空，UI 会显示本地化的“新建群聊”占位符。 |
+| `im:chat:readonly`（或 `im:chat:read` / `im:chat`） | 群组标题建议授予 | 通过 `GET /open-apis/im/v1/chats/:chat_id` 查询群组显示名称。没有此权限时，话题标题会回退为第一条用户消息的摘要；若消息也为空，UI 会显示本地化的“新建群聊”占位符。 |
 | `contact:user.email:readonly` + 相关权限 | 建议 | 将发送者的 Feishu 电子邮箱自动匹配到 CubePlex 账户（避免手动 `link`）。 |
 
 添加范围后，请 **发布新应用版本**，以便租户授权生效——在版本发布前，Feishu 不会应用新范围。

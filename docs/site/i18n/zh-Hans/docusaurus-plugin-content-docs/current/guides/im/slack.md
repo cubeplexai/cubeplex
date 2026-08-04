@@ -74,6 +74,8 @@ Slack 使用 **Socket Mode** 运行——CubePlex 会向 Slack 打开持久出�
 
 没有这些订阅，机器人永远无法看到任何消息。添加事件后，Slack 会提示你重新安装应用（步骤 6），以便新范围和订阅生效。
 
+在 **topic** 路由模式下，每个 @提及机器人的 Slack 线程会成为 CubePlex 话题。这些事件通常不带频道显示名，因此 CubePlex 会用第一条用户消息作为话题标题（之后可在侧边栏 ⋮ 菜单中重命名）。
+
 :::info 📸 截图占位符
 **截图内容：** Event Subscriptions 页面，已展开“Subscribe to bot events”，并显示已添加 `app_mention` 和 `message.im`。
 **资源：** `/img/im/slack-event-subscriptions.png`

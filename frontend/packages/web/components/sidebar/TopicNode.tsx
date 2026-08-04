@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Layers,
   MoreHorizontal,
+  Pencil,
   Pin,
   PinOff,
   SquarePen,
@@ -63,8 +64,15 @@ export function TopicNode({
     conversations.some((c) => c.id === activeConvId) || topic.id === activeTopicId,
   )
   const router = useRouter()
-  const { topicParticipants, topicConversations, fetchDetail, remove, createConversation, setPin } =
-    useTopicStore()
+  const {
+    topicParticipants,
+    topicConversations,
+    fetchDetail,
+    remove,
+    rename,
+    createConversation,
+    setPin,
+  } = useTopicStore()
   const fetchConversations = useConversationStore((s) => s.fetchList)
   const participants = topicParticipants[topic.id] ?? []
 
@@ -97,6 +105,49 @@ export function TopicNode({
   }, [activeTopicId, topic.id, ensureDetailLoaded])
   const [creating, setCreating] = useState<boolean>(false)
   const [memberDialogOpen, setMemberDialogOpen] = useState<boolean>(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState(topic.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const displayTitle = topicDisplayTitle(topic.title, tTopics('newGroupChat'))
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!isEditing) setDraft(topic.title)
+  }, [topic.title, isEditing])
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [isEditing])
+
+  const commitEdit = async (): Promise<void> => {
+    const next = draft.trim()
+    setIsEditing(false)
+    if (!next || next === topic.title) return
+    try {
+      await rename(buildClient(currentWsId), topic.id, next)
+    } catch (err) {
+      console.error('Failed to rename topic:', err)
+    }
+  }
+
+  const cancelEdit = (): void => {
+    setIsEditing(false)
+    setDraft(topic.title)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void commitEdit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+    }
+  }
 
   const handleCreateConversation = async (e: React.MouseEvent): Promise<void> => {
     e.preventDefault()
@@ -129,14 +180,50 @@ export function TopicNode({
     if (next) ensureDetailLoaded()
   }
 
+  const baseRowClasses = cn(
+    'group relative flex items-center gap-1 pl-1.5 pr-1 py-1.5 rounded',
+    'transition-colors duration-fast',
+    stateClass,
+  )
+
+  if (isEditing) {
+    return (
+      <li>
+        <div className={baseRowClasses}>
+          {expanded ? (
+            <ChevronDown className="size-3 shrink-0" />
+          ) : (
+            <ChevronRight className="size-3 shrink-0" />
+          )}
+          {topic.is_pinned ? (
+            <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />
+          ) : topic.im_platform ? (
+            <PlatformLogo platform={topic.im_platform} className="size-3 shrink-0" />
+          ) : (
+            <Layers className="size-3 shrink-0 text-primary/70" />
+          )}
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => void commitEdit()}
+            onClick={(e) => e.stopPropagation()}
+            className={
+              'flex-1 min-w-0 bg-background/80 border border-border rounded ' +
+              'px-1.5 py-0.5 text-[12.5px] font-medium leading-none outline-none ' +
+              'focus:border-primary'
+            }
+          />
+        </div>
+      </li>
+    )
+  }
+
   return (
     <li>
       <div
-        className={cn(
-          'group relative flex items-center gap-1 pl-1.5 pr-1 py-1.5 rounded',
-          'transition-colors duration-fast cursor-pointer',
-          stateClass,
-        )}
+        className={cn(baseRowClasses, 'cursor-pointer')}
         onClick={toggle}
         role="button"
         tabIndex={0}
@@ -159,8 +246,11 @@ export function TopicNode({
         ) : (
           <Layers className="size-3 shrink-0 text-primary/70" />
         )}
-        <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
-          {topicDisplayTitle(topic.title, tTopics('newGroupChat'))}
+        <div
+          className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight"
+          title={displayTitle}
+        >
+          {displayTitle}
         </div>
         {participants.length > 0 ? (
           <AvatarStack
@@ -214,6 +304,15 @@ export function TopicNode({
             className="w-36"
             onClick={(e) => e.stopPropagation()}
           >
+            <DropdownMenuItem
+              onClick={() => {
+                setDraft(topic.title)
+                setIsEditing(true)
+              }}
+            >
+              <Pencil className="size-3.5" />
+              {tTopics('renameTopic')}
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 // Refresh participants in the background — MemberPanel

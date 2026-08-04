@@ -62,6 +62,55 @@ class TestTitleAndAttributes:
         # locale-specific phrase into the stored title.
         assert im_topic_title(scope_kind="channel", bot_name="MyBot", channel_name=None) == ""
 
+    def test_group_title_falls_back_to_title_hint(self) -> None:
+        # Platforms without a channel name (Slack threads) use the first
+        # message snippet so the sidebar is not a wall of "New Group Chat".
+        assert (
+            im_topic_title(
+                scope_kind="thread",
+                bot_name="MyBot",
+                channel_name=None,
+                title_hint="  please review this PR  ",
+            )
+            == "please review this PR"
+        )
+
+    def test_channel_name_wins_over_title_hint(self) -> None:
+        assert (
+            im_topic_title(
+                scope_kind="channel",
+                bot_name="MyBot",
+                channel_name="Team",
+                title_hint="hello",
+            )
+            == "Team"
+        )
+
+    def test_dm_ignores_title_hint(self) -> None:
+        assert (
+            im_topic_title(
+                scope_kind="dm",
+                bot_name="MyBot",
+                channel_name=None,
+                title_hint="hello",
+            )
+            == "MyBot"
+        )
+
+    def test_title_hint_truncated_to_80(self) -> None:
+        long = "x" * 100
+        assert (
+            len(
+                im_topic_title(
+                    scope_kind="thread",
+                    bot_name="MyBot",
+                    channel_name=None,
+                    title_hint=long,
+                )
+            )
+            == 80
+        )
+
     def test_bot_display_name_default(self) -> None:
         assert bot_display_name(None) == "CubePlex"
         assert bot_display_name({"bot_app_name": "Helper"}) == "Helper"
