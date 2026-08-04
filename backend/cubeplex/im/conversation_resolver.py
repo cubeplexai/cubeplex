@@ -151,7 +151,8 @@ async def resolve_im_conversation(
             # inbound message (Slack threads often lack a platform channel
             # name). Mark ``title_source=message`` so a later platform channel
             # name can still promote over it. Never overwrite a non-empty
-            # title; DM keeps bot name.
+            # title; DM keeps bot name. (Empty check is after channel-name
+            # refresh, which leaves user-owned titles alone.)
             if (
                 scope_kind != "dm"
                 and not (anchored.title or "").strip()
@@ -405,7 +406,8 @@ def _maybe_refresh_topic_channel_name(
         return
 
     # No resolved name: clear only opaque / legacy-label placeholders.
-    if title_is_legacy_id or title_is_legacy_label:
+    # Never touch a user-owned title even if it happens to equal those strings.
+    if title_source != "user" and (title_is_legacy_id or title_is_legacy_label):
         topic.title = ""
     if stored_name in (channel_id, "群聊"):
         attrs = dict(topic.attributes or {})

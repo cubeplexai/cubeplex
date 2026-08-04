@@ -434,6 +434,65 @@ async def test_user_title_equal_to_platform_name_not_tracked(
         assert topic.attributes["im"]["title_source"] == "user"
 
 
+async def test_user_title_matching_legacy_label_not_cleared_without_name(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A user title equal to ``群聊`` / channel id must survive a no-name refresh."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="first",
+            origin="inbound",
+            channel_name="Team",
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        topic.title = "群聊"
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["title_source"] = "user"
+        im["channel_name"] = "Team"
+        attrs["im"] = im
+        topic.attributes = attrs
+        session.add(topic)
+        await session.commit()
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="should not replace",
+            origin="inbound",
+            # no channel_name
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "群聊"
+        assert topic.attributes["im"]["title_source"] == "user"
+
+
 async def test_shared_topic_refreshes_legacy_channel_id_title(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
