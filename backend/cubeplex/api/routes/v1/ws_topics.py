@@ -241,6 +241,16 @@ async def update_topic(
 
     if body.title is not None:
         topic.title = body.title
+        # IM topics may have a provisional message-snippet title that platform
+        # channel-name refresh is allowed to replace. A manual rename must
+        # stick — mark title_source=user so inbound resolve won't overwrite.
+        attrs = dict(topic.attributes or {})
+        im = attrs.get("im")
+        if isinstance(im, dict):
+            im = dict(im)
+            im["title_source"] = "user"
+            attrs["im"] = im
+            topic.attributes = attrs
     session.add(topic)
     await session.commit()
     await session.refresh(topic)

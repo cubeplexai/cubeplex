@@ -247,6 +247,126 @@ async def test_shared_topic_uses_channel_name_as_title(
         assert topic.title == "项目 Alpha"
         assert topic.attributes["im"]["channel_name"] == "项目 Alpha"
         assert topic.attributes["im"]["channel_id"] == _CHANNEL
+        assert topic.attributes["im"]["title_source"] == "channel"
+
+
+async def test_message_provisional_title_promotes_to_channel_name(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A title_hint provisional title must yield to a later platform name.
+
+    Covers the Feishu race where the first resolve has no channel_name (lookup
+    failed / schedule / trigger) and stamps the message snippet, then a later
+    inbound resolves the real group name.
+    """
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="please review this PR",
+            origin="inbound",
+            # no channel_name → provisional message title
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "please review this PR"
+        assert topic.attributes["im"].get("title_source") == "message"
+        assert topic.attributes["im"].get("channel_name") is None
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="later message",
+            origin="inbound",
+            channel_name="研发大群",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "研发大群"
+        assert topic.attributes["im"]["channel_name"] == "研发大群"
+        assert topic.attributes["im"]["title_source"] == "channel"
+
+
+async def test_user_renamed_title_not_overwritten_by_channel_name(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Manual renames (title_source=user) must stick when a channel name arrives."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="provisional",
+            origin="inbound",
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        topic.title = "My Custom Name"
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["title_source"] = "user"
+        attrs["im"] = im
+        topic.attributes = attrs
+        session.add(topic)
+        await session.commit()
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="later",
+            origin="inbound",
+            channel_name="平台群名",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "My Custom Name"
+        assert topic.attributes["im"]["channel_name"] == "平台群名"
+        assert topic.attributes["im"]["title_source"] == "user"
 
 
 async def test_shared_topic_refreshes_legacy_channel_id_title(
