@@ -123,7 +123,11 @@ class SlackOpDispatcher:
     async def dispatch_patch(self, state: Any) -> bool:
         s = self._state
         pending = s.card_state.pending_input
-        pending_id = f"{pending.kind}:{pending.run_id}" if pending else None
+        # Include question_id so two consecutive same-kind HITLs (e.g. two
+        # ask_user prompts) each get their own button message.
+        pending_id = (
+            f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}" if pending else None
+        )
         if (
             pending is not None
             and pending.resolved_choice is None
