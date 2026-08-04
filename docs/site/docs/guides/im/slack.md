@@ -74,6 +74,8 @@ Open **Event Subscriptions** and turn it on (with Socket Mode enabled, Slack del
 
 Without these subscriptions the bot never sees any messages. After adding events, Slack will prompt you to reinstall the app (Step 6) so the new scopes and subscriptions take effect.
 
+In **topic** routing mode, each Slack thread that @-mentions the bot becomes a CubePlex topic. Slack does not supply a channel display name on these events, so CubePlex titles the topic from the first user message (you can rename it later from the sidebar ⋮ menu).
+
 :::info 📸 Screenshot placeholder
 **Capture:** The Event Subscriptions page with "Subscribe to bot events" expanded, showing `app_mention` and `message.im` added.
 **Asset:** `/img/im/slack-event-subscriptions.png`

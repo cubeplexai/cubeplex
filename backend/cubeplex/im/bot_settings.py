@@ -75,14 +75,29 @@ def bot_display_name(config: dict[str, Any] | None) -> str:
     return str(name) if name else "CubePlex"
 
 
-def im_topic_title(*, scope_kind: str, bot_name: str, channel_name: str | None) -> str:
+def im_topic_title(
+    *,
+    scope_kind: str,
+    bot_name: str,
+    channel_name: str | None,
+    title_hint: str | None = None,
+) -> str:
     """Topic title: bot name for a DM, channel name for a group.
 
-    When the platform did not supply a group name, return ``""`` rather than a
-    localized phrase. The sidebar already does ``title || t('newGroupChat')``,
-    so an empty title stays i18n-clean and is not frozen in the writer's locale.
+    When the platform did not supply a group name, fall back to a trimmed
+    snippet of the first inbound message (``title_hint``) so Slack threads and
+    similar scopes do not all show the localized empty label. Prefer empty over
+    baking a locale-specific phrase into storage — the sidebar still does
+    ``title || t('newGroupChat')`` when both name and hint are missing.
     """
-    title = bot_name if scope_kind == "dm" else (channel_name or "")
+    if scope_kind == "dm":
+        title = bot_name
+    elif channel_name:
+        title = channel_name
+    else:
+        hint = (title_hint or "").strip()
+        # Match conversation provisional titles (80 chars); column max is 255.
+        title = hint[:80] if hint else ""
     return title[:255]
 
 

@@ -46,7 +46,7 @@ Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions,
 | `cardkit:card:read` and `cardkit:card:write` | Yes | Stream interactive card replies. |
 | `im:message.reactions:read` and `im:message.reactions:write_only` | Yes | Read and update message reactions used by the connector. |
 | `contact:contact.base:readonly` | Yes | Required by the CubePlex connection wizard. |
-| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Recommended for group titles | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id`. Without it the title stays empty and the UI shows a localized "New Group Chat" placeholder. |
+| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Recommended for group titles | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id`. Without it the topic title falls back to a snippet of the first user message; if that is also empty the UI shows a localized "New Group Chat" placeholder. |
 | `contact:user.email:readonly` + related | Recommended | Auto-match the sender's Feishu email to a CubePlex account (avoids manual `link`). |
 
 After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.

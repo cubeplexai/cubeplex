@@ -226,14 +226,18 @@ async def update_topic(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, Any]:
+    """Rename a topic. Any participant may update the title (sidebar rename).
+
+    Title is the only patch field today; destructive ops stay owner-only.
+    """
     repo = _topic_repo(session, ctx)
     topic = await repo.get(topic_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
     participant = await repo.get_participant(topic_id, ctx.user.id)
-    if participant is None or participant.role != "owner":
-        raise HTTPException(status_code=403, detail="Only topic owner can update")
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a topic participant")
 
     if body.title is not None:
         topic.title = body.title

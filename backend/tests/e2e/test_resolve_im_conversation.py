@@ -178,9 +178,10 @@ async def test_shared_creates_topic_and_link(
         topic = (
             await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
-        # Without a platform-supplied channel_name, title stays empty so the
-        # UI can localize (never the opaque channel id, never a frozen phrase).
-        assert topic.title == ""
+        # Without a platform-supplied channel_name, title comes from the
+        # inbound message snippet (never the opaque channel id, never a
+        # frozen localized phrase).
+        assert topic.title == "hello world"
         assert topic.attributes.get("im", {}).get("channel_name") is None
         assert topic.creator_user_id == _USER  # acting user owns shared topics
         assert topic.attributes.get("im", {}).get("account_id") == _ACCOUNT
@@ -360,7 +361,8 @@ async def test_shared_topic_clears_legacy_channel_id_without_name(
 
     async with maker() as session:
         topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
-        assert topic.title == ""
+        # Opaque id cleared, then provisional title stamped from this message.
+        assert topic.title == "second"
         assert topic.attributes["im"]["channel_name"] is None
 
 

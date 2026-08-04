@@ -147,6 +147,16 @@ async def resolve_im_conversation(
             _maybe_refresh_topic_channel_name(
                 anchored, channel_id=channel_id, channel_name=resolved_channel_name
             )
+            # Legacy / empty group topics: stamp a provisional title from the
+            # inbound message (Slack threads often lack a platform channel
+            # name). Never overwrite a non-empty title; DM keeps bot name.
+            if (
+                scope_kind != "dm"
+                and not (anchored.title or "").strip()
+                and (title_hint or "").strip()
+            ):
+                anchored.title = (title_hint or "").strip()[:80]
+                session.add(anchored)
         else:
             # The linked Topic was archived/deleted in the UI. Don't keep
             # appending under a Topic the user removed (topic + conversation
@@ -173,6 +183,7 @@ async def resolve_im_conversation(
                 scope_kind=scope_kind,
                 bot_name=bot_name,
                 channel_name=resolved_channel_name,
+                title_hint=title_hint,
             ),
             sandbox_mode=sandbox_mode or "dedicated",
             attributes=dict(im_attrs),

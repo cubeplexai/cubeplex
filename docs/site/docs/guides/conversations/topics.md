@@ -36,7 +36,7 @@ You cannot upgrade a conversation that is already part of a topic, or one wired 
 
 ### From an IM bot
 
-An IM connector in **topic** routing mode creates a CubePlex topic when the first message arrives. The IM channel and platform are stored as topic metadata. In **shared** routing mode, the connector instead uses one standalone group conversation; it does not create a topic. See [IM Connectors](../im/overview.md) and [Group chats](./group-chats.md).
+An IM connector in **topic** routing mode creates a CubePlex topic when the first message arrives. The IM channel and platform are stored as topic metadata. The topic title prefers the platform channel or group name when the connector can resolve one; otherwise it uses a snippet of the first user message (for example Slack thread @-mentions, which do not supply a group title). Empty titles still fall back to a localized "New Group Chat" label in the sidebar. In **shared** routing mode, the connector instead uses one standalone group conversation; it does not create a topic. See [IM Connectors](../im/overview.md) and [Group chats](./group-chats.md).
 
 :::note Web topics and IM topics don't cross over (current limitation)
 The IM runner only drives topics that originated from IM. A topic created in the web app cannot currently be answered from an IM channel.
@@ -46,8 +46,8 @@ The IM runner only drives topics that originated from IM. A topic created in the
 
 Every participant has one of two roles:
 
-- **Owner** — manages the roster, title, and topic lifecycle.
-- **Member** — can read and post in every conversation under the topic and start new conversations.
+- **Owner** — manages the roster and topic lifecycle (invite, remove, archive).
+- **Member** — can read and post in every conversation under the topic, start new conversations, and rename the topic.
 
 | Action | Who can do it |
 |---|---|
@@ -55,7 +55,7 @@ Every participant has one of two roles:
 | Leave the topic | Any participant (yourself) |
 | Remove another participant | Owner only |
 | Transfer ownership / change a role | Owner only |
-| Rename the topic | Owner only |
+| Rename the topic | Any participant (sidebar ⋮ menu) |
 | Pin / unpin the topic | Any participant |
 | Archive the topic | Owner only |
 | Start a new conversation in the topic | Any participant |
@@ -83,10 +83,11 @@ A topic starts with one conversation, and any participant can open more—usuall
 
 Each message in a shared topic is tagged with the participant who sent it. In a plain 1:1 chat that tag is hidden because there is only one human participant.
 
-## Ordering, pinning, and archiving
+## Ordering, pinning, renaming, and archiving
 
 - **Ordering.** Topics, group chats, and 1:1 conversations share one sidebar list ordered by recent activity. A topic moves when any child conversation gets a new message.
 - **Pinning.** Pinning a topic is shared by all members. Pinning an individual conversation lifts only that conversation.
+- **Renaming.** Use **Rename** on the topic's ⋮ menu to edit the title inline. Hover a truncated topic or conversation name in the sidebar to see the full title.
 - **Archiving.** An owner can archive a topic for all participants. A member who wants out can leave from the topic member controls.
 
 ## Topics as automation destinations

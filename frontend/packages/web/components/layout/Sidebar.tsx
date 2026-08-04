@@ -204,7 +204,10 @@ export function ConversationRow({
         {showGroupIcon && !hasGroupParticipants && (
           <Users className="size-3 shrink-0 text-muted-foreground" />
         )}
-        <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
+        <div
+          className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight"
+          title={convo.title || tSidebar('untitledChat')}
+        >
           {convo.title || tSidebar('untitledChat')}
         </div>
         {isRunning ? (

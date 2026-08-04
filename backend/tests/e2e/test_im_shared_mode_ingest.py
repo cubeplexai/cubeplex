@@ -180,7 +180,8 @@ async def test_first_shared_message_creates_topic(
         assert conv.attributes.get("im", {}).get("account_id") == _ACCOUNT
 
         topic = (await s.execute(select(Topic).where(Topic.id == conv.topic_id))).scalar_one()
-        assert topic.title == ""  # no platform name → empty (UI localizes), never channel id
+        # No platform channel name → first message snippet (never channel id).
+        assert topic.title == "hello shared"
         assert topic.max_participants == 100
         assert topic.attributes["im"]["scope_kind"] == "channel"
 
