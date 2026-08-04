@@ -1,6 +1,6 @@
 ---
 name: pdf
-version: 1.2.0
+version: 1.3.0
 description: >
   Use this skill when visual quality and design identity matter for a PDF.
   CREATE (generate from scratch): "make a PDF", "generate a report", "write a proposal",
