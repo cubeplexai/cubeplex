@@ -152,8 +152,11 @@ class TestSlackConnectorLifecycleHooks:
         await c.on_processing_complete(state)
         c.remove_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
         c.remove_reaction.reset_mock()
+        c.add_reaction.reset_mock()
         await c.on_processing_failed(state)
         c.remove_reaction.assert_awaited_once_with("1234.5678", "hourglass_flowing_sand")
+        # Abort without finalize must still leave a visible failure marker.
+        c.add_reaction.assert_awaited_once_with("1234.5678", "x")
 
     @pytest.mark.asyncio
     async def test_processing_start_skips_without_inbound_id(self) -> None:
