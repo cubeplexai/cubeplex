@@ -12,19 +12,31 @@ export const teamsDescriptor: PlatformDescriptor = {
     {
       key: 'app',
       labelKey: 'im.wizard.teams.prereq.app',
-      helpUrl: () => 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps',
-    },
-    {
-      key: 'graphPermission',
-      labelKey: 'im.wizard.teams.prereq.graphPermission',
+      // Create Azure Bot (not bare App registrations). Incomplete
+      // #view/Microsoft_AAD_RegisteredApps dumps users on the portal home.
+      helpUrl: () => 'https://portal.azure.com/#create/Microsoft.AzureBot',
     },
     {
       key: 'clientSecret',
       labelKey: 'im.wizard.teams.prereq.clientSecret',
+      // Secrets live on the Entra app behind the bot.
+      helpUrl: () =>
+        'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+    },
+    {
+      key: 'graphPermission',
+      labelKey: 'im.wizard.teams.prereq.graphPermission',
+      items: ['User.Read.All'],
+      helpUrl: () =>
+        'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
     },
     {
       key: 'endpoint',
       labelKey: 'im.wizard.teams.prereq.endpoint',
+    },
+    {
+      key: 'teamsChannel',
+      labelKey: 'im.wizard.teams.prereq.teamsChannel',
     },
   ],
   credentialFields: [
@@ -76,5 +88,7 @@ export const teamsDescriptor: PlatformDescriptor = {
     tenant_id: f.tenant_id || '',
     acting_user_id: 'self',
   }),
-  scopeConsoleUrl: () => 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps',
+  // Secrets + Graph permissions live on the Entra app registration list.
+  scopeConsoleUrl: () =>
+    'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
 }

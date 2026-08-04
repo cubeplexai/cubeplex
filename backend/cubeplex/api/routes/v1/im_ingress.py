@@ -41,7 +41,11 @@ from cubeplex.im.feishu.signature import (
 )
 from cubeplex.im.inbound import ingest_inbound_event
 from cubeplex.im.resume import resume_paused_run
-from cubeplex.im.teams.app_manager import get_entry_by_bot_id
+from cubeplex.im.teams.app_manager import (
+    bot_id_candidates,
+    remember_conversation_route,
+    resolve_entry_for_activity,
+)
 from cubeplex.im.teams.commands import parse_link_command as parse_teams_link
 from cubeplex.im.teams.connector import TeamsConnector
 from cubeplex.im.types import BindingMode, lookup_binding_mode
@@ -448,22 +452,25 @@ async def teams_messages(
     if not isinstance(activity, dict):
         return Response(status_code=status.HTTP_400_BAD_REQUEST)
 
-    recipient = activity.get("recipient") or {}
-    bot_id = str(recipient.get("id") or "")
-    if not bot_id:
-        return Response(status_code=status.HTTP_200_OK)
-
-    entry = get_entry_by_bot_id(bot_id)
+    auth_header = request.headers.get("authorization", "")
+    # Web Chat / Direct Line put a channel account id in recipient.id
+    # (``botname@…``), not the Microsoft App ID we cache on. Fall back to
+    # JWT ``aud`` / ``appid`` so those channels still resolve.
+    entry = resolve_entry_for_activity(activity, auth_header)
     if entry is None:
-        logger.debug("[Teams ingress] no app for bot_id={}", bot_id)
+        logger.warning(
+            "[Teams ingress] no app for candidates={}",
+            bot_id_candidates(activity, auth_header),
+        )
         return Response(status_code=status.HTTP_200_OK)
+    # Canonical bot id is the App ID used at connect / external_account_id.
+    bot_id = entry.bot_id
 
     # Validate Azure Bot Framework JWT before any state-changing work.
     token_validator = getattr(entry.app.server, "_token_validator", None)
     if token_validator is None:
         logger.warning("[Teams ingress] no token validator for bot_id={}", bot_id)
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
-    auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
     try:
@@ -512,11 +519,28 @@ async def teams_messages(
 
     event.account_external_id = account.external_account_id
 
+    # Outbound must use this activity's serviceUrl + channelId + recipient.id.
+    # Web Chat bot account is ``name@…``, not the App ID (App ID → connector 403).
+    service_url = str(activity.get("serviceUrl") or "").rstrip("/")
+    bf_channel_id = str(activity.get("channelId") or "msteams")
+    recipient = activity.get("recipient") or {}
+    bot_account_id = str(recipient.get("id") or "") or bot_id
+    if event.channel_id and service_url:
+        remember_conversation_route(
+            event.channel_id,
+            service_url=service_url,
+            channel_id=bf_channel_id,
+            bot_account_id=bot_account_id,
+        )
+
     gate_connector = TeamsConnector(
         bot_id=bot_id,
         app=entry.app,
         channel_id=event.channel_id,
         graph_client=entry.graph_client,
+        service_url=service_url or None,
+        bf_channel_id=bf_channel_id,
+        bot_account_id=bot_account_id,
     )
 
     link_email = parse_teams_link(event.text)

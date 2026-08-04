@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from cubeplex.im.outbound import _FloodSignal
+from cubeplex.im.teams.app_manager import get_conversation_route
 from cubeplex.im.teams.format import normalize_for_teams, strip_mention_tags
 from cubeplex.im.types import (
     DM_SCOPE_KEY,
@@ -17,6 +18,7 @@ from cubeplex.im.types import (
 )
 
 TEAMS_MSG_LIMIT = 25000
+_DEFAULT_SERVICE_URL = "https://smba.trafficmanager.net/teams"
 
 
 class TeamsRateLimitError(_FloodSignal):
@@ -29,7 +31,10 @@ class TeamsConnector:
     Construction:
     - Inbound parsing only needs ``bot_id``.
     - Outbound calls need an ``app`` (microsoft-teams SDK App instance)
-      plus ``channel_id`` and optionally ``reply_to_id``.
+      plus ``channel_id`` (conversation id) and optionally ``reply_to_id``.
+    - ``service_url`` / ``bf_channel_id`` must come from the inbound activity
+      (Web Chat uses a different serviceUrl than Teams; App.send hardcodes
+      msteams + default smba URL and 401s on Web Chat).
     - Identity resolution needs a ``graph_client`` (TeamsGraphClient).
     """
 
@@ -41,12 +46,22 @@ class TeamsConnector:
         channel_id: str | None = None,
         reply_to_id: str | None = None,
         graph_client: Any = None,
+        service_url: str | None = None,
+        bf_channel_id: str | None = None,
+        bot_account_id: str | None = None,
     ) -> None:
         self._bot_id = bot_id
         self._app = app
         self._channel_id = channel_id
         self._reply_to_id = reply_to_id
         self._graph_client = graph_client
+        self._service_url = (service_url or "").rstrip("/") or None
+        self._bf_channel_id = bf_channel_id or None
+        # Channel account id from activity.recipient (not always the App ID).
+        self._bot_account_id = (bot_account_id or "").strip() or None
+        # Web Chat / Direct Line reject PUT updateActivity (405). Cache the
+        # first failure so we stop trying mid-stream.
+        self._edit_supported: bool | None = None
 
     # ------------------------------------------------------------------
     # Inbound
@@ -152,21 +167,115 @@ class TeamsConnector:
     # Outbound
     # ------------------------------------------------------------------
 
+    @property
+    def supports_message_edit(self) -> bool:
+        """Whether this channel supports updating an existing activity.
+
+        Teams does (updateActivity streaming). Web Chat / Direct Line return
+        405 Method Not Allowed on PUT …/activities/{id}.
+        """
+        if self._edit_supported is False:
+            return False
+        if self._edit_supported is True:
+            return True
+        ch = (self._bf_channel_id or "msteams").lower()
+        # Known non-updatable Bot Framework channels.
+        if ch in ("webchat", "directline", "emulator"):
+            return False
+        return True
+
+    def _resolve_route(self, conversation_id: str) -> tuple[str, str, str]:
+        """Pick service_url, channel id, and bot channel account for outbound."""
+        if self._service_url:
+            return (
+                self._service_url,
+                self._bf_channel_id or "msteams",
+                self._bot_account_id or self._bot_id,
+            )
+        cached = get_conversation_route(conversation_id)
+        if cached is not None:
+            url, ch, bot_acc = cached
+            return url, ch, bot_acc or self._bot_account_id or self._bot_id
+        default_url = _DEFAULT_SERVICE_URL
+        if self._app is not None:
+            api = getattr(self._app, "api", None)
+            api_url = getattr(api, "service_url", None) if api is not None else None
+            if isinstance(api_url, str) and api_url.strip():
+                default_url = api_url.rstrip("/")
+        return (
+            default_url,
+            self._bf_channel_id or "msteams",
+            self._bot_account_id or self._bot_id,
+        )
+
+    async def _send_activity(
+        self,
+        conversation_id: str,
+        activity: Any,
+    ) -> Any:
+        """Send via activity_sender with the conversation's real serviceUrl.
+
+        ``App.send`` hardcodes ``channel_id="msteams"``, the default Teams
+        service URL, and ``from.id`` = App ID. Web Chat requires the inbound
+        ``activity.recipient.id`` as from.id or the connector returns 403.
+        """
+        from microsoft_teams.api import (
+            Account,
+            ConversationAccount,
+            ConversationReference,
+            MessageActivityInput,
+        )
+        from microsoft_teams.cards import AdaptiveCard
+
+        if self._app is None:
+            raise RuntimeError("Teams app not bound")
+        if not getattr(self._app, "_initialized", True):
+            raise RuntimeError("Teams app not initialized")
+
+        service_url, bf_channel, bot_account_id = self._resolve_route(conversation_id)
+        if not bot_account_id:
+            bot_account_id = getattr(self._app, "id", None) or self._bot_id
+        if not bot_account_id:
+            raise RuntimeError("Teams bot account id missing")
+
+        if isinstance(activity, str):
+            activity = MessageActivityInput(text=activity)
+        elif isinstance(activity, AdaptiveCard):
+            activity = MessageActivityInput().add_card(activity)
+
+        ref = ConversationReference(
+            channel_id=bf_channel,
+            service_url=service_url,
+            bot=Account(id=str(bot_account_id)),
+            conversation=ConversationAccount(id=conversation_id),
+        )
+        sender = getattr(self._app, "activity_sender", None)
+        if sender is None:
+            # Fallback for older SDK shapes; still better than wrong URL.
+            return await self._app.send(conversation_id, activity)
+        return await sender.send(activity, ref)
+
     async def send_message(self, text: str) -> str | None:
         """Send a Markdown text message. Returns the activity ID."""
         if self._app is None or not self._channel_id:
             return None
         try:
             text = normalize_for_teams(text[:TEAMS_MSG_LIMIT])
-            result = await self._app.send(self._channel_id, text)
+            result = await self._send_activity(self._channel_id, text)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
             logger.opt(exception=True).warning("[Teams] send_message failed")
             return None
 
     async def edit_message(self, activity_id: str, text: str) -> bool:
-        """Update an existing message. Raises TeamsRateLimitError on 429."""
+        """Update an existing message. Raises TeamsRateLimitError on 429.
+
+        Returns False when the channel does not support updates (Web Chat
+        405) so the renderer can fall back to send-new-message.
+        """
         if self._app is None or not self._channel_id:
+            return False
+        if not self.supports_message_edit:
             return False
         try:
             from microsoft_teams.api import MessageActivityInput
@@ -175,11 +284,21 @@ class TeamsConnector:
             msg = MessageActivityInput()
             msg.id = activity_id
             msg.text = text
-            await self._app.send(self._channel_id, msg)
+            await self._send_activity(self._channel_id, msg)
+            self._edit_supported = True
             return True
         except Exception as exc:
             if _is_rate_limit(exc):
                 raise TeamsRateLimitError(f"edit rate limited: {exc}") from exc
+            # Web Chat / some connectors: PUT activities/{id} → 405.
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status == 405 or "405" in str(exc):
+                self._edit_supported = False
+                logger.info(
+                    "[Teams] edit not supported on channel={} — using send-only mode",
+                    self._bf_channel_id,
+                )
+                return False
             logger.opt(exception=True).warning("[Teams] edit_message failed")
             return False
 
@@ -191,7 +310,7 @@ class TeamsConnector:
                 TypingActivityInput,
             )
 
-            await self._app.send(self._channel_id, TypingActivityInput())
+            await self._send_activity(self._channel_id, TypingActivityInput())
         except Exception:
             logger.opt(exception=True).debug("[Teams] typing indicator failed")
 
@@ -209,7 +328,7 @@ class TeamsConnector:
                 content=card,
             )
             msg = MessageActivityInput(attachments=[attachment])
-            result = await self._app.send(self._channel_id, msg)
+            result = await self._send_activity(self._channel_id, msg)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
             logger.opt(exception=True).warning("[Teams] send_card failed")
@@ -251,11 +370,16 @@ class TeamsConnector:
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         if self._app is None:
             return None
+        del reply_to_id  # Bot Framework create-activity path; threading via conv id
         try:
-            result = await self._app.send(chat_id, text)
+            result = await self._send_activity(chat_id, text)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
-            logger.opt(exception=True).warning("[Teams] send_to_chat failed")
+            logger.opt(exception=True).warning(
+                "[Teams] send_to_chat failed chat_id={} route={}",
+                chat_id,
+                self._resolve_route(chat_id),
+            )
             return None
 
 
