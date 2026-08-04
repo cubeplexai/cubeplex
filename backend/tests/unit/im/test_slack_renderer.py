@@ -179,6 +179,111 @@ async def test_hitl_reset_only_once_on_later_patches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_split_keeps_offset_at_segment_start() -> None:
+    """After splitting, later deltas must edit the full current segment.
+
+    Regression: advancing offset past the remainder made the next chat.update
+    replace the new message with only the newly arrived suffix.
+    """
+    state = _make_state()
+    # Just over the 2800 split threshold so stream seals msg1 and posts msg2.
+    first = "A" * 2900
+    state.card_state.streaming_content = first
+    d, conn = _make_dispatcher(state)
+    conn.send_message = AsyncMock(side_effect=["ts-1", "ts-2"])
+    await d.dispatch_create(state)
+    # Force a single-message create if create already split; reset for stream.
+    state.bot_message_id = "ts-1"
+    state.card_id = "ts-1"
+    d.sent_char_offset = 0
+    conn.send_message.reset_mock()
+    conn.send_message.side_effect = ["ts-2"]
+    conn.edit_message.reset_mock()
+
+    ok = await d.dispatch_stream(state, first)
+    assert ok is True
+    # First message finalized; remainder on a new message; offset stays at
+    # the start of the second segment (not past the remainder).
+    assert conn.edit_message.await_count >= 1
+    assert state.bot_message_id == "ts-2"
+    offset_after_split = d.sent_char_offset
+    assert offset_after_split > 0
+    assert offset_after_split < len(first)
+    remainder_on_slack = first[offset_after_split:]
+    assert remainder_on_slack
+    # New message holds the full remainder, not a truncated delta-only view.
+    assert conn.send_message.await_args.args[0] == remainder_on_slack[:3000]
+
+    # Grow the buffer — next edit must repaint full segment from offset.
+    grown = first + "B" * 50
+    state.card_state.streaming_content = grown
+    conn.edit_message.reset_mock()
+    ok = await d.dispatch_stream(state, grown)
+    assert ok is True
+    painted = conn.edit_message.await_args.args[1]
+    assert painted.startswith(remainder_on_slack[:100])
+    assert painted.endswith("B" * 50)
+    assert d.sent_char_offset == offset_after_split
+
+
+@pytest.mark.asyncio
+async def test_second_hitl_starts_at_post_hitl_boundary() -> None:
+    """Second distinct HITL must not repost the first post-HITL continuation."""
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    state.card_state.streaming_content = "Pre-HITL answer"
+    d, conn = _make_dispatcher(state)
+    await d.dispatch_create(state)
+
+    # First HITL resolution.
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Pick?",
+        choices=[("A", "a", "default")],
+        question_id="qid-1",
+        answer_key="k",
+        resolved_choice="A",
+    )
+    state.card_state.hitl_resolved = True
+    await d.dispatch_patch(state)
+    assert d.sent_char_offset == 0
+
+    first_continuation = "First continuation after ask_user"
+    state.card_state.post_hitl_content = first_continuation
+    conn.send_message.reset_mock()
+    conn.send_message.return_value = "ts-cont-1"
+    await d.dispatch_stream(state, first_continuation)
+    assert state.bot_message_id == "ts-cont-1"
+    assert first_continuation in conn.send_message.await_args.args[0]
+
+    # Second distinct HITL (sandbox confirm) resolves — pin offset to buffer end.
+    state.card_state.pending_input = PendingInput(
+        kind="sandbox_confirm",
+        run_id="run-1",
+        question="Allow?",
+        choices=[("Yes", "yes", "primary"), ("No", "no", "danger")],
+        question_id="qid-2",
+        answer_key="k",
+        resolved_choice="Yes",
+    )
+    await d.dispatch_patch(state)
+    assert state.bot_message_id is None
+    assert d.sent_char_offset == len(first_continuation)
+
+    second_only = "Second continuation only"
+    state.card_state.post_hitl_content = first_continuation + second_only
+    conn.send_message.reset_mock()
+    conn.send_message.return_value = "ts-cont-2"
+    ok = await d.dispatch_stream(state, state.card_state.post_hitl_content)
+    assert ok is True
+    posted = conn.send_message.await_args.args[0]
+    assert posted == second_only
+    assert first_continuation not in posted
+
+
+@pytest.mark.asyncio
 async def test_dispatch_finalize() -> None:
     state = _make_state()
     state.card_state.streaming_content = "Final answer"
