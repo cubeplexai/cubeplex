@@ -1,4 +1,8 @@
-"""Teams outbound renderer — Markdown messages with updateActivity streaming."""
+"""Teams outbound renderer — Markdown messages with updateActivity streaming.
+
+Web Chat / Direct Line do not support PUT updateActivity (405). For those
+channels we buffer until finalize and send complete message(s).
+"""
 
 from __future__ import annotations
 
@@ -27,8 +31,15 @@ class TeamsOpDispatcher:
         self.sent_char_offset: int = 0
         self._pending_input_sent_id: str | None = None
 
+    def _can_edit(self) -> bool:
+        return bool(getattr(self._connector, "supports_message_edit", True))
+
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
+        # No updateActivity → don't post a partial first token; finalize will
+        # send the full reply once (avoids a stuck "你好" with no follow-up).
+        if not self._can_edit():
+            return True
         text = s.card_state.streaming_content
         if not text:
             text = "..."
@@ -54,6 +65,9 @@ class TeamsOpDispatcher:
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
         s = self._state
+        # Buffer only; finalize posts the complete text on non-edit channels.
+        if not self._can_edit():
+            return True
         if s.bot_message_id is None:
             return await self.dispatch_create(state)
         full_content = s.card_state.streaming_content
@@ -62,10 +76,13 @@ class TeamsOpDispatcher:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             finalize_text = current_segment[:split_at]
             try:
-                await self._connector.edit_message(s.bot_message_id, finalize_text)
+                ok = await self._connector.edit_message(s.bot_message_id, finalize_text)
             except TeamsRateLimitError:
                 note_flood_strike(s)
                 return False
+            if not ok:
+                # Channel rejected edit mid-stream — fall back to send-only.
+                return True
             self.sent_char_offset += split_at
             remaining = full_content[self.sent_char_offset :]
             if remaining:
@@ -82,7 +99,8 @@ class TeamsOpDispatcher:
             return False
         if ok:
             note_edit_success(s)
-        return bool(ok)
+        # False (e.g. 405) is OK: finalize will send the full buffer.
+        return True
 
     async def dispatch_patch(self, state: Any) -> bool:
         s = self._state
@@ -158,26 +176,29 @@ class TeamsOpDispatcher:
         if not full_content:
             return True
         remaining = full_content[self.sent_char_offset :]
-        if s.bot_message_id is not None and len(remaining) <= TEAMS_MSG_LIMIT:
+        if not remaining:
+            return True
+
+        # Prefer edit when the channel supports it and we already have a msg.
+        if s.bot_message_id is not None and self._can_edit() and len(remaining) <= TEAMS_MSG_LIMIT:
             try:
-                await self._connector.edit_message(s.bot_message_id, remaining)
+                ok = await self._connector.edit_message(s.bot_message_id, remaining)
             except Exception:
                 logger.opt(exception=True).warning("[Teams] finalize edit failed")
-                await self.emergency_text(remaining[:TEAMS_MSG_LIMIT])
-        else:
-            while remaining:
-                chunk = remaining[:TEAMS_MSG_LIMIT]
-                remaining = remaining[TEAMS_MSG_LIMIT:]
-                if s.bot_message_id and not self.sent_char_offset:
-                    try:
-                        await self._connector.edit_message(s.bot_message_id, chunk)
-                    except Exception:
-                        await self._connector.send_message(chunk)
-                else:
-                    msg_id = await self._connector.send_message(chunk)
-                    if msg_id:
-                        s.bot_message_id = msg_id
-                self.sent_char_offset += len(chunk)
+                ok = False
+            if ok:
+                self.sent_char_offset += len(remaining)
+                return True
+            # Fall through to send-new-message path.
+
+        # Send-only (Web Chat / edit failed / oversize): post remaining chunks.
+        while remaining:
+            chunk = remaining[:TEAMS_MSG_LIMIT]
+            remaining = remaining[TEAMS_MSG_LIMIT:]
+            msg_id = await self._connector.send_message(chunk)
+            if msg_id:
+                s.bot_message_id = msg_id
+            self.sent_char_offset += len(chunk)
         return True
 
     async def emergency_text(self, text: str) -> None:

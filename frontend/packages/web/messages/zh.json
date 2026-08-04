@@ -2486,15 +2486,16 @@
       },
       "teams": {
         "prereq": {
-          "app": "在 Azure Portal 创建 Bot 注册（或使用 Teams Toolkit）",
-          "graphPermission": "添加 User.Read.All 应用权限并授予管理员同意",
-          "clientSecret": "在「证书和密码」中创建客户端密码",
-          "endpoint": "将消息终结点设为 https://<your-domain>/api/v1/im/teams/messages"
+          "app": "Azure Portal → 创建资源 → Azure Bot。建议选单租户。在 Bot 的「配置 / Configuration」页复制 Microsoft App ID 与 Directory (tenant) ID。",
+          "clientSecret": "Azure Bot → 配置 → Microsoft App ID 旁的「管理 / Manage」进入 Entra 应用 → 证书和密码 → 新建客户端密码。立即复制密码「值 / Value」（只显示一次）。",
+          "graphPermission": "同一 Entra 应用（Azure Bot → 配置 → 管理）→ API 权限 → 添加 → Microsoft Graph → 应用程序权限 → User.Read.All → 添加，再点「为租户授予管理员同意」。",
+          "endpoint": "Azure Bot → 配置 → 消息终结点 / Messaging endpoint 填 https://YOUR_DOMAIN/api/v1/im/teams/messages（须公网 HTTPS；流式处理终结点保持关闭）。",
+          "teamsChannel": "Azure Bot → 频道 / Channels → 添加 Microsoft Teams 并保持 Running。未启用频道则收不到任何消息。"
         },
         "field": {
-          "appId": "应用程序(客户端) ID",
-          "appSecret": "客户端密码",
-          "tenantId": "租户 ID"
+          "appId": "应用程序(客户端) ID — Azure Bot → 配置 → Microsoft App ID",
+          "appSecret": "客户端密码 — Entra 应用 → 证书和密码（填 Value，不是 Secret ID）",
+          "tenantId": "目录(租户) ID — Azure Bot → 配置 → App Tenant ID（或 Entra ID → 概述）"
         }
       },
       "dingtalk": {

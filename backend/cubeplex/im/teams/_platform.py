@@ -29,7 +29,7 @@ class TeamsPlatform:
         **kwargs: Any,
     ) -> Any:
         from cubeplex.im.outbound import OutboundRunTailer
-        from cubeplex.im.teams.app_manager import get_entry_by_bot_id
+        from cubeplex.im.teams.app_manager import get_conversation_route, get_entry_by_bot_id
         from cubeplex.im.teams.connector import TeamsConnector
         from cubeplex.im.teams.graph import TeamsGraphClient
         from cubeplex.im.teams.renderer import TeamsOpDispatcher
@@ -54,6 +54,11 @@ class TeamsPlatform:
 
         channel_id = queue_item.channel_id
         reply_to_id = queue_item.reply_to_id
+        # Prefer route remembered from the inbound webhook activity.
+        route = get_conversation_route(channel_id) if channel_id else None
+        service_url = route[0] if route else None
+        bf_channel_id = route[1] if route else None
+        bot_account_id = route[2] if route else None
 
         connector = TeamsConnector(
             bot_id=bot_id,
@@ -61,6 +66,9 @@ class TeamsPlatform:
             channel_id=channel_id,
             reply_to_id=reply_to_id,
             graph_client=graph_client,
+            service_url=service_url,
+            bf_channel_id=bf_channel_id,
+            bot_account_id=bot_account_id,
         )
 
         bot_name = (account.config or {}).get("bot_app_name") or "CubePlex"

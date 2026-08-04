@@ -2486,15 +2486,16 @@
       },
       "teams": {
         "prereq": {
-          "app": "Create a Bot Registration in Azure Portal (or via Teams Toolkit)",
-          "graphPermission": "Add User.Read.All application permission and grant admin consent",
-          "clientSecret": "Create a Client Secret in Certificates & Secrets",
-          "endpoint": "Set Messaging Endpoint to https://<your-domain>/api/v1/im/teams/messages"
+          "app": "Azure Portal → Create a resource → Azure Bot. Prefer single-tenant. Copy Microsoft App ID and Directory (tenant) ID from the bot’s Configuration page.",
+          "clientSecret": "Azure Bot → Configuration → Manage (next to Microsoft App ID) opens the Entra app → Certificates & secrets → New client secret. Copy the secret Value immediately (shown once).",
+          "graphPermission": "Same Entra app (Azure Bot → Configuration → Manage) → API permissions → Add → Microsoft Graph → Application permissions → User.Read.All → Add, then Grant admin consent for your tenant.",
+          "endpoint": "Azure Bot → Configuration → Messaging endpoint = https://YOUR_DOMAIN/api/v1/im/teams/messages (public HTTPS required; leave Streaming endpoint off).",
+          "teamsChannel": "Azure Bot → Channels → add Microsoft Teams and leave it Running. Without this channel, no messages are delivered."
         },
         "field": {
-          "appId": "Application (Client) ID",
-          "appSecret": "Client Secret",
-          "tenantId": "Tenant ID"
+          "appId": "Application (client) ID — Azure Bot → Configuration → Microsoft App ID",
+          "appSecret": "Client secret — Entra app → Certificates & secrets (the Value, not the Secret ID)",
+          "tenantId": "Directory (tenant) ID — Azure Bot → Configuration → App Tenant ID (or Entra ID → Overview)"
         }
       },
       "dingtalk": {
