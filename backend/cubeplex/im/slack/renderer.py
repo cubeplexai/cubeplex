@@ -40,6 +40,9 @@ class SlackOpDispatcher:
         self._state = state
         self.sent_char_offset: int = 0
         self._pending_input_sent_id: str | None = None
+        # Only reset the bot message once per resolved HITL question — later
+        # patch_card events (tools/artifacts) still have resolved_choice set.
+        self._hitl_reset_qid: str | None = None
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
@@ -83,10 +86,13 @@ class SlackOpDispatcher:
             self.sent_char_offset += split_at
             remaining = full_content[self.sent_char_offset :]
             if remaining:
-                msg_ts = await self._connector.send_message(remaining[:_SPLIT_THRESHOLD])
+                posted = remaining[:_SLACK_SECTION_LIMIT]
+                msg_ts = await self._connector.send_message(posted)
                 if msg_ts:
                     s.card_id = msg_ts
                     s.bot_message_id = msg_ts
+                    # Advance so drain loops know how much is already on Slack.
+                    self.sent_char_offset += len(posted)
             note_edit_success(s)
             return True
         # After a split (or a stream tick with no new chars), segment can be
@@ -115,12 +121,16 @@ class SlackOpDispatcher:
             await self._send_pending_input_buttons(pending)
             self._pending_input_sent_id = pending_id
         if pending is not None and pending.resolved_choice is not None:
-            # New Slack message for the post-HITL answer — reset offset so we
-            # stream ``post_hitl_content`` from the start (not from the old
-            # pre-HITL streaming_content length, which made every edit empty).
-            s.card_id = None
-            s.bot_message_id = None
-            self.sent_char_offset = 0
+            # New Slack message for the post-HITL answer — only on the first
+            # resolved patch for this question_id. Later tool/artifact patches
+            # still carry resolved_choice and must not clear bot_message_id
+            # again (that orphaned the partial reply / "..." placeholder).
+            rid = f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}"
+            if rid != self._hitl_reset_qid:
+                s.card_id = None
+                s.bot_message_id = None
+                self.sent_char_offset = 0
+                self._hitl_reset_qid = rid
         return True
 
     async def _send_pending_input_buttons(self, pending: Any) -> None:
