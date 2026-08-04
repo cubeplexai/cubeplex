@@ -144,6 +144,41 @@ async def test_post_hitl_streams_new_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hitl_reset_only_once_on_later_patches() -> None:
+    """Later tool/artifact patches must not clear the post-HITL message again."""
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    state.card_state.streaming_content = "Pick one:"
+    d, conn = _make_dispatcher(state)
+    await d.dispatch_create(state)
+
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Pick?",
+        choices=[("A", "a", "default")],
+        question_id="qid-1",
+        answer_key="k",
+        resolved_choice="A",
+    )
+    state.card_state.hitl_resolved = True
+    await d.dispatch_patch(state)
+    assert state.bot_message_id is None
+
+    # First post-HITL stream creates a message.
+    state.card_state.post_hitl_content = "Answer"
+    await d.dispatch_stream(state, "Answer")
+    assert state.bot_message_id == "msg-ts-1"
+    saved_id = state.bot_message_id
+
+    # A later patch (tool result) still has resolved_choice set — must keep id.
+    await d.dispatch_patch(state)
+    assert state.bot_message_id == saved_id
+    assert d.sent_char_offset == 0 or state.bot_message_id is not None
+
+
+@pytest.mark.asyncio
 async def test_dispatch_finalize() -> None:
     state = _make_state()
     state.card_state.streaming_content = "Final answer"

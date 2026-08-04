@@ -12,8 +12,11 @@ from cubeplex.im.types import RenderState
 
 
 class _RecordingDispatcher:
-    def __init__(self) -> None:
+    def __init__(self, *, segment: int = 0) -> None:
         self.ops: list[OutboundOp] = []
+        # Mimic Slack multi-segment drain when segment > 0.
+        self.sent_char_offset: int = 0
+        self._segment = segment
 
     async def dispatch_create(self, state: Any) -> bool:
         self.ops.append(OutboundOp(kind="card_create"))
@@ -21,6 +24,10 @@ class _RecordingDispatcher:
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
         self.ops.append(OutboundOp(kind="stream_text", text=text))
+        if self._segment > 0:
+            # Advance one segment per call until the full buffer is covered.
+            full = len(state.card_state.streaming_content or "")
+            self.sent_char_offset = min(full, self.sent_char_offset + self._segment)
         return True
 
     async def dispatch_patch(self, state: Any) -> bool:
@@ -146,3 +153,51 @@ async def test_tailer_flushes_coalesced_stream_when_no_terminal() -> None:
     assert kinds.count("stream_text") == 1
     assert kinds[-1] == "finalize"
     assert state.card_state.streaming_content == "AB"
+
+
+@pytest.mark.asyncio
+async def test_tailer_drains_multi_segment_stream_before_wait() -> None:
+    """Long coalesced buffer must be fully flushed (multiple stream calls)."""
+    state = RenderState(bot_name="bot", run_id="run-3", stream_interval=0.0)
+    state.card_id = "card-1"
+    # 3 segments of 4 chars each → need 3 dispatch_stream calls to drain.
+    dispatcher = _RecordingDispatcher(segment=4)
+    connector = _FakeConnector()
+    tailer = OutboundRunTailer(
+        redis=AsyncMock(),
+        key_prefix="cb-",
+        run_id="run-3",
+        connector=connector,
+        state=state,
+        dispatcher=dispatcher,
+        block_ms=1,
+    )
+
+    long = "abcdefghijkl"  # 12 chars
+    batches = [
+        [_FakeEvent("1", {"type": "text_delta", "data": {"content": long}})],
+        [_FakeEvent("2", {"type": "done", "data": {}})],
+    ]
+    call = {"n": 0}
+
+    async def _read(*_a: Any, **_k: Any) -> list[_FakeEvent]:
+        i = call["n"]
+        call["n"] += 1
+        if i < len(batches):
+            return batches[i]
+        return []
+
+    import cubeplex.im.outbound as outbound_mod
+
+    original = outbound_mod.read_run_events_after
+    outbound_mod.read_run_events_after = _read  # type: ignore[assignment]
+    try:
+        await tailer.run()
+    finally:
+        outbound_mod.read_run_events_after = original  # type: ignore[assignment]
+
+    # First batch drains with 3 stream calls (12/4); finalize does not need more.
+    stream_count = sum(1 for op in dispatcher.ops if op.kind == "stream_text")
+    assert stream_count == 3
+    assert dispatcher.sent_char_offset == 12
+    assert dispatcher.ops[-1].kind == "finalize"

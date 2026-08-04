@@ -603,9 +603,7 @@ class OutboundRunTailer:
                     if pending_stream is not None:
                         # Terminal finalize/error supersedes intermediate stream.
                         if not op.final:
-                            await self._dispatch_op(
-                                self._refresh_stream_op(pending_stream), is_terminal=False
-                            )
+                            await self._flush_pending_stream(pending_stream)
                         pending_stream = None
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     try:
@@ -634,9 +632,7 @@ class OutboundRunTailer:
                                     "[outbound] deliver_terminal_files raised"
                                 )
                 if pending_stream is not None and not done:
-                    await self._dispatch_op(
-                        self._refresh_stream_op(pending_stream), is_terminal=False
-                    )
+                    await self._flush_pending_stream(pending_stream)
                 if done:
                     return
         finally:
@@ -673,6 +669,38 @@ class OutboundRunTailer:
             text = cs.streaming_content or ""
             element_id = "streaming_content"
         return OutboundOp(kind="stream_text", element_id=element_id, text=text)
+
+    def _stream_buffer_len(self) -> int:
+        cs = self._state.card_state
+        if cs.hitl_resolved:
+            return len(cs.post_hitl_content or "")
+        return len(cs.streaming_content or "")
+
+    async def _flush_pending_stream(self, op: OutboundOp) -> None:
+        """Dispatch a coalesced stream_text, draining multi-segment buffers.
+
+        Slack's dispatcher paints at most one split (~2.8k) plus one follow-up
+        chunk per call. If a quiet stretch follows (long tool / HITL) with a
+        multi-segment buffer already accumulated, a single flush would leave
+        Slack truncated until the next event. Keep calling while
+        ``sent_char_offset`` advances and unsent text remains.
+        """
+        op = self._refresh_stream_op(op)
+        dispatcher = self._dispatcher
+        if dispatcher is None or not hasattr(dispatcher, "sent_char_offset"):
+            await self._dispatch_op(op, is_terminal=False)
+            return
+        # Cap iterations: pathological buffers shouldn't spin forever.
+        for _ in range(64):
+            before = int(getattr(dispatcher, "sent_char_offset", 0) or 0)
+            await self._dispatch_op(self._refresh_stream_op(op), is_terminal=False)
+            after = int(getattr(dispatcher, "sent_char_offset", 0) or 0)
+            if after >= self._stream_buffer_len():
+                return
+            if after <= before:
+                # Single-message path keeps offset at 0 after painting the
+                # full buffer — no further work.
+                return
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
         """Delegate one OutboundOp to the injected OpDispatcher.
