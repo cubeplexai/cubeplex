@@ -474,19 +474,25 @@ class TestTopicParticipants:
         assert len(owners) == 1
         assert owners[0]["user_id"] == member_uid
 
-        # Admin can no longer rename — they were demoted
-        rename = await admin_c.patch(
-            f"/api/v1/ws/{ws_id}/topics/{topic_id}",
-            json={"title": "Should Fail"},
+        # Title rename is any-participant (sidebar UX). Demotion is proven by
+        # an owner-only action: demoted admin cannot re-promote themselves.
+        self_promote = await admin_c.patch(
+            f"/api/v1/ws/{ws_id}/topics/{topic_id}/participants/{admin_uid}",
+            json={"role": "owner"},
         )
-        assert rename.status_code == 403, rename.text
+        assert self_promote.status_code == 403, self_promote.text
 
-        # Member (new owner) can rename
-        rename2 = await member_c.patch(
+        # New owner can still rename; demoted admin can too (any participant).
+        rename = await member_c.patch(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}",
             json={"title": "Owned by Member"},
         )
-        assert rename2.status_code == 200, rename2.text
+        assert rename.status_code == 200, rename.text
+        rename_admin = await admin_c.patch(
+            f"/api/v1/ws/{ws_id}/topics/{topic_id}",
+            json={"title": "Renamed by demoted admin"},
+        )
+        assert rename_admin.status_code == 200, rename_admin.text
 
     @pytest.mark.anyio
     async def test_sole_owner_cannot_self_demote(
