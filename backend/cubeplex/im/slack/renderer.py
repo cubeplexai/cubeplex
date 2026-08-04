@@ -48,9 +48,12 @@ class SlackOpDispatcher:
         s = self._state
         text = _active_stream_text(s.card_state)
         if not text:
-            # After HITL, wait for real post_hitl text — a permanent "..." next
-            # to ✅ is worse than silence until tokens (or empty finalize).
+            # After HITL, do not post a permanent "..." for empty post_hitl.
+            # Fold still lands on card_create when card_id was cleared, and a
+            # second HITL (or paused done) needs the button path — run patch
+            # first so pending_input is delivered, then skip the placeholder.
             if getattr(s.card_state, "hitl_resolved", False):
+                await self.dispatch_patch(state)
                 return False
             text = "..."
         current_segment = text[self.sent_char_offset :]
