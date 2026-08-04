@@ -124,13 +124,18 @@ export function TopicNode({
   }, [isEditing])
 
   const commitEdit = async (): Promise<void> => {
-    const next = draft.trim()
-    setIsEditing(false)
-    if (!next || next === topic.title) return
+    const next = draft.trim().slice(0, 255)
+    if (!next || next === topic.title) {
+      setIsEditing(false)
+      setDraft(topic.title)
+      return
+    }
     try {
       await rename(buildClient(currentWsId), topic.id, next)
+      setIsEditing(false)
     } catch (err) {
       console.error('Failed to rename topic:', err)
+      // Keep the editor open so a failed rename is not a silent no-op.
     }
   }
 
@@ -205,7 +210,8 @@ export function TopicNode({
           <input
             ref={inputRef}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            maxLength={255}
+            onChange={(e) => setDraft(e.target.value.slice(0, 255))}
             onKeyDown={handleKeyDown}
             onBlur={() => void commitEdit()}
             onClick={(e) => e.stopPropagation()}

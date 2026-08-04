@@ -369,6 +369,71 @@ async def test_user_renamed_title_not_overwritten_by_channel_name(
         assert topic.attributes["im"]["title_source"] == "user"
 
 
+async def test_user_title_equal_to_platform_name_not_tracked(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """User title that equals the stored channel name must not be auto-tracked.
+
+    Regression: title_tracks_platform used string equality alone, so
+    Custom→Team (user) then platform renames Team→Other would overwrite.
+    """
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="x",
+            origin="inbound",
+            channel_name="Team",
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        # User explicitly renames back to the same string as the platform name.
+        topic.title = "Team"
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["title_source"] = "user"
+        im["channel_name"] = "Team"
+        attrs["im"] = im
+        topic.attributes = attrs
+        session.add(topic)
+        await session.commit()
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="later",
+            origin="inbound",
+            channel_name="Other",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "Team"
+        assert topic.attributes["im"]["channel_name"] == "Other"
+        assert topic.attributes["im"]["title_source"] == "user"
+
+
 async def test_shared_topic_refreshes_legacy_channel_id_title(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
