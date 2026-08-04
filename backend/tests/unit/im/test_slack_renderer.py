@@ -72,6 +72,35 @@ async def test_dispatch_stream_skips_empty_segment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_finalize_empty_post_hitl_still_adds_check() -> None:
+    """HITL resolved then done with no further text must still stamp ✅."""
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    state.card_state.streaming_content = "Pick one:"
+    d, conn = _make_dispatcher(state)
+    await d.dispatch_create(state)
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Pick?",
+        choices=[("A", "a", "default")],
+        question_id="qid",
+        answer_key="k",
+        resolved_choice="A",
+    )
+    state.card_state.hitl_resolved = True
+    await d.dispatch_patch(state)
+    conn.add_reaction.reset_mock()
+    conn.remove_reaction.reset_mock()
+    # No post_hitl_content — empty active stream.
+    ok = await d.dispatch_finalize(state)
+    assert ok is True
+    conn.remove_reaction.assert_awaited()
+    conn.add_reaction.assert_any_await("1234.5678", "white_check_mark")
+
+
+@pytest.mark.asyncio
 async def test_post_hitl_streams_new_message() -> None:
     """After ask_user is answered, stream post_hitl_content as a new message.
 

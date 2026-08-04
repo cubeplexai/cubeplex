@@ -139,9 +139,17 @@ def _apply_third_party_log_levels(root_level: int | None = None) -> None:
     for name in _NOISY_THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(third_party_level)
 
-    verbose_modules = config.get("logging.verbose_modules", []) or []
+    # Opt-in DEBUG for listed modules *and* any pre-pinned noisy descendants.
+    # e.g. verbose_modules: ["slack_sdk"] must also re-enable
+    # slack_sdk.socket_mode.aiohttp which we set to WARNING above — Python
+    # uses each child's explicit level, not just the ancestor's.
+    verbose_modules = [str(n) for n in (config.get("logging.verbose_modules", []) or [])]
     for name in verbose_modules:
         logging.getLogger(name).setLevel(logging.DEBUG)
+    if verbose_modules:
+        for name in _NOISY_THIRD_PARTY_LOGGERS:
+            if any(name == v or name.startswith(f"{v}.") for v in verbose_modules):
+                logging.getLogger(name).setLevel(logging.DEBUG)
 
 
 class InterceptHandler(logging.Handler):
