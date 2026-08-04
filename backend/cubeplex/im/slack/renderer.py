@@ -48,8 +48,14 @@ class SlackOpDispatcher:
         s = self._state
         text = _active_stream_text(s.card_state)
         if not text:
+            # After HITL, wait for real post_hitl text — a permanent "..." next
+            # to ✅ is worse than silence until tokens (or empty finalize).
+            if getattr(s.card_state, "hitl_resolved", False):
+                return False
             text = "..."
         current_segment = text[self.sent_char_offset :]
+        if not current_segment:
+            return False
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             send_text = current_segment[:split_at]
@@ -203,19 +209,31 @@ class SlackOpDispatcher:
                     logger.opt(exception=True).warning("[Slack] finalize edit failed")
                     await self.emergency_text(remaining[:4000])
             else:
+                # After a mid-stream split, offset is nonzero but bot_message_id
+                # still holds the *current* segment — first chunk must edit that
+                # message, not re-post the whole remaining buffer as new msgs.
+                edit_current = s.bot_message_id is not None
                 while remaining:
                     chunk = remaining[:_SLACK_SECTION_LIMIT]
                     remaining = remaining[_SLACK_SECTION_LIMIT:]
-                    if s.bot_message_id and not self.sent_char_offset:
+                    if edit_current and s.bot_message_id:
                         try:
                             await self._connector.edit_message(s.bot_message_id, chunk)
                         except Exception:
                             await self._connector.send_message(chunk)
+                        edit_current = False
                     else:
                         msg_ts = await self._connector.send_message(chunk)
                         if msg_ts:
                             s.bot_message_id = msg_ts
                     self.sent_char_offset += len(chunk)
+        elif s.bot_message_id is not None:
+            # Empty final text but a "..." (or stale) bot message exists — e.g.
+            # post-HITL tool events before done. Replace so it is not left forever.
+            try:
+                await self._connector.edit_message(s.bot_message_id, "✓")
+            except Exception:
+                logger.opt(exception=True).warning("[Slack] finalize placeholder clear failed")
         # Always clear processing markers — including empty post-HITL success
         # (HITL answer then done with no further text) so the hourglass is
         # not left hanging without a white_check_mark.

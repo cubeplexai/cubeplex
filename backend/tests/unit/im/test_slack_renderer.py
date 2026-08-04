@@ -227,6 +227,59 @@ async def test_stream_split_keeps_offset_at_segment_start() -> None:
 
 
 @pytest.mark.asyncio
+async def test_finalize_long_split_edits_current_segment_first() -> None:
+    """After a stream split, finalize must edit the open segment, not re-post it."""
+    state = _make_state()
+    # Simulate: first segment sealed at offset 2000; current msg has the rest.
+    d, conn = _make_dispatcher(state)
+    state.bot_message_id = "ts-seg2"
+    state.card_id = "ts-seg2"
+    d.sent_char_offset = 2000
+    # remaining = 3500 chars → first chunk edits ts-seg2, second is a new post.
+    state.card_state.streaming_content = "X" * 2000 + "Y" * 3500
+    conn.edit_message.reset_mock()
+    conn.send_message.reset_mock()
+    conn.send_message.return_value = "ts-seg3"
+
+    ok = await d.dispatch_finalize(state)
+    assert ok is True
+    # First 3000 of remaining → edit current segment message.
+    conn.edit_message.assert_awaited()
+    assert conn.edit_message.await_args.args[0] == "ts-seg2"
+    assert conn.edit_message.await_args.args[1] == "Y" * 3000
+    # Remainder 500 → new message (not a duplicate of the full remaining).
+    conn.send_message.assert_awaited()
+    assert conn.send_message.await_args.args[0] == "Y" * 500
+
+
+@pytest.mark.asyncio
+async def test_empty_post_hitl_create_skips_placeholder() -> None:
+    """Do not post '...' when post-HITL buffer is still empty."""
+    state = _make_state()
+    state.card_state.hitl_resolved = True
+    state.card_state.post_hitl_content = ""
+    d, conn = _make_dispatcher(state)
+    ok = await d.dispatch_create(state)
+    assert ok is False
+    conn.send_message.assert_not_awaited()
+    assert state.bot_message_id is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_clears_empty_placeholder() -> None:
+    """If a placeholder bot message exists with no final text, replace it."""
+    state = _make_state()
+    state.card_state.hitl_resolved = True
+    state.card_state.post_hitl_content = ""
+    d, conn = _make_dispatcher(state)
+    state.bot_message_id = "ts-dots"
+    ok = await d.dispatch_finalize(state)
+    assert ok is True
+    conn.edit_message.assert_awaited_with("ts-dots", "✓")
+    conn.add_reaction.assert_any_await("1234.5678", "white_check_mark")
+
+
+@pytest.mark.asyncio
 async def test_second_hitl_starts_at_post_hitl_boundary() -> None:
     """Second distinct HITL must not repost the first post-HITL continuation."""
     from cubeplex.im.card_model import PendingInput
