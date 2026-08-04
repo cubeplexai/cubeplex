@@ -370,6 +370,19 @@ def _maybe_refresh_topic_channel_name(
 
     if channel_name:
         desired = channel_name[:255]
+        name_changed = stored_name != desired
+        # Manual renames are authoritative even when the string equals the
+        # stored platform name (user set title back to "Team", then platform
+        # renames the channel). Still sync channel_name metadata.
+        if title_source == "user":
+            if name_changed or not isinstance(im_blob, dict) or stored_name is None:
+                attrs = dict(topic.attributes or {})
+                im = dict(attrs.get("im") or {})
+                im["channel_name"] = desired
+                im["channel_id"] = channel_id
+                attrs["im"] = im
+                topic.attributes = attrs
+            return
         title_is_placeholder = (
             title_is_legacy_id
             or title_is_legacy_label
@@ -377,7 +390,6 @@ def _maybe_refresh_topic_channel_name(
             or title_is_message_provisional
         )
         title_tracks_platform = stored_name is not None and topic.title == stored_name
-        name_changed = stored_name != desired
         if not title_is_placeholder and not name_changed:
             return
         if title_is_placeholder or title_tracks_platform:
