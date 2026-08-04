@@ -297,6 +297,56 @@ async def test_empty_post_hitl_create_still_sends_pending_buttons() -> None:
 
 
 @pytest.mark.asyncio
+async def test_consecutive_same_kind_hitl_sends_both_button_sets() -> None:
+    """Two ask_user prompts in one run must not share a pending dedup key."""
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    d, conn = _make_dispatcher(state)
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="First?",
+        choices=[("A", "a", "default")],
+        question_id="qid-1",
+        answer_key="k",
+    )
+    await d.dispatch_patch(state)
+    assert conn.send_message_with_blocks.await_count == 1
+
+    # Resolve first, clear card (as production does), then second same-kind HITL.
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="First?",
+        choices=[("A", "a", "default")],
+        question_id="qid-1",
+        answer_key="k",
+        resolved_choice="A",
+    )
+    state.card_state.hitl_resolved = True
+    await d.dispatch_patch(state)
+
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Second?",
+        choices=[("B", "b", "default")],
+        question_id="qid-2",
+        answer_key="k",
+    )
+    conn.send_message_with_blocks.reset_mock()
+    # Empty create path (no post_hitl text, card_id cleared).
+    state.card_id = None
+    state.bot_message_id = None
+    state.card_state.post_hitl_content = ""
+    ok = await d.dispatch_create(state)
+    assert ok is False
+    conn.send_message_with_blocks.assert_awaited()
+    assert "Second?" in str(conn.send_message_with_blocks.await_args.args[0])
+
+
+@pytest.mark.asyncio
 async def test_finalize_clears_empty_placeholder() -> None:
     """If a placeholder bot message exists with no final text, replace it."""
     state = _make_state()
