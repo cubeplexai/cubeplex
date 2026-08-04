@@ -149,13 +149,16 @@ async def resolve_im_conversation(
             )
             # Legacy / empty group topics: stamp a provisional title from the
             # inbound message (Slack threads often lack a platform channel
-            # name). Never overwrite a non-empty title; DM keeps bot name.
+            # name). Mark ``title_source=message`` so a later platform channel
+            # name can still promote over it. Never overwrite a non-empty
+            # title; DM keeps bot name.
             if (
                 scope_kind != "dm"
                 and not (anchored.title or "").strip()
                 and (title_hint or "").strip()
             ):
                 anchored.title = (title_hint or "").strip()[:80]
+                _set_topic_title_source(anchored, "message")
                 session.add(anchored)
         else:
             # The linked Topic was archived/deleted in the UI. Don't keep
@@ -175,20 +178,28 @@ async def resolve_im_conversation(
                 await session.flush()
 
     if should_topic and topic_id is None:
+        title = im_topic_title(
+            scope_kind=scope_kind,
+            bot_name=bot_name,
+            channel_name=resolved_channel_name,
+            title_hint=title_hint,
+        )
         topic = Topic(
             org_id=account.org_id,
             workspace_id=account.workspace_id,
             creator_user_id=account.acting_user_id if is_shared else effective_user_id,
-            title=im_topic_title(
-                scope_kind=scope_kind,
-                bot_name=bot_name,
-                channel_name=resolved_channel_name,
-                title_hint=title_hint,
-            ),
+            title=title,
             sandbox_mode=sandbox_mode or "dedicated",
             attributes=dict(im_attrs),
             max_participants=100 if is_shared else 20,
         )
+        # Track provenance so a later platform channel name can replace a
+        # message-snippet provisional title without clobbering user renames.
+        if scope_kind != "dm":
+            if resolved_channel_name:
+                _set_topic_title_source(topic, "channel")
+            elif title:
+                _set_topic_title_source(topic, "message")
         session.add(topic)
         await session.flush()
         topic_id = topic.id
@@ -316,6 +327,17 @@ async def resolve_im_conversation(
     )
 
 
+def _set_topic_title_source(topic: Topic, source: str) -> None:
+    """Stamp ``attributes.im.title_source`` (message | channel | user)."""
+    attrs = dict(topic.attributes or {})
+    im = dict(attrs.get("im") or {})
+    if im.get("title_source") == source:
+        return
+    im["title_source"] = source
+    attrs["im"] = im
+    topic.attributes = attrs
+
+
 def _maybe_refresh_topic_channel_name(
     topic: Topic, *, channel_id: str, channel_name: str | None
 ) -> None:
@@ -323,31 +345,44 @@ def _maybe_refresh_topic_channel_name(
 
     When ``channel_name`` is set:
     - rewrite title if it still looks platform-derived (empty, channel id,
-      legacy ``群聊``, or equal to the previously stored channel_name);
-    - keep ``attributes.im.channel_name`` in sync.
+      legacy ``群聊``, equal to the previously stored channel_name, or a
+      provisional message-snippet marked ``title_source=message``);
+    - keep ``attributes.im.channel_name`` in sync;
+    - promote ``title_source`` to ``channel`` when the title is rewritten.
 
     When ``channel_name`` is missing (lookup failed / no scope granted):
     - only clear *legacy placeholder* titles (channel id / ``群聊``) to ``""``
-      so the UI can localize; never touch user-edited titles;
+      so the UI can localize; never touch user-edited or message-provisional
+      titles;
     - clear ``attributes.im.channel_name`` if it still holds the opaque id.
 
     Mutates ``topic`` in place (already session-tracked).
     """
     im_blob = (topic.attributes or {}).get("im")
     stored_name = im_blob.get("channel_name") if isinstance(im_blob, dict) else None
+    title_source = im_blob.get("title_source") if isinstance(im_blob, dict) else None
     title_is_legacy_id = topic.title == channel_id
     title_is_legacy_label = topic.title == "群聊"
     title_is_empty = not topic.title
+    # Message-snippet provisional titles (Slack / failed first lookup) must
+    # still yield to a later platform name; user renames set title_source=user.
+    title_is_message_provisional = title_source == "message"
 
     if channel_name:
         desired = channel_name[:255]
-        title_is_placeholder = title_is_legacy_id or title_is_legacy_label or title_is_empty
+        title_is_placeholder = (
+            title_is_legacy_id
+            or title_is_legacy_label
+            or title_is_empty
+            or title_is_message_provisional
+        )
         title_tracks_platform = stored_name is not None and topic.title == stored_name
         name_changed = stored_name != desired
         if not title_is_placeholder and not name_changed:
             return
         if title_is_placeholder or title_tracks_platform:
             topic.title = desired
+            _set_topic_title_source(topic, "channel")
         if name_changed or not isinstance(im_blob, dict) or stored_name is None:
             attrs = dict(topic.attributes or {})
             im = dict(attrs.get("im") or {})
