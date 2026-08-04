@@ -59,10 +59,12 @@ class SlackOpDispatcher:
         current_segment = text[self.sent_char_offset :]
         if not current_segment:
             return False
+        sealed_prefix = False
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             send_text = current_segment[:split_at]
             self.sent_char_offset += split_at
+            sealed_prefix = True
         else:
             send_text = current_segment
         msg_ts = await self._connector.send_message(send_text)
@@ -70,6 +72,13 @@ class SlackOpDispatcher:
             return False
         s.card_id = msg_ts
         s.bot_message_id = msg_ts
+        # Create sealed only a prefix (long buffer on first paint). Clear so the
+        # drain loop's next stream tick creates a *new* message for the
+        # remainder — otherwise stream would edit this sealed msg with only
+        # the tail and wipe the first segment.
+        if sealed_prefix:
+            s.card_id = None
+            s.bot_message_id = None
         # Processing hourglass is added in SlackConnector.on_processing_start
         # (tailer start), not here — waiting until first content made it feel late.
         return True
