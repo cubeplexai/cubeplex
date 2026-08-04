@@ -362,11 +362,13 @@ class SlackConnector:
     # Processing lifecycle hooks (OutboundRunTailer)
     # ------------------------------------------------------------------
     # Hourglass goes on the *inbound* message as soon as the tailer starts
-    # (same timing as Feishu/Discord ``on_processing_start``). Terminal ✅/❌
-    # stay on SlackOpDispatcher.finalize so they only land once the reply
-    # is done.
+    # (same timing as Feishu/Discord ``on_processing_start``). Success ✅ is
+    # still stamped by SlackOpDispatcher.finalize; failure ❌ is stamped
+    # here when the tailer aborts without a terminal finalize (and also
+    # when finalize already stamped ``x`` — add_reaction is idempotent).
 
     _REACTION_PROCESSING = "hourglass_flowing_sand"
+    _REACTION_FAILURE = "x"
 
     async def on_processing_start(self, state: Any) -> None:
         target = getattr(state, "inbound_message_id", None)
@@ -382,8 +384,10 @@ class SlackConnector:
 
     async def on_processing_failed(self, state: Any) -> None:
         target = getattr(state, "inbound_message_id", None)
-        if target:
-            await self.remove_reaction(target, self._REACTION_PROCESSING)
+        if not target:
+            return
+        await self.remove_reaction(target, self._REACTION_PROCESSING)
+        await self.add_reaction(target, self._REACTION_FAILURE)
 
     # ------------------------------------------------------------------
     # IdentityResolver protocol
