@@ -45,6 +45,15 @@ class SlackGateway:
         )
         from slack_bolt.async_app import AsyncApp
 
+        # Re-apply after slack_sdk import/connect: its socket client logs every
+        # PING/PONG at DEBUG when the leaf logger level is NOTSET.
+        try:
+            from cubeplex.utils.log import _apply_third_party_log_levels
+
+            _apply_third_party_log_levels()
+        except Exception:
+            logger.opt(exception=True).debug("[Slack] re-apply third-party log levels failed")
+
         app = AsyncApp(token=self._bot_token)
         self._app = app
         self._client = app.client

@@ -101,27 +101,43 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     "lark_oapi",
     # Slack Socket Mode (slack_sdk + bolt) logs every sdk-ping-pong / PING /
     # PONG and most HTTP request/response bodies at DEBUG.
+    # Set the leaf loggers too: slack_sdk checks ``self.logger.level <= DEBUG``
+    # (the raw level, not getEffectiveLevel), and NOTSET (0) is ``<= DEBUG``,
+    # so only parenting under a WARNING parent still enters the debug branches
+    # (the emit is filtered, but we still want the leaf level raised so the
+    # branch is skipped and so re-inits can't leave a NOTSET child under a
+    # DEBUG root if the parent was reset).
     "slack_sdk",
+    "slack_sdk.socket_mode",
+    "slack_sdk.socket_mode.aiohttp",
+    "slack_sdk.socket_mode.async_client",
+    "slack_sdk.web",
+    "slack_sdk.web.async_client",
+    "slack_sdk.web.async_internal_utils",
     "slack_bolt",
+    "slack_bolt.app",
+    "slack_bolt.adapter",
 )
 
 
-def _apply_third_party_log_levels(root_level: int) -> None:
+def _apply_third_party_log_levels(root_level: int | None = None) -> None:
     """Silence chatty third-party loggers, then re-enable any opted-in modules.
 
-    If `root_level` is already INFO or higher, the silence cap is a no-op
-    (third-party loggers already inherit INFO from root). The opt-in
-    `verbose_modules` list still works at any root level.
+    Always raises noisy third-party loggers to ``third_party_level`` (default
+    WARNING), even when the root is already INFO+, so leaf loggers that use
+    ``logger.level`` (not effective level) still skip DEBUG branches.
+
+    Safe to call more than once (e.g. again when a long-lived gateway starts).
+    The opt-in ``verbose_modules`` list re-enables DEBUG for selected names.
     """
+    del root_level  # kept for call-site compatibility; silence is absolute
     third_party_name = str(config.get("logging.third_party_level", "WARNING")).upper()
     third_party_level = logging.getLevelName(third_party_name)
     if not isinstance(third_party_level, int):
         third_party_level = logging.WARNING
 
-    # Only raise the floor — never lower a logger below its natural level.
-    if third_party_level > root_level:
-        for name in _NOISY_THIRD_PARTY_LOGGERS:
-            logging.getLogger(name).setLevel(third_party_level)
+    for name in _NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(third_party_level)
 
     verbose_modules = config.get("logging.verbose_modules", []) or []
     for name in verbose_modules:
