@@ -266,6 +266,37 @@ async def test_empty_post_hitl_create_skips_placeholder() -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_post_hitl_create_still_sends_pending_buttons() -> None:
+    """Second HITL with no interim text must still get Slack buttons.
+
+    After the first HITL resolution clears card_id, fold returns card_create
+    for the next ask_user/sandbox_confirm. Create must not skip the pending
+    path entirely when post_hitl is empty.
+    """
+    from cubeplex.im.card_model import PendingInput
+
+    state = _make_state()
+    state.card_state.hitl_resolved = True
+    state.card_state.post_hitl_content = ""
+    state.card_id = None
+    state.bot_message_id = None
+    state.card_state.pending_input = PendingInput(
+        kind="sandbox_confirm",
+        run_id="run-1",
+        question="Allow?",
+        choices=[("Yes", "approve", "primary"), ("No", "deny", "danger")],
+        question_id="qid-2",
+        answer_key="",
+    )
+    d, conn = _make_dispatcher(state)
+    ok = await d.dispatch_create(state)
+    assert ok is False
+    conn.send_message.assert_not_awaited()
+    conn.send_message_with_blocks.assert_awaited()
+    assert state.bot_message_id is None
+
+
+@pytest.mark.asyncio
 async def test_finalize_clears_empty_placeholder() -> None:
     """If a placeholder bot message exists with no final text, replace it."""
     state = _make_state()
