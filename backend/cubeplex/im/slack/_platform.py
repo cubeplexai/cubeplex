@@ -51,7 +51,11 @@ class SlackPlatform:
             run_id=run_id,
             reply_to_id=queue_item.reply_to_id,
             inbound_message_id=queue_item.inbound_message_id,
-            stream_interval=1.0,
+            # chat.update is not bound to the strict 1 msg/s postMessage
+            # channel limit; 0.45s keeps the typewriter feeling responsive
+            # without hammering Slack (was 1.0s — web finished long before
+            # Slack caught up). Tailer also coalesces stream_text in a batch.
+            stream_interval=0.45,
         )
         op_dispatcher = SlackOpDispatcher(connector=sc, state=state)
 

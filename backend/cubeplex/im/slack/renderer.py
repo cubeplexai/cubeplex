@@ -67,6 +67,10 @@ class SlackOpDispatcher:
         if s.bot_message_id is None:
             return await self.dispatch_create(state)
         full_content = _active_stream_text(s.card_state)
+        # Always paint the full cumulative buffer for the current message
+        # (offset only advances when we split a long answer into multiple
+        # Slack messages). Using only the tail after a coalesce could leave
+        # earlier chunks missing if create posted a short prefix.
         current_segment = full_content[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
