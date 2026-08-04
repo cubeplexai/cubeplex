@@ -33,10 +33,12 @@ class TeamsOpDispatcher:
         if not text:
             text = "..."
         current_segment = text[self.sent_char_offset :]
+        sealed_prefix = False
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             send_text = current_segment[:split_at]
             self.sent_char_offset += split_at
+            sealed_prefix = True
         else:
             send_text = current_segment
         msg_id = await self._connector.send_message(send_text)
@@ -44,6 +46,10 @@ class TeamsOpDispatcher:
             return False
         s.card_id = msg_id
         s.bot_message_id = msg_id
+        # Partial create: seal this message so drain/stream opens a new one.
+        if sealed_prefix:
+            s.card_id = None
+            s.bot_message_id = None
         return True
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:

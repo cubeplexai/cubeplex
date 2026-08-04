@@ -179,6 +179,36 @@ async def test_hitl_reset_only_once_on_later_patches() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_split_seals_prefix_for_drain() -> None:
+    """Long first create must not leave the sealed prefix as the open edit target.
+
+    Drain loops call stream again after create advances offset; if bot_message_id
+    still points at the first segment, stream would replace it with only the tail.
+    """
+    state = _make_state()
+    long = "A" * 5000
+    state.card_state.streaming_content = long
+    d, conn = _make_dispatcher(state)
+    conn.send_message = AsyncMock(return_value="ts-1")
+    ok = await d.dispatch_create(state)
+    assert ok is True
+    offset_after_create = d.sent_char_offset
+    assert 0 < offset_after_create < len(long)
+    # Sealed first segment — no open message for the remainder.
+    assert state.bot_message_id is None
+    assert state.card_id is None
+    # Next stream creates a new message for the remainder (not edit ts-1).
+    conn.send_message = AsyncMock(return_value="ts-2")
+    conn.edit_message.reset_mock()
+    ok = await d.dispatch_stream(state, long)
+    assert ok is True
+    assert state.bot_message_id == "ts-2"
+    conn.edit_message.assert_not_awaited()
+    posted = conn.send_message.await_args.args[0]
+    assert posted == long[offset_after_create:]
+
+
+@pytest.mark.asyncio
 async def test_stream_split_keeps_offset_at_segment_start() -> None:
     """After splitting, later deltas must edit the full current segment.
 
