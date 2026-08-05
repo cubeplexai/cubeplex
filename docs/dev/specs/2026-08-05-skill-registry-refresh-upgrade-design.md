@@ -216,99 +216,73 @@ Existing upgrade endpoints stay:
 
 ### 5. Service layer
 
-Introduce an explicit catalog import path (name illustrative):
+**Design bar:** solve the real bugs with the simplest structure. Prefer a
+short dedicated path over a perfect concurrency framework. Rare races that
+only jitter `current_version` or leave an extra catalog version are
+acceptable; silently changing installs or forking skills is not.
 
-- A dedicated `refresh_remote_skill(skill_id, ...)` (preferred over a
-  `write_install` flag on first-time publish, to keep install side-effects
-  out of the refresh call graph) that:
-  1. Loads the **target** skill by `skill_id` + provenance; resolves adapter
-     via `SkillsAdapterManager.adapter_by_id`.
-  2. Fetches files; validates bundle.
-  3. **Pins identity to the target skill** (see §5.1).
-  4. Hash-compares under a per-skill lock (see §5.2); maybe creates version
-     on **that** `skill_id`; updates `current_version`.
-  5. **Never** calls install repository.
+Introduce a dedicated `refresh_remote_skill(skill_id, ...)` (do **not** reuse
+`_install_remote` / install-writing publish):
 
-Keep **first-time remote install** on the existing path that **does** write
-install (discover → install). Refresh is only for skills already in catalog
-with provenance.
+1. Load target skill by `skill_id` + provenance; resolve adapter.
+2. Fetch + validate bundle.
+3. Identity pin (§5.1).
+4. Content-hash compare; maybe append `SkillVersion` on **that** `skill_id`
+   and advance `current_version`.
+5. **Never** touch install repositories.
 
-Refactor today's ws `refresh_skill` handler off `_install_remote` onto this
-path; add admin twin.
+First-time remote install stays on the existing install-writing path.
+Refactor today's ws `refresh` handler onto this path; add admin twin.
 
-#### 5.1 Identity pin — refresh must not rename or fork the skill
+#### 5.1 Identity pin — **MUST**
 
-Today's `_publish_from_files` derives `canonical_name` from frontmatter `name`
-and `find_by_name`. That is correct for **first import**, wrong for **refresh**.
+Today's `_publish_from_files` derives identity via frontmatter `name` +
+`find_by_name`. Fine for first import; wrong for refresh.
 
-Refresh rules:
+1. Always attach new versions to the route's `skill_id`.
+2. Frontmatter `name` must equal the target skill's slug
+   (`org-slug:skill-slug` → `skill-slug`).
+3. Mismatch → **422** `SKILL_IDENTITY_MISMATCH`; no new skill, no alternate
+   skill update, no provenance rewrite.
 
-1. Operate only on the requested `skill_id` (the row loaded for the route).
-2. After fetch, parse frontmatter `name`. Expected slug is the suffix of the
-   target skill's canonical name (`org-slug:skill-slug` → `skill-slug`).
-3. If frontmatter name **≠** expected slug → **422** with stable code
-   `SKILL_IDENTITY_MISMATCH` (or equivalent). Do **not** create another
-   `Skill` row, do not update a different skill, do not change provenance.
-4. New `SkillVersion` rows always attach to the original `skill_id`.
-5. Response `skill_id` / `canonical_name` always refer to that same skill.
+Without this, upstream renames silently fork the catalog.
 
-Rationale: upstream renaming a SKILL.md would otherwise silently fork the
-catalog and leave installs pointing at a stale skill that never refreshes.
+#### 5.2 Concurrency — **SHOULD** keep simple
 
-#### 5.2 Concurrency — serialize catalog tip updates per skill
+**MUST for U1:**
 
-Hand-wave "second wins or collides cleanly" is not an API contract.
+- Rely on existing uniqueness `(skill_id, version)` and normal DB
+  transactions.
+- If frontmatter version collides but content differs → auto next patch
+  (already in §3); do not 500.
+- Do not invent distributed locks, single-flight services, or cross-path
+  lock audits for zip upload in this feature.
 
-Rules:
+**Nice-to-have (only if one-liners):**
 
-1. **Any path that creates a `SkillVersion` or updates `current_version` on an
-   existing skill** must take the same critical section: `SELECT … FOR UPDATE`
-   on that `skills` row (then re-read tip). This includes **refresh** and
-   **existing-skill** branches of publish/re-upload (`_publish_from_files` and
-   successors). Refresh-only locking is not enough — concurrent zip upload on
-   the same skill would otherwise race the tip.
-2. **Network fetch stays outside the lock.** Order for refresh:
-   optional cheap pre-check → `fetch(source_ref)` (I/O) → open/continue DB
-   transaction → lock install (WS, §5.3) → lock skill → hash-compare → allocate
-   version → object-store upload → insert version → update tip → commit.
-3. Hash comparison and version allocation run **inside** the skill-row lock
-   after re-reading the tip version.
-4. If two concurrent refreshes fetch the **same** content: only one creates
-   a version; the other returns `changed: false` after re-check (or sees the
-   peer's version already at tip).
-5. If two concurrent writers (refresh vs refresh, or refresh vs re-upload)
-   produce **different** content: both may create distinct versions;
-   `current_version` ends at the **last committer's** assigned version. Each
-   response reports its own `assigned_version`. Clients re-list for the tip.
-6. Do not claim success without a corresponding `SkillVersion` row (upload
-   after lock + version allocation, or treat orphan objects as best-effort GC
-   under unique key paths).
+- `SELECT … FOR UPDATE` on the skill row inside the write transaction before
+  hash compare + version insert — optional hardening, not a gate for shipping.
+- Concurrent double-refresh may create two versions or last-writer tip; agents
+  still use `installed_version`. No special concurrent e2e required for U1.
 
-U1 does **not** require a global distributed lock — Postgres row locks on
-`skills.id` are the primitive. New-skill first create (no existing row tip)
-is unaffected beyond normal unique constraints.
+#### 5.3 Workspace auth — **MUST** be clear, not perfect
 
-#### 5.3 Workspace auth and mutation in one transaction
+**MUST:**
 
-WS private-only gate is not a plain re-read at the end of the handler.
+1. WS refresh allowed only when a **workspace-private** install exists for
+   `(org, workspace, skill)` and the skill has provenance.
+2. Check that install in the **same request / same DB session** as the catalog
+   write (not a stale flag from an earlier step). Missing → refuse
+   (`REFRESH_PRIVATE_ONLY`); no catalog write.
+3. Admin refresh does not require a private install.
 
-1. After remote fetch (no lock held during network), open the write
-   transaction (same session that mutates catalog).
-2. **`SELECT … FOR UPDATE` the workspace-private install row** for
-   `(org_id, workspace_id, skill_id)` (and check provenance / visibility).
-   Missing row → `REFRESH_PRIVATE_ONLY` without catalog mutation.
-3. `SELECT … FOR UPDATE` the skill row; run hash-compare + version create +
-   tip update (§5.2).
-4. Commit. Holding the install row lock for the mutation duration means a
-   concurrent uninstall of that private install **blocks until refresh
-   commits** (or fails if it raced before the lock) — a non-locking
-   "re-assert before commit" is **not** sufficient (delete can still commit
-   between a plain SELECT and the refresh COMMIT).
+**Not required for U1:**
 
-A member must not advance the shared catalog tip after losing the only
-permission basis for refresh. Uninstall paths that delete private installs
-already compete on the same row; no separate distributed lock is required
-if both use normal transactional row locks.
+- `FOR UPDATE` on the install row, multi-step re-assert protocols, or proving
+  absence of TOCTOU against concurrent uninstall. Window is rare; worst case
+  is a catalog tip bump after the member already had legitimate private
+  access at click time — same product effect as finishing refresh one second
+  earlier.
 
 ### 6. UI flow
 
@@ -357,9 +331,9 @@ admin-only upgrade, refresh failed, etc.).
 | Fetch network / 404 / invalid bundle | 422 with safe message |
 | Same content hash | `changed: false` |
 | Content changed, same frontmatter version | New auto patch version; `changed: true` |
-| Concurrent refresh | See §5.2 — per-skill lock; same-content → one create; different content → tip = last committer |
+| Concurrent refresh | Accept rare tip/version jitter; uniqueness prevents duplicate version strings (§5.2) |
 | Upstream renames frontmatter `name` | 422 `SKILL_IDENTITY_MISMATCH`; no fork (§5.1) |
-| Private install deleted mid-refresh | Install row held `FOR UPDATE` for mutation; concurrent delete waits or loses race before lock (§5.3) |
+| Private install gone at write time | Refuse WS refresh; no catalog write (§5.3) |
 | Member refreshes private; org-wide still on old pin | Catalog tip advances; org install shows `update_available` for admin |
 | Tombstoned preinstalled | Not remote; no refresh |
 | Upgrade to version that does not exist | Existing 404/422 behavior |
@@ -410,8 +384,6 @@ Observable invariants:
    docs match.
 7. Refresh never attaches versions to a different `skill_id` than requested
    (name drift → error, not fork).
-8. Concurrent same-content refreshes produce at most one new version; no
-   install mutation.
 
 ---
 

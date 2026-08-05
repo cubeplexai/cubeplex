@@ -23,8 +23,10 @@ that ws. Upgrade reuses existing admin install and workspace settings install
 paths. UI surfaces Check for update + Upgrade separately; docs describe the
 same contract.
 
-**Load-bearing decision:** stop routing refresh through
-`_install_remote` / `_publish_from_files` install side-effects.
+**Load-bearing decisions:** (1) stop routing refresh through
+`_install_remote` / install-writing publish; (2) identity-pin to
+`skill_id`; (3) keep concurrency/auth simple — fix real bugs, not theoretical
+races (spec §5 design bar).
 
 ## Tech stack
 
@@ -103,53 +105,33 @@ from provenance + role.
 
 ### Core logic
 
-1. Load **target** skill by `skill_id`; require
-   `imported_from_registry_id` + `imported_from_source_ref` (read-only
-   preflight OK).
-2. Resolve adapter; if missing/disabled → error.
-3. **`fetch(source_ref)` outside DB locks** → validate files → parse
-   frontmatter.
-4. **Identity pin (spec §5.1):** frontmatter `name` must equal the target
-   skill's slug (`canonical` after `org-slug:`). Mismatch → 422
-   `SKILL_IDENTITY_MISMATCH`; no new skill row, no alternate-skill update.
-5. Begin write transaction.
-6. **WS only (spec §5.3):** `SELECT … FOR UPDATE` workspace-private install
-   for `(org_id, workspace_id, skill_id)`; missing →
-   `REFRESH_PRIVATE_ONLY` (no catalog write). Do **not** rely on a plain
-   re-SELECT without a row lock.
-7. **`SELECT … FOR UPDATE` skill row** (spec §5.2 — same lock primitive any
-   existing-skill version creator must use, including re-upload). Re-read tip
-   hash.
-8. If hash equals tip → `changed=false`; commit/return.
-9. Else choose version string: frontmatter/meta if free on **this** skill_id;
-   else next patch from `_next_version_for`.
-10. Upload files for that version; create `SkillVersion` on **target**
-    `skill_id`; `update_current_version`; **do not** touch installs.
-11. Commit (install row lock released with transaction).
+1. Load target skill by `skill_id`; require provenance.
+2. **WS only:** require workspace-private install for
+   `(org_id, workspace_id, skill_id)`; else `REFRESH_PRIVATE_ONLY`.
+3. Resolve adapter; fetch + validate files; parse frontmatter.
+4. **Identity pin:** frontmatter `name` == target slug; else
+   `SKILL_IDENTITY_MISMATCH` (no fork).
+5. Compute content hash; if equals tip version hash → `changed=false`.
+6. Else allocate version (frontmatter if free, else next patch); upload;
+   create `SkillVersion` on **this** `skill_id`; update `current_version`.
+7. **Never** create/update/delete `OrgSkillInstall`.
 
-First-time remote install path **unchanged** (still writes install). Do **not**
-route refresh through `_publish_from_files` without bypassing name-based
-`find_by_name` and install writes.
-
-**Companion hardening in U1:** when updating an **existing** skill via
-publish/re-upload, take the same skill-row `FOR UPDATE` before allocating a
-version / advancing `current_version`, so refresh and upload cannot race the
-tip.
+Do **not** call `_install_remote` or install-writing `_publish_from_files`.
+Keep the function short; skip cross-writer lock redesigns and concurrent-session
+tests for U1.
 
 ### Tests (e2e preferred)
 
 | Invariant | Placement |
 |---|---|
-| Refresh with new content: new version + `current_version` advances; all installs' `installed_version` **unchanged** | e2e (fake registry or respx) |
-| Refresh same content: `changed=false`, no new version row | e2e |
-| Content change + same frontmatter version: still creates a version (auto patch), not 500 collision | e2e or unit on service |
-| Upstream renames frontmatter `name` → `SKILL_IDENTITY_MISMATCH`; original skill unchanged; no fork skill | e2e |
-| Member refresh org-wide-only skill → refused | e2e |
-| Member refresh private remote skill → allowed; install unchanged | e2e |
-| Admin refresh any org-visible remote skill → allowed; install unchanged | e2e |
-| After refresh, admin list shows `update_available` when install pin is old | e2e |
-| Upgrade (existing admin install) then state returns to `installed` | e2e (may already partially exist) |
-| Concurrent same-content refresh: at most one new version; both installs unchanged | e2e or unit with concurrent sessions if practical |
+| Refresh with new content: new version + tip advances; **all** installs unchanged | e2e |
+| Refresh same content: `changed=false` | e2e |
+| Same frontmatter version, different content: auto patch, not 500 | e2e or unit |
+| Frontmatter rename → `SKILL_IDENTITY_MISMATCH`; original skill unchanged | e2e |
+| Member refresh org-wide-only → refused | e2e |
+| Member refresh private → allowed; install unchanged | e2e |
+| Admin refresh remote skill → allowed; install unchanged | e2e |
+| After refresh, old install pin → `update_available`; upgrade → installed | e2e |
 
 ---
 
@@ -282,20 +264,15 @@ U2+U3).
 
 ## Self-review notes
 
-- **Interface consistency:** one `SkillRefreshResponse`; both routes return it;
-  frontend core types match.
-- **No vagueness:** private-only WS gate; auto-patch when frontmatter version
-  collides with different hash; install rows never touched on refresh;
-  identity pin; per-skill lock; auth+mutation same transaction.
-- **Risk:** member private refresh advances shared `current_version` — accepted
-  in spec (approach B); do not "fix" with shadow versions.
-- **Risk:** `_publish_from_files` shared by first install — split refresh path
-  rather than accidental install or name-based fork on refresh.
-- **Codex local review (2026-08-05):** R1 three HIGHs closed in §5.1–§5.3
-  (identity pin, concurrency, auth). R2 two HIGHs closed: WS auth needs
-  `FOR UPDATE` on the private install (not plain re-assert); skill-row lock
-  must cover **all** existing-skill tip writers (refresh + re-upload), not
-  refresh alone; fetch stays outside the lock.
+- **Interface consistency:** one `SkillRefreshResponse`; both routes return it.
+- **Simplicity bar (product):** fix catalog-only + identity pin + clear
+  permissions; do not build a lock protocol for rare tip races (spec §5).
+- **Risk accepted:** private refresh advances shared tip (approach B);
+  rare concurrent tip jitter without formal locking.
+- **Risk avoided:** reusing install-writing publish (would change agent load).
+- **Codex review:** identity pin kept as MUST; elaborate FOR UPDATE / cross-writer
+  lock requirements deliberately **downgraded** after impact review — not worth
+  the complexity for U1.
 
 ---
 
