@@ -122,7 +122,9 @@ class SkillCatalogService:
             for (skill, sv) in rows
         ]
 
-        # Also load workspace-private installs (always enabled)
+        # Also load workspace-private installs (always enabled when present).
+        # Tombstone still wins: a preinstalled skill uninstalled at org level
+        # must not remain loadable via a leftover workspace-private install.
         ws_private_stmt = (
             select(Skill, SkillVersion)
             .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)  # type: ignore[arg-type]
@@ -134,6 +136,7 @@ class SkillCatalogService:
             .where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
                 OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+                not_tombstoned,
             )
         )
         ws_private_rows = (await self.session.execute(ws_private_stmt)).all()

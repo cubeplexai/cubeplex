@@ -250,11 +250,12 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
             existing_pairs.add(key)
             created += 1
 
-    # Tombstone wins: drop any org-wide install that already has a tombstone
-    # (heals dual-state from concurrent uninstall vs uncommitted reconcile).
+    # Tombstone wins: drop ANY install (org-wide or workspace-private) that
+    # already has a tombstone. Admin uninstall only deletes the org-wide row;
+    # private leftovers would otherwise keep the skill loadable via
+    # list_enabled's private path.
     purge = await db_session.execute(
         delete(OrgSkillInstall).where(
-            OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
             OrgSkillInstall.skill_id.in_(skill_ids),  # type: ignore[attr-defined]
             exists().where(
                 OrgPreinstalledTombstone.org_id == OrgSkillInstall.org_id,  # type: ignore[arg-type]
