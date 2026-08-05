@@ -255,44 +255,60 @@ Refresh rules:
 Rationale: upstream renaming a SKILL.md would otherwise silently fork the
 catalog and leave installs pointing at a stale skill that never refreshes.
 
-#### 5.2 Concurrency — serialize refresh per skill
+#### 5.2 Concurrency — serialize catalog tip updates per skill
 
 Hand-wave "second wins or collides cleanly" is not an API contract.
 
 Rules:
 
-1. Serialize catalog mutation for a given `skill_id` (Postgres row lock on
-   the `skills` row, or equivalent single-flight) for the hash-compare +
-   version-create + `current_version` update.
-2. Hash comparison and version allocation run **inside** that critical
-   section after re-reading the tip version.
-3. If two concurrent refreshes fetch the **same** content: only one creates
+1. **Any path that creates a `SkillVersion` or updates `current_version` on an
+   existing skill** must take the same critical section: `SELECT … FOR UPDATE`
+   on that `skills` row (then re-read tip). This includes **refresh** and
+   **existing-skill** branches of publish/re-upload (`_publish_from_files` and
+   successors). Refresh-only locking is not enough — concurrent zip upload on
+   the same skill would otherwise race the tip.
+2. **Network fetch stays outside the lock.** Order for refresh:
+   optional cheap pre-check → `fetch(source_ref)` (I/O) → open/continue DB
+   transaction → lock install (WS, §5.3) → lock skill → hash-compare → allocate
+   version → object-store upload → insert version → update tip → commit.
+3. Hash comparison and version allocation run **inside** the skill-row lock
+   after re-reading the tip version.
+4. If two concurrent refreshes fetch the **same** content: only one creates
    a version; the other returns `changed: false` after re-check (or sees the
    peer's version already at tip).
-4. If two concurrent refreshes fetch **different** content: both may create
-   distinct versions (different hashes / version strings); `current_version`
-   ends at the **last committer's** assigned version. Both responses report
-   their own `assigned_version`. Clients re-list for the tip.
-5. Object-store uploads for a version that loses a unique-constraint race must
-   not leave the API claiming success without a corresponding `SkillVersion`
-   row (upload after lock + version allocation, or treat orphan objects as
-   best-effort GC / acceptable garbage under unique key paths).
+5. If two concurrent writers (refresh vs refresh, or refresh vs re-upload)
+   produce **different** content: both may create distinct versions;
+   `current_version` ends at the **last committer's** assigned version. Each
+   response reports its own `assigned_version`. Clients re-list for the tip.
+6. Do not claim success without a corresponding `SkillVersion` row (upload
+   after lock + version allocation, or treat orphan objects as best-effort GC
+   under unique key paths).
+
+U1 does **not** require a global distributed lock — Postgres row locks on
+`skills.id` are the primitive. New-skill first create (no existing row tip)
+is unaffected beyond normal unique constraints.
 
 #### 5.3 Workspace auth and mutation in one transaction
 
-WS private-only gate is not a one-shot check at the top of the handler.
+WS private-only gate is not a plain re-read at the end of the handler.
 
-1. Open the request transaction (same session that mutates catalog).
-2. Assert workspace-private install for `(org_id, workspace_id, skill_id)`
-   (and provenance / visibility).
-3. Lock skill row / run catalog refresh in that transaction.
-4. Re-assert private install still exists (or hold a lock that prevents
-   delete of that install row for the duration) **before commit**.
-5. If the private install was removed mid-flight → abort catalog mutation
-   (rollback) and return `REFRESH_PRIVATE_ONLY` (or `REFRESH_UNAUTHORIZED`).
+1. After remote fetch (no lock held during network), open the write
+   transaction (same session that mutates catalog).
+2. **`SELECT … FOR UPDATE` the workspace-private install row** for
+   `(org_id, workspace_id, skill_id)` (and check provenance / visibility).
+   Missing row → `REFRESH_PRIVATE_ONLY` without catalog mutation.
+3. `SELECT … FOR UPDATE` the skill row; run hash-compare + version create +
+   tip update (§5.2).
+4. Commit. Holding the install row lock for the mutation duration means a
+   concurrent uninstall of that private install **blocks until refresh
+   commits** (or fails if it raced before the lock) — a non-locking
+   "re-assert before commit" is **not** sufficient (delete can still commit
+   between a plain SELECT and the refresh COMMIT).
 
 A member must not advance the shared catalog tip after losing the only
-permission basis for refresh.
+permission basis for refresh. Uninstall paths that delete private installs
+already compete on the same row; no separate distributed lock is required
+if both use normal transactional row locks.
 
 ### 6. UI flow
 
@@ -343,7 +359,7 @@ admin-only upgrade, refresh failed, etc.).
 | Content changed, same frontmatter version | New auto patch version; `changed: true` |
 | Concurrent refresh | See §5.2 — per-skill lock; same-content → one create; different content → tip = last committer |
 | Upstream renames frontmatter `name` | 422 `SKILL_IDENTITY_MISMATCH`; no fork (§5.1) |
-| Private install deleted mid-refresh | Rollback; refuse (§5.3) |
+| Private install deleted mid-refresh | Install row held `FOR UPDATE` for mutation; concurrent delete waits or loses race before lock (§5.3) |
 | Member refreshes private; org-wide still on old pin | Catalog tip advances; org install shows `update_available` for admin |
 | Tombstoned preinstalled | Not remote; no refresh |
 | Upgrade to version that does not exist | Existing 404/422 behavior |
