@@ -4,62 +4,56 @@ Related: Spec `docs/dev/specs/2026-08-05-skill-creator-upgrade-design.md`
 
 **Goal**: Upgrade preinstalled `skill-creator` so agents author better skills
 (interview → draft → checklist → publish → light verify) without a platform
-tool encyclopedia or cross-skill template references.
+tool encyclopedia or cross-skill template references; and make the preinstalled
+version bump actually reach existing org installs.
 
-**Architecture**: Content-only change under
-`backend/skills/preinstalled/skill-creator/` (SKILL.md rewrite + optional
-`references/`), version bump for seeder/sync, one docs-site path correction.
-No API, migration, or frontend code.
+**Architecture**:
+1. Content under `backend/skills/preinstalled/skill-creator/` (SKILL.md +
+   `references/`) with version `0.4.0`.
+2. Seeder change so preinstalled install pins advance with catalog
+   `current_version` (otherwise existing orgs stay on 0.3.0 forever).
+3. Docs-site path correction (`/workspace/.skills`).
 
-**Tech stack**: Markdown skill bundle; existing publish/frontmatter contracts
-unchanged (`SKILL_SLUG_RE`, auto version, `save_artifact` +
+No Alembic migration. No `load_skill` precedence / marketplace UI work.
+
+**Tech stack**: Markdown skill bundle; `skill_seeder.py`; existing publish /
+frontmatter contracts (`SKILL_SLUG_RE`, auto version, `save_artifact` +
 `platform_skills_publish_skill`).
 
 ---
 
-## Unit 1: Rewrite `SKILL.md` procedure
+## Unit 1: Advance preinstalled install pins on seed
+
+**Why first:** Without this, Units 2–4 ship content that most orgs never load.
 
 **Files**:
-- `backend/skills/preinstalled/skill-creator/SKILL.md`
+- `backend/cubeplex/seeders/skill_seeder.py` — extend
+  `_reconcile_preinstalled_installs` (or a sibling helper called after it)
+- `backend/tests/…` — unit or e2e covering seeder pin advance (placement per
+  `docs/testing.md`; prefer unit if seeder is pure DB; e2e if session/fixtures
+  already exist for seeder)
 
-**What changes**:
-- Frontmatter: bump `version` to `0.4.0`; refresh `description` (create /
-  edit / publish / capture-from-chat triggers; third person; optional
-  Chinese phrases users actually say). Keep or tighten `keywords`.
-- Body structure (numbered workflow, not essay):
-  1. Intent routing (new / capture-from-chat / edit)
-  2. Search-before-create (`platform_skills_find` when useful)
-  3. Ground / interview (minimal; conversation extraction for capture)
-  4. Description draft + user confirm
-  5. Bundle under `/workspace/skills/<slug>/` with **`references/`** (plural)
-  6. Body guidelines + **rule C** (workflow-local tools only; one short
-     “use live tool schemas” paragraph — no tool catalog)
-  7. Pre-publish checklist (inline short list **or** “read
-     `references/quality-checklist.md`”)
-  8. `save_artifact` → publish consent path
-  9. Light verify (`load_skill`; optional one dry-run)
-- **Edit semantics callout**: preinstalled → fork as `org-slug:name`; never
-  edit `/workspace/.skills/…` in place; always use `load_skill` path as copy
-  source.
-- **Remove**: gerund naming preference; `reference/` example; any instruction
-  to load or imitate other preinstalled skills by name.
-- **Keep**: absolute correctness on `/workspace` vs `.skills`, version omit
-  default, `cubeplex.requires.env` note, publish targets current workspace.
+**Behavior**:
+- For each org-wide (`workspace_id is None`) install of a **preinstalled**,
+  non-deprecated skill: if `installed_version != skill.current_version` and
+  no org tombstone for `(org_id, skill_id)`, set
+  `installed_version = skill.current_version`.
+- Do **not** create installs that were tombstoned.
+- Do **not** change uploaded-skill installs.
+- Do **not** invent new workspace-private installs; only update existing
+  org-wide pin rows (and any workspace-private installs of preinstalled
+  skills if they exist — same rule, same skill_id).
+- Keep concurrent-safe patterns already used (nested transaction / IntegrityError
+  handling if touching the same rows).
 
-**Interfaces / contracts** (must stay aligned with code):
-- Name: `^[a-z0-9][a-z0-9-]{0,62}$`, no `:`
-- Publish: `save_artifact` → `platform_skills_publish_skill(artifact_id)`
-- Caps: 10 MB / file, 50 MB / bundle (document in checklist)
-- Runtime helpers: `load_skill` returns `path`; do not hand-build
-  `/workspace/.skills/...`
+**Invariant**: After seed, an org that had `skill-creator@0.3.0` installed and
+no tombstone has `installed_version == 0.4.0` when catalog head is `0.4.0`.
 
 **Tests**:
-- No automated runtime test required for markdown-only ship.
-- Manual (or one-shot agent dogfood in a worktree sandbox): follow the
-  rewritten skill to create a throwaway skill → publish → `load_skill`
-  succeeds. Document command/outcome in PR body.
-- Optional unit-style assertion only if the repo already parses preinstalled
-  SKILL.md in tests — do **not** invent a heavy suite for prose.
+- Seed catalog with skill at v1; create org install pinned at v1; update catalog
+  head to v2 via seed path; assert install pin is v2.
+- Tombstoned org: install not recreated; pin not force-updated if install was
+  purged by tombstone heal.
 
 ---
 
@@ -67,85 +61,96 @@ unchanged (`SKILL_SLUG_RE`, auto version, `save_artifact` +
 
 **Files**:
 - `backend/skills/preinstalled/skill-creator/references/quality-checklist.md`
-  (create)
 - `backend/skills/preinstalled/skill-creator/references/minimal-skill.example.md`
-  (create)
 
 **quality-checklist.md**:
 - Pre-publish items from the spec (frontmatter, paths, size, one-job, rule C)
+- Capture-from-chat scrub + full-content confirm
 - Publish error → fix mapping
 - Post-publish: `load_skill` + optional sample prompt
 
 **minimal-skill.example.md**:
 - Fictional slug only (e.g. `weekly-status-summary`) — **no** real
   preinstalled skill names
-- Full minimal SKILL.md example demonstrating third-person description,
-  second-person steps, one tool mention under rule C (e.g. `save_artifact`
-  for a deliverable), and `references/` layout if needed
-
-**Core logic**:
-- SKILL.md points to these files with “read when you need the full checklist /
-  example” so the always-injected creator body stays short.
+- Full minimal SKILL.md example: third-person description, second-person steps,
+  one tool under rule C (e.g. `save_artifact`), `references/` if needed
 
 **Tests**: none beyond “files exist and are linked from SKILL.md”.
 
 ---
 
-## Unit 3: Docs site path correction
+## Unit 3: Rewrite `SKILL.md` procedure
 
 **Files**:
-- `docs/site/docs/guides/skills/overview.md`
-- Matching zh-Hans copy if present under
-  `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/guides/skills/overview.md`
-  (update if it still says `/.skills/`)
+- `backend/skills/preinstalled/skill-creator/SKILL.md`
 
-**Change**:
-- Skill mount path: `/.skills/...` → `/workspace/.skills/...` (and note
-  agents should use `load_skill`’s `path`, not construct paths).
+**What changes**:
+- Frontmatter: bump `version` to `0.4.0`; refresh `description` (create /
+  edit / publish / capture-from-chat; third person; optional Chinese phrases).
+- Numbered workflow per design (intent → find → ground → description → bundle
+  → body + rule C → checklist → save_artifact → publish → light verify).
+- **Capture safeguards** in the ground step (scrub secrets/PII; full SKILL.md
+  confirm before publish).
+- **Edit / fork callout**: preinstalled → `org-slug:name` fork; never edit
+  `/workspace/.skills/…`; fork discoverability rules (distinct name preferred,
+  distinguishable description, no shadow promise).
+- **Remove**: gerund preference; `reference/` example; cross-skill templates.
+- **Keep**: `/workspace` vs `.skills`, version omit default,
+  `cubeplex.requires.env`, workspace-scoped publish.
 
-**Tests**: none; docs-only.
+**Interfaces / contracts**:
+- Name: `^[a-z0-9][a-z0-9-]{0,62}$`, no `:`
+- Publish: `save_artifact` → `platform_skills_publish_skill(artifact_id)`
+- Caps: 10 MB / file, 50 MB / bundle
+- Runtime: use `load_skill` `path` only
+
+**Tests**: manual dogfood preferred; no heavy prose suite.
 
 ---
 
-## Unit 4: Ship verification (manual)
+## Unit 4: Docs site path correction
 
-**Not a code unit** — PR verification checklist:
+**Files**:
+- `docs/site/docs/guides/skills/overview.md`
+- zh-Hans twin if it still says `/.skills/`
 
-1. Diff review: no sibling skill names used as templates; no platform tool
-   encyclopedia section.
-2. Frontmatter `version: 0.4.0` present.
-3. Grep skill-creator tree: no bare `reference/` directory advice (except
-   historical notes outside this tree).
-4. Worktree dogfood (optional but preferred): seed/run path that loads
-   preinstalled skills, exercise create → publish → load once if local
-   stack is up (`CUBEPLEX_API__PORT` from `.worktree.env`).
+**Change**: mount path → `/workspace/.skills/...`; note agents use
+`load_skill`’s `path`.
+
+---
+
+## Unit 5: Ship verification
+
+1. Diff: no sibling skill names as templates; no tool encyclopedia.
+2. Frontmatter `version: 0.4.0`.
+3. Grep skill-creator: no `reference/` directory advice.
+4. Seeder test green (Unit 1).
+5. Dogfood if stack up: create → publish → `load_skill`; and/or seed advances
+   pin for existing install.
 
 ---
 
 ## Explicitly out of plan
 
-- `scripts/validate_skill_*.py` (defer; checklist is enough for v0.4)
-- Eval harness, description optimization loops
-- API / seeder Python changes beyond natural pickup of new preinstalled files
+- `scripts/validate_skill_*.py` (defer)
+- Eval harness / description optimization
+- Catalog precedence / fork shadows preinstalled
 - Frontend marketplace changes
 
 ---
 
 ## Implementation order
 
-1. Unit 2 files first (checklist + example) so SKILL.md can link to real paths.
-2. Unit 1 SKILL.md rewrite + version bump.
-3. Unit 3 docs path fix.
-4. Unit 4 manual verify; open PR with dogfood notes.
+1. Unit 1 (seeder pin advance + tests)
+2. Unit 2 (references files)
+3. Unit 3 (SKILL.md)
+4. Unit 4 (site docs)
+5. Unit 5 verify; push same PR (#470)
 
 ## PR shape
 
-**One concern, one PR** (docs/dev spec+plan may already be a prior commit on
-this branch; implementation commit(s) ship skill + site docs together):
+Single PR (already open): design + seeder + skill content + site docs.
 
-- Title idea: `Improve skill-creator authoring loop and path accuracy`
-- Body: link this plan + design; list success criteria; note version `0.4.0`
-  for sandbox sync.
-
-If spec/plan were committed alone first, implementation is a follow-up commit
-on the same branch (still one PR is fine for this size).
+- Title: keep `Upgrade skill-creator authoring loop` (or update if needed)
+- Body: link design/plan; call out seeder pin advance as the rollout fix;
+  version `0.4.0`.
