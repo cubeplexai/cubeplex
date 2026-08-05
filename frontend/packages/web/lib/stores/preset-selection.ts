@@ -16,7 +16,11 @@ import type { ThinkingLevel, WorkspacePresetSummary } from '@/lib/types/presets'
 export interface PresetSelectionState {
   /** The workspace preset list, refetched on mount. Not persisted. */
   presets: WorkspacePresetSummary[]
-  /** Selected model key (tier name or custom label); `null` = workspace default. */
+  /**
+   * Selected preset key — a **tier** name (`pro`, `max`, …) or custom label,
+   * never a concrete model id. Persisted so admin remaps of a tier's primary
+   * model take effect without the user re-selecting. `null` = workspace default.
+   */
   modelKey: string | null
   /** Selected thinking level; default `"medium"`. */
   thinking: ThinkingLevel

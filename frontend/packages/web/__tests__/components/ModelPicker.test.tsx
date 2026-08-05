@@ -127,7 +127,7 @@ describe('ModelPicker', () => {
     expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('medium')
   })
 
-  it('shows tier labels without mono primary or description as list body text', async () => {
+  it('shows tier labels with model names in the list; no mono primary or description body text', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: PRESETS }))
 
     renderWithIntl(<ModelPicker wsId="ws_labels" />)
@@ -144,6 +144,11 @@ describe('ModelPicker', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Lite · openai\/gpt-5/i })).toBeInTheDocument()
 
+    // List keeps tier labels; model display names appear as secondary text.
+    expect(screen.getByText(en.adminPresets.modelTiers.pro.name)).toBeInTheDocument()
+    expect(screen.getByText(en.adminPresets.modelTiers.lite.name)).toBeInTheDocument()
+    expect(screen.getByText('GPT-5')).toBeInTheDocument()
+
     // Visible list should not put full primary as the main text content of the row
     // (primary is in aria-label only). Mono primary string should not appear as standalone text.
     expect(screen.queryByText('anthropic/claude-opus-4-7')).not.toBeInTheDocument()
@@ -151,7 +156,20 @@ describe('ModelPicker', () => {
     expect(screen.queryByText(en.adminPresets.modelTiers.pro.description)).not.toBeInTheDocument()
   })
 
-  it('updates selection when a preset row is clicked', async () => {
+  it('shows the selected model display name on the trigger (not the tier name)', async () => {
+    getPresetSelectionStore('ws_trigger').getState().setModelKey('pro')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: PRESETS }))
+
+    renderWithIntl(<ModelPicker wsId="ws_trigger" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Claude Opus 4.7')).toBeInTheDocument()
+    })
+    // Tier name only appears after opening the list, not on the closed trigger.
+    expect(screen.queryByText(en.adminPresets.modelTiers.pro.name)).not.toBeInTheDocument()
+  })
+
+  it('persists selection as the tier key, not the model display name', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: PRESETS }))
 
     renderWithIntl(<ModelPicker wsId="ws_click" />)
@@ -163,6 +181,7 @@ describe('ModelPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: /Model and thinking effort/i }))
     fireEvent.click(screen.getByRole('button', { name: /Lite · openai\/gpt-5/i }))
 
+    // modelKey is the preset key (tier) so admin remaps of that tier resolve seamlessly.
     expect(getPresetSelectionStore('ws_click').getState().modelKey).toBe('lite')
   })
 })

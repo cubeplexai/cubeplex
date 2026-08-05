@@ -38,9 +38,17 @@ function brandForPreset(p: WorkspacePresetSummary): string | null {
 
 /**
  * Composer control that merges model-preset choice and thinking effort into a
- * single button + popover. List rows show model-family brand + tier/custom
- * label; hover Tooltip holds provider/model details. Backed by the per-`wsId`
- * Zustand store; refetches + revalidates on mount.
+ * single button + popover.
+ *
+ * - Trigger shows the resolved **model** display name (not tier Max/Pro).
+ * - List rows keep the **tier / custom key** as the primary label, with model
+ *   name secondary (`Pro · Claude Opus 4.7`).
+ * - Selection is stored and sent as the preset **key** (tier name or custom
+ *   label). When admin remaps a tier's primary model, the same key resolves to
+ *   the new model without the user re-picking.
+ *
+ * Hover Tooltip holds provider/model details. Backed by the per-`wsId` Zustand
+ * store; refetches + revalidates on mount.
  */
 export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): React.ReactElement {
   const t = useTranslations('chat')
@@ -95,8 +103,10 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
     pro: tTier('pro.description'),
     max: tTier('max.description'),
   }
+  /** List / a11y label: tier i18n name or custom preset key. */
   const nameOf = (p: WorkspacePresetSummary): string =>
     p.kind === 'tier' ? tierName[p.key as ModelTier] : p.key
+  /** Trigger label: resolved model display name (not the tier). */
   const modelNameOf = (p: WorkspacePresetSummary): string =>
     p.model_display_name ?? p.model_id ?? modelIdFromPrimary(p.primary) ?? p.primary
   const descOf = (p: WorkspacePresetSummary): string =>
@@ -106,11 +116,11 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
   const effectiveKey = modelKey ?? defaultPreset?.key ?? null
   const selected = presets.find((p) => p.key === effectiveKey) ?? null
   const selectedBrand = selected ? brandForPreset(selected) : null
-  const selectedLabel = selected ? nameOf(selected) : null
+  const selectedModelName = selected ? modelNameOf(selected) : null
 
   const triggerAria =
-    selected && selectedLabel
-      ? `${t('modelPickerAria')}: ${selectedLabel} (${selected.primary})`
+    selected && selectedModelName
+      ? `${t('modelPickerAria')}: ${selectedModelName} (${selected.primary})`
       : t('modelPickerAria')
 
   return (
@@ -129,7 +139,7 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
         )}
       >
         {mounted && selected ? (
-          <ModelBrandLogo brand={selectedBrand} label={selectedLabel ?? selected.primary} />
+          <ModelBrandLogo brand={selectedBrand} label={selectedModelName ?? selected.primary} />
         ) : (
           <Cpu aria-hidden className="size-3.5 text-muted-foreground" />
         )}
@@ -138,7 +148,7 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
             rendered nothing — so defer to post-hydration to avoid a mismatch. */}
         {mounted && selected ? (
           <>
-            <span className="font-medium">{nameOf(selected)}</span>
+            <span className="font-medium">{modelNameOf(selected)}</span>
             <span aria-hidden className="text-muted-foreground/60">
               ·
             </span>
@@ -160,6 +170,7 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
               const label = nameOf(p)
               const modelName = modelNameOf(p)
               const brand = brandForPreset(p)
+              // Selection is always p.key (tier/custom), not the display name.
               const rowAria = `${label} · ${p.primary}`
               return (
                 <Tooltip key={p.key}>
