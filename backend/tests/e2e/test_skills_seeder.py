@@ -315,3 +315,71 @@ async def test_list_enabled_excludes_tombstoned_even_with_orphan_install(
     # Next reconcile should purge the orphan install.
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
     assert await installs.get(org.id, skill.id) is None
+
+
+@pytest.mark.asyncio
+async def test_tombstone_suppresses_workspace_private_preinstalled_install(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Tombstone must block load_skill even via a workspace-private install.
+
+    Admin uninstall only deletes the org-wide row; a leftover private install
+    of a preinstalled skill must not remain loadable or survive reconcile.
+    """
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
+
+    from cubeplex.models import OrgSkillInstall
+    from cubeplex.repositories.workspace import WorkspaceRepository
+
+    org = await OrganizationRepository(db_session).create(
+        name=f"priv-tomb-org-{uuid.uuid4().hex[:8]}",
+        slug=f"priv-tomb-org-{uuid.uuid4().hex[:8]}",
+    )
+    workspace = await WorkspaceRepository(db_session).create(
+        org_id=org.id, name=f"priv-tomb-ws-{uuid.uuid4().hex[:6]}"
+    )
+    skill_name = _unique_name("priv-tomb")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+
+    # Org-wide path: uninstall + tombstone (mirrors admin route).
+    await installs.delete(org.id, skill.id)
+    await OrgPreinstalledTombstoneRepository(db_session).add_tombstone(
+        org_id=org.id, skill_id=skill.id, hidden_by_user_id=None
+    )
+
+    # Leftover private install of the same preinstalled skill (direct row —
+    # admin uninstall never creates these; they are the orphan case).
+    db_session.add(
+        OrgSkillInstall(
+            org_id=org.id,
+            workspace_id=workspace.id,
+            skill_id=skill.id,
+            installed_version="1.0.0",
+            installed_by_user_id=None,
+            auto_bind=True,
+        )
+    )
+    await db_session.commit()
+    private = await installs.get_workspace_private(org.id, workspace.id, skill.id)
+    assert private is not None
+
+    catalog = SkillCatalogService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    enabled = await catalog.list_enabled_for_workspace(workspace.id, org_id=org.id)
+    assert all(r.skill_id != skill.id for r in enabled)
+    assert (
+        await catalog.find_enabled_by_name(workspace.id, org_id=org.id, name=skill_name) is None
+    )
+
+    # Reconcile purges the private orphan; pin is not advanced under tombstone.
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+    assert await installs.get_workspace_private(org.id, workspace.id, skill.id) is None
+    assert await installs.get(org.id, skill.id) is None
