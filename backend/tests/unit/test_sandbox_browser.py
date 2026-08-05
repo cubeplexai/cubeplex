@@ -105,8 +105,10 @@ async def test_start_browser_runs_launch_script() -> None:
 
 @pytest.mark.asyncio
 async def test_start_browser_raises_on_failure() -> None:
+    from cubeplex.sandbox.base import SandboxError
+
     sb = _RecordingSandbox(exit_code=1)
-    with pytest.raises(RuntimeError, match="failed to start sandbox browser"):
+    with pytest.raises(SandboxError, match="failed to start sandbox browser"):
         await sb.start_browser()
 
 
@@ -173,6 +175,38 @@ async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> No
     monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
     # Resolver short-circuits to (user, ctx.user.id, ctx.user.id) when
     # conversation_id is None, so we don't need a real session for that path.
+    ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ws_browser.get_live_view(ctx, session=None, conversation_id=None)  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_live_view_returns_503_when_start_browser_fails(monkeypatch) -> None:
+    """Chromium heal failure must be retryable 503, not an unhandled 500.
+
+    ``start_browser`` raises ``SandboxError`` when start-browser.sh exits non-zero
+    (CDP never comes up). The route must map that the same way as provision
+    failures — otherwise SWR/panel do not retry cleanly.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from cubeplex.api.routes.v1 import ws_browser
+    from cubeplex.sandbox import SandboxError
+
+    class _Sandbox:
+        async def start_browser(self) -> None:
+            raise SandboxError("failed to start sandbox browser: chromium failed")
+
+    class _Manager:
+        async def get_or_create(self, *args, **kwargs):
+            return SimpleNamespace(sandbox=_Sandbox())
+
+    monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
     ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
 
     with pytest.raises(HTTPException) as exc_info:

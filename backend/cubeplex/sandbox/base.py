@@ -155,7 +155,8 @@ class Sandbox(ABC):
         """
         result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
         if result.exit_code not in (0, None):
-            raise RuntimeError(f"failed to start sandbox browser: {result.output}")
+            # SandboxError (not RuntimeError) so live-view maps this to retryable 503.
+            raise SandboxError(f"failed to start sandbox browser: {result.output}")
 
     async def start_terminal(self) -> None:
         """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
