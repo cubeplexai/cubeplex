@@ -71,20 +71,24 @@ export function useWorkspaceSkillsCatalog(wsId: string, filters?: WorkspaceSkill
     return catalog.map((s) => {
       const wsPrivate = wsBySkill.get(s.id)
       if (wsPrivate) {
+        const pinned = wsPrivate.installed_version
         return {
           ...s,
-          installed_version: wsPrivate.installed_version,
-          install_state: 'installed' as const,
+          installed_version: pinned,
+          install_state:
+            pinned !== s.current_version ? ('update_available' as const) : ('installed' as const),
           workspaceState: 'workspace-private' as const,
           installId: wsPrivate.install_id,
         }
       }
       const org = orgBySkill.get(s.id)
       if (org) {
+        const pinned = org.installed_version
         return {
           ...s,
-          installed_version: org.installed_version,
-          install_state: 'installed' as const,
+          installed_version: pinned,
+          install_state:
+            pinned !== s.current_version ? ('update_available' as const) : ('installed' as const),
           workspaceState: org.enabled ? ('org-enabled' as const) : ('org-disabled' as const),
           installId: org.install_id,
         }
