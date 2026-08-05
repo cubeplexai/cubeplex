@@ -33,9 +33,11 @@ export interface SkillInstallResponse {
 export interface SkillRefreshResponse {
   canonical_name: string
   skill_id: string
-  installed_version: string
+  current_version: string
+  previous_version: string
   /** False when re-import produced no new version. */
   changed: boolean
+  assigned_version: string | null
 }
 
 export async function discoverSkills(

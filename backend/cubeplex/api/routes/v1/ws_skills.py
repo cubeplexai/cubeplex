@@ -47,6 +47,7 @@ from cubeplex.skills.discovery import (
     SkillInstallService,
 )
 from cubeplex.skills.frontmatter import InvalidFrontmatterError, extract_env_vars, parse_skill_md
+from cubeplex.skills.refresh import SkillRefreshError, refresh_remote_catalog
 from cubeplex.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
@@ -126,27 +127,36 @@ async def list_skills_in_ws(
         skills = await repo.list_visible_for_org(ctx.org_id, source=source)
         installs = await OrgSkillInstallRepository(session).list_for_org(ctx.org_id)
         installed_versions: dict[str, str] = {i.skill_id: i.installed_version for i in installs}
-        return [
-            SkillSummary(
-                id=s.id,
-                name=s.name,
-                source=s.source,  # type: ignore[arg-type]
-                description=s.description,
-                current_version=s.current_version,
-                keywords=s.keywords,
-                install_state="installed",
-                installed_version=installed_versions.get(s.id),
-                workspace_bindings_count=0,
-                imported_from_registry_id=s.imported_from_registry_id,
-                imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
-                if s.imported_from_registry_id
-                else None,
+        summaries: list[SkillSummary] = []
+        for s in skills:
+            if not (
+                (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
+                and (tag is None or tag in s.keywords)
+                and s.id in installed_versions
+            ):
+                continue
+            pinned = installed_versions[s.id]
+            install_state: Literal["uninstalled", "installed", "update_available"] = (
+                "update_available" if pinned != s.current_version else "installed"
             )
-            for s in skills
-            if (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
-            and (tag is None or tag in s.keywords)
-            and s.id in installed_versions
-        ]
+            summaries.append(
+                SkillSummary(
+                    id=s.id,
+                    name=s.name,
+                    source=s.source,  # type: ignore[arg-type]
+                    description=s.description,
+                    current_version=s.current_version,
+                    keywords=s.keywords,
+                    install_state=install_state,
+                    installed_version=pinned,
+                    workspace_bindings_count=0,
+                    imported_from_registry_id=s.imported_from_registry_id,
+                    imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
+                    if s.imported_from_registry_id
+                    else None,
+                )
+            )
+        return summaries
     else:  # catalog
         skills = await repo.list_visible_for_org(ctx.org_id, source=source)
         return [
@@ -348,23 +358,29 @@ async def refresh_skill(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SkillRefreshResponse:
-    """Re-import a skill from its original remote registry.
+    """Catalog-only re-fetch from stored registry provenance.
 
-    For skills installed from a registry (imported_from_registry_id is set),
-    re-fetches the SKILL.md from the stored source_ref and publishes a new
-    version if the content has changed. For preinstalled/manually uploaded
-    skills, always returns changed=False.
+    Allowed only when this workspace has a **workspace-private** install of the
+    skill. Never mutates install rows — use settings/admin install to upgrade.
     """
     skill = await SkillRepository(session).get(skill_id)
     if skill is None or not _visible(skill, ctx.org_id):
         raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
 
+    private = await OrgSkillInstallRepository(session).get_workspace_private(
+        ctx.org_id, workspace_id, skill_id
+    )
+    if private is None:
+        raise HTTPException(status_code=422, detail="REFRESH_PRIVATE_ONLY")
+
     if not skill.imported_from_registry_id or not skill.imported_from_source_ref:
         return SkillRefreshResponse(
             canonical_name=skill.name,
             skill_id=skill.id,
-            installed_version=skill.current_version,
+            current_version=skill.current_version,
+            previous_version=skill.current_version,
             changed=False,
+            assigned_version=None,
         )
 
     org = await OrganizationRepository(session).get(ctx.org_id)
@@ -378,31 +394,29 @@ async def refresh_skill(
         org_id=ctx.org_id,
         org_slug=org.slug,
         workspace_id=workspace_id,
+        include_local=False,
     )
     publisher = SkillPublishService(session=session, cache=_cache())
-    install_svc = SkillInstallService(
-        session=session,
-        registry=registry,
-        publisher=publisher,
-        org_id=ctx.org_id,
-        org_slug=org.slug,
-        workspace_id=workspace_id,
-        actor_user_id=ctx.user.id,
-    )
-    prev_version = skill.current_version
     try:
-        result = await install_svc._install_remote(
-            skill.imported_from_registry_id,
-            skill.imported_from_source_ref,
+        result = await refresh_remote_catalog(
+            session,
+            skill=skill,
+            org_id=ctx.org_id,
+            org_slug=org.slug,
+            actor_user_id=ctx.user.id,
+            registry=registry,
+            publisher=publisher,
         )
-    except SkillInstallError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    except SkillRefreshError as e:
+        raise HTTPException(status_code=422, detail=e.code) from e
 
     return SkillRefreshResponse(
         canonical_name=result.canonical_name,
         skill_id=result.skill_id,
-        installed_version=result.installed_version,
-        changed=result.installed_version != prev_version,
+        current_version=result.current_version,
+        previous_version=result.previous_version,
+        changed=result.changed,
+        assigned_version=result.assigned_version,
     )
 
 
