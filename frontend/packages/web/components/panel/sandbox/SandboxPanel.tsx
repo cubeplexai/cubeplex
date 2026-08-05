@@ -27,10 +27,20 @@ const TABS: {
   { id: 'terminal', label: 'Terminal', Icon: TerminalSquare },
 ]
 
+/** Last workspace/conversation the sandbox panel rendered for. Module-level so
+ *  remounts (route changes) can detect a scope change even when conversation
+ *  pages close the panel and home does not. */
+let lastSandboxScopeKey: string | null = null
+
+function sandboxScopeKey(workspaceId: string | null, conversationId?: string | null): string {
+  return `${workspaceId ?? ''}:${conversationId ?? ''}`
+}
+
 export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps) {
   const [activeTab, setActiveTab] = useState<SandboxTab>('files')
   const [refreshing, setRefreshing] = useState(false)
   const close = usePanelStore((s) => s.close)
+  const openSandbox = usePanelStore((s) => s.openSandbox)
   const sandboxView = usePanelStore((s) => (s.view.type === 'sandbox' ? s.view : null))
   const initialFilePath = sandboxView?.initialFilePath ?? null
   const initialTab = sandboxView?.initialTab
@@ -38,6 +48,33 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const { mutate } = useSWRConfig()
   const browserRefreshRef = useRef<(() => void) | null>(null)
   const terminalRefreshRef = useRef<(() => Promise<unknown>) | null>(null)
+  const scopeKey = sandboxScopeKey(workspaceId, conversationId)
+
+  // If the user navigates while the global sandbox panel stays open (e.g.
+  // conversation → home, or a path that does not call panelStore.close), drop
+  // any file path targeted for the previous conversation so we don't fetch it
+  // under the wrong sandbox scope.
+  useEffect(() => {
+    const prev = lastSandboxScopeKey
+    lastSandboxScopeKey = scopeKey
+    if (prev === null || prev === scopeKey) return
+    const view = usePanelStore.getState().view
+    if (view.type !== 'sandbox') return
+    if (!view.initialFilePath) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- store sync on route scope change
+    openSandbox(view.initialTab ?? 'files')
+  }, [scopeKey, openSandbox])
+
+  // When the panel is closed (conversation switch calls close()), forget the
+  // scope so the next openSandboxFile on a new conversation is not treated as
+  // a cross-scope leak and wiped on mount.
+  useEffect(() => {
+    return () => {
+      if (usePanelStore.getState().view.type !== 'sandbox') {
+        lastSandboxScopeKey = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from external panel store
@@ -113,6 +150,9 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
         )}
         {activeTab === 'files' && (
           <SandboxFilesView
+            // Remount tree/preview when scope changes so local selectedFile
+            // cannot leak across conversations.
+            key={scopeKey}
             workspaceId={workspaceId}
             conversationId={conversationId}
             initialFilePath={initialFilePath}
@@ -121,6 +161,7 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
         )}
         {activeTab === 'browser' && (
           <BrowserView
+            key={scopeKey}
             workspaceId={workspaceId}
             conversationId={conversationId}
             hideHeader
@@ -129,6 +170,7 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
         )}
         {activeTab === 'terminal' && (
           <SandboxTerminalView
+            key={scopeKey}
             workspaceId={workspaceId}
             conversationId={conversationId}
             refreshRef={terminalRefreshRef}

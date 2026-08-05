@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
-import { Download, FileText } from 'lucide-react'
+import { Download, FileText, X } from 'lucide-react'
 import { useLocale } from 'next-intl'
 import { csrfHeaders } from '@/lib/csrf'
 import { useSandboxFileContent } from '@/hooks/useSandboxFileContent'
@@ -10,6 +10,7 @@ import type { SandboxFileEntry } from '@/hooks/useSandboxFiles'
 import { PreviewLoading } from '@/components/panel/artifact/PreviewLoading'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { CodeHighlight, ImageViewer, MediaPlayer, CsvTable } from '@/components/shared/previews'
+import { cn } from '@/lib/utils'
 
 const PdfPreview = dynamic(
   () => import('@/components/panel/artifact/PdfPreview').then((m) => m.PdfPreview),
@@ -104,6 +105,63 @@ interface SandboxFilePreviewProps {
   workspaceId: string
   conversationId?: string | null
   onNavigate?: (path: string) => void
+  /** Close only the preview pane (tree stays open). */
+  onClose?: () => void
+}
+
+function PreviewChrome({
+  filename,
+  downloadUrl,
+  onClose,
+  children,
+}: {
+  filename: string
+  downloadUrl: string
+  onClose?: () => void
+  children: ReactNode
+}): React.ReactElement {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-card px-2">
+        <span
+          className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+          title={filename}
+        >
+          {filename}
+        </span>
+        <a
+          href={downloadUrl}
+          target="_blank"
+          rel="noreferrer"
+          download={filename}
+          className={cn(
+            'rounded p-1 text-muted-foreground transition-colors',
+            'hover:bg-muted hover:text-foreground',
+          )}
+          title="Download"
+          aria-label={`Download ${filename}`}
+        >
+          <Download className="size-3.5" />
+        </a>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className={cn(
+              'rounded p-1 text-muted-foreground transition-colors',
+              'hover:bg-muted hover:text-foreground',
+            )}
+            title="Close preview"
+            aria-label="Close preview"
+            data-testid="sandbox-file-preview-close"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+    </div>
+  )
 }
 
 export function SandboxFilePreview({
@@ -111,46 +169,34 @@ export function SandboxFilePreview({
   workspaceId,
   conversationId,
   onNavigate,
+  onClose,
 }: SandboxFilePreviewProps) {
   const ext = getExtension(entry.name)
   const downloadUrl = buildDownloadUrl(workspaceId, entry.path, conversationId)
 
+  let body: ReactNode
   if (IMAGE_EXTENSIONS.has(ext)) {
-    return <ImageViewer url={downloadUrl} alt={entry.name} />
-  }
-
-  if (ext === '.pdf') {
-    return <PdfPreview fileUrl={downloadUrl} />
-  }
-
-  if (VIDEO_EXTENSIONS.has(ext)) {
-    return <MediaPlayer url={downloadUrl} type="video" filename={entry.name} />
-  }
-
-  if (AUDIO_EXTENSIONS.has(ext)) {
-    return <MediaPlayer url={downloadUrl} type="audio" filename={entry.name} />
-  }
-
-  if (OFFICE_EXTENSIONS.has(ext)) {
-    return (
+    body = <ImageViewer url={downloadUrl} alt={entry.name} />
+  } else if (ext === '.pdf') {
+    body = <PdfPreview fileUrl={downloadUrl} />
+  } else if (VIDEO_EXTENSIONS.has(ext)) {
+    body = <MediaPlayer url={downloadUrl} type="video" filename={entry.name} />
+  } else if (AUDIO_EXTENSIONS.has(ext)) {
+    body = <MediaPlayer url={downloadUrl} type="audio" filename={entry.name} />
+  } else if (OFFICE_EXTENSIONS.has(ext)) {
+    body = (
       <OfficeFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
-  }
-
-  if (ext === '.html') {
-    return (
+  } else if (ext === '.html') {
+    body = (
       <HtmlFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
-  }
-
-  if (ext === '.csv') {
-    return (
+  } else if (ext === '.csv') {
+    body = (
       <CsvFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
-  }
-
-  if (ext === '.md') {
-    return (
+  } else if (ext === '.md') {
+    body = (
       <MarkdownFilePreview
         entry={entry}
         workspaceId={workspaceId}
@@ -158,21 +204,25 @@ export function SandboxFilePreview({
         onNavigate={onNavigate}
       />
     )
-  }
-
-  if (CODE_EXTENSIONS.has(ext)) {
-    return (
+  } else if (CODE_EXTENSIONS.has(ext)) {
+    body = (
       <CodeFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
-  }
-
-  if (PLAIN_TEXT_EXTENSIONS.has(ext) || !ext) {
-    return (
+  } else if (PLAIN_TEXT_EXTENSIONS.has(ext) || !ext) {
+    body = (
       <TextFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
+  } else {
+    body = (
+      <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
-  return <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+  return (
+    <PreviewChrome filename={entry.name} downloadUrl={downloadUrl} onClose={onClose}>
+      {body}
+    </PreviewChrome>
+  )
 }
 
 // ── Text content previews (fetch via useSandboxFileContent) ───────

@@ -44,6 +44,10 @@ export function SandboxFilesView({
     setSelectedFile(makeStubEntry(path))
   }, [])
 
+  const handleClosePreview = useCallback(() => {
+    setSelectedFile(null)
+  }, [])
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full">
       <ResizablePanel defaultSize={selectedFile ? 30 : 100} minSize={20}>
@@ -64,6 +68,7 @@ export function SandboxFilesView({
               workspaceId={workspaceId}
               conversationId={conversationId}
               onNavigate={handleNavigate}
+              onClose={handleClosePreview}
             />
           </ResizablePanel>
         </>

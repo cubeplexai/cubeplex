@@ -20,7 +20,8 @@ export function SandboxFileTree({
   selectedPath,
 }: SandboxFileTreeProps) {
   return (
-    <div className="h-full overflow-auto py-1">
+    // Tight left inset: when a preview is open the tree is already ~30% wide.
+    <div className="h-full overflow-auto py-1 pl-0.5">
       <TreeDirectory
         workspaceId={workspaceId}
         conversationId={conversationId}
@@ -33,6 +34,11 @@ export function SandboxFileTree({
     </div>
   )
 }
+
+/** Indent per tree level + base pad — keep compact so the tree stays usable
+ *  next to a file preview. */
+const TREE_INDENT_PX = 12
+const TREE_BASE_PAD_PX = 4
 
 function TreeDirectory({
   workspaceId,
@@ -72,7 +78,7 @@ function TreeDirectory({
       {open && loading && (
         <div
           className={'flex items-center gap-1.5 py-1' + ' text-xs text-muted-foreground'}
-          style={{ paddingLeft: (depth + 1) * 16 + 8 }}
+          style={{ paddingLeft: (depth + 1) * TREE_INDENT_PX + TREE_BASE_PAD_PX }}
         >
           <Loader2 className="size-3 animate-spin" />
           Loading…
@@ -153,7 +159,7 @@ function TreeRow({
         'transition-colors text-left',
         selected && 'bg-muted',
       )}
-      style={{ paddingLeft: depth * 16 + 8 }}
+      style={{ paddingLeft: depth * TREE_INDENT_PX + TREE_BASE_PAD_PX }}
     >
       {isDir ? (
         <>
