@@ -152,9 +152,12 @@ async def refresh_remote_catalog(
         # Same version string already exists (different hash, or race). Auto-patch.
         version = await publisher._next_version_for(skill.name)
 
-    # Strip org prefix for storage path: skill.name is "org:slug".
+    # Content-addressed prefix: concurrent refreshes with different payloads
+    # must not share object keys (same version string → same org_skill_prefix
+    # would otherwise clobber the winner's bytes after a race).
     slug = expected
-    prefix = org_skill_prefix(org_id, slug, version)
+    digest = content_hash.removeprefix("sha256:")[:16]
+    prefix = f"{org_skill_prefix(org_id, slug, version).rstrip('/')}/{digest}/"
     store = get_objectstore_client()
     for rel, data in files.items():
         await store.upload_file(skill_object_key(prefix, rel), data)
