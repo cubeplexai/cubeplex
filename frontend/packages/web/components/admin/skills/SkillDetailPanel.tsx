@@ -480,6 +480,12 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
           <Badge variant={skill.source === 'preinstalled' ? 'default' : 'secondary'}>
             {skill.source === 'preinstalled' ? t('preinstalled') : t('orgUploaded')}
           </Badge>
+          {skill.imported_from_registry_name && (
+            <Badge variant="outline" className="gap-1 text-[11px]">
+              <span className="text-muted-foreground">{t('viaRegistry')}</span>
+              {skill.imported_from_registry_name}
+            </Badge>
+          )}
           {skill.install_state === 'installed' && (
             <Badge variant="outline" className="border-success-border text-success-fg">
               {t('installed')}
