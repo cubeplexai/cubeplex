@@ -100,6 +100,73 @@ async def test_seed_adds_new_version_on_bump(
 
 
 @pytest.mark.asyncio
+async def test_seed_advances_existing_org_install_pin_on_version_bump(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Existing OrgSkillInstall pins must move with catalog current_version.
+
+    Without pin advance, version bumps leave workspaces on the old installed
+    content forever (admin only sees update_available).
+    """
+    org = await OrganizationRepository(db_session).create(
+        name=f"pin-org-{uuid.uuid4().hex[:8]}",
+        slug=f"pin-org-{uuid.uuid4().hex[:8]}",
+    )
+    skill_name = _unique_name("pin-advance")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+    install = await installs.get(org.id, skill.id)
+    assert install is not None
+    assert install.installed_version == "1.0.0"
+
+    _write_skill_md(src / skill_name, name=skill_name, version="1.1.0", description="bumped")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    assert skill.current_version == "1.1.0"
+    install = await installs.get(org.id, skill.id)
+    assert install is not None
+    assert install.installed_version == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_seed_does_not_advance_pin_for_tombstoned_org(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Tombstoned orgs must not get a resurrected install when the catalog bumps."""
+    org = await OrganizationRepository(db_session).create(
+        name=f"pin-tomb-org-{uuid.uuid4().hex[:8]}",
+        slug=f"pin-tomb-org-{uuid.uuid4().hex[:8]}",
+    )
+    skill_name = _unique_name("pin-tomb")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+    await installs.delete(org.id, skill.id)
+    await OrgPreinstalledTombstoneRepository(db_session).add_tombstone(
+        org_id=org.id, skill_id=skill.id, hidden_by_user_id=None
+    )
+
+    _write_skill_md(src / skill_name, name=skill_name, version="2.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    assert await installs.get(org.id, skill.id) is None
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    assert skill.current_version == "2.0.0"
+
+
+@pytest.mark.asyncio
 async def test_seed_redis_lock_prevents_concurrent_runs(
     tmp_path: Path, db_session, redis_client: Redis
 ) -> None:

@@ -51,7 +51,7 @@ Every skill contains at least a `SKILL.md` file — a markdown document with fro
 - **Templates** — Starter files, boilerplate, or reference material.
 - **Configuration** — Settings that control the skill's behavior.
 
-When a skill is loaded, its files are mounted at `/.skills/<name>/<version>/` inside the sandbox so the agent can reference them. The agent reads a skill's instructions by calling the built-in `load_skill` tool with the skill's exact name.
+When a skill is loaded, its files are mounted at `/workspace/.skills/<name>/<version>/` inside the sandbox so the agent can reference them. The agent should use the `path` field returned by `load_skill` (do not construct that path by hand). The agent reads a skill's instructions by calling the built-in `load_skill` tool with the skill's exact name.
 
 ## Next steps
 

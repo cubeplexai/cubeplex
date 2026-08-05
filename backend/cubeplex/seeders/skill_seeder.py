@@ -40,7 +40,8 @@ async def seed_preinstalled_skills(
 
     Also auto-installs any missing non-tombstoned preinstalled skills for
     existing orgs (so skills added after bootstrap become loadable without a
-    manual admin install).
+    manual admin install), and advances existing install pins to the catalog
+    ``current_version`` so version bumps actually roll out.
 
     Multi-replica safe: only one process holding the Redis lock runs the seed;
     others log and return.
@@ -161,11 +162,14 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
 
 
 async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
-    """Install missing preinstalled skills for every existing org.
+    """Install missing preinstalled skills and advance install pins to catalog head.
 
     Mirrors org-bootstrap auto-install (``auto_bind=True``, system actor).
-    Skips skills an org admin already uninstalled (tombstone). Does not change
-    existing installs (version pins stay as-is).
+    Skips skills an org admin already uninstalled (tombstone). Advances
+    ``installed_version`` on existing installs of preinstalled skills when the
+    catalog ``current_version`` has moved forward (so frontmatter version bumps
+    actually roll out). Uploaded skills are not in the preinstalled list and
+    are never touched.
     """
     skills_repo = SkillRepository(db_session)
     active = [s for s in await skills_repo.list_preinstalled() if s.deprecated_at is None]
@@ -178,6 +182,7 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
     org_ids = [org.id for org in orgs]
 
     skill_ids = [s.id for s in active]
+    skill_by_id = {s.id: s for s in active}
     existing_rows = (
         (
             await db_session.execute(
@@ -259,14 +264,43 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
     )
     purged = int(getattr(purge, "rowcount", 0) or 0)
 
-    if created == 0 and purged == 0:
+    # Advance pins: catalog head is the source of truth for preinstalled skills.
+    # Includes org-wide and any workspace-private installs of those skills.
+    # Skip tombstoned (org, skill) pairs so we never revive an uninstall path.
+    install_rows = (
+        (
+            await db_session.execute(
+                select(OrgSkillInstall).where(
+                    OrgSkillInstall.skill_id.in_(skill_ids),  # type: ignore[attr-defined]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    advanced = 0
+    for row in install_rows:
+        if (row.org_id, row.skill_id) in tomb_pairs:
+            continue
+        skill = skill_by_id.get(row.skill_id)
+        if skill is None:
+            continue
+        if row.installed_version == skill.current_version:
+            continue
+        row.installed_version = skill.current_version
+        advanced += 1
+    if advanced:
+        await db_session.flush()
+
+    if created == 0 and purged == 0 and advanced == 0:
         return
 
     await db_session.commit()
     logger.info(
-        "Reconciled preinstalled skill installs: created {} row(s), purged {} dual-state "
-        "for {} org(s)",
+        "Reconciled preinstalled skill installs: created {} row(s), purged {} dual-state, "
+        "advanced {} pin(s) for {} org(s)",
         created,
         purged,
+        advanced,
         len(org_ids),
     )
