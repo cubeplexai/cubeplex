@@ -136,6 +136,58 @@ async def test_seed_advances_existing_org_install_pin_on_version_bump(
 
 
 @pytest.mark.asyncio
+async def test_seed_advances_workspace_private_preinstalled_pin(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Workspace-private installs of preinstalled skills also advance pins."""
+    from cubeplex.models import OrgSkillInstall
+    from cubeplex.repositories.workspace import WorkspaceRepository
+
+    org = await OrganizationRepository(db_session).create(
+        name=f"priv-pin-org-{uuid.uuid4().hex[:8]}",
+        slug=f"priv-pin-org-{uuid.uuid4().hex[:8]}",
+    )
+    workspace = await WorkspaceRepository(db_session).create(
+        org_id=org.id, name=f"priv-pin-ws-{uuid.uuid4().hex[:6]}"
+    )
+    skill_name = _unique_name("priv-pin")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    installs = OrgSkillInstallRepository(db_session)
+    # Drop org-wide; keep only a private install pinned at 1.0.0.
+    await installs.delete(org.id, skill.id)
+    db_session.add(
+        OrgSkillInstall(
+            org_id=org.id,
+            workspace_id=workspace.id,
+            skill_id=skill.id,
+            installed_version="1.0.0",
+            installed_by_user_id=None,
+            auto_bind=True,
+        )
+    )
+    await db_session.commit()
+
+    _write_skill_md(src / skill_name, name=skill_name, version="1.2.0", description="private-bump")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skill = await SkillRepository(db_session).find_by_name(skill_name)
+    assert skill is not None
+    assert skill.current_version == "1.2.0"
+    private = await installs.get_workspace_private(org.id, workspace.id, skill.id)
+    assert private is not None
+    assert private.installed_version == "1.2.0"
+    # Org-wide was recreated at head for this org (no tombstone).
+    org_wide = await installs.get(org.id, skill.id)
+    assert org_wide is not None
+    assert org_wide.installed_version == "1.2.0"
+
+
+@pytest.mark.asyncio
 async def test_seed_does_not_advance_pin_for_tombstoned_org(
     tmp_path: Path, db_session, redis_client: Redis
 ) -> None:
