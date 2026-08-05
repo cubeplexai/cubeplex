@@ -1561,9 +1561,12 @@ async def seeded_session_org_ws() -> AsyncIterator[tuple[AsyncSession, str, str,
         await test_engine.dispose()
 
 
-_FAKE_SKILL_MD = (
+_FAKE_SKILL_MD_DEFAULT = (
     "---\nname: slide-deck\ndescription: Build slide decks\nversion: 1.0.0\n---\n# Slide deck\n"
 )
+
+# Mutable holder so refresh e2e tests can change upstream content mid-run.
+_FAKE_SKILL_MD: dict[str, str] = {"content": _FAKE_SKILL_MD_DEFAULT}
 
 
 @pytest_asyncio.fixture
@@ -1575,6 +1578,7 @@ async def fake_registry_url() -> AsyncIterator[str]:
     uvicorn server (not a MockTransport) exercises the full production httpx
     code path inside RemoteRegistryAdapter.
     """
+    _FAKE_SKILL_MD["content"] = _FAKE_SKILL_MD_DEFAULT
     registry_app = FastAPI()
 
     @registry_app.get("/search")
@@ -1599,7 +1603,7 @@ async def fake_registry_url() -> AsyncIterator[str]:
     @registry_app.get("/raw/{full:path}")
     async def _raw(full: str) -> PlainTextResponse:
         if full.endswith("/SKILL.md") or full == "SKILL.md":
-            return PlainTextResponse(_FAKE_SKILL_MD)
+            return PlainTextResponse(_FAKE_SKILL_MD["content"])
         if full.endswith("style.md"):
             return PlainTextResponse("# style guide\n")
         raise HTTPException(status_code=404, detail="not found")

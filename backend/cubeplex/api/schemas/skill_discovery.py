@@ -45,7 +45,11 @@ class InstallCandidateResponse(BaseModel):
 
 
 class SkillRefreshResponse(BaseModel):
+    """Catalog-only refresh result. Does not report install state."""
+
     canonical_name: str
     skill_id: str
-    installed_version: str
+    current_version: str
+    previous_version: str
     changed: bool
+    assigned_version: str | None = None

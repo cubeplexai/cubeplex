@@ -48,6 +48,7 @@ export const useSkillsStore = create<SkillsState>((set) => ({
   },
 
   async refresh(client, wsId, skillId) {
+    // Catalog-only: does not change install pins. Caller revalidates lists.
     const r = await refreshSkill(client, wsId, skillId)
     return r.changed
   },
