@@ -56,7 +56,7 @@ and sandbox layout (`/workspace/.skills/<safe-name>/<version>/`).
 | **B. Platform conventions chapter** (subagent, widgets, sandbox catalog) | Richer authoring context; duplicates system/tool prompts; high drift | **Rejected** as a standalone layer |
 | **C. Workflow-local tool guidance only** | When the *target* skill needs a capability, encode prefer/avoid and skill-specific rules in *that* skill’s body | **Adopt** |
 | **D. Creator = full authoring product** (scripts, evals, multi-file always) | Overbuilt for v1; evals deferred | Partial later if needed |
-| **E. A + C + tightened author loop + thin structure** | Fix correctness; teach C; optional progressive disclosure for creator’s own bulk | **Recommended** |
+| **E. A + C + tightened author loop + thin structure + seeder pin advance** | Fix correctness; teach C; progressive disclosure for creator bulk; make preinstalled version bumps reach existing org installs | **Recommended** |
 
 ## Design
 
@@ -132,7 +132,11 @@ moving parts, same agent-followable contract.
 
 1. **Intent** — new / capture-from-chat / edit existing.
 2. **Search before create** — if the user might already have a skill, `platform_skills_find` once; only create when missing or user wants a custom fork.
-3. **Ground** — problem, audience, success criteria, out of scope; for capture-from-chat, extract steps and corrections from the conversation first, then confirm with the user.
+3. **Ground** — problem, audience, success criteria, out of scope; for capture-from-chat, extract steps and corrections from the conversation first, then confirm with the user. **Capture safeguards** (required):
+   - Scrub secrets, tokens, API keys, passwords, and obvious PII from extracted steps.
+   - Reject or redacted-only if the conversation is mostly credentials / customer data.
+   - Prefer durable *procedure* over one-off context (ticket IDs, names, temporary workarounds).
+   - Before publish, show the **full draft SKILL.md** (not just the description) and get explicit user confirmation of the final content.
 4. **Description draft** — third person, WHAT + WHEN, trigger phrases (include language variants the user actually uses); show user and adjust.
 5. **Bundle layout** under `/workspace/skills/<slug>/`:
    - `SKILL.md` required
@@ -152,6 +156,21 @@ moving parts, same agent-followable contract.
 
 Instructions must say: copy from `load_skill` path → edit under `/workspace/…` →
 leave `version` blank → publish. Never edit `/workspace/.skills/…` in place.
+
+#### Fork discoverability (coexistence with preinstalled)
+
+`load_skill` and the available-skills list key on **exact canonical name**. After
+forking preinstalled `foo` → `acme:foo`, **both** can remain enabled. Auto
+skill selection may keep matching the bare preinstalled skill if descriptions
+overlap.
+
+Authoring rules for forks (content-level; no catalog precedence change in this PR):
+
+1. Tell the user clearly: this is a **fork** (`org:slug`), not an upgrade of the system skill.
+2. Prefer a **distinct frontmatter `name`** when the user is customizing (e.g. `weekly-report-acme`) so the fork does not sit next to the same bare slug. If they insist on reusing the slug, warn that both will appear.
+3. Make the fork **description distinguishable** (e.g. “Org customisation of … Use when …”) so auto-invoke prefers the right one.
+4. After publish, verify with `load_skill` on the **fork’s** canonical name; remind the user how to ask for the fork by name if both remain installed.
+5. Do **not** promise that forking disables or shadows the preinstalled skill — that would require catalog/API work (out of scope).
 
 ### Frontmatter guidance changes
 
@@ -197,10 +216,34 @@ beyond that correction (and only if we ship the path fix).
 
 ### Seeding / rollout
 
-- Change files under `backend/skills/preinstalled/skill-creator/`
-- Bump `version` in frontmatter so seeder creates a new `SkillVersion` and
-  sandbox sync replaces the old tree
-- No Alembic migration; no API change
+**Fact (today):** `seed_preinstalled_skills` upserts the catalog
+(`Skill.current_version` + new `SkillVersion` row + objectstore files).
+`_reconcile_preinstalled_installs` only **creates missing** org-wide installs;
+it **does not** advance `OrgSkillInstall.installed_version` for existing rows
+(“version pins stay as-is”). Enabled skills are resolved by **installed**
+version, not catalog head. Admin UI already surfaces `update_available` when
+`installed_version != current_version`.
+
+Therefore: **frontmatter version bump alone does not roll 0.4.0 into existing
+workspaces.** They keep loading the pinned install (e.g. 0.3.0) until something
+updates the install row.
+
+**Required for this feature:** extend seeder reconcile so that for each
+**non-tombstoned** org-wide install of a **preinstalled** skill, if
+`installed_version != skill.current_version`, set
+`installed_version = skill.current_version` (and leave workspace-private
+installs / uploaded skills alone). Preserve:
+
+- org tombstones (never reinstall / never bump a skill the org uninstalled)
+- explicit workspace disable bindings (unchanged — install version still
+  advances at org level; disabled workspaces still do not load it)
+
+No Alembic migration. Optional later: keep admin “pin / skip auto-update” if
+product needs it — not required for v0.4.
+
+**Rollout sequence after deploy:** seed runs → catalog 0.4.0 + install pins
+updated → next cubepi run skill sync → sandbox gets
+`/workspace/.skills/skill-creator/0.4.0/…`.
 
 ## Out of scope
 
@@ -208,21 +251,29 @@ beyond that correction (and only if we ship the path fix).
 - Blind A/B description optimization
 - Packaging `.skill` zip for external harnesses
 - Teaching admin org-wide zip upload as the primary agent path
-- Changing how `load_skill` injects content or how available-skills lists are built
+- Changing `load_skill` name resolution or available-skills **precedence**
+  (fork discoverability is authoring guidance only; no shadowing of preinstalled)
+- Auto-uninstall of preinstalled skill when a same-slug fork is published
 
 ## Success criteria
 
 1. An agent following skill-creator can produce a minimal skill that **publishes**
    and is **loadable** via `load_skill` with the returned canonical name.
 2. Bundle layout docs use **`references/`**; no `reference/` example remains.
-3. Edit-preinstalled path is described as **fork to `org:name`**, not overwrite.
+3. Edit-preinstalled path is described as **fork to `org:name`**, not overwrite;
+   fork coexistence / discoverability rules are documented in the skill body.
 4. Creator does **not** maintain a platform tool encyclopedia; authored skills
    only mention tools they need (rule C).
 5. Creator does **not** tell authors to open other preinstalled skills as templates.
 6. Pre-publish checklist is present and matches server validation outcomes for
    name, version collision, and missing `SKILL.md`.
-7. Preinstalled version bumps; existing workspaces pick up content on next skill sync.
-8. Site overview path for skill files matches `/workspace/.skills/…` if that page is updated in the same PR.
+7. Preinstalled version is `0.4.0` **and** seeder advances existing org install
+   pins so a previously installed org loads 0.4.0 after seed (tombstones still
+   skip). Verified by test or dogfood: install at 0.3.0 → seed 0.4.0 → enabled
+   version is 0.4.0.
+8. Capture-from-chat path requires full-content confirmation and secret scrubbing.
+9. Site overview path for skill files matches `/workspace/.skills/…` if that page
+   is updated in the same PR.
 
 ## Risks
 
@@ -230,6 +281,9 @@ beyond that correction (and only if we ship the path fix).
 | --- | --- |
 | Longer SKILL.md hurts skill-creator’s own token cost | Keep procedure in SKILL.md; put checklist/example in `references/`; load on demand |
 | Authors still write bloated tool sections | Explicit “don’t restate schemas”; checklist item |
-| Fork-vs-overwrite still confused | Bold callout + one example of `org:slug` after editing a preinstalled skill |
+| Fork-vs-overwrite still confused | Bold callout + fork discoverability rules + example of `org:slug` |
+| Auto skill-select still hits preinstalled after fork | Distinct name/description; no false “shadow” promise |
+| Capture leaks secrets into durable skills | Scrub + full-content confirm before publish |
+| Version bump invisible to existing orgs | Seeder advances preinstalled install pins |
 | Over-interviewing | “Only ask what changes the skill”; capture-from-chat fills defaults |
 | Checklist ignored | Put checklist step in the numbered workflow, not only an appendix |
