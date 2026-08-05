@@ -378,11 +378,10 @@ async def test_tombstone_suppresses_workspace_private_preinstalled_install(
     Admin uninstall only deletes the org-wide row; a leftover private install
     of a preinstalled skill must not remain loadable or survive reconcile.
     """
-    from cubeplex.skills.cache import SkillCache
-    from cubeplex.skills.service import SkillCatalogService
-
     from cubeplex.models import OrgSkillInstall
     from cubeplex.repositories.workspace import WorkspaceRepository
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
 
     org = await OrganizationRepository(db_session).create(
         name=f"priv-tomb-org-{uuid.uuid4().hex[:8]}",
