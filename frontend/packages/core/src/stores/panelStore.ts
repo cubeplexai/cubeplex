@@ -61,8 +61,17 @@ export type PanelView =
       type: 'attachment'
       info: AttachmentPanelInfo
     }
-  | { type: 'sandbox'; initialFilePath?: string; revision?: number }
+  | {
+      type: 'sandbox'
+      initialFilePath?: string
+      /** Which sandbox tab to show when the panel opens / is re-targeted. */
+      initialTab?: SandboxTab
+      revision?: number
+    }
   | { type: 'skill-candidate'; candidateId: string; repo: string | null; sourceName: string }
+
+/** Tabs inside the sandbox side panel (Files / Browser / Terminal). */
+export type SandboxTab = 'files' | 'browser' | 'terminal'
 
 export interface PanelStore {
   view: PanelView
@@ -80,7 +89,12 @@ export interface PanelStore {
 
   openAttachment: (info: AttachmentPanelInfo) => void
 
-  openSandbox: () => void
+  /**
+   * Open the sandbox panel. Optional `tab` selects Files / Browser / Terminal
+   * (defaults to files). Bumps revision so re-clicking while already open
+   * still switches tabs.
+   */
+  openSandbox: (tab?: SandboxTab) => void
 
   openSandboxFile: (path: string) => void
 
@@ -119,11 +133,23 @@ export const usePanelStore = create<PanelStore>((set) => ({
       view: { type: 'attachment', info },
     }),
 
-  openSandbox: () => set({ view: { type: 'sandbox' } }),
+  openSandbox: (tab = 'files') =>
+    set({
+      view: {
+        type: 'sandbox',
+        initialTab: tab,
+        revision: ++sandboxRevisionCounter,
+      },
+    }),
 
   openSandboxFile: (path) =>
     set({
-      view: { type: 'sandbox', initialFilePath: path, revision: ++sandboxRevisionCounter },
+      view: {
+        type: 'sandbox',
+        initialFilePath: path,
+        initialTab: 'files',
+        revision: ++sandboxRevisionCounter,
+      },
     }),
 
   openSkillCandidate: (candidateId, repo, sourceName) =>

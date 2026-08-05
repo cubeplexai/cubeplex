@@ -49,16 +49,30 @@ vi.mock('@cubeplex/core', () => {
         selector?: (state: {
           create: typeof storeMocks.createConversation
           rename: typeof storeMocks.renameConversation
+          conversations: unknown[]
         }) => unknown,
       ) => {
         const state = {
           create: storeMocks.createConversation,
           rename: storeMocks.renameConversation,
+          conversations: [] as unknown[],
         }
         return selector ? selector(state) : state
       },
       { setState: storeMocks.setConversationState },
     ),
+    usePanelStore: (
+      selector: (state: {
+        view: { type: string }
+        openSandbox: () => void
+        close: () => void
+      }) => unknown,
+    ) =>
+      selector({
+        view: { type: 'closed' },
+        openSandbox: vi.fn(),
+        close: vi.fn(),
+      }),
     useMessageStore: (
       selector: (state: {
         send: typeof storeMocks.send
@@ -86,6 +100,14 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
 
+vi.mock('@cubeplex/core/hooks/useDeploymentMode', () => ({
+  useDeploymentMode: () => ({ sandboxEnabled: true }),
+}))
+
+vi.mock('next-themes', () => ({
+  useTheme: () => ({ theme: 'light', resolvedTheme: 'light', setTheme: vi.fn() }),
+}))
+
 function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
@@ -101,6 +123,21 @@ describe('WorkspaceHomePage', () => {
     storeMocks.renameConversation.mockResolvedValue({ id: 'conv-1', title: 'Reply with' })
     storeMocks.send.mockResolvedValue(undefined)
     storeMocks.attachedIds.mockReturnValue(['file-1'])
+    // AppShell uses useMediaQuery → window.matchMedia (jsdom has none by default).
+    // matches:false → mobile branch (no react-resizable-panels Group mount).
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
   })
 
   it('eagerly creates a draft conversation on file pick and uploads to it', async () => {

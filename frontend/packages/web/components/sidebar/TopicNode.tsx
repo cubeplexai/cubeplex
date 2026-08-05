@@ -154,9 +154,7 @@ export function TopicNode({
     }
   }
 
-  const handleCreateConversation = async (e: React.MouseEvent): Promise<void> => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleCreateConversation = async (): Promise<void> => {
     if (creating || !currentWsId) return
     setCreating(true)
     const client = buildClient(currentWsId)
@@ -273,20 +271,6 @@ export function TopicNode({
             {tTopics('members', { count: topic.participant_count ?? 0 })}
           </span>
         )}
-        <button
-          type="button"
-          onClick={(e) => void handleCreateConversation(e)}
-          disabled={creating}
-          className={cn(
-            'p-1 rounded cursor-pointer hover:bg-accent text-muted-foreground hover:text-foreground',
-            'shrink-0 opacity-0 group-hover:opacity-100 transition-opacity',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
-          )}
-          aria-label={tTopics('newConversation')}
-          title={tTopics('newConversation')}
-        >
-          <SquarePen className="size-3.5" />
-        </button>
         <DropdownMenu>
           <DropdownMenuTrigger
             onClick={(e) => {
@@ -310,6 +294,15 @@ export function TopicNode({
             className="w-36"
             onClick={(e) => e.stopPropagation()}
           >
+            <DropdownMenuItem
+              disabled={creating}
+              onClick={() => {
+                void handleCreateConversation()
+              }}
+            >
+              <SquarePen className="size-3.5" />
+              {tTopics('newConversation')}
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 setDraft(topic.title)

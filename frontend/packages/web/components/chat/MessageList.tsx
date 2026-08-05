@@ -35,6 +35,8 @@ import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
+import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
+import { cn } from '@/lib/utils'
 
 interface MessageListProps {
   conversationId: string
@@ -555,118 +557,119 @@ export function MessageList({ conversationId }: MessageListProps) {
   }, [conversationId, messagesLoaded, loadOlderUntilSeq, workspaceId])
 
   return (
-    <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
-      <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto px-4 md:px-0">
-        {hasMoreOlder && (
-          <div className="flex justify-center py-2">
-            <button
-              type="button"
-              onClick={handleLoadEarlier}
-              disabled={isLoadingOlder}
-              className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors px-3 py-1 rounded-md border border-border bg-background/60"
-            >
-              {isLoadingOlder ? t('loadingEarlier') : t('loadEarlier')}
-            </button>
-          </div>
-        )}
-        {(messages ?? []).map((msg) => (
-          // id="msg-{seq}" matches the conversation-search route's
-          // matched_message_seq (cubepi_messages.seq — see
-          // backend/cubeplex/search/worker.py). SearchResultRow links to
-          // #msg-N; the browser scrolls to this anchor when the user
-          // clicks a search hit. ``seq`` is missing only on the optimistic
-          // user bubble before the run is claimed — those are never search
-          // targets, so we just skip the anchor.
-          <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
-            {msg.role === 'user' &&
-              msg.metadata?.synthetic === true &&
-              (msg.metadata.synthetic_source === 'compaction' ||
-                msg.metadata.kind === 'compaction') && (
-                <CompactionMarker
-                  source={
-                    typeof msg.metadata.compaction === 'object' &&
-                    msg.metadata.compaction !== null &&
-                    'source' in msg.metadata.compaction
-                      ? String((msg.metadata.compaction as { source?: string }).source ?? '')
-                      : undefined
-                  }
-                />
-              )}
-            {msg.role === 'user' && msg.metadata?.synthetic !== true && (
-              <>
-                {/* Sender identity is stamped on every user message (incl. 1:1)
-                    so a 1:1→group conversion attributes past messages, but the
-                    badge only shows in group chats. */}
-                {isGroupChat &&
-                  msg.metadata?.sender_display_name &&
-                  msg.metadata?.sender_user_id && (
-                    <SenderBadge
-                      userId={msg.metadata.sender_user_id}
-                      displayName={msg.metadata.sender_display_name}
-                    />
-                  )}
-                {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
-                  <MessageAttachments
-                    attachments={msg.metadata.attachments}
-                    conversationId={conversationId}
+    <ScrollArea ref={scrollRef} className="flex-1" onScroll={handleScroll}>
+      {/* Outer px-4 matches the composer footer so column edges share the same
+          inset; CHAT_COLUMN_CLASS keeps max-width + centering in sync with InputBar. */}
+      <div className="px-4 py-4">
+        <div ref={contentRef} className={cn(CHAT_COLUMN_CLASS, 'space-y-4')}>
+          {hasMoreOlder && (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                onClick={handleLoadEarlier}
+                disabled={isLoadingOlder}
+                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors px-3 py-1 rounded-md border border-border bg-background/60"
+              >
+                {isLoadingOlder ? t('loadingEarlier') : t('loadEarlier')}
+              </button>
+            </div>
+          )}
+          {(messages ?? []).map((msg) => (
+            // id="msg-{seq}" matches the conversation-search route's
+            // matched_message_seq (cubepi_messages.seq — see
+            // backend/cubeplex/search/worker.py). SearchResultRow links to
+            // #msg-N; the browser scrolls to this anchor when the user
+            // clicks a search hit. ``seq`` is missing only on the optimistic
+            // user bubble before the run is claimed — those are never search
+            // targets, so we just skip the anchor.
+            <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
+              {msg.role === 'user' &&
+                msg.metadata?.synthetic === true &&
+                (msg.metadata.synthetic_source === 'compaction' ||
+                  msg.metadata.kind === 'compaction') && (
+                  <CompactionMarker
+                    source={
+                      typeof msg.metadata.compaction === 'object' &&
+                      msg.metadata.compaction !== null &&
+                      'source' in msg.metadata.compaction
+                        ? String((msg.metadata.compaction as { source?: string }).source ?? '')
+                        : undefined
+                    }
                   />
                 )}
-                <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
-              </>
-            )}
-            {msg.role === 'assistant' &&
-              msg.id !== lastAssistantId &&
-              (() => {
-                const anchor = anchorByMessageId.get(msg.id)
-                const isAnchor = anchor !== undefined
-                const isLastRun = isAnchor && msg.id === lastAnchorMessageId
-                return (
-                  <HistoryAssistantMessage
-                    message={msg}
-                    subagentDataMap={subagentDataMap}
-                    toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
-                    conversationId={conversationId}
-                    workspaceId={workspaceId}
-                    isGroupChat={isGroupChat}
-                    activeRunId={activeRunId}
-                    isStreamingTurn={isStreaming}
-                    showForkAction={isAnchor}
-                    turnUsage={anchor?.turnUsage ?? null}
-                    turnCopyText={anchor?.copyText ?? ''}
-                    isLastRun={isLastRun}
-                    sessionUsage={isLastRun ? sessionUsage : null}
-                    contextWindow={isLastRun ? contextWindow : null}
-                    contextTokens={isLastRun ? contextTokens : null}
-                    pendingConfirmMap={pendingConfirmMap}
-                    onSandboxConfirm={handleSandboxConfirm}
-                  />
-                )
-              })()}
-          </div>
-        ))}
+              {msg.role === 'user' && msg.metadata?.synthetic !== true && (
+                <>
+                  {/* Sender identity is stamped on every user message (incl. 1:1)
+                    so a 1:1→group conversion attributes past messages, but the
+                    badge only shows in group chats. */}
+                  {isGroupChat &&
+                    msg.metadata?.sender_display_name &&
+                    msg.metadata?.sender_user_id && (
+                      <SenderBadge
+                        userId={msg.metadata.sender_user_id}
+                        displayName={msg.metadata.sender_display_name}
+                      />
+                    )}
+                  {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                    <MessageAttachments
+                      attachments={msg.metadata.attachments}
+                      conversationId={conversationId}
+                    />
+                  )}
+                  <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
+                </>
+              )}
+              {msg.role === 'assistant' &&
+                msg.id !== lastAssistantId &&
+                (() => {
+                  const anchor = anchorByMessageId.get(msg.id)
+                  const isAnchor = anchor !== undefined
+                  const isLastRun = isAnchor && msg.id === lastAnchorMessageId
+                  return (
+                    <HistoryAssistantMessage
+                      message={msg}
+                      subagentDataMap={subagentDataMap}
+                      toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
+                      conversationId={conversationId}
+                      workspaceId={workspaceId}
+                      isGroupChat={isGroupChat}
+                      activeRunId={activeRunId}
+                      isStreamingTurn={isStreaming}
+                      showForkAction={isAnchor}
+                      turnUsage={anchor?.turnUsage ?? null}
+                      turnCopyText={anchor?.copyText ?? ''}
+                      isLastRun={isLastRun}
+                      sessionUsage={isLastRun ? sessionUsage : null}
+                      contextWindow={isLastRun ? contextWindow : null}
+                      contextTokens={isLastRun ? contextTokens : null}
+                      pendingConfirmMap={pendingConfirmMap}
+                      onSandboxConfirm={handleSandboxConfirm}
+                    />
+                  )
+                })()}
+            </div>
+          ))}
 
-        {failoverEvents.map((event, idx) => (
-          <FailoverBanner key={`${event.timestamp}-${idx}`} event={event} />
-        ))}
+          {failoverEvents.map((event, idx) => (
+            <FailoverBanner key={`${event.timestamp}-${idx}`} event={event} />
+          ))}
 
-        {mainStream && (
-          <AssistantMessage
-            stream={mainStream}
-            isStreaming={isStreaming}
-            statusPhase={statusPhase}
-            subAgentStreams={subAgentStreams}
-            toolResultMap={mergedToolResultMap}
-            todos={todos}
-            conversationId={conversationId}
-            pendingConfirmMap={pendingConfirmMap}
-            onSandboxConfirm={handleSandboxConfirm}
-          />
-        )}
+          {mainStream && (
+            <AssistantMessage
+              stream={mainStream}
+              isStreaming={isStreaming}
+              statusPhase={statusPhase}
+              subAgentStreams={subAgentStreams}
+              toolResultMap={mergedToolResultMap}
+              todos={todos}
+              conversationId={conversationId}
+              pendingConfirmMap={pendingConfirmMap}
+              onSandboxConfirm={handleSandboxConfirm}
+            />
+          )}
 
-        {pendingAsk && streamingConversationId === conversationId && (
-          <div className="flex gap-2.5">
-            <div className="shrink-0 w-6 h-6" />
-            <div className="flex-1 max-w-[75%]">
+          {pendingAsk && streamingConversationId === conversationId && (
+            <div className={ASSISTANT_CONTENT_MAX_CLASS}>
               <AskUserCard
                 key={pendingAsk.question_id}
                 pending={pendingAsk}
@@ -674,20 +677,20 @@ export function MessageList({ conversationId }: MessageListProps) {
                 onCancel={handleAskUserCancel}
               />
             </div>
-          </div>
-        )}
+          )}
 
-        {conversationError && <RunErrorBubble data={conversationError.data} />}
+          {conversationError && <RunErrorBubble data={conversationError.data} />}
 
-        {lastRunStatus === 'stale' && (
-          <div
-            className="flex items-start gap-2 px-3 py-2.5 rounded
+          {lastRunStatus === 'stale' && (
+            <div
+              className="flex items-start gap-2 px-3 py-2.5 rounded
             bg-warning-surface border border-warning-border text-warning-fg text-sm"
-          >
-            <AlertCircle className="size-4 shrink-0 mt-0.5" />
-            <span>{t('incompletePreviousAnswer')}</span>
-          </div>
-        )}
+            >
+              <AlertCircle className="size-4 shrink-0 mt-0.5" />
+              <span>{t('incompletePreviousAnswer')}</span>
+            </div>
+          )}
+        </div>
       </div>
     </ScrollArea>
   )

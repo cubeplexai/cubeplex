@@ -122,7 +122,7 @@
   "topics": {
     "newGroupChat": "新建群聊",
     "newTopic": "新建话题",
-    "newConversation": "在此话题下新建对话",
+    "newConversation": "新建聊天",
     "renameTopic": "重命名",
     "members": "{count} 位成员",
     "owner": "群主",

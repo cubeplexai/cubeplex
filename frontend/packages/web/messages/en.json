@@ -122,7 +122,7 @@
   "topics": {
     "newGroupChat": "New Group Chat",
     "newTopic": "New Topic",
-    "newConversation": "New conversation in this topic",
+    "newConversation": "New Chat",
     "renameTopic": "Rename",
     "members": "{count} members",
     "owner": "Owner",

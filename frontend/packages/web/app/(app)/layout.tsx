@@ -19,9 +19,10 @@ import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/
  *  with a mobile hamburger built in, so we don't add a second strip. */
 function routeOwnsHeader(pathname: string | null): boolean {
   if (!pathname) return false
-  // Chat conversation pages render <AppShell> (see app/(app)/w/[wsId]/conversations/[id]/page.tsx)
-  // and the workspace home page also uses InputBar inside its own centered layout — no AppShell.
-  return /^\/w\/[^/]+\/conversations\//.test(pathname)
+  // Chat conversation + workspace home (new chat) both render <AppShell>.
+  if (/^\/w\/[^/]+\/conversations\//.test(pathname)) return true
+  if (/^\/w\/[^/]+$/.test(pathname)) return true
+  return false
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -95,7 +96,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <Sheet open={drawerOpen} onOpenChange={(open) => setDrawerOpen(open)}>
-        <SheetContent side="left" hideClose className="w-56 max-w-[80vw] p-0">
+        <SheetContent side="left" hideClose className="w-[16.8rem] max-w-[80vw] p-0">
           <SheetTitle className="sr-only">Navigation menu</SheetTitle>
           <SheetDescription className="sr-only">
             Workspace, recent conversations, and account

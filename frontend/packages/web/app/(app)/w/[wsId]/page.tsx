@@ -9,6 +9,7 @@ import {
   useConversationStore,
   useMessageStore,
 } from '@cubeplex/core'
+import { AppShell } from '@/components/layout/AppShell'
 import { InputBar } from '@/components/layout/InputBar'
 import { PromptCards } from '@/components/chat/PromptCards'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
@@ -114,19 +115,23 @@ export default function WorkspaceHomePage({
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-8 pb-12">
-      <div className="text-center">
-        <CubePlexLogo className="mb-3" markClassName="size-11" wordmarkClassName="text-2xl" />
-        <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
+    <AppShell headerVariant="minimal" conversationId={draftConvId ?? undefined}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-8 px-4 pb-12">
+        <div className="text-center">
+          <CubePlexLogo className="mb-3" markClassName="size-11" wordmarkClassName="text-2xl" />
+          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
+        </div>
+        {/* Home composer stays the pre-widen max-w-2xl; conversation pages use
+            the wider CHAT_COLUMN_CLASS from InputBar itself. */}
+        <div className="w-full max-w-2xl">
+          <InputBar
+            conversationId={draftConvId ?? undefined}
+            onCreateConversation={ensureConversation}
+            onSubmit={handleSubmit}
+          />
+        </div>
+        <PromptCards />
       </div>
-      <div className="w-full max-w-2xl px-4">
-        <InputBar
-          conversationId={draftConvId ?? undefined}
-          onCreateConversation={ensureConversation}
-          onSubmit={handleSubmit}
-        />
-      </div>
-      <PromptCards />
-    </div>
+    </AppShell>
   )
 }

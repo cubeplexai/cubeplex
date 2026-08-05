@@ -20,7 +20,7 @@ export function PromptCards() {
   const setDraft = useComposerDraft((s) => s.setDraft)
 
   return (
-    <div className="grid w-full max-w-2xl grid-cols-1 gap-2 px-4 sm:grid-cols-3">
+    <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-3">
       {CARDS.map(({ key, icon: Icon }, i) => (
         <button
           key={key}

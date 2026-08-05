@@ -1,7 +1,8 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Layers, Menu, Monitor, UserPlus, X } from 'lucide-react'
+import { FolderOpen, Layers, Menu, TerminalSquare, UserPlus, X } from 'lucide-react'
+import { SiGooglechrome } from 'react-icons/si'
 import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -14,20 +15,44 @@ import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
-import { useConversationStore, usePanelStore } from '@cubeplex/core'
+import { useConversationStore, usePanelStore, type SandboxTab } from '@cubeplex/core'
 import { useDeploymentMode } from '@cubeplex/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
 import { ConversationMemberStrip } from '@/components/chat/ConversationMemberStrip'
+import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
 import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
 import { InviteToConversationDialog } from '@/components/dialogs/InviteToConversationDialog'
+
+const SANDBOX_HEADER_ACTIONS: {
+  tab: SandboxTab
+  label: string
+  testId: string
+  // Lucide icons + monochrome SiGooglechrome (currentColor, no brand blue fill).
+  Icon: typeof FolderOpen | typeof SiGooglechrome
+}[] = [
+  { tab: 'files', label: 'Files', testId: 'header-sandbox-files', Icon: FolderOpen },
+  { tab: 'browser', label: 'Browser', testId: 'header-sandbox-browser', Icon: SiGooglechrome },
+  { tab: 'terminal', label: 'Terminal', testId: 'header-sandbox-terminal', Icon: TerminalSquare },
+]
 
 interface AppShellProps {
   children: ReactNode
   headerTitle?: string
   conversationId?: string
+  /**
+   * `full` — conversation chrome (title, invite, share, topic, sandbox, theme).
+   * `minimal` — new-chat home: topic + sandbox + theme only.
+   */
+  headerVariant?: 'full' | 'minimal'
 }
 
-export function AppShell({ children, headerTitle, conversationId }: AppShellProps) {
+export function AppShell({
+  children,
+  headerTitle,
+  conversationId,
+  headerVariant = 'full',
+}: AppShellProps) {
+  const tTopics = useTranslations('topics')
   const tUpgrade = useTranslations('topics.upgradeDialog')
   const tInvite = useTranslations('conversation.invite')
   const view = usePanelStore((s) => s.view)
@@ -37,7 +62,9 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
     conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
   )
   const canUpgrade = Boolean(workspaceId && conversation && !conversation.topic_id)
+  const minimal = headerVariant === 'minimal'
   const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [createTopicOpen, setCreateTopicOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   // Only offer the browser panel where the backend actually mounts /browser/*
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
@@ -103,13 +130,24 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
       <ToolDetailPanel />
     )
 
-  const upgradeDialog = workspaceId && conversation && !conversation.topic_id && (
+  // Conversation pages only: promote an existing chat into a topic.
+  const upgradeDialog = !minimal && workspaceId && conversation && !conversation.topic_id && (
     <UpgradeToTopicDialog
       wsId={workspaceId}
       conversationId={conversation.id}
       initialTitle={conversation.title ?? ''}
       open={upgradeOpen}
       onOpenChange={setUpgradeOpen}
+    />
+  )
+
+  // New-chat home only: same create-topic flow as the sidebar "New Topic" button.
+  // Mount only while open so unit tests / cold paths don't pull auth/member stores.
+  const createTopicDialog = minimal && workspaceId && createTopicOpen && (
+    <CreateGroupChatDialog
+      wsId={workspaceId}
+      open={createTopicOpen}
+      onOpenChange={setCreateTopicOpen}
     />
   )
 
@@ -133,22 +171,40 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         >
           <Menu className="size-4" />
         </button>
-        <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
-        {workspaceId && conversation?.is_group_chat && (
+        <span className="text-sm text-muted-foreground truncate flex-1">
+          {minimal ? '' : headerTitle || ''}
+        </span>
+        {!minimal && workspaceId && conversation?.is_group_chat && (
           <ConversationMemberStrip wsId={workspaceId} conversationId={conversation.id} />
         )}
-        {canUpgrade && (
+        {/* Topic control:
+            - minimal (new chat): create a topic — same as sidebar New Topic
+            - full (conversation): promote this chat to a topic when eligible */}
+        {minimal && workspaceId && (
           <button
             type="button"
-            onClick={() => setUpgradeOpen(true)}
-            className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
-            aria-label={tUpgrade('promoteLabel')}
-            title={tUpgrade('promoteLabel')}
+            onClick={() => setCreateTopicOpen(true)}
+            className="mr-1 cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+            aria-label={tTopics('newTopic')}
+            title={tTopics('newTopic')}
+            data-testid="header-topic-button"
           >
             <Layers className="h-4 w-4" />
           </button>
         )}
-        {workspaceId && conversation && (
+        {!minimal && canUpgrade && (
+          <button
+            type="button"
+            onClick={() => setUpgradeOpen(true)}
+            className="mr-1 cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+            aria-label={tUpgrade('promoteLabel')}
+            title={tUpgrade('promoteLabel')}
+            data-testid="header-topic-button"
+          >
+            <Layers className="h-4 w-4" />
+          </button>
+        )}
+        {!minimal && workspaceId && conversation && (
           <button
             type="button"
             onClick={() => setInviteOpen(true)}
@@ -160,17 +216,23 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
             <UserPlus className="h-4 w-4" />
           </button>
         )}
-        {conversationId && <SharePanel conversationId={conversationId} />}
+        {!minimal && conversationId && <SharePanel conversationId={conversationId} />}
         {workspaceId && sandboxEnabled && (
-          <button
-            type="button"
-            onClick={openSandbox}
-            className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
-            aria-label="Open sandbox"
-            title="Open sandbox"
-          >
-            <Monitor className="h-4 w-4" />
-          </button>
+          <div className="mr-1 flex items-center gap-0.5">
+            {SANDBOX_HEADER_ACTIONS.map(({ tab, label, testId, Icon }) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => openSandbox(tab)}
+                className="cursor-pointer rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+                aria-label={label}
+                title={label}
+                data-testid={testId}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
         )}
         <ThemeToggle />
       </header>
@@ -200,6 +262,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
           </div>
         )}
         {upgradeDialog}
+        {createTopicDialog}
         {inviteDialog}
       </div>
     )
@@ -213,10 +276,12 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         elementRef={groupRef}
       >
         <ResizablePanel
-          // Sandbox browser is landscape; a wider rail reduces the tall/flat
-          // letterbox and makes takeover clicks easier to aim (see #424).
-          defaultSize={panelOpen ? (isSandboxPanel ? 28 : 50) : 100}
-          minSize={isSandboxPanel ? 20 : 30}
+          // Percent of the main content area (sidebar is outside this group).
+          // Sandbox defaults give chat ~40% so a wider nav rail still leaves a
+          // usable conversation column; the handle can drag either way. Other
+          // panels (artifact/tool) stay 50/50.
+          defaultSize={panelOpen ? (isSandboxPanel ? 40 : 50) : 100}
+          minSize={isSandboxPanel ? 28 : 30}
         >
           {main}
         </ResizablePanel>
@@ -225,8 +290,8 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
           <>
             <ResizableHandle withHandle />
             <ResizablePanel
-              defaultSize={isSandboxPanel ? 72 : 50}
-              minSize={isSandboxPanel ? 35 : 25}
+              defaultSize={isSandboxPanel ? 60 : 50}
+              minSize={isSandboxPanel ? 30 : 25}
             >
               {panelContent}
             </ResizablePanel>
@@ -234,6 +299,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         )}
       </ResizablePanelGroup>
       {upgradeDialog}
+      {createTopicDialog}
       {inviteDialog}
     </>
   )

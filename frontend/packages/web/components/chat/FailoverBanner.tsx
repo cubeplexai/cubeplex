@@ -2,6 +2,8 @@
 
 import { AlertTriangle } from 'lucide-react'
 import type { FailoverEvent } from '@/lib/types/events'
+import { ASSISTANT_CONTENT_MAX_CLASS } from '@/lib/chatLayout'
+import { cn } from '@/lib/utils'
 
 interface FailoverBannerProps {
   event: FailoverEvent
@@ -28,22 +30,19 @@ export function FailoverBanner({ event }: FailoverBannerProps) {
     : `Switched from ${failed_ref} to ${next_ref}`
 
   return (
-    <div className="flex justify-start gap-2.5" data-testid="failover-banner">
-      <div className="shrink-0 w-6 h-6" />
-      <div className="flex-1 max-w-[75%]">
-        <details
-          className="group rounded-md border border-border bg-card px-3 py-2
+    <div className={cn(ASSISTANT_CONTENT_MAX_CLASS)} data-testid="failover-banner">
+      <details
+        className="group rounded-md border border-border bg-card px-3 py-2
             text-xs text-muted-foreground"
-        >
-          <summary className="flex cursor-pointer list-none items-center gap-2 marker:hidden">
-            <AlertTriangle className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="font-medium">{summary}</span>
-          </summary>
-          <p className="mt-1.5 ml-5 whitespace-pre-wrap break-words text-muted-foreground">
-            {reason}
-          </p>
-        </details>
-      </div>
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-2 marker:hidden">
+          <AlertTriangle className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="font-medium">{summary}</span>
+        </summary>
+        <p className="mt-1.5 ml-5 whitespace-pre-wrap break-words text-muted-foreground">
+          {reason}
+        </p>
+      </details>
     </div>
   )
 }

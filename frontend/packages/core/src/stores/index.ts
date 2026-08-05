@@ -13,6 +13,7 @@ export {
   type PanelStore,
   type PanelView,
   type AttachmentPanelInfo,
+  type SandboxTab,
 } from './panelStore'
 export { useToolDetailStore, type ToolDetailStore } from './toolDetailStore'
 export { useAuthStore, type AuthStore } from './authStore'

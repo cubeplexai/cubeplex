@@ -13,7 +13,7 @@ import type {
 } from '@cubeplex/core'
 import type { AgentStream } from '@cubeplex/core'
 import { useArtifactStore } from '@cubeplex/core'
-import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
 import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageArtifactCard } from './ImageArtifactCard'
@@ -33,6 +33,8 @@ import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SkillSearchResults } from './tool-results/SkillSearchResults'
+import { ASSISTANT_CONTENT_MAX_CLASS } from '@/lib/chatLayout'
+import { cn, proseClasses } from '@/lib/utils'
 
 interface ReasoningBlockProps {
   thinking: string
@@ -218,8 +220,6 @@ interface StreamingProps {
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
-
-import { proseClasses } from '@/lib/utils'
 
 /** Convert a consolidated SubagentSummary to an AgentStream for SubAgentCard */
 function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
@@ -668,110 +668,99 @@ export function AssistantMessage({
   return (
     <div data-role="assistant" className="group space-y-2">
       {(grouped.length > 0 || totalSubagents >= 2 || showErrorBubble) && (
-        <div className="flex justify-start gap-2.5">
-          <div
-            className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
-        flex items-center justify-center mt-0.5"
-          >
-            <Bot className="size-3.5 text-primary/70" />
-          </div>
-          <div className="flex-1 max-w-[75%] space-y-2">
-            {totalSubagents >= 2 && (
-              <SubAgentCluster
-                activeCount={isStreaming === true ? activeSubagentCount : 0}
-                totalCount={totalSubagents}
-              />
-            )}
-            {grouped.map((item, i) => renderItem(item, i))}
-            {showErrorBubble && (
-              <div
-                role="alert"
-                className="flex items-start gap-2 px-3 py-2.5 rounded-lg
+        <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, 'space-y-2')}>
+          {totalSubagents >= 2 && (
+            <SubAgentCluster
+              activeCount={isStreaming === true ? activeSubagentCount : 0}
+              totalCount={totalSubagents}
+            />
+          )}
+          {grouped.map((item, i) => renderItem(item, i))}
+          {showErrorBubble && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 px-3 py-2.5 rounded-lg
                   bg-destructive/10 border border-destructive/20 text-destructive text-sm"
-              >
-                <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="font-medium">{t('assistantReplyFailed')}</div>
-                  <pre
-                    className="whitespace-pre-wrap break-words font-mono text-xs leading-snug
+            >
+              <AlertCircle className="size-4 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0 space-y-1">
+                <div className="font-medium">{t('assistantReplyFailed')}</div>
+                <pre
+                  className="whitespace-pre-wrap break-words font-mono text-xs leading-snug
                       opacity-90 max-h-48 overflow-auto"
-                  >
-                    {errorMessage}
-                  </pre>
-                </div>
+                >
+                  {errorMessage}
+                </pre>
               </div>
-            )}
-            {message && conversationId && showForkAction && (
-              <div
-                className="flex flex-wrap items-center gap-1 opacity-0
+            </div>
+          )}
+          {message && conversationId && showForkAction && (
+            <div
+              className="flex flex-wrap items-center gap-1 opacity-0
                   transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-              >
-                <CopyButton content={turnCopyText ?? ''} />
-                {turnUsage && (
-                  <TokenUsageBar
-                    turnUsage={turnUsage}
-                    sessionUsage={isLastRun ? (sessionUsage ?? null) : null}
-                    contextWindow={isLastRun ? (contextWindow ?? null) : null}
-                    contextTokens={isLastRun ? (contextTokens ?? null) : null}
-                    showSessionView={isLastRun ?? false}
-                  />
-                )}
-                {isLastRun && workspaceId && (
-                  <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
-                )}
-                <MessageActions
-                  conversationId={conversationId}
-                  workspaceId={workspaceId ?? null}
-                  runId={message.run_id}
-                  isGroupChat={isGroupChat ?? false}
-                  activeRunId={activeRunId ?? null}
-                  isStreaming={isStreamingTurn ?? false}
+            >
+              <CopyButton content={turnCopyText ?? ''} />
+              {turnUsage && (
+                <TokenUsageBar
+                  turnUsage={turnUsage}
+                  sessionUsage={isLastRun ? (sessionUsage ?? null) : null}
+                  contextWindow={isLastRun ? (contextWindow ?? null) : null}
+                  contextTokens={isLastRun ? (contextTokens ?? null) : null}
+                  showSessionView={isLastRun ?? false}
                 />
-                <TimeChip timestamp={message.timestamp ?? null} />
-              </div>
-            )}
-          </div>
+              )}
+              {isLastRun && workspaceId && (
+                <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
+              )}
+              <MessageActions
+                conversationId={conversationId}
+                workspaceId={workspaceId ?? null}
+                runId={message.run_id}
+                isGroupChat={isGroupChat ?? false}
+                activeRunId={activeRunId ?? null}
+                isStreaming={isStreamingTurn ?? false}
+              />
+              <TimeChip timestamp={message.timestamp ?? null} />
+            </div>
+          )}
         </div>
       )}
       {(isStreaming && todos && todos.length > 0) ||
       (!isStreaming && historyTodos.length > 0) ||
       isStreaming ? (
-        <div className="flex justify-start gap-2.5">
-          <div className="shrink-0 w-6" aria-hidden />
-          <div className="flex-1 max-w-[75%] space-y-2">
-            {isStreaming && todos && todos.length > 0 && (
-              <TaskProgressCard todos={todos} isStreaming={true} />
-            )}
-            {!isStreaming && historyTodos.length > 0 && (
-              <TaskProgressCard todos={historyTodos} isStreaming={false} />
-            )}
-            {isStreaming && (
-              <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-                {statusPhase === 'sandbox_creating' ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">
-                    {t('sandboxPreparing')}
-                  </span>
-                ) : statusPhase === 'sandbox_failed' ? (
-                  <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
-                ) : (
-                  <>
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+        <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, 'space-y-2')}>
+          {isStreaming && todos && todos.length > 0 && (
+            <TaskProgressCard todos={todos} isStreaming={true} />
+          )}
+          {!isStreaming && historyTodos.length > 0 && (
+            <TaskProgressCard todos={historyTodos} isStreaming={false} />
+          )}
+          {isStreaming && (
+            <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
+              {statusPhase === 'sandbox_creating' ? (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  {t('sandboxPreparing')}
+                </span>
+              ) : statusPhase === 'sandbox_failed' ? (
+                <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
+              ) : (
+                <>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:0ms]"
-                    />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:150ms]"
-                    />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:300ms]"
-                    />
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                  />
+                </>
+              )}
+            </div>
+          )}
         </div>
       ) : null}
     </div>

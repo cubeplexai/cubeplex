@@ -520,7 +520,8 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
       className={cn(
         'bg-card border-r border-border flex flex-col h-full shrink-0 overflow-hidden',
         'transition-[width] duration-200 ease-in-out',
-        collapsed ? 'w-12' : 'w-56',
+        // Expanded was w-56 (14rem); +~20% ≈ 16.8rem for more conversation titles.
+        collapsed ? 'w-12' : 'w-[16.8rem]',
       )}
     >
       {/* Brand — shows logo + wordmark + collapse button when expanded;
@@ -609,7 +610,9 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
                 type="button"
                 onClick={() => setGroupDialogOpen(true)}
                 className={cn(
-                  'flex w-full items-center px-2 py-1.5 rounded transition-colors duration-fast text-xs text-muted-foreground hover:text-foreground hover:bg-accent',
+                  // cursor-pointer: native <button> defaults to arrow; New Chat is a
+                  // <Link> so it already gets the hand without this class.
+                  'flex w-full cursor-pointer items-center px-2 py-1.5 rounded transition-colors duration-fast text-xs text-muted-foreground hover:text-foreground hover:bg-accent',
                   collapsed ? 'justify-center' : 'gap-2',
                 )}
                 aria-label={t('newTopic')}

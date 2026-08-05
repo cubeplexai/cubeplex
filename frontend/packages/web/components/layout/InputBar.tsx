@@ -32,6 +32,7 @@ import {
   type SlashCommand,
   type SlashCommandContext,
 } from '@/lib/slash-commands'
+import { CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
 
 interface InputBarProps {
   conversationId?: string
@@ -453,7 +454,7 @@ export function InputBar({
   }
 
   return (
-    <div className="w-full max-w-3xl mx-auto pb-[env(safe-area-inset-bottom)]">
+    <div className={cn(CHAT_COLUMN_CLASS, 'pb-[env(safe-area-inset-bottom)]')}>
       {conversationId && <PendingSteers conversationId={conversationId} />}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}

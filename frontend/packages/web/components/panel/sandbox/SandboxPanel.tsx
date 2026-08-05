@@ -1,16 +1,15 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { FolderOpen, Globe, Loader2, TerminalSquare, RefreshCw, X } from 'lucide-react'
-import { usePanelStore } from '@cubeplex/core'
+import { useState, useCallback, useEffect, useRef, type ComponentType } from 'react'
+import { FolderOpen, Loader2, TerminalSquare, RefreshCw, X } from 'lucide-react'
+import { SiGooglechrome } from 'react-icons/si'
+import { usePanelStore, type SandboxTab } from '@cubeplex/core'
 import { useSWRConfig } from 'swr'
 
 import { BrowserView } from '@/components/panel/BrowserView'
 import { SandboxFilesView } from './SandboxFilesView'
 import { SandboxTerminalView } from './SandboxTerminalView'
 import { cn } from '@/lib/utils'
-
-type SandboxTab = 'files' | 'browser' | 'terminal'
 
 interface SandboxPanelProps {
   workspaceId: string | null
@@ -20,10 +19,11 @@ interface SandboxPanelProps {
 const TABS: {
   id: SandboxTab
   label: string
-  Icon: typeof FolderOpen
+  Icon: ComponentType<{ className?: string }>
 }[] = [
   { id: 'files', label: 'Files', Icon: FolderOpen },
-  { id: 'browser', label: 'Browser', Icon: Globe },
+  // Match AppShell header: monochrome Chrome (currentColor), not Lucide Globe.
+  { id: 'browser', label: 'Browser', Icon: SiGooglechrome },
   { id: 'terminal', label: 'Terminal', Icon: TerminalSquare },
 ]
 
@@ -33,6 +33,7 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const close = usePanelStore((s) => s.close)
   const sandboxView = usePanelStore((s) => (s.view.type === 'sandbox' ? s.view : null))
   const initialFilePath = sandboxView?.initialFilePath ?? null
+  const initialTab = sandboxView?.initialTab
   const sandboxRevision = sandboxView?.revision ?? null
   const { mutate } = useSWRConfig()
   const browserRefreshRef = useRef<(() => void) | null>(null)
@@ -41,7 +42,8 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from external panel store
     if (initialFilePath) setActiveTab('files')
-  }, [initialFilePath, sandboxRevision])
+    else if (initialTab) setActiveTab(initialTab)
+  }, [initialFilePath, initialTab, sandboxRevision])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
