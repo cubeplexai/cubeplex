@@ -25,16 +25,35 @@ fi
 # Don't be tempted by /etc/ssl/certs/cubeplex-egress.pem next to it: that one is
 # a symlink into the init container's own filesystem layer, so it dangles here.
 # Absent whenever egress interception is off, hence the -s guard.
+#
+# certutil -N on an *existing* NSS DB can spin forever (busy-wait on a lock /
+# re-init path) and block this launcher so Chromium never starts — supervisord
+# still shows chromium RUNNING (the shell is alive) but CDP :9222 is dead.
+# Only create the DB when missing, skip re-import when present, and bound every
+# certutil with timeout so a bad DB never wedges the browser stack.
 MITM_CA=/etc/ssl/certs/cubeplex-egress-ca.pem
+
+import_mitm_ca() {
+    NSS_DB="$1"
+    mkdir -p "$NSS_DB"
+    if [ ! -f "$NSS_DB/cert9.db" ]; then
+        timeout 5 certutil -N -d "sql:$NSS_DB" --empty-password 2>/dev/null || true
+    fi
+    # Already imported → skip (certutil -A on a duplicate can also hang/prompt).
+    if timeout 5 certutil -L -d "sql:$NSS_DB" 2>/dev/null | grep -q "cubeplex-egress-ca"; then
+        return 0
+    fi
+    timeout 5 certutil -A -d "sql:$NSS_DB" -n "cubeplex-egress-ca" -t "CT,," -i "$MITM_CA" \
+        2>/dev/null || true
+}
 
 if [ -s "$MITM_CA" ]; then
     # Chromium <91 read ~/.pki/nssdb; modern (XDG) Chromium reads
     # ~/.local/share/pki/nssdb. Import into both so a Chromium upgrade in
     # the image doesn't silently break trust on existing profiles.
-    for NSS_DB in "$HOME/.pki/nssdb" "$HOME/.local/share/pki/nssdb"; do
-        mkdir -p "$NSS_DB"
-        certutil -N -d "sql:$NSS_DB" --empty-password 2>/dev/null || true
-        certutil -A -d "sql:$NSS_DB" -n "cubeplex-egress-ca" -t "CT,," -i "$MITM_CA" 2>/dev/null || true
+    for NSS_DB in "${HOME:-/home/cubeplex}/.pki/nssdb" \
+        "${HOME:-/home/cubeplex}/.local/share/pki/nssdb"; do
+        import_mitm_ca "$NSS_DB"
     done
 fi
 

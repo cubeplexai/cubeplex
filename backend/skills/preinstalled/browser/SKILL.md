@@ -29,12 +29,14 @@ when a step needs a human you ask the user to take over in the panel.
 agent-browser connect 9222        # attach to that user-visible Chromium (CDP 127.0.0.1:9222)
 ```
 
-`start-browser.sh` boots the headful Chromium the user watches; it's a no-op if
-already running, so always run it first (the browser may not be up yet if the
-user hasn't opened the panel). Then `agent-browser connect 9222` attaches to it.
-If `connect` fails with "connection refused", the stack isn't up yet — run
-`start-browser.sh` again and wait a few seconds. **Never** start a fresh/headless
-browser — the user would see nothing and the session wouldn't be theirs.
+`start-browser.sh` boots the headful Chromium the user watches. It is idempotent
+but **not** a blind no-op: if Neko/supervisord is up while Chromium died (user
+closed the last tab/window → empty desktop + CDP refused), it restarts Chromium
+and waits until CDP `9222` answers. Always run it first. Then
+`agent-browser connect 9222` attaches to it. If `connect` still fails with
+"connection refused", run `start-browser.sh` again and wait a few seconds.
+**Never** start a fresh/headless browser — the user would see nothing and the
+session wouldn't be theirs.
 
 Tell the user they can watch and take over in the CubePlex **browser panel**.
 

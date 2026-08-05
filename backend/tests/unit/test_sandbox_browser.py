@@ -27,6 +27,40 @@ def test_sandbox_image_enables_neko_implicit_hosting() -> None:
     assert "fa-mouse-pointer" in text
 
 
+def test_start_browser_script_ensures_chromium_when_stack_already_up() -> None:
+    """Closing the last Chromium tab leaves Neko up but CDP dead.
+
+    ``start-browser.sh`` used to exit early on "supervisord pid ok", so refresh /
+    browser skill saw "already running" while ``agent-browser connect 9222`` got
+    connection refused. The script must heal Chromium and wait on CDP.
+    """
+    script = (_REPO_ROOT / "deploy" / "images" / "sandbox" / "neko" / "start-browser.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "ensure_chromium" in script
+    assert "9222/json/version" in script
+    assert "supervisorctl" in script and "restart chromium" in script
+    # Must not exit before ensuring chromium on the already-running path.
+    assert "neko stack already running" in script
+    assert "ensure_chromium" in script.split("neko stack already running", 1)[1]
+
+
+def test_launch_chrome_bounds_certutil_so_restart_cannot_wedge() -> None:
+    """Unbounded ``certutil -N`` on an existing NSS DB spins and blocks chrome.
+
+    Supervisord still reports chromium RUNNING (the launcher shell is alive) while
+    CDP never comes up — same empty desktop / connection-refused symptom. The
+    launcher must only init missing DBs, skip already-imported certs, and timeout
+    every certutil call.
+    """
+    script = (_REPO_ROOT / "deploy" / "images" / "sandbox" / "neko" / "launch-chrome.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "timeout 5 certutil" in script
+    assert "cert9.db" in script
+    assert "cubeplex-egress-ca" in script
+
+
 class _RecordingSandbox(Sandbox):
     """Minimal sandbox that records executed commands."""
 
