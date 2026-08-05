@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowUpCircle, Download, Trash2, X, Check } from 'lucide-react'
-import type { SkillDetail } from '@cubeplex/core'
+import { ArrowUpCircle, Download, RefreshCw, Trash2, X, Check } from 'lucide-react'
+import { adminRefreshSkill, type SkillDetail } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { jsonHeaders, csrfHeaders, readApiError } from '@/lib/csrf'
 
@@ -12,12 +12,13 @@ interface OrgInstallActionsProps {
   onActionDone: () => void
 }
 
-type Action = 'install' | 'upgrade' | 'uninstall' | null
+type Action = 'install' | 'upgrade' | 'uninstall' | 'refresh' | null
 
 export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProps) {
   const t = useTranslations('adminSkills')
   const [busy, setBusy] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
+  const [refreshNote, setRefreshNote] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
 
   // Reset confirm dialog whenever install_state changes (e.g. after upgrade or version switch)
@@ -45,9 +46,31 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
     if (!res.ok && res.status !== 204) throw new Error(await readApiError(res))
   }
 
+  async function checkForUpdate(): Promise<void> {
+    setBusy('refresh')
+    setError(null)
+    setRefreshNote(null)
+    try {
+      const r = await adminRefreshSkill(skill.id, jsonHeaders())
+      if (r.changed) {
+        setRefreshNote(
+          t('refreshFoundVersion', { version: r.assigned_version ?? r.current_version }),
+        )
+      } else {
+        setRefreshNote(t('refreshAlreadyLatest'))
+      }
+      onActionDone()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function run(action: Exclude<Action, null>, fn: () => Promise<void>): Promise<void> {
     setBusy(action)
     setError(null)
+    setRefreshNote(null)
     try {
       await fn()
       onActionDone()
@@ -60,10 +83,24 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
 
   const installed =
     skill.install_state === 'installed' || skill.install_state === 'update_available'
+  const canRefresh = Boolean(skill.imported_from_registry_id)
 
   return (
     <div className="flex flex-col items-end gap-1.5">
       <div className="flex flex-wrap items-center gap-2">
+        {canRefresh && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => void checkForUpdate()}
+            data-testid="skill-check-update-button"
+          >
+            <RefreshCw className={`size-3.5 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
+            {busy === 'refresh' ? t('refreshChecking') : t('checkForUpdate')}
+          </Button>
+        )}
+
         {skill.install_state === 'uninstalled' && (
           <Button
             size="sm"
@@ -128,6 +165,7 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
         )}
       </div>
 
+      {refreshNote && <p className="text-xs text-muted-foreground">{refreshNote}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )

@@ -1,5 +1,21 @@
 import { toApiError } from './client'
-import type { SkillCandidateOut, SkillPreviewResponse } from './skills'
+import type { SkillCandidateOut, SkillPreviewResponse, SkillRefreshResponse } from './skills'
+
+export async function adminRefreshSkill(
+  skillId: string,
+  extraHeaders?: HeadersInit,
+): Promise<SkillRefreshResponse> {
+  const res = await fetch(`/api/v1/admin/skills/${skillId}/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...Object.fromEntries(new Headers(extraHeaders)),
+    },
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as SkillRefreshResponse
+}
 
 export async function adminDiscoverSkills(q: string, limit = 10): Promise<SkillCandidateOut[]> {
   const params = new URLSearchParams({ q, limit: String(limit) })
