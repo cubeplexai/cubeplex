@@ -46,6 +46,8 @@ export interface SkillDetail {
   install_state: InstallState
   installed_version: string | null
   auto_bind: boolean | null
+  imported_from_registry_id: string | null
+  imported_from_registry_name: string | null
 }
 
 export interface SkillFile {

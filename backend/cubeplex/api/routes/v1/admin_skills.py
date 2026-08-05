@@ -27,6 +27,7 @@ from cubeplex.api.schemas.skill_discovery import (
     CandidatePreviewResponse,
     InstallCandidateResponse,
     SkillCandidateResponse,
+    SkillRefreshResponse,
 )
 from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubeplex.config import config as _config
@@ -40,6 +41,7 @@ from cubeplex.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
+from cubeplex.repositories.skill_registry import SkillRegistryRepository
 from cubeplex.skills.cache import SkillCache
 from cubeplex.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
 from cubeplex.skills.frontmatter import (
@@ -48,6 +50,7 @@ from cubeplex.skills.frontmatter import (
     parse_skill_md,
     peek_skill_name,
 )
+from cubeplex.skills.refresh import SkillRefreshError, refresh_remote_catalog
 from cubeplex.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
@@ -89,6 +92,9 @@ async def list_skills(
     org_id = await resolve_current_org_id(user, session)
     skills = await SkillRepository(session).list_visible_for_org(org_id, source=source)
     installs_repo = OrgSkillInstallRepository(session)
+    registry_names = {
+        r.id: r.name for r in await SkillRegistryRepository(session).list_for_org(org_id)
+    }
 
     summaries: list[SkillSummary] = []
     for s in skills:
@@ -123,6 +129,10 @@ async def list_skills(
                 install_state=install_state,  # type: ignore[arg-type]
                 installed_version=installed_version,
                 workspace_bindings_count=0,
+                imported_from_registry_id=s.imported_from_registry_id,
+                imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
+                if s.imported_from_registry_id
+                else None,
             )
         )
     return summaries
@@ -259,6 +269,66 @@ async def admin_install_candidate(
     )
 
 
+@router.post("/{skill_id}/refresh", response_model=SkillRefreshResponse)
+async def admin_refresh_skill(
+    skill_id: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SkillRefreshResponse:
+    """Catalog-only re-fetch from registry provenance. Never mutates installs."""
+    org_id = await resolve_current_org_id(user, session)
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+
+    if not skill.imported_from_registry_id or not skill.imported_from_source_ref:
+        return SkillRefreshResponse(
+            canonical_name=skill.name,
+            skill_id=skill.id,
+            current_version=skill.current_version,
+            previous_version=skill.current_version,
+            changed=False,
+            assigned_version=None,
+        )
+
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillsAdapterManager.build(
+        session=session,
+        catalog=catalog,
+        org_id=org_id,
+        org_slug=org.slug,
+        workspace_id=None,
+        include_local=False,
+    )
+    publisher = SkillPublishService(session=session, cache=_cache())
+    try:
+        result = await refresh_remote_catalog(
+            session,
+            skill=skill,
+            org_id=org_id,
+            org_slug=org.slug,
+            actor_user_id=user.id,
+            registry=registry,
+            publisher=publisher,
+        )
+    except SkillRefreshError as e:
+        raise HTTPException(status_code=422, detail=e.code) from e
+
+    return SkillRefreshResponse(
+        canonical_name=result.canonical_name,
+        skill_id=result.skill_id,
+        current_version=result.current_version,
+        previous_version=result.previous_version,
+        changed=result.changed,
+        assigned_version=result.assigned_version,
+    )
+
+
 @router.get("/{skill_id}", response_model=SkillDetail)
 async def get_skill(
     skill_id: str,
@@ -283,6 +353,11 @@ async def get_skill(
         install_state = "installed"
         installed_version = install.installed_version
 
+    registry_name: str | None = None
+    if skill.imported_from_registry_id:
+        reg = await SkillRegistryRepository(session).get(org_id, skill.imported_from_registry_id)
+        registry_name = reg.name if reg is not None else None
+
     return SkillDetail(
         id=skill.id,
         name=skill.name,
@@ -306,6 +381,8 @@ async def get_skill(
         install_state=install_state,  # type: ignore[arg-type]
         installed_version=installed_version,
         auto_bind=install.auto_bind if install is not None else None,
+        imported_from_registry_id=skill.imported_from_registry_id,
+        imported_from_registry_name=registry_name,
     )
 
 

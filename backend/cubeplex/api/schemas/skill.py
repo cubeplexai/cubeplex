@@ -52,6 +52,8 @@ class SkillDetail(BaseModel):
     install_state: Literal["uninstalled", "installed", "update_available"]
     installed_version: str | None = None
     auto_bind: bool | None = None  # None when not installed
+    imported_from_registry_id: str | None = None
+    imported_from_registry_name: str | None = None
 
 
 class SkillContentResponse(BaseModel):
