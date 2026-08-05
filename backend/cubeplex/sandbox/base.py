@@ -148,8 +148,10 @@ class Sandbox(ABC):
         """Start the on-demand Neko browser stack inside the sandbox (idempotent).
 
         Baked into the sandbox image at ``/usr/local/bin/start-browser.sh``; safe
-        to call repeatedly (no-op if already running). Runs as root so
-        supervisord can chown runtime dirs and drop to the sandbox user.
+        to call repeatedly. If supervisord is already up but Chromium died
+        (e.g. user closed the last tab), the script restarts Chromium and waits
+        for CDP on 9222 — not a blind no-op. Runs as root so supervisord can
+        chown runtime dirs and drop to the sandbox user.
         """
         result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
         if result.exit_code not in (0, None):

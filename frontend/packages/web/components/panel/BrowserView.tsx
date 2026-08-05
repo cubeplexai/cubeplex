@@ -57,6 +57,11 @@ interface LiveFrameProps {
   takeover: boolean
   swallow: (e: React.SyntheticEvent) => void
   testId?: string
+  /**
+   * Bumped on explicit refresh so the iframe remounts even when the signed URL
+   * string is unchanged (otherwise React keeps the dead WebRTC peer).
+   */
+  frameKey?: number
 }
 
 /** Largest desktop-aspect box that fits inside the parent. */
@@ -115,6 +120,7 @@ function BrowserLiveFrame({
   takeover,
   swallow,
   testId,
+  frameKey = 0,
 }: LiveFrameProps) {
   const { ref, width, height } = useContainedSize(DESKTOP_ASPECT)
 
@@ -137,6 +143,7 @@ function BrowserLiveFrame({
       {url && width > 0 && height > 0 && (
         <div className="relative shrink-0" style={{ width, height }}>
           <iframe
+            key={frameKey}
             title="Sandbox browser"
             src={url}
             className="absolute inset-0 h-full w-full border-0"
@@ -236,6 +243,12 @@ export function BrowserView({
   const close = usePanelStore((s) => s.close)
   const t = useTranslations('panel.header')
   const [takeover, setTakeover] = useState(false)
+  // Explicit refresh remounts the Neko iframe even when the signed URL is stable.
+  const [frameKey, setFrameKey] = useState(0)
+  const handleRefresh = useCallback(() => {
+    setFrameKey((k) => k + 1)
+    void refresh()
+  }, [refresh])
   // User intent; AND with isDesktop so a narrow viewport never shows theater
   // (no setState-in-effect to clear).
   const [expandIntent, setExpandIntent] = useState(false)
@@ -249,11 +262,11 @@ export function BrowserView({
   const expanded = expandIntent && isDesktop
 
   useEffect(() => {
-    if (refreshRef) refreshRef.current = () => refresh()
+    if (refreshRef) refreshRef.current = handleRefresh
     return () => {
       if (refreshRef) refreshRef.current = null
     }
-  }, [refreshRef, refresh])
+  }, [refreshRef, handleRefresh])
 
   /** Move the portal host into `slot` if it is not already there. */
   const attachHost = useCallback(
@@ -366,7 +379,7 @@ export function BrowserView({
     <>
       <button
         type="button"
-        onClick={() => refresh()}
+        onClick={handleRefresh}
         className="p-1 rounded-xs text-muted-foreground hover:bg-accent transition-colors duration-fast"
         aria-label="Refresh live view"
       >
@@ -394,6 +407,7 @@ export function BrowserView({
         takeover={takeover}
         swallow={swallow}
         testId="browser-live-preview"
+        frameKey={frameKey}
       />,
       host,
     )
