@@ -218,13 +218,16 @@ Existing upgrade endpoints stay:
 
 Introduce an explicit catalog import path (name illustrative):
 
-- `SkillPublishService.publish_remote_files(..., *, write_install: bool)`  
-  or a dedicated `refresh_remote_skill(skill_id, ...)` that:
-  1. Loads skill + provenance; resolves adapter via
-     `SkillsAdapterManager.adapter_by_id`.
+- A dedicated `refresh_remote_skill(skill_id, ...)` (preferred over a
+  `write_install` flag on first-time publish, to keep install side-effects
+  out of the refresh call graph) that:
+  1. Loads the **target** skill by `skill_id` + provenance; resolves adapter
+     via `SkillsAdapterManager.adapter_by_id`.
   2. Fetches files; validates bundle.
-  3. Hash-compares; maybe creates version; updates `current_version`.
-  4. **Never** calls install repository.
+  3. **Pins identity to the target skill** (see §5.1).
+  4. Hash-compares under a per-skill lock (see §5.2); maybe creates version
+     on **that** `skill_id`; updates `current_version`.
+  5. **Never** calls install repository.
 
 Keep **first-time remote install** on the existing path that **does** write
 install (discover → install). Refresh is only for skills already in catalog
@@ -232,6 +235,64 @@ with provenance.
 
 Refactor today's ws `refresh_skill` handler off `_install_remote` onto this
 path; add admin twin.
+
+#### 5.1 Identity pin — refresh must not rename or fork the skill
+
+Today's `_publish_from_files` derives `canonical_name` from frontmatter `name`
+and `find_by_name`. That is correct for **first import**, wrong for **refresh**.
+
+Refresh rules:
+
+1. Operate only on the requested `skill_id` (the row loaded for the route).
+2. After fetch, parse frontmatter `name`. Expected slug is the suffix of the
+   target skill's canonical name (`org-slug:skill-slug` → `skill-slug`).
+3. If frontmatter name **≠** expected slug → **422** with stable code
+   `SKILL_IDENTITY_MISMATCH` (or equivalent). Do **not** create another
+   `Skill` row, do not update a different skill, do not change provenance.
+4. New `SkillVersion` rows always attach to the original `skill_id`.
+5. Response `skill_id` / `canonical_name` always refer to that same skill.
+
+Rationale: upstream renaming a SKILL.md would otherwise silently fork the
+catalog and leave installs pointing at a stale skill that never refreshes.
+
+#### 5.2 Concurrency — serialize refresh per skill
+
+Hand-wave "second wins or collides cleanly" is not an API contract.
+
+Rules:
+
+1. Serialize catalog mutation for a given `skill_id` (Postgres row lock on
+   the `skills` row, or equivalent single-flight) for the hash-compare +
+   version-create + `current_version` update.
+2. Hash comparison and version allocation run **inside** that critical
+   section after re-reading the tip version.
+3. If two concurrent refreshes fetch the **same** content: only one creates
+   a version; the other returns `changed: false` after re-check (or sees the
+   peer's version already at tip).
+4. If two concurrent refreshes fetch **different** content: both may create
+   distinct versions (different hashes / version strings); `current_version`
+   ends at the **last committer's** assigned version. Both responses report
+   their own `assigned_version`. Clients re-list for the tip.
+5. Object-store uploads for a version that loses a unique-constraint race must
+   not leave the API claiming success without a corresponding `SkillVersion`
+   row (upload after lock + version allocation, or treat orphan objects as
+   best-effort GC / acceptable garbage under unique key paths).
+
+#### 5.3 Workspace auth and mutation in one transaction
+
+WS private-only gate is not a one-shot check at the top of the handler.
+
+1. Open the request transaction (same session that mutates catalog).
+2. Assert workspace-private install for `(org_id, workspace_id, skill_id)`
+   (and provenance / visibility).
+3. Lock skill row / run catalog refresh in that transaction.
+4. Re-assert private install still exists (or hold a lock that prevents
+   delete of that install row for the duration) **before commit**.
+5. If the private install was removed mid-flight → abort catalog mutation
+   (rollback) and return `REFRESH_PRIVATE_ONLY` (or `REFRESH_UNAUTHORIZED`).
+
+A member must not advance the shared catalog tip after losing the only
+permission basis for refresh.
 
 ### 6. UI flow
 
@@ -280,7 +341,9 @@ admin-only upgrade, refresh failed, etc.).
 | Fetch network / 404 / invalid bundle | 422 with safe message |
 | Same content hash | `changed: false` |
 | Content changed, same frontmatter version | New auto patch version; `changed: true` |
-| Concurrent refresh | Unique `(skill_id, version)` — second wins or collides cleanly; both catalog-only |
+| Concurrent refresh | See §5.2 — per-skill lock; same-content → one create; different content → tip = last committer |
+| Upstream renames frontmatter `name` | 422 `SKILL_IDENTITY_MISMATCH`; no fork (§5.1) |
+| Private install deleted mid-refresh | Rollback; refuse (§5.3) |
 | Member refreshes private; org-wide still on old pin | Catalog tip advances; org install shows `update_available` for admin |
 | Tombstoned preinstalled | Not remote; no refresh |
 | Upgrade to version that does not exist | Existing 404/422 behavior |
@@ -329,6 +392,10 @@ Observable invariants:
    provenance; still criterion 1 holds.
 6. Admin and workspace UIs expose the two actions with correct enablement;
    docs match.
+7. Refresh never attaches versions to a different `skill_id` than requested
+   (name drift → error, not fork).
+8. Concurrent same-content refreshes produce at most one new version; no
+   install mutation.
 
 ---
 
