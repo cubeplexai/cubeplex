@@ -103,19 +103,29 @@ from provenance + role.
 
 ### Core logic
 
-1. Load skill; require `imported_from_registry_id` + `imported_from_source_ref`.
-2. Resolve adapter; if missing/disabled → error.
-3. `fetch(source_ref)` → validate files → `content_hash`.
-4. If hash equals latest version's hash → return `changed=false` (catalog tip
-   unchanged).
-5. Else choose version string: frontmatter/meta if free; else next patch from
-   `_next_version_for`.
-6. Upload files; create `SkillVersion`; `update_current_version`; **do not**
-   touch installs.
-7. WS handler only: before service, assert private install for
-   `(org_id, workspace_id, skill_id)`; else refuse.
+1. Load **target** skill by `skill_id`; require
+   `imported_from_registry_id` + `imported_from_source_ref`.
+2. **WS only (same transaction as mutation):** assert
+   workspace-private install for `(org_id, workspace_id, skill_id)`; else
+   refuse with `REFRESH_PRIVATE_ONLY`. Do not treat this as a fire-and-forget
+   pre-check outside the write transaction (spec §5.3).
+3. Resolve adapter; if missing/disabled → error.
+4. `fetch(source_ref)` → validate files → parse frontmatter.
+5. **Identity pin (spec §5.1):** frontmatter `name` must equal the target
+   skill's slug (`canonical` after `org-slug:`). Mismatch → 422
+   `SKILL_IDENTITY_MISMATCH`; no new skill row, no alternate-skill update.
+6. **Per-skill lock (spec §5.2):** lock skill row; re-read tip version hash.
+7. If hash equals tip → `changed=false`; release; return.
+8. Else choose version string: frontmatter/meta if free on **this** skill_id;
+   else next patch from `_next_version_for`.
+9. Upload files for that version; create `SkillVersion` on **target**
+   `skill_id`; `update_current_version`; **do not** touch installs.
+10. **WS only:** re-assert private install still present before commit; else
+    rollback.
 
-First-time remote install path **unchanged** (still writes install).
+First-time remote install path **unchanged** (still writes install). Do **not**
+route refresh through `_publish_from_files` without bypassing name-based
+`find_by_name` and install writes.
 
 ### Tests (e2e preferred)
 
@@ -124,11 +134,13 @@ First-time remote install path **unchanged** (still writes install).
 | Refresh with new content: new version + `current_version` advances; all installs' `installed_version` **unchanged** | e2e (fake registry or respx) |
 | Refresh same content: `changed=false`, no new version row | e2e |
 | Content change + same frontmatter version: still creates a version (auto patch), not 500 collision | e2e or unit on service |
+| Upstream renames frontmatter `name` → `SKILL_IDENTITY_MISMATCH`; original skill unchanged; no fork skill | e2e |
 | Member refresh org-wide-only skill → refused | e2e |
 | Member refresh private remote skill → allowed; install unchanged | e2e |
 | Admin refresh any org-visible remote skill → allowed; install unchanged | e2e |
 | After refresh, admin list shows `update_available` when install pin is old | e2e |
 | Upgrade (existing admin install) then state returns to `installed` | e2e (may already partially exist) |
+| Concurrent same-content refresh: at most one new version; both installs unchanged | e2e or unit with concurrent sessions if practical |
 
 ---
 
@@ -264,11 +276,15 @@ U2+U3).
 - **Interface consistency:** one `SkillRefreshResponse`; both routes return it;
   frontend core types match.
 - **No vagueness:** private-only WS gate; auto-patch when frontmatter version
-  collides with different hash; install rows never touched on refresh.
+  collides with different hash; install rows never touched on refresh;
+  identity pin; per-skill lock; auth+mutation same transaction.
 - **Risk:** member private refresh advances shared `current_version` — accepted
   in spec (approach B); do not "fix" with shadow versions.
-- **Risk:** `_publish_from_files` shared by first install — add a flag or split
-  rather than accidental install on refresh.
+- **Risk:** `_publish_from_files` shared by first install — split refresh path
+  rather than accidental install or name-based fork on refresh.
+- **Codex local review (2026-08-05):** three HIGH design holes closed in
+  spec §5.1–§5.3 + U1 core logic / tests: identity pin, auth TOCTOU,
+  concurrent tip nondeterminism.
 
 ---
 
