@@ -104,28 +104,37 @@ from provenance + role.
 ### Core logic
 
 1. Load **target** skill by `skill_id`; require
-   `imported_from_registry_id` + `imported_from_source_ref`.
-2. **WS only (same transaction as mutation):** assert
-   workspace-private install for `(org_id, workspace_id, skill_id)`; else
-   refuse with `REFRESH_PRIVATE_ONLY`. Do not treat this as a fire-and-forget
-   pre-check outside the write transaction (spec §5.3).
-3. Resolve adapter; if missing/disabled → error.
-4. `fetch(source_ref)` → validate files → parse frontmatter.
-5. **Identity pin (spec §5.1):** frontmatter `name` must equal the target
+   `imported_from_registry_id` + `imported_from_source_ref` (read-only
+   preflight OK).
+2. Resolve adapter; if missing/disabled → error.
+3. **`fetch(source_ref)` outside DB locks** → validate files → parse
+   frontmatter.
+4. **Identity pin (spec §5.1):** frontmatter `name` must equal the target
    skill's slug (`canonical` after `org-slug:`). Mismatch → 422
    `SKILL_IDENTITY_MISMATCH`; no new skill row, no alternate-skill update.
-6. **Per-skill lock (spec §5.2):** lock skill row; re-read tip version hash.
-7. If hash equals tip → `changed=false`; release; return.
-8. Else choose version string: frontmatter/meta if free on **this** skill_id;
+5. Begin write transaction.
+6. **WS only (spec §5.3):** `SELECT … FOR UPDATE` workspace-private install
+   for `(org_id, workspace_id, skill_id)`; missing →
+   `REFRESH_PRIVATE_ONLY` (no catalog write). Do **not** rely on a plain
+   re-SELECT without a row lock.
+7. **`SELECT … FOR UPDATE` skill row** (spec §5.2 — same lock primitive any
+   existing-skill version creator must use, including re-upload). Re-read tip
+   hash.
+8. If hash equals tip → `changed=false`; commit/return.
+9. Else choose version string: frontmatter/meta if free on **this** skill_id;
    else next patch from `_next_version_for`.
-9. Upload files for that version; create `SkillVersion` on **target**
-   `skill_id`; `update_current_version`; **do not** touch installs.
-10. **WS only:** re-assert private install still present before commit; else
-    rollback.
+10. Upload files for that version; create `SkillVersion` on **target**
+    `skill_id`; `update_current_version`; **do not** touch installs.
+11. Commit (install row lock released with transaction).
 
 First-time remote install path **unchanged** (still writes install). Do **not**
 route refresh through `_publish_from_files` without bypassing name-based
 `find_by_name` and install writes.
+
+**Companion hardening in U1:** when updating an **existing** skill via
+publish/re-upload, take the same skill-row `FOR UPDATE` before allocating a
+version / advancing `current_version`, so refresh and upload cannot race the
+tip.
 
 ### Tests (e2e preferred)
 
@@ -282,9 +291,11 @@ U2+U3).
   in spec (approach B); do not "fix" with shadow versions.
 - **Risk:** `_publish_from_files` shared by first install — split refresh path
   rather than accidental install or name-based fork on refresh.
-- **Codex local review (2026-08-05):** three HIGH design holes closed in
-  spec §5.1–§5.3 + U1 core logic / tests: identity pin, auth TOCTOU,
-  concurrent tip nondeterminism.
+- **Codex local review (2026-08-05):** R1 three HIGHs closed in §5.1–§5.3
+  (identity pin, concurrency, auth). R2 two HIGHs closed: WS auth needs
+  `FOR UPDATE` on the private install (not plain re-assert); skill-row lock
+  must cover **all** existing-skill tip writers (refresh + re-upload), not
+  refresh alone; fetch stays outside the lock.
 
 ---
 
