@@ -7,11 +7,13 @@ advance Skill.current_version. It never creates or updates OrgSkillInstall rows.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.models import Skill
+from cubeplex.models import Skill, SkillVersion
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
 from cubeplex.skills.content_hash import compute_skill_version_hash
@@ -157,19 +159,53 @@ async def refresh_remote_catalog(
     for rel, data in files.items():
         await store.upload_file(skill_object_key(prefix, rel), data)
 
+    # Single transaction: never leave current_version pointing at a missing
+    # SkillVersion (update_current_version / versions.create each commit alone).
     skills = SkillRepository(session)
-    await skills.update_current_version(skill.id, version, fm.description, fm.keywords)
-    await versions.create(
-        skill_id=skill.id,
-        version=version,
-        description=fm.description,
-        keywords=fm.keywords,
-        raw_metadata=fm.raw_metadata,
-        storage_prefix=prefix,
-        entry_file="SKILL.md",
-        uploaded_by_user_id=actor_user_id,
-        content_hash=content_hash,
+    skill_row = await skills.get(skill.id)
+    if skill_row is None:
+        raise SkillRefreshError("skill disappeared", code="SKILL_NOT_FOUND")
+
+    skill_row.current_version = version
+    skill_row.description = fm.description
+    skill_row.keywords = fm.keywords
+    skill_row.updated_at = datetime.now(UTC)
+    session.add(
+        SkillVersion(
+            skill_id=skill.id,
+            version=version,
+            description=fm.description,
+            keywords=fm.keywords,
+            raw_metadata=fm.raw_metadata,
+            storage_prefix=prefix,
+            entry_file="SKILL.md",
+            uploaded_by_user_id=actor_user_id,
+            content_hash=content_hash,
+        )
     )
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Concurrent refresh won the (skill_id, version) race. If tip already
+        # has our content, treat as no-op; otherwise surface a controlled error.
+        await session.rollback()
+        refreshed = await skills.get(skill.id)
+        if refreshed is None:
+            raise SkillRefreshError("skill disappeared", code="SKILL_NOT_FOUND") from None
+        tip_now = await versions.find(refreshed.id, refreshed.current_version)
+        if tip_now is not None and tip_now.content_hash == content_hash:
+            return RefreshResult(
+                canonical_name=refreshed.name,
+                skill_id=refreshed.id,
+                previous_version=previous,
+                current_version=refreshed.current_version,
+                changed=False,
+                assigned_version=None,
+            )
+        raise SkillRefreshError(
+            "concurrent catalog update; retry",
+            code="REFRESH_CONFLICT",
+        ) from None
 
     return RefreshResult(
         canonical_name=skill.name,
