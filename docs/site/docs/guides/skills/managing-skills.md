@@ -56,13 +56,14 @@ Custom skills uploaded at the workspace level are workspace-private. To make a s
 
 ## Updating skills
 
-When a new version of a skill is available (for example, a remote registry publishes an update), the skill's install state shows **update available**. To update:
+Updates have two steps when the skill came from a remote registry:
 
-1. Open the skill's detail panel.
-2. Review the new version's description and content.
-3. Click **Install** (or **Update**, depending on context) to pull in the latest version.
+1. **Check for update** (workspace-private skills only) re-fetches the remote bundle into the **org catalog**. Your workspace install pin does not move yet.
+2. When the catalog is ahead of your install, the skill shows **update available**. For **workspace-private** skills, click **Upgrade to v…** to move your pin. For **org-wide** skills, only an org admin can upgrade the org install from **Admin > Skills**.
 
-The agent will use the updated version in subsequent conversations.
+If the skill was uploaded as a zip (not from a registry), there is no Check for update — a new version appears after someone uploads a newer package.
+
+The agent keeps using the installed version until an upgrade completes; later conversations pick up the new pin.
 
 ## Uninstalling skills
 

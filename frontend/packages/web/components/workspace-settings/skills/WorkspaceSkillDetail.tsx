@@ -5,12 +5,13 @@ import dynamic from 'next/dynamic'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Files, GitCompare, History } from 'lucide-react'
+import { ArrowUpCircle, FileText, Files, GitCompare, History, RefreshCw } from 'lucide-react'
 import {
   createApiClient,
   deleteWorkspaceSkill,
   formatSkillLabel,
   installWorkspaceSkill,
+  refreshSkill,
   toggleWorkspaceSkill,
   type SkillContent,
   type SkillVersionDetail,
@@ -410,7 +411,9 @@ function WorkspaceActions({
 }) {
   const t = useTranslations('wsSettings.skillDetail')
   const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
 
   function client() {
     const c = createApiClient('')
@@ -421,6 +424,7 @@ function WorkspaceActions({
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true)
     setError(null)
+    setNote(null)
     try {
       await action()
       onDone()
@@ -431,49 +435,105 @@ function WorkspaceActions({
     }
   }
 
+  const isPrivate = skill.workspaceState === 'workspace-private'
+  const isOrg = skill.workspaceState === 'org-enabled' || skill.workspaceState === 'org-disabled'
+  const canRefresh = isPrivate && Boolean(skill.imported_from_registry_id)
+  const canUpgradePrivate = isPrivate && skill.install_state === 'update_available'
+  const orgUpdateAvailable = isOrg && skill.install_state === 'update_available'
+
+  async function checkForUpdate(): Promise<void> {
+    setRefreshing(true)
+    setError(null)
+    setNote(null)
+    try {
+      const r = await refreshSkill(client(), wsId, skill.id)
+      if (r.changed) {
+        setNote(t('refreshFoundVersion', { version: r.assigned_version ?? r.current_version }))
+      } else {
+        setNote(t('refreshAlreadyLatest'))
+      }
+      onDone()
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {canRefresh && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || refreshing}
+            onClick={() => void checkForUpdate()}
+            data-testid="ws-skill-check-update-button"
+          >
+            <RefreshCw className={`size-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? t('refreshChecking') : t('checkForUpdate')}
+          </Button>
+        )}
+        {canUpgradePrivate && (
+          <Button
+            size="sm"
+            disabled={busy || refreshing}
+            onClick={() =>
+              void run(() => installWorkspaceSkill(client(), skill.id, skill.current_version))
+            }
+            data-testid="ws-skill-upgrade-button"
+          >
+            <ArrowUpCircle className="size-3.5" />
+            {busy ? t('actionUpgrading') : t('actionUpgrade', { version: skill.current_version })}
+          </Button>
+        )}
+        {skill.workspaceState === 'org-enabled' && skill.installId && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || refreshing}
+            onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, false))}
+          >
+            {busy ? t('actionDisabling') : t('actionDisable')}
+          </Button>
+        )}
+        {skill.workspaceState === 'org-disabled' && skill.installId && (
+          <Button
+            size="sm"
+            disabled={busy || refreshing}
+            onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, true))}
+          >
+            {busy ? t('actionEnabling') : t('actionEnable')}
+          </Button>
+        )}
+        {skill.workspaceState === 'workspace-private' && skill.installId && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || refreshing}
+            onClick={() => void run(() => deleteWorkspaceSkill(client(), skill.installId!))}
+          >
+            {busy ? t('actionRemoving') : t('actionRemove')}
+          </Button>
+        )}
+        {skill.workspaceState === 'available' && (
+          <Button
+            size="sm"
+            disabled={busy || refreshing}
+            onClick={() =>
+              void run(() => installWorkspaceSkill(client(), skill.id, skill.current_version))
+            }
+          >
+            {busy ? t('actionInstalling') : t('actionInstall')}
+          </Button>
+        )}
+      </div>
+      {orgUpdateAvailable && (
+        <p className="max-w-xs text-right text-xs text-muted-foreground">{t('orgUpdateHint')}</p>
+      )}
+      {note && <p className="max-w-xs text-right text-xs text-muted-foreground">{note}</p>}
       {error && <span className="text-xs text-destructive">{error}</span>}
-      {skill.workspaceState === 'org-enabled' && skill.installId && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, false))}
-        >
-          {busy ? t('actionDisabling') : t('actionDisable')}
-        </Button>
-      )}
-      {skill.workspaceState === 'org-disabled' && skill.installId && (
-        <Button
-          size="sm"
-          disabled={busy}
-          onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, true))}
-        >
-          {busy ? t('actionEnabling') : t('actionEnable')}
-        </Button>
-      )}
-      {skill.workspaceState === 'workspace-private' && skill.installId && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => void run(() => deleteWorkspaceSkill(client(), skill.installId!))}
-        >
-          {busy ? t('actionRemoving') : t('actionRemove')}
-        </Button>
-      )}
-      {skill.workspaceState === 'available' && (
-        <Button
-          size="sm"
-          disabled={busy}
-          onClick={() =>
-            void run(() => installWorkspaceSkill(client(), skill.id, skill.current_version))
-          }
-        >
-          {busy ? t('actionInstalling') : t('actionInstall')}
-        </Button>
-      )}
     </div>
   )
 }
@@ -523,6 +583,11 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
           >
             {t(STATE_KEY[skill.workspaceState])}
           </Badge>
+          {skill.install_state === 'update_available' && (
+            <Badge variant="outline" className="border-warning-border text-warning-fg">
+              {t('stateUpgradable')}
+            </Badge>
+          )}
           <div className="ml-auto">
             <WorkspaceActions wsId={wsId} skill={skill} onDone={onActionDone} />
           </div>

@@ -61,6 +61,16 @@ From **Admin > Skills** you control which skills exist in your organization and 
 
 Whether a specific workspace can use an org-installed skill is then a per-workspace toggle (managed by the workspace owner from the workspace **Skills** page, or by an admin from the skill's workspace-bindings view). Disabling a skill for a workspace hides it from the agent there; historical conversation output is unaffected.
 
+## Check for updates (remote registries)
+
+Skills imported from a registry keep a link to their source. **Refresh** and **upgrade** are separate steps:
+
+1. **Check for update** re-fetches the remote skill into the **org catalog** only. It never changes what workspaces are running.
+2. When the catalog tip is newer than the org install, the skill shows **update available**.
+3. **Upgrade to v…** moves the org install pointer to that catalog version. Agents start using it on later conversations.
+
+Only org admins can refresh and upgrade org-wide installs (**Admin > Skills**). Workspace members may refresh **workspace-private** registry skills from the workspace Skills page.
+
 ## Manage skill versions
 
 Each upload or registry import appends a new immutable version; older versions are never modified. When a newer version exists than the one your org installed, the skill shows **update available**.
