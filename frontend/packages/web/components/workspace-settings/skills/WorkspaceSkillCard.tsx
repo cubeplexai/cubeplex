@@ -1,6 +1,14 @@
 'use client'
 
-import { CheckCircle2, CircleSlash, Lock, Package, Plus, Sparkles } from 'lucide-react'
+import {
+  ArrowUpCircle,
+  CheckCircle2,
+  CircleSlash,
+  Lock,
+  Package,
+  Plus,
+  Sparkles,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { formatSkillLabel } from '@cubeplex/core'
@@ -50,8 +58,10 @@ function StateBadge({ state }: { state: WorkspaceSkillState }) {
 }
 
 export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCardProps) {
+  const t = useTranslations('wsSettings.skillCard')
   const SourceIcon = skill.source === 'preinstalled' ? Sparkles : Package
   const label = formatSkillLabel(skill.name)
+  const upgradable = skill.install_state === 'update_available'
   return (
     <button
       type="button"
@@ -78,6 +88,12 @@ export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCar
           {label.primary}
         </span>
         <StateBadge state={skill.workspaceState} />
+        {upgradable && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
+            <ArrowUpCircle className="size-3" />
+            {t('upgradable')}
+          </span>
+        )}
       </div>
       {skill.description && (
         <p className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
@@ -86,6 +102,9 @@ export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCar
         <span className="font-mono text-[10px] text-muted-foreground/80">
           v{skill.installed_version ?? skill.current_version}
         </span>
+        {upgradable && skill.installed_version && (
+          <span className="font-mono text-[10px] text-warning-fg">→ v{skill.current_version}</span>
+        )}
         {skill.keywords.slice(0, 2).map((kw) => (
           <Badge key={kw} variant="outline" className="px-1.5 text-[10px]">
             {kw}
