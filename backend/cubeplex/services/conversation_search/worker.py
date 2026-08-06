@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
+from typing import Any
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.config import config
@@ -11,11 +12,35 @@ from cubeplex.models.conversation_chunk import ConversationChunk
 from cubeplex.models.embedding_job import EmbeddingJob
 from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
 from cubeplex.repositories.embedding_job import EmbeddingJobRepository
-from cubeplex.services.conversation_search.chunker import MessageInput, chunk_messages
+from cubeplex.services.conversation_search.chunker import Chunk, MessageInput, chunk_messages
 from cubeplex.services.conversation_search.embedding import EmbeddingProvider
 from cubeplex.services.conversation_search.text_extract import extract_searchable_text
 
 logger = logging.getLogger(__name__)
+
+
+def build_chunks_for_messages(
+    messages: Sequence[Any],
+    *,
+    seq_lo: int,
+    seq_hi: int,
+    target_tokens: int,
+    overlap_tokens: int,
+) -> list[Chunk]:
+    """Sync extract + soft-window chunk. Safe to run in a worker thread.
+
+    Kept free of the event loop so long conversations cannot stall uvicorn
+    when many embedding jobs run under load.
+    """
+    inputs: list[MessageInput] = []
+    for idx, m in enumerate(messages):
+        seq = idx + 1
+        if not (seq_lo <= seq <= seq_hi):
+            continue
+        text = extract_searchable_text(m)
+        if text:
+            inputs.append(MessageInput(seq=seq, text=text))
+    return chunk_messages(inputs, target_tokens=target_tokens, overlap_tokens=overlap_tokens)
 
 
 class EmbeddingWorker:
@@ -91,29 +116,16 @@ class EmbeddingWorker:
             data = await cp.load(job.conversation_id)
         if data is None:
             return
-        # 2. Filter to (seq_lo, seq_hi) window.
-        #
-        # We use 1-based load-order as the seq. This matches what the
-        # frontend conversation page uses for its `#msg-N` anchors —
-        # both sides walk cubepi's `data.messages` in order. The seq
-        # is a navigation hint, not an authoritative cubepi reference.
-        # If cubepi ever starts filtering tombstones / system messages
-        # from `data.messages`, both sides shift together, anchors stay
-        # consistent.
-        in_window = [
-            (idx + 1, m)
-            for idx, m in enumerate(data.messages)
-            if job.seq_lo <= idx + 1 <= job.seq_hi
-        ]
-        # 3. Extract searchable text per message.
-        inputs: list[MessageInput] = []
-        for seq, m in in_window:
-            text = extract_searchable_text(m)
-            if text:
-                inputs.append(MessageInput(seq=seq, text=text))
-        # 4. Chunk.
-        chunks = chunk_messages(
-            inputs, target_tokens=self._target_tokens, overlap_tokens=self._overlap_tokens
+        # 2–4. Filter seq window, extract text, soft-chunk off the event loop.
+        # 1-based load-order seq matches the frontend `#msg-N` anchors (both
+        # walk cubepi's `data.messages` in order). Navigation hint only.
+        chunks = await asyncio.to_thread(
+            build_chunks_for_messages,
+            data.messages,
+            seq_lo=job.seq_lo,
+            seq_hi=job.seq_hi,
+            target_tokens=self._target_tokens,
+            overlap_tokens=self._overlap_tokens,
         )
         if not chunks:
             return
