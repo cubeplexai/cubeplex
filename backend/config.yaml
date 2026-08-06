@@ -431,6 +431,8 @@ default:
       batch_size: 32
       timeout_seconds: 30
     chunker:
+      # Soft size band via cubeplex.utils.tokens (CJK-aware char weights),
+      # not a model-native tokenizer. Good enough for embedding windows.
       target_tokens: 600
       overlap_tokens: 100
     worker:

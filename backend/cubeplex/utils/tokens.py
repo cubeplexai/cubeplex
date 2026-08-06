@@ -1,4 +1,4 @@
-"""Cheap token estimates for budgeting — CJK-aware, not for billing.
+"""Cheap CJK-aware token estimates — soft budgets and soft chunk windows.
 
 Real tokenizers (tiktoken, provider-native) differ a lot by language:
 
@@ -16,15 +16,17 @@ Rules of thumb used elsewhere in the industry:
 * CJK-heavy product traffic: plain ``len // 4`` **severely undercounts** Chinese
   (measured ~5× low on cl100k pure-ZH prose)
 
-This module is the **only** place cubeplex should hard-code char→token ratios
-for budget heuristics (memory injection caps, history tool output bounds, MCP
-tool-schema size gates). It deliberately **over-estimates slightly** so a
-budget that says "≤ N tokens" rarely overflows the real model.
+This module is the **only** place cubeplex hard-codes char→token ratios for:
 
-It is **not** a substitute for:
+* budget heuristics (memory injection, history tool output, MCP tool-schema size)
+* conversation-search chunk soft windows (embedding model tokenizer is not
+  fixed; cl100k was already an estimate and pulled a downloadable BPE)
 
-* provider ``usage`` fields (billing / compaction trigger)
-* tiktoken encode for embedding chunk windows that must match model BPE
+It deliberately **over-estimates slightly** so a budget that says "≤ N tokens"
+rarely overflows a real model. Chunk windows use the same weights so mid-size
+is language-aware without shipping a vocab file.
+
+Not a substitute for provider ``usage`` fields (billing / compaction trigger).
 
 cubepi still owns ``approx_tokens(messages)`` for compaction relative sizing;
 call sites that only have a ``str`` / JSON blob should import from here.
@@ -59,21 +61,24 @@ def _is_cjk_char(ch: str) -> bool:
     )
 
 
+def char_token_weight(ch: str) -> float:
+    """Fractional token weight of one Unicode character (same table as approx)."""
+    if not ch:
+        return 0.0
+    return _TOKENS_PER_CJK_CHAR if _is_cjk_char(ch[0]) else _TOKENS_PER_OTHER_CHAR
+
+
 def approx_tokens(text: str) -> int:
-    """Estimate tokens for a plain string (budgeting only).
+    """Estimate tokens for a plain string (soft budget / soft window only).
 
     Empty → 0. Non-empty → at least 1.
     """
     if not text:
         return 0
-    cjk = 0
-    other = 0
+    total = 0.0
     for ch in text:
-        if _is_cjk_char(ch):
-            cjk += 1
-        else:
-            other += 1
-    return max(1, math.ceil(cjk * _TOKENS_PER_CJK_CHAR + other * _TOKENS_PER_OTHER_CHAR))
+        total += char_token_weight(ch)
+    return max(1, math.ceil(total))
 
 
 def approx_tokens_of(value: Any) -> int:

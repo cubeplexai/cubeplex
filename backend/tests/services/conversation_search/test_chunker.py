@@ -1,20 +1,9 @@
-import cubeplex.services.conversation_search.chunker as chunker_mod
 from cubeplex.services.conversation_search.chunker import Chunk, MessageInput, chunk_messages
+from cubeplex.utils.tokens import approx_tokens
 
 
 def _msg(seq: int, text: str) -> MessageInput:
     return MessageInput(seq=seq, text=text)
-
-
-def test_import_does_not_eagerly_load_tiktoken_encoding() -> None:
-    """Module import must not call get_encoding (can block on HTTP download)."""
-    # _encoding is an lru_cache; cache_info hits stay 0 until first chunk_messages.
-    chunker_mod._encoding.cache_clear()
-    info = chunker_mod._encoding.cache_info()
-    assert info.hits == 0
-    assert info.misses == 0
-    # Import path already ran; the contract is: no cache fill until use.
-    assert chunker_mod._encoding.cache_info().currsize == 0
 
 
 def test_single_short_message_one_chunk() -> None:
@@ -27,7 +16,8 @@ def test_single_short_message_one_chunk() -> None:
 
 
 def test_long_corpus_creates_multiple_chunks_with_overlap() -> None:
-    long_word = "word " * 800  # ~800 tokens
+    # Soft estimate ~0.3 tok/char for ASCII → need enough chars for ≥3 windows.
+    long_word = "word " * 2000
     msgs = [_msg(1, long_word)]
     chunks = chunk_messages(msgs, target_tokens=200, overlap_tokens=50)
     assert len(chunks) >= 3
@@ -35,6 +25,17 @@ def test_long_corpus_creates_multiple_chunks_with_overlap() -> None:
     assert chunks[-1].chunk_seq == len(chunks) - 1
     for a, b in zip(chunks, chunks[1:], strict=False):
         assert any(w in b.text for w in a.text.split()[-10:])
+
+
+def test_chunk_soft_size_near_target() -> None:
+    """Each non-final chunk should land near the soft target, not explode."""
+    text = "hello world " * 500
+    chunks = chunk_messages([_msg(1, text)], target_tokens=200, overlap_tokens=50)
+    assert len(chunks) >= 2
+    for c in chunks[:-1]:
+        est = approx_tokens(c.text)
+        # Soft window: allow generous band around target.
+        assert 80 <= est <= 320, est
 
 
 def test_empty_messages_yields_no_chunks() -> None:
@@ -48,3 +49,13 @@ def test_seq_range_tracks_messages_in_chunk() -> None:
     assert len(chunks) == 1
     assert chunks[0].seq_lo == 1
     assert chunks[0].seq_hi == 3
+
+
+def test_chinese_gets_smaller_char_windows_than_english() -> None:
+    """Same soft target: CJK weight is higher → fewer chars per chunk."""
+    en = "a" * 2000
+    zh = "中" * 2000
+    en_chunks = chunk_messages([_msg(1, en)], target_tokens=200, overlap_tokens=0)
+    zh_chunks = chunk_messages([_msg(1, zh)], target_tokens=200, overlap_tokens=0)
+    assert len(zh_chunks) > len(en_chunks)
+    assert len(zh_chunks[0].text) < len(en_chunks[0].text)
