@@ -200,7 +200,7 @@ def test_render_pinned_order_is_deterministic_regardless_of_input_order() -> Non
 
 
 def test_select_pinned_respects_token_budget() -> None:
-    """Pinned selection stops before exceeding the char budget (budget * 4)."""
+    """Pinned selection stops before exceeding the CJK-aware token budget."""
     items = [
         _mk_item(
             type_=MemoryType.PREFERENCE,
@@ -210,8 +210,8 @@ def test_select_pinned_respects_token_budget() -> None:
         )
         for i in range(1, 20)
     ]
-    # token_budget=50 → char_budget=200; first item cost=200+80=280 > 200,
-    # but first item is always taken when selected is empty.
+    # ~60 tokens for content + structure overhead > 50; first item is always
+    # taken when selected is empty, second would exceed.
     selected = _select_pinned(items, token_budget=50, max_items=30)
     assert len(selected) == 1
 

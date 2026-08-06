@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from cubeplex.utils.tokens import approx_tokens_of, max_chars_for_token_budget
 
 _SENSITIVE_ARGUMENT_PARTS = ("secret", "token", "password", "authorization", "api_key")
 MIN_HISTORY_MAX_TOKENS = 256
@@ -35,8 +36,13 @@ class FormattedToolResult:
 
 
 def estimate_tokens(value: object) -> int:
-    """Return a deliberately cheap estimate suitable for output bounding."""
-    return max(1, len(json.dumps(value, ensure_ascii=False)) // 4)
+    """Return a deliberately cheap estimate suitable for output bounding.
+
+    Delegates to :func:`cubeplex.utils.tokens.approx_tokens_of` (CJK-aware).
+    Kept as a local name so history-formatter tests and capability docs can
+    keep saying ``estimate_tokens``.
+    """
+    return max(1, approx_tokens_of(value))
 
 
 def format_history_turns(
@@ -384,7 +390,7 @@ def _longest_prefix_that_fits(
             lower = middle
         else:
             upper = middle - 1
-    return _truncate_text(text[:lower], max(1, (lower + 3) // 4))
+    return _truncate_text(text[:lower], max(1, approx_tokens_of(text[:lower])))
 
 
 def _tool_result_payload(
@@ -436,11 +442,11 @@ def _truncate_tool_result_content(
             lower = middle
         else:
             upper = middle - 1
-    return _truncate_text(content[:lower], max(1, (lower + 3) // 4))
+    return _truncate_text(content[:lower], max(1, approx_tokens_of(content[:lower])))
 
 
 def _truncate_text(text: str, max_tokens: int) -> str:
-    max_chars = max(0, max_tokens * 4)
+    max_chars = max_chars_for_token_budget(max_tokens)
     if len(text) <= max_chars:
         return text
     if max_chars <= 3:
