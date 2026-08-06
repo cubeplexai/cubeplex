@@ -283,12 +283,12 @@ async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:
     for row in install_rows:
         if (row.org_id, row.skill_id) in tomb_pairs:
             continue
-        skill = skill_by_id.get(row.skill_id)
-        if skill is None:
+        matched = skill_by_id.get(row.skill_id)
+        if matched is None:
             continue
-        if row.installed_version == skill.current_version:
+        if row.installed_version == matched.current_version:
             continue
-        row.installed_version = skill.current_version
+        row.installed_version = matched.current_version
         advanced += 1
     if advanced:
         await db_session.flush()
