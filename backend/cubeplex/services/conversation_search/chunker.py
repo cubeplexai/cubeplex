@@ -1,10 +1,22 @@
 """Sliding-window chunker. Token counting via tiktoken cl100k_base."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from functools import lru_cache
 
 import tiktoken
 
-_ENC = tiktoken.get_encoding("cl100k_base")
+
+@lru_cache(maxsize=1)
+def _encoding() -> tiktoken.Encoding:
+    """Lazy-load cl100k_base.
+
+    tiktoken may download the BPE file on first use (sync HTTP). Doing that at
+    module import blocks the asyncio event loop during app lifespan and can
+    leave the API port unbound for tens of seconds (or until Ctrl-C fails).
+    """
+    return tiktoken.get_encoding("cl100k_base")
 
 
 @dataclass(frozen=True)
@@ -31,13 +43,14 @@ def chunk_messages(
     """
     if not messages or target_tokens <= 0:
         return []
+    enc = _encoding()
     tokens: list[int] = []
     token_seq: list[int] = []
-    space = _ENC.encode(" ")
+    space = enc.encode(" ")
     for m in messages:
         if not m.text:
             continue
-        encoded = _ENC.encode(m.text)
+        encoded = enc.encode(m.text)
         if not encoded:
             continue
         tokens.extend(encoded)
@@ -52,7 +65,7 @@ def chunk_messages(
     i = 0
     while i < len(tokens):
         j = min(i + target_tokens, len(tokens))
-        text = _ENC.decode(tokens[i:j])
+        text = enc.decode(tokens[i:j])
         seqs = token_seq[i:j]
         out.append(
             Chunk(
