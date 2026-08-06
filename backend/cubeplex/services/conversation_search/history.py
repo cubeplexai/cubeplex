@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from cubeplex.utils.tokens import approx_tokens_of, max_chars_for_token_budget
+from cubeplex.utils.tokens import approx_tokens_of
 
 _SENSITIVE_ARGUMENT_PARTS = ("secret", "token", "password", "authorization", "api_key")
 MIN_HISTORY_MAX_TOKENS = 256
@@ -390,7 +390,10 @@ def _longest_prefix_that_fits(
             lower = middle
         else:
             upper = middle - 1
-    return _truncate_text(text[:lower], max(1, approx_tokens_of(text[:lower])))
+    # Binary search already found the longest prefix under budget; do not
+    # re-cap via max_chars_for_token_budget (that assumes densest CJK and
+    # would silently shred English/mixed text that already fits).
+    return text[:lower]
 
 
 def _tool_result_payload(
@@ -442,13 +445,4 @@ def _truncate_tool_result_content(
             lower = middle
         else:
             upper = middle - 1
-    return _truncate_text(content[:lower], max(1, approx_tokens_of(content[:lower])))
-
-
-def _truncate_text(text: str, max_tokens: int) -> str:
-    max_chars = max_chars_for_token_budget(max_tokens)
-    if len(text) <= max_chars:
-        return text
-    if max_chars <= 3:
-        return text[:max_chars]
-    return f"{text[: max_chars - 3]}..."
+    return content[:lower]

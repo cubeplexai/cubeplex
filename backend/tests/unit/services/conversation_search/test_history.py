@@ -283,3 +283,50 @@ def test_long_tool_metadata_uses_a_bounded_reference_that_fetches_the_result() -
 
 def test_targeted_tool_result_returns_none_for_an_unknown_call() -> None:
     assert format_tool_result(MESSAGES, tool_call_id="missing", max_tokens=256) is None
+
+
+def test_english_tool_result_is_not_shredded_after_budget_prefix() -> None:
+    """Binary-search prefix must not be re-capped as densest CJK chars.
+
+    Regression: max_chars_for_token_budget(approx_tokens(prefix)) treated every
+    character as 1.3 tokens and discarded most English content that already fit.
+    """
+    body = "alpha beta gamma delta epsilon zeta eta theta " * 80
+    messages = [
+        {
+            "seq": 1,
+            "role": "user",
+            "content": [{"type": "text", "text": "q"}],
+        },
+        {
+            "seq": 2,
+            "role": "assistant",
+            "content": [{"type": "tool_call", "id": "call-en", "name": "read", "arguments": {}}],
+        },
+        {
+            "seq": 3,
+            "role": "tool_result",
+            "tool_call_id": "call-en",
+            "tool_name": "read",
+            "content": [{"type": "text", "text": body}],
+        },
+    ]
+    result = format_tool_result(messages, tool_call_id="call-en", max_tokens=256)
+    assert result is not None
+    assert result.truncated is True
+    # Soft English ~0.3 tok/char → a 256-token envelope still has hundreds of chars
+    # of body after metadata; CJK re-cap would leave only ~150–230 chars.
+    assert len(result.content) >= 400
+    assert (
+        estimate_tokens(
+            {
+                "tool_call_id": result.tool_call_id,
+                "tool_name": result.tool_name,
+                "content": result.content,
+                "is_error": result.is_error,
+                "estimated_tokens": result.estimated_tokens,
+                "truncated": result.truncated,
+            }
+        )
+        <= 256
+    )
