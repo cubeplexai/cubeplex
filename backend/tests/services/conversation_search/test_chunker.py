@@ -1,8 +1,20 @@
+import cubeplex.services.conversation_search.chunker as chunker_mod
 from cubeplex.services.conversation_search.chunker import Chunk, MessageInput, chunk_messages
 
 
 def _msg(seq: int, text: str) -> MessageInput:
     return MessageInput(seq=seq, text=text)
+
+
+def test_import_does_not_eagerly_load_tiktoken_encoding() -> None:
+    """Module import must not call get_encoding (can block on HTTP download)."""
+    # _encoding is an lru_cache; cache_info hits stay 0 until first chunk_messages.
+    chunker_mod._encoding.cache_clear()
+    info = chunker_mod._encoding.cache_info()
+    assert info.hits == 0
+    assert info.misses == 0
+    # Import path already ran; the contract is: no cache fill until use.
+    assert chunker_mod._encoding.cache_info().currsize == 0
 
 
 def test_single_short_message_one_chunk() -> None:

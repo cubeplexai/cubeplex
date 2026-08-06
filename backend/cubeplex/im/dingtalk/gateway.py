@@ -4,13 +4,49 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from typing import Any
+from urllib.parse import quote_plus
 
 import dingtalk_stream
 import httpx
+import websockets
 from loguru import logger
 
 from cubeplex.im.dingtalk.connector import DingtalkConnector
+
+
+async def stream_until_disconnect(client: dingtalk_stream.DingTalkStreamClient) -> None:
+    """Run one DingTalk stream session until disconnect or cancel.
+
+    ``dingtalk_stream.DingTalkStreamClient.start()`` catches
+    ``asyncio.CancelledError`` and reconnects forever, which prevents uvicorn
+    graceful shutdown (Ctrl-C hangs). We reimplement the connection body so
+    cancellation always propagates, and run the sync open-connection HTTP call
+    in a worker thread so it cannot block the event loop.
+    """
+    client.pre_start()
+    connection = await asyncio.to_thread(client.open_connection)
+    if not connection:
+        raise ConnectionError("dingtalk open_connection returned no endpoint")
+
+    logger.info("[DingTalk] stream endpoint ready")
+    uri = f"{connection['endpoint']}?ticket={quote_plus(connection['ticket'])}"
+    async with websockets.connect(uri) as websocket:
+        client.websocket = websocket
+        keepalive = asyncio.create_task(
+            client.keepalive(websocket),
+            name="dingtalk-keepalive",
+        )
+        try:
+            async for raw_message in websocket:
+                json_message = json.loads(raw_message)
+                asyncio.create_task(client.background_task(json_message))
+        finally:
+            keepalive.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await keepalive
+            client.websocket = None
 
 
 class DingtalkGateway:
@@ -77,7 +113,7 @@ class DingtalkGateway:
             backoff = 1.0
             while True:
                 try:
-                    await client.start()
+                    await stream_until_disconnect(client)
                 except asyncio.CancelledError:
                     return
                 except Exception:
@@ -280,22 +316,24 @@ class DingtalkGateway:
             lg.propagate = False
         if self._refresh_task is not None:
             self._refresh_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError, Exception):
                 await self._refresh_task
-            except (asyncio.CancelledError, Exception):
-                pass
         if self._client is not None:
             ws = getattr(self._client, "websocket", None)
             if ws is not None:
-                try:
+                with suppress(Exception):
                     await ws.close()
-                except Exception:
-                    pass
         if self._task is not None:
             self._task.cancel()
             try:
                 await asyncio.wait_for(self._task, timeout=5.0)
-            except (asyncio.CancelledError, TimeoutError, Exception):
+            except TimeoutError:
+                # Should be unreachable with stream_until_disconnect; re-cancel
+                # in case a future SDK path swallows cancellation again.
+                self._task.cancel()
+                with suppress(asyncio.CancelledError, TimeoutError, Exception):
+                    await asyncio.wait_for(self._task, timeout=2.0)
+            except (asyncio.CancelledError, Exception):
                 pass
         await self._shared_http.aclose()
         logger.info("[DingTalk] Gateway stopped for account {}", self._account.id)
