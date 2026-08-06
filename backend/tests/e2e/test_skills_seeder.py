@@ -426,9 +426,7 @@ async def test_tombstone_suppresses_workspace_private_preinstalled_install(
     )
     enabled = await catalog.list_enabled_for_workspace(workspace.id, org_id=org.id)
     assert all(r.skill_id != skill.id for r in enabled)
-    assert (
-        await catalog.find_enabled_by_name(workspace.id, org_id=org.id, name=skill_name) is None
-    )
+    assert await catalog.find_enabled_by_name(workspace.id, org_id=org.id, name=skill_name) is None
 
     # Reconcile purges the private orphan; pin is not advanced under tombstone.
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
