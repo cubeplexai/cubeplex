@@ -49,6 +49,7 @@ from cubeplex.models.memory import (
 )
 from cubeplex.prompts.memory import MEMORY_PROMPT_HEADER
 from cubeplex.repositories.memory import MemoryRepository
+from cubeplex.utils.tokens import DEFAULT_STRUCTURE_OVERHEAD_TOKENS, approx_tokens
 
 PINNED_TYPES = {MemoryType.PREFERENCE, MemoryType.CORRECTION}
 RELEVANCE_TYPES = {
@@ -58,7 +59,8 @@ RELEVANCE_TYPES = {
     MemoryType.ORG_POLICY,
 }
 
-# Pinned injection budget (preference + correction). Coarse char proxy: 4 chars ≈ 1 token.
+# Pinned injection budget (preference + correction). Token units via
+# cubeplex.utils.tokens (CJK-aware); not a raw char count.
 DEFAULT_PINNED_TOKEN_BUDGET = 1500
 DEFAULT_PINNED_MAX_ITEMS = 30
 
@@ -128,7 +130,7 @@ class MemoryMiddleware(Middleware):
             every LLM call) so callers that haven't wired the ref yet remain
             compatible.
         relevance_token_budget: Approximate token cap for the relevance
-            tier.  Coarse char-based proxy: ``budget * 4`` chars.
+            tier (CJK-aware via :func:`cubeplex.utils.tokens.approx_tokens`).
         pinned_token_budget: Approximate token cap for pinned
             (preference + correction) injection into the system prompt.
         pinned_max_items: Hard cap on pinned item count (after ranking).
@@ -293,13 +295,12 @@ async def compute_relevance_snapshot(
         )
     )
 
-    # Apply token budget — coarse char-based proxy (4 chars ≈ 1 token)
-    char_budget = relevance_token_budget * 4
+    # Token budget (CJK-aware); structure overhead covers XML-ish tags.
     selected: list[MemoryItem] = []
     used = 0
     for m in relevant:
-        cost = len(m.content) + 80  # tag overhead
-        if used + cost > char_budget:
+        cost = approx_tokens(m.content) + DEFAULT_STRUCTURE_OVERHEAD_TOKENS
+        if used + cost > relevance_token_budget:
             break
         selected.append(m)
         used += cost
@@ -342,14 +343,13 @@ def _select_pinned(
             -m.created_at.timestamp(),
         ),
     )
-    char_budget = token_budget * 4
     selected: list[MemoryItem] = []
     used = 0
     for m in ranked:
         if len(selected) >= max_items:
             break
-        cost = len(m.content) + 80
-        if selected and used + cost > char_budget:
+        cost = approx_tokens(m.content) + DEFAULT_STRUCTURE_OVERHEAD_TOKENS
+        if selected and used + cost > token_budget:
             break
         selected.append(m)
         used += cost

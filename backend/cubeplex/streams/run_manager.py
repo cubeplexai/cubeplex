@@ -2645,9 +2645,9 @@ class RunManager:
                     signer=self._app.state.mcp_user_token_signer,
                 )
 
-                import json as _json
+                from cubeplex.utils.tokens import approx_tokens_of as _approx_tokens_of
 
-                _total_tool_tokens = sum(len(_json.dumps(s.tools_cache)) // 4 for s in _mcp_specs)
+                _total_tool_tokens = sum(_approx_tokens_of(s.tools_cache) for s in _mcp_specs)
                 _mcp_ctx_window = int(_model_config.context_window or 0)
 
                 if disclosure_active(
