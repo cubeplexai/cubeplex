@@ -37,6 +37,15 @@ CubePlex is a cloud-native AI agent workspace for teams. Chat across models,
 install skills, keep shared memory, connect MCP tools, automate runs, and
 govern team access — self-hosted on Docker Compose or Kubernetes.
 
+<p align="center">
+  <img src="docs/site/static/img/architecture/cubeplex-overview.svg" alt="CubePlex architecture: clients, the application and agent runtime, workspace sandboxes, external services, and persistent infrastructure" width="100%" />
+</p>
+
+The diagram reflects the current application architecture. Workspace sandboxes
+are isolated execution environments with persistent working state; external
+model providers, MCP servers, and IM platforms remain outside CubePlex's trust
+boundary.
+
 ## Features
 
 | Area | What you get |

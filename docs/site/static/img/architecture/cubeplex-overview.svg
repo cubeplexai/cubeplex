@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1170" role="img" aria-labelledby="title desc">
+  <title id="title">CubePlex architecture overview</title>
+  <desc id="desc">Web and IM clients connect to the CubePlex application and CubePi agent runtime. The runtime uses skills, memory, MCP tools, automations, artifacts, workspace sandboxes, model providers, MCP servers, and persistent infrastructure.</desc>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#27272a" stroke-width=".7"/></pattern>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7Z" fill="#6a83e3"/></marker>
+    <marker id="arrow-gray" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7Z" fill="#71717a"/></marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .title { fill:#f4f4f5; font-size:32px; font-weight:700; letter-spacing:-.6px; }
+      .subtitle { fill:#a1a1aa; font-size:16px; }
+      .section { fill:#93a6ec; font-size:13px; font-weight:650; letter-spacing:.8px; }
+      .panel { fill:#0a0a0b; stroke:#3f3f46; stroke-width:1.3; }
+      .box { fill:#101014; stroke:#52525b; stroke-width:1.25; }
+      .key { fill:#14213d; stroke:#6a83e3; stroke-width:1.7; }
+      .sandbox { fill:#0c2f28; stroke:#34d399; stroke-width:1.7; }
+      .infra { fill:#18181b; stroke:#52525b; stroke-width:1.2; }
+      .name { fill:#f4f4f5; font-weight:650; }
+      .sub { fill:#a1a1aa; font-size:12px; }
+      .tiny { fill:#71717a; font-size:10.5px; }
+      .label { fill:#93a6ec; font-size:11px; font-weight:600; }
+      .line-blue { fill:none; stroke:#6a83e3; stroke-width:1.9; marker-end:url(#arrow-blue); stroke-linejoin:round; }
+      .line-gray { fill:none; stroke:#71717a; stroke-width:1.45; marker-end:url(#arrow-gray); stroke-linejoin:round; }
+      .line-dashed { fill:none; stroke:#6a83e3; stroke-width:1.45; stroke-dasharray:5 5; marker-end:url(#arrow-blue); stroke-linejoin:round; }
+    </style>
+  </defs>
+  <rect width="1800" height="1170" fill="#18181b"/>
+  <rect width="1800" height="1170" fill="url(#grid)"/>
+
+  <text x="58" y="62" class="title">CubePlex architecture</text>
+  <text x="58" y="92" class="subtitle">A cloud-native agent workspace: governed collaboration, agent execution, and isolated workspaces.</text>
+
+  <rect x="48" y="230" width="370" height="258" rx="14" class="panel"/>
+  <text x="76" y="262" class="section">TEAM ENTRY POINTS</text>
+  <rect x="76" y="293" width="314" height="68" rx="9" class="box"/>
+    <text x="233" y="322" text-anchor="middle" class="name" style="font-size:17px">Web workspace</text>
+    <text x="233" y="344" text-anchor="middle" class="sub">Next.js · chat · settings · artifacts</text>
+
+  <rect x="76" y="390" width="314" height="68" rx="9" class="box"/>
+    <text x="233" y="419" text-anchor="middle" class="name" style="font-size:17px">IM bridges</text>
+    <text x="233" y="441" text-anchor="middle" class="sub">Slack · Discord · Teams · Feishu · DingTalk</text>
+
+
+  <rect x="472" y="132" width="842" height="705" rx="14" class="panel"/>
+  <text x="502" y="164" class="section">CUBEPLEX APPLICATION</text>
+  <rect x="502" y="194" width="782" height="76" rx="9" class="key"/>
+    <text x="893" y="227" text-anchor="middle" class="name" style="font-size:19px">Organization, workspace, and access governance</text>
+    <text x="893" y="249" text-anchor="middle" class="sub">memberships · roles · model policy · workspace-scoped APIs</text>
+
+  <rect x="502" y="311" width="782" height="108" rx="9" class="key"/>
+    <text x="893" y="341" text-anchor="middle" class="name" style="font-size:20px">FastAPI + CubePi agent runtime</text>
+    <text x="893" y="363" text-anchor="middle" class="sub">streaming conversation runs · tool orchestration · approvals · checkpoints</text>
+    <text x="893" y="384" text-anchor="middle" class="tiny mono">SSE API · provider routing · policy enforcement</text>
+
+  <text x="502" y="465" class="section">RUNTIME CAPABILITIES</text>
+  <rect x="502" y="493" width="182" height="95" rx="9" class="box"/>
+    <text x="593" y="523" text-anchor="middle" class="name" style="font-size:17px">Skills</text>
+    <text x="593" y="545" text-anchor="middle" class="sub">packaged workflows</text>
+    <text x="593" y="566" text-anchor="middle" class="tiny mono">built-in · uploaded · registry</text>
+  <rect x="702" y="493" width="182" height="95" rx="9" class="box"/>
+    <text x="793" y="523" text-anchor="middle" class="name" style="font-size:17px">Memory</text>
+    <text x="793" y="545" text-anchor="middle" class="sub">personal · workspace · org</text>
+    <text x="793" y="566" text-anchor="middle" class="tiny mono">pinned + relevance snapshots</text>
+  <rect x="902" y="493" width="182" height="95" rx="9" class="box"/>
+    <text x="993" y="523" text-anchor="middle" class="name" style="font-size:15px">Automation + artifacts</text>
+    <text x="993" y="545" text-anchor="middle" class="sub">schedules · webhooks · outputs</text>
+    <text x="993" y="566" text-anchor="middle" class="tiny mono">versioned files and previews</text>
+  <rect x="1102" y="493" width="182" height="95" rx="9" class="box"/>
+    <text x="1193" y="523" text-anchor="middle" class="name" style="font-size:17px">MCP catalog</text>
+    <text x="1193" y="545" text-anchor="middle" class="sub">tool discovery · OAuth</text>
+    <text x="1193" y="566" text-anchor="middle" class="tiny mono">scoped credential grants</text>
+
+  <rect x="502" y="643" width="782" height="160" rx="11" class="sandbox"/>
+  <text x="526" y="673" class="section" fill="#6ee7b7">WORKSPACE SANDBOX</text>
+  <rect x="528" y="698" width="228" height="75" rx="9" class="sandbox"/>
+    <text x="642" y="730.5" text-anchor="middle" class="name" style="font-size:17px">Isolated runtime</text>
+    <text x="642" y="752.5" text-anchor="middle" class="sub">shell · files · browser</text>
+
+  <rect x="779" y="698" width="228" height="75" rx="9" class="sandbox"/>
+    <text x="893" y="730.5" text-anchor="middle" class="name" style="font-size:17px">Persistent workspace</text>
+    <text x="893" y="752.5" text-anchor="middle" class="sub">working tree · packages · files</text>
+
+  <rect x="1030" y="698" width="228" height="75" rx="9" class="sandbox"/>
+    <text x="1144" y="730.5" text-anchor="middle" class="name" style="font-size:17px">Task-scoped access</text>
+    <text x="1144" y="752.5" text-anchor="middle" class="sub">network · env · command policy</text>
+
+
+  <rect x="1368" y="132" width="384" height="705" rx="14" class="panel"/>
+  <text x="1396" y="164" class="section">EXTERNAL SYSTEMS</text>
+  <rect x="1396" y="195" width="328" height="68" rx="9" class="box"/>
+    <text x="1560" y="224" text-anchor="middle" class="name" style="font-size:17px">IM platforms</text>
+    <text x="1560" y="246" text-anchor="middle" class="sub">message events and responses</text>
+
+  <rect x="1396" y="318" width="328" height="68" rx="9" class="box"/>
+    <text x="1560" y="347" text-anchor="middle" class="name" style="font-size:17px">Model providers</text>
+    <text x="1560" y="369" text-anchor="middle" class="sub">hosted and custom model APIs</text>
+
+  <rect x="1396" y="441" width="328" height="68" rx="9" class="box"/>
+    <text x="1560" y="470" text-anchor="middle" class="name" style="font-size:17px">Remote MCP servers</text>
+    <text x="1560" y="492" text-anchor="middle" class="sub">tools and connected services</text>
+
+  <rect x="1396" y="643" width="328" height="160" rx="9" class="sandbox"/>
+    <text x="1560" y="673" text-anchor="middle" class="name" style="font-size:17px">OpenSandbox service</text>
+    <text x="1560" y="695" text-anchor="middle" class="sub">remote sandbox control plane</text>
+    <text x="1560" y="716" text-anchor="middle" class="tiny mono">Docker or Kubernetes execution</text>
+
+  <path d="M390 327H446V399H502" class="line-blue"/>
+  <path d="M390 424H446V399H502" class="line-blue"/>
+  <text x="446" y="387" text-anchor="middle" class="label">requests</text>
+  <path d="M893 270V311" class="line-blue"/>
+  <path d="M593 419V493" class="line-gray"/>
+  <path d="M793 419V493" class="line-gray"/>
+  <path d="M993 419V493" class="line-gray"/>
+  <path d="M1193 419V493" class="line-gray"/>
+  <path d="M893 419V643" class="line-blue"/>
+  <text x="910" y="627" text-anchor="middle" class="label">tool execution</text>
+  <path d="M1396 229H1328V384H1284" class="line-gray"/>
+  <text x="1328" y="372" text-anchor="middle" class="label">events</text>
+  <path d="M1284 399H1360V352H1396" class="line-blue"/>
+  <text x="1360" y="339" text-anchor="middle" class="label">model calls</text>
+  <path d="M1284 540H1330V475H1396" class="line-dashed"/>
+  <text x="1307" y="527" text-anchor="middle" class="label">MCP tools</text>
+  <path d="M1284 723H1396" class="line-blue"/>
+  <text x="1340" y="710" text-anchor="middle" class="label">sandbox API</text>
+
+  <rect x="472" y="890" width="1280" height="200" rx="14" class="panel"/>
+  <text x="502" y="922" class="section">PERSISTENCE AND DEPLOYMENT</text>
+  <rect x="502" y="954" width="220" height="96" rx="9" class="infra"/>
+    <text x="612" y="984" text-anchor="middle" class="name" style="font-size:17px">PostgreSQL</text>
+    <text x="612" y="1006" text-anchor="middle" class="sub">organizations · conversations · state</text>
+    <text x="612" y="1027" text-anchor="middle" class="tiny mono">CubePi checkpoints · governance</text>
+  <rect x="742" y="954" width="220" height="96" rx="9" class="infra"/>
+    <text x="852" y="984" text-anchor="middle" class="name" style="font-size:17px">Redis</text>
+    <text x="852" y="1006" text-anchor="middle" class="sub">coordination · caches · queues</text>
+    <text x="852" y="1027" text-anchor="middle" class="tiny mono">OAuth and active-run state</text>
+  <rect x="982" y="954" width="220" height="96" rx="9" class="infra"/>
+    <text x="1092" y="984" text-anchor="middle" class="name" style="font-size:17px">S3-compatible storage</text>
+    <text x="1092" y="1006" text-anchor="middle" class="sub">attachments · artifacts · skills</text>
+    <text x="1092" y="1027" text-anchor="middle" class="tiny mono">RustFS in Docker Compose</text>
+  <rect x="1222" y="954" width="502" height="96" rx="9" class="key"/>
+    <text x="1473" y="997" text-anchor="middle" class="name" style="font-size:17px">Deploy on Docker Compose or Kubernetes with Helm</text>
+    <text x="1473" y="1019" text-anchor="middle" class="sub">the same frontend and backend images; optional OpenSandbox integration</text>
+
+  <path d="M612 837V954" class="line-gray"/>
+  <path d="M852 837V954" class="line-gray"/>
+  <path d="M1092 837V954" class="line-gray"/>
+</svg>
