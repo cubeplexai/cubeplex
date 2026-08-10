@@ -56,6 +56,20 @@ class OutboundOp:
     final: bool = False
 
 
+def _label_for_option(pending: Any, answer_key: str, value: str) -> str:
+    """Map a machine answer value back to a human label when we have one."""
+    for lbl, val, _ in pending.choices:
+        if val == value:
+            return str(lbl)
+    for field in getattr(pending, "fields", None) or []:
+        if field.key != answer_key:
+            continue
+        for lbl, val in field.options:
+            if val == value:
+                return str(lbl)
+    return value or "answered"
+
+
 def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> OutboundOp | None:
     """Fold one cubepi run event into ``state.card_state``.
 
@@ -253,64 +267,88 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return None
 
     if etype == "ask_user_request":
-        from cubeplex.im.card_model import PendingInput
+        from cubeplex.im.card_model import AskFormField, PendingInput
 
         question_id = str(data.get("question_id") or "")
         questions_list = data.get("questions") or []
-        if questions_list and isinstance(questions_list, list):
-            first = questions_list[0] if isinstance(questions_list[0], dict) else {}
-        else:
-            first = {}
+        if not isinstance(questions_list, list):
+            questions_list = []
+
+        # Project every question into AskFormField so form-capable platforms
+        # (Feishu) can collect multi-select / free-text / multi-question in
+        # one submit. Button-only platforms still use ``choices`` below.
+        fields: list[AskFormField] = []
+        for q in questions_list:
+            if not isinstance(q, dict):
+                continue
+            key = str(q.get("key") or "")
+            if not key:
+                continue
+            q_prompt = str(q.get("prompt") or "")
+            multi_select = bool(q.get("multi_select"))
+            required = bool(q.get("required", True))
+            raw_opts = q.get("options") or []
+            options: list[tuple[str, str]] = []
+            if isinstance(raw_opts, list):
+                for opt in raw_opts:
+                    if isinstance(opt, str) and opt:
+                        options.append((opt, opt))
+                    elif isinstance(opt, dict):
+                        value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
+                        label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
+                        if value:
+                            options.append((label, value))
+            if multi_select and options:
+                kind: Literal["single_select", "multi_select", "input"] = "multi_select"
+            elif options:
+                kind = "single_select"
+            else:
+                kind = "input"
+            fields.append(
+                AskFormField(
+                    key=key,
+                    prompt=q_prompt,
+                    kind=kind,
+                    options=options,
+                    required=required,
+                )
+            )
+
+        first = questions_list[0] if questions_list and isinstance(questions_list[0], dict) else {}
         prompt = str(first.get("prompt") or "")
-        more = len(questions_list) - 1 if len(questions_list) > 1 else 0
+        more = len(fields) - 1 if len(fields) > 1 else 0
         if more > 0:
             prompt = f"{prompt}\n\n_(+{more} more question{'s' if more > 1 else ''})_"
-        # cubepi expects the answer dict keyed by `questions[*].key`. v1
-        # captures questions[0].key so the resume path can rebuild the
-        # right shape; multi-question forms fall back to questions[0].
+        # Button path still keys the single-choice resume on questions[0].key.
         answer_key = str(first.get("key") or "") or None
-        raw_options = first.get("options") or []
-        # Each choice is (label, value, button_type):
-        # - label is what the user reads on the button (option's ``label``)
-        # - value is what cubepi receives back in the answer dict (option's
-        #   ``value`` — falling back to ``key`` for legacy fixtures, then
-        #   ``label`` if neither is set)
-        # - button_type is the Feishu styling hint
-        # Keeping label and value separate matters for {label:"Yes", value:"yes"}
-        # — sending "Yes" back would mismatch cubepi's schema.
+
+        # One-click buttons only work for a single single-select question.
+        # multi_select needs a list; free-text needs an input; multi-question
+        # needs every key filled. Those go through the form path (Feishu) or
+        # the web-client notice (other IM platforms).
         choices: list[tuple[str, str, str]] = []
-        # multi_select=True questions need a list answer; a single Feishu card
-        # button can only ship one scalar. The free-form fallback below
-        # already routes to the web client — reuse it by skipping option
-        # parsing so the renderer shows the notice instead of buttons that
-        # would only send one of the N required selections.
-        multi_select = bool(first.get("multi_select"))
-        # Multi-QUESTION forms (questions list has 2+ entries) also can't be
-        # answered via a single button row: the click would submit only
-        # questions[0]'s answer and cubepi would reject or mis-resume the
-        # incomplete form. Treat like free-form / multi-select and route to
-        # the web client.
-        multi_question = len(questions_list) > 1
-        if isinstance(raw_options, list) and not multi_select and not multi_question:
-            for opt in raw_options:
-                if isinstance(opt, str) and opt:
-                    # Bare-string options collapse: the same string is both
-                    # the human label and the schema value.
-                    choices.append((opt, opt, "default"))
-                elif isinstance(opt, dict):
-                    value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
-                    label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
-                    btn_type = str(opt.get("type") or "default")
-                    if value:
-                        choices.append((label, value, btn_type))
-        # Free-form (no options) and multi-select questions cannot be answered
-        # via a single card button. The old "OK" fallback was misleading: clicking
-        # it sent ``{key: "ok"}`` which cubepi either rejected as a schema
-        # mismatch or silently treated as the wrong value for a path/filename/date
-        # prompt. v1 doesn't render text input via CardKit; append a notice and
-        # leave ``choices`` empty so the renderer surfaces the "(等待响应)" hint
-        # instead of a bogus button. The user answers through the web client.
+        simple_button = (
+            len(fields) == 1 and fields[0].kind == "single_select" and bool(fields[0].options)
+        )
+        if simple_button:
+            raw_options = first.get("options") or []
+            if isinstance(raw_options, list):
+                for opt in raw_options:
+                    if isinstance(opt, str) and opt:
+                        choices.append((opt, opt, "default"))
+                    elif isinstance(opt, dict):
+                        value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
+                        label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
+                        btn_type = str(opt.get("type") or "default")
+                        if value:
+                            choices.append((label, value, btn_type))
+
+        # Non-form platforms still show a web-client notice when buttons
+        # can't complete the form. Feishu's form renderer uses ``fields``
+        # and ignores this notice text.
         if not choices:
+            multi_question = len(fields) > 1
+            multi_select = any(f.kind == "multi_select" for f in fields)
             if multi_question:
                 notice = "_(此问需多题作答，请在 CubePlex 网页端继续。)_"
             elif multi_select:
@@ -318,11 +356,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             else:
                 notice = "_(此问题需要文本输入；请在 CubePlex 网页端继续。)_"
             prompt = f"{prompt}\n\n{notice}" if prompt else notice
+
         state.card_state.pending_input = PendingInput(
             kind="ask_user",
             run_id=state.run_id,
             question=prompt,
             choices=choices,
+            fields=fields,
             question_id=question_id,
             answer_key=answer_key,
         )
@@ -362,15 +402,22 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         elif etype == "sandbox_confirm_resolved":
             resolved = str(data.get("decision") or "")
         else:
-            # data["answers"] is {answer_key: machine_value} — look up the
-            # human-readable label so the receipt shows what the user chose.
+            # data["answers"] is {answer_key: machine_value} (or multi-key for
+            # form submits). Prefer human labels from choices / fields.
             answers = data.get("answers") or {}
-            chosen_value = next(iter(answers.values()), "") if isinstance(answers, dict) else ""
-            label = next(
-                (lbl for lbl, val, _ in pending.choices if val == chosen_value),
-                chosen_value or "answered",
-            )
-            resolved = label
+            if isinstance(answers, dict) and answers:
+                parts: list[str] = []
+                for akey, aval in answers.items():
+                    if isinstance(aval, list):
+                        labels = [_label_for_option(pending, akey, str(v)) for v in aval]
+                        parts.append(", ".join(labels) if labels else str(aval))
+                    else:
+                        parts.append(_label_for_option(pending, akey, str(aval)))
+                resolved = (
+                    "; ".join(parts) if len(parts) > 1 else (parts[0] if parts else "answered")
+                )
+            else:
+                resolved = "answered"
         pending.resolved_choice = resolved
         state.card_state.hitl_resolved = True
         state.last_patch_monotonic = now

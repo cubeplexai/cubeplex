@@ -113,6 +113,37 @@ async def test_resume_paused_run_ask_user_passes_choice_dict(
 
 
 @pytest.mark.asyncio
+async def test_resume_paused_run_ask_user_passes_full_answers_dict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Form submit path: resume with the full answers dict from form_value."""
+    from cubeplex.im import resume as resume_mod
+
+    seen: list[dict[str, Any]] = []
+
+    class _FakeRunManager:
+        async def resume_run_with_answer(self, **kwargs: Any) -> str:
+            seen.append(kwargs)
+            return "new_run_xyz"
+
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
+
+    monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
+    answers = {"k1": "yes", "k2": "hello", "tags": ["a", "b"]}
+    ok = await resume_mod.resume_paused_run(
+        run_id="run_1",
+        input_kind="ask_user",
+        choice="",
+        operator_open_id="ou_x",
+        question_id="q_1",
+        answers=answers,
+        run_manager=_FakeRunManager(),
+    )
+    assert ok is True
+    assert seen[0]["answer"] == answers
+
+
 async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answer_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
