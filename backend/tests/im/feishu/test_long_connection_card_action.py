@@ -83,6 +83,58 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
 
 
 @pytest.mark.asyncio
+async def test_lc_handler_forwards_form_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Form submit callbacks put answers in action.form_value, not choice.
+
+    The LC shim must forward form_value or parse_action_payload rejects the
+    submit as ``missing run_id or choice`` (value has run_id + form marker
+    but no choice).
+    """
+    from cubeplex.im.feishu import long_connection as lc
+
+    seen: list[dict[str, Any]] = []
+
+    async def fake_handler(
+        envelope: dict[str, Any], *, run_manager: Any = None, redis_key_prefix: str = ""
+    ) -> tuple[bool, str | None]:
+        seen.append(envelope)
+        return True, None
+
+    monkeypatch.setattr(lc, "_handle_card_action", fake_handler)
+
+    class _Op:
+        open_id = "ou_user_1"
+
+    class _Action:
+        value = {
+            "action": "ask_user",
+            "run_id": "run_1",
+            "question_id": "q_form",
+            "form": True,
+        }
+        form_value = {"name": "alice", "tags": ["a", "b"]}
+        name = "ask_user_submit"
+        tag = "button"
+
+    class _Data:
+        operator = _Op()
+        token = "tok_form"
+        action = _Action()
+
+    class _Event:
+        event = _Data()
+
+    await lc._lc_handle_card_action(_Event(), run_manager=None, redis_key_prefix="cubeplex-dev")
+    action = seen[0]["event"]["action"]
+    assert action["value"]["run_id"] == "run_1"
+    assert action["form_value"] == {"name": "alice", "tags": ["a", "b"]}
+    assert action["name"] == "ask_user_submit"
+    assert "choice" not in action["value"]
+
+
+@pytest.mark.asyncio
 async def test_lc_handler_carries_toast_when_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
