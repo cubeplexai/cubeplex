@@ -92,6 +92,60 @@ def _install_graceful_shutdown_receiver(
     client._receive_message_loop = MethodType(_receive_message_loop, client)
 
 
+def _as_plain_dict(raw: Any) -> dict[str, Any]:
+    """Coerce an SDK object / Mapping into a plain dict of JSON-ish values."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    # lark_oapi models sometimes expose a to_dict / __dict__ of fields.
+    to_dict = getattr(raw, "to_dict", None)
+    if callable(to_dict):
+        try:
+            out = to_dict()
+            if isinstance(out, dict):
+                return dict(out)
+        except Exception:
+            pass
+    items = getattr(raw, "items", None)
+    if callable(items):
+        try:
+            return {str(k): v for k, v in items()}
+        except Exception:
+            pass
+    as_dict = getattr(raw, "__dict__", None)
+    if isinstance(as_dict, dict) and as_dict:
+        return {
+            str(k): v for k, v in as_dict.items() if not str(k).startswith("_") and v is not None
+        }
+    return {}
+
+
+def _action_to_dict(action: Any) -> dict[str, Any]:
+    """Project the SDK action object into the webhook-shaped action dict.
+
+    Button clicks only need ``value``. Form submits also carry
+    ``form_value`` (the filled fields keyed by form item ``name``). The
+    previous shim only forwarded ``value``, so multi-question / input
+    submits hit parse_action_payload as ``missing run_id or choice``
+    (run_id present, choice empty, form_value dropped).
+    """
+    out: dict[str, Any] = {"value": _as_plain_dict(getattr(action, "value", None))}
+    form_value = getattr(action, "form_value", None)
+    if form_value is None and isinstance(action, dict):
+        form_value = action.get("form_value")
+    fv = _as_plain_dict(form_value) if form_value is not None else {}
+    if fv:
+        out["form_value"] = fv
+    for attr in ("tag", "name"):
+        val = getattr(action, attr, None)
+        if val is None and isinstance(action, dict):
+            val = action.get(attr)
+        if val is not None and val != "":
+            out[attr] = str(val)
+    return out
+
+
 async def _lc_handle_card_action(event: Any, *, run_manager: Any, redis_key_prefix: str) -> Any:
     """Glue: convert the SDK's P2CardActionTrigger event into the dict
     envelope that ``_handle_card_action`` (the webhook ingress) accepts,
@@ -132,11 +186,7 @@ async def _lc_handle_card_action(event: Any, *, run_manager: Any, redis_key_pref
                     if operator is not None
                     else {}
                 ),
-                "action": (
-                    {"value": dict(getattr(action, "value", {}) or {})}
-                    if action is not None
-                    else {}
-                ),
+                "action": _action_to_dict(action) if action is not None else {},
             },
         }
 
