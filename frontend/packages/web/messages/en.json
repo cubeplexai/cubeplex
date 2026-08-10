@@ -432,6 +432,13 @@
     },
     "copy": "Copy",
     "copied": "Copied",
+    "runInfo": {
+      "label": "Info",
+      "ariaLabel": "Run info",
+      "runIdLabel": "Run ID",
+      "copy": "Copy run ID",
+      "copied": "Copied"
+    },
     "time": {
       "justNow": "just now",
       "minutesAgo": "{n}m ago",
