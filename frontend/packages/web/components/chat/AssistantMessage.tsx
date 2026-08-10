@@ -25,6 +25,7 @@ import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { MessageActions } from './MessageActions'
 import { CopyButton, TimeChip } from './MessageMeta'
+import { RunInfoChip } from './RunInfoChip'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
@@ -712,6 +713,7 @@ export function AssistantMessage({
               {isLastRun && workspaceId && (
                 <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
               )}
+              <RunInfoChip runId={message.run_id} />
               <MessageActions
                 conversationId={conversationId}
                 workspaceId={workspaceId ?? null}

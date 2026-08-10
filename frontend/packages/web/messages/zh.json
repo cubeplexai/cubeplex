@@ -432,6 +432,13 @@
     },
     "copy": "复制",
     "copied": "已复制",
+    "runInfo": {
+      "label": "信息",
+      "ariaLabel": "本轮运行信息",
+      "runIdLabel": "Run ID",
+      "copy": "复制 Run ID",
+      "copied": "已复制"
+    },
     "time": {
       "justNow": "刚刚",
       "minutesAgo": "{n} 分钟前",
