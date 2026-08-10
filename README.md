@@ -41,7 +41,8 @@ govern team access — self-hosted on Docker Compose or Kubernetes.
   <img src="docs/site/static/img/architecture/cubeplex-overview.svg" alt="CubePlex architecture: clients, the application and agent runtime, workspace sandboxes, external services, and persistent infrastructure" width="100%" />
 </p>
 
-The diagram reflects the current application architecture. Workspace sandboxes
+The diagram reflects the current application architecture. CubePlex runs
+streaming agent conversations through the CubePi runtime. Workspace sandboxes
 are isolated execution environments with persistent working state; external
 model providers, MCP servers, and IM platforms remain outside CubePlex's trust
 boundary.
