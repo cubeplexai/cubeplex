@@ -10,7 +10,7 @@ const esc = (value) => value
   .replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;');
 
-const box = ({ x, y, w, h, kind = 'box', title, body = '', small = '', titleSize = 17 }) => {
+const box = ({ x, y, w, h, kind = 'box', title, body = '', small = '', titleSize = 19 }) => {
   const cx = x + w / 2;
   const titleY = small ? y + 30 : body ? y + h / 2 - 5 : y + h / 2 + 6;
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="9" class="${kind}"/>
@@ -33,18 +33,18 @@ const svg = `
     <style>
       text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
       .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-      .title { fill:#f4f4f5; font-size:32px; font-weight:700; letter-spacing:-.6px; }
-      .subtitle { fill:#a1a1aa; font-size:16px; }
-      .section { fill:#93a6ec; font-size:13px; font-weight:650; letter-spacing:.8px; }
+      .title { fill:#f4f4f5; font-size:34px; font-weight:700; letter-spacing:-.6px; }
+      .subtitle { fill:#a1a1aa; font-size:17px; }
+      .section { fill:#93a6ec; font-size:14px; font-weight:650; letter-spacing:.8px; }
       .panel { fill:#0a0a0b; stroke:#3f3f46; stroke-width:1.3; }
       .box { fill:#101014; stroke:#52525b; stroke-width:1.25; }
       .key { fill:#14213d; stroke:#6a83e3; stroke-width:1.7; }
       .sandbox { fill:#0c2f28; stroke:#34d399; stroke-width:1.7; }
       .infra { fill:#18181b; stroke:#52525b; stroke-width:1.2; }
       .name { fill:#f4f4f5; font-weight:650; }
-      .sub { fill:#a1a1aa; font-size:12px; }
+      .sub { fill:#a1a1aa; font-size:13.5px; }
       .tiny { fill:#71717a; font-size:10.5px; }
-      .label { fill:#93a6ec; font-size:11px; font-weight:600; }
+      .label { fill:#93a6ec; font-size:12px; font-weight:600; }
       .line-blue { fill:none; stroke:#6a83e3; stroke-width:1.9; marker-end:url(#arrow-blue); stroke-linejoin:round; }
       .line-gray { fill:none; stroke:#71717a; stroke-width:1.45; marker-end:url(#arrow-gray); stroke-linejoin:round; }
       .line-dashed { fill:none; stroke:#6a83e3; stroke-width:1.45; stroke-dasharray:5 5; marker-end:url(#arrow-blue); stroke-linejoin:round; }
@@ -63,13 +63,13 @@ const svg = `
 
   <rect x="472" y="132" width="842" height="705" rx="14" class="panel"/>
   <text x="502" y="164" class="section">CUBEPLEX APPLICATION</text>
-  ${box({ x: 502, y: 194, w: 782, h: 76, kind: 'key', title: 'Organization, workspace, and access governance', body: 'memberships · roles · model policy · workspace-scoped APIs', titleSize: 19 })}
-  ${box({ x: 502, y: 311, w: 782, h: 108, kind: 'key', title: 'FastAPI + CubePi agent runtime', body: 'streaming conversation runs · tool orchestration · approvals · checkpoints', small: 'SSE API · provider routing · policy enforcement', titleSize: 20 })}
+  ${box({ x: 502, y: 194, w: 782, h: 76, kind: 'key', title: 'Organization, workspace, and access governance', body: 'memberships · roles · model policy · workspace-scoped APIs', titleSize: 20 })}
+  ${box({ x: 502, y: 311, w: 782, h: 108, kind: 'key', title: 'FastAPI + CubePi agent runtime', body: 'streaming conversation runs · tool orchestration · approvals · checkpoints', small: 'SSE API · provider routing · policy enforcement', titleSize: 22 })}
 
   <text x="502" y="465" class="section">RUNTIME CAPABILITIES</text>
   ${box({ x: 502, y: 493, w: 182, h: 95, title: 'Skills', body: 'packaged workflows', small: 'built-in · uploaded · registry' })}
   ${box({ x: 702, y: 493, w: 182, h: 95, title: 'Memory', body: 'personal · workspace · org', small: 'pinned + relevance snapshots' })}
-  ${box({ x: 902, y: 493, w: 182, h: 95, title: 'Automation + artifacts', body: 'schedules · webhooks · outputs', small: 'versioned files and previews', titleSize: 15 })}
+  ${box({ x: 902, y: 493, w: 182, h: 95, title: 'Automation + artifacts', body: 'schedules · webhooks · outputs', small: 'versioned files and previews', titleSize: 17 })}
   ${box({ x: 1102, y: 493, w: 182, h: 95, title: 'MCP catalog', body: 'tool discovery · OAuth', small: 'scoped credential grants' })}
 
   <rect x="502" y="643" width="782" height="160" rx="11" class="sandbox"/>
