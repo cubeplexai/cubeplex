@@ -42,7 +42,8 @@ govern team access — self-hosted on Docker Compose or Kubernetes.
 </p>
 
 The diagram reflects the current application architecture. CubePlex runs
-streaming agent conversations through the CubePi runtime. Workspace sandboxes
+streaming agent conversations through the [CubePi runtime](https://github.com/cubeplexai/cubepi).
+Workspace sandboxes
 are isolated execution environments with persistent working state; external
 model providers, MCP servers, and IM platforms remain outside CubePlex's trust
 boundary.
