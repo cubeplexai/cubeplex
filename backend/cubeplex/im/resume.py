@@ -84,6 +84,7 @@ async def resume_paused_run(
     operator_open_id: str,
     question_id: str = "",
     answer_key: str = "",
+    answers: dict[str, Any] | None = None,
     run_manager: Any,
     **_: Any,
 ) -> bool:
@@ -144,15 +145,22 @@ async def resume_paused_run(
             reason=f"via Feishu card (operator={operator_open_id})",
         )
     elif input_kind == "ask_user":
-        # cubepi ask_user expects a dict keyed by the question's `key`
-        # (the form schema). The renderer plumbs questions[0].key through
-        # the button payload → ActionPayload → ResumeAction → here. If
-        # the question carried no key (defensive fallback for malformed
-        # payloads or single-key prompts), drop in "choice" so cubepi
-        # gets a syntactically valid dict; a schema mismatch is then
-        # cubepi's to report, not ours.
-        key = answer_key or "choice"
-        answer = {key: choice}
+        # Form path (Feishu multi-question / multi-select / free-text): the
+        # card action already built the full {key: value} dict from
+        # form_value. Button path still wraps a single choice under
+        # questions[0].key.
+        if answers is not None:
+            answer = answers
+        else:
+            # cubepi ask_user expects a dict keyed by the question's `key`
+            # (the form schema). The renderer plumbs questions[0].key through
+            # the button payload → ActionPayload → ResumeAction → here. If
+            # the question carried no key (defensive fallback for malformed
+            # payloads or single-key prompts), drop in "choice" so cubepi
+            # gets a syntactically valid dict; a schema mismatch is then
+            # cubepi's to report, not ours.
+            key = answer_key or "choice"
+            answer = {key: choice}
     else:
         logger.warning("[resume] unknown input_kind={}", input_kind)
         return False

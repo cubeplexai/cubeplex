@@ -146,6 +146,52 @@ def test_pending_input_renders_buttons_with_payload() -> None:
     assert "approve_deploy" in s
 
 
+def test_pending_input_form_renders_select_input_and_multi() -> None:
+    """Multi-question / multi-select / free-text use a CardKit form so the
+    user can submit every field in one click.
+    """
+    from cubeplex.im.feishu.card_model import AskFormField
+
+    state = _empty_state()
+    state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run_form",
+        question="fill me\n\n_(网页端)_",
+        choices=[],
+        fields=[
+            AskFormField(
+                key="pick",
+                prompt="Pick one",
+                kind="single_select",
+                options=[("Yes", "yes"), ("No", "no")],
+            ),
+            AskFormField(
+                key="tags",
+                prompt="Tags",
+                kind="multi_select",
+                options=[("A", "a"), ("B", "b")],
+            ),
+            AskFormField(key="name", prompt="Your name", kind="input"),
+        ],
+        question_id="q_form",
+    )
+    card = render(state)
+    form = next(e for e in card["body"]["elements"] if e.get("element_id") == "pending_input")
+    assert form["tag"] == "form"
+    tags = [el.get("tag") for el in form["elements"]]
+    assert "select_static" in tags
+    assert "multi_select_static" in tags
+    assert "input" in tags
+    assert "button" in tags
+    submit = next(el for el in form["elements"] if el.get("tag") == "button")
+    assert submit.get("form_action_type") == "submit"
+    assert submit["behaviors"][0]["value"]["run_id"] == "run_form"
+    assert submit["behaviors"][0]["value"]["question_id"] == "q_form"
+    # Field names are cubepi keys so form_value maps 1:1 to the answer dict.
+    names = {el.get("name") for el in form["elements"] if el.get("name")}
+    assert {"pick", "tags", "name", "ask_user_submit"} <= names
+
+
 def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     """The button TEXT must be the human label; the button VALUE.choice must
     carry the schema value. Otherwise users pick between machine tokens.

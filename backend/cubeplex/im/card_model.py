@@ -48,6 +48,23 @@ class ArtifactItem:
 
 
 @dataclass(slots=True)
+class AskFormField:
+    """One cubepi ``ask_user`` question projected for platform form renderers.
+
+    Feishu CardKit can collect every field in one form submit; other IM
+    platforms still only handle the simple single-select button path and
+    ignore this list.
+    """
+
+    key: str
+    prompt: str
+    kind: Literal["single_select", "multi_select", "input"]
+    options: list[tuple[str, str]] = field(default_factory=list)
+    """``(label, value)`` pairs for select kinds; empty for free-text input."""
+    required: bool = True
+
+
+@dataclass(slots=True)
 class PendingInput:
     """An awaiting-user-input prompt rendered as an interactive element."""
 
@@ -68,16 +85,31 @@ class PendingInput:
     machine values like ``yes`` / ``no`` with human-readable labels like
     ``Yes`` / ``No``. Rendering the value as button text would force the
     user to choose between machine tokens.
+
+    Populated only for the simple single-question single-select path that
+    one-click buttons can answer. Multi-question / multi-select / free-text
+    leave this empty; Feishu uses ``fields`` instead.
     """
+    fields: list[AskFormField] = field(default_factory=list)
+    """Full ask_user question list for form-capable platforms (Feishu)."""
     question_id: str | None = None
     """cubepi-side identifier for matching the resume call."""
     answer_key: str | None = None
     """cubepi form schema key (questions[0].key for ask_user). The resume call
     builds the answer dict as {answer_key: choice} — without this, cubepi
-    rejects the answer because our key won't match its schema."""
+    rejects the answer because our key won't match its schema. Unused when
+    the form path submits a full answers dict."""
     resolved_choice: str | None = None
     resolved_by_open_id: str | None = None
     resolved_at_iso: str | None = None
+
+    def needs_form(self) -> bool:
+        """True when one-click buttons cannot submit a complete answer."""
+        if self.kind != "ask_user" or not self.fields:
+            return False
+        if len(self.fields) > 1:
+            return True
+        return self.fields[0].kind in ("multi_select", "input")
 
 
 @dataclass(slots=True)
@@ -136,6 +168,7 @@ class CardState:
 
 __all__ = [
     "ArtifactItem",
+    "AskFormField",
     "CardState",
     "PendingInput",
     "SubAgentRow",

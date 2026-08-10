@@ -419,6 +419,7 @@ async def _handle_card_action(
             operator_open_id=action.operator_open_id,
             question_id=action.question_id,
             answer_key=action.answer_key,
+            answers=getattr(action, "answers", None),
             run_manager=run_manager,
         )
     except Exception:

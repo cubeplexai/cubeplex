@@ -40,6 +40,9 @@ def test_ask_user_request_populates_pending_input() -> None:
     assert pending.question_id == "q_1"
     assert pending.answer_key == "choice"
     assert pending.choices == [("yes", "yes", "default"), ("no", "no", "default")]
+    assert pending.needs_form() is False
+    assert len(pending.fields) == 1
+    assert pending.fields[0].kind == "single_select"
     assert op is not None and op.kind == "patch_card"
 
 
@@ -115,10 +118,10 @@ def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
     ]
 
 
-def test_ask_user_multi_question_routes_to_web_client_notice() -> None:
-    """Multi-question asks (questions list has 2+ entries) can't be answered
-    with a single button row — the click would only submit questions[0].
-    Route to the web client.
+def test_ask_user_multi_question_populates_fields_and_needs_form() -> None:
+    """Multi-question asks cannot use one-click buttons; fields are populated
+    so Feishu can render a form. Non-form platforms still see a web notice
+    baked into ``question``.
     """
     state = _state_with_card()
     fold_event(
@@ -142,13 +145,16 @@ def test_ask_user_multi_question_routes_to_web_client_notice() -> None:
     pending = state.card_state.pending_input
     assert pending is not None
     assert pending.choices == []
+    assert pending.needs_form() is True
+    assert len(pending.fields) == 2
+    assert pending.fields[0].kind == "single_select"
+    assert pending.fields[1].kind == "input"
     assert "网页端" in pending.question
 
 
-def test_ask_user_multi_select_routes_to_web_client_notice() -> None:
-    """Multi-select questions need a list answer; a single card-button click
-    can only ship one scalar. Treat them like the free-form case — surface
-    a notice pointing to the web client and skip the buttons.
+def test_ask_user_multi_select_populates_fields_and_needs_form() -> None:
+    """Multi-select questions need a list answer; populate fields for the
+    Feishu form path and skip one-click buttons.
     """
     state = _state_with_card()
     fold_event(
@@ -172,14 +178,16 @@ def test_ask_user_multi_select_routes_to_web_client_notice() -> None:
     pending = state.card_state.pending_input
     assert pending is not None
     assert pending.choices == []
+    assert pending.needs_form() is True
+    assert pending.fields[0].kind == "multi_select"
+    assert pending.fields[0].options == [("A", "a"), ("B", "b")]
     assert "多选" in pending.question and "网页端" in pending.question
 
 
-def test_ask_user_request_with_no_options_renders_text_input_notice() -> None:
+def test_ask_user_request_with_no_options_populates_input_field() -> None:
     """Free-form questions (no options) cannot be answered via card buttons.
-    Instead of synthesizing a misleading "OK" button (which would send the
-    string "ok" back to cubepi and fail the schema), the renderer surfaces
-    a notice pointing the user to the web client.
+    Populate an input field for Feishu; non-form platforms still see the
+    web-client notice in ``question``.
     """
     state = _state_with_card()
     fold_event(
@@ -196,6 +204,9 @@ def test_ask_user_request_with_no_options_renders_text_input_notice() -> None:
     pending = state.card_state.pending_input
     assert pending is not None
     assert pending.choices == []
+    assert pending.needs_form() is True
+    assert pending.fields[0].kind == "input"
+    assert pending.fields[0].key == "freeform"
     assert "网页端" in pending.question
 
 

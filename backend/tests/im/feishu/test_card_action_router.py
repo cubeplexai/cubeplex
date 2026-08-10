@@ -134,3 +134,57 @@ def test_dispatch_sandbox_confirm_maps_to_sandbox_decision() -> None:
     assert action.input_kind == "sandbox_confirm"
     assert action.choice == "approve"
     assert action.question_id == "qsc_1"
+
+
+def test_parse_payload_form_submit_extracts_answers() -> None:
+    event = {
+        "operator": {"open_id": "ou_user_1"},
+        "action": {
+            "tag": "button",
+            "name": "ask_user_submit",
+            "value": {
+                "action": "ask_user",
+                "run_id": "run_1",
+                "question_id": "q_form",
+                "form": True,
+            },
+            "form_value": {
+                "k1": "yes",
+                "k2": "hello",
+                "tags": ["a", "b"],
+            },
+        },
+    }
+    parsed = parse_action_payload(event)
+    assert parsed.kind == "ask_user"
+    assert parsed.run_id == "run_1"
+    assert parsed.choice == ""
+    assert parsed.question_id == "q_form"
+    assert parsed.answers == {"k1": "yes", "k2": "hello", "tags": ["a", "b"]}
+
+
+def test_parse_payload_form_submit_rejects_empty_form_value() -> None:
+    with pytest.raises(InvalidAction):
+        parse_action_payload(
+            {
+                "operator": {"open_id": "ou_x"},
+                "action": {
+                    "value": {"action": "ask_user", "run_id": "r", "form": True},
+                    "form_value": {"ask_user_submit": "x"},
+                },
+            }
+        )
+
+
+def test_dispatch_form_answers_pass_through() -> None:
+    payload = ActionPayload(
+        kind="ask_user",
+        run_id="run_1",
+        choice="",
+        operator_open_id="ou_x",
+        question_id="q_1",
+        answers={"name": "alice", "tags": ["a"]},
+    )
+    action = dispatch(payload, expected_responder_open_id="ou_x")
+    assert action is not None
+    assert action.answers == {"name": "alice", "tags": ["a"]}

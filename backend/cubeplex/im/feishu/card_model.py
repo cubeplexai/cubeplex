@@ -5,6 +5,7 @@ The canonical definitions now live in ``cubeplex.im.card_model``.
 
 from cubeplex.im.card_model import (
     ArtifactItem,
+    AskFormField,
     CardState,
     PendingInput,
     SubAgentRow,
@@ -13,6 +14,7 @@ from cubeplex.im.card_model import (
 
 __all__ = [
     "ArtifactItem",
+    "AskFormField",
     "CardState",
     "PendingInput",
     "SubAgentRow",

@@ -412,6 +412,105 @@ def _artifacts_panel(state: CardState) -> dict[str, Any]:
     }
 
 
+def _option_objects(options: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "text": {"tag": "plain_text", "content": label[:100] or value[:100]},
+            "value": value,
+        }
+        for label, value in options
+        if value
+    ]
+
+
+def _render_form_field(field: Any, *, index: int) -> list[dict[str, Any]]:
+    """Project one AskFormField into Feishu form child elements.
+
+    Select components have no ``label``; put the prompt as a div above.
+    Input supports ``label`` natively.
+    """
+    # element_id: letters/numbers/underscore, start with letter, ≤20 chars.
+    eid = f"ask_f_{index}"
+    name = field.key
+    elements: list[dict[str, Any]] = []
+    if field.kind == "input":
+        elements.append(
+            {
+                "tag": "input",
+                "element_id": eid,
+                "name": name,
+                "required": field.required,
+                "width": "fill",
+                "input_type": "multiline_text",
+                "rows": 2,
+                "placeholder": {"tag": "plain_text", "content": "请输入"},
+                "label": {
+                    "tag": "plain_text",
+                    "content": (field.prompt or name)[:200],
+                },
+            }
+        )
+        return elements
+
+    if field.prompt:
+        elements.append(
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": field.prompt},
+            }
+        )
+    tag = "multi_select_static" if field.kind == "multi_select" else "select_static"
+    elements.append(
+        {
+            "tag": tag,
+            "element_id": eid,
+            "name": name,
+            "required": field.required,
+            "width": "fill",
+            "placeholder": {"tag": "plain_text", "content": "请选择"},
+            "options": _option_objects(list(field.options)),
+        }
+    )
+    return elements
+
+
+def _render_ask_form(pending: PendingInput) -> dict[str, Any]:
+    """CardKit form: collect every ask_user field, submit once.
+
+    form_value keys are the cubepi question keys, so the resume path can
+    pass the dict straight through as the cubepi answer.
+    """
+    form_elements: list[dict[str, Any]] = []
+    for i, field in enumerate(pending.fields):
+        form_elements.extend(_render_form_field(field, index=i))
+
+    submit_value: dict[str, Any] = {
+        "action": pending.kind,
+        "run_id": pending.run_id,
+        "form": True,
+    }
+    if pending.question_id:
+        submit_value["question_id"] = pending.question_id
+    form_elements.append(
+        {
+            "tag": "button",
+            "element_id": "ask_submit",
+            "name": "ask_user_submit",
+            "text": {"tag": "plain_text", "content": "提交"},
+            "type": "primary",
+            "width": "fill",
+            "form_action_type": "submit",
+            "behaviors": [{"type": "callback", "value": submit_value}],
+        }
+    )
+    return {
+        "tag": "form",
+        "element_id": "pending_input",
+        "name": "ask_user_form",
+        "elements": form_elements,
+    }
+
+
 def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
     if pending.resolved_choice is not None:
         receipt = (
@@ -419,14 +518,26 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
             + (f" · 由 {pending.resolved_by_open_id} 操作" if pending.resolved_by_open_id else "")
             + (f" · {pending.resolved_at_iso}" if pending.resolved_at_iso else "")
         )
+        # After resolve, show the clean field prompts (not the web-client
+        # notice that non-form platforms bake into pending.question).
+        header = pending.question
+        if pending.fields:
+            header = "\n\n".join(f.prompt for f in pending.fields if f.prompt) or header
         return {
             "tag": "interactive_container",
             "element_id": "pending_input",
             "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": pending.question}},
+                {"tag": "div", "text": {"tag": "lark_md", "content": header}},
                 {"tag": "div", "text": {"tag": "lark_md", "content": receipt}},
             ],
         }
+
+    # Form path: multi-question / multi-select / free-text — one submit
+    # returns the full answers dict. Single-select one-click buttons stay
+    # below for the common yes/no case.
+    if pending.needs_form():
+        return _render_ask_form(pending)
+
     body_elements: list[dict[str, Any]] = [
         {"tag": "div", "text": {"tag": "lark_md", "content": pending.question}},
     ]
