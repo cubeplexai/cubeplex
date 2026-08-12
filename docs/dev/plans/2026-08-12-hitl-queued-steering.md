@@ -1,13 +1,15 @@
 # HITL queued steering implementation plan
 
 - **Goal:** Keep the conversation composer usable during HITL and deliver every
-  accepted text instruction to the existing run without 409s, message loss, or
-  invalid prompt history.
+  accepted text instruction to the existing run without the paused-HITL 409,
+  message loss, or invalid prompt history.
 - **Architecture:** A workspace-scoped Postgres queue becomes the source of
-  truth for steering. The API commits a row before acknowledging it; Redis only
-  wakes the worker that owns the run; a delivery coordinator claims rows and
-  passes them through `agent.steer(...)`. The frontend routes composer text by
-  an explicit per-conversation run lifecycle rather than by streaming visuals.
+  truth for steering only while a durable HITL request is pending. The API
+  commits those rows before acknowledging them; Redis wakes the resume worker;
+  a per-run single-flight coordinator passes ordered rows through
+  `agent.steer(...)`. Ordinary live steering keeps its current direct path. The
+  frontend routes composer text by an explicit per-conversation run lifecycle
+  rather than by streaming visuals.
 - **Tech stack:** FastAPI, SQLModel/SQLAlchemy, Alembic, Postgres, Redis Pub/Sub,
   CubePi, Next.js/React, Zustand, Vitest, pytest, and Playwright.
 - **Design:**
@@ -67,29 +69,35 @@ failed
 - `org_id`, `workspace_id`, `conversation_id`, and `run_id`;
 - `client_steer_id`, `content`, `sender_user_id`, and optional
   `sender_display_name`;
-- optional `hitl_question_id` captured when enqueue happens;
+- required `hitl_question_id` captured when enqueue happens;
 - `state`, optional `delivery_owner`, and timezone-aware optional
   `delivery_lease_until`;
 - inherited timezone-aware `created_at` and `updated_at`.
 
-The table has a unique constraint on `(run_id, client_steer_id)`, a foreign key
-to the conversation, the normal org/workspace scope index, and an ordered
-delivery index on `(run_id, state, created_at, id)`.
+The table has a unique constraint on `(conversation_id, client_steer_id)`, a
+foreign key to the conversation, the normal org/workspace scope index, and an
+ordered delivery index on `(run_id, state, created_at, id)`.
 
 The scoped repository exposes typed operations for these contracts:
 
-- idempotently enqueue by `(run_id, client_steer_id)`, returning the existing
-  row on a request retry;
+- look up an existing row by scoped conversation and client steer ID before
+  current-run routing;
+- idempotently enqueue by `(conversation_id, client_steer_id)`, returning the
+  existing row and its original run on a request retry;
+- lock the scoped conversation row for durable enqueue before capacity checks
+  and insert, serializing accepted order and soft deletion across API workers;
 - list visible `queued`, `dispatched`, and `failed` rows for one conversation;
-- claim a FIFO batch for one run with `FOR UPDATE SKIP LOCKED`, including an
-  expired lease owned by a dead worker;
+- count active rows/bytes per run and visible unresolved rows/bytes per
+  conversation before enqueue;
+- claim an ordered batch for one run with `FOR UPDATE SKIP LOCKED`, including
+  an expired lease owned by a dead worker;
 - return a synchronously failed delivery claim to `queued`;
-- transition `queued` directly to `cancelled`, delete a dismissed `failed` row,
-  and transition `dispatched` to `cancel_requested`;
+- transition `queued` or dismissed `failed` to `cancelled`, and transition
+  `dispatched` to `cancel_requested`;
 - mark an owned row `cancelled`, `injected`, or `failed` with compare-and-set
   predicates so a cancellation/injection race has one winner;
-- delete injected/cancelled tombstones and mark remaining active rows failed
-  when a logical run really terminates.
+- mark active rows failed when a logical run really terminates and delete
+  injected/cancelled tombstones after the 24-hour idempotency window.
 
 Repository methods participate in the caller's transaction. A route, delivery
 claim, or cleanup operation commits all of its state transition at once rather
@@ -100,12 +108,18 @@ than relying on multiple per-row commits.
 - Store status as a bounded string column and use `SteeringMessageState` at
   Python boundaries, matching existing queue models without introducing a
   PostgreSQL enum lifecycle.
-- Treat `(created_at, id)` as the FIFO tie-breaker. The sortable public ID makes
-  equal timestamps deterministic.
-- Keep injected/cancelled tombstones until logical run cleanup so a retried POST
-  cannot recreate and inject the same client ID.
-- Preserve `failed` rows and their content for bootstrap. They are deleted only
-  after the user dismisses or moves the text back to the composer.
+- Treat `(created_at, id)` as the deterministic order among rows committed when
+  a drain starts. The conversation-row lock serializes durable enqueues; its
+  acquisition order, rather than a client timestamp, defines simultaneous
+  submissions. Requests not committed when a drain starts join a later batch.
+- Enforce 32 KiB per message, 32 active rows/256 KiB per run, and 100 visible
+  unresolved rows/1 MiB per conversation. Count UTF-8 bytes. These caps include
+  failed rows where the spec says so and guarantee bootstrap stays bounded.
+- Keep injected/cancelled tombstones for 24 hours, including after logical run
+  cleanup, so a delayed retry cannot target a later run in the conversation.
+- Preserve `failed` rows and their content for bootstrap. Dismiss or move to
+  draft changes them to `cancelled`; the bounded cleanup deletes that tombstone
+  only after the 24-hour idempotency window.
 - User-facing conversation deletion is soft and therefore does not trigger an
   FK cascade. Explicitly delete these transient rows before stamping
   `Conversation.deleted_at`; do not change retention for history, artifacts,
@@ -115,9 +129,15 @@ than relying on multiple per-row commits.
 
 - Unit: `stm` IDs have the expected shape and fit the existing 20-character
   column limit.
-- Backend e2e: duplicate enqueue returns one row; FIFO claims are stable; two
+- Backend e2e: duplicate enqueue returns one row; ordered claims are stable; two
   claimers cannot own the same row; expired leases are reclaimable; each valid
   and invalid state transition is enforced.
+- Backend e2e: a retry after the original HITL run terminates returns its
+  tombstone for 24 hours and never dispatches into a newer run.
+- Backend e2e: every byte/count boundary accepts the maximum, rejects the next
+  enqueue without a row, and returns the specified 413 or 429 error code.
+- Backend e2e: concurrent enqueues respect the cap, receive a stable server
+  order, and cannot race a soft conversation deletion into an orphaned row.
 - Backend e2e: org/workspace-scoped reads and mutations cannot see another
   workspace's rows.
 - Backend e2e: soft conversation deletion removes uninjected steering rows,
@@ -130,9 +150,10 @@ than relying on multiple per-row commits.
 - Create `backend/cubeplex/streams/steering_delivery.py` for delivery claims,
   CubePi message construction, cancellation, history reconciliation, and the
   bounded fallback poll.
-- Modify `backend/cubeplex/streams/run_manager.py` to use durable queue
-  notifications, attach/detach Agents to the coordinator, acknowledge injected
-  messages, and finalize queue rows with the logical run.
+- Modify `backend/cubeplex/streams/run_manager.py` to add durable HITL queue
+  notifications alongside the existing live-steer control message,
+  attach/detach Agents to the coordinator, acknowledge injected messages, and
+  finalize queue rows with the logical run.
 - Create `backend/tests/unit/test_steering_delivery.py` for coordinator behavior
   with fake repositories and Agents.
 - Update `backend/tests/unit/test_run_manager_steer.py`,
@@ -151,7 +172,8 @@ notify_available(run_id, item_id) -> None
 drain_run(run_id, agent, ctx) -> None
 resolve_cancel(run_id, client_steer_id, agent, ctx) -> None
 ack_injected(run_id, client_steer_id, ctx) -> None
-finalize_run(run_id, ctx, has_pending_hitl) -> None
+finalize_run(run_id, ctx, terminal_status) -> None
+reconcile_and_purge_rows(limit=100) -> None
 ```
 
 Its constructor receives the async database session factory, Redis client and
@@ -167,20 +189,23 @@ Redis control payloads become content-free wake-ups:
 {"type":"steer_cancel_requested","run_id":"...","steer_id":"steer-..."}
 ```
 
-The former `steer` control message containing user text is removed in the clean
-cutover. Hard-run cancellation and its acknowledgement channel stay unchanged.
+The existing `steer` and `cancel_steer` control messages remain the ordinary
+live-run path. The two new content-free messages are used only for rows accepted
+while an HITL request is pending. Hard-run cancellation stays unchanged.
 
 ### Core logic
 
-1. After either prompt-path or respond-path code registers
-   `self._agents[run_id]`, it synchronously drains durable rows before calling
-   `agent.prompt(...)` or `agent.respond(...)`.
+1. After the respond path registers `self._agents[run_id]`, it synchronously
+   drains durable HITL rows before calling `agent.respond(...)`. A fresh prompt
+   has no pending HITL rows and keeps the existing live steering path.
 2. Claiming commits `state=dispatched`, `delivery_owner`, and a short lease
    before calling the synchronous `agent.steer(...)`. If that call raises, the
    same owner returns the row to `queued`.
-3. The control listener wakes the owner for low latency. One process-level
-   two-second fallback poll drains only run IDs currently present in that
-   process's Agent registry; Redis loss cannot strand a committed row.
+3. Registration, the control listener, and one process-level two-second
+   fallback poll all enter the same per-run `asyncio.Lock` before claim and
+   dispatch. The poll considers only run IDs in that process's Agent registry.
+   Redis loss cannot strand a row, and overlapping wake-ups cannot reverse two
+   claimed batches. Locks are removed when the Agent detaches.
 4. The CubePi Agent checkpoints a `MessageEndEvent(UserMessage)` before calling
    CubePlex listeners. When StreamConverter produces `injected_message`, the
    run manager attempts `ack_injected` and then publishes the existing SSE
@@ -193,23 +218,36 @@ cutover. Hard-run cancellation and its acknowledgement channel stay unchanged.
    `agent.cancel_steer(...)`; successful removal becomes `cancelled`, while a
    message already found in history becomes `injected`. A replacement owner
    finishes an expired cancellation after the same history reconciliation.
-7. Run cleanup deletes tombstones and marks uninjected rows failed only when
-   the logical run is terminal. `paused_hitl`, or `errored` with a persisted
-   HITL request that can be retried, leaves rows recoverable. Hard Stop,
-   completed, cancelled, stale, and unrecoverable error paths finalize them.
+7. Run cleanup marks uninjected rows failed only when the logical run is
+   terminal. `paused_hitl` leaves rows recoverable. Hard Stop, completed,
+   cancelled, stale, and `errored` paths finalize them; this feature does not
+   make `errored` HITL resumes retryable. Injected/cancelled tombstones remain
+   for 24 hours.
 8. `_force_cancel_hitl` finalizes rows belonging to the old run before a new
    run is allowed to claim the conversation.
+9. At startup and every 30 seconds, a scan claims at most 100 active queue rows
+   without a live owner. It checks Redis run status and the checkpointed pending
+   request, then uses the same compare-and-set finalizer for stale, terminal,
+   or errored runs. This covers stale transitions initiated by startup recovery,
+   bootstrap, stream reads, and the IM run-claim path without adding database
+   work to the Redis-only `mark_run_stale` helper. Each pass also deletes at
+   most 100 terminal tombstones older than 24 hours.
 
-`RunManager.start_control_listeners()` starts the coordinator poll after its
-Redis listeners, and `stop_control_listeners()` stops the poll before closing
-those listeners. No second application-lifespan owner is introduced.
+`RunManager.start_control_listeners()` starts the coordinator's drain and
+reconciliation tasks after its Redis listeners, and `stop_control_listeners()`
+stops both tasks before closing those listeners. No second application-lifespan
+owner is introduced.
 
 ### Tests
 
 - Unit: queued rows are converted to CubePi `UserMessage` objects with
-  `steer_id`, sender metadata, text, and FIFO order intact.
-- Unit: startup drain happens after Agent registration but before both
-  `prompt` and `respond` calls.
+  `steer_id`, sender metadata, text, and persisted batch order intact.
+- Unit: startup drain stages rows after Agent registration and before
+  `agent.respond(...)`; the companion e2e test proves CubePi checkpoints the
+  tool result before those staged messages. Fresh `prompt` calls do not query
+  the HITL queue.
+- Unit: concurrent registration, notification, and poll drains for one run are
+  single-flight and preserve batch order.
 - Unit: missed Pub/Sub is recovered by the bounded poll without creating a
   per-run polling task.
 - Unit: a synchronous dispatch failure returns the row to queued; a failed
@@ -219,24 +257,23 @@ those listeners. No second application-lifespan owner is introduced.
 - Unit: cancel-before-drain never calls `agent.steer`; cancel-after-dispatch
   calls `agent.cancel_steer`; an injection race resolves to injected.
 - Unit: Redis control tests assert that wake-ups contain IDs but never steering
-  content or sender data.
+  content or sender data, while ordinary live steer messages remain unchanged.
+- Backend e2e: reconciliation finalizes rows after every current stale-marking
+  entry point and after an `errored` resume; each reconciliation and purge pass
+  respects its 100-row bound.
 
-## Unit 3 — Workspace API, HITL recovery, and bootstrap
+## Unit 3 — Workspace API, HITL routing, and bootstrap
 
 ### Files
 
 - Modify `backend/cubeplex/api/routes/v1/conversations.py` to enqueue steering,
   cancel queue rows, expose pending rows in bootstrap, and resolve long-pause
   run IDs from the CubePi checkpointer.
-- Modify `backend/cubeplex/streams/hitl_resume.py` so a matching persisted HITL
-  request can retry a resume whose prior worker ended in `errored` before
-  clearing the request.
-- Update `backend/tests/unit/test_hitl_claim_resume.py` and
-  `backend/tests/unit/test_conversations_bootstrap_pending_hitl.py`.
+- Update `backend/tests/unit/test_conversations_bootstrap_pending_hitl.py`.
 - Update `backend/tests/e2e/test_hitl_pause_resume.py` to replace the paused
   steering 409 contract with durable queue behavior.
-- Update `backend/tests/e2e/test_steer_endpoint.py` for the durable live-run
-  response and persistence contract.
+- Update `backend/tests/e2e/test_steer_endpoint.py` for the conditional
+  HITL-durable versus ordinary-live response contract.
 - Create `backend/tests/e2e/test_hitl_queued_steering.py` for cross-store,
   cross-worker, and ordering invariants that do not belong in route unit tests.
 
@@ -253,19 +290,33 @@ It returns one of:
 
 ```json
 {"status":"queued","run_id":"...","steer_id":"steer-..."}
+{"status":"dispatched","run_id":"...","steer_id":"steer-..."}
+{"status":"injected","run_id":"...","steer_id":"steer-..."}
+{"status":"cancelled","run_id":"...","steer_id":"steer-..."}
+{"status":"failed","run_id":"...","steer_id":"steer-..."}
+{"status":"steered","run_id":"...","steer_id":"steer-..."}
+{"status":"published","run_id":"...","steer_id":"steer-..."}
 {"status":"no_active_run","run_id":null,"steer_id":"steer-..."}
 ```
 
-The route trims content and rejects an empty text instruction, matching the
-normal text-message rule. It retains the current participant auto-join and
-sender snapshot behavior.
+The five queue states are the actual current state of a durable row, including
+an existing row returned by an idempotent retry. `steered` and `published` are
+the unchanged ordinary live-run outcomes. The route trims content and rejects
+an empty text instruction, matching the normal text-message rule. It also
+rejects more than 32 KiB with HTTP 413/`steer_content_too_large`, and rejects a
+run or conversation queue cap with HTTP 429/`steer_queue_full`. Both errors
+leave the draft intact. The route retains the current participant auto-join and
+sender snapshot behavior. Reusing an existing durable `steer_id` with different
+normalized content or a different sender returns HTTP
+409/`steer_id_conflict` without changing the row.
 
 `POST /api/v1/ws/{workspace_id}/conversations/{conversation_id}/steer/cancel`
-locates the durable row by the scoped conversation and client steer ID; it no
-longer requires a current Redis active-run pointer. Responses are:
+first locates a durable row by scoped conversation and client steer ID. If none
+exists, it keeps the current Redis live-run cancellation path. Durable responses
+are:
 
 ```text
-cancelled         queued becomes a tombstone; failed is dismissed/deleted
+cancelled         queued or failed becomes a 24-hour tombstone
 accepted          dispatched item entered cancel_requested
 already_injected  persisted history already owns the message
 not_found         no visible row matches
@@ -292,22 +343,29 @@ Only `queued`, `dispatched`, and `failed` are returned. `cancel_requested`,
 
 ### Core logic
 
-- Resolve enqueue ownership from a Redis active run in `running` or
-  `paused_hitl`; if Redis expired, use the checkpointer's matching
-  `pending_request` and `pending_run_id`. A terminal Redis status is not an
-  enqueue target.
+- Before current-run routing, look up `(conversation_id, steer_id)` in the
+  scoped durable repository. Return an existing row's actual state and original
+  run even if the conversation now has a newer run, but reject a content or
+  sender mismatch as `steer_id_conflict`.
+- Next resolve a checkpointed `pending_request` and matching `pending_run_id`.
+  If they exist, use the durable queue even if Redis expired or already says
+  `running`. If no HITL request exists, preserve the current Redis-only live
+  `dispatch_steer` path. A terminal Redis status is not an enqueue target.
 - Commit the idempotent queue row before publishing `steer_available`.
-- Recheck ownership after commit. If the same run is neither active nor the
-  owner of a persisted HITL request, mark the row failed and return
-  `no_active_run`. Bootstrap also reconciles old rows whose terminal cleanup
-  raced an enqueue, ensuring they surface as failed instead of remaining
-  queued forever.
+- On a uniqueness conflict, reload by scoped conversation and client ID and
+  return the existing row's actual state; never report an injected, cancelled,
+  or failed row as newly queued.
+- Recheck ownership after commit. If the matching HITL request was cleared but
+  the same run is still active, keep the row and notify the live owner. If the
+  run is neither active nor the owner of that pending request, mark the row
+  failed and return its `failed` state. Bootstrap and the coordinator's bounded
+  reconciliation scan repair rows whose terminal cleanup raced enqueue.
 - Keep the paused HITL question authoritative until CubePi checkpoints its tool
   result. Steering submitted after form POST but before that clear therefore
   still resolves to the same run.
-- Let `claim_resume` reclaim `errored` only through the existing call path that
-  has already verified a matching DB pending request and run ID. Completed,
-  cancelled, or mismatched runs remain conflicts.
+- Leave `claim_resume` unchanged: `errored`, completed, cancelled, or mismatched
+  runs remain conflicts. An errored run finalizes uninjected steering as failed
+  instead of risking a second execution of partial resume side effects.
 - Use a separate scoped session for queue hydration if it runs concurrently
   with bootstrap history reads; do not issue concurrent operations on the
   route's shared `AsyncSession`.
@@ -318,13 +376,17 @@ Only `queued`, `dispatched`, and `failed` are returned. `cancel_requested`,
 
 - Unit: bootstrap serializes queue states and timezone-aware timestamps, and
   omits terminal/cancel-requested rows.
-- Unit: resume claim accepts `errored` and continues to reject completed or
-  cancelled state; route/e2e coverage proves the claim is never called without
-  the matching persisted pending request precondition.
-- Backend e2e: paused `ask_user` and sandbox confirmation steering return 200
+- Backend e2e: paused `ask_user` and sandbox confirmation steering return 202
   queued instead of 409.
 - Backend e2e: duplicate POSTs with one `steer_id` produce one queue row and one
-  checkpointed user message.
+  checkpointed user message, and retries return each existing terminal or
+  in-flight state truthfully.
+- Backend e2e: reusing one durable `steer_id` with different content or sender
+  returns `steer_id_conflict` and leaves the original row unchanged.
+- Backend e2e: a delayed retry during a newer run returns the old run's
+  24-hour tombstone instead of entering the new run; expiry cleanup is bounded.
+- Backend e2e: a running run without a persisted HITL request still uses the
+  existing direct `steered`/`published` path and creates no queue row.
 - Backend e2e: Redis expiry during a long HITL pause still resolves through
   `pending_run_id`, and bootstrap restores the queued row.
 - Backend e2e: cross-workspace enqueue, cancel, and bootstrap reads return the
@@ -365,6 +427,16 @@ Add these core types:
 ```ts
 type RunLifecycle = 'idle' | 'running' | 'paused_hitl' | 'resuming_hitl' | 'stopping'
 
+type SteerRunStatus =
+  | 'queued'
+  | 'dispatched'
+  | 'injected'
+  | 'cancelled'
+  | 'failed'
+  | 'steered'
+  | 'published'
+  | 'no_active_run'
+
 type PendingSteerState =
   | 'submitting' // local-only optimistic state
   | 'queued'
@@ -382,10 +454,13 @@ type PendingSteer = {
 `messageStore.runLifecycleByConversation` is the composer-routing authority.
 `isStreaming` remains the visual signal for assistant output and loading UI.
 
-`messageStore.steer(...)` returns whether the server accepted the row. The
-InputBar clears the textarea only on `queued`; `no_active_run` or a request
-error leaves the draft intact. `cancelSteer(...)` returns its server outcome so
-the failed-row UI moves text into `useComposerDraft` only after dismissal wins.
+`messageStore.steer(...)` returns the server status instead of collapsing it to
+a boolean. `queued` and `dispatched` retain a pending chip; `injected` does not;
+`failed` becomes a failed chip; `cancelled`, `no_active_run`, queue validation
+errors, `steer_id_conflict`, and request errors restore the text for user
+control. `steered` and `published` retain the ordinary live behavior.
+`cancelSteer(...)` returns its server outcome so the failed-row UI moves text
+into `useComposerDraft` only after dismissal wins.
 
 ### Core logic
 
@@ -396,9 +471,10 @@ the failed-row UI moves text into `useComposerDraft` only after dismissal wins.
   - pending HITL otherwise → `paused_hitl`;
   - active running run → `running`.
 - Live HITL request events set `paused_hitl`. Submitting any HITL decision sets
-  `resuming_hitl`. A paused `done` returns to `paused_hitl`; a true terminal
-  event returns to `idle`; hard Stop sets `stopping` until bootstrap/terminal
-  confirmation makes it idle.
+  `resuming_hitl`. If the answer POST rejects or fails, refresh bootstrap; a
+  still-pending request restores `paused_hitl`. A paused `done` returns to
+  `paused_hitl`; a true terminal event returns to `idle`; hard Stop sets
+  `stopping` until bootstrap/terminal confirmation makes it idle.
 - Composer Enter starts a new turn only in `idle`. It calls `steer` in
   `running`, `paused_hitl`, and `resuming_hitl`, and is disabled in `stopping`.
 - The textarea is enabled during both HITL states. The form owns only its own
@@ -410,11 +486,20 @@ the failed-row UI moves text into `useComposerDraft` only after dismissal wins.
 - A text-only `active_run_conflict` refreshes bootstrap once. If the refreshed
   lifecycle is running/paused/resuming, retry the unchanged text once through
   `/steer` with one generated `steer_id`; never loop between send and steer.
+- InputBar snapshots and clears submitted text synchronously when it creates the
+  local `submitting` chip, so the textarea remains ready while the request is in
+  flight. If the request is not accepted, restore with
+  `currentDraft ? submitted + "\n" + currentDraft : submitted`; never run an
+  asynchronous unconditional clear.
 - Merge bootstrap's server rows with a local `submitting` row instead of
   clearing the optimistic chip during an in-flight enqueue. Server rows replace
   matching client IDs once committed.
 - `injected_message` keeps its current job: commit the user message at CubePi's
-  actual history position and remove the matching pending chip.
+  actual history position and remove the matching pending chip. The enqueue
+  response reducer first checks transcript messages for that `steer_id`; if SSE
+  already committed it, no response state may recreate the chip. Conversely,
+  an `injected` response whose message is not local triggers one bootstrap
+  refresh because the checkpointed history is already authoritative.
 - Failed chips offer two explicit actions when lifecycle is idle:
   - **Move to draft:** cancel/dismiss the failed server row, then place its text
     in the existing composer draft bridge for user-controlled resubmission.
@@ -424,14 +509,18 @@ the failed-row UI moves text into `useComposerDraft` only after dismissal wins.
 ### Tests
 
 - Update `frontend/packages/core/__tests__/api/stream.test.ts` for `queued`,
-  `accepted`, and `already_injected` response contracts.
+  every durable stored state, the ordinary live statuses, and the two bounded
+  queue errors plus `steer_id_conflict`.
 - Update `frontend/packages/core/__tests__/stores/messageStoreSteer.test.ts`,
   `messageStorePendingSteer.test.ts`, and
   `messageStoreCommitSteer.test.ts` for server state, bootstrap merging,
-  accepted-only draft clearing, cancellation races, and injection idempotency.
+  snapshot-safe draft restoration, cancellation races, injection idempotency,
+  `injected_message` arriving before the enqueue response, and an `injected`
+  response repairing a missing local SSE event through bootstrap.
 - Update
   `frontend/packages/core/__tests__/stores/messageStore.bootstrapPendingHitl.test.ts`
-  for paused/resuming lifecycle derivation and queue restoration.
+  for paused/resuming lifecycle derivation, failed-answer rollback, and queue
+  restoration.
 - Update
   `frontend/packages/core/__tests__/stores/messageStoreSendConflict.test.ts`
   for a single text-only send→bootstrap→steer recovery and the no-retry
@@ -447,8 +536,9 @@ the failed-row UI moves text into `useComposerDraft` only after dismissal wins.
 
 ### Files
 
-- Extend `frontend/packages/web/__tests__/e2e/steering.spec.ts` with the real
-  browser flow for queued steering during HITL.
+- Extend `frontend/packages/web/__tests__/e2e/steering.spec.ts` with a
+  deterministic browser flow for queued steering during HITL, using the
+  existing outer-model test seam for fixed tool calls and responses.
 - Modify `docs/site/docs/guides/conversations/basics.md` in the implementation
   PR to replace the current composer-lock description with the accepted queue
   behavior and text-only limitation.
@@ -464,11 +554,12 @@ The browser scenario is:
 
 ```text
 Agent emits ask_user
-→ user sends two text steering messages while the card is pending
+→ user sends one text steering message and waits for queued
+→ user sends a second text steering message and waits for queued
 → pending chips show durable queued state
 → page reload restores the card and chips
 → user submits the HITL form
-→ chips become transcript user messages in FIFO order
+→ chips become transcript user messages in accepted order
 → Agent responds with the HITL answer and steering in context
 → another reload preserves the same role/message order
 ```
@@ -484,9 +575,10 @@ assistant tool_use
 ```
 
 Run the sandbox approve and deny ordering variants at backend e2e level; the
-browser test needs only one complete `ask_user` flow. The Playwright test uses
-the repository's existing real-LLM gate rather than adding an unmarked model
-call.
+browser test needs only one complete `ask_user` flow. Keep Postgres, Redis,
+FastAPI, SSE, and the browser real, but make the outer model deterministic so
+the test does not depend on whether a model chooses to call `ask_user` or echo
+both inputs.
 
 ### Tests and verification
 
@@ -498,7 +590,6 @@ cd backend
 uv run pytest \
   tests/unit/test_public_id.py \
   tests/unit/test_steering_delivery.py \
-  tests/unit/test_hitl_claim_resume.py \
   tests/unit/test_conversations_bootstrap_pending_hitl.py \
   --no-cov 2>&1 | tee tmp/hitl-queued-unit.log | tail -3
 
@@ -539,18 +630,23 @@ that full command separately first.
 
 | Approved spec requirement | Owning unit |
 |---|---|
-| Durable, idempotent, FIFO steering storage | Unit 1 |
+| Durable, idempotent, deterministically ordered HITL steering storage | Unit 1 |
+| Atomic byte/count limits and bounded bootstrap payload | Units 1 and 3 |
+| Delayed retry returns actual state instead of targeting a newer run | Units 1, 3, and 4 |
 | Cross-worker delivery without Redis as source of truth | Unit 2 |
+| Registration, notification, and poll drains are single-flight per run | Unit 2 |
 | Tool result before queued user messages | Units 2 and 5 |
 | Cancel, lease recovery, acknowledgement reconciliation | Units 1 and 2 |
 | Paused/resuming API accepts steering without 409 | Unit 3 |
-| Long-pause Redis expiry and failed-resume retry | Unit 3 |
+| Long-pause Redis expiry and safe errored-run finalization | Units 2 and 3 |
 | Workspace isolation and sender identity | Units 1 and 3 |
 | Composer unlocked for text but not attachments | Unit 4 |
+| In-flight typing and SSE-before-response cannot lose text or recreate chips | Unit 4 |
 | Explicit idle/running/paused/resuming/stopping routing | Unit 4 |
 | Refresh restores pending chips; injection commits transcript | Units 3–5 |
 | Stale text send retries once as steering | Unit 4 |
 | Failed text is visible and recoverable, never silently dropped | Units 1, 3, and 4 |
+| Ordinary live steering retains its current direct path | Units 2–4 |
 | User-facing documentation ships with behavior | Unit 5 |
 
 ## Completion criteria
