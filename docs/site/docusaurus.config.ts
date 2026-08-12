@@ -34,6 +34,9 @@ const classicOptions: ClassicOptions = {
     editUrl: 'https://github.com/cubeplexai/cubeplex/edit/main/docs/site/',
   },
   blog: false,
+  gtag: {
+    trackingID: 'G-QE95ELVWCP',
+  },
   theme: {
     customCss: './src/css/custom.css',
   },
