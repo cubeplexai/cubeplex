@@ -9,6 +9,7 @@ import {
   getTextContent,
   getToolResultPreviewContent,
   getSubagentSummary,
+  toolTimingFromDetails,
   submitSandboxConfirm,
   submitAskUserAnswer,
   cancelActiveRun,
@@ -93,8 +94,10 @@ function buildHistoricalToolResultMap(
       contentType?: string
     }
   > = {}
-  // Build a map of tool_call_id → authoritative tool start time from the
-  // assistant message that issued the call (its timestamp is our best proxy).
+  // Fallback start times when details.tool_started_at is missing (old rows /
+  // tools that predate TimestampMiddleware): use the assistant message clock.
+  // Prefer details when present — assistant ts is turn-start and inflates
+  // duration (thinking + model latency before the tool actually ran).
   const toolCallStartMap: Record<string, number> = {}
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue
@@ -109,11 +112,12 @@ function buildHistoricalToolResultMap(
 
   for (const msg of messages) {
     if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
-    const receivedAt = msgTimestampMs(msg)
+    const timing = toolTimingFromDetails(msg.details)
+    const receivedAt = timing.receivedAt ?? msgTimestampMs(msg)
     map[msg.tool_call_id] = {
       content: getToolResultPreviewContent(msg),
       receivedAt: receivedAt || Date.now(),
-      startedAt: toolCallStartMap[msg.tool_call_id],
+      startedAt: timing.startedAt ?? toolCallStartMap[msg.tool_call_id],
     }
     // Index subagent inner tool results so their previews/citations work
     const summary = msg.tool_name === 'subagent' ? getSubagentSummary(msg) : null
