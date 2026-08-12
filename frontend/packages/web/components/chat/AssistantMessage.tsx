@@ -55,10 +55,10 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * Beautiful-UI style thinking chip:
- * - Collapsed complete: compact pill "Thought · 4s" (not a full-width row)
- * - Streaming: pill + live timer + 3-line scrolling trace body
- * - Expanded complete: pill stays, body panel opens below
+ * Thinking row — same density as tool chips (no heavy pill/card):
+ * - Collapsed: one muted line "Thought · 4s ›"
+ * - Streaming: same line + 3-line scroll body (no card chrome)
+ * - Expanded: line + full body under a light left rule
  */
 function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
   const t = useTranslations('chat')
@@ -86,20 +86,11 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
   }, [thinking, isStreaming])
 
   const displayTime = durationMs ?? (isStreaming && startedAt != null ? elapsed : null)
-  // Show timer as soon as we have any timing signal (not only ≥1s).
   const timeLabel = displayTime != null ? formatDuration(displayTime) : null
-  const showBody = isStreaming || isExpanded
   const title = isStreaming ? t('thinking') : t('thought')
 
   return (
-    <div
-      className={cn(
-        'transition-[background-color,border-color,box-shadow] duration-150',
-        showBody
-          ? 'rounded-xl border border-border/80 bg-muted/40 px-3 py-2.5 shadow-sm'
-          : 'inline-flex max-w-full',
-      )}
-    >
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => {
@@ -108,46 +99,38 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
         aria-expanded={isStreaming ? true : isExpanded}
         aria-label={timeLabel ? `${title} ${timeLabel}` : title}
         className={cn(
-          'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1',
-          'text-xs transition-colors',
-          isStreaming
-            ? 'cursor-default border-primary/25 bg-primary/5 text-foreground'
-            : 'cursor-pointer border-border bg-card text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground',
+          '-mx-1.5 inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5',
+          'text-[12.5px] leading-5 text-muted-foreground transition-colors',
+          isStreaming ? 'cursor-default' : 'cursor-pointer hover:bg-muted/70 hover:text-foreground',
         )}
       >
+        {!isStreaming &&
+          (isExpanded ? (
+            <ChevronDown className="size-3 shrink-0 opacity-70" />
+          ) : (
+            <ChevronRight className="size-3 shrink-0 opacity-70" />
+          ))}
         <Brain
           className={cn(
-            'size-3.5 shrink-0',
-            isStreaming ? 'text-primary animate-pulse' : 'text-muted-foreground',
+            'size-3 shrink-0 opacity-70',
+            isStreaming && 'text-primary opacity-90 animate-pulse',
           )}
         />
-        <span className={cn('font-medium', isStreaming && 'text-foreground')}>{title}</span>
-        {timeLabel && (
-          <span
-            className={cn(
-              'rounded-full px-1.5 py-px font-mono text-[11px] tabular-nums leading-none',
-              isStreaming ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
-            )}
-          >
-            {timeLabel}
-          </span>
-        )}
-        {!isStreaming && (
-          <span className="text-muted-foreground/70">
-            {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-          </span>
-        )}
+        <span className={cn('font-medium tabular-nums', isStreaming && 'text-foreground/90')}>
+          {title}
+          {timeLabel ? ` · ${timeLabel}` : ''}
+        </span>
       </button>
 
       {/* Streaming: 3-line scrolling viewport with gradient mask */}
       {isStreaming && (
-        <div className="mt-2.5 relative">
+        <div className="mt-1 relative">
           <div
             ref={scrollRef}
-            className="overflow-hidden text-xs leading-[1.625] whitespace-pre-wrap italic
-              pl-3 border-l-2 border-primary/30 text-muted-foreground/80"
+            className="overflow-hidden text-[12px] leading-[1.55] whitespace-pre-wrap italic
+              pl-2.5 border-l border-border/80 text-muted-foreground/75"
             style={{
-              maxHeight: 'calc(1.625em * 3)',
+              maxHeight: 'calc(1.55em * 3)',
               maskImage:
                 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,' +
                 ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,' +
@@ -165,8 +148,8 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
 
       {/* Completed & expanded: full content */}
       {!isStreaming && isExpanded && (
-        <div className="mt-2.5 pl-3 border-l-2 border-border max-h-64 overflow-y-auto">
-          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap italic">
+        <div className="mt-1 max-h-48 overflow-y-auto pl-2.5 border-l border-border/80">
+          <p className="text-[12px] leading-relaxed whitespace-pre-wrap italic text-muted-foreground/80">
             {thinking}
           </p>
         </div>
