@@ -3,7 +3,6 @@
 import { useEffect, useId, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import {
-  CircleHelp,
   MessageSquarePlus,
   Square,
   Cpu,
@@ -21,7 +20,6 @@ import type { SlashCommand } from '@/lib/slash-commands'
 import { ComposerOverlayShell } from './ComposerOverlayShell'
 
 type DescKey =
-  | 'commands.help.description'
   | 'commands.new.description'
   | 'commands.stop.description'
   | 'commands.model.description'
@@ -35,8 +33,6 @@ type DescKey =
 
 function descriptionFor(cmdId: string): DescKey {
   switch (cmdId) {
-    case 'help':
-      return 'commands.help.description'
     case 'new':
       return 'commands.new.description'
     case 'stop':
@@ -58,12 +54,11 @@ function descriptionFor(cmdId: string): DescKey {
     case 'compact':
       return 'commands.compact.description'
     default:
-      return 'commands.help.description'
+      return 'commands.new.description'
   }
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
-  help: CircleHelp,
   new: MessageSquarePlus,
   stop: Square,
   model: Cpu,
@@ -132,7 +127,11 @@ export function CommandPopover({
           commands.map((cmd, i) => {
             const active = i === activeIndex
             const optionId = `${listboxId}-opt-${cmd.id}`
-            const Icon = COMMAND_ICONS[cmd.id] ?? CircleHelp
+            const isSkill = cmd.category === 'skill' || cmd.id.startsWith('skill:')
+            const Icon = isSkill ? Sparkles : (COMMAND_ICONS[cmd.id] ?? MessageSquarePlus)
+            const desc =
+              cmd.description ??
+              (cmd.descriptionKey ? t(descriptionFor(cmd.id)) : t(descriptionFor('new')))
             return (
               <button
                 key={cmd.id}
@@ -141,7 +140,7 @@ export function CommandPopover({
                 role="option"
                 aria-selected={active}
                 data-index={i}
-                data-testid={`slash-cmd-${cmd.name}`}
+                data-testid={isSkill ? `slash-cmd-skill-${cmd.name}` : `slash-cmd-${cmd.name}`}
                 onMouseEnter={() => onActiveIndexChange(i)}
                 onClick={() => onSelect(cmd)}
                 className={cn(
@@ -159,7 +158,7 @@ export function CommandPopover({
                 </span>
                 <span className="shrink-0 font-medium">/{cmd.name}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {t(descriptionFor(cmd.id))}
+                  {desc}
                 </span>
               </button>
             )

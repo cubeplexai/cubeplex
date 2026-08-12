@@ -15,10 +15,18 @@ const cmds: SlashCommand[] = [
     run: vi.fn(),
   },
   {
-    id: 'help',
-    name: 'help',
-    descriptionKey: 'commands.help.description',
-    category: 'help',
+    id: 'skills',
+    name: 'skills',
+    descriptionKey: 'commands.skills.description',
+    category: 'tools',
+    isAvailable: () => true,
+    run: vi.fn(),
+  },
+  {
+    id: 'skill:s1',
+    name: 'deep-research',
+    description: 'Run multi-source research',
+    category: 'skill',
     isAvailable: () => true,
     run: vi.fn(),
   },
@@ -51,8 +59,14 @@ describe('CommandPopover', () => {
   it('calls onSelect when a row is clicked', () => {
     const onSelect = vi.fn()
     renderPopover({ onSelect })
-    fireEvent.click(screen.getByTestId('slash-cmd-help'))
-    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'help' }))
+    fireEvent.click(screen.getByTestId('slash-cmd-skills'))
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'skills' }))
+  })
+
+  it('renders dynamic skill rows with freeform description', () => {
+    renderPopover()
+    expect(screen.getByTestId('slash-cmd-skill-deep-research')).toBeInTheDocument()
+    expect(screen.getByText('Run multi-source research')).toBeInTheDocument()
   })
 
   it('shows empty state when no commands', () => {

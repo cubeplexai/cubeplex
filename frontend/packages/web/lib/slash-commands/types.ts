@@ -3,7 +3,7 @@
  * Shell injects all side-effect callbacks; the registry never imports AppShell.
  */
 
-export type SlashCommandCategory = 'conversation' | 'run' | 'composer' | 'help' | 'tools'
+export type SlashCommandCategory = 'conversation' | 'run' | 'composer' | 'tools' | 'skill'
 
 export type SlashCommandContext = {
   conversationId?: string
@@ -27,16 +27,22 @@ export type SlashCommandContext = {
   /** Open in-composer MCP connector list (not full-page navigation). */
   openMcpPicker: () => void
   compactConversation: (conversationId: string) => void | Promise<void>
-  /** Enter help mode in the popover (clear filter / show all). */
-  showHelp: () => void
+  /** Pin a skill chip for the next send (dynamic skill slash entries). */
+  pinSkill: (skill: { id: string; name: string }) => void
 }
 
 export type SlashCommand = {
   id: string
-  /** Without leading slash, e.g. "new" */
+  /** Without leading slash, e.g. "new" or skill primary slug. */
   name: string
   aliases?: string[]
-  descriptionKey: string
+  /**
+   * i18n key under `slashCommands` for static commands.
+   * Dynamic entries (skills) use {@link description} instead.
+   */
+  descriptionKey?: string
+  /** Plain description for dynamic skill rows. */
+  description?: string
   category: SlashCommandCategory
   keywords?: string[]
   isAvailable: (ctx: SlashCommandContext) => boolean

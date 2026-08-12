@@ -21,20 +21,21 @@ function baseCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
     openSkillsPicker: vi.fn(),
     openMcpPicker: vi.fn(),
     compactConversation: vi.fn(),
-    showHelp: vi.fn(),
+    pinSkill: vi.fn(),
     ...overrides,
   }
 }
 
 describe('filterCommands + registry availability', () => {
-  it('lists idle P0 commands with conversation + workspace', () => {
+  it('lists idle P0 commands in usefulness order', () => {
     const names = filterCommands(SLASH_COMMANDS, '', baseCtx()).map((c) => c.name)
-    expect(names).toContain('help')
-    expect(names).toContain('new')
-    expect(names).toContain('model')
-    expect(names).toContain('skills')
-    expect(names).toContain('mcp')
-    expect(names).toContain('compact')
+    expect(names).not.toContain('help')
+    expect(names[0]).toBe('new')
+    expect(names.indexOf('model')).toBeLessThan(names.indexOf('skills'))
+    expect(names.indexOf('skills')).toBeLessThan(names.indexOf('attach'))
+    expect(names.indexOf('attach')).toBeLessThan(names.indexOf('mcp'))
+    expect(names.indexOf('compact')).toBeLessThan(names.indexOf('share'))
+    expect(names.indexOf('share')).toBeLessThan(names.indexOf('rename'))
     expect(names).not.toContain('stop')
   })
 

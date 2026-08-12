@@ -8,19 +8,18 @@ function hasWorkspace(ctx: SlashCommandContext): boolean {
   return Boolean(ctx.workspaceId)
 }
 
-/** P0 slash commands. Order is the default palette order when query is empty. */
+/**
+ * Static slash commands, ordered by day-to-day usefulness in the composer.
+ * Dynamic enabled skills are appended at filter time (see skillCommands).
+ *
+ * Order rationale:
+ * 1. new — leave / reset thread
+ * 2. stop — only while streaming (appears near top when relevant)
+ * 3. model / effort — every-turn controls
+ * 4. skills / attach / mcp — context you add before send
+ * 5. compact / share / rename — occasional thread ops
+ */
 export const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'help',
-    name: 'help',
-    descriptionKey: 'commands.help.description',
-    category: 'help',
-    keywords: ['commands', 'list', '?', '援助'],
-    isAvailable: () => true,
-    run: (ctx) => {
-      ctx.showHelp()
-    },
-  },
   {
     id: 'new',
     name: 'new',
@@ -67,25 +66,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   {
-    id: 'rename',
-    name: 'rename',
-    descriptionKey: 'commands.rename.description',
-    category: 'conversation',
-    keywords: ['title', 'name'],
-    isAvailable: hasConversation,
+    id: 'skills',
+    name: 'skills',
+    descriptionKey: 'commands.skills.description',
+    category: 'tools',
+    keywords: ['skill', 'marketplace', 'install', 'pick', 'browse'],
+    isAvailable: hasWorkspace,
     run: (ctx) => {
-      ctx.startRename()
-    },
-  },
-  {
-    id: 'share',
-    name: 'share',
-    descriptionKey: 'commands.share.description',
-    category: 'conversation',
-    keywords: ['link', 'public'],
-    isAvailable: hasConversation,
-    run: (ctx) => {
-      ctx.openShare()
+      ctx.openSkillsPicker()
     },
   },
   {
@@ -97,17 +85,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     isAvailable: () => true,
     run: (ctx) => {
       ctx.openAttach()
-    },
-  },
-  {
-    id: 'skills',
-    name: 'skills',
-    descriptionKey: 'commands.skills.description',
-    category: 'tools',
-    keywords: ['skill', 'marketplace', 'install', 'pick'],
-    isAvailable: hasWorkspace,
-    run: (ctx) => {
-      ctx.openSkillsPicker()
     },
   },
   {
@@ -130,6 +107,28 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     isAvailable: (ctx) => hasConversation(ctx) && !ctx.isStreaming && ctx.compactAvailable,
     run: (ctx) => {
       if (ctx.conversationId) void ctx.compactConversation(ctx.conversationId)
+    },
+  },
+  {
+    id: 'share',
+    name: 'share',
+    descriptionKey: 'commands.share.description',
+    category: 'conversation',
+    keywords: ['link', 'public'],
+    isAvailable: hasConversation,
+    run: (ctx) => {
+      ctx.openShare()
+    },
+  },
+  {
+    id: 'rename',
+    name: 'rename',
+    descriptionKey: 'commands.rename.description',
+    category: 'conversation',
+    keywords: ['title', 'name'],
+    isAvailable: hasConversation,
+    run: (ctx) => {
+      ctx.startRename()
     },
   },
 ]

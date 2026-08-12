@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useShallow } from 'zustand/react/shallow'
 import { toast } from 'sonner'
+import useSWR from 'swr'
 import {
   useMessageStore,
   useAttachmentStore,
   createApiClient,
   compactConversation,
   type Message,
+  type SkillSummary,
 } from '@cubeplex/core'
 import { ArrowUp, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -31,13 +33,20 @@ import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { applySkillChipsToContent, type ComposerSkillChip } from '@/lib/composer/skillChips'
 import {
-  filterCommands,
+  filterSlashPalette,
   parseLeadingCommandToken,
+  skillCommandsFromSummaries,
   SLASH_COMMANDS,
   type SlashCommand,
   type SlashCommandContext,
 } from '@/lib/slash-commands'
 import { CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
+
+async function fetchEnabledSkills(url: string): Promise<SkillSummary[]> {
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) throw new Error(`skills fetch failed: ${res.status}`)
+  return res.json() as Promise<SkillSummary[]>
+}
 
 /** In-composer overlays (mutually exclusive with each other). */
 type ComposerPanel = 'slash' | 'plus' | 'skills' | 'mcp' | null
@@ -77,7 +86,6 @@ export function InputBar({
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [composerPanel, setComposerPanel] = useState<ComposerPanel>(null)
   const [slashActiveIndex, setSlashActiveIndex] = useState(0)
-  const [slashHelpMode, setSlashHelpMode] = useState(false)
   /** Esc dismisses until the draft changes (keeps `/…` text without reopening). */
   const [slashDismissed, setSlashDismissed] = useState(false)
   const send = useMessageStore((s) => s.send)
@@ -167,23 +175,27 @@ export function InputBar({
 
   const closeComposerPanels = useCallback((): void => {
     setComposerPanel(null)
-    setSlashHelpMode(false)
     setSlashDismissed(true)
   }, [])
 
   const openSkillsPicker = useCallback((): void => {
-    setSlashHelpMode(false)
     setSlashDismissed(true)
     setModelPickerOpen(false)
     setComposerPanel('skills')
   }, [])
 
   const openMcpPicker = useCallback((): void => {
-    setSlashHelpMode(false)
     setSlashDismissed(true)
     setModelPickerOpen(false)
     setComposerPanel('mcp')
   }, [])
+
+  // Enabled workspace skills → dynamic `/skill-name` rows in the slash palette.
+  const { data: enabledSkills } = useSWR<SkillSummary[]>(
+    workspaceId ? `/api/v1/ws/${workspaceId}/skills` : null,
+    fetchEnabledSkills,
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  )
 
   const handleSubmit = async (): Promise<void> => {
     if (
@@ -253,28 +265,18 @@ export function InputBar({
 
   const clearComposer = useCallback((): void => {
     setContent('')
-    setSlashHelpMode(false)
     setSlashActiveIndex(0)
     setComposerPanel(null)
     resetTextareaHeight()
   }, [])
 
   const slashToken = parseLeadingCommandToken(content)
-  const slashWantsOpen = !slashDismissed && (slashToken !== null || slashHelpMode)
+  const slashWantsOpen = !slashDismissed && slashToken !== null
   // Skills/MCP pickers take over the floating slot; hide slash while they are open.
   const slashOpen = slashWantsOpen && composerPanel !== 'skills' && composerPanel !== 'mcp'
 
   const runSlashCommand = useCallback(
     async (cmd: SlashCommand, ctx: SlashCommandContext): Promise<void> => {
-      // help keeps the popover open with full list; other commands clear draft.
-      if (cmd.id === 'help') {
-        setSlashHelpMode(true)
-        setContent('/')
-        setSlashActiveIndex(0)
-        await cmd.run(ctx)
-        return
-      }
-      setSlashHelpMode(false)
       clearComposer()
       await cmd.run(ctx)
     },
@@ -324,6 +326,12 @@ export function InputBar({
       openMcpPicker: () => {
         if (workspaceId) openMcpPicker()
       },
+      pinSkill: (skill) => {
+        setSkillChips((prev) => {
+          if (prev.some((s) => s.id === skill.id)) return prev
+          return [...prev, skill]
+        })
+      },
       compactConversation: async (id: string) => {
         const client = createApiClient('')
         if (workspaceId) client.setWorkspaceId(workspaceId)
@@ -344,10 +352,6 @@ export function InputBar({
           toast.error(tSlash('compactFailed'))
         }
       },
-      showHelp: () => {
-        setSlashHelpMode(true)
-        setSlashActiveIndex(0)
-      },
     }),
     [
       conversationId,
@@ -366,10 +370,14 @@ export function InputBar({
     ],
   )
 
-  const slashQuery = slashHelpMode ? '' : (slashToken?.query ?? '')
+  const slashQuery = slashToken?.query ?? ''
+  const skillSlashCommands = useMemo(
+    () => skillCommandsFromSummaries(enabledSkills ?? []),
+    [enabledSkills],
+  )
   const slashCommands = useMemo(
-    () => filterCommands(SLASH_COMMANDS, slashQuery, slashCtx),
-    [slashQuery, slashCtx],
+    () => filterSlashPalette(SLASH_COMMANDS, skillSlashCommands, slashQuery, slashCtx),
+    [slashQuery, slashCtx, skillSlashCommands],
   )
 
   // Keep highlight in range when the filtered list shrinks.
@@ -406,7 +414,6 @@ export function InputBar({
       }
       if (e.key === 'Escape') {
         e.preventDefault()
-        setSlashHelpMode(false)
         setSlashDismissed(true)
         return
       }
@@ -441,9 +448,6 @@ export function InputBar({
     if (composerPanel === 'skills' || composerPanel === 'mcp' || composerPanel === 'plus') {
       setComposerPanel(null)
     }
-    if (slashHelpMode && parseLeadingCommandToken(next) === null) {
-      setSlashHelpMode(false)
-    }
     const ta = textareaRef.current
     if (ta) {
       ta.style.height = 'auto'
@@ -451,14 +455,21 @@ export function InputBar({
     }
   }
 
-  const toggleSkillChip = useCallback((skill: ComposerSkillChip): void => {
-    setSkillChips((prev) => {
-      if (prev.some((s) => s.id === skill.id)) {
-        return prev.filter((s) => s.id !== skill.id)
-      }
-      return [...prev, skill]
-    })
-  }, [])
+  /** Pin/unpin a skill chip, then close the picker so the user can type. */
+  const selectSkillChip = useCallback(
+    (skill: ComposerSkillChip): void => {
+      setSkillChips((prev) => {
+        if (prev.some((s) => s.id === skill.id)) {
+          return prev.filter((s) => s.id !== skill.id)
+        }
+        return [...prev, skill]
+      })
+      closeComposerPanels()
+      // Next frame so the panel unmounts before focus returns to the draft.
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [closeComposerPanels],
+  )
 
   const selectedSkillIds = useMemo(() => new Set(skillChips.map((s) => s.id)), [skillChips])
 
@@ -581,7 +592,7 @@ export function InputBar({
               open={composerPanel === 'skills'}
               workspaceId={workspaceId}
               selectedIds={selectedSkillIds}
-              onToggle={toggleSkillChip}
+              onToggle={selectSkillChip}
               onClose={closeComposerPanels}
             />
             <ComposerMcpPicker
@@ -618,7 +629,6 @@ export function InputBar({
             onOpenChange={(open) => {
               if (open) {
                 setSlashDismissed(true)
-                setSlashHelpMode(false)
                 setModelPickerOpen(false)
                 setComposerPanel('plus')
                 return

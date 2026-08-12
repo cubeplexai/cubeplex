@@ -1,4 +1,5 @@
 export { parseLeadingCommandToken } from './parse'
-export { filterCommands } from './filter'
+export { filterCommands, filterSlashPalette } from './filter'
 export { SLASH_COMMANDS } from './registry'
+export { skillCommandsFromSummaries } from './skillCommands'
 export type { CommandToken, SlashCommand, SlashCommandCategory, SlashCommandContext } from './types'
