@@ -4,6 +4,8 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import en from '../../messages/en.json'
 import { InputBar } from '../../components/layout/InputBar'
 import { getPresetSelectionStore } from '../../lib/stores/preset-selection'
+import { ApiError } from '@cubeplex/core'
+import { toast } from 'sonner'
 
 const storeMocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -16,7 +18,13 @@ const storeMocks = vi.hoisted(() => ({
   setWorkspaceId: vi.fn(),
   compactConversation: vi.fn().mockResolvedValue({ ok: true, compacted: false }),
   appendHistoryMessage: vi.fn(),
-  state: { isStreaming: false, streamingConversationId: null as string | null },
+  state: {
+    isStreaming: false,
+    streamingConversationId: null as string | null,
+    cancellingConversationIds: {} as Record<string, true>,
+    runLifecycle: {} as Record<string, string>,
+    pendingAsk: null as unknown | null,
+  },
 }))
 
 vi.mock('next/navigation', () => ({
@@ -28,6 +36,16 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@cubeplex/core', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      public status: number,
+      public code: string | null,
+      public detail: unknown,
+    ) {
+      super(message)
+    }
+  },
   createApiClient: () => ({
     setWorkspaceId: storeMocks.setWorkspaceId,
   }),
@@ -44,6 +62,8 @@ vi.mock('@cubeplex/core', () => ({
       pendingAsk: unknown | null
       isStreaming: boolean
       streamingConversationId: string | null
+      cancellingConversationIds: Record<string, true>
+      runLifecycle: Record<string, string>
     }) => unknown,
   ) =>
     selector({
@@ -54,9 +74,11 @@ vi.mock('@cubeplex/core', () => ({
       appendHistoryMessage: storeMocks.appendHistoryMessage,
       pendingSteers: {},
       pendingConfirmMap: {},
-      pendingAsk: null,
+      pendingAsk: storeMocks.state.pendingAsk,
       isStreaming: storeMocks.state.isStreaming,
       streamingConversationId: storeMocks.state.streamingConversationId,
+      cancellingConversationIds: storeMocks.state.cancellingConversationIds,
+      runLifecycle: storeMocks.state.runLifecycle,
     }),
   useAttachmentStore: (
     selector: (state: {
@@ -112,6 +134,9 @@ describe('InputBar', () => {
     vi.clearAllMocks()
     storeMocks.state.isStreaming = false
     storeMocks.state.streamingConversationId = null
+    storeMocks.state.cancellingConversationIds = {}
+    storeMocks.state.runLifecycle = {}
+    storeMocks.state.pendingAsk = null
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
@@ -140,6 +165,85 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(textarea).not.toBeDisabled()
     })
+  })
+
+  it('keeps the composer locked while cancellation is still finalizing', () => {
+    storeMocks.state.cancellingConversationIds = { 'conv-1': true }
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+
+    expect(screen.getByTestId('chat-input')).toBeDisabled()
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'placeholder',
+      'Previous turn is still finishing…',
+    )
+    expect(screen.getByTestId('send-button')).toBeDisabled()
+  })
+
+  it('routes text to steering while HITL is paused without locking the textarea', async () => {
+    storeMocks.state.pendingAsk = { question_id: 'q1' }
+    storeMocks.state.runLifecycle = { 'conv-1': 'paused_hitl' }
+    storeMocks.steer.mockResolvedValue(true)
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+
+    expect(textarea).not.toBeDisabled()
+    expect(textarea).toHaveAttribute('placeholder', 'Add guidance for after the pending decision…')
+    fireEvent.change(textarea, { target: { value: 'use the smaller dataset' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.steer).toHaveBeenCalledWith(
+        expect.anything(),
+        'conv-1',
+        'use the smaller dataset',
+      )
+    })
+    expect(storeMocks.send).not.toHaveBeenCalled()
+  })
+
+  it('prepends a rejected steer to text typed while the request was in flight', async () => {
+    storeMocks.state.pendingAsk = { question_id: 'q1' }
+    storeMocks.state.runLifecycle = { 'conv-1': 'paused_hitl' }
+    let rejectSteer: ((reason: Error) => void) | undefined
+    storeMocks.steer.mockImplementation(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          rejectSteer = reject
+        }),
+    )
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+    fireEvent.change(textarea, { target: { value: 'submitted' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+    expect(textarea).toHaveValue('')
+    fireEvent.change(textarea, { target: { value: 'new typing' } })
+    rejectSteer?.(new Error('queue rejected'))
+
+    await waitFor(() => expect(textarea).toHaveValue('submitted\nnew typing'))
+  })
+
+  it('restores the draft and shows a friendly message on an active-run conflict', async () => {
+    storeMocks.send.mockRejectedValue(
+      new ApiError(
+        'Conversation conv-1 already has an active run',
+        409,
+        'active_run_conflict',
+        null,
+      ),
+    )
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+
+    fireEvent.change(textarea, { target: { value: 'keep my draft' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue('keep my draft')
+    })
+    expect(toast.error).toHaveBeenCalledWith('Previous turn is still finishing. Try again shortly.')
   })
 
   it('keeps attachment selector snapshots stable', () => {

@@ -24,7 +24,12 @@ const storeMocks = vi.hoisted(() => ({
     },
   }),
   appendHistoryMessage: vi.fn(),
-  state: { isStreaming: false, streamingConversationId: null as string | null },
+  state: {
+    isStreaming: false,
+    streamingConversationId: null as string | null,
+    cancellingConversationIds: {} as Record<string, true>,
+    runLifecycle: {} as Record<string, string>,
+  },
 }))
 
 const routerMocks = vi.hoisted(() => ({
@@ -56,6 +61,8 @@ vi.mock('@cubeplex/core', () => ({
       pendingAsk: unknown | null
       isStreaming: boolean
       streamingConversationId: string | null
+      cancellingConversationIds: Record<string, true>
+      runLifecycle: Record<string, string>
     }) => unknown,
   ) =>
     selector({
@@ -69,6 +76,8 @@ vi.mock('@cubeplex/core', () => ({
       pendingAsk: null,
       isStreaming: storeMocks.state.isStreaming,
       streamingConversationId: storeMocks.state.streamingConversationId,
+      cancellingConversationIds: storeMocks.state.cancellingConversationIds,
+      runLifecycle: storeMocks.state.runLifecycle,
     }),
   useAttachmentStore: (
     selector: (state: {
@@ -125,6 +134,7 @@ describe('InputBar slash commands', () => {
     vi.clearAllMocks()
     storeMocks.state.isStreaming = false
     storeMocks.state.streamingConversationId = null
+    storeMocks.state.cancellingConversationIds = {}
     getPresetSelectionStore('ws-1').setState({ modelKey: null, thinking: 'off' })
   })
 

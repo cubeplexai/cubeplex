@@ -34,6 +34,7 @@ from cubeplex.repositories import (
     ConversationParticipantRepository,
     ConversationRepository,
     MembershipRepository,
+    SteeringMessageRepository,
     UserSandboxRepository,
 )
 from cubeplex.repositories.conversation import (
@@ -41,6 +42,12 @@ from cubeplex.repositories.conversation import (
     ForkNewThreadExistsError,
     ForkRunNotCompletedError,
     ForkSourceMissingError,
+)
+from cubeplex.repositories.steering_message import (
+    MAX_MESSAGE_BYTES,
+    SteeringMessageConflictError,
+    SteeringMessageContentTooLargeError,
+    SteeringMessageQueueFullError,
 )
 from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.skills.cache import SkillCache
@@ -978,6 +985,11 @@ class CancelSteerRequest(BaseModel):
     steer_id: str
 
 
+def _durable_steer_status(state: object) -> str:
+    value = str(state)
+    return "cancelled" if value == "cancel_requested" else value
+
+
 class SandboxConfirmAnswer(BaseModel):
     """Request body for answering a pending sandbox command confirmation."""
 
@@ -1761,6 +1773,12 @@ async def get_conversation_bootstrap(
     # Todos can live below the bootstrap tail — walk the most recent assistant
     # rows directly so the panel hydrates correctly on long conversations.
     todos = await find_latest_todos(session, conversation_id)
+    steering_repo = SteeringMessageRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    pending_steering = await steering_repo.list_for_bootstrap(conversation_id)
 
     return {
         "messages": history.messages,
@@ -1772,6 +1790,15 @@ async def get_conversation_bootstrap(
         "last_run_error": last_run_error_payload,
         "usage_summary": usage_summary,
         "pending_hitl": pending_hitl,
+        "pending_steers": [
+            {
+                "steer_id": row.client_steer_id,
+                "content": row.content,
+                "state": str(row.state),
+                "created_at": utc_isoformat(row.created_at),
+            }
+            for row in pending_steering
+        ],
     }
 
 
@@ -2081,6 +2108,11 @@ async def steer_active_run(
             message="Steering message must not be empty",
             details="Provide non-empty content to steer the run",
         )
+    if len(body.content.encode("utf-8")) > MAX_MESSAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"code": "steer_content_too_large"},
+        )
 
     conv_repo = ConversationRepository(
         session,
@@ -2111,19 +2143,78 @@ async def steer_active_run(
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
+    steering_repo = SteeringMessageRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    existing = await steering_repo.get_by_client_id(
+        conversation_id=conversation_id,
+        client_steer_id=body.steer_id,
+    )
+    if existing is not None:
+        if existing.content != body.content or existing.sender_user_id != ctx.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "steer_id_conflict"},
+            )
+        return {
+            "status": _durable_steer_status(existing.state),
+            "run_id": existing.run_id,
+            "steer_id": existing.client_steer_id,
+        }
+
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is not None and active_run.status == "paused_hitl":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "paused_hitl",
-                "message": "answer or cancel the pending question first",
-            },
-        )
+    pending_request, pending_run_id = await _load_pending_hitl(conversation_id)
+    pending_run_meta = (
+        await get_run_meta(rds.client, prefix=rds.key_prefix, run_id=pending_run_id)
+        if pending_run_id is not None
+        else None
+    )
+    pending_is_deliverable = pending_run_meta is None or pending_run_meta.status in (
+        "paused_hitl",
+        "running",
+    )
+    if pending_request is not None and pending_run_id is not None and pending_is_deliverable:
+        try:
+            queued, _created = await steering_repo.enqueue(
+                conversation_id=conversation_id,
+                run_id=pending_run_id,
+                client_steer_id=body.steer_id,
+                content=body.content,
+                sender_user_id=ctx.user.id,
+                sender_display_name=_sender_display_name,
+                hitl_question_id=pending_request.question_id,
+            )
+        except SteeringMessageContentTooLargeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={"code": "steer_content_too_large"},
+            ) from exc
+        except SteeringMessageQueueFullError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "steer_queue_full"},
+            ) from exc
+        except SteeringMessageConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "steer_id_conflict"},
+            ) from exc
+        await session.commit()
+        run_manager = raw_request.app.state.run_manager
+        await run_manager.notify_durable_steer(pending_run_id, queued.id)
+        await session.refresh(queued)
+        return {
+            "status": _durable_steer_status(queued.state),
+            "run_id": queued.run_id,
+            "steer_id": queued.client_steer_id,
+        }
+
     if active_run is None or active_run.status != "running":
-        return {"status": "no_active_run", "run_id": None}
+        return {"status": "no_active_run", "run_id": None, "steer_id": body.steer_id}
 
     steer_metadata: dict[str, Any] = {}
     if _sender_display_name:
@@ -2137,7 +2228,11 @@ async def steer_active_run(
         steer_id=body.steer_id,
         metadata=steer_metadata or None,
     )
-    return {"status": dispatch_status, "run_id": active_run.run_id}
+    return {
+        "status": dispatch_status,
+        "run_id": active_run.run_id,
+        "steer_id": body.steer_id,
+    }
 
 
 @router.post("/{conversation_id}/steer/cancel", status_code=status.HTTP_202_ACCEPTED)
@@ -2163,17 +2258,31 @@ async def cancel_steer(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    steering_repo = SteeringMessageRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    durable = await steering_repo.request_cancel(
+        conversation_id=conversation_id,
+        client_steer_id=body.steer_id,
+    )
+    if durable is not None:
+        await session.commit()
+        if str(durable.state) == "cancel_requested":
+            await raw_request.app.state.run_manager.notify_durable_cancel(
+                durable.run_id,
+                durable.client_steer_id,
+            )
+            return {"status": "accepted", "run_id": durable.run_id}
+        return {
+            "status": _durable_steer_status(durable.state),
+            "run_id": durable.run_id,
+        }
+
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is not None and active_run.status == "paused_hitl":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "paused_hitl",
-                "message": "answer or cancel the pending question first",
-            },
-        )
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}
 

@@ -85,10 +85,12 @@ Hover a completed assistant reply to reveal small action chips under the bubble:
 
 While the agent is responding, you can:
 
-- **Stop the response** — click the stop button (square icon) to cancel the current response.
+- **Stop the response** — click the stop button (square icon) to cancel the current response. The composer stays locked and shows cancellation progress until the previous run has fully stopped.
 - **Steer mid-stream** — type a message while the agent is still responding and press Enter. This sends a "steer" instruction that redirects the agent without waiting for it to finish.
 
-When the agent needs your input (e.g., a confirmation before proceeding), the input bar locks until you respond to the prompt card that appears in the chat.
+When the agent needs your input (for example, a confirmation before proceeding), you can keep typing in the input bar. Text sent while the prompt card is waiting is queued as guidance for the same run; it does not answer the card. The agent receives that guidance after you answer, approve, deny, or cancel the card. Queued guidance survives a refresh and can be cancelled before the agent uses it.
+
+Attachments remain unavailable while a run is active, including while an input or confirmation card is waiting. If you hard-stop a run, the composer shows cancellation progress and stays locked until the previous run has fully stopped.
 
 ## Managing conversations
 

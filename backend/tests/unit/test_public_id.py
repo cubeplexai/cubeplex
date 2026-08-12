@@ -74,3 +74,9 @@ def test_id_length_bounds() -> None:
     assert len(public_id.generate_public_id("ws")) == 17
     assert len(public_id.generate_public_id("art")) == 18
     assert len(public_id.generate_public_id("atch")) == 19
+
+
+def test_steering_message_prefix() -> None:
+    pid = public_id.generate_public_id(public_id.PREFIX_STEERING_MESSAGE)
+    assert pid.startswith("stm-")
+    assert len(pid) == 18

@@ -30,14 +30,23 @@ export async function cancelActiveRun(
 ): Promise<CancelRunResponse> {
   const res = await client.post(`/api/v1/conversations/${conversationId}/cancel`, {})
   if (!res.ok) {
-    throw new Error(`Failed to cancel run: HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as CancelRunResponse
 }
 
 export interface SteerRunResponse {
-  status: 'steered' | 'published' | 'no_active_run'
+  status:
+    | 'steered'
+    | 'published'
+    | 'no_active_run'
+    | 'queued'
+    | 'dispatched'
+    | 'injected'
+    | 'cancelled'
+    | 'failed'
   run_id: string | null
+  steer_id: string
 }
 
 export async function steerRun(
@@ -51,13 +60,13 @@ export async function steerRun(
     steer_id: steerId,
   })
   if (!res.ok) {
-    throw new Error(`Failed to steer run: HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as SteerRunResponse
 }
 
 export interface CancelSteerResponse {
-  status: 'cancelled' | 'not_found' | 'published' | 'no_active_run'
+  status: 'accepted' | 'cancelled' | 'not_found' | 'published' | 'no_active_run' | 'injected'
   run_id: string | null
 }
 
@@ -70,7 +79,7 @@ export async function cancelSteer(
     steer_id: steerId,
   })
   if (!res.ok) {
-    throw new Error(`Failed to cancel steer: HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as CancelSteerResponse
 }
@@ -190,10 +199,16 @@ export async function* streamMessages(
     })
 
     if (!res.ok) {
+      const error = await toApiError(res)
+      const activeRunConflict = res.status === 409
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        data: { message: `HTTP ${res.status}` },
+        data: {
+          error_code: activeRunConflict ? 'active_run_conflict' : (error.code ?? 'http_error'),
+          params: { http_status: res.status },
+          message: error.message,
+        },
         agent_id: null,
         agent_name: null,
       } as AgentEvent

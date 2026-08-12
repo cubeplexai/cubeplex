@@ -56,6 +56,7 @@ import {
 } from './conversationUnreadSync'
 
 const YIELD_EVERY = 200
+const injectedSteerIds = new Set<string>()
 
 // Payload carried by the `injected_message` SSE event. `sender_*` are present
 // only for group-chat messages and drive the live SenderBadge.
@@ -104,9 +105,26 @@ export interface PendingAsk {
   run_id: string
 }
 
+export type RunLifecycle = 'idle' | 'running' | 'paused_hitl' | 'resuming_hitl' | 'stopping'
+
+export interface PendingSteer {
+  steerId: string
+  text: string
+  state: 'submitting' | 'queued' | 'dispatched' | 'failed'
+  createdAt: string
+}
+
+function failedPendingSteers(state: MessageStore, conversationId: string): PendingSteer[] {
+  return (state.pendingSteers[conversationId] ?? []).map((pending) => ({
+    ...pending,
+    state: 'failed',
+  }))
+}
+
 export interface MessageStore {
   messages: Record<string, Message[]>
-  pendingSteers: Record<string, { steerId: string; text: string }[]>
+  pendingSteers: Record<string, PendingSteer[]>
+  runLifecycle: Record<string, RunLifecycle>
   streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
@@ -139,6 +157,8 @@ export interface MessageStore {
   contextTokens: Record<string, number | null>
   pendingConfirmMap: Record<string, PendingConfirm>
   pendingAsk: PendingAsk | null
+  /** Conversations whose accepted cancel request is still releasing its active-run slot. */
+  cancellingConversationIds: Record<string, true>
   /**
    * Per-conversation list of ``model_failover`` SSE events. Appended as
    * the events arrive so ``MessageList`` can render an inline banner at
@@ -196,7 +216,7 @@ export interface MessageStore {
    */
   appendHistoryMessage(conversationId: string, message: Message): void
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
-  steer(client: ApiClient, conversationId: string, content: string): Promise<void>
+  steer(client: ApiClient, conversationId: string, content: string): Promise<boolean>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
   __commitTurnAndInject(conversationId: string, data: InjectedMessageData): void
   clearStream(): void
@@ -250,6 +270,38 @@ let activeStreamController: AbortController | null = null
  */
 function ownsStreamingConversation(state: MessageStore, conversationId: string): boolean {
   return state.streamingConversationId === conversationId
+}
+
+function withoutConversationFlag(
+  flags: Record<string, true>,
+  conversationId: string,
+): Record<string, true> {
+  if (!flags[conversationId]) return flags
+  const next = { ...flags }
+  delete next[conversationId]
+  return next
+}
+
+const CANCEL_POLL_INTERVAL_MS = 500
+
+async function waitForConversationIdle(
+  client: ApiClient,
+  conversationId: string,
+  get: () => MessageStore,
+): Promise<boolean> {
+  while (get().cancellingConversationIds[conversationId]) {
+    try {
+      const bootstrap = await getConversationBootstrap(client, conversationId)
+      if (!bootstrap.active_run && !bootstrap.pending_hitl) return true
+    } catch (err) {
+      // Deleted/inaccessible conversations cannot accept another send. Other
+      // failures are usually transient; retain the lock and retry instead of
+      // exposing the exact 409 race this lifecycle guard exists to prevent.
+      if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return false
+    }
+    await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
+  }
+  return false
 }
 
 /**
@@ -1032,16 +1084,25 @@ async function finalizeCompletedStream(
   if (!assistantMessage) {
     set((state) => {
       if (!ownsStreamingConversation(state, conversationId)) {
-        return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+        return {
+          pendingSteers: {
+            ...state.pendingSteers,
+            [conversationId]: failedPendingSteers(state, conversationId),
+          },
+        }
       }
       return {
         isStreaming: false,
+        runLifecycle: { ...state.runLifecycle, [conversationId]: 'idle' },
         pendingConfirmMap: {},
         pendingAsk: null,
         streamingConversationId: null,
         currentRunId: null,
         statusPhase: null,
-        pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+        pendingSteers: {
+          ...state.pendingSteers,
+          [conversationId]: failedPendingSteers(state, conversationId),
+        },
       }
     })
     maybeMarkUnreadOnTerminal(get, conversationId)
@@ -1050,7 +1111,12 @@ async function finalizeCompletedStream(
 
   set((state) => {
     if (!ownsStreamingConversation(state, conversationId)) {
-      return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+      return {
+        pendingSteers: {
+          ...state.pendingSteers,
+          [conversationId]: failedPendingSteers(state, conversationId),
+        },
+      }
     }
     return {
       messages: {
@@ -1069,12 +1135,16 @@ async function finalizeCompletedStream(
       streamAgents: {},
       toolStartedMap: {},
       isStreaming: false,
+      runLifecycle: { ...state.runLifecycle, [conversationId]: 'idle' },
       pendingConfirmMap: {},
       pendingAsk: null,
       streamingConversationId: null,
       currentRunId: null,
       statusPhase: null,
-      pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+      pendingSteers: {
+        ...state.pendingSteers,
+        [conversationId]: failedPendingSteers(state, conversationId),
+      },
     }
   })
   maybeMarkUnreadOnTerminal(get, conversationId)
@@ -1117,13 +1187,13 @@ async function finalizePausedStream(
   if (!assistantMessage) {
     set((state) => {
       if (!ownsStreamingConversation(state, conversationId)) {
-        return { pendingSteers: { ...state.pendingSteers, [conversationId]: [] } }
+        return {}
       }
       return {
         isStreaming: false,
+        runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
         streamingConversationId: nextStreamingConversationId,
         statusPhase: null,
-        pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
       }
     })
     return
@@ -1147,9 +1217,9 @@ async function finalizePausedStream(
       streamAgents: {},
       toolStartedMap: {},
       isStreaming: false,
+      runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
       streamingConversationId: nextStreamingConversationId,
       statusPhase: null,
-      pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
     }
   })
 }
@@ -1321,6 +1391,7 @@ const unreadMarkAt: Record<string, number> = {}
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   pendingSteers: {},
+  runLifecycle: {},
   streamAgents: {},
   isStreaming: false,
   streamingConversationId: null,
@@ -1336,6 +1407,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   toolResultMap: {},
   pendingConfirmMap: {},
   pendingAsk: null,
+  cancellingConversationIds: {},
   failoverEvents: {},
   turnUsage: {},
   sessionUsage: {},
@@ -1502,6 +1574,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // streamingConversationId === conversationId` gate still fires.
         const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
         const isStreamingActive = streamingActive && !isPaused
+        const lifecycle: RunLifecycle = get().cancellingConversationIds[conversationId]
+          ? 'stopping'
+          : hasPendingHitl && bootstrap.active_run?.status === 'running'
+            ? 'resuming_hitl'
+            : hasPendingHitl
+              ? 'paused_hitl'
+              : bootstrap.active_run
+                ? 'running'
+                : 'idle'
         // `bootstrap.messages` already includes everything up to the latest
         // event in the Redis stream at fetch time. The SSE reattach should
         // pick up STRICTLY-NEW events from here; without this cursor the
@@ -1574,17 +1655,30 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           errors: { ...s.errors, [conversationId]: nextError },
           lastRunStatus: bootstrap.last_run_status ?? null,
           streamAgents: nextStreamAgents,
-          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          pendingSteers: {
+            ...s.pendingSteers,
+            [conversationId]: (bootstrap.pending_steers ?? []).map((row) => ({
+              steerId: row.steer_id,
+              text: row.content,
+              state: row.state,
+              createdAt: row.created_at,
+            })),
+          },
+          runLifecycle: { ...s.runLifecycle, [conversationId]: lifecycle },
           toolStartedMap: {},
           toolResultMap: restoredToolResultMap,
-          // When `skipSeed` fired (we just answered/cancelled this exact
-          // question), preserve the current pendingAsk / pendingConfirmMap
+          // When `skipSeed` fired (we just answered this exact question),
+          // preserve the current pendingAsk / pendingConfirmMap
           // instead of clearing them. The form stays mounted in its
           // submitting/cancelling state until the SSE `ask_user_resolved`
           // event arrives, which avoids the visible blank gap that
           // optimistic-clear used to produce.
           pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
           pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
+          cancellingConversationIds:
+            !bootstrap.active_run && !bootstrap.pending_hitl
+              ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
+              : s.cancellingConversationIds,
           isStreaming: isStreamingActive,
           streamingConversationId: streamingActive ? conversationId : null,
           currentRunId: streamRunId,
@@ -1732,6 +1826,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     attachments?: import('../types').MessageAttachment[],
     options?: { model_key?: string | null; reasoning?: ReasoningControl },
   ) {
+    if (get().cancellingConversationIds[conversationId]) {
+      throw new ApiError('Previous turn is still finishing.', 409, 'active_run_conflict', null)
+    }
     const isFirstTurn = (get().messages[conversationId] ?? []).length === 0
     if (isFirstTurn && content.trim()) {
       void useConversationStore.getState().generateTitle(client, conversationId, content)
@@ -1762,6 +1859,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       },
       streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
       isStreaming: true,
+      runLifecycle: { ...state.runLifecycle, [conversationId]: 'running' },
       streamingConversationId: conversationId,
       currentRunId: null,
       lastAppliedEventId: null,
@@ -1782,6 +1880,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     )
     let sawDone = false
     let sawPausedDone = false
+    let activeRunConflict: ApiError | null = null
     activeStreamController?.abort()
     const controller = new AbortController()
     activeStreamController = controller
@@ -1844,7 +1943,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             continue
           } else if (event.type === 'error') {
             const errData = event.data as ErrorEventData
-            if (!retried && !sawDone && errData.message.includes('409')) {
+            const isActiveRunConflict =
+              errData.error_code === 'active_run_conflict' || errData.message.includes('409')
+            if (!retried && !sawDone && isActiveRunConflict) {
               retried = true
               await new Promise((r) => setTimeout(r, 400))
               if (!ownsStreamingConversation(get(), conversationId)) break outer
@@ -1857,6 +1958,29 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 streamOptions,
               )
               continue outer
+            }
+            if (isActiveRunConflict) {
+              flush()
+              activeRunConflict = new ApiError(errData.message, 409, 'active_run_conflict', errData)
+              set((s) => ({
+                messages: {
+                  ...s.messages,
+                  [conversationId]: (s.messages[conversationId] ?? []).filter(
+                    (message) => message.id !== userMessage.id,
+                  ),
+                },
+                errors: { ...s.errors, [conversationId]: null },
+                streamAgents: {},
+                toolStartedMap: {},
+                toolResultMap: {},
+                isStreaming: false,
+                pendingConfirmMap: {},
+                pendingAsk: null,
+                streamingConversationId: null,
+                currentRunId: null,
+                statusPhase: null,
+              }))
+              break outer
             }
             flush()
             let didTerminal = false
@@ -1978,6 +2102,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }
     }
 
+    if (activeRunConflict) throw activeRunConflict
+
     if (sawDone || sawPausedDone) {
       const lastState = get()
       if (
@@ -1995,9 +2121,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   async steer(client, conversationId, content) {
     const text = content.trim()
-    if (!text) return
+    if (!text) return false
     const state = get()
-    if (!state.isStreaming || state.streamingConversationId !== conversationId) return
+    const lifecycle = state.runLifecycle[conversationId]
+    const canSteer =
+      lifecycle === 'running' ||
+      lifecycle === 'paused_hitl' ||
+      lifecycle === 'resuming_hitl' ||
+      (state.isStreaming && state.streamingConversationId === conversationId)
+    if (!canSteer) return false
 
     // A sent-but-not-yet-injected steer is held in pendingSteers (rendered as a
     // chip above the input box), NOT in the transcript. cubepi injects it into
@@ -2007,10 +2139,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     // reports the run was NOT steered (already finished / not in this process),
     // remove the pending entry.
     const steerId = nextMessageId('steer')
+    const createdAt = new Date().toISOString()
     set((s) => ({
       pendingSteers: {
         ...s.pendingSteers,
-        [conversationId]: [...(s.pendingSteers[conversationId] ?? []), { steerId, text }],
+        [conversationId]: [
+          ...(s.pendingSteers[conversationId] ?? []),
+          { steerId, text, state: 'submitting', createdAt },
+        ],
       },
     }))
 
@@ -2026,10 +2162,43 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     try {
       const res = await steerRun(client, conversationId, text, steerId)
-      if (res.status === 'no_active_run') removePending()
+      if (res.status === 'no_active_run' || res.status === 'cancelled' || res.status === 'failed') {
+        removePending()
+        return false
+      }
+      if (res.status === 'injected' || injectedSteerIds.has(steerId)) {
+        removePending()
+        if (
+          res.status === 'injected' &&
+          !(get().messages[conversationId] ?? []).some(
+            (message) => message.role === 'user' && message.metadata?.steer_id === steerId,
+          )
+        ) {
+          await get().loadMessages(client, conversationId)
+        }
+        return true
+      }
+      set((s) => ({
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) =>
+            pending.steerId === steerId
+              ? {
+                  ...pending,
+                  state:
+                    res.status === 'queued' || res.status === 'dispatched'
+                      ? res.status
+                      : 'dispatched',
+                }
+              : pending,
+          ),
+        },
+      }))
+      return true
     } catch (err) {
       console.error('Failed to steer run:', err)
       removePending()
+      throw err
     }
   },
 
@@ -2055,6 +2224,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   // matching pending entry. This keeps the live transcript ordering identical to
   // a reload from the checkpointer (steer interleaved between assistant turns).
   __commitTurnAndInject(conversationId, data) {
+    injectedSteerIds.add(data.steer_id)
     const state = get()
     // Idempotency: if this steer is already committed, no-op (replay-safe).
     const already = (state.messages[conversationId] ?? []).some(
@@ -2113,7 +2283,45 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   async cancelStream(client, conversationId) {
     const state = get()
-    if (!state.isStreaming || state.streamingConversationId !== conversationId) return
+    const hasPendingHitl =
+      state.pendingAsk !== null || Object.keys(state.pendingConfirmMap).length > 0
+    const ownsConversation = state.streamingConversationId === conversationId
+    if (state.cancellingConversationIds[conversationId]) return
+    if (!ownsConversation || (!state.isStreaming && !hasPendingHitl)) return
+
+    set((s) => ({
+      cancellingConversationIds: { ...s.cancellingConversationIds, [conversationId]: true },
+      runLifecycle: { ...s.runLifecycle, [conversationId]: 'stopping' },
+    }))
+
+    try {
+      await cancelActiveRun(client, conversationId)
+    } catch (err) {
+      set((s) => ({
+        cancellingConversationIds: withoutConversationFlag(
+          s.cancellingConversationIds,
+          conversationId,
+        ),
+        runLifecycle: {
+          ...s.runLifecycle,
+          [conversationId]: hasPendingHitl ? 'paused_hitl' : 'running',
+        },
+      }))
+      throw err
+    }
+
+    if (!state.isStreaming) {
+      const isIdle = await waitForConversationIdle(client, conversationId, get)
+      if (!isIdle) return
+      set((s) => ({
+        cancellingConversationIds: withoutConversationFlag(
+          s.cancellingConversationIds,
+          conversationId,
+        ),
+      }))
+      await get().loadMessages(client, conversationId)
+      return
+    }
 
     // Stop consuming the stream first so no late event mutates streamAgents
     // after we snapshot it below.
@@ -2138,26 +2346,38 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     } else {
       set((s) => {
         if (!ownsStreamingConversation(s, conversationId)) {
-          return { pendingSteers: { ...s.pendingSteers, [conversationId]: [] } }
+          return {
+            pendingSteers: {
+              ...s.pendingSteers,
+              [conversationId]: failedPendingSteers(s, conversationId),
+            },
+          }
         }
         return {
           isStreaming: false,
+          runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
           pendingConfirmMap: {},
           pendingAsk: null,
           streamingConversationId: null,
           currentRunId: null,
           statusPhase: null,
-          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          pendingSteers: {
+            ...s.pendingSteers,
+            [conversationId]: failedPendingSteers(s, conversationId),
+          },
         }
       })
       maybeMarkUnreadOnTerminal(get, conversationId)
     }
 
-    try {
-      await cancelActiveRun(client, conversationId)
-    } catch (err) {
-      console.error('Failed to cancel run:', err)
-    }
+    const isIdle = await waitForConversationIdle(client, conversationId, get)
+    if (!isIdle) return
+    set((s) => ({
+      cancellingConversationIds: withoutConversationFlag(
+        s.cancellingConversationIds,
+        conversationId,
+      ),
+    }))
   },
 
   clearStream() {
@@ -2168,9 +2388,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     set({
       streamAgents: {},
       pendingSteers: {},
+      runLifecycle: {},
       isStreaming: false,
       pendingConfirmMap: {},
       pendingAsk: null,
+      cancellingConversationIds: {},
       streamingConversationId: null,
       currentRunId: null,
       lastAppliedEventId: null,

@@ -31,7 +31,9 @@ export function PendingSteers({ conversationId }: PendingSteersProps): React.Rea
           className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground"
         >
           <span className="flex-1 truncate opacity-70">{p.text}</span>
-          <span className="text-[10px] uppercase tracking-wide opacity-50">steering…</span>
+          <span className="text-[10px] uppercase tracking-wide opacity-50">
+            {p.state === 'failed' ? 'not sent' : p.state === 'queued' ? 'queued' : 'steering…'}
+          </span>
           <button
             type="button"
             aria-label="Cancel pending steer"

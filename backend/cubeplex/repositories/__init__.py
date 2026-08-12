@@ -28,6 +28,7 @@ from cubeplex.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
+from cubeplex.repositories.steering_message import SteeringMessageRepository
 from cubeplex.repositories.topic import TopicRepository
 from cubeplex.repositories.trigger import TriggerEventRepository, TriggerRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
@@ -58,6 +59,7 @@ __all__ = [
     "PresentedFileRepository",
     "SkillRepository",
     "SkillVersionRepository",
+    "SteeringMessageRepository",
     "TopicRepository",
     "TriggerEventRepository",
     "TriggerRepository",

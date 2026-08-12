@@ -197,7 +197,12 @@
   "input": {
     "placeholder": "告诉 CubePlex 你想完成什么…",
     "hint": "Enter 发送 / Shift+Enter 换行",
-    "pendingHitlLock": "请先回答上方待处理的问题。"
+    "pendingHitlLock": "请先回答上方待处理的问题。",
+    "pendingHitlSteerHint": "添加待处理决定之后要执行的指导…",
+    "steerFailed": "指导未能排队，文字已恢复。",
+    "cancellingLock": "上一轮仍在结束中…",
+    "activeRunConflict": "上一轮仍在结束中，请稍后重试。",
+    "cancelFailed": "无法取消当前运行，请重试。"
   },
   "slashCommands": {
     "listAria": "输入框命令",
@@ -405,6 +410,8 @@
     "loadFailed": "加载成果失败"
   },
   "chat": {
+    "cancellingRun": "正在取消运行…",
+    "cancelFailed": "无法取消当前运行，请重试。",
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
     "loadEarlier": "加载更早的消息",
     "loadingEarlier": "正在加载更早的消息…",

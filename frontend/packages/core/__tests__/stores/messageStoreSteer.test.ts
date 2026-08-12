@@ -85,4 +85,50 @@ describe('messageStore.steer', () => {
     expect(useMessageStore.getState().pendingSteers.conv1).toHaveLength(1)
     expect(useMessageStore.getState().messages.conv1).toHaveLength(0)
   })
+
+  it('queues steering while the lifecycle is paused_hitl even though streaming is false', async () => {
+    useMessageStore.setState({
+      isStreaming: false,
+      streamingConversationId: 'conv1',
+      runLifecycle: { conv1: 'paused_hitl' },
+    })
+    ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      status: 'queued',
+      run_id: 'r1',
+      steer_id: 'ignored-by-store',
+    })
+
+    expect(await useMessageStore.getState().steer(fakeClient, 'conv1', 'after approval')).toBe(true)
+    expect(useMessageStore.getState().pendingSteers.conv1[0]).toMatchObject({
+      text: 'after approval',
+      state: 'queued',
+    })
+  })
+
+  it('does not recreate a pending chip when injected_message wins the POST race', async () => {
+    let resolvePost:
+      ((value: { status: 'queued'; run_id: string; steer_id: string }) => void) | null = null
+    ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      (_client: unknown, _conversation: string, _text: string, steerId: string) =>
+        new Promise((resolve) => {
+          resolvePost = resolve
+          queueMicrotask(() => {
+            useMessageStore.getState().__commitTurnAndInject('conv1', {
+              content: 'race text',
+              steer_id: steerId,
+            })
+          })
+        }),
+    )
+
+    const pending = useMessageStore.getState().steer(fakeClient, 'conv1', 'race text')
+    await Promise.resolve()
+    const injected = useMessageStore.getState().messages.conv1.at(-1)
+    const steerId = injected?.metadata?.steer_id as string
+    resolvePost?.({ status: 'queued', run_id: 'r1', steer_id: steerId })
+    await pending
+
+    expect(useMessageStore.getState().pendingSteers.conv1 ?? []).toHaveLength(0)
+    expect(useMessageStore.getState().messages.conv1).toHaveLength(1)
+  })
 })
