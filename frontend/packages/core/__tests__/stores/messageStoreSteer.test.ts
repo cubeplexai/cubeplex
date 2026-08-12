@@ -131,4 +131,31 @@ describe('messageStore.steer', () => {
     expect(useMessageStore.getState().pendingSteers.conv1 ?? []).toHaveLength(0)
     expect(useMessageStore.getState().messages.conv1).toHaveLength(1)
   })
+
+  it('refreshes history when an injected response arrives before its stream event', async () => {
+    ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      status: 'injected',
+      run_id: 'r1',
+      steer_id: 'server-steer-id',
+    })
+    const client = {
+      resolvePath: (path: string) => path,
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            messages: [],
+            active_run: null,
+            pending_hitl: null,
+            pending_steers: [],
+            last_run_status: null,
+          }),
+      }),
+    } as never
+
+    expect(await useMessageStore.getState().steer(client, 'conv1', 'already injected')).toBe(true)
+
+    expect(client.get).toHaveBeenCalledOnce()
+  })
 })

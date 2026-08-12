@@ -180,7 +180,11 @@ export interface MessageStore {
    */
   unreadConversationIds: UnreadConversationIds
 
-  loadMessages(client: ApiClient, conversationId: string): Promise<void>
+  loadMessages(
+    client: ApiClient,
+    conversationId: string,
+    options?: { force?: boolean },
+  ): Promise<void>
   /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
    *  cursor and prepend it to ``messages[conversationId]``. Noop when already
    *  in flight, when ``hasMore`` is false, or when no cursor is set yet. */
@@ -1449,9 +1453,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     })
   },
 
-  async loadMessages(client: ApiClient, conversationId: string) {
+  async loadMessages(client: ApiClient, conversationId: string, options?: { force?: boolean }) {
+    const force = options?.force === true
     const state = get()
-    if (state.isStreaming && state.streamingConversationId === conversationId) return
+    if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
     // The page-level effect and <MessageList>'s own effect both fire on mount
     // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
     if (loadMessagesInFlight.has(conversationId)) return loadMessagesInFlight.get(conversationId)
@@ -1459,7 +1464,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       try {
         const bootstrap = await getConversationBootstrap(client, conversationId)
         const current = get()
-        if (current.isStreaming && current.streamingConversationId === conversationId) return
+        if (!force && current.isStreaming && current.streamingConversationId === conversationId)
+          return
 
         let messages = normalizeMessages(bootstrap.messages ?? [])
         if (bootstrap.active_run?.user_message) {
@@ -2174,7 +2180,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             (message) => message.role === 'user' && message.metadata?.steer_id === steerId,
           )
         ) {
-          await get().loadMessages(client, conversationId)
+          await get().loadMessages(client, conversationId, { force: true })
         }
         return true
       }
