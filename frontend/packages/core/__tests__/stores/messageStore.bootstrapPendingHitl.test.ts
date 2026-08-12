@@ -29,6 +29,41 @@ beforeEach(() => {
 })
 
 describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
+  it('hydrates durable pending steer chips and paused lifecycle', async () => {
+    const client = makeBootstrapClient({
+      messages: [],
+      active_run: { run_id: 'run-1', status: 'paused_hitl' },
+      last_run_status: null,
+      pending_hitl: {
+        run_id: 'run-1',
+        question_id: 'qid-1',
+        kind: 'ask_user',
+        requested_at: '2026-08-12T00:00:00.000Z',
+        questions: [],
+      },
+      pending_steers: [
+        {
+          steer_id: 'steer-1',
+          content: 'queued direction',
+          state: 'queued',
+          created_at: '2026-08-12T00:00:01.000Z',
+        },
+      ],
+    })
+
+    await useMessageStore.getState().loadMessages(client, 'conv-queued')
+
+    expect(useMessageStore.getState().runLifecycle['conv-queued']).toBe('paused_hitl')
+    expect(useMessageStore.getState().pendingSteers['conv-queued']).toEqual([
+      {
+        steerId: 'steer-1',
+        text: 'queued direction',
+        state: 'queued',
+        createdAt: '2026-08-12T00:00:01.000Z',
+      },
+    ])
+  })
+
   it('seeds pendingAsk (singular) when bootstrap returns an ask_user request', async () => {
     const client = makeBootstrapClient({
       messages: [],

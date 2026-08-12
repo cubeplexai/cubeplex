@@ -17,7 +17,7 @@ Scenarios:
 4. POST ask-user-answer with mismatched question_id → 409 stale_answer.
 5. POST ask-user-answer with no pending → 404 no_pending.
 6. Two concurrent POSTs → exactly one 2xx + one 409 ``resume_in_flight``.
-7. Steer route on a paused conversation → 409 ``paused_hitl``.
+7. Steer route on a paused conversation → durable queued row.
 8. Cancel route on a paused conversation → dispatches to
    ``cancel_paused_run``.
 """
@@ -367,20 +367,75 @@ async def test_concurrent_submit_one_wins(
 
 
 @pytest.mark.asyncio
-async def test_steer_route_returns_409_paused_hitl(
+async def test_steer_route_queues_durably_while_paused_hitl(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """Steer on a paused conversation surfaces a clear 409 paused_hitl
-    instead of misleading no_active_run."""
+    """Paused steering is accepted and survives through bootstrap."""
     client, ws_id = member_client
-    conv_id, _ = await _seed_paused_conversation(client, ws_id, _ask_pending("q-steer"))
+    conv_id, run_id = await _seed_paused_conversation(client, ws_id, _ask_pending("q-steer"))
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
         json={"content": "any steer text", "steer_id": "s-1"},
     )
-    assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"]["code"] == "paused_hitl"
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {"status": "queued", "run_id": run_id, "steer_id": "s-1"}
+
+    bootstrap = await client.get(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/bootstrap")
+    assert bootstrap.status_code == 200, bootstrap.text
+    assert bootstrap.json()["pending_steers"] == [
+        {
+            "steer_id": "s-1",
+            "content": "any steer text",
+            "state": "queued",
+            "created_at": bootstrap.json()["pending_steers"][0]["created_at"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_paused_steer_retry_and_cancel_are_durable(
+    member_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-steer-cancel"),
+    )
+    path = f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer"
+    body = {"content": "keep this exact text", "steer_id": "s-idempotent"}
+
+    first = await client.post(path, json=body)
+    retry = await client.post(path, json=body)
+    assert first.status_code == retry.status_code == 202
+    assert (
+        first.json()
+        == retry.json()
+        == {
+            "status": "queued",
+            "run_id": run_id,
+            "steer_id": "s-idempotent",
+        }
+    )
+
+    conflict = await client.post(
+        path,
+        json={"content": "different text", "steer_id": "s-idempotent"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "steer_id_conflict"
+
+    cancelled = await client.post(
+        f"{path}/cancel",
+        json={"steer_id": "s-idempotent"},
+    )
+    assert cancelled.status_code == 202
+    assert cancelled.json() == {"status": "cancelled", "run_id": run_id}
+
+    bootstrap = await client.get(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/bootstrap")
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["pending_steers"] == []
 
 
 @pytest.mark.asyncio

@@ -64,6 +64,12 @@ export interface ConversationBootstrap extends HistoryWindowPage {
    * ``null`` when there is no pending HITL.
    */
   pending_hitl?: PendingHitl | null
+  pending_steers?: Array<{
+    steer_id: string
+    content: string
+    state: 'queued' | 'dispatched' | 'failed'
+    created_at: string
+  }>
 }
 
 export interface StartRunResponse {

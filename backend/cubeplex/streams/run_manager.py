@@ -884,6 +884,14 @@ class RunManager:
         self._control_tasks: list[asyncio.Task[None]] = []
         self._tasks_empty: asyncio.Event = asyncio.Event()
         self._tasks_empty.set()
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.streams.steering_delivery import DurableSteeringCoordinator
+
+        self._steering_delivery = DurableSteeringCoordinator(
+            async_session_maker,
+            redis=redis,
+            redis_key_prefix=key_prefix,
+        )
 
     def _on_task_done(self, run_id: str) -> None:
         """Done-callback that removes the run task and signals drain when empty."""
@@ -1105,6 +1113,19 @@ class RunManager:
             extra = {"metadata": metadata}
         await self._publish_control(run_id, "steer", content, steer_id=steer_id, extra=extra)
         return "published"
+
+    async def notify_durable_steer(self, run_id: str, queue_item_id: str) -> None:
+        """Wake the run owner without putting user-authored content on Redis."""
+        await self._publish_control(
+            run_id,
+            "steer_available",
+            extra={"queue_item_id": queue_item_id},
+        )
+        await self._steering_delivery.drain(run_id)
+
+    async def notify_durable_cancel(self, run_id: str, steer_id: str) -> None:
+        await self._publish_control(run_id, "cancel_durable_steer", steer_id=steer_id)
+        await self._steering_delivery.cancel_dispatched(run_id, steer_id)
 
     async def resume_run_with_answer(
         self,
@@ -1347,6 +1368,13 @@ class RunManager:
             agent = self._agents.get(run_id)
             if agent is not None:
                 agent.cancel_steer(data.get("steer_id") or "")
+        elif type_ == "steer_available":
+            await self._steering_delivery.drain(run_id)
+        elif type_ == "cancel_durable_steer":
+            await self._steering_delivery.cancel_dispatched(
+                run_id,
+                data.get("steer_id") or "",
+            )
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
         run_id = data.get("run_id")
@@ -1389,6 +1417,9 @@ class RunManager:
 
     async def start_control_listeners(self, ready_timeout: float = 5.0) -> None:
         self._control_stopping = False
+        steering_delivery = getattr(self, "_steering_delivery", None)
+        if steering_delivery is not None:
+            steering_delivery.start()
         ctrl_ready = asyncio.Event()
         ack_ready = asyncio.Event()
         self._control_tasks = [
@@ -1427,6 +1458,9 @@ class RunManager:
             with suppress(asyncio.CancelledError):
                 await t
         self._control_tasks = []
+        steering_delivery = getattr(self, "_steering_delivery", None)
+        if steering_delivery is not None:
+            await steering_delivery.stop()
 
     async def drain(self, timeout_seconds: float) -> None:
         """Wait for in-flight runs to finish, then return.
@@ -2153,11 +2187,21 @@ class RunManager:
             # across deltas inside a single run.
             stream_converter = StreamConverter()
 
-            def _on_event(evt: Any, _signal: Any = None) -> None:
+            from cubepi.agent.types import HitlRequestEvent as _HitlRequestEvent
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubepi.providers.base import UserMessage as _UserMsg
+
+            async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # auto_detach runs first so a follow-up HitlRequestEvent
                 # detaches the agent before SSE conversion; T6 reads
                 # `auto_detach.detached` in the terminal block below.
                 auto_detach(evt, _signal)
+                if isinstance(evt, _HitlRequestEvent):
+                    self._steering_delivery.unregister(run_id)
+                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
+                    steer_id = evt.message.metadata.get("steer_id")
+                    if isinstance(steer_id, str) and steer_id:
+                        await self._steering_delivery.acknowledge_injected(run_id, steer_id)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_queue.put_nowait(d)
 
@@ -2166,6 +2210,17 @@ class RunManager:
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
             drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+            from cubeplex.streams.steering_delivery import SteeringRunScope
+
+            await self._steering_delivery.register_and_drain(
+                run_id=run_id,
+                scope=SteeringRunScope(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                ),
+                agent=agent,
+            )
 
             from cubepi.tracing import trace, tracing_context
 
@@ -3925,6 +3980,9 @@ class RunManager:
             except ValueError:
                 citation_event_queue.set(None)
 
+            if final_status != "paused_hitl":
+                await self._steering_delivery.finalize_run(run_id)
+            self._steering_delivery.unregister(run_id)
             self._agents.pop(run_id, None)
             # Release the turn lock BEFORE the sandbox/session teardown below:
             # `done` has already been emitted, and holding the active-run key
@@ -4118,6 +4176,7 @@ class RunManager:
         # even when the exception is raised inside _run_cubepi_respond_path (a
         # separate call frame — locals().get() would never see it).
         extra_ref_holder: dict[str, Any] = {}
+        durable_final_status = "errored"
 
         try:
             try:
@@ -4329,6 +4388,7 @@ class RunManager:
                 run_id=run_id,
             )
             final_status = final_meta.status if final_meta is not None else "completed"
+            durable_final_status = final_status
 
             done_data: dict[str, Any] = {
                 "usage": {
@@ -4492,6 +4552,9 @@ class RunManager:
                 with suppress(Exception):
                     await catalog_session_ctx.__aexit__(None, None, None)
 
+            if durable_final_status != "paused_hitl":
+                await self._steering_delivery.finalize_run(run_id)
+            self._steering_delivery.unregister(run_id)
             self._agents.pop(run_id, None)
             # Clear the active-run pointer — claim_resume handles the case
             # where pointer is gone but meta is paused_hitl (it re-stamps

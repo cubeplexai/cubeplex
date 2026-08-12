@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { steerRun, cancelSteer } from '../../src/api/stream'
-
-function fakeClient(capture: { path?: string; body?: unknown }) {
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { cancelSteer, steerRun, streamMessages } from '../../src/api/stream'
+function fakeClient(capture: { path?: string; body?: unknown } = {}) {
   return {
+    baseUrl: '',
+    resolvePath: (path: string) => path,
     post: vi.fn(async (path: string, body: unknown) => {
       capture.path = path
       capture.body = body
@@ -10,6 +11,10 @@ function fakeClient(capture: { path?: string; body?: unknown }) {
     }),
   } as never
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('steer api', () => {
   it('steerRun sends content + steer_id', async () => {
@@ -24,5 +29,30 @@ describe('steer api', () => {
     await cancelSteer(fakeClient(cap), 'conv-1', 's1')
     expect(cap.path).toBe('/api/v1/conversations/conv-1/steer/cancel')
     expect(cap.body).toEqual({ steer_id: 's1' })
+  })
+})
+
+describe('message stream errors', () => {
+  it('classifies an active-run 409 for friendly composer recovery', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'Conversation conv-1 already has an active run' }), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
+
+    const events = []
+    for await (const event of streamMessages(fakeClient(), 'conv-1', 'hello')) {
+      events.push(event)
+    }
+
+    expect(events).toHaveLength(1)
+    expect(events[0].data).toMatchObject({
+      error_code: 'active_run_conflict',
+      params: { http_status: 409 },
+    })
   })
 })

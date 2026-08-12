@@ -12,7 +12,6 @@ import {
   toolTimingFromDetails,
   submitSandboxConfirm,
   submitAskUserAnswer,
-  cancelActiveRun,
   ApiError,
 } from '@cubeplex/core'
 import type {
@@ -21,7 +20,8 @@ import type {
   SubagentSummary,
   TurnUsage,
 } from '@cubeplex/core'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
 import { SenderBadge } from './SenderBadge'
@@ -169,7 +169,15 @@ async function handlePendingSubmitError(
     conversationId: string,
   ) => Promise<void>,
 ): Promise<void> {
-  if (!(err instanceof ApiError)) throw err
+  useMessageStore.setState((state) => ({
+    runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
+  }))
+  if (!(err instanceof ApiError)) {
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    await loadMessages(client, conversationId)
+    throw err
+  }
   const code = err.code
   const client = createApiClient('')
   if (workspaceId) client.setWorkspaceId(workspaceId)
@@ -198,8 +206,10 @@ async function handlePendingSubmitError(
       const nextAsk = s.pendingAsk?.question_id === questionId ? null : s.pendingAsk
       return { pendingConfirmMap: nextConfirm, pendingAsk: nextAsk }
     })
+    await loadMessages(client, conversationId)
     return
   }
+  await loadMessages(client, conversationId)
   throw err
 }
 
@@ -227,6 +237,8 @@ export function MessageList({ conversationId }: MessageListProps) {
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
+  const cancelStream = useMessageStore((s) => s.cancelStream)
+  const isCancelling = useMessageStore((s) => Boolean(s.cancellingConversationIds[conversationId]))
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   // Active run guard for the per-message Fork action — MessageActions
   // greys the button when the clicked message is part of the still-running
@@ -266,6 +278,9 @@ export function MessageList({ conversationId }: MessageListProps) {
       const questionId = pending.question_id
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
+      useMessageStore.setState((state) => ({
+        runLifecycle: { ...state.runLifecycle, [convId]: 'resuming_hitl' },
+      }))
       try {
         await submitSandboxConfirm(client, convId, questionId, decision)
         // Optimistic removal — sandbox_confirm_resolved SSE will also clean up.
@@ -297,6 +312,9 @@ export function MessageList({ conversationId }: MessageListProps) {
       const questionId = pendingAsk.question_id
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
+      useMessageStore.setState((state) => ({
+        runLifecycle: { ...state.runLifecycle, [convId]: 'resuming_hitl' },
+      }))
       try {
         await submitAskUserAnswer(client, convId, questionId, answers)
         // Keep the form mounted (still in "submitting" state) until
@@ -326,29 +344,14 @@ export function MessageList({ conversationId }: MessageListProps) {
     const convId = streamingConversationId ?? conversationId
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    // Optimistic clear so the form disappears immediately. The backend
-    // /cancel route is paused-aware (POST hits cancel_paused_run when
-    // status=paused_hitl), which writes a synthetic AgentAbortedEvent
-    // and finalises the run as cancelled. Reload bootstrap to pick up
-    // the new terminal state — composer unlocks once pendingAsk clears.
-    // Mirror the submit handler: keep the form mounted (it will switch
-    // to its "cancelling" state via the AskUserCard button) until the
-    // backend's cancel-respond flow finishes and SSE clears pendingAsk.
-    // `lastAnsweredAskQuestionId` is the bootstrap-guard.
-    useMessageStore.setState({ lastAnsweredAskQuestionId: pendingAsk.question_id })
     try {
-      await cancelActiveRun(client, convId)
+      await cancelStream(client, convId)
     } catch (err) {
-      // Cancel failed — drop the bootstrap-guard so the bootstrap below
-      // can re-seed the form. The form was never unmounted, just held
-      // in its "cancelling" state; clearing the guard lets the next
-      // bootstrap rewrite `pendingAsk` from `pending_hitl`.
-      useMessageStore.setState({ lastAnsweredAskQuestionId: null })
       console.error('Failed to cancel paused ask_user:', err)
-    } finally {
-      await loadMessages(client, convId)
+      toast.error(t('cancelFailed'))
+      throw err
     }
-  }, [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages])
+  }, [conversationId, streamingConversationId, pendingAsk, workspaceId, cancelStream, t])
 
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
 
@@ -680,6 +683,20 @@ export function MessageList({ conversationId }: MessageListProps) {
                 onSubmit={handleAskUserSubmit}
                 onCancel={handleAskUserCancel}
               />
+            </div>
+          )}
+
+          {isCancelling && !pendingAsk && (
+            <div
+              role="status"
+              className={cn(
+                ASSISTANT_CONTENT_MAX_CLASS,
+                'my-2 flex items-center gap-2 rounded-lg border border-info-border',
+                'bg-info-surface px-3 py-2 text-sm text-info-fg',
+              )}
+            >
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              <span>{t('cancellingRun')}</span>
             </div>
           )}
 

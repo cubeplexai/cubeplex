@@ -56,6 +56,7 @@ from cubeplex.models.skill import (
 )
 from cubeplex.models.skill_registry import SkillRegistry
 from cubeplex.models.sso_connection import SSOConnection
+from cubeplex.models.steering_message import SteeringMessage, SteeringMessageState
 from cubeplex.models.topic import Topic, TopicParticipant
 from cubeplex.models.trigger import Trigger, TriggerEvent
 from cubeplex.models.user import User
@@ -118,6 +119,8 @@ __all__ = [
     "SkillRegistry",
     "SkillVersion",
     "SSOConnection",
+    "SteeringMessage",
+    "SteeringMessageState",
     "ExternalIdentity",
     "Topic",
     "TopicParticipant",

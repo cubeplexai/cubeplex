@@ -197,7 +197,12 @@
   "input": {
     "placeholder": "Tell CubePlex what you want to get done…",
     "hint": "Enter to send / Shift+Enter for newline",
-    "pendingHitlLock": "Answer the pending question above first."
+    "pendingHitlLock": "Answer the pending question above first.",
+    "pendingHitlSteerHint": "Add guidance for after the pending decision…",
+    "steerFailed": "That guidance was not queued. Your text has been restored.",
+    "cancellingLock": "Previous turn is still finishing…",
+    "activeRunConflict": "Previous turn is still finishing. Try again shortly.",
+    "cancelFailed": "Could not cancel the current run. Try again."
   },
   "slashCommands": {
     "listAria": "Composer commands",
@@ -405,6 +410,8 @@
     "loadFailed": "Failed to load artifacts"
   },
   "chat": {
+    "cancellingRun": "Cancelling run…",
+    "cancelFailed": "Could not cancel the current run. Try again.",
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
     "loadEarlier": "Load earlier messages",
     "loadingEarlier": "Loading earlier messages…",

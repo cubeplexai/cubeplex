@@ -374,9 +374,22 @@ class ConversationRepository(ScopedRepository[Conversation]):
         Returns ``False`` if the conversation doesn't exist or is already
         soft-deleted (the filter hides it).
         """
-        conv = await self.get(conversation_id)
+        stmt = (
+            self._scoped_select()
+            .where(cast(Any, Conversation.id) == conversation_id)
+            .with_for_update()
+        )
+        conv = (await self.session.execute(stmt)).scalar_one_or_none()
         if conv is None:
             return False
+        from cubeplex.repositories.steering_message import SteeringMessageRepository
+
+        steering_repo = SteeringMessageRepository(
+            self.session,
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+        )
+        await steering_repo.delete_for_conversation(conversation_id)
         conv.deleted_at = datetime.now(UTC)
         await self.session.commit()
         return True

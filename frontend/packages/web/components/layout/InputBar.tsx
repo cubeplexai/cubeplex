@@ -11,6 +11,7 @@ import {
   useAttachmentStore,
   createApiClient,
   compactConversation,
+  ApiError,
   type Message,
   type SkillSummary,
 } from '@cubeplex/core'
@@ -108,6 +109,18 @@ export function InputBar({
   const hasPendingHitl = useMessageStore(
     (s) => Object.keys(s.pendingConfirmMap).length > 0 || s.pendingAsk !== null,
   )
+  const runLifecycle = useMessageStore((s) =>
+    conversationId ? (s.runLifecycle[conversationId] ?? 'idle') : 'idle',
+  )
+  const isCancelling = useMessageStore((s) =>
+    conversationId ? Boolean(s.cancellingConversationIds[conversationId]) : false,
+  )
+  const composerLockMessage = isCancelling ? t('cancellingLock') : null
+  const shouldSteer =
+    messageIsStreaming ||
+    runLifecycle === 'running' ||
+    runLifecycle === 'paused_hitl' ||
+    runLifecycle === 'resuming_hitl'
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const slashListboxId = useId()
@@ -198,11 +211,12 @@ export function InputBar({
   )
 
   const handleSubmit = async (): Promise<void> => {
+    const submittedText = content
     if (
       isSubmitting ||
-      messageIsStreaming ||
+      shouldSteer ||
       uploadInFlight ||
-      hasPendingHitl ||
+      isCancelling ||
       modelSyncPending ||
       !canSendPayload
     )
@@ -255,8 +269,18 @@ export function InputBar({
             reasoning: reasoningFromThinking(selection.thinking),
           }
         : undefined
-      await send(client, conversationId!, text, ids, optimisticAttachments, sendOptions)
+      await send(client, conversationId!, submittedText, ids, optimisticAttachments, sendOptions)
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.code === 'active_run_conflict') {
+        setContent((current) => current || submittedText)
+        if (conversationId) {
+          const recoveryClient = createApiClient('')
+          if (workspaceId) recoveryClient.setWorkspaceId(workspaceId)
+          await hydrate(recoveryClient, conversationId)
+        }
+        toast.error(t('activeRunConflict'))
+        return
+      }
       console.error('Failed to send message:', err)
     } finally {
       setIsHandlingSubmit(false)
@@ -431,8 +455,8 @@ export function InputBar({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (hasPendingHitl) return
-      if (messageIsStreaming && (hasText || hasSkillChips)) {
+      if (isCancelling) return
+      if (shouldSteer && (hasText || hasSkillChips)) {
         void handleSteer()
       } else {
         void handleSubmit()
@@ -505,16 +529,23 @@ export function InputBar({
   }
 
   // Steering is text-only; don't allow new attachment uploads mid-run.
-  const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting && !messageIsStreaming
+  const canAttach =
+    Boolean(conversationId || onSubmit) && !isSubmitting && !shouldSteer && !isCancelling
   // Show Stop only while streaming AND the box is empty; once the user types
   // (or pins a skill chip), the button becomes Send (which steers the live run).
-  const showStop = messageIsStreaming && Boolean(conversationId) && !hasText && !hasSkillChips
+  const showStop =
+    messageIsStreaming && Boolean(conversationId) && !hasText && !hasSkillChips && !isCancelling
 
   const handleCancel = async (): Promise<void> => {
     if (!conversationId) return
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    await cancelStream(client, conversationId)
+    try {
+      await cancelStream(client, conversationId)
+    } catch (err) {
+      console.error('Failed to cancel run:', err)
+      toast.error(t('cancelFailed'))
+    }
   }
 
   const handleSteer = async (): Promise<void> => {
@@ -525,7 +556,16 @@ export function InputBar({
     setContent('')
     setSkillChips([])
     resetTextareaHeight()
-    await steer(client, conversationId, text)
+    try {
+      const accepted = await steer(client, conversationId, text)
+      if (!accepted) {
+        setContent((current) => (current ? `${text}\n${current}` : text))
+      }
+    } catch (err) {
+      setContent((current) => (current ? `${text}\n${current}` : text))
+      console.error('Failed to queue steering:', err)
+      toast.error(t('steerFailed'))
+    }
   }
 
   return (
@@ -613,15 +653,17 @@ export function InputBar({
           value={content}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={hasPendingHitl ? t('pendingHitlLock') : t('placeholder')}
-          title={hasPendingHitl ? t('pendingHitlLock') : undefined}
+          placeholder={
+            composerLockMessage ?? (hasPendingHitl ? t('pendingHitlSteerHint') : t('placeholder'))
+          }
+          title={composerLockMessage ?? undefined}
           rows={1}
           role="combobox"
           aria-expanded={slashOpen}
           aria-controls={slashOpen ? slashListboxId : undefined}
           aria-autocomplete="list"
           className="resize-none bg-transparent outline-none text-md text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto px-3.5 py-1 disabled:cursor-not-allowed"
-          disabled={(isSubmitting && !messageIsStreaming) || hasPendingHitl}
+          disabled={(isSubmitting && !shouldSteer) || composerLockMessage !== null}
         />
         <div className="flex items-end gap-1 px-2 pt-1 pb-0.5">
           <ComposerAddMenu
@@ -668,18 +710,18 @@ export function InputBar({
               <button
                 data-testid="send-button"
                 type="button"
-                onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
+                onClick={() => void (shouldSteer ? handleSteer() : handleSubmit())}
                 disabled={
                   !canSendPayload ||
-                  (isSubmitting && !messageIsStreaming) ||
+                  (isSubmitting && !shouldSteer) ||
                   uploadInFlight ||
-                  hasPendingHitl ||
-                  (modelSyncPending && !messageIsStreaming)
+                  isCancelling ||
+                  (modelSyncPending && !shouldSteer)
                 }
-                title={hasPendingHitl ? t('pendingHitlLock') : undefined}
+                title={composerLockMessage ?? undefined}
                 className={cn(
                   'flex size-7 shrink-0 items-center justify-center rounded-md transition-all duration-fast active:scale-[0.94]',
-                  canSendPayload && !hasPendingHitl
+                  canSendPayload && !isCancelling
                     ? 'bg-primary text-primary-foreground hover:bg-primary/80'
                     : 'bg-muted text-muted-foreground',
                   'disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100',

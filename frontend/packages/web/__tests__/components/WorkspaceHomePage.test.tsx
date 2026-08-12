@@ -40,6 +40,7 @@ vi.mock('@cubeplex/core', () => {
   useAttachmentStore.getState = (): typeof attachmentState => attachmentState
 
   return {
+    ApiError: class ApiError extends Error {},
     createApiClient: () => ({
       setWorkspaceId: storeMocks.setWorkspaceId,
     }),
@@ -82,6 +83,8 @@ vi.mock('@cubeplex/core', () => {
         pendingAsk: unknown | null
         isStreaming: boolean
         streamingConversationId: string | null
+        cancellingConversationIds: Record<string, true>
+        runLifecycle: Record<string, string>
       }) => unknown,
     ) =>
       selector({
@@ -92,6 +95,8 @@ vi.mock('@cubeplex/core', () => {
         pendingAsk: null,
         isStreaming: false,
         streamingConversationId: null,
+        cancellingConversationIds: {},
+        runLifecycle: {},
       }),
   }
 })
