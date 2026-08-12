@@ -500,10 +500,7 @@ function ContentBlockRenderer({
   if (block.type === 'tool_call_streaming') {
     const supportsPreview = block.name === 'write_file'
     return (
-      <div
-        className="overflow-hidden rounded-xl border border-border/80 bg-card
-          border-l-2 border-l-info-fg/40 shadow-sm"
-      >
+      <div className="min-w-0">
         <ToolCallItem
           name={block.name || 'tool'}
           arguments={{}}

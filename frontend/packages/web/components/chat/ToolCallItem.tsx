@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, memo } from 'react'
 import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubeplex/core'
-import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
+import { Check, Loader2, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useMcpToolRegistryStore, useToolDetailStore } from '@cubeplex/core'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
@@ -47,7 +47,7 @@ interface ToolCallItemProps {
   /** True while this tool is still executing */
   isPending: boolean
   allowOpenWhenPending?: boolean
-  /** Show border-top separator (not first in group) */
+  /** @deprecated chips use gap, not dividers — kept for call-site compat */
   showDivider?: boolean
   pendingConfirm?: PendingConfirm | null
   onSandboxConfirm?: (decision: 'approve' | 'deny') => Promise<void>
@@ -55,6 +55,7 @@ interface ToolCallItemProps {
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`
   const seconds = Math.round(ms / 1000)
   if (seconds < 60) return `${seconds}s`
   const m = Math.floor(seconds / 60)
@@ -62,6 +63,10 @@ function formatDuration(ms: number): string {
   return s > 0 ? `${m}m${s}s` : `${m}m`
 }
 
+/**
+ * Compact Beautiful-UI-style tool chip. One dense line; click opens the
+ * right-hand tool detail panel (unchanged behaviour).
+ */
 export const ToolCallItem = memo(function ToolCallItem({
   name,
   arguments: args,
@@ -73,7 +78,6 @@ export const ToolCallItem = memo(function ToolCallItem({
   timestamp,
   isPending,
   allowOpenWhenPending,
-  showDivider,
   pendingConfirm,
   onSandboxConfirm,
 }: ToolCallItemProps) {
@@ -103,7 +107,11 @@ export const ToolCallItem = memo(function ToolCallItem({
   const FallbackIcon = getToolIcon(displayName)
   const summary = summaryOverride ?? getParamSummary(displayName, args)
   const canOpen = Boolean(toolResult) || allowOpenWhenPending
-  const labelTooltip = mcpEntry ? `${mcpEntry.server_name} · ${mcpEntry.bare_name}` : displayName
+  const labelTooltip = mcpEntry
+    ? `${mcpEntry.server_name} · ${mcpEntry.bare_name}`
+    : summary
+      ? `${displayName} — ${summary}`
+      : displayName
 
   const handleViewInPanel = () => {
     openPanel(
@@ -116,15 +124,18 @@ export const ToolCallItem = memo(function ToolCallItem({
   }
 
   return (
-    <div className={showDivider ? 'border-t border-border/70' : ''}>
+    <div>
       <button
         type="button"
         onClick={canOpen ? handleViewInPanel : undefined}
+        disabled={!canOpen}
         title={labelTooltip}
         className={cn(
-          'flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors',
-          canOpen ? 'hover:bg-accent/70 cursor-pointer' : 'cursor-default',
-          isPending && 'bg-info-surface/40',
+          'group flex w-full max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5',
+          'text-left text-[12.5px] leading-5 transition-colors',
+          canOpen
+            ? 'cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+            : 'cursor-default text-muted-foreground',
         )}
       >
         {mcpIconSrc && !mcpIconFailed ? (
@@ -132,50 +143,52 @@ export const ToolCallItem = memo(function ToolCallItem({
           <img
             src={mcpIconSrc}
             alt=""
-            className="size-3.5 rounded-sm shrink-0 object-contain"
+            className="size-3 shrink-0 rounded-[2px] object-contain opacity-80"
             onError={() => setMcpIconFailed(true)}
           />
         ) : mcpEntry ? (
-          <Plug className="size-3.5 text-muted-foreground shrink-0" />
+          <Plug className="size-3 shrink-0 opacity-70" />
         ) : (
-          <FallbackIcon
-            className={cn(
-              'size-3.5 shrink-0',
-              isPending ? 'text-info-fg/80' : 'text-muted-foreground',
-            )}
-          />
+          <FallbackIcon className="size-3 shrink-0 opacity-70" />
         )}
-        <span className="font-medium text-foreground shrink-0 max-w-[40%] truncate">
+
+        <span
+          className={cn(
+            'shrink-0 font-medium',
+            isPending ? 'text-foreground' : 'text-foreground/90',
+          )}
+        >
           {displayName}
         </span>
-        {summary && (
-          <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 text-left">
-            {summary}
-          </span>
+
+        {summary ? (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/80">{summary}</span>
+        ) : (
+          <span className="min-w-0 flex-1" />
         )}
-        <span className="ml-auto flex items-center gap-1.5 shrink-0 tabular-nums">
+
+        <span className="ml-auto flex shrink-0 items-center gap-1 tabular-nums text-[11px] text-muted-foreground/70">
           {pendingConfirm ? null : isPending ? (
             <>
-              <Circle className="size-2.5 text-info-fg animate-pulse" />
-              <span className="text-xs text-muted-foreground">{formatDuration(elapsed)}</span>
+              <Loader2 className="size-3 animate-spin opacity-70" />
+              <span>{formatDuration(elapsed)}</span>
             </>
           ) : toolResult ? (
             <>
-              <CheckCircle2 className="size-3 text-success-fg" />
-              <span className="text-xs text-muted-foreground">{formatDuration(duration)}</span>
-              <PanelRight className="size-3 text-muted-foreground/70" />
+              <Check className="size-3 text-success-fg" strokeWidth={2.5} />
+              {duration >= 500 && <span>{formatDuration(duration)}</span>}
             </>
-          ) : canOpen ? (
-            <PanelRight className="size-3 text-muted-foreground/70" />
           ) : null}
         </span>
       </button>
       {pendingConfirm && onSandboxConfirm && (
-        <SandboxConfirmCard
-          pending={pendingConfirm}
-          onApprove={() => onSandboxConfirm('approve')}
-          onDeny={() => onSandboxConfirm('deny')}
-        />
+        <div className="mt-1">
+          <SandboxConfirmCard
+            pending={pendingConfirm}
+            onApprove={() => onSandboxConfirm('approve')}
+            onDeny={() => onSandboxConfirm('deny')}
+          />
+        </div>
       )}
     </div>
   )
