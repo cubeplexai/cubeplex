@@ -32,13 +32,21 @@ export function getToolIcon(toolName: string): LucideIcon {
 
 /**
  * Extract a human-readable summary from tool arguments.
- * Returns the most meaningful parameter value, truncated.
+ * Prefer model-supplied `description` (short intent line) when present —
+ * same pattern as Grok Build's bash/task tools. Otherwise pick the most
+ * meaningful parameter for the tool kind.
  */
 export function getParamSummary(
   toolName: string,
   args: Record<string, unknown>,
   maxLen = 60,
 ): string {
+  const desc = args.description
+  if (typeof desc === 'string' && desc.trim()) {
+    const d = desc.trim().replace(/\s+/g, ' ')
+    return d.length > maxLen ? d.slice(0, maxLen) + '...' : d
+  }
+
   const bare = bareToolName(toolName)
   let value = ''
   if (bare === 'execute') {
@@ -52,8 +60,11 @@ export function getParamSummary(
   } else if (bare === 'load_skill') {
     value = String(args.skill_name ?? '')
   } else {
-    const firstVal = Object.values(args).find((v) => typeof v === 'string')
-    value = firstVal ? String(firstVal) : ''
+    // Skip description-like keys already handled; prefer a stable string arg.
+    const firstVal = Object.entries(args).find(
+      ([k, v]) => k !== 'description' && typeof v === 'string' && v.trim(),
+    )
+    value = firstVal ? String(firstVal[1]) : ''
   }
   if (value.length > maxLen) {
     return value.slice(0, maxLen) + '...'

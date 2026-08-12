@@ -7,6 +7,7 @@ import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useMcpToolRegistryStore, useToolDetailStore } from '@cubeplex/core'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SandboxConfirmCard } from './SandboxConfirmCard'
+import { cn } from '@/lib/utils'
 
 /** Pick the best renderable icon src: prefer per-tool over server icon;
  * prefer cached_src (offline data URI) over remote src. Theme matching is
@@ -115,14 +116,16 @@ export const ToolCallItem = memo(function ToolCallItem({
   }
 
   return (
-    <div className={showDivider ? 'border-t border-border' : ''}>
+    <div className={showDivider ? 'border-t border-border/70' : ''}>
       <button
         type="button"
         onClick={canOpen ? handleViewInPanel : undefined}
         title={labelTooltip}
-        className={`flex w-full items-center gap-2 px-3
-          py-2 text-sm transition-colors
-          ${canOpen ? 'hover:bg-accent cursor-pointer' : ''}`}
+        className={cn(
+          'flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors',
+          canOpen ? 'hover:bg-accent/70 cursor-pointer' : 'cursor-default',
+          isPending && 'bg-info-surface/40',
+        )}
       >
         {mcpIconSrc && !mcpIconFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -135,60 +138,35 @@ export const ToolCallItem = memo(function ToolCallItem({
         ) : mcpEntry ? (
           <Plug className="size-3.5 text-muted-foreground shrink-0" />
         ) : (
-          <FallbackIcon className="size-3.5 text-muted-foreground shrink-0" />
+          <FallbackIcon
+            className={cn(
+              'size-3.5 shrink-0',
+              isPending ? 'text-info-fg/80' : 'text-muted-foreground',
+            )}
+          />
         )}
-        <span
-          className="font-medium text-foreground
-            shrink-0"
-        >
+        <span className="font-medium text-foreground shrink-0 max-w-[40%] truncate">
           {displayName}
         </span>
         {summary && (
-          <>
-            <span
-              className="text-muted-foreground/40
-                shrink-0"
-            >
-              |
-            </span>
-            <span
-              className="text-xs text-muted-foreground
-                truncate"
-            >
-              {summary}
-            </span>
-          </>
+          <span className="text-xs text-muted-foreground truncate min-w-0 flex-1 text-left">
+            {summary}
+          </span>
         )}
-        <span
-          className="ml-auto flex items-center gap-1.5
-            shrink-0"
-        >
+        <span className="ml-auto flex items-center gap-1.5 shrink-0 tabular-nums">
           {pendingConfirm ? null : isPending ? (
             <>
-              <Circle
-                className="size-2.5 text-info-fg
-                  animate-pulse"
-              />
-              <span
-                className="text-xs
-                  text-muted-foreground"
-              >
-                {formatDuration(elapsed)}
-              </span>
+              <Circle className="size-2.5 text-info-fg animate-pulse" />
+              <span className="text-xs text-muted-foreground">{formatDuration(elapsed)}</span>
             </>
           ) : toolResult ? (
             <>
               <CheckCircle2 className="size-3 text-success-fg" />
-              <span
-                className="text-xs
-                  text-muted-foreground"
-              >
-                {formatDuration(duration)}
-              </span>
-              <PanelRight className="size-3 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">{formatDuration(duration)}</span>
+              <PanelRight className="size-3 text-muted-foreground/70" />
             </>
           ) : canOpen ? (
-            <PanelRight className="size-3 text-muted-foreground" />
+            <PanelRight className="size-3 text-muted-foreground/70" />
           ) : null}
         </span>
       </button>
