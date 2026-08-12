@@ -13,7 +13,7 @@ import type {
 } from '@cubeplex/core'
 import type { AgentStream } from '@cubeplex/core'
 import { useArtifactStore } from '@cubeplex/core'
-import { ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Sparkle, AlertCircle } from 'lucide-react'
 import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageArtifactCard } from './ImageArtifactCard'
@@ -57,8 +57,10 @@ function formatDuration(ms: number): string {
 /**
  * Thinking row — same density as tool chips (no heavy pill/card):
  * - Collapsed: one muted line "Thought · 4s ›"
- * - Streaming: same line + 3-line scroll body (no card chrome)
+ * - Streaming: sparkle + shimmer label + 3-line scroll body
  * - Expanded: line + full body under a light left rule
+ *
+ * Icon is a 4-point star (Beautiful UI Thinking) rather than a brain.
  */
 function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
   const t = useTranslations('chat')
@@ -110,13 +112,21 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
           ) : (
             <ChevronRight className="size-3 shrink-0 opacity-70" />
           ))}
-        <Brain
+        <Sparkle
           className={cn(
-            'size-3 shrink-0 opacity-70',
-            isStreaming && 'text-primary opacity-90 animate-pulse',
+            'size-3 shrink-0',
+            isStreaming
+              ? 'fill-primary text-primary animate-thinking-sparkle'
+              : 'fill-muted-foreground/40 text-muted-foreground/80',
           )}
+          strokeWidth={1.75}
         />
-        <span className={cn('font-medium tabular-nums', isStreaming && 'text-foreground/90')}>
+        <span
+          className={cn(
+            'font-medium tabular-nums',
+            isStreaming ? 'animate-thinking-shimmer' : undefined,
+          )}
+        >
           {title}
           {timeLabel ? ` · ${timeLabel}` : ''}
         </span>
