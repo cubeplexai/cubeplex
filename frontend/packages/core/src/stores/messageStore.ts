@@ -24,7 +24,7 @@ import type {
   ToolResultMessage as ToolResultMessageType,
   UserMessage as UserMessageType,
 } from '../types'
-import { getTextContent } from '../types'
+import { getTextContent, toolTimingFromDetails } from '../types'
 import type { ApiClient } from '../api'
 import {
   ApiError,
@@ -698,10 +698,14 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const tcId = e.data.tool_call_id ?? ''
     const newMap = { ...state.toolResultMap }
     if (tcId) {
+      // Prefer TimestampMiddleware details (true tool wall clock) over the
+      // SSE event stamp / client toolStartedMap, so live and reload match.
+      const timing = toolTimingFromDetails(e.data.details)
       newMap[tcId] = {
         content: e.data.content,
-        receivedAt: timestampToMs(event.timestamp),
+        receivedAt: timing.receivedAt ?? timestampToMs(event.timestamp),
         startedAt:
+          timing.startedAt ??
           state.toolStartedMap[tcId] ??
           (e.data.started_at ? timestampToMs(e.data.started_at) : undefined),
         contentType: e.data.content_type,
@@ -1547,12 +1551,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const restoredToolResultMap: MessageStore['toolResultMap'] = {}
         for (const msg of messages) {
           if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
+          const timing = toolTimingFromDetails(msg.details)
           restoredToolResultMap[msg.tool_call_id] = {
             content: msg.content
               .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
               .map((b) => b.text)
               .join(''),
-            receivedAt: (msg.timestamp ?? 0) * 1000,
+            receivedAt: timing.receivedAt ?? (msg.timestamp ?? 0) * 1000,
+            startedAt: timing.startedAt,
             details: msg.details,
           }
         }

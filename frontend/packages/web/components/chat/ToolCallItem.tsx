@@ -176,7 +176,12 @@ export const ToolCallItem = memo(function ToolCallItem({
           ) : toolResult ? (
             <>
               <Check className="size-3 text-success-fg" strokeWidth={2.5} />
-              {duration >= 500 && <span>{formatDuration(duration)}</span>}
+              {/* Always show completed duration (incl. sub-500ms). The old
+                  `>= 500` gate made fast tools flash a live clock then lose
+                  the number the moment the result landed. */}
+              {Number.isFinite(duration) && duration >= 0 && (
+                <span>{formatDuration(duration)}</span>
+              )}
             </>
           ) : null}
         </span>

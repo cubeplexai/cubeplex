@@ -150,6 +150,27 @@ export function getToolResultPreviewContent(msg: ToolResultMessage): string {
   return getTextContent(msg)
 }
 
+/**
+ * Per-tool wall-clock timing from TimestampMiddleware
+ * (`details.tool_started_at` / `details.tool_ended_at`, ISO UTC strings).
+ * Prefer these over message-level timestamps: the assistant message clock
+ * starts at the beginning of the model turn (thinking + text + prior tools),
+ * which inflates duration after reload.
+ */
+export function toolTimingFromDetails(details: unknown): {
+  startedAt?: number
+  receivedAt?: number
+} {
+  if (!details || typeof details !== 'object') return {}
+  const d = details as Record<string, unknown>
+  const start = typeof d.tool_started_at === 'string' ? Date.parse(d.tool_started_at) : Number.NaN
+  const end = typeof d.tool_ended_at === 'string' ? Date.parse(d.tool_ended_at) : Number.NaN
+  return {
+    startedAt: Number.isFinite(start) ? start : undefined,
+    receivedAt: Number.isFinite(end) ? end : undefined,
+  }
+}
+
 export function getThinking(msg: AssistantMessage): string {
   return msg.content
     .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')
