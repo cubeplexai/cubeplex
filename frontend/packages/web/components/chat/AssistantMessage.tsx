@@ -79,24 +79,32 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
   }, [thinking, isStreaming])
 
   const displayTime = durationMs ?? (isStreaming && startedAt ? elapsed : null)
+  const showTime = displayTime != null && displayTime >= 1000
+  const timeLabel = showTime ? formatDuration(displayTime) : null
 
-  // Streaming: always show 3-line scroller; Completed: collapsed or fully expanded
+  // Header: streaming "Thinking…" · done "Thought for 4s" (expandable)
+  const headerLabel = isStreaming
+    ? t('thinking')
+    : timeLabel
+      ? t('thoughtFor', { time: timeLabel })
+      : t('thinkingProcess')
+
   return (
     <div>
-      {/* Header - clickable when not streaming */}
       <button
         type="button"
         onClick={() => {
           if (!isStreaming) setIsExpanded((prev) => !prev)
         }}
-        className={`flex items-center gap-1.5 text-xs text-muted-foreground
-          transition-colors group w-full text-left
-          ${isStreaming ? 'cursor-default' : 'hover:text-foreground cursor-pointer'}`}
+        aria-expanded={isStreaming ? true : isExpanded}
+        className={cn(
+          'flex items-center gap-1.5 text-xs w-full text-left transition-colors group',
+          isStreaming
+            ? 'cursor-default text-muted-foreground'
+            : 'cursor-pointer text-muted-foreground hover:text-foreground',
+        )}
       >
-        <span
-          className="text-muted-foreground/60 group-hover:text-muted-foreground
-          transition-colors"
-        >
+        <span className="text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
           {isStreaming ? (
             <Brain className="size-3 text-primary/70 animate-pulse" />
           ) : isExpanded ? (
@@ -105,20 +113,20 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
             <ChevronRight className="size-3" />
           )}
         </span>
-        {!isStreaming && <Brain className="size-3 text-muted-foreground/70" />}
-        <span>{isStreaming ? t('thinking') : t('thinkingProcess')}</span>
-        {displayTime != null && displayTime >= 1000 && (
-          <span className="text-muted-foreground/50 ml-0.5">{formatDuration(displayTime)}</span>
+        {!isStreaming && <Brain className="size-3 text-muted-foreground/70 shrink-0" />}
+        <span className="font-medium tabular-nums">{headerLabel}</span>
+        {isStreaming && timeLabel && (
+          <span className="text-muted-foreground/50 ml-0.5 tabular-nums">{timeLabel}</span>
         )}
       </button>
 
       {/* Streaming: 3-line scrolling viewport with gradient mask */}
       {isStreaming && (
-        <div className="mt-1.5 relative">
+        <div className="mt-2 relative">
           <div
             ref={scrollRef}
             className="overflow-hidden text-xs leading-[1.625] whitespace-pre-wrap italic
-              pl-4 border-l-2 border-primary/30"
+              pl-3 border-l-2 border-primary/25 text-muted-foreground/70"
             style={{
               maxHeight: 'calc(1.625em * 3)',
               maskImage:
@@ -131,18 +139,15 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
                 ' rgba(0,0,0,0.45) 85%, transparent 100%)',
             }}
           >
-            <span className="text-muted-foreground/70">{thinking}</span>
+            {thinking}
           </div>
         </div>
       )}
 
       {/* Completed & expanded: full content */}
       {!isStreaming && isExpanded && (
-        <div className="mt-1.5 pl-4 border-l-2 border-border/50 max-h-64 overflow-y-auto">
-          <p
-            className="text-xs text-muted-foreground/70 leading-relaxed whitespace-pre-wrap
-            italic"
-          >
+        <div className="mt-2 pl-3 border-l-2 border-border/60 max-h-64 overflow-y-auto">
+          <p className="text-xs text-muted-foreground/75 leading-relaxed whitespace-pre-wrap italic">
             {thinking}
           </p>
         </div>
@@ -294,7 +299,7 @@ function ContentBlockRenderer({
 }) {
   if (block.type === 'thinking') {
     return (
-      <div className="bg-card border border-border rounded-xl px-3 py-2.5">
+      <div className="rounded-xl border border-border/80 bg-muted/30 px-3 py-2.5">
         <ReasoningBlock
           thinking={block.thinking}
           isStreaming={isStreaming && isLast}
@@ -478,9 +483,8 @@ function ContentBlockRenderer({
     const supportsPreview = block.name === 'write_file'
     return (
       <div
-        className="bg-card border border-border rounded-xl
-          overflow-hidden border-l-2
-          border-l-muted-foreground/20"
+        className="overflow-hidden rounded-xl border border-border/80 bg-card
+          border-l-2 border-l-info-fg/40 shadow-sm"
       >
         <ToolCallItem
           name={block.name || 'tool'}
