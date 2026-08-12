@@ -46,6 +46,7 @@ interface ReasoningBlockProps {
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`
   const seconds = Math.round(ms / 1000)
   if (seconds < 60) return `${seconds}s`
   const m = Math.floor(seconds / 60)
@@ -53,6 +54,12 @@ function formatDuration(ms: number): string {
   return s > 0 ? `${m}m${s}s` : `${m}m`
 }
 
+/**
+ * Beautiful-UI style thinking chip:
+ * - Collapsed complete: compact pill "Thought · 4s" (not a full-width row)
+ * - Streaming: pill + live timer + 3-line scrolling trace body
+ * - Expanded complete: pill stays, body panel opens below
+ */
 function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
@@ -78,55 +85,67 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
     }
   }, [thinking, isStreaming])
 
-  const displayTime = durationMs ?? (isStreaming && startedAt ? elapsed : null)
-  const showTime = displayTime != null && displayTime >= 1000
-  const timeLabel = showTime ? formatDuration(displayTime) : null
-
-  // Header: streaming "Thinking…" · done "Thought for 4s" (expandable)
-  const headerLabel = isStreaming
-    ? t('thinking')
-    : timeLabel
-      ? t('thoughtFor', { time: timeLabel })
-      : t('thinkingProcess')
+  const displayTime = durationMs ?? (isStreaming && startedAt != null ? elapsed : null)
+  // Show timer as soon as we have any timing signal (not only ≥1s).
+  const timeLabel = displayTime != null ? formatDuration(displayTime) : null
+  const showBody = isStreaming || isExpanded
+  const title = isStreaming ? t('thinking') : t('thought')
 
   return (
-    <div>
+    <div
+      className={cn(
+        'transition-[background-color,border-color,box-shadow] duration-150',
+        showBody
+          ? 'rounded-xl border border-border/80 bg-muted/40 px-3 py-2.5 shadow-sm'
+          : 'inline-flex max-w-full',
+      )}
+    >
       <button
         type="button"
         onClick={() => {
           if (!isStreaming) setIsExpanded((prev) => !prev)
         }}
         aria-expanded={isStreaming ? true : isExpanded}
+        aria-label={timeLabel ? `${title} ${timeLabel}` : title}
         className={cn(
-          'flex items-center gap-1.5 text-xs w-full text-left transition-colors group',
+          'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1',
+          'text-xs transition-colors',
           isStreaming
-            ? 'cursor-default text-muted-foreground'
-            : 'cursor-pointer text-muted-foreground hover:text-foreground',
+            ? 'cursor-default border-primary/25 bg-primary/5 text-foreground'
+            : 'cursor-pointer border-border bg-card text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground',
         )}
       >
-        <span className="text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
-          {isStreaming ? (
-            <Brain className="size-3 text-primary/70 animate-pulse" />
-          ) : isExpanded ? (
-            <ChevronDown className="size-3" />
-          ) : (
-            <ChevronRight className="size-3" />
+        <Brain
+          className={cn(
+            'size-3.5 shrink-0',
+            isStreaming ? 'text-primary animate-pulse' : 'text-muted-foreground',
           )}
-        </span>
-        {!isStreaming && <Brain className="size-3 text-muted-foreground/70 shrink-0" />}
-        <span className="font-medium tabular-nums">{headerLabel}</span>
-        {isStreaming && timeLabel && (
-          <span className="text-muted-foreground/50 ml-0.5 tabular-nums">{timeLabel}</span>
+        />
+        <span className={cn('font-medium', isStreaming && 'text-foreground')}>{title}</span>
+        {timeLabel && (
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-px font-mono text-[11px] tabular-nums leading-none',
+              isStreaming ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+            )}
+          >
+            {timeLabel}
+          </span>
+        )}
+        {!isStreaming && (
+          <span className="text-muted-foreground/70">
+            {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </span>
         )}
       </button>
 
       {/* Streaming: 3-line scrolling viewport with gradient mask */}
       {isStreaming && (
-        <div className="mt-2 relative">
+        <div className="mt-2.5 relative">
           <div
             ref={scrollRef}
             className="overflow-hidden text-xs leading-[1.625] whitespace-pre-wrap italic
-              pl-3 border-l-2 border-primary/25 text-muted-foreground/70"
+              pl-3 border-l-2 border-primary/30 text-muted-foreground/80"
             style={{
               maxHeight: 'calc(1.625em * 3)',
               maskImage:
@@ -139,15 +158,15 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
                 ' rgba(0,0,0,0.45) 85%, transparent 100%)',
             }}
           >
-            {thinking}
+            {thinking || t('thinking')}
           </div>
         </div>
       )}
 
       {/* Completed & expanded: full content */}
       {!isStreaming && isExpanded && (
-        <div className="mt-2 pl-3 border-l-2 border-border/60 max-h-64 overflow-y-auto">
-          <p className="text-xs text-muted-foreground/75 leading-relaxed whitespace-pre-wrap italic">
+        <div className="mt-2.5 pl-3 border-l-2 border-border max-h-64 overflow-y-auto">
+          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap italic">
             {thinking}
           </p>
         </div>
@@ -298,15 +317,14 @@ function ContentBlockRenderer({
   onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }) {
   if (block.type === 'thinking') {
+    // ReasoningBlock owns its own chip / panel chrome (no outer card wrap).
     return (
-      <div className="rounded-xl border border-border/80 bg-muted/30 px-3 py-2.5">
-        <ReasoningBlock
-          thinking={block.thinking}
-          isStreaming={isStreaming && isLast}
-          startedAt={block.started_at}
-          durationMs={block.duration_ms}
-        />
-      </div>
+      <ReasoningBlock
+        thinking={block.thinking}
+        isStreaming={isStreaming && isLast}
+        startedAt={block.started_at}
+        durationMs={block.duration_ms}
+      />
     )
   }
   if (block.type === 'tool_call' && block.name === 'subagent') {
