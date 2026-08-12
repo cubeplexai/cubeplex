@@ -104,10 +104,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: 'skills',
     descriptionKey: 'commands.skills.description',
     category: 'tools',
-    keywords: ['skill', 'marketplace', 'install'],
+    keywords: ['skill', 'marketplace', 'install', 'pick'],
     isAvailable: hasWorkspace,
     run: (ctx) => {
-      ctx.openSkills()
+      ctx.openSkillsPicker()
     },
   },
   {
@@ -118,7 +118,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     keywords: ['connector', 'tools', 'integrations'],
     isAvailable: hasWorkspace,
     run: (ctx) => {
-      ctx.openMcp()
+      ctx.openMcpPicker()
     },
   },
   {

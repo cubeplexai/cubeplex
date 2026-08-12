@@ -202,6 +202,7 @@
   "slashCommands": {
     "listAria": "Composer commands",
     "noMatches": "No matching commands",
+    "filterHint": "Type to filter commands",
     "compactSuccess": "Conversation context compacted",
     "compactSkipped": "Not enough history to compact yet",
     "compactFailed": "Could not compact conversation",
@@ -232,15 +233,45 @@
         "description": "Attach a file"
       },
       "skills": {
-        "description": "Open workspace skills"
+        "description": "Choose a skill for this message"
       },
       "mcp": {
-        "description": "Open MCP connectors"
+        "description": "Browse MCP connectors"
       },
       "compact": {
         "description": "Compact conversation context"
       }
     }
+  },
+  "composerExtras": {
+    "addMenuAria": "Add attachments, skills, or connectors",
+    "uploadFiles": "Upload files",
+    "uploadFilesDesc": "Attach from your computer",
+    "skills": "Skills",
+    "skillsDesc": "Pin a skill for this message",
+    "mcp": "MCP connectors",
+    "mcpDesc": "See connectors for this workspace",
+    "skillChipsAria": "Selected skills",
+    "removeSkill": "Remove skill {name}",
+    "skillsPickerAria": "Choose skills",
+    "skillsSearchPlaceholder": "Search skills…",
+    "skillsLoadError": "Could not load skills",
+    "skillsEmpty": "No enabled skills in this workspace",
+    "skillsNoMatches": "No matching skills",
+    "skillsFooterHint": "Selected skills send with your next message",
+    "manageSkills": "Manage",
+    "mcpPickerAria": "MCP connectors",
+    "mcpSearchPlaceholder": "Search connectors…",
+    "mcpLoadError": "Could not load connectors",
+    "mcpEmpty": "No connectors in this workspace",
+    "mcpNoMatches": "No matching connectors",
+    "mcpFooterHint": "Enable or connect from Manage",
+    "manageMcp": "Manage",
+    "mcpStatusReady": "Ready",
+    "mcpStatusNeedsAttention": "Needs setup",
+    "mcpStatusDisabled": "Off",
+    "mcpStatusNotInstalled": "Not installed",
+    "loading": "Loading…"
   },
   "askUser": {
     "submit": "Submit",

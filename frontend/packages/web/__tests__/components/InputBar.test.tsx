@@ -176,7 +176,7 @@ describe('InputBar', () => {
     const { container } = renderWithIntl(<InputBar onSubmit={onSubmit} />)
     const file = new File(['hello'], 'hello.txt', { type: 'text/plain' })
 
-    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeDisabled()
+    expect(screen.getByTestId('composer-add-menu')).not.toBeDisabled()
 
     const fileInput = container.querySelector('input[type="file"]')
     expect(fileInput).toBeInstanceOf(HTMLInputElement)

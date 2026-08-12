@@ -202,6 +202,7 @@
   "slashCommands": {
     "listAria": "输入框命令",
     "noMatches": "没有匹配的命令",
+    "filterHint": "输入以筛选命令",
     "compactSuccess": "已压缩对话上下文",
     "compactSkipped": "历史消息还不够，暂无法压缩",
     "compactFailed": "压缩对话失败",
@@ -232,15 +233,45 @@
         "description": "附加文件"
       },
       "skills": {
-        "description": "打开工作区技能"
+        "description": "为本条消息选择技能"
       },
       "mcp": {
-        "description": "打开 MCP 连接器"
+        "description": "浏览 MCP 连接器"
       },
       "compact": {
         "description": "压缩对话上下文"
       }
     }
+  },
+  "composerExtras": {
+    "addMenuAria": "添加附件、技能或连接器",
+    "uploadFiles": "上传文件",
+    "uploadFilesDesc": "从电脑选择文件",
+    "skills": "技能",
+    "skillsDesc": "为本条消息固定技能",
+    "mcp": "MCP 连接器",
+    "mcpDesc": "查看本工作区连接器",
+    "skillChipsAria": "已选技能",
+    "removeSkill": "移除技能 {name}",
+    "skillsPickerAria": "选择技能",
+    "skillsSearchPlaceholder": "搜索技能…",
+    "skillsLoadError": "无法加载技能",
+    "skillsEmpty": "本工作区暂无已启用技能",
+    "skillsNoMatches": "没有匹配的技能",
+    "skillsFooterHint": "已选技能会随下一条消息发送",
+    "manageSkills": "管理",
+    "mcpPickerAria": "MCP 连接器",
+    "mcpSearchPlaceholder": "搜索连接器…",
+    "mcpLoadError": "无法加载连接器",
+    "mcpEmpty": "本工作区暂无连接器",
+    "mcpNoMatches": "没有匹配的连接器",
+    "mcpFooterHint": "在管理页启用或连接",
+    "manageMcp": "管理",
+    "mcpStatusReady": "可用",
+    "mcpStatusNeedsAttention": "待配置",
+    "mcpStatusDisabled": "关闭",
+    "mcpStatusNotInstalled": "未安装",
+    "loading": "加载中…"
   },
   "askUser": {
     "submit": "提交",

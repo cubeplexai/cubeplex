@@ -129,8 +129,10 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
         aria-label={triggerAria}
         data-testid="model-picker-trigger"
         className={cn(
-          'flex h-8 items-center gap-1.5 rounded border border-transparent bg-transparent px-2',
-          'text-sm whitespace-nowrap transition-colors outline-none',
+          // Match composer control height (size-7). leading-none + slight
+          // translate keeps label glyphs optically lower in the hover chip.
+          'flex h-7 items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2',
+          'text-sm leading-none whitespace-nowrap transition-colors outline-none',
           // Borderless until hovered / open, so it blends into the composer
           // instead of reading as a framed control inside the input box.
           'hover:border-border hover:bg-accent',
@@ -148,16 +150,18 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
             rendered nothing — so defer to post-hydration to avoid a mismatch. */}
         {mounted && selected ? (
           <>
-            <span className="font-medium">{modelNameOf(selected)}</span>
-            <span aria-hidden className="text-muted-foreground/60">
+            <span className="translate-y-px font-medium">{modelNameOf(selected)}</span>
+            <span aria-hidden className="translate-y-px text-muted-foreground/60">
               ·
             </span>
           </>
         ) : null}
         {mounted ? (
-          <span className="text-muted-foreground">{t(THINKING_LABEL_KEY[thinking])}</span>
+          <span className="translate-y-px text-muted-foreground">
+            {t(THINKING_LABEL_KEY[thinking])}
+          </span>
         ) : null}
-        <ChevronDown aria-hidden className="size-3.5 text-muted-foreground" />
+        <ChevronDown aria-hidden className="size-3.5 translate-y-px text-muted-foreground" />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-72 p-0">
         <div className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">

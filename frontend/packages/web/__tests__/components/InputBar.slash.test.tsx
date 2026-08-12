@@ -152,15 +152,31 @@ describe('InputBar slash commands', () => {
     expect(textarea).toHaveValue('')
   })
 
-  it('navigates on /skills without send', async () => {
+  it('opens skills picker on /skills without send or navigation', async () => {
     renderWithIntl(<InputBar conversationId="conv-1" />)
     const textarea = screen.getByTestId('chat-input')
     fireEvent.change(textarea, { target: { value: '/skills' } })
     fireEvent.click(await screen.findByTestId('slash-cmd-skills'))
-    await waitFor(() => {
-      expect(routerMocks.push).toHaveBeenCalledWith('/w/ws-1/skills')
-    })
+    expect(await screen.findByTestId('composer-skills-picker')).toBeInTheDocument()
+    expect(routerMocks.push).not.toHaveBeenCalled()
     expect(storeMocks.send).not.toHaveBeenCalled()
+  })
+
+  it('opens mcp picker on /mcp without navigation', async () => {
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+    fireEvent.change(textarea, { target: { value: '/mcp' } })
+    fireEvent.click(await screen.findByTestId('slash-cmd-mcp'))
+    expect(await screen.findByTestId('composer-mcp-picker')).toBeInTheDocument()
+    expect(routerMocks.push).not.toHaveBeenCalled()
+    expect(storeMocks.send).not.toHaveBeenCalled()
+  })
+
+  it('plus menu opens skills picker', async () => {
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    fireEvent.click(screen.getByTestId('composer-add-menu'))
+    fireEvent.click(await screen.findByTestId('composer-add-skills'))
+    expect(await screen.findByTestId('composer-skills-picker')).toBeInTheDocument()
   })
 
   it('calls compact on /compact when idle and appends history marker', async () => {

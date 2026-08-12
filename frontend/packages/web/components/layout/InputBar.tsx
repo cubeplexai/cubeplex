@@ -12,7 +12,7 @@ import {
   compactConversation,
   type Message,
 } from '@cubeplex/core'
-import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
@@ -20,11 +20,16 @@ import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
 import { ModelPicker } from '@/components/chat/ModelPicker'
 import { CommandPopover } from '@/components/chat/CommandPopover'
+import { ComposerAddMenu } from '@/components/chat/ComposerAddMenu'
+import { ComposerSkillsPicker } from '@/components/chat/ComposerSkillsPicker'
+import { ComposerMcpPicker } from '@/components/chat/ComposerMcpPicker'
+import { ComposerSkillChips } from '@/components/chat/ComposerSkillChips'
 import { reasoningFromThinking } from '@/lib/reasoning-control'
 import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
+import { applySkillChipsToContent, type ComposerSkillChip } from '@/lib/composer/skillChips'
 import {
   filterCommands,
   parseLeadingCommandToken,
@@ -33,6 +38,9 @@ import {
   type SlashCommandContext,
 } from '@/lib/slash-commands'
 import { CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
+
+/** In-composer overlays (mutually exclusive with each other). */
+type ComposerPanel = 'slash' | 'plus' | 'skills' | 'mcp' | null
 
 interface InputBarProps {
   conversationId?: string
@@ -64,8 +72,10 @@ export function InputBar({
   const router = useRouter()
   const [content, setContent] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [skillChips, setSkillChips] = useState<ComposerSkillChip[]>([])
   const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [composerPanel, setComposerPanel] = useState<ComposerPanel>(null)
   const [slashActiveIndex, setSlashActiveIndex] = useState(0)
   const [slashHelpMode, setSlashHelpMode] = useState(false)
   /** Esc dismisses until the draft changes (keeps `/…` text without reopening). */
@@ -147,11 +157,33 @@ export function InputBar({
   // `messageIsStreaming` directly (see handleSubmit).
   const isSubmitting = isLoading || isHandlingSubmit
   const hasText = content.trim().length > 0
+  const hasSkillChips = skillChips.length > 0
   const stagedFileCount = conversationId ? attachedIds.length : pendingFiles.length
+  const canSendPayload = hasText || stagedFileCount > 0 || hasSkillChips
 
   const resetTextareaHeight = (): void => {
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
+
+  const closeComposerPanels = useCallback((): void => {
+    setComposerPanel(null)
+    setSlashHelpMode(false)
+    setSlashDismissed(true)
+  }, [])
+
+  const openSkillsPicker = useCallback((): void => {
+    setSlashHelpMode(false)
+    setSlashDismissed(true)
+    setModelPickerOpen(false)
+    setComposerPanel('skills')
+  }, [])
+
+  const openMcpPicker = useCallback((): void => {
+    setSlashHelpMode(false)
+    setSlashDismissed(true)
+    setModelPickerOpen(false)
+    setComposerPanel('mcp')
+  }, [])
 
   const handleSubmit = async (): Promise<void> => {
     if (
@@ -160,17 +192,19 @@ export function InputBar({
       uploadInFlight ||
       hasPendingHitl ||
       modelSyncPending ||
-      (!content.trim() && stagedFileCount === 0)
+      !canSendPayload
     )
       return
     if (!conversationId && !onSubmit) return
 
     try {
       setIsHandlingSubmit(true)
+      const text = applySkillChipsToContent(content, skillChips)
       if (onSubmit) {
-        await onSubmit(content, [...pendingFiles])
+        await onSubmit(text, [...pendingFiles])
         setContent('')
         setPendingFiles([])
+        setSkillChips([])
         resetTextareaHeight()
         return
       }
@@ -193,8 +227,8 @@ export function InputBar({
             download_url: f.download_url,
           }
         })
-      const text = content
       setContent('')
+      setSkillChips([])
       resetTextareaHeight()
       clearStaging(conversationId!)
       // Pull the per-workspace preset + thinking choice at send time so the
@@ -221,11 +255,14 @@ export function InputBar({
     setContent('')
     setSlashHelpMode(false)
     setSlashActiveIndex(0)
+    setComposerPanel(null)
     resetTextareaHeight()
   }, [])
 
   const slashToken = parseLeadingCommandToken(content)
-  const slashOpen = !slashDismissed && (slashToken !== null || slashHelpMode)
+  const slashWantsOpen = !slashDismissed && (slashToken !== null || slashHelpMode)
+  // Skills/MCP pickers take over the floating slot; hide slash while they are open.
+  const slashOpen = slashWantsOpen && composerPanel !== 'skills' && composerPanel !== 'mcp'
 
   const runSlashCommand = useCallback(
     async (cmd: SlashCommand, ctx: SlashCommandContext): Promise<void> => {
@@ -281,11 +318,11 @@ export function InputBar({
       openShare: () => {
         if (conversationId) requestOpenShare(conversationId)
       },
-      openSkills: () => {
-        if (workspaceId) router.push(`/w/${workspaceId}/skills`)
+      openSkillsPicker: () => {
+        if (workspaceId) openSkillsPicker()
       },
-      openMcp: () => {
-        if (workspaceId) router.push(`/w/${workspaceId}/mcp`)
+      openMcpPicker: () => {
+        if (workspaceId) openMcpPicker()
       },
       compactConversation: async (id: string) => {
         const client = createApiClient('')
@@ -322,6 +359,8 @@ export function InputBar({
       consumeRenameRequest,
       openMobileMenu,
       requestOpenShare,
+      openSkillsPicker,
+      openMcpPicker,
       router,
       tSlash,
     ],
@@ -342,6 +381,15 @@ export function InputBar({
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.nativeEvent.isComposing) return
+
+    if (composerPanel === 'skills' || composerPanel === 'mcp') {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeComposerPanels()
+        return
+      }
+      // Let picker search inputs own navigation when focused; textarea Esc only.
+    }
 
     if (slashOpen) {
       if (e.key === 'ArrowDown') {
@@ -377,7 +425,7 @@ export function InputBar({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (hasPendingHitl) return
-      if (messageIsStreaming && hasText) {
+      if (messageIsStreaming && (hasText || hasSkillChips)) {
         void handleSteer()
       } else {
         void handleSubmit()
@@ -389,6 +437,10 @@ export function InputBar({
     const next = e.target.value
     setContent(next)
     setSlashDismissed(false)
+    // Typing re-opens slash; close skills/mcp so the palette can appear.
+    if (composerPanel === 'skills' || composerPanel === 'mcp' || composerPanel === 'plus') {
+      setComposerPanel(null)
+    }
     if (slashHelpMode && parseLeadingCommandToken(next) === null) {
       setSlashHelpMode(false)
     }
@@ -398,6 +450,17 @@ export function InputBar({
       ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'
     }
   }
+
+  const toggleSkillChip = useCallback((skill: ComposerSkillChip): void => {
+    setSkillChips((prev) => {
+      if (prev.some((s) => s.id === skill.id)) {
+        return prev.filter((s) => s.id !== skill.id)
+      }
+      return [...prev, skill]
+    })
+  }, [])
+
+  const selectedSkillIds = useMemo(() => new Set(skillChips.map((s) => s.id)), [skillChips])
 
   const handleFiles = async (files: FileList | null): Promise<void> => {
     if (!files || !files.length) return
@@ -432,9 +495,9 @@ export function InputBar({
 
   // Steering is text-only; don't allow new attachment uploads mid-run.
   const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting && !messageIsStreaming
-  // Show Stop only while streaming AND the box is empty; once the user types,
-  // the button becomes Send (which steers the live run).
-  const showStop = messageIsStreaming && Boolean(conversationId) && !hasText
+  // Show Stop only while streaming AND the box is empty; once the user types
+  // (or pins a skill chip), the button becomes Send (which steers the live run).
+  const showStop = messageIsStreaming && Boolean(conversationId) && !hasText && !hasSkillChips
 
   const handleCancel = async (): Promise<void> => {
     if (!conversationId) return
@@ -444,11 +507,12 @@ export function InputBar({
   }
 
   const handleSteer = async (): Promise<void> => {
-    if (!conversationId || !hasText) return
+    if (!conversationId || (!hasText && !hasSkillChips)) return
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    const text = content
+    const text = applySkillChipsToContent(content, skillChips)
     setContent('')
+    setSkillChips([])
     resetTextareaHeight()
     await steer(client, conversationId, text)
   }
@@ -494,7 +558,13 @@ export function InputBar({
         </div>
       )}
       <div
-        className="relative flex flex-col rounded-lg border border-transparent bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 has-[[aria-expanded=true]]:border-primary has-[[aria-expanded=true]]:ring-2 has-[[aria-expanded=true]]:ring-ring/30 duration-base"
+        className={cn(
+          // Keep radius at lg (pre-change). Visible border + asymmetric inset
+          // (more top, less bottom) sits the column lower in the frame.
+          'relative flex flex-col rounded-lg border border-border bg-raised pt-3 pb-1.5 shadow-sm transition duration-base',
+          'focus-within:border-border-strong focus-within:ring-2 focus-within:ring-ring/20',
+          'has-[[aria-expanded=true]]:border-border-strong has-[[aria-expanded=true]]:ring-2 has-[[aria-expanded=true]]:ring-ring/20',
+        )}
         onMouseDown={handleShellMouseDown}
       >
         <CommandPopover
@@ -504,6 +574,27 @@ export function InputBar({
           onActiveIndexChange={setSlashActiveIndex}
           onSelect={(cmd) => void runSlashCommand(cmd, slashCtx)}
           listboxId={slashListboxId}
+        />
+        {workspaceId && (
+          <>
+            <ComposerSkillsPicker
+              open={composerPanel === 'skills'}
+              workspaceId={workspaceId}
+              selectedIds={selectedSkillIds}
+              onToggle={toggleSkillChip}
+              onClose={closeComposerPanels}
+            />
+            <ComposerMcpPicker
+              open={composerPanel === 'mcp'}
+              workspaceId={workspaceId}
+              onClose={closeComposerPanels}
+            />
+          </>
+        )}
+        <ComposerSkillChips
+          skills={skillChips}
+          onRemove={(id) => setSkillChips((prev) => prev.filter((s) => s.id !== id))}
+          className="px-2.5 pb-1"
         />
         <textarea
           ref={textareaRef}
@@ -518,28 +609,39 @@ export function InputBar({
           aria-expanded={slashOpen}
           aria-controls={slashOpen ? slashListboxId : undefined}
           aria-autocomplete="list"
-          className="resize-none bg-transparent outline-none text-md text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto px-3.5 pt-3 pb-1 disabled:cursor-not-allowed"
+          className="resize-none bg-transparent outline-none text-md text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto px-3.5 py-1 disabled:cursor-not-allowed"
           disabled={(isSubmitting && !messageIsStreaming) || hasPendingHitl}
         />
-        <div className="flex items-center gap-1 px-2 pb-2">
-          <button
-            type="button"
-            aria-label={tShell('inputBarAttach')}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!canAttach}
-            className="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <Paperclip className="size-3.5" />
-          </button>
-          <div className="ml-auto flex items-center gap-1">
+        <div className="flex items-end gap-1 px-2 pt-1 pb-0.5">
+          <ComposerAddMenu
+            open={composerPanel === 'plus'}
+            onOpenChange={(open) => {
+              if (open) {
+                setSlashDismissed(true)
+                setSlashHelpMode(false)
+                setModelPickerOpen(false)
+                setComposerPanel('plus')
+                return
+              }
+              // Functional update so choosing Skills/MCP (which sets another
+              // panel in the same click) is not clobbered by menu close.
+              setComposerPanel((prev) => (prev === 'plus' ? null : prev))
+            }}
+            disabled={!canAttach && !workspaceId}
+            canAttach={canAttach}
+            canSkills={Boolean(workspaceId)}
+            canMcp={Boolean(workspaceId)}
+            onAttach={() => fileInputRef.current?.click()}
+            onSkills={openSkillsPicker}
+            onMcp={openMcpPicker}
+          />
+          <div className="ml-auto flex items-end gap-1">
             {workspaceId && (
-              <>
-                <ModelPicker
-                  wsId={workspaceId}
-                  open={modelPickerOpen}
-                  onOpenChange={setModelPickerOpen}
-                />
-              </>
+              <ModelPicker
+                wsId={workspaceId}
+                open={modelPickerOpen}
+                onOpenChange={setModelPickerOpen}
+              />
             )}
             {showStop ? (
               <button
@@ -547,7 +649,7 @@ export function InputBar({
                 type="button"
                 onClick={() => void handleCancel()}
                 aria-label={tShell('inputBarStop')}
-                className="group relative flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
+                className="group relative flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80 active:scale-[0.94]"
               >
                 <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
                 <span className="relative size-2 rounded-xs bg-primary-foreground transition-transform group-hover:scale-110" />
@@ -555,9 +657,10 @@ export function InputBar({
             ) : (
               <button
                 data-testid="send-button"
+                type="button"
                 onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
                 disabled={
-                  (!content.trim() && stagedFileCount === 0) ||
+                  !canSendPayload ||
                   (isSubmitting && !messageIsStreaming) ||
                   uploadInFlight ||
                   hasPendingHitl ||
@@ -565,8 +668,11 @@ export function InputBar({
                 }
                 title={hasPendingHitl ? t('pendingHitlLock') : undefined}
                 className={cn(
-                  'flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
-                  'disabled:cursor-not-allowed disabled:opacity-25',
+                  'flex size-7 shrink-0 items-center justify-center rounded-md transition-all duration-fast active:scale-[0.94]',
+                  canSendPayload && !hasPendingHitl
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/80'
+                    : 'bg-muted text-muted-foreground',
+                  'disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100',
                 )}
               >
                 {isSubmitting ? (

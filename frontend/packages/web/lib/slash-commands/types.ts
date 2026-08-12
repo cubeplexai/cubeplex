@@ -22,8 +22,10 @@ export type SlashCommandContext = {
   openAttach: () => void
   createNewChat: () => void | Promise<void>
   openShare: () => void
-  openSkills: () => void
-  openMcp: () => void
+  /** Open in-composer skills picker (not full-page navigation). */
+  openSkillsPicker: () => void
+  /** Open in-composer MCP connector list (not full-page navigation). */
+  openMcpPicker: () => void
   compactConversation: (conversationId: string) => void | Promise<void>
   /** Enter help mode in the popover (clear filter / show all). */
   showHelp: () => void

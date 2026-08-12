@@ -38,9 +38,10 @@ test.describe('M7 attachments happy path', () => {
     )
 
     try {
-      // Click the paperclip and pick the file
+      // Open + menu → upload, then pick the file
+      await page.getByTestId('composer-add-menu').click()
       const fileChooserPromise = page.waitForEvent('filechooser')
-      await page.getByRole('button', { name: 'Attach files' }).click()
+      await page.getByTestId('composer-add-upload').click()
       const fc = await fileChooserPromise
       await fc.setFiles(tmp)
 
@@ -91,10 +92,11 @@ test.describe('M7 attachments — home page eager-create flow', () => {
     fs.writeFileSync(tmp, Buffer.alloc(1024 * 1024, 0))
 
     try {
-      // Pick a file via the file chooser. The home-page InputBar now has
+      // Pick a file via the + menu upload path. The home-page InputBar now has
       // onCreateConversation, so this triggers eager-create + upload.
+      await page.getByTestId('composer-add-menu').click()
       const fileChooserPromise = page.waitForEvent('filechooser')
-      await page.getByRole('button', { name: 'Attach files' }).click()
+      await page.getByTestId('composer-add-upload').click()
       const fc = await fileChooserPromise
       await fc.setFiles(tmp)
 
@@ -132,8 +134,9 @@ test.describe('M7 attachments — home page eager-create flow', () => {
     )
 
     try {
+      await page.getByTestId('composer-add-menu').click()
       const fileChooserPromise = page.waitForEvent('filechooser')
-      await page.getByRole('button', { name: 'Attach files' }).click()
+      await page.getByTestId('composer-add-upload').click()
       const fc = await fileChooserPromise
       await fc.setFiles(tmp)
 
