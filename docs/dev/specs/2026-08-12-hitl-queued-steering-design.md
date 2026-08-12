@@ -14,18 +14,19 @@ Keep the composer available while a run is waiting for HITL or resuming from
 an HITL answer. Text entered in that period is steering for the existing run,
 not a new turn and not an answer to the HITL form.
 
-Make steering server-owned and durable. `POST /steer` stores each message in
-Postgres before acknowledging it, then the worker that owns the Agent copies
-it into CubePi's steering queue. This applies to both ordinary live steering
-and HITL steering, so the transition from `paused_hitl` back to a live worker
-has no delivery gap.
+Make steering submitted while an HITL request is pending server-owned and
+durable. `POST /steer` stores those messages in Postgres before acknowledging
+them, then the worker that resumes the Agent copies them into CubePi's steering
+queue. Ordinary live steering keeps its current direct delivery path. The
+durable path covers the gap from `paused_hitl` through resume-worker startup
+without changing the normal running path.
 
 CubePi already supplies the required ordering on resume:
 
 ```text
 assistant tool_use
 → HITL tool_result
-→ queued steering UserMessage(s), FIFO
+→ queued steering UserMessage(s), persisted order
 → next model call
 ```
 
@@ -67,7 +68,10 @@ or a worker restart can forget text that the UI appeared to accept.
   text. Refreshes, long HITL pauses, and worker replacement do not lose it.
 - Steering submitted before the resume safe point is visible to the model
   after the HITL tool result and before the next model call.
-- Multiple queued messages retain FIFO order and group-chat sender identity.
+- Messages committed before one drain begins are handed to CubePi in
+  `(created_at, id)` order and retain group-chat sender identity. Durable
+  enqueues for one conversation are transaction-serialized; simultaneous
+  clients are ordered by server lock acquisition, not client timestamps.
 - Cancelling a not-yet-injected steering message works while HITL is paused.
 - The normal live-steering experience and `injected_message` transcript
   behavior remain the same.
@@ -84,6 +88,9 @@ or a worker restart can forget text that the UI appeared to accept.
 - Starting a second concurrent run for the conversation.
 - Reordering a steering message ahead of the HITL tool result.
 - Adding a general offline outbox for ordinary idle-conversation messages.
+- Persisting ordinary live steering when no HITL request is pending.
+- Retrying an HITL resume after the run reaches `errored`; safe recovery from
+  partial tool or provider side effects requires a separate design.
 - Real-time synchronization of pending chips across multiple open tabs. A
   bootstrap or focus refresh is authoritative; injected transcript messages
   continue to arrive through the run stream.
@@ -114,17 +121,17 @@ also only a wake-up signal and cannot be the delivery record.
 **Rejected as the source of truth.** Redis remains useful as a low-latency
 notification to the owning worker.
 
-### C. Persist every accepted steering message, then deliver it to CubePi
+### C. Persist steering accepted while HITL is pending
 
-Use a scoped Postgres queue for both live and paused steering. The API commits
-the queue row first. The owning worker is notified through the existing Redis
-control channel, and a database-backed delivery coordinator claims the row and
+Use a scoped Postgres queue while the durable HITL request exists. The API
+commits the queue row first. The owning worker is notified through a new Redis
+control message, and a database-backed delivery coordinator claims the row and
 calls `agent.steer(...)`. Agent registration and a bounded fallback poll also
 drain accepted rows, so Pub/Sub loss is recoverable.
 
-This adds one table and a delivery state machine, but removes the paused/resume
-special-case gap instead of moving it elsewhere. The same idempotency and
-cancel behavior apply to all steering.
+Once the pending HITL request is cleared, `POST /steer` uses the existing live
+delivery path. This keeps the new table and delivery state machine scoped to
+the durability gap that prompted the feature.
 
 **Recommended.**
 
@@ -135,8 +142,10 @@ cancel behavior apply to all steering.
 - The HITL card remains visible and actionable.
 - The textarea is enabled. Its hint explains that text will be sent after the
   HITL decision; sending text does not submit the card.
-- Enter creates a pending steering chip and clears the textarea only after the
-  queue API accepts the message.
+- Enter snapshots the submitted text into a local `submitting` chip and clears
+  the textarea immediately, leaving it ready for more text. If the queue API
+  rejects the message, the snapshot is prepended to any newer draft instead of
+  replacing it; text typed while the request was in flight is never cleared.
 - The chip uses a queued label while no Agent is live and remains cancellable.
 - The attachment button stays disabled because steering is text-only.
 
@@ -176,8 +185,12 @@ message at the position reported by the existing `injected_message` event.
 It is not rendered in the transcript earlier because that would disagree with
 checkpoint history after reload.
 
-If multiple messages were queued, CubePlex hands them to `agent.steer(...)` in
-creation order. CubePi drains them in that order.
+One drain may run for a given run at a time. It hands all rows committed before
+that drain begins to `agent.steer(...)` in `(created_at, id)` order. A request
+that commits after the batch was claimed joins the next batch. Concurrent
+durable enqueues are serialized on the conversation row, so this is a stable
+server acceptance order. CubePi preserves the order in which the coordinator
+hands it messages.
 
 ## Frontend lifecycle model
 
@@ -186,7 +199,7 @@ Add a per-conversation run lifecycle independent from `isStreaming`:
 | Lifecycle | Meaning | Composer submit |
 |---|---|---|
 | `idle` | No active or pending run | Start a new turn |
-| `running` | Agent is live | Queue steering |
+| `running` | Agent is live, with no pending HITL | Send live steering |
 | `paused_hitl` | Pending HITL, no live Agent | Queue steering |
 | `resuming_hitl` | HITL answer accepted or being processed | Queue steering |
 | `stopping` | Hard Stop is in progress | Disabled |
@@ -210,8 +223,12 @@ type PendingSteer = {
 }
 ```
 
-The source tab may add an optimistic chip while the request is in flight, but
-it restores the text to the draft if the API does not durably accept it.
+The source tab adds an optimistic chip while the request is in flight. If the
+API does not durably accept it, an empty draft becomes the submitted snapshot;
+otherwise the snapshot is prepended to the newer draft with a newline. An
+`injected_message` event is terminal for its
+`steer_id`: a later POST response must not recreate a chip that the event
+already removed.
 
 ### Stale-client recovery
 
@@ -235,28 +252,52 @@ public ID prefix `stm`.
 | `id` | Public `stm-...` primary key |
 | `org_id`, `workspace_id` | Required scope columns |
 | `conversation_id`, `run_id` | Owning conversation and logical run |
-| `client_steer_id` | Stable client id; unique with `run_id` |
+| `client_steer_id` | Stable client id; unique with `conversation_id` |
 | `content` | Accepted text |
 | `sender_user_id` | User authorized at enqueue time |
 | `sender_display_name` | Group-chat display snapshot |
-| `hitl_question_id` | Pending HITL question at enqueue time, nullable |
+| `hitl_question_id` | Required pending HITL question at enqueue time |
 | `state` | `queued`, `dispatched`, `cancel_requested`, `injected`, `cancelled`, or `failed` |
 | `delivery_owner`, `delivery_lease_until` | Crash-recoverable delivery claim |
 | `created_at`, `updated_at` | Timezone-aware timestamps |
 
 Constraints and indexes:
 
-- Unique `(run_id, client_steer_id)` makes enqueue idempotent.
+- Unique `(conversation_id, client_steer_id)` keeps a delayed retry from being
+  delivered to a later run in the same conversation.
 - Index `(run_id, state, created_at, id)` supports ordered claim and drain.
-- The conversation foreign key cascades on conversation deletion.
+- The foreign key uses `ON DELETE CASCADE` for physical deletion. Because the
+  user-facing conversation delete is soft, that path explicitly removes queue
+  rows in the same transaction.
 - Repository methods always filter by `(org_id, workspace_id)`; routes retain
   the existing workspace member dependency and do not share admin handlers.
+- Durable enqueue locks the scoped conversation row before checking limits and
+  inserting. This makes capacity enforcement and accepted order atomic across
+  API workers and serializes correctly with soft deletion.
 
-The migration must be generated with Alembic autogenerate. Terminal tombstones
-remain until their run reaches a terminal state so retries cannot duplicate a
-message. Normal run cleanup then deletes `injected` and `cancelled` rows.
-Uninjected rows become `failed` and remain visible until the user retries or
-dismisses them; user-authored text is never silently discarded.
+The API enforces these bounds before enqueue and counts UTF-8 bytes, not
+JavaScript or Python characters:
+
+- one message: at most 32 KiB;
+- one run: at most 32 active rows and 256 KiB of active content;
+- one conversation: at most 100 visible unresolved rows and 1 MiB of their
+  content, including rows in `failed` state.
+
+These limits also bound `bootstrap.pending_steers`. A 413
+`steer_content_too_large` or 429 `steer_queue_full` response does not create a
+row, and the frontend keeps the submitted text in the composer.
+
+The migration must be generated with Alembic autogenerate. `injected` and
+`cancelled` tombstones remain for a 24-hour idempotency window after terminal
+transition; a bounded cleanup deletes older tombstones. Normal completion,
+hard Stop, unrecoverable error, and forced HITL cancellation call shared
+run-finalization logic. A bounded reconciliation scan covers stale-run
+transitions from startup recovery, bootstrap, stream reads, and the IM
+run-claim path. Both change uninjected rows to `failed`. Moving failed text to
+the draft or dismissing it changes the row to `cancelled` instead of deleting
+the idempotency record. Failed text otherwise remains visible; user-authored
+text is never silently discarded. Soft conversation deletion removes all of
+its queue rows immediately.
 
 ## Queue state machine
 
@@ -267,14 +308,14 @@ queued ------------------------------> dispatched
   | cancel                                 |  \ cancel
   v                                        v   v
 cancelled                             injected  cancel_requested
-                                           |      |          |
-                                           |      | removed  | injection won
-                                           |      v          v
-                                           |   cancelled  injected
-                                           v
-                                        deleted
+                                                  |          |
+                                                  | removed  | injection won
+                                                  v          v
+                                              cancelled   injected
 
 queued/dispatched -- run ends first --> failed
+failed -- move to draft or dismiss --> cancelled
+injected/cancelled -- after 24 hours --> deleted
 ```
 
 - `queued` means committed to Postgres but not copied into an Agent queue.
@@ -297,8 +338,10 @@ The run manager owns a process-level steering delivery coordinator:
 1. `POST /steer` commits an idempotent `queued` row.
 2. It publishes a Redis `steer_available` control message containing only the
    run and queue item IDs. Redis is a wake-up hint, not the payload authority.
-3. The worker that has `self._agents[run_id]` claims queued rows for that run
-   with `FOR UPDATE SKIP LOCKED`, ordered by `(created_at, id)`, and commits
+3. The worker that has `self._agents[run_id]` enters a per-run asynchronous
+   single-flight section shared by registration, Pub/Sub, and fallback-poll
+   drains. It claims committed rows for that run with
+   `FOR UPDATE SKIP LOCKED`, ordered by `(created_at, id)`, and commits
    `dispatched` with a short lease.
 4. It calls `agent.steer(UserMessage(...))` with `client_steer_id` and sender
    metadata. A synchronous delivery failure returns the row to `queued`.
@@ -308,10 +351,11 @@ The run manager owns a process-level steering delivery coordinator:
    history reconciliation repairs the row later.
 
 The coordinator drains once synchronously after an Agent is registered and
-before `agent.prompt(...)` or `agent.respond(...)` begins. It also wakes on the
-control notification. One bounded process-level fallback poll queries queued
-rows every two seconds only for run IDs owned by that process; this recovers a
-missed Pub/Sub notification without one poller per run.
+before `agent.respond(...)` begins. It also wakes on the control notification.
+One bounded process-level fallback poll queries queued rows every two seconds
+only for run IDs owned by that process; this recovers a missed Pub/Sub
+notification without one poller per run. All three entries use the same
+per-run lock, so overlapping wake-ups cannot reverse two claimed batches.
 
 This startup drain closes the current HITL gap: steering accepted while the
 run is paused or while the resume worker is being constructed is already in
@@ -351,13 +395,21 @@ Retain the request:
 }
 ```
 
-Resolve the run in this order:
+Resolve delivery in this order:
 
-1. Redis active run for `running` or `paused_hitl`;
-2. checkpointed `pending_request` plus `pending_run_id` for a long HITL pause
-   whose Redis keys expired.
+1. After validating the request, look up `(conversation_id, steer_id)` in the
+   durable queue. If content and sender match, return its current state and
+   original `run_id` without dispatching again. Reusing the ID with different
+   content or a different sender returns 409 `steer_id_conflict`.
+2. If a checkpointed `pending_request` and matching `pending_run_id` exist,
+   enqueue durably for that HITL run. This covers `paused_hitl`, resume-worker
+   startup, and a long pause whose Redis keys expired.
+3. Otherwise, if Redis has the same conversation's `running` run, use the
+   existing live `dispatch_steer` path and its `steered`/`published` response.
+4. Otherwise return `no_active_run`.
 
-After validation, insert idempotently and return:
+For durable enqueue, return the current stored state, including on an
+idempotent retry:
 
 ```json
 {
@@ -367,9 +419,18 @@ After validation, insert idempotently and return:
 }
 ```
 
+`status` is one of `queued`, `dispatched`, `injected`, `cancelled`, or `failed`.
+`queued` and `dispatched` keep a pending chip. `injected` is already owned by
+history and must not create a chip; if that history message is not in the local
+transcript yet, the client refreshes bootstrap once. `cancelled` and `failed`
+keep the submitted text in user control and require a new `steer_id` for any
+later submission. Ordinary live steering retains `steered`, `published`, and
+`no_active_run`.
+
 `paused_hitl` no longer returns 409. `no_active_run` remains a non-error result
-for a run that finished before enqueue won the race. The client restores the
-draft in that case.
+when no run or persisted HITL request exists before insertion. If a run ends
+after a row commits, the route returns that row as `failed`, so accepted text
+remains recoverable. The client restores the draft for `no_active_run`.
 
 ### `POST /conversations/{conversation_id}/steer/cancel`
 
@@ -408,18 +469,23 @@ not rendered.
 Keep `injected_message` unchanged. No new event is required for correctness:
 the POST response updates the source tab, bootstrap restores durable state,
 and `injected_message` commits the final transcript position. Live cross-tab
-pending-chip synchronization is out of scope for this version.
+pending-chip synchronization is out of scope for this version. The client
+records the event's `steer_id` before removing its chip; any later enqueue
+response for that ID is ignored for pending-state purposes.
 
 ## Failure and race behavior
 
 | Case | Required result |
 |---|---|
 | Steer races HITL answer submit | One durable row; startup drain or live coordinator delivers it once |
-| Duplicate POST retry | Same `(run_id, client_steer_id)` result; no duplicate injection |
+| Duplicate POST retry within 24 hours | Return the existing row's actual state and original run; no duplicate injection |
+| Same `steer_id` with different content or sender | Return 409 `steer_id_conflict`; do not mutate or dispatch |
+| `injected_message` arrives before POST response | Transcript wins; the response cannot recreate the pending chip |
 | Page refresh while paused | Bootstrap restores HITL card and pending steer chips |
 | Worker dies before dispatch | Row remains `queued` or its lease expires; next owner reclaims |
 | Worker dies after checkpoint, before queue ack | History reconciliation marks `injected`; no duplicate |
-| HITL answer fails and remains pending | Queued steering stays queued for the retry |
+| HITL answer POST is rejected | UI refreshes bootstrap and returns to `paused_hitl`; queued steering remains queued |
+| Resume worker reaches `errored` | Do not retry `agent.respond`; queued/dispatched rows become visible `failed` rows |
 | Run ends before injection | Row becomes `failed`; UI offers retry as a new turn or dismiss |
 | User cancels queued steer | It never reaches CubePi |
 | Cancel races injection | Exactly one terminal outcome; persisted history wins once injected |
@@ -432,9 +498,11 @@ pending-chip synchronization is out of scope for this version.
 - Store the sender identity that was authorized when the message was accepted.
   A later membership change does not rewrite message authorship.
 - Do not log steering content or publish it on Redis control channels.
-- Apply the same content size validation as ordinary steering.
-- Conversation deletion cascades queue data; workspace/user deletion paths
-  must include the new scoped table through normal model relationships.
+- Enforce the explicit byte and queue bounds defined in the data model before
+  returning a durable success response.
+- User-facing soft deletion explicitly deletes queue rows. Physical
+  conversation deletion uses the foreign-key cascade; workspace/user deletion
+  paths include the new scoped table through normal model relationships.
 
 ## Test strategy
 
@@ -460,13 +528,21 @@ outer model response where deterministic tool calls are needed.
    expired lease, and assert history reconciliation prevents duplication.
 8. Assert cross-workspace enqueue, cancel, and bootstrap access return scoped
    404 behavior.
+9. Race registration, Pub/Sub, and fallback-poll drains for two rows and assert
+   only one drain runs for the run and CubePi receives the committed batch in
+   `(created_at, id)` order.
+10. Exercise every stale-run entry point and soft conversation deletion; each
+    path finalizes or removes the scoped rows instead of leaving an active row.
+11. Assert the per-message, per-run, and per-conversation byte/count limits
+    return their stable errors without inserting a row.
 
 ### Backend unit tests
 
 - Queue transition and lease-claim functions.
-- Idempotent `(run_id, client_steer_id)` enqueue.
-- Terminal cleanup classification (`injected`/`cancelled` delete,
-  uninjected → `failed`).
+- Idempotent `(conversation_id, client_steer_id)` enqueue and mismatched-retry
+  rejection.
+- Terminal cleanup classification (uninjected → `failed`; terminal tombstones
+  retained for 24 hours and then purged in bounded batches).
 - Conversion of queue rows to CubePi `UserMessage` metadata.
 
 ### Frontend store and flow tests
@@ -475,20 +551,28 @@ outer model response where deterministic tool calls are needed.
   new-turn `send`.
 - Accepted rows remain as chips through bootstrap and become transcript
   messages only on `injected_message`.
-- A rejected enqueue restores the draft.
+- Submit clears the captured snapshot immediately. A rejected enqueue restores
+  it before any text typed in flight instead of overwriting that newer text.
+- An `injected_message` received before the enqueue response remains terminal
+  and the response does not recreate its chip.
 - A text-only `active_run_conflict` refreshes bootstrap and retries exactly
   once as steering; attachments are retained and not retried.
 - HITL form submission state does not lock the textarea, while hard Stop does.
+- A rejected HITL answer refreshes bootstrap and returns the lifecycle to
+  `paused_hitl` instead of leaving it in `resuming_hitl`.
 
-One Playwright business-flow test should cover: Agent asks a question → user
-queues text → user submits the form → queued text appears in the transcript at
-the correct point → Agent response reflects both inputs.
+One deterministic Playwright business-flow test should cover: the test model
+emits a fixed `ask_user` call → the user queues text → the user submits the form
+→ queued text appears in the transcript at the correct point → the fixed next
+model response observes the expected request history. This does not depend on
+a real model deciding whether to call the HITL tool.
 
 ## Documentation and rollout
 
-This is a clean cutover: the steering endpoint becomes durable for all active
-runs and the frontend switches to the lifecycle model in the same PR. No
-dual-write or compatibility shim is needed before public release.
+This is a conditional cutover inside the existing steering endpoint: a
+persisted HITL request uses the durable queue, while an ordinary running run
+keeps the current live dispatch. The frontend lifecycle and backend routing
+ship together; no dual-write or compatibility shim is needed.
 
 The implementation PR must update the conversation guide to explain:
 
@@ -501,7 +585,8 @@ Operational signals:
 - count and age of `queued`/`dispatched` steering rows,
 - enqueue-to-injection latency,
 - expired delivery leases and reconciliation outcomes,
-- runs ending with failed steering rows.
+- runs ending with failed steering rows,
+- count and age of terminal tombstones awaiting 24-hour cleanup.
 
 ## Success criteria
 
