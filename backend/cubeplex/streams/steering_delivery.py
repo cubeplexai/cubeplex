@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from cubepi.providers.base import TextContent, UserMessage
@@ -22,6 +23,7 @@ from cubeplex.repositories.steering_message import (
 )
 
 HistorySteerLoader = Callable[[str], Awaitable[set[str]]]
+MAINTENANCE_BATCH_SIZE = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +87,7 @@ class DurableSteeringCoordinator:
         self._locks: dict[str, asyncio.Lock] = {}
         self._poll_task: asyncio.Task[None] | None = None
         self._poll_count = 0
+        self._maintenance_cursor: tuple[datetime, str] | None = None
 
     def _repo(
         self,
@@ -218,8 +221,13 @@ class DurableSteeringCoordinator:
                         )
                 await session.commit()
 
-    async def finalize_run(self, run_id: str) -> None:
-        scope = self._scopes.get(run_id)
+    async def finalize_run(
+        self,
+        run_id: str,
+        *,
+        scope: SteeringRunScope | None = None,
+    ) -> None:
+        scope = scope or self._scopes.get(run_id)
         if scope is None:
             return
         lock = self._locks.setdefault(run_id, asyncio.Lock())
@@ -255,7 +263,18 @@ class DurableSteeringCoordinator:
         from cubeplex.streams.run_events import get_run_meta
 
         async with self._session_maker() as session:
-            rows = await list_active_steering_for_reconciliation(session, limit=100)
+            rows = await list_active_steering_for_reconciliation(
+                session,
+                limit=MAINTENANCE_BATCH_SIZE,
+                after=self._maintenance_cursor,
+            )
+            if not rows and self._maintenance_cursor is not None:
+                self._maintenance_cursor = None
+                rows = await list_active_steering_for_reconciliation(
+                    session,
+                    limit=MAINTENANCE_BATCH_SIZE,
+                )
+            next_cursor = (rows[-1].updated_at, rows[-1].id) if rows else self._maintenance_cursor
             history_by_conversation: dict[str, set[str]] = {}
             pending_by_conversation: dict[str, str | None] = {}
             finalized_runs: set[tuple[str, str, str]] = set()
@@ -298,6 +317,7 @@ class DurableSteeringCoordinator:
                         finalized_runs.add(run_key)
             await purge_terminal_steering_tombstones(session, limit=100)
             await session.commit()
+            self._maintenance_cursor = next_cursor
 
     async def _poll_loop(self) -> None:
         try:

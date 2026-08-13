@@ -2204,8 +2204,40 @@ async def steer_active_run(
                 detail={"code": "steer_id_conflict"},
             ) from exc
         await session.commit()
+        current_active_run = await get_active_run(
+            rds.client,
+            prefix=rds.key_prefix,
+            conversation_id=conversation_id,
+        )
+        current_pending, current_pending_run_id = await _load_pending_hitl(conversation_id)
+        pending_still_owns = (
+            current_pending is not None
+            and current_pending_run_id == pending_run_id
+            and current_pending.question_id == queued.hitl_question_id
+        )
+        active_still_owns = (
+            current_active_run is not None
+            and current_active_run.run_id == pending_run_id
+            and current_active_run.status in ("running", "paused_hitl")
+        )
+        if not pending_still_owns and not active_still_owns:
+            await steering_repo.fail_queued(row_id=queued.id)
+            await session.commit()
+            await session.refresh(queued)
+            return {
+                "status": _durable_steer_status(queued.state),
+                "run_id": queued.run_id,
+                "steer_id": queued.client_steer_id,
+            }
         run_manager = raw_request.app.state.run_manager
-        await run_manager.notify_durable_steer(pending_run_id, queued.id)
+        try:
+            await run_manager.notify_durable_steer(pending_run_id, queued.id)
+        except Exception:
+            logger.exception(
+                "Durable steer %s committed but run %s wake-up failed",
+                queued.id,
+                pending_run_id,
+            )
         await session.refresh(queued)
         return {
             "status": _durable_steer_status(queued.state),

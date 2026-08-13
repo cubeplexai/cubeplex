@@ -24,6 +24,7 @@ const storeMocks = vi.hoisted(() => ({
     cancellingConversationIds: {} as Record<string, true>,
     runLifecycle: {} as Record<string, string>,
     pendingAsk: null as unknown | null,
+    pendingSteers: {} as Record<string, unknown[]>,
   },
 }))
 
@@ -72,7 +73,7 @@ vi.mock('@cubeplex/core', () => ({
       cancelStream: storeMocks.cancelStream,
       cancelSteer: storeMocks.cancelSteer,
       appendHistoryMessage: storeMocks.appendHistoryMessage,
-      pendingSteers: {},
+      pendingSteers: storeMocks.state.pendingSteers,
       pendingConfirmMap: {},
       pendingAsk: storeMocks.state.pendingAsk,
       isStreaming: storeMocks.state.isStreaming,
@@ -137,6 +138,7 @@ describe('InputBar', () => {
     storeMocks.state.cancellingConversationIds = {}
     storeMocks.state.runLifecycle = {}
     storeMocks.state.pendingAsk = null
+    storeMocks.state.pendingSteers = {}
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
@@ -223,6 +225,26 @@ describe('InputBar', () => {
     rejectSteer?.(new Error('queue rejected'))
 
     await waitFor(() => expect(textarea).toHaveValue('submitted\nnew typing'))
+  })
+
+  it('restores failed steering text ahead of newer composer text', async () => {
+    storeMocks.state.pendingSteers = {
+      'conv-1': [
+        {
+          steerId: 'failed-steer',
+          text: 'failed guidance in full',
+          state: 'failed',
+          createdAt: '2026-08-12T00:00:00.000Z',
+        },
+      ],
+    }
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+    fireEvent.change(textarea, { target: { value: 'newer typing' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /restore/i }))
+
+    await waitFor(() => expect(textarea).toHaveValue('failed guidance in full\nnewer typing'))
   })
 
   it('restores the draft and shows a friendly message on an active-run conflict', async () => {

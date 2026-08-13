@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models import Conversation, SteeringMessage, SteeringMessageState
@@ -427,6 +427,26 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         result = await self.session.execute(stmt)
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
+    async def fail_queued(self, *, row_id: str) -> bool:
+        """Fail one orphan only while no delivery owner has claimed it."""
+        stmt = (
+            update(SteeringMessage)
+            .where(
+                cast(Any, SteeringMessage.id) == row_id,
+                cast(Any, SteeringMessage.org_id) == self.org_id,
+                cast(Any, SteeringMessage.workspace_id) == self.workspace_id,
+                cast(Any, SteeringMessage.state) == SteeringMessageState.queued,
+            )
+            .values(
+                state=SteeringMessageState.failed,
+                delivery_owner=None,
+                delivery_lease_until=None,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return bool(result.rowcount == 1)  # type: ignore[attr-defined]
+
     async def delete_for_conversation(self, conversation_id: str) -> int:
         stmt = delete(SteeringMessage).where(
             cast(Any, SteeringMessage.org_id) == self.org_id,
@@ -473,14 +493,25 @@ async def list_active_steering_for_reconciliation(
     session: AsyncSession,
     *,
     limit: int = 100,
+    after: tuple[datetime, str] | None = None,
 ) -> list[SteeringMessage]:
     """Bounded internal maintenance scan across workspace scopes."""
-    stmt = (
-        select(SteeringMessage)
-        .where(cast(Any, SteeringMessage.state).in_(ACTIVE_STATES))
-        .order_by(cast(Any, SteeringMessage.updated_at), cast(Any, SteeringMessage.id))
-        .limit(limit)
-    )
+    stmt = select(SteeringMessage).where(cast(Any, SteeringMessage.state).in_(ACTIVE_STATES))
+    if after is not None:
+        updated_at, row_id = after
+        stmt = stmt.where(
+            or_(
+                cast(Any, SteeringMessage.updated_at) > updated_at,
+                (
+                    (cast(Any, SteeringMessage.updated_at) == updated_at)
+                    & (cast(Any, SteeringMessage.id) > row_id)
+                ),
+            )
+        )
+    stmt = stmt.order_by(
+        cast(Any, SteeringMessage.updated_at),
+        cast(Any, SteeringMessage.id),
+    ).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 

@@ -17,6 +17,7 @@ from cubeplex.repositories import ConversationRepository, SteeringMessageReposit
 from cubeplex.repositories.steering_message import (
     SteeringMessageConflictError,
     SteeringMessageQueueFullError,
+    list_active_steering_for_reconciliation,
     purge_terminal_steering_tombstones,
 )
 from cubeplex.streams.steering_delivery import (
@@ -332,3 +333,41 @@ async def test_terminal_tombstones_are_purged_only_after_24_hours(
     assert await purge_terminal_steering_tombstones(db_session) == 1
     await db_session.commit()
     assert await repo.count_for_conversation(conversation.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_scan_can_advance_past_retained_rows(
+    db_session: AsyncSession,
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    baseline = datetime.now(UTC) + timedelta(days=365)
+    for index in range(3):
+        row, _ = await repo.enqueue(
+            conversation_id=conversation.id,
+            run_id=f"run-retained-{index}",
+            client_steer_id=f"steer-retained-{index}",
+            content=str(index),
+            sender_user_id=user.id,
+            sender_display_name=None,
+            hitl_question_id="question-retained",
+        )
+        row.updated_at = baseline + timedelta(seconds=index)
+        db_session.add(row)
+    await db_session.commit()
+
+    first = await list_active_steering_for_reconciliation(
+        db_session,
+        limit=2,
+        after=(baseline - timedelta(seconds=1), ""),
+    )
+    cursor = (first[-1].updated_at, first[-1].id)
+    second = await list_active_steering_for_reconciliation(
+        db_session,
+        limit=2,
+        after=cursor,
+    )
+
+    assert [row.client_steer_id for row in first] == ["steer-retained-0", "steer-retained-1"]
+    assert [row.client_steer_id for row in second] == ["steer-retained-2"]

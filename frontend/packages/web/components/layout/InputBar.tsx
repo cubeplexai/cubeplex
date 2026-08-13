@@ -102,10 +102,9 @@ export function InputBar({
     useMessageStore((s) =>
       conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false,
     ) ?? false
-  // Composer lock: while a HITL request is pending (live SSE or bootstrap
-  // cold-start seed), block both fresh-turn send and mid-stream steer until
-  // the user answers the card. The pending slots are global to the store —
-  // the user only sees one conversation at a time so we don't scope per-id.
+  // The pending slots are global to the store — the user only sees one
+  // conversation at a time so we don't scope this hint per id. HITL itself
+  // no longer locks the composer; text is routed through durable steering.
   const hasPendingHitl = useMessageStore(
     (s) => Object.keys(s.pendingConfirmMap).length > 0 || s.pendingAsk !== null,
   )
@@ -568,9 +567,16 @@ export function InputBar({
     }
   }
 
+  const recoverFailedSteer = (text: string): void => {
+    setContent((current) => (current ? `${text}\n${current}` : text))
+    justConsumedRef.current = true
+  }
+
   return (
     <div className={cn(CHAT_COLUMN_CLASS, 'pb-[env(safe-area-inset-bottom)]')}>
-      {conversationId && <PendingSteers conversationId={conversationId} />}
+      {conversationId && (
+        <PendingSteers conversationId={conversationId} onRecover={recoverFailedSteer} />
+      )}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}
       <input

@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cubepi.providers.base import ReasoningControl
 from cubepi.providers.fallback import FallbackBoundModel
@@ -34,6 +34,9 @@ from cubeplex.streams.run_events import (
     update_run_meta,
 )
 from cubeplex.utils.time import utc_isoformat
+
+if TYPE_CHECKING:
+    from cubeplex.streams.steering_delivery import SteeringRunScope
 
 
 @dataclass(slots=True)
@@ -943,7 +946,17 @@ class RunManager:
                     f"answer or cancel before starting a new turn"
                 )
             _pending_req, _old_run_id = _db_pending
-            await self._force_cancel_hitl(conversation_id, _old_run_id)
+            from cubeplex.streams.steering_delivery import SteeringRunScope
+
+            await self._force_cancel_hitl(
+                conversation_id,
+                _old_run_id,
+                scope=SteeringRunScope(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                ),
+            )
 
         async def _try_create_run() -> RunMeta | None:
             return await create_run(
@@ -1264,6 +1277,8 @@ class RunManager:
         self,
         conversation_id: str,
         old_run_id: str | None,
+        *,
+        scope: SteeringRunScope,
     ) -> None:
         """Silently cancel a paused HITL so a new run can start.
 
@@ -1280,6 +1295,7 @@ class RunManager:
         await _repair_dangling_tool_calls(conversation_id)
 
         if old_run_id is not None:
+            await self._steering_delivery.finalize_run(old_run_id, scope=scope)
             await update_run_meta(
                 self._redis,
                 prefix=self._key_prefix,
