@@ -42,19 +42,21 @@ def test_tools_returns_list_of_agent_tools() -> None:
     mw = _make_middleware()
     tools = mw.tools
     assert isinstance(tools, list)
-    assert len(tools) == 1
-    tool = tools[0]
-    assert isinstance(tool, AgentTool)
+    assert len(tools) == 2
+    assert all(isinstance(t, AgentTool) for t in tools)
+    assert {t.name for t in tools} == {"save_artifact", "present_file"}
 
 
 def test_tool_has_correct_name() -> None:
     mw = _make_middleware()
-    assert mw.tools[0].name == "save_artifact"
+    by_name = {t.name: t for t in mw.tools}
+    assert "save_artifact" in by_name
+    assert "present_file" in by_name
 
 
 def test_tool_has_correct_parameters_schema() -> None:
     mw = _make_middleware()
-    tool = mw.tools[0]
+    tool = next(t for t in mw.tools if t.name == "save_artifact")
     assert tool.parameters is _SaveArtifactArgs
     # Verify schema can be serialised (pydantic model)
     schema = tool.parameters.model_json_schema()
@@ -65,12 +67,14 @@ def test_tool_has_correct_parameters_schema() -> None:
 
 def test_tool_execute_is_callable() -> None:
     mw = _make_middleware()
-    assert callable(mw.tools[0].execute)
+    for tool in mw.tools:
+        assert callable(tool.execute)
 
 
 def test_tool_description_mentions_save_artifact() -> None:
     mw = _make_middleware()
-    desc = mw.tools[0].description
+    tool = next(t for t in mw.tools if t.name == "save_artifact")
+    desc = tool.description
     assert "artifact" in desc.lower()
     assert "sandbox" in desc.lower()
 

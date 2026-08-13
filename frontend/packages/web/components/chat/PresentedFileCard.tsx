@@ -73,6 +73,13 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   }
 
   const caption = file.caption || captionFallback || file.filename
+  if (!workspaceId) {
+    return (
+      <div className="my-2 rounded border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+        {caption}
+      </div>
+    )
+  }
   const url = contentUrl(workspaceId, file.conversation_id, file.id)
   const isImage = file.kind === 'image' || file.mime_type.startsWith('image/')
 
