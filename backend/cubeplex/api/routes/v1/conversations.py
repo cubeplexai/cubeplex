@@ -976,7 +976,7 @@ class SteerMessageRequest(BaseModel):
     """Request body for steering an in-flight run."""
 
     content: str
-    steer_id: str
+    steer_id: str = Field(max_length=64)
 
 
 class CancelSteerRequest(BaseModel):

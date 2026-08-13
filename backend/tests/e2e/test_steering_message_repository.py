@@ -240,6 +240,21 @@ class _QueueingAgent:
         return False
 
 
+class _FailsFirstDeliveryAgent(_QueueingAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempted_steer_ids: list[str] = []
+        self._failed = False
+
+    def steer(self, message: UserMessage) -> None:
+        steer_id = message.metadata["steer_id"]
+        self.attempted_steer_ids.append(steer_id)
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("synchronous delivery failed")
+        super().steer(message)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_event(
     db_session: AsyncSession,
@@ -295,6 +310,95 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
 
 
 @pytest.mark.asyncio
+async def test_synchronous_delivery_failure_requeues_the_remaining_batch_in_order(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    rows = []
+    for steer_id in ("steer-batch-first", "steer-batch-second"):
+        row, _ = await repo.enqueue(
+            conversation_id=conversation.id,
+            run_id="run-batch-order",
+            client_steer_id=steer_id,
+            content=steer_id,
+            sender_user_id=user.id,
+            sender_display_name=None,
+            hitl_question_id="question-batch-order",
+        )
+        rows.append(row)
+    await db_session.commit()
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    agent = _FailsFirstDeliveryAgent()
+    await coordinator.register_and_drain(
+        run_id="run-batch-order",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        agent=agent,
+    )
+
+    assert agent.messages == []
+    for row in rows:
+        await db_session.refresh(row)
+        assert row.state == SteeringMessageState.queued
+
+    await coordinator.drain("run-batch-order")
+
+    assert agent.attempted_steer_ids == [
+        "steer-batch-first",
+        "steer-batch-first",
+        "steer-batch-second",
+    ]
+    assert [message.metadata["steer_id"] for message in agent.messages] == [
+        "steer-batch-first",
+        "steer-batch-second",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unregister_does_not_remove_a_replacement_agent(
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, _user = steering_conversation
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    scope = SteeringRunScope(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=conversation.id,
+    )
+    old_agent = _QueueingAgent()
+    replacement_agent = _QueueingAgent()
+    await coordinator.register_and_drain(
+        run_id="run-replacement",
+        scope=scope,
+        agent=old_agent,
+    )
+    await coordinator.register_and_drain(
+        run_id="run-replacement",
+        scope=scope,
+        agent=replacement_agent,
+    )
+
+    await coordinator.unregister("run-replacement", agent=old_agent)
+
+    assert coordinator._agents["run-replacement"] is replacement_agent
+
+
+@pytest.mark.asyncio
 async def test_unregister_waits_for_an_in_flight_drain(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -347,7 +451,9 @@ async def test_unregister_waits_for_an_in_flight_drain(
 
     drain_task = asyncio.create_task(coordinator.drain("run-unregister-race"))
     await drain_entered.wait()
-    unregister_task = asyncio.create_task(coordinator.unregister("run-unregister-race"))
+    unregister_task = asyncio.create_task(
+        coordinator.unregister("run-unregister-race", agent=agent)
+    )
     await asyncio.sleep(0)
 
     assert unregister_task.done() is False

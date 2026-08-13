@@ -137,6 +137,57 @@ describe('messageStore.cancelStream', () => {
     expect(useMessageStore.getState().pendingSteers.conv1).toEqual([])
   })
 
+  it('keeps recovery locked and retries when post-stop reconciliation fails', async () => {
+    vi.useFakeTimers()
+    seedStreaming('conv1', {})
+    useMessageStore.setState({
+      pendingSteers: {
+        conv1: [
+          {
+            steerId: 'steer-retry-refresh',
+            text: 'already injected',
+            state: 'dispatched',
+            createdAt: '2026-08-12T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    vi.mocked(getConversationBootstrap)
+      .mockResolvedValueOnce(idleBootstrap())
+      .mockRejectedValueOnce(new Error('bootstrap unavailable'))
+      .mockResolvedValue({
+        ...idleBootstrap(),
+        messages: [
+          {
+            id: 'steer-message-retry',
+            role: 'user',
+            content: [{ type: 'text', text: 'already injected' }],
+            metadata: { steer_id: 'steer-retry-refresh' },
+          },
+        ],
+      })
+
+    let settled = false
+    const cancelling = useMessageStore
+      .getState()
+      .cancelStream(fakeClient, 'conv1')
+      .finally(() => {
+        settled = true
+      })
+    await vi.waitFor(() => expect(getConversationBootstrap).toHaveBeenCalledTimes(2))
+
+    expect(settled).toBe(false)
+    expect(useMessageStore.getState().cancellingConversationIds).toEqual({ conv1: true })
+    expect(useMessageStore.getState().pendingSteers.conv1[0].state).toBe('dispatched')
+
+    await vi.advanceTimersByTimeAsync(500)
+    await cancelling
+
+    expect(getConversationBootstrap).toHaveBeenCalledTimes(3)
+    expect(useMessageStore.getState().pendingSteers.conv1).toEqual([])
+    expect(useMessageStore.getState().cancellingConversationIds).toEqual({})
+  })
+
   it('is a no-op when not streaming the given conversation', async () => {
     await useMessageStore.getState().cancelStream(fakeClient, 'conv-other')
     expect(cancelActiveRun).not.toHaveBeenCalled()

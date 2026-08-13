@@ -1689,6 +1689,7 @@ class RunManager:
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
             )
+            extra_ref_holder["steering_agent"] = agent
             # Hand the history already loaded for the citation seed to the
             # agent (mirrors prompt()'s own restore: messages + extra).
             # prompt() skips its checkpointer load when messages are already
@@ -2195,6 +2196,7 @@ class RunManager:
                 # interactive-only writes (e.g. persona_update) for schedule/IM.
                 trigger=ctx.trigger,
             )
+            extra_ref_holder["steering_agent"] = agent
             extra_ref_holder["extra"] = agent._extra
 
             auto_detach = _build_auto_detach_listener(agent)
@@ -2213,7 +2215,7 @@ class RunManager:
                 # `auto_detach.detached` in the terminal block below.
                 auto_detach(evt, _signal)
                 if isinstance(evt, _HitlRequestEvent):
-                    await self._steering_delivery.unregister(run_id)
+                    await self._steering_delivery.unregister(run_id, agent=agent)
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     steer_id = evt.message.metadata.get("steer_id")
                     if isinstance(steer_id, str) and steer_id:
@@ -3996,10 +3998,21 @@ class RunManager:
             except ValueError:
                 citation_event_queue.set(None)
 
-            if final_status != "paused_hitl":
-                await self._steering_delivery.finalize_run(run_id)
-            await self._steering_delivery.unregister(run_id)
-            self._agents.pop(run_id, None)
+            steering_agent = extra_ref_holder.get("steering_agent")
+            current_agent = self._agents.get(run_id)
+            registration_replaced = (
+                current_agent is not None and current_agent is not steering_agent
+            )
+            if not registration_replaced:
+                if final_status != "paused_hitl":
+                    await self._steering_delivery.finalize_run(run_id)
+                if steering_agent is not None:
+                    await self._steering_delivery.unregister(run_id, agent=steering_agent)
+                    current_agent = self._agents.get(run_id)
+                    if current_agent is steering_agent:
+                        self._agents.pop(run_id, None)
+                    elif current_agent is not None:
+                        registration_replaced = True
             # Release the turn lock BEFORE the sandbox/session teardown below:
             # `done` has already been emitted, and holding the active-run key
             # through a (remote) sandbox release gave the next send a 409
@@ -4013,7 +4026,7 @@ class RunManager:
             # in start_run (the guard only fires when create_run failed),
             # orphaning the paused turn. The respond / cancel paths clear
             # the lock when they terminate.
-            if final_status != "paused_hitl":
+            if final_status != "paused_hitl" and not registration_replaced:
                 await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
@@ -4568,23 +4581,35 @@ class RunManager:
                 with suppress(Exception):
                     await catalog_session_ctx.__aexit__(None, None, None)
 
-            if durable_final_status != "paused_hitl":
-                await self._steering_delivery.finalize_run(run_id)
-            await self._steering_delivery.unregister(run_id)
-            self._agents.pop(run_id, None)
+            steering_agent = extra_ref_holder.get("steering_agent")
+            current_agent = self._agents.get(run_id)
+            registration_replaced = (
+                current_agent is not None and current_agent is not steering_agent
+            )
+            if not registration_replaced:
+                if durable_final_status != "paused_hitl":
+                    await self._steering_delivery.finalize_run(run_id)
+                if steering_agent is not None:
+                    await self._steering_delivery.unregister(run_id, agent=steering_agent)
+                    current_agent = self._agents.get(run_id)
+                    if current_agent is steering_agent:
+                        self._agents.pop(run_id, None)
+                    elif current_agent is not None:
+                        registration_replaced = True
             # Clear the active-run pointer — claim_resume handles the case
             # where pointer is gone but meta is paused_hitl (it re-stamps
             # the pointer atomically). On "completed" the pointer must be
             # gone so the next start_run can allocate a fresh run.
-            await clear_active_run(
-                self._redis,
-                prefix=self._key_prefix,
-                conversation_id=conversation_id,
-                run_id=run_id,
-            )
-            await expire_run_data(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                ttl_seconds=self._run_event_ttl_seconds,
-            )
+            if not registration_replaced:
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )

@@ -186,7 +186,7 @@ export interface MessageStore {
   loadMessages(
     client: ApiClient,
     conversationId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; throwOnError?: boolean },
   ): Promise<void>
   /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
    *  cursor and prepend it to ``messages[conversationId]``. Noop when already
@@ -304,6 +304,26 @@ async function waitForConversationIdle(
       // Deleted/inaccessible conversations cannot accept another send. Other
       // failures are usually transient; retain the lock and retry instead of
       // exposing the exact 409 race this lifecycle guard exists to prevent.
+      if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return false
+    }
+    await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
+  }
+  return false
+}
+
+async function reconcileAfterStop(
+  client: ApiClient,
+  conversationId: string,
+  get: () => MessageStore,
+): Promise<boolean> {
+  while (get().cancellingConversationIds[conversationId]) {
+    try {
+      await get().loadMessages(client, conversationId, {
+        force: true,
+        throwOnError: true,
+      })
+      return true
+    } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return false
     }
     await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
@@ -1460,7 +1480,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     })
   },
 
-  async loadMessages(client: ApiClient, conversationId: string, options?: { force?: boolean }) {
+  async loadMessages(
+    client: ApiClient,
+    conversationId: string,
+    options?: { force?: boolean; throwOnError?: boolean },
+  ) {
     const force = options?.force === true
     const state = get()
     if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
@@ -1756,6 +1780,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
         }
       } catch (err) {
+        if (options?.throwOnError) throw err
         // 404/403 just mean the conversation was deleted or the user lost
         // access — the page-level effect renders ErrorState for those, so we
         // don't want to *also* seed an internal_error bubble that flashes on
@@ -2374,7 +2399,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (!state.isStreaming) {
       const isIdle = await waitForConversationIdle(client, conversationId, get)
       if (!isIdle) return
-      await get().loadMessages(client, conversationId, { force: true })
+      if (!(await reconcileAfterStop(client, conversationId, get))) return
       set((s) => ({
         cancellingConversationIds: withoutConversationFlag(
           s.cancellingConversationIds,
@@ -2440,7 +2465,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     const isIdle = await waitForConversationIdle(client, conversationId, get)
     if (!isIdle) return
-    await get().loadMessages(client, conversationId, { force: true })
+    if (!(await reconcileAfterStop(client, conversationId, get))) return
     set((s) => ({
       cancellingConversationIds: withoutConversationFlag(
         s.cancellingConversationIds,
