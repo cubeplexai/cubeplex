@@ -2,8 +2,8 @@
 
 Implements the cubepi Middleware protocol with two hooks:
 
-- ``tools``: exposes ``save_artifact`` as a ``cubepi.AgentTool`` so the
-  graph factory can include it in the tool list passed to the agent.
+- ``tools``: exposes ``save_artifact`` and ``present_file`` as cubepi tools
+  so the graph factory can include them in the agent tool list.
 - ``transform_system_prompt``: queries the artifact registry and appends the
   ARTIFACT_PROMPT + current artifact list to the system prompt. Using the
   system prompt (stable prefix) rather than the per-turn user message is
@@ -25,9 +25,11 @@ from cubepi.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from cubeplex.api.exceptions import APIException
 from cubeplex.prompts.artifacts import ARTIFACT_PROMPT
 from cubeplex.sandbox.base import Sandbox
 from cubeplex.services.artifact_registration import register_artifact_from_sandbox
+from cubeplex.services.presented_files import PresentedFilePathError, PresentedFileService
 
 # ---------------------------------------------------------------------------
 # Input schema for save_artifact
@@ -131,9 +133,103 @@ def _make_save_artifact_tool(
             "so the user can preview and download it. "
             "First create the files with the execute tool, then call this. "
             "For agent-authored skills, use artifact_type='skill', entry_file='SKILL.md', "
-            "and ensure path points to a directory containing SKILL.md at the root."
+            "and ensure path points to a directory containing SKILL.md at the root. "
+            "To only show a file in chat without gallery registration, use present_file."
         ),
         parameters=_SaveArtifactArgs,
+        execute=_execute,
+    )
+
+
+class _PresentFileArgs(BaseModel):
+    path: str = Field(description="Absolute path under /workspace to show the user")
+    caption: str | None = Field(
+        default=None,
+        description="Optional short caption shown with the file (e.g. 'Login QR code')",
+    )
+
+
+def _make_present_file_tool(
+    sandbox: Sandbox,
+    conversation_id: str,
+    org_id: str,
+    workspace_id: str,
+) -> AgentTool[_PresentFileArgs]:
+    """Build the present_file cubepi.AgentTool."""
+
+    async def _execute(
+        tool_call_id: str,
+        args: _PresentFileArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.presented_file import PresentedFileRepository
+
+        try:
+            async with async_session_maker() as session:
+                repo = PresentedFileRepository(session, org_id=org_id, workspace_id=workspace_id)
+                service = PresentedFileService(repo=repo)
+                presented = await service.present_from_sandbox(
+                    sandbox,
+                    conversation_id=conversation_id,
+                    path=args.path,
+                    caption=args.caption,
+                )
+        except PresentedFilePathError as exc:
+            return AgentToolResult(
+                content=[TextContent(text=json.dumps({"error": str(exc)}))],
+                is_error=True,
+            )
+        except APIException as exc:
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        text=json.dumps(
+                            {
+                                "error": exc.message,
+                                "error_code": exc.error_code,
+                                "details": exc.details,
+                            }
+                        )
+                    )
+                ],
+                is_error=True,
+            )
+        except Exception as exc:
+            logger.exception("present_file failed for {}", args.path)
+            return AgentToolResult(
+                content=[TextContent(text=json.dumps({"error": str(exc)}))],
+                is_error=True,
+            )
+
+        logger.info(
+            "Presented file: id={}, path={}, kind={}",
+            presented.id,
+            presented.source_path,
+            presented.kind,
+        )
+        return AgentToolResult(
+            content=[
+                TextContent(
+                    text=json.dumps({"action": "presented", "presented_file": presented.to_dict()})
+                )
+            ]
+        )
+
+    return AgentTool(
+        name="present_file",
+        description=(
+            "Show a sandbox file to the user in the chat (inline image or downloadable "
+            "file card). Use this for QR codes, screenshots, temporary exports — anything "
+            "the user needs to see now. Does NOT add the file to the artifact gallery. "
+            "Never embed /workspace paths as markdown images; call this tool instead. "
+            "For durable deliverables the user should keep, use save_artifact."
+        ),
+        parameters=_PresentFileArgs,
         execute=_execute,
     )
 
@@ -144,7 +240,7 @@ def _make_save_artifact_tool(
 
 
 class ArtifactMiddleware(Middleware):
-    """Registers save_artifact tool and injects artifact prompt into messages.
+    """Registers save_artifact + present_file tools and injects artifact prompt.
 
     Usage::
 
@@ -174,11 +270,14 @@ class ArtifactMiddleware(Middleware):
         self._save_artifact_tool: AgentTool[Any] = _make_save_artifact_tool(
             sandbox, conversation_id, org_id, workspace_id
         )
+        self._present_file_tool: AgentTool[Any] = _make_present_file_tool(
+            sandbox, conversation_id, org_id, workspace_id
+        )
 
     @property
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubepi.AgentTool list for this middleware."""
-        return [self._save_artifact_tool]
+        return [self._save_artifact_tool, self._present_file_tool]
 
     async def _build_artifact_list(self) -> str:
         """Query DB for existing artifacts and format as a prompt section."""

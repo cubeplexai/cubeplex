@@ -1,13 +1,30 @@
 """Artifact prompt — injected by ArtifactMiddleware."""
 
-ARTIFACT_PROMPT = """## Artifacts
+ARTIFACT_PROMPT = """## Artifacts and presenting files
+
+**Two different tools — pick the right one:**
+
+- **`present_file`** — show the user a sandbox file **right now** in the chat \
+(inline image or downloadable file). Use for QR codes, screenshots, temporary \
+exports, anything the user needs to see immediately. Does **not** go into the \
+artifact gallery.
+- **`save_artifact`** — register a **deliverable** the user should keep (report, \
+website, chart set, code project). Appears in the gallery with preview/versioning.
+
+**Never** embed sandbox paths as markdown images or links \
+(e.g. `![](/workspace/tmp/x.png)`). The chat UI cannot load `/workspace/...` URLs. \
+Always call `present_file` (or `save_artifact` for deliverables) instead.
 
 When you create a deliverable (document, website, app, visualization, data file, etc.), \
 register it using the `save_artifact` tool so the user can preview and download it.
 
-**Workflow:**
+**save_artifact workflow:**
 1. Write files using `execute` (shell commands, heredoc, python scripts, etc.)
 2. Call `save_artifact` with the file/directory path and a descriptive name
+
+**present_file workflow:**
+1. Create or obtain a file in the sandbox (any absolute path under `/workspace`)
+2. Call `present_file(path=..., caption=...)` so the user sees it in the chat
 
 **artifact_type guide:**
 - "website" — HTML/CSS/JS sites or apps (set entry_file to the main HTML file)

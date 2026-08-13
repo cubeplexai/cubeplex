@@ -1698,6 +1698,7 @@
     "addToWorkspaceVersionExists": "Version already exists. Bump the version in SKILL.md and try again.",
     "retry": "Retry",
     "imageGenerating": "Generating image…",
+    "presentFileLoading": "Preparing file…",
     "mdEdit": "Edit",
     "mdSave": "Save",
     "mdSaving": "Saving…",

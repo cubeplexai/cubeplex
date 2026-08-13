@@ -20,6 +20,7 @@ from cubeplex.repositories.membership import MembershipRepository
 from cubeplex.repositories.org_invite_token import OrgInviteTokenRepository
 from cubeplex.repositories.organization import OrganizationRepository
 from cubeplex.repositories.organization_membership import OrganizationMembershipRepository
+from cubeplex.repositories.presented_file import PresentedFileRepository
 from cubeplex.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
@@ -54,6 +55,7 @@ __all__ = [
     "OrganizationMembershipRepository",
     "OrgInviteTokenRepository",
     "OrganizationRepository",
+    "PresentedFileRepository",
     "SkillRepository",
     "SkillVersionRepository",
     "TopicRepository",
