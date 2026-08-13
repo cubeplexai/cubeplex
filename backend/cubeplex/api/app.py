@@ -572,6 +572,7 @@ def create_app(
         memory_router,
         model_presets,
         onboarding,
+        presented_files_router,
         public_artifacts,
         public_attachments,
         shares,
@@ -626,6 +627,7 @@ def create_app(
     app.include_router(admin_im.router, prefix="/api/v1")
     app.include_router(im_link.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
+    app.include_router(presented_files_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(me_api_keys_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")

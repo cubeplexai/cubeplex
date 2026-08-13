@@ -18,6 +18,7 @@ import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageArtifactCard } from './ImageArtifactCard'
 import { MarkdownArtifactCard } from './MarkdownArtifactCard'
+import { PresentedFileCard, type PresentedFileMeta } from './PresentedFileCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { TaskProgressCard } from './TaskProgressCard'
@@ -415,6 +416,41 @@ function ContentBlockRenderer({
     }
     return <ImageArtifactCard caption={args.prompt ?? ''} artifact={artifact} />
   }
+  if (block.type === 'tool_call' && block.name === 'present_file') {
+    const args = block.arguments as { path?: string; caption?: string }
+    const toolResult = toolResultMap[block.id]
+    let presented: PresentedFileMeta | null = null
+    if (toolResult?.content) {
+      try {
+        const parsed = JSON.parse(toolResult.content) as {
+          presented_file?: PresentedFileMeta
+        }
+        if (parsed.presented_file?.id) presented = parsed.presented_file
+      } catch {
+        /* ignore */
+      }
+    }
+    if (toolResult && !presented) {
+      // Error result — fall through to generic tool rendering.
+      return (
+        <ToolCallGroup
+          blocks={[block as ContentBlock & { type: 'tool_call' }]}
+          toolResultMap={toolResultMap}
+          isStreaming={isStreaming}
+          messageCreatedAt={messageCreatedAt}
+          agentId={agentId}
+          pendingConfirmMap={pendingConfirmMap}
+          onSandboxConfirm={onSandboxConfirm}
+        />
+      )
+    }
+    return (
+      <PresentedFileCard
+        file={presented}
+        captionFallback={args.caption || args.path || undefined}
+      />
+    )
+  }
   if (block.type === 'tool_call' && isSkillsFindCall(block)) {
     const toolResult = toolResultMap[block.id]
     if (!toolResult) return null
@@ -490,6 +526,12 @@ function ContentBlockRenderer({
     const prompt = extractJsonStringPrefix(block.args_text, 'prompt')
     return <ImageArtifactCard caption={prompt} artifact={null} />
   }
+  if (block.type === 'tool_call_streaming' && block.name === 'present_file') {
+    const caption =
+      extractJsonStringPrefix(block.args_text, 'caption') ||
+      extractJsonStringPrefix(block.args_text, 'path')
+    return <PresentedFileCard file={null} captionFallback={caption || undefined} />
+  }
   if (block.type === 'tool_call_streaming') {
     const supportsPreview = block.name === 'write_file'
     return (
@@ -541,6 +583,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.name !== 'subagent' &&
       block.name !== 'save_artifact' &&
       block.name !== 'generate_image' &&
+      block.name !== 'present_file' &&
       block.name !== 'write_todos' &&
       block.name !== 'show_widget' &&
       !isSkillsFindCall(block)

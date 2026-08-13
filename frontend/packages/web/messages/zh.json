@@ -1698,6 +1698,7 @@
     "addToWorkspaceVersionExists": "版本已存在，请先在 SKILL.md 中 bump version 后重试。",
     "retry": "重试",
     "imageGenerating": "正在生成图片…",
+    "presentFileLoading": "正在准备文件…",
     "mdEdit": "编辑",
     "mdSave": "保存",
     "mdSaving": "保存中…",

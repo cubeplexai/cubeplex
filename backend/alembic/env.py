@@ -32,6 +32,7 @@ from cubeplex.models import (  # noqa: F401
     OrgProviderOverride,
     OrgSettings,
     OrgSkillInstall,
+    PresentedFile,
     Provider,
     SandboxEnvVar,
     Skill,
