@@ -296,7 +296,7 @@ class DurableSteeringCoordinator:
                                 row_id=row.id,
                                 state=SteeringMessageState.injected,
                             )
-                    await repo.fail_active_for_run(run_id)
+                    await repo.finalize_active_for_run(run_id)
                     await session.commit()
             except Exception:
                 logger.opt(exception=True).warning(
@@ -366,7 +366,7 @@ class DurableSteeringCoordinator:
                         continue
                     run_key = (row.org_id, row.workspace_id, row.run_id)
                     if run_key not in finalized_runs:
-                        await repo.fail_active_for_run(row.run_id)
+                        await repo.finalize_active_for_run(row.run_id)
                         finalized_runs.add(run_key)
             await purge_terminal_steering_tombstones(session, limit=100)
             await session.commit()

@@ -172,6 +172,58 @@ describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
     expect(client.get).toHaveBeenCalledTimes(2)
   })
 
+  it('does not let conflict recovery for A replace a newer stream in B', async () => {
+    let resolveBootstrap: ((value: unknown) => void) | undefined
+    const client = {
+      get: vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          resolveBootstrap = resolve
+        }),
+      ),
+    } as unknown as ApiClient
+
+    const recovery = useMessageStore.getState().loadMessages(client, 'conv-a', {
+      force: true,
+      preserveOtherConversationStream: true,
+    })
+    await vi.waitFor(() => expect(client.get).toHaveBeenCalledOnce())
+    useMessageStore.setState({
+      isStreaming: true,
+      streamingConversationId: 'conv-b',
+      currentRunId: 'run-b',
+      streamAgents: {
+        main: {
+          text: 'keep B alive',
+          thinking: '',
+          toolCalls: [],
+          toolResults: [],
+          blocks: [{ type: 'text', text: 'keep B alive' }],
+          name: null,
+        },
+      },
+    })
+    resolveBootstrap?.({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          messages: [],
+          active_run: { run_id: 'run-a', status: 'running' },
+          pending_hitl: null,
+          pending_steers: [],
+          last_run_status: null,
+        }),
+    })
+    await recovery
+
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv-b',
+      currentRunId: 'run-b',
+      streamAgents: { main: { text: 'keep B alive' } },
+    })
+  })
+
   it('seeds pendingAsk (singular) when bootstrap returns an ask_user request', async () => {
     const client = makeBootstrapClient({
       messages: [],

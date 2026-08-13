@@ -186,7 +186,11 @@ export interface MessageStore {
   loadMessages(
     client: ApiClient,
     conversationId: string,
-    options?: { force?: boolean; throwOnError?: boolean },
+    options?: {
+      force?: boolean
+      throwOnError?: boolean
+      preserveOtherConversationStream?: boolean
+    },
   ): Promise<void>
   /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
    *  cursor and prepend it to ``messages[conversationId]``. Noop when already
@@ -224,7 +228,7 @@ export interface MessageStore {
   appendHistoryMessage(conversationId: string, message: Message): void
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<boolean>
-  cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
+  cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<boolean>
   __commitTurnAndInject(conversationId: string, data: InjectedMessageData): void
   clearStream(): void
   clearLastRunStatus(): void
@@ -1483,7 +1487,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   async loadMessages(
     client: ApiClient,
     conversationId: string,
-    options?: { force?: boolean; throwOnError?: boolean },
+    options?: {
+      force?: boolean
+      throwOnError?: boolean
+      preserveOtherConversationStream?: boolean
+    },
   ) {
     const force = options?.force === true
     const state = get()
@@ -1499,6 +1507,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       try {
         const bootstrap = await getConversationBootstrap(client, conversationId)
         const current = get()
+        if (
+          options?.preserveOtherConversationStream &&
+          current.streamingConversationId !== null &&
+          current.streamingConversationId !== conversationId
+        ) {
+          return
+        }
         if (!force && current.isStreaming && current.streamingConversationId === conversationId)
           return
 
@@ -2298,6 +2313,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }))
     try {
       await cancelSteer(client, conversationId, steerId)
+      return true
     } catch (err) {
       console.error('Failed to cancel steer:', err)
       if (removed) {
@@ -2316,7 +2332,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
         })
       }
-      await get().loadMessages(client, conversationId, { force: true })
+      await get().loadMessages(client, conversationId, {
+        force: true,
+        preserveOtherConversationStream: true,
+      })
+      return false
     }
   },
 

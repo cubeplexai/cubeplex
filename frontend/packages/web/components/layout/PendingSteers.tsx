@@ -27,15 +27,14 @@ export function PendingSteers({
 
   if (pending.length === 0) return null
 
-  const onCancel = (steerId: string): void => {
+  const onCancel = async (steerId: string): Promise<boolean> => {
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    void cancelSteer(client, conversationId, steerId)
+    return cancelSteer(client, conversationId, steerId)
   }
 
-  const recoverFailed = (steerId: string, text: string): void => {
-    onRecover(text)
-    onCancel(steerId)
+  const recoverFailed = async (steerId: string, text: string): Promise<void> => {
+    if (await onCancel(steerId)) onRecover(text)
   }
 
   return (
@@ -58,7 +57,7 @@ export function PendingSteers({
             <button
               type="button"
               aria-label={t('pendingSteerRestore')}
-              onClick={() => recoverFailed(p.steerId, p.text)}
+              onClick={() => void recoverFailed(p.steerId, p.text)}
               className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
             >
               <RotateCcw className="size-3" />
@@ -67,7 +66,7 @@ export function PendingSteers({
             <button
               type="button"
               aria-label={p.state === 'failed' ? t('pendingSteerDismiss') : t('pendingSteerCancel')}
-              onClick={() => onCancel(p.steerId)}
+              onClick={() => void onCancel(p.steerId)}
               className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
             >
               <X className="size-3" />

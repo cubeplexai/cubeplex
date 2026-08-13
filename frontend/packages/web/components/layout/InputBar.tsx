@@ -277,7 +277,10 @@ export function InputBar({
           const recoveryClient = createApiClient('')
           if (workspaceId) recoveryClient.setWorkspaceId(workspaceId)
           await Promise.all([
-            loadMessages(recoveryClient, conversationId, { force: true }),
+            loadMessages(recoveryClient, conversationId, {
+              force: true,
+              preserveOtherConversationStream: true,
+            }),
             hydrate(recoveryClient, conversationId),
           ])
         }
