@@ -205,7 +205,9 @@ while an HITL request is pending. Hard-run cancellation stays unchanged.
    fallback poll all enter the same per-run `asyncio.Lock` before claim and
    dispatch. The poll considers only run IDs in that process's Agent registry.
    Redis loss cannot strand a row, and overlapping wake-ups cannot reverse two
-   claimed batches. Locks are removed when the Agent detaches.
+   claimed batches. Before a HITL detach, the same lock removes uncheckpointed
+   messages from the old Agent and returns owned `dispatched` rows to `queued`;
+   locks are removed only after that reconciliation.
 4. The CubePi Agent checkpoints a `MessageEndEvent(UserMessage)` before calling
    CubePlex listeners. When StreamConverter produces `injected_message`, the
    run manager attempts `ack_injected` and then publishes the existing SSE
