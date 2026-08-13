@@ -143,6 +143,28 @@ class DurableSteeringCoordinator:
             else:
                 await repo.requeue_expired_claim(row_id=row.id)
 
+    async def _process_owned_cancel_requests(
+        self,
+        repo: SteeringMessageRepository,
+        *,
+        scope: SteeringRunScope,
+        run_id: str,
+        agent: Any,
+    ) -> None:
+        rows = await repo.list_owned_cancel_requests(run_id=run_id, owner=self._owner)
+        history_ids: set[str] | None = None
+        for row in rows:
+            if agent.cancel_steer(row.client_steer_id):
+                await repo.mark_owned_cancelled(row_id=row.id, owner=self._owner)
+                continue
+            if history_ids is None:
+                history_ids = await self._history_loader(scope.conversation_id)
+            if row.client_steer_id in history_ids:
+                await repo.reconcile_terminal(
+                    row_id=row.id,
+                    state=SteeringMessageState.injected,
+                )
+
     async def drain(self, run_id: str) -> None:
         agent = self._agents.get(run_id)
         scope = self._scopes.get(run_id)
@@ -152,6 +174,12 @@ class DurableSteeringCoordinator:
         async with lock:
             async with self._session_maker() as session:
                 repo = self._repo(session, scope)
+                await self._process_owned_cancel_requests(
+                    repo,
+                    scope=scope,
+                    run_id=run_id,
+                    agent=agent,
+                )
                 await self._repair_expired_claims(repo, scope=scope, run_id=run_id)
                 claimed = await repo.claim_queued(run_id=run_id, owner=self._owner)
                 await session.commit()

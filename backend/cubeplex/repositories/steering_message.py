@@ -263,6 +263,27 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_owned_cancel_requests(
+        self,
+        *,
+        run_id: str,
+        owner: str,
+    ) -> list[SteeringMessage]:
+        stmt = (
+            self._scoped_select()
+            .where(
+                cast(Any, SteeringMessage.run_id) == run_id,
+                cast(Any, SteeringMessage.state) == SteeringMessageState.cancel_requested,
+                cast(Any, SteeringMessage.delivery_owner) == owner,
+            )
+            .order_by(
+                cast(Any, SteeringMessage.created_at),
+                cast(Any, SteeringMessage.id),
+            )
+            .limit(MAX_ACTIVE_ROWS_PER_RUN)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def requeue_expired_claim(
         self,
         *,

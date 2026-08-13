@@ -294,6 +294,57 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
 
 
 @pytest.mark.asyncio
+async def test_owner_poll_processes_committed_cancel_without_redis_wakeup(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    row, _ = await repo.enqueue(
+        conversation_id=conversation.id,
+        run_id="run-cancel-poll",
+        client_steer_id="steer-cancel-poll",
+        content="do not inject me",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-cancel-poll",
+    )
+    await db_session.commit()
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    agent = _QueueingAgent()
+    await coordinator.register_and_drain(
+        run_id="run-cancel-poll",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        agent=agent,
+    )
+    assert len(agent.messages) == 1
+
+    async with session_factory() as cancel_session:
+        cancel_repo = _repo(cancel_session)
+        cancelled = await cancel_repo.request_cancel(
+            conversation_id=conversation.id,
+            client_steer_id="steer-cancel-poll",
+        )
+        assert cancelled is not None
+        assert cancelled.state == SteeringMessageState.cancel_requested
+        await cancel_session.commit()
+    await coordinator.poll_once()
+
+    assert agent.messages == []
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.cancelled
+
+
+@pytest.mark.asyncio
 async def test_terminal_tombstones_are_purged_only_after_24_hours(
     db_session: AsyncSession,
     steering_conversation: tuple[Conversation, User],
