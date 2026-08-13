@@ -1286,7 +1286,10 @@ async function consumeRunStream(
               ...s.errors,
               [conversationId]: { runId: s.currentRunId ?? '', data: errData },
             },
-            pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+            pendingSteers: {
+              ...s.pendingSteers,
+              [conversationId]: failedPendingSteers(s, conversationId),
+            },
             ...(owns
               ? {
                   streamAgents: {},
@@ -1298,6 +1301,7 @@ async function consumeRunStream(
                   streamingConversationId: null,
                   currentRunId: null,
                   statusPhase: null,
+                  runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
                   lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
                 }
               : {}),
@@ -1459,7 +1463,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
     // The page-level effect and <MessageList>'s own effect both fire on mount
     // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
-    if (loadMessagesInFlight.has(conversationId)) return loadMessagesInFlight.get(conversationId)
+    const existingLoad = loadMessagesInFlight.get(conversationId)
+    if (existingLoad) {
+      if (!force) return existingLoad
+      await existingLoad
+    }
     const promise = (async () => {
       try {
         const bootstrap = await getConversationBootstrap(client, conversationId)
@@ -1574,11 +1582,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const streamingActive = !!bootstrap.active_run || hasPendingHitl
         // Paused HITL: SSE is attached but the worker has detached. Don't
         // light up "is streaming" indicators (typing dots etc.); the
-        // <AskUserCard> / composer lock already convey state. `pendingAsk`
+        // <AskUserCard> and composer hint already convey state. `pendingAsk`
         // and `pendingConfirmMap` are the truth signals here. We keep
         // `streamingConversationId` set so MessageList's `pendingAsk &&
         // streamingConversationId === conversationId` gate still fires.
-        const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
+        const isResumingHitl = hasPendingHitl && bootstrap.active_run?.status === 'running'
+        const isPaused =
+          !isResumingHitl && (bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl)
         const isStreamingActive = streamingActive && !isPaused
         const lifecycle: RunLifecycle = get().cancellingConversationIds[conversationId]
           ? 'stopping'
@@ -1650,51 +1660,64 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
         }
 
-        set((s) => ({
-          messages: { ...s.messages, [conversationId]: messages },
-          oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
-          hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
-          todos: restoredTodos,
-          // Clear only when bootstrap has authoritative error state or persisted
-          // assistant history; otherwise keep a live error visible through the
-          // bootstrap race.
-          errors: { ...s.errors, [conversationId]: nextError },
-          lastRunStatus: bootstrap.last_run_status ?? null,
-          streamAgents: nextStreamAgents,
-          pendingSteers: {
-            ...s.pendingSteers,
-            [conversationId]: (bootstrap.pending_steers ?? []).map((row) => ({
-              steerId: row.steer_id,
-              text: row.content,
-              state: row.state,
-              createdAt: row.created_at,
-            })),
-          },
-          runLifecycle: { ...s.runLifecycle, [conversationId]: lifecycle },
-          toolStartedMap: {},
-          toolResultMap: restoredToolResultMap,
-          // When `skipSeed` fired (we just answered this exact question),
-          // preserve the current pendingAsk / pendingConfirmMap
-          // instead of clearing them. The form stays mounted in its
-          // submitting/cancelling state until the SSE `ask_user_resolved`
-          // event arrives, which avoids the visible blank gap that
-          // optimistic-clear used to produce.
-          pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
-          pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
-          cancellingConversationIds:
-            !bootstrap.active_run && !bootstrap.pending_hitl
-              ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
-              : s.cancellingConversationIds,
-          isStreaming: isStreamingActive,
-          streamingConversationId: streamingActive ? conversationId : null,
-          currentRunId: streamRunId,
-          lastAppliedEventId: streamCursor,
-          statusPhase: null,
-          turnUsage: newTurnUsage,
-          sessionUsage: newSessionUsage,
-          contextWindow: newContextWindow,
-          contextTokens: newContextTokens,
+        const serverPendingSteers: PendingSteer[] = (bootstrap.pending_steers ?? []).map((row) => ({
+          steerId: row.steer_id,
+          text: row.content,
+          state: row.state,
+          createdAt: row.created_at,
         }))
+
+        set((s) => {
+          const serverSteerIds = new Set(serverPendingSteers.map((pending) => pending.steerId))
+          const unmatchedSubmitting = (s.pendingSteers[conversationId] ?? []).filter(
+            (pending) => pending.state === 'submitting' && !serverSteerIds.has(pending.steerId),
+          )
+          const hydratedPending = [...serverPendingSteers, ...unmatchedSubmitting].sort(
+            (left, right) =>
+              left.createdAt.localeCompare(right.createdAt) ||
+              left.steerId.localeCompare(right.steerId),
+          )
+          return {
+            messages: { ...s.messages, [conversationId]: messages },
+            oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
+            hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
+            todos: restoredTodos,
+            // Clear only when bootstrap has authoritative error state or persisted
+            // assistant history; otherwise keep a live error visible through the
+            // bootstrap race.
+            errors: { ...s.errors, [conversationId]: nextError },
+            lastRunStatus: bootstrap.last_run_status ?? null,
+            streamAgents: nextStreamAgents,
+            pendingSteers: {
+              ...s.pendingSteers,
+              [conversationId]: hydratedPending,
+            },
+            runLifecycle: { ...s.runLifecycle, [conversationId]: lifecycle },
+            toolStartedMap: {},
+            toolResultMap: restoredToolResultMap,
+            // When `skipSeed` fired (we just answered this exact question),
+            // preserve the current pendingAsk / pendingConfirmMap
+            // instead of clearing them. The form stays mounted in its
+            // submitting/cancelling state until the SSE `ask_user_resolved`
+            // event arrives, which avoids the visible blank gap that
+            // optimistic-clear used to produce.
+            pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
+            pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
+            cancellingConversationIds:
+              !bootstrap.active_run && !bootstrap.pending_hitl
+                ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
+                : s.cancellingConversationIds,
+            isStreaming: isStreamingActive,
+            streamingConversationId: streamingActive ? conversationId : null,
+            currentRunId: streamRunId,
+            lastAppliedEventId: streamCursor,
+            statusPhase: null,
+            turnUsage: newTurnUsage,
+            sessionUsage: newSessionUsage,
+            contextWindow: newContextWindow,
+            contextTokens: newContextTokens,
+          }
+        })
 
         if (streamRunId !== null) {
           activeStreamController?.abort()
@@ -1913,7 +1936,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
     const streamOptions = { ...(options ?? {}), onRunId: handleRunId }
 
-    let retried = false
     let streamSource = streamMessages(
       client,
       conversationId,
@@ -1951,19 +1973,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const errData = event.data as ErrorEventData
             const isActiveRunConflict =
               errData.error_code === 'active_run_conflict' || errData.message.includes('409')
-            if (!retried && !sawDone && isActiveRunConflict) {
-              retried = true
-              await new Promise((r) => setTimeout(r, 400))
-              if (!ownsStreamingConversation(get(), conversationId)) break outer
-              streamSource = streamMessages(
-                client,
-                conversationId,
-                content,
-                attachmentIds,
-                controller.signal,
-                streamOptions,
-              )
-              continue outer
+            const isTextOnly =
+              (attachmentIds?.length ?? 0) === 0 && (attachments?.length ?? 0) === 0
+            if (!sawDone && isActiveRunConflict && isTextOnly) {
+              flush()
+              await get().loadMessages(client, conversationId, { force: true })
+              const refreshed = get()
+              const refreshedLifecycle = refreshed.runLifecycle[conversationId]
+              const canReroute =
+                refreshed.currentRunId !== null &&
+                (refreshedLifecycle === 'running' ||
+                  refreshedLifecycle === 'paused_hitl' ||
+                  refreshedLifecycle === 'resuming_hitl')
+              if (canReroute && (await get().steer(client, conversationId, content))) return
             }
             if (isActiveRunConflict) {
               flush()
@@ -1985,6 +2007,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 streamingConversationId: null,
                 currentRunId: null,
                 statusPhase: null,
+                runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
               }))
               break outer
             }
@@ -2002,7 +2025,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                   ...s.errors,
                   [conversationId]: { runId: s.currentRunId ?? '', data: errData },
                 },
-                pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+                pendingSteers: {
+                  ...s.pendingSteers,
+                  [conversationId]: failedPendingSteers(s, conversationId),
+                },
                 ...(owns
                   ? {
                       streamAgents: {},
@@ -2014,6 +2040,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                       streamingConversationId: null,
                       currentRunId: null,
                       statusPhase: null,
+                      runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
                       lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
                     }
                   : {}),
@@ -2087,7 +2114,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               data: { error_code: 'internal_error', message: (err as Error).message },
             },
           },
-          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          pendingSteers: {
+            ...s.pendingSteers,
+            [conversationId]: failedPendingSteers(s, conversationId),
+          },
           ...(owns
             ? {
                 isStreaming: false,
@@ -2095,6 +2125,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 pendingAsk: null,
                 streamingConversationId: null,
                 currentRunId: null,
+                runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
               }
             : {}),
         }

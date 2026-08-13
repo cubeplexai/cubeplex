@@ -64,6 +64,86 @@ describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
     ])
   })
 
+  it('preserves a local submitting steer that an older bootstrap cannot see yet', async () => {
+    useMessageStore.setState({
+      pendingSteers: {
+        'conv-submitting': [
+          {
+            steerId: 'steer-local',
+            text: 'still committing',
+            state: 'submitting',
+            createdAt: '2026-08-12T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    const client = makeBootstrapClient({
+      messages: [],
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      last_run_status: null,
+    })
+
+    await useMessageStore.getState().loadMessages(client, 'conv-submitting')
+
+    expect(useMessageStore.getState().pendingSteers['conv-submitting']).toEqual([
+      expect.objectContaining({ steerId: 'steer-local', state: 'submitting' }),
+    ])
+  })
+
+  it('treats a running active run with stale pending HITL data as resuming', async () => {
+    const client = makeBootstrapClient({
+      messages: [],
+      active_run: { run_id: 'run-resuming', status: 'running' },
+      pending_hitl: {
+        run_id: 'run-resuming',
+        question_id: 'qid-resuming',
+        kind: 'ask_user',
+        requested_at: '2026-08-12T00:00:00.000Z',
+        questions: [],
+      },
+      pending_steers: [],
+      last_run_status: null,
+    })
+
+    await useMessageStore.getState().loadMessages(client, 'conv-resuming')
+
+    expect(useMessageStore.getState().runLifecycle['conv-resuming']).toBe('resuming_hitl')
+    expect(useMessageStore.getState().isStreaming).toBe(true)
+    expect(useMessageStore.getState().streamingConversationId).toBe('conv-resuming')
+  })
+
+  it('runs a forced bootstrap after an older in-flight bootstrap finishes', async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined
+    const response = {
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          messages: [],
+          active_run: null,
+          pending_hitl: null,
+          pending_steers: [],
+          last_run_status: null,
+        }),
+    }
+    const client = {
+      get: vi
+        .fn()
+        .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+        .mockResolvedValueOnce(response),
+    } as unknown as ApiClient
+
+    const older = useMessageStore.getState().loadMessages(client, 'conv-force')
+    await vi.waitFor(() => expect(client.get).toHaveBeenCalledTimes(1))
+    const forced = useMessageStore.getState().loadMessages(client, 'conv-force', { force: true })
+    resolveFirst?.(response)
+    await Promise.all([older, forced])
+
+    expect(client.get).toHaveBeenCalledTimes(2)
+  })
+
   it('seeds pendingAsk (singular) when bootstrap returns an ask_user request', async () => {
     const client = makeBootstrapClient({
       messages: [],

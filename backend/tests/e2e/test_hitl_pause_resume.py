@@ -394,6 +394,79 @@ async def test_steer_route_queues_durably_while_paused_hitl(
 
 
 @pytest.mark.asyncio
+async def test_paused_steer_wakeup_failure_still_returns_accepted(
+    member_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-commit Redis failure must not invite a duplicate client retry."""
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-steer-wakeup"),
+    )
+    run_manager = client._transport.app.state.run_manager  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        run_manager,
+        "notify_durable_steer",
+        AsyncMock(side_effect=RuntimeError("redis unavailable")),
+    )
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
+        json={"content": "persist this", "steer_id": "s-wakeup"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "status": "queued",
+        "run_id": run_id,
+        "steer_id": "s-wakeup",
+    }
+
+
+@pytest.mark.asyncio
+async def test_paused_steer_fails_when_run_loses_ownership_after_commit(
+    member_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run that ends during enqueue cannot leave accepted guidance orphaned."""
+    from cubeplex.api.routes.v1 import conversations as conversations_route
+
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-steer-owner"),
+    )
+    pending = _ask_pending("q-steer-owner")
+    reads = 0
+
+    async def changing_pending(_conversation_id: str) -> tuple[HitlRequest | None, str | None]:
+        nonlocal reads
+        reads += 1
+        return (pending, run_id) if reads == 1 else (None, None)
+
+    async def no_active_run(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(conversations_route, "_load_pending_hitl", changing_pending)
+    monkeypatch.setattr(conversations_route, "get_active_run", no_active_run)
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
+        json={"content": "too late", "steer_id": "s-owner-race"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "status": "failed",
+        "run_id": run_id,
+        "steer_id": "s-owner-race",
+    }
+
+
+@pytest.mark.asyncio
 async def test_paused_steer_retry_and_cancel_are_durable(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:

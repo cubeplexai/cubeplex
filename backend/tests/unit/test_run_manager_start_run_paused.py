@@ -27,6 +27,7 @@ import pytest
 
 from cubeplex.streams.run_events import create_run, update_run_meta
 from cubeplex.streams.run_manager import RunContext, RunManager
+from cubeplex.streams.steering_delivery import SteeringRunScope
 
 PREFIX = "test_start_run_paused"
 
@@ -201,3 +202,33 @@ async def test_start_run_succeeds_when_no_pending(
     task = rm._tasks.get(run_id)
     assert task is not None
     await task
+
+
+async def test_force_cancel_hitl_finalizes_durable_steering_with_explicit_scope(
+    redis: fakeredis.aioredis.FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cp = MagicMock()
+    cp.save_pending_request = AsyncMock()
+
+    @asynccontextmanager
+    async def _fake_cm() -> Any:
+        yield cp
+
+    monkeypatch.setattr("cubeplex.agents.checkpointer.shared_checkpointer", _fake_cm)
+    monkeypatch.setattr(
+        "cubeplex.streams.run_manager._repair_dangling_tool_calls",
+        AsyncMock(),
+    )
+    monkeypatch.setattr("cubeplex.streams.run_manager.update_run_meta", AsyncMock())
+    monkeypatch.setattr("cubeplex.streams.run_manager.clear_active_run", AsyncMock())
+    monkeypatch.setattr("cubeplex.streams.run_manager.expire_run_data", AsyncMock())
+
+    rm = _make_rm(redis)
+    rm._append_event = AsyncMock()  # type: ignore[method-assign]
+    rm._steering_delivery.finalize_run = AsyncMock()  # type: ignore[method-assign]
+    scope = SteeringRunScope(org_id="o1", workspace_id="w1", conversation_id="c1")
+
+    await rm._force_cancel_hitl("c1", "old-run", scope=scope)
+
+    rm._steering_delivery.finalize_run.assert_awaited_once_with("old-run", scope=scope)

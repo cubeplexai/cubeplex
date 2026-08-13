@@ -2,14 +2,18 @@
 
 import { useShallow } from 'zustand/react/shallow'
 import { useMessageStore, createApiClient } from '@cubeplex/core'
-import { X } from 'lucide-react'
+import { RotateCcw, X } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface PendingSteersProps {
   conversationId: string
+  onRecover: (text: string) => void
 }
 
-export function PendingSteers({ conversationId }: PendingSteersProps): React.ReactElement | null {
+export function PendingSteers({
+  conversationId,
+  onRecover,
+}: PendingSteersProps): React.ReactElement | null {
   const pending = useMessageStore(useShallow((s) => s.pendingSteers[conversationId] ?? []))
   const cancelSteer = useMessageStore((s) => s.cancelSteer)
   const { workspaceId } = useWorkspaceContext()
@@ -20,6 +24,11 @@ export function PendingSteers({ conversationId }: PendingSteersProps): React.Rea
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
     void cancelSteer(client, conversationId, steerId)
+  }
+
+  const recoverFailed = (steerId: string, text: string): void => {
+    onRecover(text)
+    onCancel(steerId)
   }
 
   return (
@@ -34,14 +43,25 @@ export function PendingSteers({ conversationId }: PendingSteersProps): React.Rea
           <span className="text-[10px] uppercase tracking-wide opacity-50">
             {p.state === 'failed' ? 'not sent' : p.state === 'queued' ? 'queued' : 'steering…'}
           </span>
-          <button
-            type="button"
-            aria-label="Cancel pending steer"
-            onClick={() => onCancel(p.steerId)}
-            className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="size-3" />
-          </button>
+          {p.state === 'failed' ? (
+            <button
+              type="button"
+              aria-label="Restore failed steer to input"
+              onClick={() => recoverFailed(p.steerId, p.text)}
+              className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="size-3" />
+            </button>
+          ) : p.state !== 'submitting' ? (
+            <button
+              type="button"
+              aria-label="Cancel pending steer"
+              onClick={() => onCancel(p.steerId)}
+              className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          ) : null}
         </div>
       ))}
     </div>
