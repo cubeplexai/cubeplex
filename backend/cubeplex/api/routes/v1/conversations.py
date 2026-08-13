@@ -2302,10 +2302,16 @@ async def cancel_steer(
     if durable is not None:
         await session.commit()
         if str(durable.state) == "cancel_requested":
-            await raw_request.app.state.run_manager.notify_durable_cancel(
-                durable.run_id,
-                durable.client_steer_id,
-            )
+            try:
+                await raw_request.app.state.run_manager.notify_durable_cancel(
+                    durable.run_id,
+                    durable.client_steer_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Durable steer cancellation for %s committed but wake-up failed",
+                    durable.id,
+                )
             return {"status": "accepted", "run_id": durable.run_id}
         return {
             "status": _durable_steer_status(durable.state),

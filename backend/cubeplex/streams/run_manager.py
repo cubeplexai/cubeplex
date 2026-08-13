@@ -1137,8 +1137,8 @@ class RunManager:
         await self._steering_delivery.drain(run_id)
 
     async def notify_durable_cancel(self, run_id: str, steer_id: str) -> None:
-        await self._publish_control(run_id, "cancel_durable_steer", steer_id=steer_id)
         await self._steering_delivery.cancel_dispatched(run_id, steer_id)
+        await self._publish_control(run_id, "cancel_durable_steer", steer_id=steer_id)
 
     async def resume_run_with_answer(
         self,

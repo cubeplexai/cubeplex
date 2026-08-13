@@ -512,6 +512,54 @@ async def test_paused_steer_retry_and_cancel_are_durable(
 
 
 @pytest.mark.asyncio
+async def test_dispatched_cancel_wakeup_failure_still_returns_accepted(
+    member_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.db import async_session_maker
+    from cubeplex.repositories import SteeringMessageRepository
+
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-cancel-wakeup"),
+    )
+    path = f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer"
+    queued = await client.post(
+        path,
+        json={"content": "cancel after dispatch", "steer_id": "s-cancel-wakeup"},
+    )
+    assert queued.status_code == 202, queued.text
+
+    async with async_session_maker() as session:
+        conversation = await session.get(Conversation, conv_id)
+        assert conversation is not None
+        repo = SteeringMessageRepository(
+            session,
+            org_id=conversation.org_id,
+            workspace_id=conversation.workspace_id,
+        )
+        claimed = await repo.claim_queued(run_id=run_id, owner="remote-owner")
+        assert len(claimed) == 1
+        await session.commit()
+
+    run_manager = client._transport.app.state.run_manager  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        run_manager,
+        "notify_durable_cancel",
+        AsyncMock(side_effect=RuntimeError("redis unavailable")),
+    )
+    response = await client.post(
+        f"{path}/cancel",
+        json={"steer_id": "s-cancel-wakeup"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {"status": "accepted", "run_id": run_id}
+
+
+@pytest.mark.asyncio
 async def test_cancel_route_paused_dispatches_to_cancel_paused_run(
     member_client: tuple[httpx.AsyncClient, str],
     stub_cancel_paused: AsyncMock,
