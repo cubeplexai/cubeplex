@@ -64,6 +64,34 @@ describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
     ])
   })
 
+  it('does not hydrate a pending chip for a steer already present in history', async () => {
+    const client = makeBootstrapClient({
+      messages: [
+        {
+          id: 'steer-message-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'already injected' }],
+          metadata: { steer_id: 'steer-injected' },
+        },
+      ],
+      active_run: { run_id: 'run-1', status: 'running' },
+      pending_hitl: null,
+      pending_steers: [
+        {
+          steer_id: 'steer-injected',
+          content: 'already injected',
+          state: 'dispatched',
+          created_at: '2026-08-12T00:00:01.000Z',
+        },
+      ],
+      last_run_status: null,
+    })
+
+    await useMessageStore.getState().loadMessages(client, 'conv-injected')
+
+    expect(useMessageStore.getState().pendingSteers['conv-injected']).toEqual([])
+  })
+
   it('preserves a local submitting steer that an older bootstrap cannot see yet', async () => {
     useMessageStore.setState({
       pendingSteers: {

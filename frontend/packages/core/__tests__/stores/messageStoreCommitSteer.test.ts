@@ -88,6 +88,17 @@ describe('commit on injected_message', () => {
     expect(useMessageStore.getState().messages.c1.length).toBe(before)
   })
 
+  it('clears a stale pending chip when history already contains the steer', () => {
+    applyInjected('c1', 'do X', 's1')
+    useMessageStore.setState({
+      pendingSteers: { c1: [{ steerId: 's1', text: 'do X' }] },
+    })
+
+    applyInjected('c1', 'do X', 's1')
+
+    expect(useMessageStore.getState().pendingSteers.c1).toEqual([])
+  })
+
   it('clearStream clears all pending steers', () => {
     useMessageStore.setState({ pendingSteers: { c1: [{ steerId: 's1', text: 'do X' }] } })
     useMessageStore.getState().clearStream()

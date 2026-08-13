@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -291,6 +292,72 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
     await coordinator.acknowledge_injected("run-delivery", "steer-delivery")
     await db_session.refresh(row)
     assert row.state == SteeringMessageState.injected
+
+
+@pytest.mark.asyncio
+async def test_unregister_waits_for_an_in_flight_drain(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation, user = steering_conversation
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    agent = _QueueingAgent()
+    await coordinator.register_and_drain(
+        run_id="run-unregister-race",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        agent=agent,
+    )
+
+    row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="run-unregister-race",
+        client_steer_id="steer-unregister-race",
+        content="deliver before detach completes",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-unregister-race",
+    )
+    await db_session.commit()
+
+    drain_entered = asyncio.Event()
+    release_drain = asyncio.Event()
+    original_repair = coordinator._repair_expired_claims
+
+    async def blocked_repair(
+        repo: SteeringMessageRepository,
+        *,
+        scope: SteeringRunScope,
+        run_id: str,
+    ) -> None:
+        drain_entered.set()
+        await release_drain.wait()
+        await original_repair(repo, scope=scope, run_id=run_id)
+
+    monkeypatch.setattr(coordinator, "_repair_expired_claims", blocked_repair)
+
+    drain_task = asyncio.create_task(coordinator.drain("run-unregister-race"))
+    await drain_entered.wait()
+    unregister_task = asyncio.create_task(coordinator.unregister("run-unregister-race"))
+    await asyncio.sleep(0)
+
+    assert unregister_task.done() is False
+
+    release_drain.set()
+    await asyncio.gather(drain_task, unregister_task)
+
+    assert [message.metadata["steer_id"] for message in agent.messages] == ["steer-unregister-race"]
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.dispatched
 
 
 @pytest.mark.asyncio
