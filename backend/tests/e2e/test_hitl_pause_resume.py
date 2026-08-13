@@ -444,6 +444,27 @@ async def test_steer_route_rejects_an_invalid_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("steer_id", ["", "s" * 65])
+async def test_cancel_steer_route_rejects_an_invalid_id(
+    member_client: tuple[httpx.AsyncClient, str],
+    steer_id: str,
+) -> None:
+    client, ws_id = member_client
+    conv_id, _run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-cancel-steer-id-length"),
+    )
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer/cancel",
+        json={"steer_id": steer_id},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_paused_steer_wakeup_failure_still_returns_accepted(
     member_client: tuple[httpx.AsyncClient, str],
     monkeypatch: pytest.MonkeyPatch,

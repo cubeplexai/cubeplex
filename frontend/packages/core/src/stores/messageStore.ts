@@ -2325,8 +2325,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       },
     }))
     try {
-      await cancelSteer(client, conversationId, steerId)
-      return true
+      for (;;) {
+        const result = await cancelSteer(client, conversationId, steerId)
+        if (result.status === 'cancelled') return true
+        if (result.status !== 'accepted') return false
+        await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
+      }
     } catch (err) {
       console.error('Failed to cancel steer:', err)
       if (removed) {

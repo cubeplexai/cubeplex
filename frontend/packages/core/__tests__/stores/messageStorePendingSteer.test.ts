@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import { useMessageStore } from '../../src/stores/messageStore'
 
 vi.mock('../../src/api', async (orig) => {
@@ -14,12 +14,17 @@ const client = {} as never
 
 describe('pending steers', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     useMessageStore.setState({
       messages: {},
       pendingSteers: {},
       isStreaming: true,
       streamingConversationId: 'c1',
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('steer() adds to pendingSteers, not messages', async () => {
@@ -35,6 +40,39 @@ describe('pending steers', () => {
     const id = useMessageStore.getState().pendingSteers.c1[0].steerId
     await useMessageStore.getState().cancelSteer(client, 'c1', id)
     expect(useMessageStore.getState().pendingSteers.c1 ?? []).toHaveLength(0)
+  })
+
+  it('waits for an accepted cancellation to become terminal', async () => {
+    vi.useFakeTimers()
+    const { cancelSteer } = await import('../../src/api')
+    vi.mocked(cancelSteer)
+      .mockResolvedValueOnce({ status: 'accepted', run_id: 'r1' })
+      .mockResolvedValueOnce({ status: 'cancelled', run_id: 'r1' })
+    await useMessageStore.getState().steer(client, 'c1', 'restore only after cancel')
+    const id = useMessageStore.getState().pendingSteers.c1[0].steerId
+    let settled = false
+    const cancelling = useMessageStore
+      .getState()
+      .cancelSteer(client, 'c1', id)
+      .finally(() => {
+        settled = true
+      })
+    await Promise.resolve()
+
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(cancelling).resolves.toBe(true)
+    expect(cancelSteer).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not report an injected steer as safe to restore', async () => {
+    const { cancelSteer } = await import('../../src/api')
+    vi.mocked(cancelSteer).mockResolvedValueOnce({ status: 'injected', run_id: 'r1' })
+    await useMessageStore.getState().steer(client, 'c1', 'already injected')
+    const id = useMessageStore.getState().pendingSteers.c1[0].steerId
+
+    await expect(useMessageStore.getState().cancelSteer(client, 'c1', id)).resolves.toBe(false)
   })
 
   it('reloads the authoritative chip when cancelSteer() fails', async () => {
