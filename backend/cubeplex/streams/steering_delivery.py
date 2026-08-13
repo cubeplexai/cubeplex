@@ -112,13 +112,19 @@ class DurableSteeringCoordinator:
         self._locks.setdefault(run_id, asyncio.Lock())
         await self.drain(run_id)
 
-    async def unregister(self, run_id: str) -> None:
+    async def unregister(self, run_id: str, *, agent: Any) -> None:
+        if self._agents.get(run_id) is not agent:
+            return
         lock = self._locks.get(run_id)
         if lock is None:
+            if self._agents.get(run_id) is not agent:
+                return
             self._agents.pop(run_id, None)
             self._scopes.pop(run_id, None)
             return
         async with lock:
+            if self._agents.get(run_id) is not agent:
+                return
             self._agents.pop(run_id, None)
             self._scopes.pop(run_id, None)
             if self._locks.get(run_id) is lock:
@@ -198,7 +204,7 @@ class DurableSteeringCoordinator:
                 claimed = await repo.claim_queued(run_id=run_id, owner=self._owner)
                 await session.commit()
 
-            for row in claimed:
+            for index, row in enumerate(claimed):
                 try:
                     agent.steer(steering_message_to_cubepi(row))
                 except Exception:
@@ -208,8 +214,13 @@ class DurableSteeringCoordinator:
                     )
                     async with self._session_maker() as session:
                         repo = self._repo(session, scope)
-                        await repo.return_claim_to_queue(row_id=row.id, owner=self._owner)
+                        for undelivered in claimed[index:]:
+                            await repo.return_claim_to_queue(
+                                row_id=undelivered.id,
+                                owner=self._owner,
+                            )
                         await session.commit()
+                    break
 
     async def acknowledge_injected(self, run_id: str, client_steer_id: str) -> None:
         scope = self._scopes.get(run_id)
