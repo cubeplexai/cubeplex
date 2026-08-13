@@ -71,6 +71,17 @@ describe('messageStore.cancelStream', () => {
       text: 'partial answer',
       blocks: [{ type: 'text', text: 'partial answer' }],
     })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      ...idleBootstrap(),
+      messages: [
+        {
+          id: 'cancelled-assistant-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'partial answer' }],
+          stop_reason: 'aborted',
+        },
+      ],
+    })
 
     await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
 
@@ -93,6 +104,37 @@ describe('messageStore.cancelStream', () => {
     expect(state.isStreaming).toBe(false)
     expect(state.messages.conv1 ?? []).toHaveLength(0)
     expect(cancelActiveRun).toHaveBeenCalledOnce()
+  })
+
+  it('removes a dispatched chip that reached history just before cancellation', async () => {
+    seedStreaming('conv1', {})
+    useMessageStore.setState({
+      pendingSteers: {
+        conv1: [
+          {
+            steerId: 'steer-before-cancel',
+            text: 'already injected',
+            state: 'dispatched',
+            createdAt: '2026-08-12T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      ...idleBootstrap(),
+      messages: [
+        {
+          id: 'steer-message-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'already injected' }],
+          metadata: { steer_id: 'steer-before-cancel' },
+        },
+      ],
+    })
+
+    await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+
+    expect(useMessageStore.getState().pendingSteers.conv1).toEqual([])
   })
 
   it('is a no-op when not streaming the given conversation', async () => {

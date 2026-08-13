@@ -112,10 +112,17 @@ class DurableSteeringCoordinator:
         self._locks.setdefault(run_id, asyncio.Lock())
         await self.drain(run_id)
 
-    def unregister(self, run_id: str) -> None:
-        self._agents.pop(run_id, None)
-        self._scopes.pop(run_id, None)
-        self._locks.pop(run_id, None)
+    async def unregister(self, run_id: str) -> None:
+        lock = self._locks.get(run_id)
+        if lock is None:
+            self._agents.pop(run_id, None)
+            self._scopes.pop(run_id, None)
+            return
+        async with lock:
+            self._agents.pop(run_id, None)
+            self._scopes.pop(run_id, None)
+            if self._locks.get(run_id) is lock:
+                self._locks.pop(run_id, None)
 
     async def _repair_expired_claims(
         self,
@@ -172,6 +179,13 @@ class DurableSteeringCoordinator:
             return
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
+            if (
+                self._locks.get(run_id) is not lock
+                or self._agents.get(run_id) is not agent
+                or self._scopes.get(run_id) is not scope
+            ):
+                return
+            assert agent is not None
             async with self._session_maker() as session:
                 repo = self._repo(session, scope)
                 await self._process_owned_cancel_requests(

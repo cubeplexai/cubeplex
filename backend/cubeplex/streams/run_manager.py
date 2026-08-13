@@ -2213,7 +2213,7 @@ class RunManager:
                 # `auto_detach.detached` in the terminal block below.
                 auto_detach(evt, _signal)
                 if isinstance(evt, _HitlRequestEvent):
-                    self._steering_delivery.unregister(run_id)
+                    await self._steering_delivery.unregister(run_id)
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     steer_id = evt.message.metadata.get("steer_id")
                     if isinstance(steer_id, str) and steer_id:
@@ -3998,7 +3998,7 @@ class RunManager:
 
             if final_status != "paused_hitl":
                 await self._steering_delivery.finalize_run(run_id)
-            self._steering_delivery.unregister(run_id)
+            await self._steering_delivery.unregister(run_id)
             self._agents.pop(run_id, None)
             # Release the turn lock BEFORE the sandbox/session teardown below:
             # `done` has already been emitted, and holding the active-run key
@@ -4570,7 +4570,7 @@ class RunManager:
 
             if durable_final_status != "paused_hitl":
                 await self._steering_delivery.finalize_run(run_id)
-            self._steering_delivery.unregister(run_id)
+            await self._steering_delivery.unregister(run_id)
             self._agents.pop(run_id, None)
             # Clear the active-run pointer — claim_resume handles the case
             # where pointer is gone but meta is paused_hitl (it re-stamps

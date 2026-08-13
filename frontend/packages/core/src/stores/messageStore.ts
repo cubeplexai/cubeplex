@@ -115,6 +115,9 @@ export interface PendingSteer {
 }
 
 function failedPendingSteers(state: MessageStore, conversationId: string): PendingSteer[] {
+  if (state.cancellingConversationIds[conversationId]) {
+    return state.pendingSteers[conversationId] ?? []
+  }
   return (state.pendingSteers[conversationId] ?? []).map((pending) => ({
     ...pending,
     state: 'failed',
@@ -1660,17 +1663,28 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
         }
 
-        const serverPendingSteers: PendingSteer[] = (bootstrap.pending_steers ?? []).map((row) => ({
-          steerId: row.steer_id,
-          text: row.content,
-          state: row.state,
-          createdAt: row.created_at,
-        }))
+        const injectedHistorySteerIds = new Set(
+          messages.flatMap((message) => {
+            const steerId = message.role === 'user' ? message.metadata?.steer_id : undefined
+            return typeof steerId === 'string' ? [steerId] : []
+          }),
+        )
+        const serverPendingSteers: PendingSteer[] = (bootstrap.pending_steers ?? [])
+          .filter((row) => !injectedHistorySteerIds.has(row.steer_id))
+          .map((row) => ({
+            steerId: row.steer_id,
+            text: row.content,
+            state: row.state,
+            createdAt: row.created_at,
+          }))
 
         set((s) => {
           const serverSteerIds = new Set(serverPendingSteers.map((pending) => pending.steerId))
           const unmatchedSubmitting = (s.pendingSteers[conversationId] ?? []).filter(
-            (pending) => pending.state === 'submitting' && !serverSteerIds.has(pending.steerId),
+            (pending) =>
+              pending.state === 'submitting' &&
+              !serverSteerIds.has(pending.steerId) &&
+              !injectedHistorySteerIds.has(pending.steerId),
           )
           const hydratedPending = [...serverPendingSteers, ...unmatchedSubmitting].sort(
             (left, right) =>
@@ -2267,7 +2281,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const already = (state.messages[conversationId] ?? []).some(
       (m) => m.role === 'user' && m.metadata?.steer_id === data.steer_id,
     )
-    if (already) return
+    if (already) {
+      set((s) => ({
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+            (pending) => pending.steerId !== data.steer_id,
+          ),
+        },
+      }))
+      return
+    }
 
     const { assistantMessage, toolMessages } = buildTurnMessages(
       state.streamAgents,
@@ -2350,13 +2374,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (!state.isStreaming) {
       const isIdle = await waitForConversationIdle(client, conversationId, get)
       if (!isIdle) return
+      await get().loadMessages(client, conversationId, { force: true })
       set((s) => ({
         cancellingConversationIds: withoutConversationFlag(
           s.cancellingConversationIds,
           conversationId,
         ),
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
+            ...pending,
+            state: 'failed',
+          })),
+        },
       }))
-      await get().loadMessages(client, conversationId)
       return
     }
 
@@ -2409,11 +2440,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     const isIdle = await waitForConversationIdle(client, conversationId, get)
     if (!isIdle) return
+    await get().loadMessages(client, conversationId, { force: true })
     set((s) => ({
       cancellingConversationIds: withoutConversationFlag(
         s.cancellingConversationIds,
         conversationId,
       ),
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
+          ...pending,
+          state: 'failed',
+        })),
+      },
     }))
   },
 
