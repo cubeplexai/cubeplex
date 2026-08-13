@@ -429,24 +429,43 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         result = await self.session.execute(stmt)
         return bool(result.rowcount == 1)  # type: ignore[attr-defined]
 
-    async def fail_active_for_run(self, run_id: str) -> int:
-        stmt = (
+    async def finalize_active_for_run(self, run_id: str) -> int:
+        now = datetime.now(UTC)
+        cancel_stmt = (
             update(SteeringMessage)
             .where(
                 cast(Any, SteeringMessage.org_id) == self.org_id,
                 cast(Any, SteeringMessage.workspace_id) == self.workspace_id,
                 cast(Any, SteeringMessage.run_id) == run_id,
-                cast(Any, SteeringMessage.state).in_(ACTIVE_STATES),
+                cast(Any, SteeringMessage.state) == SteeringMessageState.cancel_requested,
+            )
+            .values(
+                state=SteeringMessageState.cancelled,
+                delivery_owner=None,
+                delivery_lease_until=None,
+                updated_at=now,
+            )
+        )
+        cancelled = await self.session.execute(cancel_stmt)
+        fail_stmt = (
+            update(SteeringMessage)
+            .where(
+                cast(Any, SteeringMessage.org_id) == self.org_id,
+                cast(Any, SteeringMessage.workspace_id) == self.workspace_id,
+                cast(Any, SteeringMessage.run_id) == run_id,
+                cast(Any, SteeringMessage.state).in_(
+                    (SteeringMessageState.queued, SteeringMessageState.dispatched)
+                ),
             )
             .values(
                 state=SteeringMessageState.failed,
                 delivery_owner=None,
                 delivery_lease_until=None,
-                updated_at=datetime.now(UTC),
+                updated_at=now,
             )
         )
-        result = await self.session.execute(stmt)
-        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+        failed = await self.session.execute(fail_stmt)
+        return int(cancelled.rowcount or 0) + int(failed.rowcount or 0)  # type: ignore[attr-defined]
 
     async def fail_queued(self, *, row_id: str) -> bool:
         """Fail one orphan only while no delivery owner has claimed it."""

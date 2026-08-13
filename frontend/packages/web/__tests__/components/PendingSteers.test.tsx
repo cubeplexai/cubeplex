@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PendingSteers } from '../../components/layout/PendingSteers'
 
@@ -54,6 +54,7 @@ vi.mock('next-intl', () => ({
 describe('PendingSteers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.cancelSteer.mockResolvedValue(true)
     mocks.pending = [
       {
         steerId: 's1',
@@ -90,14 +91,25 @@ describe('PendingSteers', () => {
     expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument()
   })
 
-  it('recovers the full failed text before dismissing its durable row', () => {
+  it('recovers the full failed text after dismissing its durable row', async () => {
     mocks.pending[0].state = 'failed'
     render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
 
     expect(screen.getByText('未发送')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '将失败的引导恢复到输入框' }))
-    expect(mocks.onRecover).toHaveBeenCalledWith('do X instead')
+    await waitFor(() => expect(mocks.onRecover).toHaveBeenCalledWith('do X instead'))
     expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')
+  })
+
+  it('keeps failed text out of the draft when dismissal fails', async () => {
+    mocks.pending[0].state = 'failed'
+    mocks.cancelSteer.mockResolvedValue(false)
+    render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '将失败的引导恢复到输入框' }))
+
+    await waitFor(() => expect(mocks.cancelSteer).toHaveBeenCalledOnce())
+    expect(mocks.onRecover).not.toHaveBeenCalled()
   })
 
   it('offers dismissal instead of recovery while a newer run is active', () => {

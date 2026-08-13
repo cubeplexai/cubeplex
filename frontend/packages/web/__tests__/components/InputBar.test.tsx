@@ -137,6 +137,7 @@ function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
 describe('InputBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    storeMocks.cancelSteer.mockResolvedValue(true)
     storeMocks.state.isStreaming = false
     storeMocks.state.streamingConversationId = null
     storeMocks.state.cancellingConversationIds = {}
@@ -299,6 +300,7 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(storeMocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
         force: true,
+        preserveOtherConversationStream: true,
       })
     })
     expect(storeMocks.hydrate).toHaveBeenCalledTimes(2)

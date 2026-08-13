@@ -75,8 +75,11 @@ describe('pending steers', () => {
       },
     })
 
-    await useMessageStore.getState().cancelSteer(recoveryClient, 'c1', 'server-steer')
+    const cancelled = await useMessageStore
+      .getState()
+      .cancelSteer(recoveryClient, 'c1', 'server-steer')
 
+    expect(cancelled).toBe(false)
     expect(useMessageStore.getState().pendingSteers.c1).toEqual([
       expect.objectContaining({ steerId: 'server-steer', state: 'queued' }),
     ])

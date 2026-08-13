@@ -313,6 +313,59 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
 
 
 @pytest.mark.asyncio
+async def test_finalization_cancels_requested_rows_and_fails_undelivered_rows(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    cancelled, _ = await repo.enqueue(
+        conversation_id=conversation.id,
+        run_id="run-finalize",
+        client_steer_id="steer-cancel-requested",
+        content="do not restore me",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-finalize",
+    )
+    failed, _ = await repo.enqueue(
+        conversation_id=conversation.id,
+        run_id="run-finalize",
+        client_steer_id="steer-undelivered",
+        content="restore me",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-finalize",
+    )
+    await db_session.commit()
+    await repo.claim_queued(run_id="run-finalize", owner="worker-a", limit=1)
+    await repo.request_cancel(
+        conversation_id=conversation.id,
+        client_steer_id=cancelled.client_steer_id,
+    )
+    await db_session.commit()
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    await coordinator.finalize_run(
+        "run-finalize",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+    )
+
+    await db_session.refresh(cancelled)
+    await db_session.refresh(failed)
+    assert cancelled.state == SteeringMessageState.cancelled
+    assert failed.state == SteeringMessageState.failed
+
+
+@pytest.mark.asyncio
 async def test_synchronous_delivery_failure_requeues_the_remaining_batch_in_order(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
