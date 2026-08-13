@@ -3,6 +3,7 @@
 import { useShallow } from 'zustand/react/shallow'
 import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { RotateCcw, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface PendingSteersProps {
@@ -17,6 +18,7 @@ export function PendingSteers({
   const pending = useMessageStore(useShallow((s) => s.pendingSteers[conversationId] ?? []))
   const cancelSteer = useMessageStore((s) => s.cancelSteer)
   const { workspaceId } = useWorkspaceContext()
+  const t = useTranslations('input')
 
   if (pending.length === 0) return null
 
@@ -41,7 +43,11 @@ export function PendingSteers({
         >
           <span className="flex-1 truncate opacity-70">{p.text}</span>
           <span className="text-[10px] uppercase tracking-wide opacity-50">
-            {p.state === 'failed' ? 'not sent' : p.state === 'queued' ? 'queued' : 'steering…'}
+            {p.state === 'failed'
+              ? t('pendingSteerFailed')
+              : p.state === 'queued'
+                ? t('pendingSteerQueued')
+                : t('pendingSteerSending')}
           </span>
           {p.state === 'failed' ? (
             <button

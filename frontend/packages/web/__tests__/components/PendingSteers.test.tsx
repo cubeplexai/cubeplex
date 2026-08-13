@@ -26,6 +26,14 @@ vi.mock('@cubeplex/core', () => ({
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
+vi.mock('next-intl', () => ({
+  useTranslations: () => (key: string) =>
+    ({
+      pendingSteerFailed: '未发送',
+      pendingSteerQueued: '已排队',
+      pendingSteerSending: '正在引导…',
+    })[key] ?? key,
+}))
 
 describe('PendingSteers', () => {
   beforeEach(() => {
@@ -43,6 +51,7 @@ describe('PendingSteers', () => {
   it('renders pending steer text and cancels on click', () => {
     render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
     expect(screen.getByText('do X instead')).toBeInTheDocument()
+    expect(screen.getByText('已排队')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')
   })
@@ -66,6 +75,7 @@ describe('PendingSteers', () => {
     mocks.pending[0].state = 'failed'
     render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
 
+    expect(screen.getByText('未发送')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /restore/i }))
     expect(mocks.onRecover).toHaveBeenCalledWith('do X instead')
     expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')

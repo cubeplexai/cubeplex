@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubeplex.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager, _registration_was_replaced
 
 
 class _FakeAgent:
@@ -29,6 +29,20 @@ class _FakeRedis:
 def _make_manager() -> RunManager:
     # Construct without touching Redis/app: registry + steer_run don't need them.
     return RunManager.__new__(RunManager)  # type: ignore[call-arg]
+
+
+def test_missing_originating_agent_does_not_imply_a_replacement() -> None:
+    assert _registration_was_replaced(current_agent=object(), originating_agent=None) is False
+
+
+def test_different_registered_agent_is_a_replacement() -> None:
+    assert (
+        _registration_was_replaced(
+            current_agent=object(),
+            originating_agent=object(),
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio

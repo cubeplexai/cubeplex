@@ -394,8 +394,10 @@ async def test_steer_route_queues_durably_while_paused_hitl(
 
 
 @pytest.mark.asyncio
-async def test_steer_route_rejects_an_id_longer_than_the_database_column(
+@pytest.mark.parametrize("steer_id", ["", "s" * 65])
+async def test_steer_route_rejects_an_invalid_id(
     member_client: tuple[httpx.AsyncClient, str],
+    steer_id: str,
 ) -> None:
     client, ws_id = member_client
     conv_id, _run_id = await _seed_paused_conversation(
@@ -406,7 +408,7 @@ async def test_steer_route_rejects_an_id_longer_than_the_database_column(
 
     response = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
-        json={"content": "invalid id", "steer_id": "s" * 65},
+        json={"content": "invalid id", "steer_id": steer_id},
     )
 
     assert response.status_code == 422

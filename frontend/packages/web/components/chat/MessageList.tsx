@@ -12,6 +12,7 @@ import {
   toolTimingFromDetails,
   submitSandboxConfirm,
   submitAskUserAnswer,
+  cancelActiveRun,
   ApiError,
 } from '@cubeplex/core'
 import type {
@@ -237,7 +238,6 @@ export function MessageList({ conversationId }: MessageListProps) {
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
-  const cancelStream = useMessageStore((s) => s.cancelStream)
   const isCancelling = useMessageStore((s) => Boolean(s.cancellingConversationIds[conversationId]))
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   // Active run guard for the per-message Fork action — MessageActions
@@ -342,16 +342,26 @@ export function MessageList({ conversationId }: MessageListProps) {
   const handleAskUserCancel = useCallback(async () => {
     if (!pendingAsk) return
     const convId = streamingConversationId ?? conversationId
+    const questionId = pendingAsk.question_id
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
+    useMessageStore.setState((state) => ({
+      runLifecycle: { ...state.runLifecycle, [convId]: 'resuming_hitl' },
+    }))
     try {
-      await cancelStream(client, convId)
+      await cancelActiveRun(client, convId)
+      useMessageStore.setState({ lastAnsweredAskQuestionId: questionId })
+      await loadMessages(client, convId)
     } catch (err) {
-      console.error('Failed to cancel paused ask_user:', err)
-      toast.error(t('cancelFailed'))
-      throw err
+      try {
+        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+      } catch (submitErr) {
+        console.error('Failed to cancel paused ask_user:', submitErr)
+        toast.error(t('cancelFailed'))
+        throw submitErr
+      }
     }
-  }, [conversationId, streamingConversationId, pendingAsk, workspaceId, cancelStream, t])
+  }, [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages, t])
 
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
 
