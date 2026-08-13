@@ -216,7 +216,7 @@ export function InputBar({
   )
 
   const handleSubmit = async (): Promise<void> => {
-    const submittedText = content
+    const submittedText = applySkillChipsToContent(content, skillChips)
     if (
       isSubmitting ||
       shouldSteer ||
@@ -227,12 +227,12 @@ export function InputBar({
     )
       return
     if (!conversationId && !onSubmit) return
+    let clearedSubmittedText = false
 
     try {
       setIsHandlingSubmit(true)
-      const text = applySkillChipsToContent(content, skillChips)
       if (onSubmit) {
-        await onSubmit(text, [...pendingFiles])
+        await onSubmit(submittedText, [...pendingFiles])
         setContent('')
         setPendingFiles([])
         setSkillChips([])
@@ -260,6 +260,7 @@ export function InputBar({
         })
       setContent('')
       setSkillChips([])
+      clearedSubmittedText = true
       resetTextareaHeight()
       clearStaging(conversationId!)
       // Pull the per-workspace preset + thinking choice at send time so the
@@ -276,7 +277,11 @@ export function InputBar({
         : undefined
       await send(client, conversationId!, submittedText, ids, optimisticAttachments, sendOptions)
     } catch (err) {
-      setContent((current) => current || submittedText)
+      if (clearedSubmittedText) {
+        setContent((current) =>
+          submittedText ? (current ? `${submittedText}\n${current}` : submittedText) : current,
+        )
+      }
       if (err instanceof ApiError && err.status === 409 && err.code === 'active_run_conflict') {
         if (conversationId) {
           const recoveryClient = createApiClient('')

@@ -983,7 +983,7 @@ class SteerMessageRequest(BaseModel):
 class CancelSteerRequest(BaseModel):
     """Request body for cancelling a not-yet-drained steer."""
 
-    steer_id: str
+    steer_id: str = Field(min_length=1, max_length=64)
 
 
 def _durable_steer_status(state: object) -> str:

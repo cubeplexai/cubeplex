@@ -28,6 +28,13 @@ describe('useComposerDraft', () => {
     expect(useComposerDraft.getState().consume('conv-a')).toBe('restore in A')
   })
 
+  it('preserves every prepend recovery queued for the same conversation', () => {
+    useComposerDraft.getState().setDraft('first recovery', 'conv-a', 'prepend')
+    useComposerDraft.getState().setDraft('second recovery', 'conv-a', 'prepend')
+
+    expect(useComposerDraft.getState().consume('conv-a')).toBe('second recovery\nfirst recovery')
+  })
+
   it('consume returns the draft and clears it', () => {
     useComposerDraft.getState().setDraft('task X')
     expect(useComposerDraft.getState().consume()).toBe('task X')

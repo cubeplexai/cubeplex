@@ -233,6 +233,26 @@ describe('InputBar', () => {
     await waitFor(() => expect(textarea).toHaveValue('submitted\nnew typing'))
   })
 
+  it('prepends a rejected send to text typed while the request was in flight', async () => {
+    let rejectSend: ((reason: Error) => void) | undefined
+    storeMocks.send.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject
+        }),
+    )
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+    fireEvent.change(textarea, { target: { value: 'submitted' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+    expect(textarea).toHaveValue('')
+    fireEvent.change(textarea, { target: { value: 'new typing' } })
+    rejectSend?.(new Error('send rejected'))
+
+    await waitFor(() => expect(textarea).toHaveValue('submitted\nnew typing'))
+  })
+
   it('restores failed steering text ahead of newer composer text', async () => {
     storeMocks.state.pendingSteers = {
       'conv-1': [

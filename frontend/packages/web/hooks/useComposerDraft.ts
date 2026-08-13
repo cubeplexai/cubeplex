@@ -35,6 +35,10 @@ export const useComposerDraft = create<ComposerDraftState>((set, get) => ({
   setDraft: (text, conversationId = null, placement = 'replace') =>
     set((state) => {
       const draft = { text, conversationId, placement, nonce: nextNonce++ }
+      const existing = conversationId === null ? null : state.pendingByConversation[conversationId]
+      if (existing && placement === 'prepend') {
+        draft.text = `${text}\n${existing.text}`
+      }
       return conversationId === null
         ? { pending: draft }
         : {
