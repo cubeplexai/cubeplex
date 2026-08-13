@@ -60,3 +60,43 @@ def test_artifact_prompt_mentions_present_file() -> None:
 
     assert "present_file" in ARTIFACT_PROMPT
     assert "/workspace" in ARTIFACT_PROMPT
+
+
+def test_clip_caption_truncates() -> None:
+    from cubeplex.services.presented_files import _CAPTION_MAX_LEN, _clip_caption
+
+    long = "x" * (_CAPTION_MAX_LEN + 50)
+    clipped = _clip_caption(long)
+    assert clipped is not None
+    assert len(clipped) == _CAPTION_MAX_LEN
+
+
+@pytest.mark.asyncio
+async def test_assert_regular_file_size_rejects_too_large() -> None:
+    from cubeplex.api.exceptions import AttachmentTooLargeError
+    from cubeplex.services.presented_files import _assert_regular_file_size
+
+    sandbox = MagicMock()
+
+    async def _exec(command: str, **kwargs: object) -> object:
+        del command, kwargs
+        return type("R", (), {"output": "999999999", "exit_code": 0})()
+
+    sandbox.execute = _exec
+    with pytest.raises(AttachmentTooLargeError):
+        await _assert_regular_file_size(sandbox, "/workspace/big.bin", max_bytes=100)
+
+
+@pytest.mark.asyncio
+async def test_assert_regular_file_size_rejects_escape() -> None:
+    from cubeplex.services.presented_files import _assert_regular_file_size
+
+    sandbox = MagicMock()
+
+    async def _exec(command: str, **kwargs: object) -> object:
+        del command, kwargs
+        return type("R", (), {"output": "ESCAPE", "exit_code": 3})()
+
+    sandbox.execute = _exec
+    with pytest.raises(PresentedFilePathError, match="outside"):
+        await _assert_regular_file_size(sandbox, "/workspace/link", max_bytes=1000)

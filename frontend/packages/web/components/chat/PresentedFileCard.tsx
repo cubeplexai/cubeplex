@@ -33,10 +33,15 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function contentUrl(workspaceId: string, conversationId: string, fileId: string): string {
+function presentedUrl(
+  workspaceId: string,
+  conversationId: string,
+  fileId: string,
+  kind: 'content' | 'thumbnail',
+): string {
   return (
     `/api/v1/ws/${workspaceId}/conversations/${conversationId}` +
-    `/presented-files/${fileId}/content`
+    `/presented-files/${fileId}/${kind}`
   )
 }
 
@@ -55,6 +60,8 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   const t = useTranslations('chatExtras')
   const { workspaceId } = useWorkspaceContext()
   const [imgLoaded, setImgLoaded] = useState(false)
+  /** Prefer thumbnail; fall back to full content once if thumb fails. */
+  const [useFullContent, setUseFullContent] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
 
   if (!file) {
@@ -80,12 +87,20 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
       </div>
     )
   }
-  const url = contentUrl(workspaceId, file.conversation_id, file.id)
+  const fullUrl = presentedUrl(workspaceId, file.conversation_id, file.id, 'content')
+  const thumbUrl = presentedUrl(workspaceId, file.conversation_id, file.id, 'thumbnail')
+  const displayUrl = useFullContent ? fullUrl : thumbUrl
   const isImage = file.kind === 'image' || file.mime_type.startsWith('image/')
 
   if (isImage && !imgFailed) {
     return (
-      <div className="my-2 w-full overflow-hidden rounded border border-border bg-card">
+      <a
+        href={fullUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="my-2 block w-full overflow-hidden rounded border border-border bg-card
+          transition-colors hover:border-primary/30"
+      >
         <div className="relative bg-muted/30">
           {!imgLoaded && (
             <div className="aspect-[4/3]">
@@ -94,14 +109,22 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
           )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={url}
+            src={displayUrl}
             alt={caption}
             className={cn(
               'w-full h-auto transition-opacity duration-300',
               imgLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
             )}
             onLoad={() => setImgLoaded(true)}
-            onError={() => setImgFailed(true)}
+            onError={() => {
+              if (!useFullContent) {
+                // Thumbnail missing/corrupt → retry once with full content.
+                setUseFullContent(true)
+                setImgLoaded(false)
+                return
+              }
+              setImgFailed(true)
+            }}
           />
         </div>
         {caption && (
@@ -109,7 +132,7 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
             <p className="line-clamp-2 text-xs text-muted-foreground">{caption}</p>
           </div>
         )}
-      </div>
+      </a>
     )
   }
 
@@ -117,7 +140,7 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
 
   return (
     <a
-      href={url}
+      href={fullUrl}
       download={file.filename}
       className="my-2 inline-flex items-center gap-2 rounded-lg border border-border bg-card
         px-2 py-1.5 text-[11px] hover:bg-muted/40 transition-colors"

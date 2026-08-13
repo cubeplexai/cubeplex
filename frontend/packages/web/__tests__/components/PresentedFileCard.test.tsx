@@ -12,7 +12,7 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
 }))
 
 describe('PresentedFileCard', () => {
-  it('renders image with content URL', () => {
+  it('renders image with thumbnail URL (full content via link)', () => {
     render(
       <PresentedFileCard
         file={{
@@ -29,6 +29,11 @@ describe('PresentedFileCard', () => {
     const img = screen.getByRole('img', { name: 'Login QR' })
     expect(img).toHaveAttribute(
       'src',
+      '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/thumbnail',
+    )
+    const link = img.closest('a')
+    expect(link).toHaveAttribute(
+      'href',
       '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
     )
   })

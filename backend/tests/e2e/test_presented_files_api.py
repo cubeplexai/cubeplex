@@ -23,6 +23,12 @@ async def _org_for_ws(ws_id: str) -> str:
 
 
 @dataclass
+class _ExecResult:
+    output: str
+    exit_code: int | None = 0
+
+
+@dataclass
 class _FakeSandbox:
     files: dict[str, bytes] = field(default_factory=dict)
 
@@ -34,9 +40,20 @@ class _FakeSandbox:
     def workdir(self) -> str:
         return "/workspace"
 
-    async def execute(self, command: str, **kwargs: object) -> object:
-        del command, kwargs
-        raise NotImplementedError
+    async def execute(self, command: str, **kwargs: object) -> _ExecResult:
+        """Satisfy present_file's pre-download size/realpath check."""
+        del kwargs
+        # Match the realpath/stat script: last existing path under /workspace in files.
+        for path, content in self.files.items():
+            if path in command or path.rsplit("/", 1)[-1] in command:
+                if not path.startswith("/workspace"):
+                    return _ExecResult(output="ESCAPE", exit_code=3)
+                return _ExecResult(output=str(len(content)), exit_code=0)
+        # Fallback: if command mentions a known absolute path key
+        for path, content in self.files.items():
+            if f"'{path}'" in command or f'"{path}"' in command or path in command:
+                return _ExecResult(output=str(len(content)), exit_code=0)
+        return _ExecResult(output="NOT_FOUND", exit_code=2)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         del files

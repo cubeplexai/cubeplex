@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import posixpath
+import shlex
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from cubeplex.sandbox.base import Sandbox
 
 SANDBOX_ROOT = "/workspace"
+_CAPTION_MAX_LEN = 1024
 
 
 class PresentedFilePathError(ValueError):
@@ -69,6 +71,52 @@ def _build_thumbnail_key(
     return f"presented/{org_id}/{workspace_id}/{conversation_id}/{file_id}/thumb/thumb.webp"
 
 
+def _clip_caption(caption: str | None) -> str | None:
+    if not caption:
+        return None
+    cleaned = caption.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > _CAPTION_MAX_LEN:
+        return cleaned[:_CAPTION_MAX_LEN]
+    return cleaned
+
+
+async def _assert_regular_file_size(sandbox: Sandbox, path: str, *, max_bytes: int) -> int:
+    """Confirm *path* is a regular file under /workspace and return its size.
+
+    Resolves symlinks and rejects escapes so we never download out-of-tree
+    targets. Checks size *before* ``sandbox.download`` so multi-GB files
+    cannot be fully materialised just to reject them.
+    """
+    q = shlex.quote(path)
+    # realpath -e requires the path to exist; case rejects leave /workspace.
+    script = (
+        f"real=$(realpath -e {q} 2>/dev/null) || {{ echo NOT_FOUND; exit 2; }}; "
+        f'case "$real" in {SANDBOX_ROOT}|{SANDBOX_ROOT}/*) ;; *) echo ESCAPE; exit 3;; esac; '
+        f'if [ ! -f "$real" ]; then echo NOT_FILE; exit 4; fi; '
+        f'stat -c %s "$real"'
+    )
+    result = await sandbox.execute(script)
+    out = (result.output or "").strip()
+    code = result.exit_code
+    if code not in (None, 0):
+        if "ESCAPE" in out:
+            raise PresentedFilePathError(f"path resolves outside {SANDBOX_ROOT}")
+        if "NOT_FILE" in out:
+            raise PresentedFilePathError(f"path is not a regular file: {path}")
+        raise PresentedFilePathError(f"Path not found in sandbox: {path}")
+    try:
+        size = int(out.splitlines()[-1])
+    except (ValueError, IndexError) as exc:
+        raise PresentedFilePathError(f"could not determine size for {path}") from exc
+    if size < 0:
+        raise PresentedFilePathError(f"invalid size for {path}")
+    if size > max_bytes:
+        raise AttachmentTooLargeError(size_bytes=size, max_bytes=max_bytes)
+    return size
+
+
 class PresentedFileService:
     """Validate, copy from sandbox, and persist a presented file."""
 
@@ -92,6 +140,10 @@ class PresentedFileService:
     ) -> PresentedFile:
         """Read *path* from the sandbox and store it as a presented file."""
         normalized = normalize_sandbox_path(path)
+        max_bytes: int = int(config.get("attachments.max_file_bytes", 52428800))
+
+        # Size / type guard before any full-file download.
+        await _assert_regular_file_size(sandbox, normalized, max_bytes=max_bytes)
 
         try:
             downloaded = await sandbox.download([normalized])
@@ -103,7 +155,7 @@ class PresentedFileService:
             raise PresentedFilePathError(f"Path not found in sandbox: {normalized}")
         _p, content = downloaded[0]
 
-        max_bytes: int = int(config.get("attachments.max_file_bytes", 52428800))
+        # Re-check after download (TOCTOU / driver quirks).
         if len(content) > max_bytes:
             raise AttachmentTooLargeError(size_bytes=len(content), max_bytes=max_bytes)
 
@@ -140,50 +192,70 @@ class PresentedFileService:
             size_bytes=len(content),
             kind=kind,
             object_key="",  # filled below
-            caption=(caption.strip() if caption and caption.strip() else None),
+            caption=_clip_caption(caption),
         )
         file_id = row.id
 
         width: int | None = None
         height: int | None = None
         thumbnail_key: str | None = None
-        if kind == "image":
-            try:
-                width, height = decode_image_dimensions(
-                    content,
-                    max_long_edge=int(
-                        config.get("attachments.view_images.max_decoded_long_edge", 16384)
-                    ),
-                )
-                thumb = _make_thumbnail(
-                    content,
-                    max_long_edge=int(config.get("attachments.thumbnail.max_long_edge", 256)),
-                    quality=int(config.get("attachments.thumbnail.quality", 80)),
-                )
-                thumbnail_key = _build_thumbnail_key(
-                    org_id=self.repo.org_id,
-                    workspace_id=self.repo.workspace_id,
-                    conversation_id=conversation_id,
-                    file_id=file_id,
-                )
-                await self.objectstore.upload_file(thumbnail_key, thumb, content_type="image/webp")
-            except InvalidImageError as exc:
-                raise AttachmentInvalidImageError(str(exc)) from exc
+        uploaded_keys: list[str] = []
 
-        object_key = _build_object_key(
-            org_id=self.repo.org_id,
-            workspace_id=self.repo.workspace_id,
-            conversation_id=conversation_id,
-            file_id=file_id,
-            filename=filename,
-        )
-        await self.objectstore.upload_file(object_key, content, content_type=resolved_mime)
+        try:
+            if kind == "image":
+                try:
+                    width, height = decode_image_dimensions(
+                        content,
+                        max_long_edge=int(
+                            config.get("attachments.view_images.max_decoded_long_edge", 16384)
+                        ),
+                    )
+                    thumb = _make_thumbnail(
+                        content,
+                        max_long_edge=int(config.get("attachments.thumbnail.max_long_edge", 256)),
+                        quality=int(config.get("attachments.thumbnail.quality", 80)),
+                    )
+                    thumbnail_key = _build_thumbnail_key(
+                        org_id=self.repo.org_id,
+                        workspace_id=self.repo.workspace_id,
+                        conversation_id=conversation_id,
+                        file_id=file_id,
+                    )
+                    await self.objectstore.upload_file(
+                        thumbnail_key, thumb, content_type="image/webp"
+                    )
+                    uploaded_keys.append(thumbnail_key)
+                except InvalidImageError as exc:
+                    raise AttachmentInvalidImageError(str(exc)) from exc
 
-        row.object_key = object_key
-        row.thumbnail_object_key = thumbnail_key
-        row.width = width
-        row.height = height
-        return await self.repo.add(row)
+            object_key = _build_object_key(
+                org_id=self.repo.org_id,
+                workspace_id=self.repo.workspace_id,
+                conversation_id=conversation_id,
+                file_id=file_id,
+                filename=filename,
+            )
+            await self.objectstore.upload_file(object_key, content, content_type=resolved_mime)
+            uploaded_keys.append(object_key)
+
+            row.object_key = object_key
+            row.thumbnail_object_key = thumbnail_key
+            row.width = width
+            row.height = height
+            return await self.repo.add(row)
+        except Exception:
+            # Compensate ObjectStore uploads so a failed DB commit (or later
+            # validation) does not leave undiscoverable blobs forever.
+            for key in uploaded_keys:
+                try:
+                    await self.objectstore.delete_file(key)
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "presented_file compensate delete failed for {}: {}",
+                        key,
+                        cleanup_exc,
+                    )
+            raise
 
     async def delete_for_conversation(self, *, conversation_id: str) -> None:
         """Cascade-delete every presented file + ObjectStore object for a conversation."""
