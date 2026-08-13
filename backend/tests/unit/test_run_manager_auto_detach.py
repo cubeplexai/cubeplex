@@ -83,3 +83,41 @@ async def test_detached_flag_set_synchronously() -> None:
 
     # Drain so the scheduled task doesn't leak into the next test.
     await asyncio.sleep(0)
+
+
+async def test_auto_detach_waits_for_quiesce_before_detaching() -> None:
+    agent = MagicMock()
+    agent.detach = AsyncMock()
+    quiesce_started = asyncio.Event()
+    release_quiesce = asyncio.Event()
+
+    async def quiesce() -> None:
+        quiesce_started.set()
+        await release_quiesce.wait()
+
+    listener = _build_auto_detach_listener(agent, before_detach=quiesce)
+    detach_task = asyncio.create_task(listener.quiesce_then_schedule(_make_hitl_request_event()))
+    await quiesce_started.wait()
+
+    agent.detach.assert_not_called()
+    release_quiesce.set()
+    await detach_task
+    await asyncio.sleep(0)
+
+    agent.detach.assert_awaited_once()
+
+
+async def test_auto_detach_still_detaches_when_quiesce_fails() -> None:
+    agent = MagicMock()
+    agent.detach = AsyncMock()
+
+    async def quiesce() -> None:
+        raise RuntimeError("database unavailable")
+
+    listener = _build_auto_detach_listener(agent, before_detach=quiesce)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await listener.quiesce_then_schedule(_make_hitl_request_event())
+    await asyncio.sleep(0)
+
+    agent.detach.assert_awaited_once()

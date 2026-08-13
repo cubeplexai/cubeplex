@@ -17,8 +17,13 @@ export function PendingSteers({
 }: PendingSteersProps): React.ReactElement | null {
   const pending = useMessageStore(useShallow((s) => s.pendingSteers[conversationId] ?? []))
   const cancelSteer = useMessageStore((s) => s.cancelSteer)
+  const lifecycle = useMessageStore((s) => s.runLifecycle[conversationId] ?? 'idle')
+  const isStreaming = useMessageStore(
+    (s) => s.isStreaming && s.streamingConversationId === conversationId,
+  )
   const { workspaceId } = useWorkspaceContext()
   const t = useTranslations('input')
+  const canRecover = lifecycle === 'idle' && !isStreaming
 
   if (pending.length === 0) return null
 
@@ -49,10 +54,10 @@ export function PendingSteers({
                 ? t('pendingSteerQueued')
                 : t('pendingSteerSending')}
           </span>
-          {p.state === 'failed' ? (
+          {p.state === 'failed' && canRecover ? (
             <button
               type="button"
-              aria-label="Restore failed steer to input"
+              aria-label={t('pendingSteerRestore')}
               onClick={() => recoverFailed(p.steerId, p.text)}
               className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
             >
@@ -61,7 +66,7 @@ export function PendingSteers({
           ) : p.state !== 'submitting' ? (
             <button
               type="button"
-              aria-label="Cancel pending steer"
+              aria-label={p.state === 'failed' ? t('pendingSteerDismiss') : t('pendingSteerCancel')}
               onClick={() => onCancel(p.steerId)}
               className="grid size-5 place-items-center rounded text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
             >

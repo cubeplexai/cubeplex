@@ -402,7 +402,7 @@ async def test_unregister_does_not_remove_a_replacement_agent(
 
 
 @pytest.mark.asyncio
-async def test_unregister_waits_for_an_in_flight_drain(
+async def test_unregister_quiesces_an_in_flight_drain_before_detach(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     steering_conversation: tuple[Conversation, User],
@@ -454,17 +454,23 @@ async def test_unregister_waits_for_an_in_flight_drain(
 
     drain_task = asyncio.create_task(coordinator.drain("run-unregister-race"))
     await drain_entered.wait()
-    unregister_task = asyncio.create_task(
-        coordinator.unregister("run-unregister-race", agent=agent)
-    )
+    detached = asyncio.Event()
+
+    async def detach_after_unregister() -> None:
+        await coordinator.unregister("run-unregister-race", agent=agent)
+        detached.set()
+
+    unregister_task = asyncio.create_task(detach_after_unregister())
     await asyncio.sleep(0)
 
     assert unregister_task.done() is False
+    assert detached.is_set() is False
 
     release_drain.set()
     await asyncio.gather(drain_task, unregister_task)
 
     assert [message.metadata["steer_id"] for message in agent.messages] == ["steer-unregister-race"]
+    assert detached.is_set() is True
     await db_session.refresh(row)
     assert row.state == SteeringMessageState.dispatched
 

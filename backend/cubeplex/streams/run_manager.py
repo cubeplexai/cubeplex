@@ -738,22 +738,44 @@ class _AutoDetachListener:
     request from a stale pending leftover from a prior session.
     """
 
-    def __init__(self, agent: Any) -> None:
+    def __init__(
+        self,
+        agent: Any,
+        *,
+        before_detach: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._agent = agent
+        self._before_detach = before_detach
         self.detached: bool = False
 
-    def __call__(self, evt: Any, _signal: Any = None) -> None:
+    def _mark_detached(self, evt: Any) -> bool:
         from cubepi.agent.types import HitlRequestEvent
 
-        if self.detached:
+        if self.detached or not isinstance(evt, HitlRequestEvent):
+            return False
+        self.detached = True
+        return True
+
+    def __call__(self, evt: Any, _signal: Any = None) -> None:
+        if self._mark_detached(evt):
+            asyncio.create_task(self._agent.detach())
+
+    async def quiesce_then_schedule(self, evt: Any) -> None:
+        if not self._mark_detached(evt):
             return
-        if isinstance(evt, HitlRequestEvent):
-            self.detached = True
+        try:
+            if self._before_detach is not None:
+                await self._before_detach()
+        finally:
             asyncio.create_task(self._agent.detach())
 
 
-def _build_auto_detach_listener(agent: Any) -> _AutoDetachListener:
-    return _AutoDetachListener(agent)
+def _build_auto_detach_listener(
+    agent: Any,
+    *,
+    before_detach: Callable[[], Awaitable[None]] | None = None,
+) -> _AutoDetachListener:
+    return _AutoDetachListener(agent, before_detach=before_detach)
 
 
 class ResumeNoPending(LookupError):
@@ -2207,23 +2229,25 @@ class RunManager:
             extra_ref_holder["steering_agent"] = agent
             extra_ref_holder["extra"] = agent._extra
 
-            auto_detach = _build_auto_detach_listener(agent)
+            async def _quiesce_steering_before_detach() -> None:
+                await self._steering_delivery.unregister(run_id, agent=agent)
+
+            auto_detach = _build_auto_detach_listener(
+                agent,
+                before_detach=_quiesce_steering_before_detach,
+            )
             # One per-run StreamConverter — see comment on the prompt path
             # variant above; the deferred-call unwrap needs persistent state
             # across deltas inside a single run.
             stream_converter = StreamConverter()
 
-            from cubepi.agent.types import HitlRequestEvent as _HitlRequestEvent
             from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
             from cubepi.providers.base import UserMessage as _UserMsg
 
             async def _on_event(evt: Any, _signal: Any = None) -> None:
-                # auto_detach runs first so a follow-up HitlRequestEvent
-                # detaches the agent before SSE conversion; T6 reads
-                # `auto_detach.detached` in the terminal block below.
-                auto_detach(evt, _signal)
-                if isinstance(evt, _HitlRequestEvent):
-                    await self._steering_delivery.unregister(run_id, agent=agent)
+                # Stop durable drains before scheduling detach so no steer can
+                # land in an Agent after its state has been persisted.
+                await auto_detach.quiesce_then_schedule(evt)
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     steer_id = evt.message.metadata.get("steer_id")
                     if isinstance(steer_id, str) and steer_id:

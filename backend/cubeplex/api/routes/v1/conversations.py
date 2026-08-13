@@ -45,6 +45,7 @@ from cubeplex.repositories.conversation import (
 )
 from cubeplex.repositories.steering_message import (
     MAX_MESSAGE_BYTES,
+    SteeringConversationUnavailableError,
     SteeringMessageConflictError,
     SteeringMessageContentTooLargeError,
     SteeringMessageQueueFullError,
@@ -2202,6 +2203,11 @@ async def steer_active_run(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "steer_id_conflict"},
+            ) from exc
+        except SteeringConversationUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conversation {conversation_id} not found",
             ) from exc
         await session.commit()
         current_active_run = await get_active_run(

@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 
 const storeMocks = vi.hoisted(() => ({
   send: vi.fn(),
+  loadMessages: vi.fn(),
   steer: vi.fn(),
   cancelStream: vi.fn(),
   cancelSteer: vi.fn(),
@@ -25,6 +26,7 @@ const storeMocks = vi.hoisted(() => ({
     runLifecycle: {} as Record<string, string>,
     pendingAsk: null as unknown | null,
     pendingSteers: {} as Record<string, unknown[]>,
+    attachedIds: [] as string[],
   },
 }))
 
@@ -54,6 +56,7 @@ vi.mock('@cubeplex/core', () => ({
   useMessageStore: (
     selector: (state: {
       send: typeof storeMocks.send
+      loadMessages: typeof storeMocks.loadMessages
       steer: typeof storeMocks.steer
       cancelStream: typeof storeMocks.cancelStream
       cancelSteer: typeof storeMocks.cancelSteer
@@ -69,6 +72,7 @@ vi.mock('@cubeplex/core', () => ({
   ) =>
     selector({
       send: storeMocks.send,
+      loadMessages: storeMocks.loadMessages,
       steer: storeMocks.steer,
       cancelStream: storeMocks.cancelStream,
       cancelSteer: storeMocks.cancelSteer,
@@ -94,7 +98,7 @@ vi.mock('@cubeplex/core', () => ({
       upload: storeMocks.upload,
       clear: storeMocks.clear,
       hydrate: storeMocks.hydrate,
-      attachedIds: () => [],
+      attachedIds: () => storeMocks.state.attachedIds,
       staging: {},
     }
     const firstSnapshot = selector(state)
@@ -139,6 +143,7 @@ describe('InputBar', () => {
     storeMocks.state.runLifecycle = {}
     storeMocks.state.pendingAsk = null
     storeMocks.state.pendingSteers = {}
+    storeMocks.state.attachedIds = []
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
@@ -266,6 +271,37 @@ describe('InputBar', () => {
       expect(textarea).toHaveValue('keep my draft')
     })
     expect(toast.error).toHaveBeenCalledWith('Previous turn is still finishing. Try again shortly.')
+  })
+
+  it('restores the draft when a stale-send steering reroute fails', async () => {
+    storeMocks.send.mockRejectedValue(
+      new ApiError('Steering queue is full', 429, 'steer_queue_full', null),
+    )
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+
+    fireEvent.change(textarea, { target: { value: 'keep this guidance' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => expect(textarea).toHaveValue('keep this guidance'))
+  })
+
+  it('refreshes message state as well as attachments after an attachment conflict', async () => {
+    storeMocks.state.attachedIds = ['file-1']
+    storeMocks.send.mockRejectedValue(
+      new ApiError('Conversation already has an active run', 409, 'active_run_conflict', null),
+    )
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'with attachment' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+        force: true,
+      })
+    })
+    expect(storeMocks.hydrate).toHaveBeenCalledTimes(2)
   })
 
   it('keeps attachment selector snapshots stable', () => {
