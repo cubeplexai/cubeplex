@@ -47,6 +47,21 @@ function terminalError(): AsyncGenerator<AgentEvent> {
   })()
 }
 
+function contextLimitError(): AsyncGenerator<AgentEvent> {
+  return (async function* () {
+    yield {
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      data: {
+        error_code: 'context_length_exceeded',
+        message: 'The model has a 4096-token context limit.',
+      },
+      agent_id: null,
+      agent_name: null,
+    } as AgentEvent
+  })()
+}
+
 function bootstrapResponse(active = true): Promise<Response> {
   return Promise.resolve({
     ok: true,
@@ -60,6 +75,14 @@ function bootstrapResponse(active = true): Promise<Response> {
         last_run_status: null,
       }),
   } as Response)
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }
 
 describe('messageStore.send active-run conflict', () => {
@@ -96,8 +119,47 @@ describe('messageStore.send active-run conflict', () => {
 
     await useMessageStore.getState().send(client, 'conv1', 'queue this instead')
 
+    expect(client.get).toHaveBeenCalledTimes(1)
     expect(streamMessages).toHaveBeenCalledTimes(1)
     expect(steerRun).toHaveBeenCalledWith(client, 'conv1', 'queue this instead', expect.any(String))
+  })
+
+  it('does not treat a numeric 409 substring as an active-run conflict', async () => {
+    vi.mocked(streamMessages).mockImplementationOnce(contextLimitError)
+
+    await useMessageStore.getState().send(fakeClient, 'conv1', 'too much context')
+
+    expect(steerRun).not.toHaveBeenCalled()
+    expect(useMessageStore.getState().errors.conv1?.data.error_code).toBe('context_length_exceeded')
+  })
+
+  it('does not let conflict recovery replace a newer conversation stream', async () => {
+    const bootstrap = deferred<Response>()
+    const client = {
+      resolvePath: (path: string) => path,
+      get: vi.fn().mockReturnValue(bootstrap.promise),
+    } as never
+    const send = useMessageStore.getState().send(client, 'conv1', 'queue in A')
+    await vi.waitFor(() => expect(client.get).toHaveBeenCalledOnce())
+    useMessageStore.setState({
+      messages: { conv1: [], conv2: [] },
+      streamAgents: {},
+      isStreaming: true,
+      streamingConversationId: 'conv2',
+      currentRunId: 'r2',
+      runLifecycle: { conv1: 'running', conv2: 'running' },
+    })
+    bootstrap.resolve(await bootstrapResponse())
+
+    await expect(send).rejects.toEqual(
+      expect.objectContaining<ApiError>({ code: 'active_run_conflict' }),
+    )
+    expect(steerRun).not.toHaveBeenCalled()
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv2',
+      currentRunId: 'r2',
+    })
   })
 
   it('propagates a failed conflict reroute so the composer can restore the draft', async () => {

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models import Conversation, SteeringMessage, SteeringMessageState
@@ -431,41 +431,29 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
 
     async def finalize_active_for_run(self, run_id: str) -> int:
         now = datetime.now(UTC)
-        cancel_stmt = (
+        stmt = (
             update(SteeringMessage)
             .where(
                 cast(Any, SteeringMessage.org_id) == self.org_id,
                 cast(Any, SteeringMessage.workspace_id) == self.workspace_id,
                 cast(Any, SteeringMessage.run_id) == run_id,
-                cast(Any, SteeringMessage.state) == SteeringMessageState.cancel_requested,
+                cast(Any, SteeringMessage.state).in_(ACTIVE_STATES),
             )
             .values(
-                state=SteeringMessageState.cancelled,
-                delivery_owner=None,
-                delivery_lease_until=None,
-                updated_at=now,
-            )
-        )
-        cancelled = await self.session.execute(cancel_stmt)
-        fail_stmt = (
-            update(SteeringMessage)
-            .where(
-                cast(Any, SteeringMessage.org_id) == self.org_id,
-                cast(Any, SteeringMessage.workspace_id) == self.workspace_id,
-                cast(Any, SteeringMessage.run_id) == run_id,
-                cast(Any, SteeringMessage.state).in_(
-                    (SteeringMessageState.queued, SteeringMessageState.dispatched)
+                state=case(
+                    (
+                        cast(Any, SteeringMessage.state) == SteeringMessageState.cancel_requested,
+                        SteeringMessageState.cancelled,
+                    ),
+                    else_=SteeringMessageState.failed,
                 ),
-            )
-            .values(
-                state=SteeringMessageState.failed,
                 delivery_owner=None,
                 delivery_lease_until=None,
                 updated_at=now,
             )
         )
-        failed = await self.session.execute(fail_stmt)
-        return int(cancelled.rowcount or 0) + int(failed.rowcount or 0)  # type: ignore[attr-defined]
+        result = await self.session.execute(stmt)
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def fail_queued(self, *, row_id: str) -> bool:
         """Fail one orphan only while no delivery owner has claimed it."""

@@ -3,12 +3,29 @@ import { useComposerDraft } from '@/hooks/useComposerDraft'
 
 describe('useComposerDraft', () => {
   beforeEach(() => {
-    useComposerDraft.setState({ pending: null })
+    useComposerDraft.setState({ pending: null, pendingByConversation: {} })
   })
 
   it('setDraft stores the text', () => {
     useComposerDraft.getState().setDraft('hello')
     expect(useComposerDraft.getState().pending?.text).toBe('hello')
+  })
+
+  it('keeps a conversation draft pending until that conversation consumes it', () => {
+    useComposerDraft.getState().setDraft('restore in A', 'conv-a')
+
+    expect(useComposerDraft.getState().consume('conv-b')).toBeNull()
+    expect(useComposerDraft.getState().pendingByConversation['conv-a']?.text).toBe('restore in A')
+    expect(useComposerDraft.getState().consume('conv-a')).toBe('restore in A')
+    expect(useComposerDraft.getState().pendingByConversation['conv-a']).toBeUndefined()
+  })
+
+  it('does not overwrite a scoped recovery draft with an unrelated global draft', () => {
+    useComposerDraft.getState().setDraft('restore in A', 'conv-a')
+    useComposerDraft.getState().setDraft('prompt in B')
+
+    expect(useComposerDraft.getState().consume('conv-b')).toBe('prompt in B')
+    expect(useComposerDraft.getState().consume('conv-a')).toBe('restore in A')
   })
 
   it('consume returns the draft and clears it', () => {

@@ -394,6 +394,35 @@ async def test_steer_route_queues_durably_while_paused_hitl(
 
 
 @pytest.mark.asyncio
+async def test_steer_route_queues_for_a_stale_but_resumable_hitl_run(
+    member_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-steer-stale"),
+    )
+    app = client._transport.app  # type: ignore[attr-defined]
+    await app.state.redis.hset(
+        _run_meta_key(app.state.redis_key_prefix, run_id),
+        mapping={"status": "stale"},
+    )
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
+        json={"content": "deliver after resume", "steer_id": "s-stale"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "status": "queued",
+        "run_id": run_id,
+        "steer_id": "s-stale",
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("steer_id", ["", "s" * 65])
 async def test_steer_route_rejects_an_invalid_id(
     member_client: tuple[httpx.AsyncClient, str],

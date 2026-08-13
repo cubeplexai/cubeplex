@@ -5,16 +5,13 @@ import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { RotateCcw, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { useComposerDraft } from '@/hooks/useComposerDraft'
 
 interface PendingSteersProps {
   conversationId: string
-  onRecover: (text: string) => void
 }
 
-export function PendingSteers({
-  conversationId,
-  onRecover,
-}: PendingSteersProps): React.ReactElement | null {
+export function PendingSteers({ conversationId }: PendingSteersProps): React.ReactElement | null {
   const pending = useMessageStore(useShallow((s) => s.pendingSteers[conversationId] ?? []))
   const cancelSteer = useMessageStore((s) => s.cancelSteer)
   const lifecycle = useMessageStore((s) => s.runLifecycle[conversationId] ?? 'idle')
@@ -34,7 +31,9 @@ export function PendingSteers({
   }
 
   const recoverFailed = async (steerId: string, text: string): Promise<void> => {
-    if (await onCancel(steerId)) onRecover(text)
+    if (await onCancel(steerId)) {
+      useComposerDraft.getState().setDraft(text, conversationId, 'prepend')
+    }
   }
 
   return (

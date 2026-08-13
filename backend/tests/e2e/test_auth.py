@@ -2,13 +2,85 @@
 
 import secrets
 
+import httpx
 import pytest
+from sqlalchemy import select
 
+import cubeplex.db as cubeplex_db
 from cubeplex.api.middleware.rate_limit import limiter
-from tests.e2e.conftest import _auth_cookie_name
+from cubeplex.models import Conversation, Role, SteeringMessage, User, Workspace
+from tests.e2e.conftest import (
+    DEFAULT_TEST_EMAIL,
+    _auth_cookie_name,
+    _ensure_default_user_and_membership,
+    _lifespan_context,
+    _login_and_attach,
+    _make_isolated_user,
+)
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
+
+
+@pytest.mark.asyncio
+async def test_delete_account_removes_steering_sent_to_another_users_conversation() -> None:
+    await _ensure_default_user_and_membership()
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    app.state.deployment_mode = "multi_tenant"
+    steer_id: str
+    conversation_id: str
+    deleting_user_id: str
+
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            await _login_and_attach(client, email, password)
+            async with cubeplex_db.async_session_maker() as session:
+                deleting_user = (
+                    await session.execute(select(User).where(User.email == email))
+                ).scalar_one()
+                other_user = (
+                    await session.execute(select(User).where(User.email == DEFAULT_TEST_EMAIL))
+                ).scalar_one()
+                workspace = await session.get(Workspace, workspace_id)
+                assert workspace is not None
+                conversation = Conversation(
+                    org_id=workspace.org_id,
+                    workspace_id=workspace.id,
+                    creator_user_id=other_user.id,
+                    title="survives steering sender deletion",
+                )
+                session.add(conversation)
+                await session.flush()
+                steering = SteeringMessage(
+                    org_id=workspace.org_id,
+                    workspace_id=workspace.id,
+                    conversation_id=conversation.id,
+                    run_id="run-account-delete",
+                    client_steer_id="steer-account-delete",
+                    content="personal steering text",
+                    sender_user_id=deleting_user.id,
+                    hitl_question_id="question-account-delete",
+                )
+                session.add(steering)
+                await session.commit()
+                steer_id = steering.id
+                conversation_id = conversation.id
+                deleting_user_id = deleting_user.id
+
+            response = await client.post(
+                "/api/v1/auth/delete-account",
+                json={"password": password},
+            )
+            assert response.status_code == 200, response.text
+
+            async with cubeplex_db.async_session_maker() as session:
+                assert await session.get(SteeringMessage, steer_id) is None
+                assert await session.get(User, deleting_user_id) is None
+                persisted_conversation = await session.get(Conversation, conversation_id)
+                assert persisted_conversation is not None
+                await session.delete(persisted_conversation)
+                await session.commit()
 
 
 @pytest.fixture(autouse=True)

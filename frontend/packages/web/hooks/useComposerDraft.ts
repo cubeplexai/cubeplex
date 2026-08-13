@@ -4,14 +4,21 @@ import { create } from 'zustand'
 
 interface PendingDraft {
   text: string
+  conversationId: string | null
+  placement: 'replace' | 'prepend'
   /** monotonic counter so identical strings still trigger consumer effect */
   nonce: number
 }
 
 interface ComposerDraftState {
   pending: PendingDraft | null
-  setDraft: (text: string) => void
-  consume: () => string | null
+  pendingByConversation: Record<string, PendingDraft>
+  setDraft: (
+    text: string,
+    conversationId?: string | null,
+    placement?: PendingDraft['placement'],
+  ) => void
+  consume: (conversationId?: string | null) => string | null
 }
 
 // Module-level monotonic counter — survives consume() that clears `pending`,
@@ -24,11 +31,33 @@ let nextNonce = 1
  *  Uses a {text, nonce} tuple so re-clicking the same card still re-fires. */
 export const useComposerDraft = create<ComposerDraftState>((set, get) => ({
   pending: null,
-  setDraft: (text) => set({ pending: { text, nonce: nextNonce++ } }),
-  consume: () => {
-    const p = get().pending
+  pendingByConversation: {},
+  setDraft: (text, conversationId = null, placement = 'replace') =>
+    set((state) => {
+      const draft = { text, conversationId, placement, nonce: nextNonce++ }
+      return conversationId === null
+        ? { pending: draft }
+        : {
+            pendingByConversation: {
+              ...state.pendingByConversation,
+              [conversationId]: draft,
+            },
+          }
+    }),
+  consume: (conversationId = null) => {
+    const state = get()
+    const scoped = conversationId === null ? null : state.pendingByConversation[conversationId]
+    const p = scoped ?? state.pending
     if (p === null) return null
-    set({ pending: null })
+    if (scoped) {
+      set((current) => {
+        const pendingByConversation = { ...current.pendingByConversation }
+        delete pendingByConversation[conversationId!]
+        return { pendingByConversation }
+      })
+    } else {
+      set({ pending: null })
+    }
     return p.text
   },
 }))

@@ -495,6 +495,7 @@ async def delete_account(
     from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
     from cubeplex.models.skill import OrgPreinstalledTombstone, OrgSkillInstall, SkillVersion
     from cubeplex.models.skill_registry import SkillRegistry
+    from cubeplex.models.steering_message import SteeringMessage
     from cubeplex.models.trigger import Trigger, TriggerEvent
     from cubeplex.models.user_event import UserEvent
     from cubeplex.models.user_sandbox import UserSandbox
@@ -693,6 +694,7 @@ async def delete_account(
         (UserEvent, UserEvent.user_id),
         (ScheduledTask, ScheduledTask.owner_user_id),
         (Trigger, Trigger.run_as_user_id),
+        (SteeringMessage, SteeringMessage.sender_user_id),
         (Conversation, Conversation.creator_user_id),
         (Membership, Membership.user_id),
         (OrganizationMembership, OrganizationMembership.user_id),

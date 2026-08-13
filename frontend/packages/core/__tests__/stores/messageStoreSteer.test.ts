@@ -13,6 +13,14 @@ import { steerRun } from '../../src/api'
 
 const fakeClient = { resolvePath: (s: string) => s, post: vi.fn() } as never
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 describe('messageStore.steer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -157,5 +165,47 @@ describe('messageStore.steer', () => {
     expect(await useMessageStore.getState().steer(client, 'conv1', 'already injected')).toBe(true)
 
     expect(client.get).toHaveBeenCalledOnce()
+  })
+
+  it('does not let injected-message repair replace a newer conversation stream', async () => {
+    ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      status: 'injected',
+      run_id: 'r1',
+      steer_id: 'server-steer-id',
+    })
+    const bootstrap = deferred<Response>()
+    const client = {
+      resolvePath: (path: string) => path,
+      get: vi.fn().mockReturnValue(bootstrap.promise),
+    } as never
+    const steer = useMessageStore.getState().steer(client, 'conv1', 'already injected')
+    await vi.waitFor(() => expect(client.get).toHaveBeenCalledOnce())
+    useMessageStore.setState({
+      messages: { conv1: [], conv2: [] },
+      streamAgents: {},
+      isStreaming: true,
+      streamingConversationId: 'conv2',
+      currentRunId: 'r2',
+      runLifecycle: { conv1: 'running', conv2: 'running' },
+    })
+    bootstrap.resolve({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          messages: [],
+          active_run: null,
+          pending_hitl: null,
+          pending_steers: [],
+          last_run_status: null,
+        }),
+    } as Response)
+
+    await expect(steer).resolves.toBe(true)
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv2',
+      currentRunId: 'r2',
+    })
   })
 })

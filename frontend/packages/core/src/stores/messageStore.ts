@@ -2026,16 +2026,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             continue
           } else if (event.type === 'error') {
             const errData = event.data as ErrorEventData
-            const isActiveRunConflict =
-              errData.error_code === 'active_run_conflict' || errData.message.includes('409')
+            const isActiveRunConflict = errData.error_code === 'active_run_conflict'
             const isTextOnly =
               (attachmentIds?.length ?? 0) === 0 && (attachments?.length ?? 0) === 0
             if (!sawDone && isActiveRunConflict && isTextOnly) {
               flush()
-              await get().loadMessages(client, conversationId, { force: true })
+              await get().loadMessages(client, conversationId, {
+                force: true,
+                preserveOtherConversationStream: true,
+              })
               const refreshed = get()
               const refreshedLifecycle = refreshed.runLifecycle[conversationId]
               const canReroute =
+                ownsStreamingConversation(refreshed, conversationId) &&
                 refreshed.currentRunId !== null &&
                 (refreshedLifecycle === 'running' ||
                   refreshedLifecycle === 'paused_hitl' ||
@@ -2049,25 +2052,32 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             if (isActiveRunConflict) {
               flush()
               activeRunConflict = new ApiError(errData.message, 409, 'active_run_conflict', errData)
-              set((s) => ({
-                messages: {
-                  ...s.messages,
-                  [conversationId]: (s.messages[conversationId] ?? []).filter(
-                    (message) => message.id !== userMessage.id,
-                  ),
-                },
-                errors: { ...s.errors, [conversationId]: null },
-                streamAgents: {},
-                toolStartedMap: {},
-                toolResultMap: {},
-                isStreaming: false,
-                pendingConfirmMap: {},
-                pendingAsk: null,
-                streamingConversationId: null,
-                currentRunId: null,
-                statusPhase: null,
-                runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
-              }))
+              set((s) => {
+                const owns = ownsStreamingConversation(s, conversationId)
+                return {
+                  messages: {
+                    ...s.messages,
+                    [conversationId]: (s.messages[conversationId] ?? []).filter(
+                      (message) => message.id !== userMessage.id,
+                    ),
+                  },
+                  errors: { ...s.errors, [conversationId]: null },
+                  runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+                  ...(owns
+                    ? {
+                        streamAgents: {},
+                        toolStartedMap: {},
+                        toolResultMap: {},
+                        isStreaming: false,
+                        pendingConfirmMap: {},
+                        pendingAsk: null,
+                        streamingConversationId: null,
+                        currentRunId: null,
+                        statusPhase: null,
+                      }
+                    : {}),
+                }
+              })
               break outer
             }
             flush()
@@ -2271,7 +2281,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             (message) => message.role === 'user' && message.metadata?.steer_id === steerId,
           )
         ) {
-          await get().loadMessages(client, conversationId, { force: true })
+          await get().loadMessages(client, conversationId, {
+            force: true,
+            preserveOtherConversationStream: true,
+          })
         }
         return true
       }
