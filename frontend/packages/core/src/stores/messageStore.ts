@@ -2285,6 +2285,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   async cancelSteer(client, conversationId, steerId) {
+    const removed = get().pendingSteers[conversationId]?.find(
+      (pending) => pending.steerId === steerId,
+    )
     set((s) => ({
       pendingSteers: {
         ...s.pendingSteers,
@@ -2297,6 +2300,23 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       await cancelSteer(client, conversationId, steerId)
     } catch (err) {
       console.error('Failed to cancel steer:', err)
+      if (removed) {
+        set((s) => {
+          const current = s.pendingSteers[conversationId] ?? []
+          if (current.some((pending) => pending.steerId === steerId)) return s
+          return {
+            pendingSteers: {
+              ...s.pendingSteers,
+              [conversationId]: [...current, removed].sort(
+                (left, right) =>
+                  left.createdAt.localeCompare(right.createdAt) ||
+                  left.steerId.localeCompare(right.steerId),
+              ),
+            },
+          }
+        })
+      }
+      await get().loadMessages(client, conversationId, { force: true })
     }
   },
 

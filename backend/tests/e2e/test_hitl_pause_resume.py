@@ -447,6 +447,34 @@ async def test_paused_steer_wakeup_failure_still_returns_accepted(
 
 
 @pytest.mark.asyncio
+async def test_paused_steer_returns_not_found_when_conversation_is_deleted_during_enqueue(
+    member_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.api.routes.v1 import conversations as conversations_route
+    from cubeplex.repositories.steering_message import SteeringConversationUnavailableError
+
+    client, ws_id = member_client
+    conv_id, _run_id = await _seed_paused_conversation(
+        client,
+        ws_id,
+        _ask_pending("q-steer-delete-race"),
+    )
+
+    async def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise SteeringConversationUnavailableError(conv_id)
+
+    monkeypatch.setattr(conversations_route.SteeringMessageRepository, "enqueue", unavailable)
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
+        json={"content": "too late", "steer_id": "s-delete-race"},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_paused_steer_fails_when_run_loses_ownership_after_commit(
     member_client: tuple[httpx.AsyncClient, str],
     monkeypatch: pytest.MonkeyPatch,

@@ -36,4 +36,49 @@ describe('pending steers', () => {
     await useMessageStore.getState().cancelSteer(client, 'c1', id)
     expect(useMessageStore.getState().pendingSteers.c1 ?? []).toHaveLength(0)
   })
+
+  it('reloads the authoritative chip when cancelSteer() fails', async () => {
+    const { cancelSteer } = await import('../../src/api')
+    vi.mocked(cancelSteer).mockRejectedValueOnce(new Error('network down'))
+    const recoveryClient = {
+      resolvePath: (path: string) => path,
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            messages: [],
+            active_run: null,
+            pending_hitl: null,
+            pending_steers: [
+              {
+                steer_id: 'server-steer',
+                content: 'still queued',
+                state: 'queued',
+                created_at: '2026-08-13T00:00:00Z',
+              },
+            ],
+            last_run_status: null,
+          }),
+      }),
+    } as never
+    useMessageStore.setState({
+      pendingSteers: {
+        c1: [
+          {
+            steerId: 'server-steer',
+            text: 'still queued',
+            state: 'queued',
+            createdAt: '2026-08-13T00:00:00Z',
+          },
+        ],
+      },
+    })
+
+    await useMessageStore.getState().cancelSteer(recoveryClient, 'c1', 'server-steer')
+
+    expect(useMessageStore.getState().pendingSteers.c1).toEqual([
+      expect.objectContaining({ steerId: 'server-steer', state: 'queued' }),
+    ])
+  })
 })

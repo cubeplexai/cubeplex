@@ -90,6 +90,7 @@ export function InputBar({
   /** Esc dismisses until the draft changes (keeps `/…` text without reopening). */
   const [slashDismissed, setSlashDismissed] = useState(false)
   const send = useMessageStore((s) => s.send)
+  const loadMessages = useMessageStore((s) => s.loadMessages)
   const cancelStream = useMessageStore((s) => s.cancelStream)
   const steer = useMessageStore((s) => s.steer)
   const appendHistoryMessage = useMessageStore((s) => s.appendHistoryMessage)
@@ -270,12 +271,15 @@ export function InputBar({
         : undefined
       await send(client, conversationId!, submittedText, ids, optimisticAttachments, sendOptions)
     } catch (err) {
+      setContent((current) => current || submittedText)
       if (err instanceof ApiError && err.status === 409 && err.code === 'active_run_conflict') {
-        setContent((current) => current || submittedText)
         if (conversationId) {
           const recoveryClient = createApiClient('')
           if (workspaceId) recoveryClient.setWorkspaceId(workspaceId)
-          await hydrate(recoveryClient, conversationId)
+          await Promise.all([
+            loadMessages(recoveryClient, conversationId, { force: true }),
+            hydrate(recoveryClient, conversationId),
+          ])
         }
         toast.error(t('activeRunConflict'))
         return

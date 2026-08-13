@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
     state: 'submitting' | 'queued' | 'dispatched' | 'failed'
     createdAt: string
   }[],
+  lifecycle: 'idle' as 'idle' | 'running',
+  isStreaming: false,
+  streamingConversationId: null as string | null,
 }))
 
 vi.mock('@cubeplex/core', () => ({
@@ -20,8 +23,18 @@ vi.mock('@cubeplex/core', () => ({
     sel: (s: {
       pendingSteers: Record<string, unknown>
       cancelSteer: typeof mocks.cancelSteer
+      runLifecycle: Record<string, 'idle' | 'running'>
+      isStreaming: boolean
+      streamingConversationId: string | null
     }) => unknown,
-  ) => sel({ pendingSteers: { 'conv-1': mocks.pending }, cancelSteer: mocks.cancelSteer }),
+  ) =>
+    sel({
+      pendingSteers: { 'conv-1': mocks.pending },
+      cancelSteer: mocks.cancelSteer,
+      runLifecycle: { 'conv-1': mocks.lifecycle },
+      isStreaming: mocks.isStreaming,
+      streamingConversationId: mocks.streamingConversationId,
+    }),
 }))
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
@@ -32,6 +45,9 @@ vi.mock('next-intl', () => ({
       pendingSteerFailed: '未发送',
       pendingSteerQueued: '已排队',
       pendingSteerSending: '正在引导…',
+      pendingSteerCancel: '取消待处理的引导',
+      pendingSteerDismiss: '忽略失败的引导',
+      pendingSteerRestore: '将失败的引导恢复到输入框',
     })[key] ?? key,
 }))
 
@@ -46,13 +62,16 @@ describe('PendingSteers', () => {
         createdAt: '2026-08-12T00:00:00.000Z',
       },
     ]
+    mocks.lifecycle = 'idle'
+    mocks.isStreaming = false
+    mocks.streamingConversationId = null
   })
 
   it('renders pending steer text and cancels on click', () => {
     render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
     expect(screen.getByText('do X instead')).toBeInTheDocument()
     expect(screen.getByText('已排队')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+    fireEvent.click(screen.getByRole('button', { name: '取消待处理的引导' }))
     expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')
   })
 
@@ -76,8 +95,23 @@ describe('PendingSteers', () => {
     render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
 
     expect(screen.getByText('未发送')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /restore/i }))
+    fireEvent.click(screen.getByRole('button', { name: '将失败的引导恢复到输入框' }))
     expect(mocks.onRecover).toHaveBeenCalledWith('do X instead')
+    expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')
+  })
+
+  it('offers dismissal instead of recovery while a newer run is active', () => {
+    mocks.pending[0].state = 'failed'
+    mocks.lifecycle = 'running'
+    mocks.isStreaming = true
+    mocks.streamingConversationId = 'conv-1'
+    render(<PendingSteers conversationId="conv-1" onRecover={mocks.onRecover} />)
+
+    expect(
+      screen.queryByRole('button', { name: '将失败的引导恢复到输入框' }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '忽略失败的引导' }))
+    expect(mocks.onRecover).not.toHaveBeenCalled()
     expect(mocks.cancelSteer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 's1')
   })
 })
