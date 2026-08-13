@@ -1949,6 +1949,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     let sawDone = false
     let sawPausedDone = false
     let activeRunConflict: ApiError | null = null
+    let conflictRerouteInProgress = false
     activeStreamController?.abort()
     const controller = new AbortController()
     activeStreamController = controller
@@ -2024,7 +2025,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 (refreshedLifecycle === 'running' ||
                   refreshedLifecycle === 'paused_hitl' ||
                   refreshedLifecycle === 'resuming_hitl')
-              if (canReroute && (await get().steer(client, conversationId, content))) return
+              if (canReroute) {
+                conflictRerouteInProgress = true
+                if (await get().steer(client, conversationId, content)) return
+                conflictRerouteInProgress = false
+              }
             }
             if (isActiveRunConflict) {
               flush()
@@ -2141,6 +2146,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         break outer
       }
     } catch (err) {
+      if (conflictRerouteInProgress) throw err
       let didTerminal = false
       set((s) => {
         const owns = ownsStreamingConversation(s, conversationId)
@@ -2394,6 +2400,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         },
       }))
       throw err
+    }
+
+    if (!ownsStreamingConversation(get(), conversationId)) {
+      const isIdle = await waitForConversationIdle(client, conversationId, get)
+      if (!isIdle) return
+      set((s) => ({
+        cancellingConversationIds: withoutConversationFlag(
+          s.cancellingConversationIds,
+          conversationId,
+        ),
+        runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+      }))
+      return
     }
 
     if (!state.isStreaming) {

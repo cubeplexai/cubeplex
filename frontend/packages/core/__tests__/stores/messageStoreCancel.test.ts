@@ -193,6 +193,32 @@ describe('messageStore.cancelStream', () => {
     expect(cancelActiveRun).not.toHaveBeenCalled()
   })
 
+  it('does not clear a replacement conversation after cancellation returns', async () => {
+    let resolveCancel: (() => void) | undefined
+    vi.mocked(cancelActiveRun).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCancel = () => resolve({ status: 'cancelled', run_id: 'r1' })
+      }),
+    )
+    seedStreaming('conv-a', {})
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv-a')
+    await Promise.resolve()
+    seedStreaming('conv-b', {
+      text: 'keep B alive',
+      blocks: [{ type: 'text', text: 'keep B alive' }],
+    })
+    resolveCancel?.()
+    await cancelling
+
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv-b',
+      currentRunId: 'r1',
+      streamAgents: { main: { text: 'keep B alive' } },
+    })
+  })
+
   it('keeps a paused HITL conversation cancelling until bootstrap reports it idle', async () => {
     vi.useFakeTimers()
     useMessageStore.setState({

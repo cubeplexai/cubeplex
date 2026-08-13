@@ -100,6 +100,20 @@ describe('messageStore.send active-run conflict', () => {
     expect(steerRun).toHaveBeenCalledWith(client, 'conv1', 'queue this instead', expect.any(String))
   })
 
+  it('propagates a failed conflict reroute so the composer can restore the draft', async () => {
+    const client = {
+      resolvePath: (path: string) => path,
+      get: vi.fn().mockImplementation(() => bootstrapResponse()),
+    } as never
+    vi.mocked(steerRun).mockRejectedValueOnce(
+      new ApiError('Steering queue is full.', 409, 'steer_queue_full', null),
+    )
+
+    await expect(
+      useMessageStore.getState().send(client, 'conv1', 'do not lose this text'),
+    ).rejects.toEqual(expect.objectContaining({ code: 'steer_queue_full' }))
+  })
+
   it('returns the lifecycle to idle after a terminal send error', async () => {
     vi.mocked(streamMessages).mockImplementationOnce(terminalError)
 

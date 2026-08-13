@@ -59,6 +59,14 @@ class RunContext:
     conversation_creator_user_id: str | None = None
 
 
+def _registration_was_replaced(*, current_agent: Any, originating_agent: Any) -> bool:
+    return (
+        originating_agent is not None
+        and current_agent is not None
+        and current_agent is not originating_agent
+    )
+
+
 class CubepiAgentRunError(RuntimeError):
     """Raised when cubepi returns a terminal assistant error without raising."""
 
@@ -4000,8 +4008,9 @@ class RunManager:
 
             steering_agent = extra_ref_holder.get("steering_agent")
             current_agent = self._agents.get(run_id)
-            registration_replaced = (
-                current_agent is not None and current_agent is not steering_agent
+            registration_replaced = _registration_was_replaced(
+                current_agent=current_agent,
+                originating_agent=steering_agent,
             )
             if not registration_replaced:
                 if final_status != "paused_hitl":
@@ -4583,8 +4592,9 @@ class RunManager:
 
             steering_agent = extra_ref_holder.get("steering_agent")
             current_agent = self._agents.get(run_id)
-            registration_replaced = (
-                current_agent is not None and current_agent is not steering_agent
+            registration_replaced = _registration_was_replaced(
+                current_agent=current_agent,
+                originating_agent=steering_agent,
             )
             if not registration_replaced:
                 if durable_final_status != "paused_hitl":

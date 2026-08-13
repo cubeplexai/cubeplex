@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 from cubepi.providers.base import UserMessage
@@ -21,6 +23,7 @@ from cubeplex.repositories.steering_message import (
     list_active_steering_for_reconciliation,
     purge_terminal_steering_tombstones,
 )
+from cubeplex.streams.run_events import create_run, update_run_meta
 from cubeplex.streams.steering_delivery import (
     DurableSteeringCoordinator,
     SteeringRunScope,
@@ -595,3 +598,68 @@ async def test_reconciliation_scan_can_advance_past_retained_rows(
 
     assert [row.client_steer_id for row in first] == ["steer-retained-0", "steer-retained-1"]
     assert [row.client_steer_id for row in second] == ["steer-retained-2"]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_preserves_a_stale_run_with_matching_pending_hitl(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.agents import checkpointer as checkpointer_module
+
+    conversation, user = steering_conversation
+    run_id = "run-stale-resumable"
+    row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id=run_id,
+        client_steer_id="steer-stale-resumable",
+        content="keep for retry",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-stale-resumable",
+    )
+    await db_session.commit()
+
+    redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prefix = f"test-steering-maintenance:{conversation.id}"
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conversation.id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+    await update_run_meta(redis_client, prefix=prefix, run_id=run_id, status="stale")
+
+    class _PendingCheckpointer:
+        async def load_pending_run_id(self, _conversation_id: str) -> str:
+            return run_id
+
+    @asynccontextmanager
+    async def fake_shared_checkpointer():
+        yield _PendingCheckpointer()
+
+    monkeypatch.setattr(
+        checkpointer_module,
+        "shared_checkpointer",
+        fake_shared_checkpointer,
+    )
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(
+        session_factory,
+        history_loader=empty_history,
+        redis=redis_client,
+        redis_key_prefix=prefix,
+    )
+    await coordinator.maintain_once()
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.queued
+    await redis_client.aclose()

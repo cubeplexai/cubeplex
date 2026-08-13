@@ -362,7 +362,7 @@ class DurableSteeringCoordinator:
                     )
                     if meta is not None and meta.status in ("running", "paused_hitl"):
                         continue
-                    if meta is None and pending_run_id == row.run_id:
+                    if pending_run_id == row.run_id and (meta is None or meta.status == "stale"):
                         continue
                     run_key = (row.org_id, row.workspace_id, row.run_id)
                     if run_key not in finalized_runs:
