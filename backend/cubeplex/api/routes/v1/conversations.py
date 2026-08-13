@@ -2177,6 +2177,7 @@ async def steer_active_run(
     pending_is_deliverable = pending_run_meta is None or pending_run_meta.status in (
         "paused_hitl",
         "running",
+        "stale",
     )
     if pending_request is not None and pending_run_id is not None and pending_is_deliverable:
         try:

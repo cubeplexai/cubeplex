@@ -366,6 +366,38 @@ async def test_finalization_cancels_requested_rows_and_fails_undelivered_rows(
 
 
 @pytest.mark.asyncio
+async def test_finalization_transitions_all_active_states_in_one_statement(
+    db_session: AsyncSession,
+    steering_conversation: tuple[Conversation, User],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    await repo.enqueue(
+        conversation_id=conversation.id,
+        run_id="run-atomic-finalize",
+        client_steer_id="steer-atomic-finalize",
+        content="finalize atomically",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-atomic-finalize",
+    )
+    await db_session.commit()
+    original_execute = db_session.execute
+    execute_calls = 0
+
+    async def counting_execute(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        nonlocal execute_calls
+        execute_calls += 1
+        return await original_execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(db_session, "execute", counting_execute)
+
+    assert await repo.finalize_active_for_run("run-atomic-finalize") == 1
+    assert execute_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_synchronous_delivery_failure_requeues_the_remaining_batch_in_order(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],

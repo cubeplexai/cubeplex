@@ -150,16 +150,21 @@ export function InputBar({
   // NEXT render — when React has actually committed the new content and
   // the textarea's scrollHeight reflects it. Doing the resize in the
   // same effect would read scrollHeight from the pre-setContent textarea.
-  const pendingDraft = useComposerDraft((s) => s.pending)
+  const pendingDraft = useComposerDraft((s) =>
+    conversationId ? (s.pendingByConversation[conversationId] ?? s.pending) : s.pending,
+  )
   const justConsumedRef = useRef(false)
   useEffect(() => {
     if (pendingDraft === null) return
-    const consumed = useComposerDraft.getState().consume()
+    const targetConversationId = conversationId ?? null
+    const consumed = useComposerDraft.getState().consume(targetConversationId)
     if (consumed === null) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- consume external draft on signal
-    setContent(consumed)
+    setContent((current) =>
+      pendingDraft.placement === 'prepend' && current ? `${consumed}\n${current}` : consumed,
+    )
     justConsumedRef.current = true
-  }, [pendingDraft])
+  }, [conversationId, pendingDraft])
   // Height sync runs AFTER content commits; the [content] dep guarantees
   // scrollHeight is measured from the latest textarea value.
   useEffect(() => {
@@ -574,16 +579,9 @@ export function InputBar({
     }
   }
 
-  const recoverFailedSteer = (text: string): void => {
-    setContent((current) => (current ? `${text}\n${current}` : text))
-    justConsumedRef.current = true
-  }
-
   return (
     <div className={cn(CHAT_COLUMN_CLASS, 'pb-[env(safe-area-inset-bottom)]')}>
-      {conversationId && (
-        <PendingSteers conversationId={conversationId} onRecover={recoverFailedSteer} />
-      )}
+      {conversationId && <PendingSteers conversationId={conversationId} />}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}
       <input
