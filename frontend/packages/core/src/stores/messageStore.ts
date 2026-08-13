@@ -294,6 +294,7 @@ function withoutConversationFlag(
 }
 
 const CANCEL_POLL_INTERVAL_MS = 500
+const CANCEL_STEER_MAX_ATTEMPTS = 10
 
 async function waitForConversationIdle(
   client: ApiClient,
@@ -2324,15 +2325,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ),
       },
     }))
-    try {
-      for (;;) {
-        const result = await cancelSteer(client, conversationId, steerId)
-        if (result.status === 'cancelled') return true
-        if (result.status !== 'accepted') return false
-        await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
-      }
-    } catch (err) {
-      console.error('Failed to cancel steer:', err)
+    const restoreRemoved = () => {
       if (removed) {
         set((s) => {
           const current = s.pendingSteers[conversationId] ?? []
@@ -2349,6 +2342,21 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
         })
       }
+    }
+    try {
+      for (let attempt = 0; attempt < CANCEL_STEER_MAX_ATTEMPTS; attempt++) {
+        const result = await cancelSteer(client, conversationId, steerId)
+        if (result.status === 'cancelled') return true
+        if (result.status !== 'accepted') return false
+        if (attempt + 1 < CANCEL_STEER_MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_INTERVAL_MS))
+        }
+      }
+      restoreRemoved()
+      return false
+    } catch (err) {
+      console.error('Failed to cancel steer:', err)
+      restoreRemoved()
       await get().loadMessages(client, conversationId, {
         force: true,
         preserveOtherConversationStream: true,

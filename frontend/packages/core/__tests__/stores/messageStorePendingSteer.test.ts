@@ -75,6 +75,33 @@ describe('pending steers', () => {
     await expect(useMessageStore.getState().cancelSteer(client, 'c1', id)).resolves.toBe(false)
   })
 
+  it('stops polling an accepted cancellation and restores its failed chip', async () => {
+    vi.useFakeTimers()
+    const { cancelSteer } = await import('../../src/api')
+    vi.mocked(cancelSteer).mockResolvedValue({ status: 'accepted', run_id: 'r1' })
+    useMessageStore.setState({
+      pendingSteers: {
+        c1: [
+          {
+            steerId: 'stuck-cancel',
+            text: 'do not lose me',
+            state: 'failed',
+            createdAt: '2026-08-13T00:00:00Z',
+          },
+        ],
+      },
+    })
+
+    const cancelling = useMessageStore.getState().cancelSteer(client, 'c1', 'stuck-cancel')
+    await vi.runAllTimersAsync()
+
+    await expect(cancelling).resolves.toBe(false)
+    expect(cancelSteer).toHaveBeenCalledTimes(10)
+    expect(useMessageStore.getState().pendingSteers.c1).toEqual([
+      expect.objectContaining({ steerId: 'stuck-cancel', state: 'failed' }),
+    ])
+  })
+
   it('reloads the authoritative chip when cancelSteer() fails', async () => {
     const { cancelSteer } = await import('../../src/api')
     vi.mocked(cancelSteer).mockRejectedValueOnce(new Error('network down'))

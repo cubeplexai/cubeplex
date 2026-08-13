@@ -357,6 +357,11 @@ only for run IDs owned by that process; this recovers a missed Pub/Sub
 notification without one poller per run. All three entries use the same
 per-run lock, so overlapping wake-ups cannot reverse two claimed batches.
 
+When an Agent reaches another HITL pause, quiescence uses that same lock to
+remove every uncheckpointed owned message from the detaching Agent and return
+its `dispatched` row to `queued`. A replacement Agent can then claim it on
+resume; a row already present in checkpoint history is finalized as injected.
+
 This startup drain closes the current HITL gap: steering accepted while the
 run is paused or while the resume worker is being constructed is already in
 the Agent queue when `agent.respond(...)` begins.
@@ -485,6 +490,7 @@ response for that ID is ignored for pending-state purposes.
 | Worker dies before dispatch | Row remains `queued` or its lease expires; next owner reclaims |
 | Worker dies after checkpoint, before queue ack | History reconciliation marks `injected`; no duplicate |
 | HITL answer POST is rejected | UI refreshes bootstrap and returns to `paused_hitl`; queued steering remains queued |
+| Drain races a new HITL pause | Quiescence removes the old Agent copy and returns the claim to `queued` before detach |
 | Resume worker reaches `errored` | Do not retry `agent.respond`; queued/dispatched rows become visible `failed` rows |
 | Run ends before injection | Row becomes `failed`; UI offers retry as a new turn or dismiss |
 | User cancels queued steer | It never reaches CubePi |

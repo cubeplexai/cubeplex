@@ -487,7 +487,7 @@ async def test_unregister_does_not_remove_a_replacement_agent(
 
 
 @pytest.mark.asyncio
-async def test_unregister_quiesces_an_in_flight_drain_before_detach(
+async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     steering_conversation: tuple[Conversation, User],
@@ -500,6 +500,14 @@ async def test_unregister_quiesces_an_in_flight_drain_before_detach(
 
     coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
     agent = _QueueingAgent()
+    delivered_ids: list[str] = []
+    original_steer = agent.steer
+
+    def record_steer(message: UserMessage) -> None:
+        delivered_ids.append(str(message.metadata["steer_id"]))
+        original_steer(message)
+
+    monkeypatch.setattr(agent, "steer", record_steer)
     await coordinator.register_and_drain(
         run_id="run-unregister-race",
         scope=SteeringRunScope(
@@ -542,7 +550,11 @@ async def test_unregister_quiesces_an_in_flight_drain_before_detach(
     detached = asyncio.Event()
 
     async def detach_after_unregister() -> None:
-        await coordinator.unregister("run-unregister-race", agent=agent)
+        await coordinator.unregister(
+            "run-unregister-race",
+            agent=agent,
+            requeue_owned=True,
+        )
         detached.set()
 
     unregister_task = asyncio.create_task(detach_after_unregister())
@@ -554,10 +566,25 @@ async def test_unregister_quiesces_an_in_flight_drain_before_detach(
     release_drain.set()
     await asyncio.gather(drain_task, unregister_task)
 
-    assert [message.metadata["steer_id"] for message in agent.messages] == ["steer-unregister-race"]
+    assert delivered_ids == ["steer-unregister-race"]
     assert detached.is_set() is True
     await db_session.refresh(row)
-    assert row.state == SteeringMessageState.dispatched
+    assert row.state == SteeringMessageState.queued
+    assert agent.messages == []
+
+    replacement = _QueueingAgent()
+    await coordinator.register_and_drain(
+        run_id="run-unregister-race",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        agent=replacement,
+    )
+    assert [message.metadata["steer_id"] for message in replacement.messages] == [
+        "steer-unregister-race"
+    ]
 
 
 @pytest.mark.asyncio

@@ -2230,7 +2230,11 @@ class RunManager:
             extra_ref_holder["extra"] = agent._extra
 
             async def _quiesce_steering_before_detach() -> None:
-                await self._steering_delivery.unregister(run_id, agent=agent)
+                await self._steering_delivery.unregister(
+                    run_id,
+                    agent=agent,
+                    requeue_owned=True,
+                )
 
             auto_detach = _build_auto_detach_listener(
                 agent,

@@ -112,7 +112,13 @@ class DurableSteeringCoordinator:
         self._locks.setdefault(run_id, asyncio.Lock())
         await self.drain(run_id)
 
-    async def unregister(self, run_id: str, *, agent: Any) -> None:
+    async def unregister(
+        self,
+        run_id: str,
+        *,
+        agent: Any,
+        requeue_owned: bool = False,
+    ) -> None:
         if self._agents.get(run_id) is not agent:
             return
         lock = self._locks.get(run_id)
@@ -125,10 +131,57 @@ class DurableSteeringCoordinator:
         async with lock:
             if self._agents.get(run_id) is not agent:
                 return
+            scope = self._scopes.get(run_id)
+            if requeue_owned and scope is not None:
+                await self._reconcile_owned_before_pause(
+                    run_id=run_id,
+                    scope=scope,
+                    agent=agent,
+                )
             self._agents.pop(run_id, None)
             self._scopes.pop(run_id, None)
             if self._locks.get(run_id) is lock:
                 self._locks.pop(run_id, None)
+
+    async def _reconcile_owned_before_pause(
+        self,
+        *,
+        run_id: str,
+        scope: SteeringRunScope,
+        agent: Any,
+    ) -> None:
+        async with self._session_maker() as session:
+            repo = self._repo(session, scope)
+            rows = await repo.list_owned_claims(run_id=run_id, owner=self._owner)
+            history_ids: set[str] | None = None
+            for row in rows:
+                removed = agent.cancel_steer(row.client_steer_id)
+                if row.state == SteeringMessageState.cancel_requested:
+                    if removed:
+                        await repo.mark_owned_cancelled(row_id=row.id, owner=self._owner)
+                        continue
+                    if history_ids is None:
+                        history_ids = await self._history_loader(scope.conversation_id)
+                    await repo.reconcile_terminal(
+                        row_id=row.id,
+                        state=(
+                            SteeringMessageState.injected
+                            if row.client_steer_id in history_ids
+                            else SteeringMessageState.cancelled
+                        ),
+                    )
+                    continue
+                if not removed:
+                    if history_ids is None:
+                        history_ids = await self._history_loader(scope.conversation_id)
+                    if row.client_steer_id in history_ids:
+                        await repo.reconcile_terminal(
+                            row_id=row.id,
+                            state=SteeringMessageState.injected,
+                        )
+                        continue
+                await repo.return_claim_to_queue(row_id=row.id, owner=self._owner)
+            await session.commit()
 
     async def _repair_expired_claims(
         self,
