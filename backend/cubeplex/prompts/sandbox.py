@@ -80,6 +80,6 @@ old_string must appear exactly once. Prefer this over `sed`/`awk`.
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
 - Commands are killed after 120 seconds by default and return `[timeout]`. \
-For installs, downloads, or builds, pass `timeout_seconds` (max 600). \
+For installs, downloads, or builds, pass `timeout_seconds` (max 1800). \
 If you still time out, split the work or raise `timeout_seconds` and retry.
 - Commands run in an isolated sandbox — safe to experiment"""

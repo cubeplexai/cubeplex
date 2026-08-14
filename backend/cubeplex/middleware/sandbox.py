@@ -110,7 +110,7 @@ def reset_executed_commands() -> None:
 # Agent-facing default. Drivers must honor this so a hung `gh` / network
 # call becomes a tool result the model can retry from, not a silent stall.
 DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
-MAX_EXECUTE_TIMEOUT_SECONDS = 600
+MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 
 
 class _ExecuteArgs(BaseModel):
@@ -121,7 +121,7 @@ class _ExecuteArgs(BaseModel):
         le=MAX_EXECUTE_TIMEOUT_SECONDS,
         description=(
             "Seconds before the command is killed. Default 120. "
-            "Raise this for installs, downloads, or builds (max 600)."
+            "Raise this for installs, downloads, or builds (max 1800)."
         ),
     )
 
@@ -250,7 +250,7 @@ def _make_execute_tool(
         description=(
             "Execute a shell command in the sandbox environment. "
             "Default timeout is 120 seconds. For installs, downloads, or "
-            "builds, pass timeout_seconds (max 600). If you hit the limit, "
+            "builds, pass timeout_seconds (max 1800). If you hit the limit, "
             "raise timeout_seconds or split the work and retry."
         ),
         parameters=_ExecuteArgs,
