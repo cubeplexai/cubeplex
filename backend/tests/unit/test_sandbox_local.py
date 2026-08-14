@@ -19,6 +19,14 @@ async def test_execute_exit_code():
 
 
 @pytest.mark.asyncio
+async def test_execute_timeout_kills_and_returns_marker():
+    sandbox = LocalSandbox()
+    result = await sandbox.execute("sleep 30", timeout=1)
+    assert result.output == "[timeout]"
+    assert result.exit_code == -1
+
+
+@pytest.mark.asyncio
 async def test_execute_combines_stderr():
     sandbox = LocalSandbox()
     result = await sandbox.execute("echo out && echo err >&2")

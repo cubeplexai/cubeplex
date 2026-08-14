@@ -95,6 +95,38 @@ def _message_for_run_exception(
     return english_fallback(code, params)
 
 
+_TOOL_ARGS_PREVIEW_LIMIT = 200
+
+
+def _preview_tool_args(args: object, *, limit: int = _TOOL_ARGS_PREVIEW_LIMIT) -> str:
+    """Compact tool-arg preview for debug logs (never the full payload)."""
+    if isinstance(args, str):
+        text = args
+    else:
+        try:
+            text = json.dumps(args, ensure_ascii=False, default=str)
+        except TypeError:
+            text = str(args)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _log_tool_start(run_id: str, evt: object) -> None:
+    """Debug-log every tool body start so a hung execute is greppable."""
+    from cubepi.agent.types import ToolExecutionStartEvent
+
+    if not isinstance(evt, ToolExecutionStartEvent):
+        return
+    logger.debug(
+        "tool start run_id={} tool={} call_id={} args={}",
+        run_id,
+        evt.tool_name,
+        evt.tool_call_id,
+        _preview_tool_args(evt.args),
+    )
+
+
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     if not ns:
         return None
@@ -1018,7 +1050,7 @@ class RunManager:
             if existing and existing.status == "running":
                 from cubeplex.config import config as _cfg
 
-                threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+                threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 180))
                 if is_stale_meta(existing, threshold_seconds=threshold):
                     await mark_run_stale(
                         self._redis,
@@ -1754,6 +1786,7 @@ class RunManager:
                 # auto_detach must run FIRST so HitlRequestEvent triggers
                 # detach before the SSE conversion below; T6 reads
                 # `auto_detach.detached` in the terminal block.
+                _log_tool_start(run_id, evt)
                 auto_detach(evt, _signal)
                 nonlocal _user_msg_seen
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
@@ -2251,6 +2284,7 @@ class RunManager:
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
+                _log_tool_start(run_id, evt)
                 await auto_detach.quiesce_then_schedule(evt)
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     steer_id = evt.message.metadata.get("steer_id")

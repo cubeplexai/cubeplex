@@ -1,5 +1,6 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
+import asyncio
 import base64
 import re
 import shlex
@@ -29,6 +30,11 @@ _TERMINAL_ENV_FILE = "/run/cubeplex/sandbox-env.sh"
 # this is the last gate before a name becomes shell code, so it re-checks
 # independently and skips anything a pre-validation row might already carry.
 _POSIX_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "timeout" in text or "timed out" in text
 
 
 @contextmanager
@@ -98,25 +104,38 @@ class OpenSandbox(Sandbox):
             uid=uid,
             gid=gid,
         )
-        with _as_sandbox_error():
-            execution = await self._sandbox.commands.run(command, opts=opts)
 
-            output_lines: list[str] = []
-            for msg in execution.logs.stdout:
-                output_lines.append(msg.text)
-            for msg in execution.logs.stderr:
-                output_lines.append(msg.text)
-            output = "\n".join(output_lines) if output_lines else ""
+        async def _run() -> ExecuteResult:
+            with _as_sandbox_error():
+                execution = await self._sandbox.commands.run(command, opts=opts)
 
-            exit_code: int | None = None
-            if execution.id:
-                try:
-                    status = await self._sandbox.commands.get_command_status(execution.id)
-                    exit_code = status.exit_code
-                except Exception as e:
-                    logger.warning("Could not get exit code for command: {}", e)
+                output_lines: list[str] = []
+                for msg in execution.logs.stdout:
+                    output_lines.append(msg.text)
+                for msg in execution.logs.stderr:
+                    output_lines.append(msg.text)
+                output = "\n".join(output_lines) if output_lines else ""
 
-            return ExecuteResult(output=output, exit_code=exit_code)
+                exit_code: int | None = None
+                if execution.id:
+                    try:
+                        status = await self._sandbox.commands.get_command_status(execution.id)
+                        exit_code = status.exit_code
+                    except Exception as e:
+                        logger.warning("Could not get exit code for command: {}", e)
+
+                return ExecuteResult(output=output, exit_code=exit_code)
+
+        try:
+            if timeout is not None:
+                return await asyncio.wait_for(_run(), timeout=timeout)
+            return await _run()
+        except TimeoutError:
+            return ExecuteResult(output="[timeout]", exit_code=-1)
+        except SandboxError as exc:
+            if timeout is not None and _is_timeout_error(exc):
+                return ExecuteResult(output="[timeout]", exit_code=-1)
+            raise
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         """Write files then chown by numeric uid so agent can edit them.

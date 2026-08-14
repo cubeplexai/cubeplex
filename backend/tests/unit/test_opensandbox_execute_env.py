@@ -76,6 +76,34 @@ async def test_set_run_env_forwarded_to_commands_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_forwards_timeout_to_run_opts() -> None:
+    backend, _ = _make_backend()
+
+    await backend.execute("sleep 9", timeout=120)
+
+    _, opts = backend._test_run_calls[0]  # type: ignore[attr-defined]
+    assert opts is not None
+    assert opts.timeout is not None
+    assert opts.timeout.total_seconds() == 120
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_error_returns_marker() -> None:
+    backend, raw = _make_backend()
+
+    async def boom(command: str, *, opts: RunCommandOpts | None = None, **_: object) -> MagicMock:
+        del command, opts
+        from opensandbox.exceptions import SandboxException
+
+        raise SandboxException("command timed out after 120s")
+
+    raw.commands.run = boom
+    result = await backend.execute("sleep 999", timeout=120)
+    assert result.output == "[timeout]"
+    assert result.exit_code == -1
+
+
+@pytest.mark.asyncio
 async def test_per_call_envs_merge_and_win_over_run_env() -> None:
     """Per-call envs override run-level env; both are present in opts.envs."""
     backend, _ = _make_backend()
