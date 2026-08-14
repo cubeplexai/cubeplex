@@ -183,10 +183,10 @@ async def _purge_deprecated_preinstalled_installs(db_session: AsyncSession) -> N
     if not deprecated_ids:
         return
 
-    install_ids = list(
+    install_rows = (
         (
             await db_session.execute(
-                select(OrgSkillInstall.id).where(
+                select(OrgSkillInstall).where(
                     OrgSkillInstall.skill_id.in_(deprecated_ids),  # type: ignore[attr-defined]
                 )
             )
@@ -194,11 +194,16 @@ async def _purge_deprecated_preinstalled_installs(db_session: AsyncSession) -> N
         .scalars()
         .all()
     )
+    install_ids = [row.id for row in install_rows]
     if not install_ids:
         return
 
-    binding_ids = WorkspaceSkillBinding.org_skill_install_id.in_(install_ids)
-    await db_session.execute(delete(WorkspaceSkillBinding).where(binding_ids))
+    binding_col = WorkspaceSkillBinding.org_skill_install_id
+    await db_session.execute(
+        delete(WorkspaceSkillBinding).where(
+            binding_col.in_(install_ids),  # type: ignore[attr-defined]
+        )
+    )
     await db_session.flush()
     result = await db_session.execute(
         delete(OrgSkillInstall).where(
