@@ -1311,7 +1311,7 @@ async def send_message(
     _install_cmd = request_obj.content and not request_obj.attachments
     if _install_cmd and _INSTALL_RE.match(request_obj.content.strip()):
         fallback_run_id = f"install-fallback-{secrets.token_hex(6)}"
-        ttl = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+        ttl = int(_config.get("lifecycle.stale_run_threshold_seconds", 180))
         claimed = await create_run(
             rds.client,
             prefix=rds.key_prefix,
@@ -1683,7 +1683,7 @@ async def get_conversation_bootstrap(
 
     last_run_status: str | None = None
     if active_run is not None:
-        threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+        threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 180))
         if is_stale_meta(active_run, threshold_seconds=threshold):
             await mark_run_stale(
                 rds.client,
@@ -1728,7 +1728,7 @@ async def get_conversation_bootstrap(
             # Apply the same staleness gate stage-A does: a row that's already
             # past the heartbeat threshold would point pending_hitl at a dead
             # run, and every approve/decline from the client would 404.
-            threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+            threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 180))
             if fresh is not None and not is_stale_meta(fresh, threshold_seconds=threshold):
                 run_id_for_pending = fresh.run_id
             else:
@@ -1854,7 +1854,7 @@ async def stream_run(
 
     from cubeplex.config import config as _cfg
 
-    threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+    threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 180))
     if is_stale_meta(run_meta, threshold_seconds=threshold):
         await mark_run_stale(
             rds.client,

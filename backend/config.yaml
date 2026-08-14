@@ -102,8 +102,9 @@ default:
     #   health checks within this time, creation fails.
     ready_timeout: 300 # 5 minutes — must cover a cold image pull
     # request_timeout: HTTP request timeout for sandbox API calls
-    #   Timeout for individual commands (execute, upload, download, etc.)
-    request_timeout: 60 # 60 seconds
+    #   Must exceed the agent execute-tool cap (120s) so the command timeout
+    #   fires first and returns `[timeout]` instead of an HTTP client error.
+    request_timeout: 150 # 150 seconds
     # create_timeout: HTTP timeout for the synchronous create call only. The server
     #   holds POST /sandboxes open until the pod is ready, so a cold image pull
     #   (minutes) blows past request_timeout. Kept separate so ordinary commands
@@ -346,7 +347,9 @@ default:
   lifecycle:
     graceful_drain_timeout_seconds: 3600
     dev_double_signal_force_exit: true
-    stale_run_threshold_seconds: 120
+    # Above the 120s execute-tool cap so a still-running command is not
+    # declared dead on refresh. Heartbeat of last_event_at is a later change.
+    stale_run_threshold_seconds: 180
 
   # Conversation context compaction (default on; threshold = model.context_window * ratio)
   # cubepi 0.x+: ``keep_tail_tokens`` (token budget) replaces the older

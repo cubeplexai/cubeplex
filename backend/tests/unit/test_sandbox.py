@@ -175,7 +175,7 @@ async def test_execute_tool_delegates_to_sandbox() -> None:
     args = _ExecuteArgs(command="echo hello world")
     result = await tool.execute("tc-1", args, signal=None, on_update=None)
 
-    sandbox.execute.assert_called_once_with("echo hello world")
+    sandbox.execute.assert_called_once_with("echo hello world", timeout=120)
     assert isinstance(result, AgentToolResult)
     assert "hello world" in _text(result)
 
@@ -210,6 +210,40 @@ async def test_execute_tool_no_exit_code_suffix_on_success() -> None:
     result = await tool.execute("tc-3", args)
 
     assert "[exit code:" not in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_timeout_returns_error_result() -> None:
+    """A timed-out command is a tool result the model can retry from, not a run crash."""
+    sandbox = _make_sandbox()
+    exec_result = MagicMock()
+    exec_result.output = "[timeout]"
+    exec_result.exit_code = -1
+    sandbox.execute = AsyncMock(return_value=exec_result)
+
+    tool = _make_execute_tool(sandbox)
+    args = _ExecuteArgs(command="sleep 999")
+    result = await tool.execute("tc-timeout", args)
+
+    sandbox.execute.assert_called_once_with("sleep 999", timeout=120)
+    text = _text(result)
+    assert text.startswith("[timeout]")
+    assert "120s" in text
+    assert result.is_error is True
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_maps_timeout_exception_to_result() -> None:
+    sandbox = _make_sandbox()
+    sandbox.execute = AsyncMock(side_effect=TimeoutError("timed out"))
+
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute("tc-to", _ExecuteArgs(command="gh issue list"))
+
+    text = _text(result)
+    assert text.startswith("[timeout]")
+    assert "120s" in text
+    assert result.is_error is True
 
 
 # ---------------------------------------------------------------------------

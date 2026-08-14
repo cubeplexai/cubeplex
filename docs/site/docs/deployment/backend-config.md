@@ -417,7 +417,7 @@ logger names to `verbose_modules` to selectively re-enable DEBUG.
 ```yaml
 lifecycle:
   graceful_drain_timeout_seconds: 3600   # max wait for in-flight runs on shutdown
-  stale_run_threshold_seconds: 120
+  stale_run_threshold_seconds: 180
 ```
 
 `graceful_drain_timeout_seconds` bounds how long the backend waits for active

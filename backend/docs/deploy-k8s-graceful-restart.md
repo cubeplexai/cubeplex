@@ -31,7 +31,7 @@ spec:
 | Key | Default | Notes |
 |---|---|---|
 | `lifecycle.graceful_drain_timeout_seconds` | 3600 | Hard cap on drain wait before forced cancel. Match `terminationGracePeriodSeconds`. |
-| `lifecycle.stale_run_threshold_seconds` | 120 | Seconds without an event before bootstrap declares a `running` run stale and clears its active-run lock. |
+| `lifecycle.stale_run_threshold_seconds` | 180 | Seconds without an event before bootstrap declares a `running` run stale and clears its active-run lock. Above the 120s execute-tool cap so a still-running command is not declared dead on refresh. |
 | `lifecycle.dev_double_signal_force_exit` | true | Second `Ctrl-C` forces immediate exit. Set false in prod if you want to require an external SIGKILL. |
 
 ## Force-killing a slow drain

@@ -397,7 +397,7 @@ logging:
 ```yaml
 lifecycle:
   graceful_drain_timeout_seconds: 3600   # 关机时等待进行中 run 的最大时间
-  stale_run_threshold_seconds: 120
+  stale_run_threshold_seconds: 180
 ```
 
 `graceful_drain_timeout_seconds` 限定后端关机前等待活动 agent run 完成的时长——

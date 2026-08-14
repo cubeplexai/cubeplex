@@ -15,6 +15,34 @@ def test_run_manager_imports_with_cubepi_tools() -> None:
     assert RunManager is not None
 
 
+def test_preview_tool_args_truncates() -> None:
+    from cubeplex.streams.run_manager import _preview_tool_args
+
+    long = {"command": "x" * 500}
+    preview = _preview_tool_args(long)
+    assert len(preview) <= 200
+    assert preview.endswith("…")
+
+
+def test_log_tool_start_ignores_other_events() -> None:
+    from cubeplex.streams.run_manager import _log_tool_start
+
+    _log_tool_start("run-1", object())
+
+
+def test_log_tool_start_accepts_start_event() -> None:
+    from cubepi.agent.types import ToolExecutionStartEvent
+
+    from cubeplex.streams.run_manager import _log_tool_start
+
+    evt = ToolExecutionStartEvent(
+        tool_call_id="call_1",
+        tool_name="execute",
+        args={"command": "gh issue list"},
+    )
+    _log_tool_start("run-1", evt)
+
+
 def test_run_cubepi_path_method_exists() -> None:
     """The cubepi dispatch method is still on RunManager."""
     from cubeplex.streams.run_manager import RunManager

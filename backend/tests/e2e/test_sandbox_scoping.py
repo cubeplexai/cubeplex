@@ -128,7 +128,7 @@ async def test_command_deny_blocks_and_filesystem_untouched(
     class _Sb:
         workdir = "/workspace"
 
-        async def execute(self, command: str) -> Any:  # pragma: no cover - guard
+        async def execute(self, command: str, **kwargs: object) -> Any:  # pragma: no cover - guard
             raise AssertionError("denied command must not reach the sandbox")
 
     class _ToolCall:
@@ -280,7 +280,7 @@ async def test_command_confirm_routes_through_hitl_channel(
     class _Sb:
         workdir = "/workspace"
 
-        async def execute(self, command: str) -> Any:  # pragma: no cover - unused
+        async def execute(self, command: str, **kwargs: object) -> Any:  # pragma: no cover - unused
             ran.append(command)
 
             class _R:

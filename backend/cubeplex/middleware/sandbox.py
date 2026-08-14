@@ -107,6 +107,11 @@ def reset_executed_commands() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Agent-facing default. Drivers must honor this so a hung `gh` / network
+# call becomes a tool result the model can retry from, not a silent stall.
+DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
+
+
 class _ExecuteArgs(BaseModel):
     command: str
 
@@ -160,6 +165,22 @@ def _shquote(path: str) -> str:
     return shlex.quote(path)
 
 
+def _timeout_tool_message(seconds: int) -> str:
+    return (
+        f"[timeout] Command exceeded {seconds}s and was killed. "
+        "Split the work or use a faster command, then retry."
+    )
+
+
+def _is_timeout_result(output: str, exit_code: int | None) -> bool:
+    return exit_code == -1 and output.strip().startswith("[timeout]")
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "timeout" in text or "timed out" in text
+
+
 def _make_execute_tool(
     sandbox: Sandbox,
     *,
@@ -182,7 +203,27 @@ def _make_execute_tool(
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
-        result = await sandbox.execute(args.command)
+        timeout = DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        try:
+            result = await sandbox.execute(args.command, timeout=timeout)
+        except TimeoutError:
+            return AgentToolResult(
+                content=[TextContent(text=_timeout_tool_message(timeout))],
+                is_error=True,
+            )
+        except Exception as exc:
+            if _is_timeout_error(exc):
+                return AgentToolResult(
+                    content=[TextContent(text=_timeout_tool_message(timeout))],
+                    is_error=True,
+                )
+            raise
+
+        if _is_timeout_result(result.output, result.exit_code):
+            return AgentToolResult(
+                content=[TextContent(text=_timeout_tool_message(timeout))],
+                is_error=True,
+            )
         if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
             _record_executed(workspace_id, conversation_id, args.command)
         output = result.output
@@ -192,7 +233,11 @@ def _make_execute_tool(
 
     return AgentTool(
         name="execute",
-        description="Execute a shell command in the sandbox environment.",
+        description=(
+            "Execute a shell command in the sandbox environment. "
+            "Killed after 120 seconds — if that happens, split the work "
+            "or pick a faster command and retry."
+        ),
         parameters=_ExecuteArgs,
         execute=_execute,
     )

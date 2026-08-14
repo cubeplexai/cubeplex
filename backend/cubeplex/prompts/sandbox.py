@@ -79,4 +79,6 @@ old_string must appear exactly once. Prefer this over `sed`/`awk`.
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
+- Commands are killed after 120 seconds and return `[timeout]`. Split the \
+work or pick a faster command, then retry.
 - Commands run in an isolated sandbox — safe to experiment"""
