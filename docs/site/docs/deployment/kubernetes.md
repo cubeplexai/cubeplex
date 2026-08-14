@@ -489,6 +489,12 @@ Moving pieces the chart wires up:
 | Backend mTLS server cert + mTLS listener on `:8443` | cubeplex ns |
 | Updated backend Service exposing `:8443` | cubeplex ns |
 
+The webhook also sets `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
+`NODE_EXTRA_CA_CERTS` on every sandbox app container so clients that ignore
+the system trust store (uv, Python `requests`, Node/npm) trust the MITM CA.
+Existing values of those names are left alone. Recreate running sandboxes
+after upgrading the webhook — admission only runs on new pods.
+
 The `cubeplex-egress-webhook` image ships with each GHCR release, so no extra
 build is needed. Turn the feature on in `values.local.yaml`:
 

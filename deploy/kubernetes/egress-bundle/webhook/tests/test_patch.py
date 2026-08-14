@@ -205,3 +205,132 @@ def test_patch_egress_only_pod_no_app_container_mounts():
         and any(m.get("name") == "ca-trust" for m in op.get("value", []))
     ]
     assert ca_trust_app_mounts == []
+
+
+_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+_APP_TRUST_ENV_NAMES = ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS")
+
+
+def _env_op(ops: list[dict], container_index: int) -> dict | None:
+    path = f"/spec/containers/{container_index}/env"
+    return next((op for op in ops if op["path"] == path), None)
+
+
+def _env_map(ops: list[dict], container_index: int) -> dict[str, str]:
+    op = _env_op(ops, container_index)
+    if op is None:
+        return {}
+    return {e["name"]: e.get("value", "") for e in op["value"]}
+
+
+def test_patch_sets_app_client_trust_env():
+    """uv / requests / npm ignore the system store; the webhook must point
+    them at the rebuilt bundle (same file update-ca-certificates writes)."""
+    ops = build_pod_patch(
+        POD, sandbox_id="sbx-1", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    # App container is index 0; egress is index 1.
+    app_env = _env_map(ops, 0)
+    for name in _APP_TRUST_ENV_NAMES:
+        assert app_env[name] == _SYSTEM_CA_BUNDLE
+    egress_env = _env_map(ops, 1)
+    for name in _APP_TRUST_ENV_NAMES:
+        assert name not in egress_env
+
+
+def test_patch_sets_client_trust_env_on_all_app_containers():
+    ops = build_pod_patch(
+        MULTI_APP_POD, sandbox_id="sbx-2", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    for idx in (0, 1):
+        env = _env_map(ops, idx)
+        for name in _APP_TRUST_ENV_NAMES:
+            assert env[name] == _SYSTEM_CA_BUNDLE
+    egress_env = _env_map(ops, 2)
+    for name in _APP_TRUST_ENV_NAMES:
+        assert name not in egress_env
+
+
+def test_patch_sets_client_trust_env_even_when_ssl_certs_already_mounted():
+    """Skipping the duplicate ca-trust mount must not skip the client env.
+    Those containers still need uv/requests/npm pointed at the bundle."""
+    pod = {
+        "metadata": {
+            "ownerReferences": [
+                {
+                    "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+                    "kind": "Sandbox",
+                    "name": "sbx-4",
+                }
+            ],
+            "labels": {},
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": "sandbox",
+                    "image": "py:3.13",
+                    "volumeMounts": [{"name": "existing-certs", "mountPath": "/etc/ssl/certs"}],
+                },
+                {"name": "egress", "image": EGRESS_IMAGE},
+            ],
+            "volumes": [],
+        },
+    }
+    ops = build_pod_patch(
+        pod, sandbox_id="sbx-4", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    assert not any(op["path"] == "/spec/containers/0/volumeMounts" for op in ops)
+    env = _env_map(ops, 0)
+    for name in _APP_TRUST_ENV_NAMES:
+        assert env[name] == _SYSTEM_CA_BUNDLE
+
+
+def test_patch_preserves_existing_app_trust_env():
+    """An operator-set SSL_CERT_FILE must not be overwritten."""
+    pod = {
+        "metadata": {
+            "ownerReferences": [
+                {
+                    "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+                    "kind": "Sandbox",
+                    "name": "sbx-5",
+                }
+            ],
+            "labels": {},
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": "sandbox",
+                    "image": "py:3.13",
+                    "env": [{"name": "SSL_CERT_FILE", "value": "/custom/ca.pem"}],
+                },
+                {"name": "egress", "image": EGRESS_IMAGE},
+            ],
+            "volumes": [],
+        },
+    }
+    ops = build_pod_patch(
+        pod, sandbox_id="sbx-5", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    env = _env_map(ops, 0)
+    assert env["SSL_CERT_FILE"] == "/custom/ca.pem"
+    assert env["REQUESTS_CA_BUNDLE"] == _SYSTEM_CA_BUNDLE
+    assert env["NODE_EXTRA_CA_CERTS"] == _SYSTEM_CA_BUNDLE
+
+
+def test_patch_egress_only_pod_no_app_client_trust_env():
+    ops = build_pod_patch(
+        EGRESS_ONLY_POD, sandbox_id="sbx-3", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    # Only egress (index 0). Its env op is the MITM sidecar env, not client trust.
+    egress_env = _env_map(ops, 0)
+    for name in _APP_TRUST_ENV_NAMES:
+        assert name not in egress_env
+    assert _env_op(ops, 1) is None
