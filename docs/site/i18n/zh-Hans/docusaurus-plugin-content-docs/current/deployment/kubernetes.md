@@ -466,6 +466,12 @@ chart 会自动配置以下组件：
 | backend mTLS server 证书 + `:8443` 上的 mTLS listener | cubeplex 命名空间 |
 | 暴露 `:8443` 的 backend Service | cubeplex 命名空间 |
 
+webhook 还会给每个 sandbox 应用容器设置 `SSL_CERT_FILE`、
+`REQUESTS_CA_BUNDLE` 和 `NODE_EXTRA_CA_CERTS`，让不走系统信任库的客户端
+（uv、Python `requests`、Node/npm）也能信任 MITM CA。这三个名字如果容器里
+已经有值，不会覆盖。升级 webhook 之后要重建正在跑的 sandbox——admission
+只在新建 pod 时执行。
+
 `cubeplex-egress-webhook` 镜像随每个 GHCR release 一起发布，无需额外构建。
 在 `values.local.yaml` 中打开：
 

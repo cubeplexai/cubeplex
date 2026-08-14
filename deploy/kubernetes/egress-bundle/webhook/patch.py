@@ -17,6 +17,17 @@ _ADDON_PATH = "/etc/egress-inject/inject.py"
 # launch-chrome.sh, which imports it into Chromium's NSS store — keep the two in sync.
 _SHARED_CA_PATH = "/etc/ssl/certs/cubeplex-egress-ca.pem"
 
+# Rebuilt by egress-ca-trust's update-ca-certificates onto the shared ca-trust
+# volume. uv, pip-requests, and Node/npm ship their own Mozilla roots and
+# ignore /etc/ssl/certs unless pointed here. The three names are not
+# interchangeable: requests ignores SSL_CERT_FILE; Node ignores both.
+_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+_APP_TRUST_ENV = (
+    {"name": "SSL_CERT_FILE", "value": _SYSTEM_CA_BUNDLE},
+    {"name": "REQUESTS_CA_BUNDLE", "value": _SYSTEM_CA_BUNDLE},
+    {"name": "NODE_EXTRA_CA_CERTS", "value": _SYSTEM_CA_BUNDLE},
+)
+
 # OpenSandbox owns sandbox pods via a BatchSandbox CR (the per-sandbox path also
 # uses Sandbox); both live under the sandbox.opensandbox.io API group.
 _SANDBOX_OWNER_KINDS = frozenset({"BatchSandbox", "Sandbox"})
@@ -60,6 +71,18 @@ def _egress_index(pod: dict[str, Any]) -> int:
 def _app_indices(pod: dict[str, Any]) -> list[int]:
     """Return indices of all non-egress containers (may be empty)."""
     return [i for i, c in enumerate(pod["spec"]["containers"]) if c.get("name") != "egress"]
+
+
+def _merge_app_trust_env(existing: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """Append MITM client-trust env vars; None if every name is already set.
+
+    Existing values win so an operator-set SSL_CERT_FILE is not overwritten.
+    """
+    names = {e.get("name") for e in existing}
+    extra = [item for item in _APP_TRUST_ENV if item["name"] not in names]
+    if not extra:
+        return None
+    return list(existing) + extra
 
 
 def build_pod_patch(
@@ -134,19 +157,25 @@ def build_pod_patch(
     ops.append({"op": "add", "path": "/spec/initContainers", "value": init})
 
     # 4) ALL non-egress containers mount the shared trust dir (so the updated
-    # bundle is visible in each app container). Pods with no app containers are
-    # handled gracefully: this loop simply emits no ops.
+    # bundle is visible in each app container) and get client-trust env so
+    # uv / requests / npm actually read that bundle. Pods with no app
+    # containers are handled gracefully: this loop simply emits no ops.
     #
     # Skip any container that already mounts /etc/ssl/certs: Kubernetes rejects a
     # pod with duplicate volumeMounts.mountPath, so re-adding it would make
-    # admission succeed but pod creation fail (Codex P2).
+    # admission succeed but pod creation fail (Codex P2). The client-trust env
+    # is independent of that skip — those processes still need the pointers.
     for aidx in _app_indices(pod):
         app_c = pod["spec"]["containers"][aidx]
         existing = app_c.get("volumeMounts", [])
-        if any(m.get("mountPath") == "/etc/ssl/certs" for m in existing):
-            continue
-        app_mounts = existing + [{"name": "ca-trust", "mountPath": "/etc/ssl/certs"}]
-        ops.append({"op": "add", "path": f"/spec/containers/{aidx}/volumeMounts", "value": app_mounts})
+        if not any(m.get("mountPath") == "/etc/ssl/certs" for m in existing):
+            app_mounts = existing + [{"name": "ca-trust", "mountPath": "/etc/ssl/certs"}]
+            ops.append(
+                {"op": "add", "path": f"/spec/containers/{aidx}/volumeMounts", "value": app_mounts}
+            )
+        merged_env = _merge_app_trust_env(app_c.get("env") or [])
+        if merged_env is not None:
+            ops.append({"op": "add", "path": f"/spec/containers/{aidx}/env", "value": merged_env})
 
     # 5) pod-level volumes
     volumes = pod["spec"].get("volumes", []) + [

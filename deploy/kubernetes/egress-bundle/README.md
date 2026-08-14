@@ -5,8 +5,9 @@ Kubernetes manifests and supporting code for CubePlex's secret-injecting MITM eg
 OpenSandbox server and egress image stay **100% stock**.  This bundle adds:
 
 - A **mutating admission webhook** (Python/FastAPI) that patches each sandbox pod to enable
-  transparent MITM, mount a per-sandbox mTLS client identity and the fixed CA, and load
-  the `inject.py` addon.
+  transparent MITM, mount a per-sandbox mTLS client identity and the fixed CA, load
+  the `inject.py` addon, and set `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` /
+  `NODE_EXTRA_CA_CERTS` on app containers so uv / requests / npm trust the MITM CA.
 - The **`inject.py` mitmproxy addon** that scans outbound headers for `cbxref_` placeholders,
   calls the CubePlex exchange endpoint over mTLS, and substitutes the real secret.
 - Kubernetes manifests wiring the above together.
