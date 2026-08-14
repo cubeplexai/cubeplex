@@ -110,10 +110,20 @@ def reset_executed_commands() -> None:
 # Agent-facing default. Drivers must honor this so a hung `gh` / network
 # call becomes a tool result the model can retry from, not a silent stall.
 DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
+MAX_EXECUTE_TIMEOUT_SECONDS = 600
 
 
 class _ExecuteArgs(BaseModel):
     command: str
+    timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_EXECUTE_TIMEOUT_SECONDS,
+        description=(
+            "Seconds before the command is killed. Default 120. "
+            "Raise this for installs, downloads, or builds (max 600)."
+        ),
+    )
 
 
 class _WriteFileArgs(BaseModel):
@@ -203,7 +213,11 @@ def _make_execute_tool(
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
-        timeout = DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        timeout = (
+            args.timeout_seconds
+            if args.timeout_seconds is not None
+            else DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        )
         try:
             result = await sandbox.execute(args.command, timeout=timeout)
         except TimeoutError:
@@ -235,8 +249,9 @@ def _make_execute_tool(
         name="execute",
         description=(
             "Execute a shell command in the sandbox environment. "
-            "Killed after 120 seconds — if that happens, split the work "
-            "or pick a faster command and retry."
+            "Default timeout is 120 seconds. For installs, downloads, or "
+            "builds, pass timeout_seconds (max 600). If you hit the limit, "
+            "raise timeout_seconds or split the work and retry."
         ),
         parameters=_ExecuteArgs,
         execute=_execute,

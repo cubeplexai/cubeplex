@@ -373,6 +373,45 @@ async def update_run_meta(
     return await get_run_meta(redis, prefix=prefix, run_id=run_id)
 
 
+# KEYS[1] = meta_key, KEYS[2] = active_key
+# ARGV[1] = last_event_at, ARGV[2] = ttl_seconds, ARGV[3] = run_id
+_TOUCH_RUN_HEARTBEAT_LUA = """
+if redis.call('HGET', KEYS[1], 'status') == 'running' then
+  redis.call('HSET', KEYS[1], 'last_event_at', ARGV[1])
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+end
+if redis.call('GET', KEYS[2]) == ARGV[3] then
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
+end
+return 1
+"""
+
+
+async def touch_run_heartbeat(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+    conversation_id: str,
+    ttl_seconds: int,
+) -> None:
+    """Refresh ``last_event_at`` without appending a user-visible event.
+
+    Long tool bodies (installs, downloads) emit nothing until they finish.
+    Without this, bootstrap stale detection treats a live worker as dead.
+    Also extends the active-run lock TTL so a long execute cannot drop it.
+    """
+    await redis.eval(  # type: ignore[misc]
+        _TOUCH_RUN_HEARTBEAT_LUA,
+        2,
+        _run_meta_key(prefix, run_id),
+        _active_run_key(prefix, conversation_id),
+        datetime.now(UTC).isoformat(),
+        str(ttl_seconds),
+        run_id,
+    )
+
+
 async def clear_active_run(
     redis: Redis,
     *,

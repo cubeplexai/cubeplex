@@ -102,9 +102,9 @@ default:
     #   health checks within this time, creation fails.
     ready_timeout: 300 # 5 minutes — must cover a cold image pull
     # request_timeout: HTTP request timeout for sandbox API calls
-    #   Must exceed the agent execute-tool cap (120s) so the command timeout
+    #   Must exceed max execute timeout_seconds (600) so the command timeout
     #   fires first and returns `[timeout]` instead of an HTTP client error.
-    request_timeout: 150 # 150 seconds
+    request_timeout: 660 # 660 seconds
     # create_timeout: HTTP timeout for the synchronous create call only. The server
     #   holds POST /sandboxes open until the pod is ready, so a cold image pull
     #   (minutes) blows past request_timeout. Kept separate so ordinary commands

@@ -169,7 +169,7 @@ class SandboxManager:
         self._domain: str = config.get("sandbox.domain", "localhost:8090")
         self._image: str = config.get("sandbox.image", "ubuntu:22.04")
         self._api_key: str | None = config.get("sandbox.api_key", None)
-        self._request_timeout: int = config.get("sandbox.request_timeout", 150)
+        self._request_timeout: int = config.get("sandbox.request_timeout", 660)
         # Separate, longer budget for the synchronous create call: the server holds
         # the POST /sandboxes open until the pod is ready, so a cold image pull can
         # take minutes — far longer than the per-command request_timeout.

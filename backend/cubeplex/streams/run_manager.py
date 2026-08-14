@@ -31,6 +31,7 @@ from cubeplex.streams.run_events import (
     is_stale_meta,
     mark_run_stale,
     set_conversation_last_error,
+    touch_run_heartbeat,
     update_run_meta,
 )
 from cubeplex.utils.time import utc_isoformat
@@ -125,6 +126,70 @@ def _log_tool_start(run_id: str, evt: object) -> None:
         evt.tool_call_id,
         _preview_tool_args(evt.args),
     )
+
+
+_TOOL_HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+
+class _InFlightToolHeartbeat:
+    """Bump ``last_event_at`` while any tool body is running.
+
+    Tool start/end events do not always become SSE, so a 120–600s execute
+    would otherwise look stale on refresh.
+    """
+
+    def __init__(
+        self,
+        redis: Redis,
+        *,
+        prefix: str,
+        run_id: str,
+        conversation_id: str,
+        ttl_seconds: int,
+        interval_seconds: float = _TOOL_HEARTBEAT_INTERVAL_SECONDS,
+    ) -> None:
+        self._redis = redis
+        self._prefix = prefix
+        self._run_id = run_id
+        self._conversation_id = conversation_id
+        self._ttl_seconds = ttl_seconds
+        self._interval_seconds = interval_seconds
+        self._in_flight = 0
+        self._task: asyncio.Task[None] | None = None
+
+    def observe(self, evt: object) -> None:
+        from cubepi.agent.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+
+        if isinstance(evt, ToolExecutionStartEvent):
+            self._in_flight += 1
+            if self._task is None or self._task.done():
+                self._task = asyncio.create_task(self._loop())
+        elif isinstance(evt, ToolExecutionEndEvent):
+            self._in_flight = max(0, self._in_flight - 1)
+            if self._in_flight == 0:
+                self.stop()
+
+    def stop(self) -> None:
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._interval_seconds)
+                try:
+                    await touch_run_heartbeat(
+                        self._redis,
+                        prefix=self._prefix,
+                        run_id=self._run_id,
+                        conversation_id=self._conversation_id,
+                        ttl_seconds=self._ttl_seconds,
+                    )
+                except Exception:
+                    logger.exception("run heartbeat failed for {}", self._run_id)
+        except asyncio.CancelledError:
+            return
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
@@ -1778,6 +1843,13 @@ class RunManager:
             # unwrap can stitch deltas across events; without persistent state
             # we couldn't peel the wrapper JSON as it streams.
             stream_converter = StreamConverter()
+            tool_heartbeat = _InFlightToolHeartbeat(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Runs on the same event loop as _run_cubepi_path, so
@@ -1787,6 +1859,7 @@ class RunManager:
                 # detach before the SSE conversion below; T6 reads
                 # `auto_detach.detached` in the terminal block.
                 _log_tool_start(run_id, evt)
+                tool_heartbeat.observe(evt)
                 auto_detach(evt, _signal)
                 nonlocal _user_msg_seen
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
@@ -2165,6 +2238,7 @@ class RunManager:
                 final_status = classification.status
             finally:
                 # Stop accepting steers for this run before tearing down.
+                tool_heartbeat.stop()
                 self._agents.pop(run_id, None)
                 self._hitl_channels.pop(run_id, None)
                 # Signal drainer and wait for it to flush remaining events so
@@ -2277,6 +2351,13 @@ class RunManager:
             # variant above; the deferred-call unwrap needs persistent state
             # across deltas inside a single run.
             stream_converter = StreamConverter()
+            tool_heartbeat = _InFlightToolHeartbeat(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
 
             from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
             from cubepi.providers.base import UserMessage as _UserMsg
@@ -2285,6 +2366,7 @@ class RunManager:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
                 _log_tool_start(run_id, evt)
+                tool_heartbeat.observe(evt)
                 await auto_detach.quiesce_then_schedule(evt)
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     steer_id = evt.message.metadata.get("steer_id")
@@ -2387,6 +2469,7 @@ class RunManager:
                     claim_token=claim_token,
                     status=final_status,
                 )
+                tool_heartbeat.stop()
                 self._agents.pop(run_id, None)
                 self._hitl_channels.pop(run_id, None)
                 await sse_queue.put(None)
