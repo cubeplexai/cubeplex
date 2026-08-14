@@ -438,7 +438,7 @@
     "collapse": "Collapse",
     "executing": "Executing...",
     "tokenUsage": "Token Usage",
-    "turnLabel": "This Turn",
+    "turnLabel": "Last call",
     "sessionLabel": "Session Total",
     "inputTokens": "Input",
     "outputTokens": "Output",

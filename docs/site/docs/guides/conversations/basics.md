@@ -76,7 +76,7 @@ During a conversation, the agent can:
 Hover a completed assistant reply to reveal small action chips under the bubble:
 
 - **Copy** — copy that turn's text reply.
-- **Token usage** — this turn's input/output/cache stats (session totals on the latest turn).
+- **Token usage** — the last LLM call's input/output/cache stats (session totals on the latest turn).
 - **Info** — show this turn's **Run ID** (and copy it). Useful when debugging with `cubepi trace` or filtering **Admin → Traces**.
 - **Fork** — start a new conversation that continues from this turn.
 - **Timestamp** — relative time; hover for the absolute time.

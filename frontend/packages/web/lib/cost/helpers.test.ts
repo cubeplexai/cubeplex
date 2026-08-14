@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeCacheHitRate,
+  lastTurnUsageByRun,
   topNWithOther,
   percentDelta,
   formatPercent,
@@ -51,6 +52,55 @@ describe('computeCacheHitRate', () => {
   })
   it('returns ratio of cache_read to (cache_read + input)', () => {
     expect(computeCacheHitRate({ input: 70, cacheRead: 30 })).toBeCloseTo(0.3)
+  })
+})
+
+describe('lastTurnUsageByRun', () => {
+  it('keeps the last assistant usage in a run, not the sum', () => {
+    const byRun = lastTurnUsageByRun([
+      {
+        role: 'assistant',
+        run_id: 'run-1',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 1282,
+          cache_read_tokens: 80,
+          cache_write_tokens: 0,
+        },
+      },
+      {
+        role: 'assistant',
+        run_id: 'run-1',
+        usage: {
+          input_tokens: 50,
+          output_tokens: 17,
+          cache_read_tokens: 40,
+        },
+      },
+    ])
+    expect(byRun.get('run-1')).toEqual({
+      input_tokens: 50,
+      output_tokens: 17,
+      cache_read_tokens: 40,
+      cache_write_tokens: 0,
+    })
+  })
+
+  it('tracks each run independently', () => {
+    const byRun = lastTurnUsageByRun([
+      {
+        role: 'assistant',
+        run_id: 'run-a',
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+      {
+        role: 'assistant',
+        run_id: 'run-b',
+        usage: { input_tokens: 3, output_tokens: 4, cache_read_tokens: 1 },
+      },
+    ])
+    expect(byRun.get('run-a')?.output_tokens).toBe(2)
+    expect(byRun.get('run-b')?.output_tokens).toBe(4)
   })
 })
 

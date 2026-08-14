@@ -38,6 +38,7 @@ import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
+import { lastTurnUsageByRun } from '@/lib/cost/helpers'
 import { cn } from '@/lib/utils'
 
 interface MessageListProps {
@@ -410,7 +411,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   // fork point 1:1.
   const { anchorByMessageId, lastAnchorMessageId } = useMemo(() => {
     const lastIdByRun = new Map<string, string>()
-    const usageByRun = new Map<string, TurnUsage>()
+    const usageByRun = lastTurnUsageByRun(messages ?? [])
     // Aggregate the run's user-visible text across every assistant message
     // sharing the run_id (a multi-step turn can emit text mid-run as well
     // as the final answer). Copy = "this turn's reply", not just the tail
@@ -428,19 +429,6 @@ export function MessageList({ conversationId }: MessageListProps) {
         const prev = textByRun.get(msg.run_id)
         textByRun.set(msg.run_id, prev ? `${prev}\n\n${text}` : text)
       }
-      const u = msg.usage
-      if (!u) continue
-      const acc = usageByRun.get(msg.run_id) ?? {
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-      }
-      acc.input_tokens += u.input_tokens
-      acc.output_tokens += u.output_tokens
-      acc.cache_read_tokens += u.cache_read_tokens ?? 0
-      acc.cache_write_tokens += u.cache_write_tokens ?? 0
-      usageByRun.set(msg.run_id, acc)
     }
     const byMessageId = new Map<
       string,

@@ -1,4 +1,9 @@
-import type { CostSummaryResponse, TimeseriesResponse, TimeseriesSeries } from '@cubeplex/core'
+import type {
+  CostSummaryResponse,
+  TimeseriesResponse,
+  TimeseriesSeries,
+  TurnUsage,
+} from '@cubeplex/core'
 import type { InsightsMetric } from './metricPreference'
 
 export type { InsightsMetric }
@@ -8,6 +13,33 @@ export function computeCacheHitRate(args: { input: number; cacheRead: number }):
   const denom = args.input + args.cacheRead
   if (denom === 0) return null
   return args.cacheRead / denom
+}
+
+/** Last assistant-message usage per run — the chip shows that call, not a sum. */
+export function lastTurnUsageByRun(
+  messages: Array<{
+    role: string
+    run_id?: string | null
+    usage?: {
+      input_tokens: number
+      output_tokens: number
+      cache_read_tokens?: number
+      cache_write_tokens?: number
+    } | null
+  }>,
+): Map<string, TurnUsage> {
+  const byRun = new Map<string, TurnUsage>()
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || !msg.run_id || !msg.usage) continue
+    const u = msg.usage
+    byRun.set(msg.run_id, {
+      input_tokens: u.input_tokens,
+      output_tokens: u.output_tokens,
+      cache_read_tokens: u.cache_read_tokens ?? 0,
+      cache_write_tokens: u.cache_write_tokens ?? 0,
+    })
+  }
+  return byRun
 }
 
 export interface TopNResult<T> {

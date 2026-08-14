@@ -19,6 +19,7 @@ from uuid_utils import uuid7
 
 from cubeplex.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, FailoverEvent, StatusEvent
 from cubeplex.errors import ErrorCode, classify_exception, english_fallback
+from cubeplex.services.usage import apply_last_llm_usage
 from cubeplex.streams.run_events import (
     RunMeta,
     append_run_event,
@@ -3596,8 +3597,7 @@ class RunManager:
 
             await flush_citation_buffer(agent_key, sse_event.agent_id)
             if sse_event.type == "usage":
-                for key in turn_usage:
-                    turn_usage[key] += sse_event.data.get(key, 0)
+                apply_last_llm_usage(turn_usage, sse_event.data)
                 nonlocal last_context_tokens
                 last_context_tokens = max(
                     last_context_tokens, sse_event.data.get("input_tokens", 0)
@@ -4225,8 +4225,7 @@ class RunManager:
 
             await flush_citation_buffer(agent_key, sse_event.agent_id)
             if sse_event.type == "usage":
-                for key in turn_usage:
-                    turn_usage[key] += sse_event.data.get(key, 0)
+                apply_last_llm_usage(turn_usage, sse_event.data)
                 nonlocal last_context_tokens
                 last_context_tokens = max(
                     last_context_tokens, sse_event.data.get("input_tokens", 0)

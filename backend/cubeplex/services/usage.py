@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 from loguru import logger
 from sqlalchemy import func as sa_func
@@ -45,6 +46,26 @@ _ZERO_SESSION: SessionUsage = {
     "total_cache_write_tokens": 0,
 }
 
+_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+)
+
+_ZERO_TURN: TurnUsage = {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+}
+
+
+def apply_last_llm_usage(turn_usage: dict[str, int], data: Mapping[str, Any]) -> None:
+    """Overwrite turn_usage with this LLM call. The chip shows the last call."""
+    for key in _USAGE_KEYS:
+        turn_usage[key] = int(data.get(key, 0) or 0)
+
 
 async def get_session_usage(
     session: AsyncSession,
@@ -81,20 +102,14 @@ async def get_turn_usage(
     *,
     after: datetime,
 ) -> tuple[TurnUsage, int]:
-    """Sum billing tokens for one turn; also return max input_tokens (context size).
+    """Last LLM call after ``after``, plus max input_tokens (context size).
 
-    Returns (turn_usage, context_tokens) where context_tokens is the largest
-    single-call input_tokens in the turn — each LLM call already carries the
-    full context, so MAX is the context size rather than the misleading SUM.
+    The usage chip shows that last call. ``context_tokens`` is still the
+    largest single-call input in the window — each call already carries the
+    full context, so MAX is the context size rather than a sum.
     """
-    stmt = (
-        sa_select(
-            sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
-            sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
-            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_read_tokens), 0),
-            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_write_tokens), 0),
-            sa_func.coalesce(sa_func.max(LlmBillingEvent.input_tokens), 0),
-        )
+    ctx_stmt = (
+        sa_select(sa_func.coalesce(sa_func.max(LlmBillingEvent.input_tokens), 0))
         .join(
             BillingEvent,
             LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
@@ -104,14 +119,33 @@ async def get_turn_usage(
             BillingEvent.started_at >= after,  # type: ignore[arg-type]
         )
     )
-    row = (await session.execute(stmt)).one()
+    last_stmt = (
+        sa_select(LlmBillingEvent)
+        .join(
+            BillingEvent,
+            LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+        )
+        .where(
+            BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
+            BillingEvent.started_at >= after,  # type: ignore[arg-type]
+        )
+        .order_by(
+            cast(Any, BillingEvent.started_at).desc(),
+            cast(Any, BillingEvent.id).desc(),
+        )
+        .limit(1)
+    )
+    context_tokens = int((await session.execute(ctx_stmt)).scalar_one())
+    last = (await session.execute(last_stmt)).scalar_one_or_none()
+    if last is None:
+        return {**_ZERO_TURN}, context_tokens
     turn: TurnUsage = {
-        "input_tokens": int(row[0]),
-        "output_tokens": int(row[1]),
-        "cache_read_tokens": int(row[2]),
-        "cache_write_tokens": int(row[3]),
+        "input_tokens": last.input_tokens,
+        "output_tokens": last.output_tokens,
+        "cache_read_tokens": last.cache_read_tokens,
+        "cache_write_tokens": last.cache_write_tokens,
     }
-    return turn, int(row[4])
+    return turn, context_tokens
 
 
 async def build_usage_summary(

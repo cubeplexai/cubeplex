@@ -438,7 +438,7 @@
     "collapse": "收起",
     "executing": "正在执行...",
     "tokenUsage": "Token 用量",
-    "turnLabel": "本轮",
+    "turnLabel": "最后一轮",
     "sessionLabel": "会话累计",
     "inputTokens": "输入",
     "outputTokens": "输出",
