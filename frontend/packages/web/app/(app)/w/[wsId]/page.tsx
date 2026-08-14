@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState, useCallback } from 'react'
+import { use, useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import {
@@ -8,6 +8,7 @@ import {
   useAttachmentStore,
   useConversationStore,
   useMessageStore,
+  usePanelStore,
 } from '@cubeplex/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { InputBar } from '@/components/layout/InputBar'
@@ -31,6 +32,13 @@ export default function WorkspaceHomePage({
   const { create: createConversation, rename: renameConversation } = useConversationStore()
   const send = useMessageStore((s) => s.send)
   const [draftConvId, setDraftConvId] = useState<string | null>(null)
+
+  // New chat (sidebar / composer) lands here. Conversation pages close the
+  // rail on mount; this route must too, or a tool/artifact/sandbox panel from
+  // the previous chat stays open.
+  useEffect(() => {
+    usePanelStore.getState().close()
+  }, [])
 
   const ensureConversation = useCallback(async (): Promise<string> => {
     if (draftConvId) return draftConvId

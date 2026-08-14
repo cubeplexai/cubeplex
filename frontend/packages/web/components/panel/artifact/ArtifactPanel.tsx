@@ -268,7 +268,21 @@ export function ArtifactPanel() {
     loadVersions(client, conversationId, artifactId)
   }, [artifact, conversationId, artifactId, loadVersions, workspaceId])
 
-  if (view.type !== 'artifact' || !artifact || !workspaceId || !identityKey) return null
+  if (view.type !== 'artifact') return null
+
+  // Artifacts can be missing while the list is still loading, or after a
+  // workspace reset cleared the store. Keep chrome + Close so the rail is
+  // never an empty, undismissable column.
+  if (!artifact || !workspaceId || !identityKey) {
+    return (
+      <div className="flex h-full flex-col bg-background" data-testid="artifact-panel-empty">
+        <PanelHeader
+          source={{ kind: 'plain', icon: <span />, title: t('unavailable') }}
+          onClose={close}
+        />
+      </div>
+    )
+  }
 
   const artifactVersions = versions[artifact.id] ?? []
   const currentSelectedVersion = selectedVersion[artifact.id] ?? null

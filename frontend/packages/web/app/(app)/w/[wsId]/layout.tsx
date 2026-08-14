@@ -3,13 +3,12 @@
 import { use, useEffect, useMemo } from 'react'
 import {
   createApiClient,
-  useArtifactStore,
   useConversationStore,
   useMcpToolRegistryStore,
   useTopicStore,
-  useWorkspaceSettingsStore,
 } from '@cubeplex/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { resetWorkspaceScopedClientState } from '@/lib/resetWorkspaceScopedState'
 
 export default function WorkspaceLayout({
   params,
@@ -22,21 +21,11 @@ export default function WorkspaceLayout({
   const value = useMemo(() => ({ workspaceId: wsId }), [wsId])
 
   useEffect(() => {
-    // Reset cross-workspace state when the wsId changes so stale conversations
-    // and artifacts from the previous workspace don't bleed through, then load
-    // the new workspace's conversation list so the sidebar is populated on
-    // every page within the workspace (including the home page).
-    useConversationStore.setState({ conversations: [], activeId: null })
-    useTopicStore.setState({ topics: [], topicParticipants: {} })
-    useArtifactStore.setState({ artifacts: {} })
-    useWorkspaceSettingsStore.setState({
-      agentConfig: null,
-      skills: null,
-      mcpEffectiveConnectors: null,
-      loading: false,
-      error: null,
-    })
-    useMcpToolRegistryStore.setState({ byWorkspace: {}, loading: {} })
+    // Reset cross-workspace state when the wsId changes so stale conversations,
+    // artifacts, and the right-hand panel from the previous workspace don't
+    // bleed through, then load the new workspace's conversation list so the
+    // sidebar is populated on every page within the workspace.
+    resetWorkspaceScopedClientState()
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     useConversationStore.getState().fetchList(client)

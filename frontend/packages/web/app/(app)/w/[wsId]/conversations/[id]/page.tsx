@@ -110,6 +110,9 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     })()
     return () => {
       cancelled = true
+      // Leaving this conversation (new chat, another chat, or another
+      // workspace page) must not leave the previous chat's rail open.
+      usePanelStore.getState().close()
       // Leaving the chat page must not leave activeId stuck on this
       // conversation — otherwise stream terminalization thinks the user is
       // still "present" on settings / home / another panel.

@@ -37,6 +37,7 @@ const messages = {
       expand: 'Expand preview',
       exitExpand: 'Exit expand',
       expandedPlaceholder: 'Expanded in preview',
+      unavailable: 'Preview unavailable',
       unknownType: 'Unknown type',
       justNow: 'just now',
       minutesAgo: '{n}m ago',
@@ -114,6 +115,23 @@ describe('ArtifactPanel expand theater', () => {
       deletedIds: {},
     })
     seedArtifact()
+  })
+
+  it('keeps a close control when the selected artifact is missing', () => {
+    useArtifactStore.setState({
+      artifacts: {},
+      versions: {},
+      selectedVersion: {},
+      loading: {},
+      deletedIds: {},
+    })
+    usePanelStore.getState().openArtifact('conv-1', 'art-missing')
+
+    renderPanel()
+
+    expect(screen.getByTestId('artifact-panel-empty')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Close'))
+    expect(usePanelStore.getState().view).toEqual({ type: 'closed' })
   })
 
   it('opens in-app expand and unmounts rail preview (single host)', () => {

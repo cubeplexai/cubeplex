@@ -1646,6 +1646,7 @@
       "expand": "Expand preview",
       "exitExpand": "Exit expand",
       "expandedPlaceholder": "Expanded in preview",
+      "unavailable": "Preview unavailable",
       "unknownType": "Unknown type",
       "justNow": "just now",
       "minutesAgo": "{n}m ago",

@@ -28,8 +28,8 @@ const TABS: {
 ]
 
 /** Last workspace/conversation the sandbox panel rendered for. Module-level so
- *  remounts (route changes) can detect a scope change even when conversation
- *  pages close the panel and home does not. */
+ *  remounts (route changes) can detect a scope change if a path leaves the
+ *  panel open. */
 let lastSandboxScopeKey: string | null = null
 
 function sandboxScopeKey(workspaceId: string | null, conversationId?: string | null): string {
@@ -50,10 +50,9 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const terminalRefreshRef = useRef<(() => Promise<unknown>) | null>(null)
   const scopeKey = sandboxScopeKey(workspaceId, conversationId)
 
-  // If the user navigates while the global sandbox panel stays open (e.g.
-  // conversation → home, or a path that does not call panelStore.close), drop
-  // any file path targeted for the previous conversation so we don't fetch it
-  // under the wrong sandbox scope.
+  // If the user navigates while the global sandbox panel stays open (a path
+  // that does not call panelStore.close), drop any file path targeted for the
+  // previous conversation so we don't fetch it under the wrong sandbox scope.
   useEffect(() => {
     const prev = lastSandboxScopeKey
     lastSandboxScopeKey = scopeKey
