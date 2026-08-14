@@ -83,6 +83,38 @@ async def test_sync_failure_does_not_set_flag_so_next_call_retries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_keepalives_touch_and_lease_while_command_runs() -> None:
+    """A long execute must refresh last_activity and the in-use lease."""
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = _make_sandbox()
+
+    async def slow_execute(
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: object = None,
+        as_root: bool = False,
+    ) -> object:
+        del command, timeout, envs, as_root
+        await asyncio.sleep(0.12)
+        return MagicMock(output="", exit_code=0)
+
+    sandbox.id = "sbx-keep"
+    sandbox.execute = slow_execute
+    lazy = _make_lazy(catalog, sandbox)
+    lazy._keepalive_interval_seconds = 0.04
+
+    await lazy.execute("pip install foo", timeout=300)
+
+    # start (_ensure_with_retry) + at least one mid-command beat
+    assert lazy._manager.touch.await_count >= 2
+    assert lazy._manager.renew_lease.await_count >= 2
+    lease_kwargs = lazy._manager.renew_lease.await_args_list[-1].kwargs
+    assert lease_kwargs["lease_seconds"] == 300
+
+
+@pytest.mark.asyncio
 async def test_concurrent_first_calls_only_sync_once() -> None:
     catalog = MagicMock()
     catalog.list_enabled_for_workspace = AsyncMock(return_value=[])

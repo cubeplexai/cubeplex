@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
 
@@ -38,6 +39,8 @@ from cubeplex.skills.sync_tar import (
 if TYPE_CHECKING:
     from cubeplex.sandbox.manager import SandboxManager
     from cubeplex.skills.service import SkillCatalogService
+
+T = TypeVar("T")
 
 
 async def _collect_files_for_push(
@@ -210,6 +213,10 @@ class LazySandbox(Sandbox):
         # Sizes the in-use lease window passed to ``manager.renew_lease``. None
         # falls back to the manager's default (``sandbox.lease_seconds``).
         self._op_timeout_seconds = op_timeout_seconds
+        # How often to refresh last_activity / lease while a command is running.
+        # Must stay below both ``sandbox.lease_seconds`` and the run stale
+        # threshold so a single long execute cannot look idle.
+        self._keepalive_interval_seconds = 30.0
         self._event_service = event_service
         self._sandbox: Sandbox | None = None
         self._user_sandbox_id: str | None = None
@@ -307,7 +314,7 @@ class LazySandbox(Sandbox):
                 self._synced_for_this_run = True
             # status == "failed" → flag stays False (F4 invariant)
 
-    async def _ensure_with_retry(self) -> Sandbox:
+    async def _ensure_with_retry(self, *, lease_seconds: int | None = None) -> Sandbox:
         """Ensure sandbox, retrying once if the existing one is broken."""
         try:
             sandbox = await self._ensure()
@@ -345,7 +352,9 @@ class LazySandbox(Sandbox):
                 sandbox.id,
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
-                lease_seconds=self._op_timeout_seconds,
+                lease_seconds=lease_seconds
+                if lease_seconds is not None
+                else self._op_timeout_seconds,
             )
         except Exception:
             logger.exception("Lazy sandbox: lease renew failed (non-fatal)")
@@ -369,6 +378,52 @@ class LazySandbox(Sandbox):
     def supports_pause(self) -> bool:
         return self._sandbox.supports_pause() if self._sandbox is not None else False
 
+    async def _run_with_keepalive(
+        self,
+        awaitable: Awaitable[T],
+        *,
+        lease_seconds: int | None,
+    ) -> T:
+        """Keep last_activity and the in-use lease fresh while ``awaitable`` runs.
+
+        A single touch at start is enough for the 1800s TTL when the command
+        is short. Long installs (up to 600s) outlive the default 300s lease,
+        so the idle-pause reaper would otherwise see an expired lease mid-op.
+        """
+
+        async def _beat() -> None:
+            while True:
+                await asyncio.sleep(self._keepalive_interval_seconds)
+                if self._sandbox is None:
+                    continue
+                try:
+                    await self._manager.touch(
+                        self._sandbox.id,
+                        org_id=self._org_id,
+                        workspace_id=self._workspace_id,
+                    )
+                except Exception:
+                    logger.exception("Lazy sandbox: keepalive touch failed (non-fatal)")
+                try:
+                    await self._manager.renew_lease(
+                        self._sandbox.id,
+                        org_id=self._org_id,
+                        workspace_id=self._workspace_id,
+                        lease_seconds=lease_seconds
+                        if lease_seconds is not None
+                        else self._op_timeout_seconds,
+                    )
+                except Exception:
+                    logger.exception("Lazy sandbox: keepalive lease failed (non-fatal)")
+
+        task = asyncio.create_task(_beat())
+        try:
+            return await awaitable
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
     async def execute(
         self,
         command: str,
@@ -377,9 +432,12 @@ class LazySandbox(Sandbox):
         envs: dict[str, str] | None = None,
         as_root: bool = False,
     ) -> ExecuteResult:
-        sandbox = await self._ensure_with_retry()
+        sandbox = await self._ensure_with_retry(lease_seconds=timeout)
         try:
-            return await sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root)
+            return await self._run_with_keepalive(
+                sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
+                lease_seconds=timeout,
+            )
         except Exception:
             # Sandbox may have died — invalidate and retry once
             async with self._lock:
@@ -389,7 +447,10 @@ class LazySandbox(Sandbox):
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
             await self._ensure_skills_synced(sandbox)
-            return await sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root)
+            return await self._run_with_keepalive(
+                sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
+                lease_seconds=timeout,
+            )
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         sandbox = await self._ensure_with_retry()

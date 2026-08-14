@@ -233,6 +233,33 @@ async def test_execute_tool_timeout_returns_error_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_forwards_custom_timeout() -> None:
+    sandbox = _make_sandbox()
+    exec_result = MagicMock()
+    exec_result.output = "ok"
+    exec_result.exit_code = 0
+    sandbox.execute = AsyncMock(return_value=exec_result)
+
+    tool = _make_execute_tool(sandbox)
+    args = _ExecuteArgs(command="pip install foo", timeout_seconds=300)
+    await tool.execute("tc-custom", args)
+
+    sandbox.execute.assert_called_once_with("pip install foo", timeout=300)
+
+
+def test_execute_args_rejects_timeout_above_max() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _ExecuteArgs(command="sleep 1", timeout_seconds=3600)
+
+
+def test_execute_args_accepts_timeout_at_max() -> None:
+    args = _ExecuteArgs(command="pip install foo", timeout_seconds=600)
+    assert args.timeout_seconds == 600
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_maps_timeout_exception_to_result() -> None:
     sandbox = _make_sandbox()
     sandbox.execute = AsyncMock(side_effect=TimeoutError("timed out"))
