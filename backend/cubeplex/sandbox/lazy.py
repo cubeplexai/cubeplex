@@ -314,7 +314,7 @@ class LazySandbox(Sandbox):
                 self._synced_for_this_run = True
             # status == "failed" → flag stays False (F4 invariant)
 
-    async def _ensure_with_retry(self, *, lease_seconds: int | None = None) -> Sandbox:
+    async def _ensure_with_retry(self) -> Sandbox:
         """Ensure sandbox, retrying once if the existing one is broken."""
         try:
             sandbox = await self._ensure()
@@ -345,16 +345,15 @@ class LazySandbox(Sandbox):
             logger.exception("Lazy sandbox: touch failed (non-fatal)")
 
         # Renew the in-use lease so the idle-pause reaper skips this sandbox
-        # while a tool call is in flight. Sized to op timeout when known;
-        # otherwise the manager falls back to its default lease window.
+        # while a tool call is in flight. Window is the default lease
+        # (``sandbox.lease_seconds``, 300s) unless the caller set
+        # ``op_timeout_seconds`` at construction — never the command timeout.
         try:
             await self._manager.renew_lease(
                 sandbox.id,
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
-                lease_seconds=lease_seconds
-                if lease_seconds is not None
-                else self._op_timeout_seconds,
+                lease_seconds=self._op_timeout_seconds,
             )
         except Exception:
             logger.exception("Lazy sandbox: lease renew failed (non-fatal)")
@@ -378,17 +377,11 @@ class LazySandbox(Sandbox):
     def supports_pause(self) -> bool:
         return self._sandbox.supports_pause() if self._sandbox is not None else False
 
-    async def _run_with_keepalive(
-        self,
-        awaitable: Awaitable[T],
-        *,
-        lease_seconds: int | None,
-    ) -> T:
+    async def _run_with_keepalive(self, awaitable: Awaitable[T]) -> T:
         """Keep last_activity and the in-use lease fresh while ``awaitable`` runs.
 
-        A single touch at start is enough for the 1800s TTL when the command
-        is short. Long installs (up to 600s) outlive the default 300s lease,
-        so the idle-pause reaper would otherwise see an expired lease mid-op.
+        Each beat extends the default lease window (300s), not the command
+        timeout. A 10s install must not pin the sandbox as in-use for 600s.
         """
 
         async def _beat() -> None:
@@ -409,9 +402,7 @@ class LazySandbox(Sandbox):
                         self._sandbox.id,
                         org_id=self._org_id,
                         workspace_id=self._workspace_id,
-                        lease_seconds=lease_seconds
-                        if lease_seconds is not None
-                        else self._op_timeout_seconds,
+                        lease_seconds=self._op_timeout_seconds,
                     )
                 except Exception:
                     logger.exception("Lazy sandbox: keepalive lease failed (non-fatal)")
@@ -432,11 +423,10 @@ class LazySandbox(Sandbox):
         envs: dict[str, str] | None = None,
         as_root: bool = False,
     ) -> ExecuteResult:
-        sandbox = await self._ensure_with_retry(lease_seconds=timeout)
+        sandbox = await self._ensure_with_retry()
         try:
             return await self._run_with_keepalive(
                 sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
-                lease_seconds=timeout,
             )
         except Exception:
             # Sandbox may have died — invalidate and retry once
@@ -449,7 +439,6 @@ class LazySandbox(Sandbox):
             await self._ensure_skills_synced(sandbox)
             return await self._run_with_keepalive(
                 sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
-                lease_seconds=timeout,
             )
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
