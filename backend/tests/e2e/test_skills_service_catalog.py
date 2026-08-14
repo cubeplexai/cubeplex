@@ -242,9 +242,7 @@ async def test_list_enabled_excludes_deprecated_skill(tmp_path, db_session) -> N
             installed_version="1.0.0",
             installed_by_user_id=user_id,
         )
-        bindings = WorkspaceSkillBindingRepository(
-            db_session, org_id=org_id, workspace_id=ws_id
-        )
+        bindings = WorkspaceSkillBindingRepository(db_session, org_id=org_id, workspace_id=ws_id)
         await bindings.enable(install.id)
 
     await skills.deprecate(gone.id)
