@@ -251,12 +251,12 @@ def test_execute_args_rejects_timeout_above_max() -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        _ExecuteArgs(command="sleep 1", timeout_seconds=3600)
+        _ExecuteArgs(command="sleep 1", timeout_seconds=1801)
 
 
 def test_execute_args_accepts_timeout_at_max() -> None:
-    args = _ExecuteArgs(command="pip install foo", timeout_seconds=600)
-    assert args.timeout_seconds == 600
+    args = _ExecuteArgs(command="pip install foo", timeout_seconds=1800)
+    assert args.timeout_seconds == 1800
 
 
 @pytest.mark.asyncio
