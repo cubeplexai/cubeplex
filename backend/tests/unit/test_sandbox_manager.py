@@ -29,8 +29,9 @@ def test_create_timeout_overrides_request_timeout_for_create_only(mock_encryptio
     default = manager._build_connection_config()
     create = manager._build_connection_config(request_timeout=manager._create_timeout)
 
-    # Ordinary commands keep the short per-command budget; the create call gets the
-    # longer budget so a cold image pull doesn't time out before the pod is ready.
+    # Ordinary commands use request_timeout (must cover max execute 600s).
+    # Create still passes create_timeout so a cold image pull has its own budget.
     assert default.request_timeout.total_seconds() == manager._request_timeout
     assert create.request_timeout.total_seconds() == manager._create_timeout
-    assert manager._create_timeout > manager._request_timeout
+    assert manager._request_timeout >= 600
+    assert manager._create_timeout != manager._request_timeout
