@@ -17,7 +17,12 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.models import Organization, OrgPreinstalledTombstone, OrgSkillInstall
+from cubeplex.models import (
+    Organization,
+    OrgPreinstalledTombstone,
+    OrgSkillInstall,
+    WorkspaceSkillBinding,
+)
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
 from cubeplex.skills.content_hash import compute_skill_version_hash
@@ -58,6 +63,7 @@ async def seed_preinstalled_skills(
 
     try:
         await _do_seed(preinstalled_dir, db_session)
+        await _purge_deprecated_preinstalled_installs(db_session)
         await _reconcile_preinstalled_installs(db_session)
     finally:
         try:
@@ -159,6 +165,52 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
         if skill.name not in found_names and skill.deprecated_at is None:
             await skills.deprecate(skill.id)
             logger.info("Deprecated removed preinstalled skill: {}", skill.name)
+
+
+async def _purge_deprecated_preinstalled_installs(db_session: AsyncSession) -> None:
+    """Drop leftover installs of preinstalled skills removed from disk.
+
+    ``_do_seed`` only sets ``deprecated_at``. Leftover ``OrgSkillInstall``
+    rows would otherwise keep slash / ``load_skill`` serving a skill the
+    Skills page catalog no longer shows. Bindings must be deleted first
+    (FK from ``workspace_skill_bindings`` to ``org_skill_installs``).
+    """
+    deprecated_ids = [
+        s.id
+        for s in await SkillRepository(db_session).list_preinstalled()
+        if s.deprecated_at is not None
+    ]
+    if not deprecated_ids:
+        return
+
+    install_ids = list(
+        (
+            await db_session.execute(
+                select(OrgSkillInstall.id).where(
+                    OrgSkillInstall.skill_id.in_(deprecated_ids),  # type: ignore[attr-defined]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not install_ids:
+        return
+
+    binding_ids = WorkspaceSkillBinding.org_skill_install_id.in_(install_ids)
+    await db_session.execute(delete(WorkspaceSkillBinding).where(binding_ids))
+    await db_session.flush()
+    result = await db_session.execute(
+        delete(OrgSkillInstall).where(
+            OrgSkillInstall.id.in_(install_ids),  # type: ignore[attr-defined]
+        )
+    )
+    purged = int(getattr(result, "rowcount", 0) or 0)
+    await db_session.commit()
+    logger.info(
+        "Purged leftover installs of deprecated preinstalled skills: {} row(s)",
+        purged,
+    )
 
 
 async def _reconcile_preinstalled_installs(db_session: AsyncSession) -> None:

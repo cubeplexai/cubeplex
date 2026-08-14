@@ -193,3 +193,66 @@ async def test_find_enabled_by_name(tmp_path, db_session) -> None:
     # Not-found case
     missing = await catalog.find_enabled_by_name(ws_id, org_id=org_id, name="nonexistent")
     assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_list_enabled_excludes_deprecated_skill(tmp_path, db_session) -> None:
+    """Deprecated catalog rows must not stay loadable via leftover installs.
+
+    Skills page catalog hides deprecated_at; slash / load_skill go through
+    list_enabled_for_workspace and must use the same filter.
+    """
+    skills = SkillRepository(db_session)
+    versions = SkillVersionRepository(db_session)
+    installs = OrgSkillInstallRepository(db_session)
+
+    org_id = f"org-{secrets.token_hex(4)}"
+    ws_id = f"ws-{secrets.token_hex(4)}"
+    user_id = "user-1"
+    await _seed_org_ws_user(db_session, org_id, ws_id, user_id)
+    live_name = f"pdf-{secrets.token_hex(4)}"
+    gone_name = f"pdf-creator-{secrets.token_hex(4)}"
+
+    live = await skills.create_preinstalled(
+        name=live_name, description="live", keywords=[], current_version="1.0.0"
+    )
+    gone = await skills.create_preinstalled(
+        name=gone_name, description="gone", keywords=[], current_version="1.0.0"
+    )
+    for skill in (live, gone):
+        prefix = global_skill_prefix(skill.name, "1.0.0")
+        await get_objectstore_client().upload_file(
+            f"{prefix}SKILL.md",
+            f"---\nname: {skill.name}\ndescription: d\nversion: 1.0.0\n---\n# x\n".encode(),
+        )
+        await versions.create(
+            skill_id=skill.id,
+            version="1.0.0",
+            description="d",
+            keywords=[],
+            raw_metadata={},
+            storage_prefix=prefix,
+            entry_file="SKILL.md",
+            uploaded_by_user_id=None,
+            content_hash="",
+        )
+        install = await installs.upsert(
+            org_id=org_id,
+            skill_id=skill.id,
+            installed_version="1.0.0",
+            installed_by_user_id=user_id,
+        )
+        bindings = WorkspaceSkillBindingRepository(
+            db_session, org_id=org_id, workspace_id=ws_id
+        )
+        await bindings.enable(install.id)
+
+    await skills.deprecate(gone.id)
+
+    catalog = SkillCatalogService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    resolved = await catalog.list_enabled_for_workspace(ws_id, org_id=org_id)
+    assert [r.name for r in resolved] == [live_name]
+    assert await catalog.find_enabled_by_name(ws_id, org_id=org_id, name=gone_name) is None
+    assert await catalog.find_enabled_by_name(ws_id, org_id=org_id, name=live_name) is not None

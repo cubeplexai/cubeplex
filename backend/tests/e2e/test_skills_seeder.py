@@ -432,3 +432,59 @@ async def test_tombstone_suppresses_workspace_private_preinstalled_install(
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
     assert await installs.get_workspace_private(org.id, workspace.id, skill.id) is None
     assert await installs.get(org.id, skill.id) is None
+
+
+@pytest.mark.asyncio
+async def test_seed_purges_installs_of_removed_preinstalled_skill(
+    tmp_path: Path, db_session, redis_client: Redis
+) -> None:
+    """Removing a preinstalled directory must drop leftover org installs.
+
+    Deprecating the catalog row alone left slash serving pdf-creator after
+    the Skills page hid it. Reconcile now deletes those install + binding rows.
+    """
+    from cubeplex.repositories.workspace import WorkspaceRepository
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillCatalogService
+
+    org = await OrganizationRepository(db_session).create(
+        name=f"gone-org-{uuid.uuid4().hex[:8]}",
+        slug=f"gone-org-{uuid.uuid4().hex[:8]}",
+    )
+    workspace = await WorkspaceRepository(db_session).create(
+        org_id=org.id, name=f"gone-ws-{uuid.uuid4().hex[:6]}"
+    )
+    keep_name = _unique_name("pdf")
+    gone_name = _unique_name("pdf-creator")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / keep_name, name=keep_name, version="1.0.0")
+    _write_skill_md(src / gone_name, name=gone_name, version="1.0.0")
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    skills = SkillRepository(db_session)
+    keep = await skills.find_by_name(keep_name)
+    gone = await skills.find_by_name(gone_name)
+    assert keep is not None
+    assert gone is not None
+    installs = OrgSkillInstallRepository(db_session)
+    assert await installs.get(org.id, keep.id) is not None
+    assert await installs.get(org.id, gone.id) is not None
+
+    # Disk no longer has the removed skill — same as shipping without pdf-creator.
+    for path in (src / gone_name).iterdir():
+        path.unlink()
+    (src / gone_name).rmdir()
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    gone = await skills.find_by_name(gone_name)
+    assert gone is not None
+    assert gone.deprecated_at is not None
+    assert await installs.get(org.id, gone.id) is None
+    assert await installs.get(org.id, keep.id) is not None
+
+    catalog = SkillCatalogService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    enabled = await catalog.list_enabled_for_workspace(workspace.id, org_id=org.id)
+    assert all(r.skill_id != gone.id for r in enabled)
+    assert any(r.skill_id == keep.id for r in enabled)
