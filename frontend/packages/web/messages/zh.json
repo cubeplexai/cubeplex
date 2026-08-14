@@ -1646,6 +1646,7 @@
       "expand": "展开预览",
       "exitExpand": "退出展开",
       "expandedPlaceholder": "已在大图预览中展开",
+      "unavailable": "预览不可用",
       "unknownType": "未知类型",
       "justNow": "刚刚",
       "minutesAgo": "{n} 分钟前",

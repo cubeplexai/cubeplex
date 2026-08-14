@@ -18,6 +18,7 @@ const storeMocks = vi.hoisted(() => ({
   hydrate: vi.fn(),
   attachedIds: vi.fn(),
   setWorkspaceId: vi.fn(),
+  closePanel: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -62,18 +63,21 @@ vi.mock('@cubeplex/core', () => {
       },
       { setState: storeMocks.setConversationState },
     ),
-    usePanelStore: (
-      selector: (state: {
-        view: { type: string }
-        openSandbox: () => void
-        close: () => void
-      }) => unknown,
-    ) =>
-      selector({
-        view: { type: 'closed' },
-        openSandbox: vi.fn(),
-        close: vi.fn(),
-      }),
+    usePanelStore: Object.assign(
+      (
+        selector: (state: {
+          view: { type: string }
+          openSandbox: () => void
+          close: () => void
+        }) => unknown,
+      ) =>
+        selector({
+          view: { type: 'closed' },
+          openSandbox: vi.fn(),
+          close: storeMocks.closePanel,
+        }),
+      { getState: () => ({ close: storeMocks.closePanel }) },
+    ),
     useMessageStore: (
       selector: (state: {
         send: typeof storeMocks.send
@@ -143,6 +147,15 @@ describe('WorkspaceHomePage', () => {
         dispatchEvent: vi.fn(),
       })),
     })
+  })
+
+  it('closes a leftover panel from the previous conversation on mount', async () => {
+    await act(async () => {
+      renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
+      await Promise.resolve()
+    })
+
+    expect(storeMocks.closePanel).toHaveBeenCalled()
   })
 
   it('eagerly creates a draft conversation on file pick and uploads to it', async () => {
