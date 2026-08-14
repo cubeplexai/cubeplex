@@ -70,6 +70,8 @@ class SkillCatalogService:
 
         Preinstalled skills with an org tombstone are never returned, even if an
         orphan install row still exists (e.g. boot reconcile race with uninstall).
+        Catalog rows with ``deprecated_at`` set (removed from disk) are also
+        excluded so slash / load_skill match the Skills page catalog filter.
         """
         explicit_disable = exists().where(
             WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
@@ -99,6 +101,7 @@ class SkillCatalogService:
             .where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
                 OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+                Skill.deprecated_at.is_(None),  # type: ignore[union-attr]
                 not_tombstoned,
                 or_(
                     explicit_enable,
@@ -136,6 +139,7 @@ class SkillCatalogService:
             .where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
                 OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+                Skill.deprecated_at.is_(None),  # type: ignore[union-attr]
                 not_tombstoned,
             )
         )
