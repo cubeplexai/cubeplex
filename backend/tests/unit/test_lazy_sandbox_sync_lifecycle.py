@@ -110,8 +110,10 @@ async def test_execute_keepalives_touch_and_lease_while_command_runs() -> None:
     # start (_ensure_with_retry) + at least one mid-command beat
     assert lazy._manager.touch.await_count >= 2
     assert lazy._manager.renew_lease.await_count >= 2
-    lease_kwargs = lazy._manager.renew_lease.await_args_list[-1].kwargs
-    assert lease_kwargs["lease_seconds"] == 300
+    # Lease window stays the construction default (None → manager 300s),
+    # not the command timeout.
+    for call in lazy._manager.renew_lease.await_args_list:
+        assert call.kwargs["lease_seconds"] is None
 
 
 @pytest.mark.asyncio
