@@ -186,10 +186,22 @@ return 1
 # Mark a run as stale and clear the active-run lock if it still points at it.
 # KEYS[1] = meta_key, KEYS[2] = active_key
 # ARGV[1] = expected_run_id
+# ARGV[2] = observed last_event_at/started_at used for the stale decision
+#           (empty = no timestamp CAS; used by startup recovery)
 _MARK_STALE_LUA = """
-if redis.call('HGET', KEYS[1], 'status') == 'running' then
-  redis.call('HSET', KEYS[1], 'status', 'stale')
+if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
+  return 0
 end
+if ARGV[2] ~= '' then
+  local current = redis.call('HGET', KEYS[1], 'last_event_at')
+  if (not current) or current == false or current == '' then
+    current = redis.call('HGET', KEYS[1], 'started_at')
+  end
+  if current ~= ARGV[2] then
+    return 0
+  end
+end
+redis.call('HSET', KEYS[1], 'status', 'stale')
 if redis.call('GET', KEYS[2]) == ARGV[1] then
   redis.call('DEL', KEYS[2])
 end
@@ -573,19 +585,26 @@ async def mark_run_stale(
     prefix: str,
     run_id: str,
     conversation_id: str,
-) -> None:
+    observed_last_event_at: str | None = None,
+) -> bool:
     """Atomically mark a run stale and release its active-run lock if held.
 
-    Idempotent: a no-op when status is already non-running and the active
-    key no longer points at this run.
+    When ``observed_last_event_at`` is set, the write is a CAS against that
+    timestamp (``last_event_at``, falling back to ``started_at``). A heartbeat
+    that refreshed the run after the caller decided it was stale makes this
+    a no-op so a live execute is not declared dead.
+
+    Returns True iff this call flipped the run to stale.
     """
-    await redis.eval(  # type: ignore[misc]
+    wrote = await redis.eval(  # type: ignore[misc]
         _MARK_STALE_LUA,
         2,
         _run_meta_key(prefix, run_id),
         _active_run_key(prefix, conversation_id),
         run_id,
+        observed_last_event_at or "",
     )
+    return int(wrote or 0) == 1
 
 
 def _last_error_key(prefix: str, conversation_id: str) -> str:

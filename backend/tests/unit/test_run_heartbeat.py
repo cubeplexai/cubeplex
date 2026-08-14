@@ -9,8 +9,10 @@ import pytest
 
 from cubeplex.streams.run_events import (
     create_run,
+    get_active_run,
     get_run_meta,
     iter_run_events,
+    mark_run_stale,
     touch_run_heartbeat,
 )
 
@@ -100,3 +102,78 @@ async def test_in_flight_tool_heartbeat_starts_and_stops() -> None:
     hb.observe(ToolExecutionEndEvent(tool_call_id="c1", tool_name="execute", is_error=False))
     assert hb._task is None or hb._task.done()
     hb.stop()
+
+
+@pytest.mark.asyncio
+async def test_mark_run_stale_cas_rejects_refreshed_heartbeat(redis) -> None:
+    prefix = "test_stale_cas"
+    run_id = "r-cas-hb"
+    conv_id = "c-cas-hb"
+    started = datetime.now(UTC).isoformat()
+    created = await create_run(
+        redis,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=started,
+        ttl_seconds=60,
+    )
+    assert created is not None
+    stale_at = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+    await redis.hset(f"{prefix}:run_meta:v2:{run_id}", "last_event_at", stale_at)
+
+    await touch_run_heartbeat(
+        redis,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        ttl_seconds=60,
+    )
+
+    marked = await mark_run_stale(
+        redis,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        observed_last_event_at=stale_at,
+    )
+    assert marked is False
+    meta = await get_run_meta(redis, prefix=prefix, run_id=run_id)
+    assert meta is not None
+    assert meta.status == "running"
+    active = await get_active_run(redis, prefix=prefix, conversation_id=conv_id)
+    assert active is not None
+    assert active.run_id == run_id
+
+
+@pytest.mark.asyncio
+async def test_mark_run_stale_cas_accepts_matching_timestamp(redis) -> None:
+    prefix = "test_stale_ok"
+    run_id = "r-stale-ok"
+    conv_id = "c-stale-ok"
+    created = await create_run(
+        redis,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+    assert created is not None
+    stale_at = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+    await redis.hset(f"{prefix}:run_meta:v2:{run_id}", "last_event_at", stale_at)
+
+    marked = await mark_run_stale(
+        redis,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        observed_last_event_at=stale_at,
+    )
+    assert marked is True
+    meta = await get_run_meta(redis, prefix=prefix, run_id=run_id)
+    assert meta is not None
+    assert meta.status == "stale"
+    assert await get_active_run(redis, prefix=prefix, conversation_id=conv_id) is None

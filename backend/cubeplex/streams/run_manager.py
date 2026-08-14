@@ -1117,13 +1117,15 @@ class RunManager:
 
                 threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 180))
                 if is_stale_meta(existing, threshold_seconds=threshold):
-                    await mark_run_stale(
+                    marked = await mark_run_stale(
                         self._redis,
                         prefix=self._key_prefix,
                         run_id=existing.run_id,
                         conversation_id=conversation_id,
+                        observed_last_event_at=existing.last_event_at or existing.started_at,
                     )
-                    created_run = await _try_create_run()
+                    if marked:
+                        created_run = await _try_create_run()
             if created_run is None:
                 existing = await get_active_run(
                     self._redis,
@@ -2459,21 +2461,23 @@ class RunManager:
                         )
                     final_status = classification.status
             finally:
-                # CAS guard: only write the terminal status if our claim
-                # token still owns the meta row. A racing flow that took
-                # over the slot wins the row; our finalize is a no-op.
-                await finalize_run_meta_if_claim_matches(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    claim_token=claim_token,
-                    status=final_status,
-                )
-                tool_heartbeat.stop()
-                self._agents.pop(run_id, None)
-                self._hitl_channels.pop(run_id, None)
-                await sse_queue.put(None)
-                await drainer
+                # Heartbeat / registration teardown must not depend on Redis
+                # finalize succeeding — a timeout there would leave the
+                # in-flight loop refreshing a dead resume.
+                try:
+                    await finalize_run_meta_if_claim_matches(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        claim_token=claim_token,
+                        status=final_status,
+                    )
+                finally:
+                    tool_heartbeat.stop()
+                    self._agents.pop(run_id, None)
+                    self._hitl_channels.pop(run_id, None)
+                    await sse_queue.put(None)
+                    await drainer
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)

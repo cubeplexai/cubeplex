@@ -1685,14 +1685,16 @@ async def get_conversation_bootstrap(
     if active_run is not None:
         threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 180))
         if is_stale_meta(active_run, threshold_seconds=threshold):
-            await mark_run_stale(
+            marked = await mark_run_stale(
                 rds.client,
                 prefix=rds.key_prefix,
                 run_id=active_run.run_id,
                 conversation_id=conversation_id,
+                observed_last_event_at=active_run.last_event_at or active_run.started_at,
             )
-            active_run = None
-            last_run_status = "stale"
+            if marked:
+                active_run = None
+                last_run_status = "stale"
 
     active_run_payload: dict[str, Any] | None = None
     if active_run is not None:
@@ -1856,12 +1858,20 @@ async def stream_run(
 
     threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 180))
     if is_stale_meta(run_meta, threshold_seconds=threshold):
-        await mark_run_stale(
+        marked = await mark_run_stale(
             rds.client,
             prefix=rds.key_prefix,
             run_id=run_id,
             conversation_id=conversation_id,
+            observed_last_event_at=run_meta.last_event_at or run_meta.started_at,
         )
+        if not marked:
+            return _build_run_streaming_response(
+                raw_request=raw_request,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                redis_handle=rds,
+            )
 
         async def _stale_stream() -> AsyncIterator[bytes]:
             from datetime import UTC, datetime
