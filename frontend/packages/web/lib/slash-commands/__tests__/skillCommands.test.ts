@@ -100,4 +100,39 @@ describe('filterSlashPalette order', () => {
     )
     expect(names).toEqual(['deep-research'])
   })
+
+  it('ranks name-prefix matches ahead of keyword-only matches for /p', () => {
+    const skillCmds = skillCommandsFromSummaries([
+      skill({ id: 's1', name: 'pdf', description: 'Generate a PDF' }),
+    ])
+    const names = filterSlashPalette(SLASH_COMMANDS, skillCmds, 'p', baseCtx()).map((c) => c.name)
+    expect(names).toContain('pdf')
+    expect(names).toContain('model')
+    expect(names.indexOf('pdf')).toBeLessThan(names.indexOf('model'))
+  })
+
+  it('ranks alias-prefix matches ahead of keyword-only matches', () => {
+    const always = (): boolean => true
+    const noop = (): void => undefined
+    const statics = [
+      {
+        id: 'model',
+        name: 'model',
+        category: 'composer' as const,
+        keywords: ['clearance'],
+        isAvailable: always,
+        run: noop,
+      },
+      {
+        id: 'new',
+        name: 'new',
+        aliases: ['clear'],
+        category: 'conversation' as const,
+        isAvailable: always,
+        run: noop,
+      },
+    ]
+    const names = filterSlashPalette(statics, [], 'cle', baseCtx()).map((c) => c.name)
+    expect(names).toEqual(['new', 'model'])
+  })
 })
