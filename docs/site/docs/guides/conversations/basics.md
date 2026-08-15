@@ -34,9 +34,10 @@ The input bar sits at the bottom. It includes:
 ## Slash commands
 
 Type **`/`** at the start of the composer (the whole draft is just the command
-token) to open a filterable command palette. Use ↑/↓ to highlight, **Enter** or
-**Tab** to run, **Esc** to dismiss. Client commands never create a user message
-bubble for the slash text.
+token) to open a filterable command palette. Keep typing to filter — commands
+whose name (or alias) starts with what you typed appear first, ahead of weaker
+keyword matches. Use ↑/↓ to highlight, **Enter** or **Tab** to run, **Esc** to
+dismiss. Client commands never create a user message bubble for the slash text.
 
 | Command | What it does |
 | --- | --- |
