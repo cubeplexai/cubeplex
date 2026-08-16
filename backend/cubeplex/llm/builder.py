@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 OnFailoverCb = Callable[[Any, Any, BaseException | str], Awaitable[None] | None]
+OnRetryCb = Callable[[Any, BaseException, int, float], Awaitable[None] | None]
 
 
 def build_provider(
@@ -105,6 +106,7 @@ def build_chain_model(
     *,
     cache_policy_factory: Callable[[str], "CacheMarkerPolicy | None"] | None = None,
     on_failover: OnFailoverCb | None = None,
+    on_retry: OnRetryCb | None = None,
 ) -> Any:
     """chain length 1 → BoundModel; >1 → FallbackBoundModel."""
     if len(preset.chain) == 0:
@@ -124,4 +126,4 @@ def build_chain_model(
         policy = cache_policy_factory(slug) if cache_policy_factory else None
         bounds.append(build_bound_model(snap, ref, cache_policy=policy))
 
-    return FallbackBoundModel(chain=tuple(bounds), on_failover=on_failover)
+    return FallbackBoundModel(chain=tuple(bounds), on_failover=on_failover, on_retry=on_retry)

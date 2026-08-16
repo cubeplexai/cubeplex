@@ -16,3 +16,15 @@ export interface FailoverEvent {
   }
   agent_id: string | null
 }
+
+export interface RetryEvent {
+  type: 'model_retry'
+  timestamp: string
+  data: {
+    model_ref: string
+    reason: string
+    attempt: number
+    wait_s: number
+  }
+  agent_id: string | null
+}

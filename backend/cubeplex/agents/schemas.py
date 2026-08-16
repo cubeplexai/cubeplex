@@ -244,3 +244,14 @@ class FailoverEvent(AgentEvent):
 
     type: Literal["model_failover"] = "model_failover"
     data: dict[str, Any] = Field(description="Event data with failed_ref, next_ref, reason")
+
+
+class RetryEvent(AgentEvent):
+    """Same-model retry before a failover hop.
+
+    Emitted by the on_retry callback wired into FallbackBoundModel.
+    data: {model_ref, reason, attempt, wait_s}
+    """
+
+    type: Literal["model_retry"] = "model_retry"
+    data: dict[str, Any] = Field(description="Event data with model_ref, reason, attempt, wait_s")

@@ -1,9 +1,11 @@
 """End-to-end fallback test using cubepi.FauxProvider chains.
 
-The primary FauxProvider raises ``RateLimited`` on its first stream so
-``FallbackBoundModel`` falls over to chain[1]; the backup FauxProvider
-returns a normal AssistantMessage. We verify the full pipeline:
+The primary FauxProvider raises ``RateLimited`` on every stream so
+``FallbackBoundModel`` retries then falls over to chain[1]; the backup
+FauxProvider returns a normal AssistantMessage. We verify the full pipeline:
 
+* ``model_retry`` SSE events fire for each same-model RateLimited retry
+  before the hop (cubepi 0.13.5);
 * a ``model_failover`` SSE event is emitted with the expected
   ``failed_ref`` / ``next_ref`` / ``reason``;
 * the final reply text comes from the backup chain leg.
@@ -166,9 +168,15 @@ async def fallback_client(
     primary = FauxProvider(provider_id="primary")
 
     def _raise_rate_limited(*args: Any, **kwargs: Any) -> Any:
-        raise RateLimited("simulated 429", provider="primary", model="m1")
+        # Wording must match cubepi's rate-limit classifier: FauxProvider
+        # raises inside the producer, so FallbackBoundModel sees a first-
+        # event error string rather than a live RateLimited exception.
+        raise RateLimited("rate limited", provider="primary", model="m1")
 
-    primary.set_responses([_raise_rate_limited])
+    # cubepi 0.13.5 retries the active model up to max_retries_per_model=3
+    # (4 attempts) on RateLimited. FauxProvider pops the queue each call,
+    # so queue enough 429s that every same-model retry still raises.
+    primary.set_responses([_raise_rate_limited] * 8)
 
     backup = FauxProvider(provider_id="backup")
     backup.set_responses(
@@ -252,6 +260,14 @@ async def test_main_agent_fails_over(fallback_client: httpx.AsyncClient) -> None
     errors = [e for e in events if e.get("type") == "error"]
     assert not errors, f"unexpected error events: {errors!r}"
 
+    retry_events = [e for e in events if e.get("type") == "model_retry"]
+    assert retry_events, (
+        f"expected model_retry events before the hop; got types {[e.get('type') for e in events]!r}"
+    )
+    assert [e["data"]["attempt"] for e in retry_events] == [1, 2, 3]
+    assert all(e["data"]["model_ref"] == "primary/m1" for e in retry_events)
+    assert all("rate limited" in e["data"]["reason"] for e in retry_events)
+
     failover_events = [e for e in events if e.get("type") == "model_failover"]
     assert failover_events, (
         f"expected a model_failover event; got types {[e.get('type') for e in events]!r}"
@@ -259,7 +275,7 @@ async def test_main_agent_fails_over(fallback_client: httpx.AsyncClient) -> None
     data = failover_events[0]["data"]
     assert data["failed_ref"] == "primary/m1", data
     assert data["next_ref"] == "backup/m1", data
-    assert "simulated 429" in data["reason"], data
+    assert "rate limited" in data["reason"], data
 
     text_events = [e for e in events if e.get("type") == "text_delta"]
     full_text = "".join((e.get("data") or {}).get("content", "") for e in text_events)

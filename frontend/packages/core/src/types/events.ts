@@ -67,6 +67,7 @@ export type AgentEventType =
   | 'ask_user_request'
   | 'ask_user_resolved'
   | 'model_failover'
+  | 'model_retry'
 
 /**
  * Slider values used by the composer. ``off`` maps to ``ReasoningControl.mode =
@@ -98,6 +99,20 @@ export interface FailoverEvent extends AgentEvent {
     failed_ref: string
     next_ref: string | null
     reason: string
+  }
+}
+
+/**
+ * Emitted by cubepi ``FallbackBoundModel.on_retry`` before a same-model
+ * retry sleep. ``wait_s`` is 0 when cubepi retries immediately.
+ */
+export interface RetryEvent extends AgentEvent {
+  type: 'model_retry'
+  data: {
+    model_ref: string
+    reason: string
+    attempt: number
+    wait_s: number
   }
 }
 

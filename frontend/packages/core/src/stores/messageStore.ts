@@ -13,6 +13,7 @@ import type {
   ContentBlock,
   ErrorEventData,
   FailoverEvent,
+  RetryEvent,
   Message,
   ReasoningEvent,
   TextDeltaEvent,
@@ -169,6 +170,12 @@ export interface MessageStore {
    * cleared with the rest of the in-flight stream state on send / cancel.
    */
   failoverEvents: Record<string, FailoverEvent[]>
+  /**
+   * Latest ``model_retry`` per conversation. Replaced in place (not
+   * appended) so the banner shows the current wait, not a stack of
+   * attempts. Cleared on failover, productive tokens, send, and cancel.
+   */
+  retryEvents: Record<string, RetryEvent | null>
   /** Per-conversation cursor into ``cubepi_messages.seq`` of the oldest message
    *  currently held in ``messages[conversationId]``. Pass as ``before_seq`` when
    *  the user scrolls up. ``null`` means the conversation is empty. */
@@ -221,6 +228,8 @@ export interface MessageStore {
    * future replay path (bootstrap, history) can share one entry point.
    */
   appendFailoverEvent(conversationId: string, event: FailoverEvent): void
+  setRetryEvent(conversationId: string, event: RetryEvent): void
+  clearRetryEvent(conversationId: string): void
   /**
    * Append a single history message (e.g. compaction marker from /compact)
    * without starting a run. Idempotent when the same ``id`` already exists.
@@ -653,7 +662,17 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
 
   const agentKey = event.agent_id ?? MAIN_AGENT_KEY
   const lastAppliedEventId = nextEventId(state.lastAppliedEventId, eventId)
-  const base = lastAppliedEventId ? { lastAppliedEventId } : {}
+  const convId = state.streamingConversationId
+  const shouldClearRetry =
+    Boolean(convId) &&
+    Boolean(convId && state.retryEvents[convId]) &&
+    (event.type === 'text_delta' || event.type === 'reasoning' || event.type === 'tool_call')
+  const base = {
+    ...(lastAppliedEventId ? { lastAppliedEventId } : {}),
+    ...(shouldClearRetry && convId
+      ? { retryEvents: { ...state.retryEvents, [convId]: null } }
+      : {}),
+  }
 
   if (event.type === 'text_delta') {
     const e = event as TextDeltaEvent
@@ -1290,9 +1309,16 @@ async function consumeRunStream(
       } else if (event.type === 'citation') {
         const citationData = event.data as unknown as import('../types').CitationData
         useCitationStore.getState().addCitation(conversationId, citationData)
+      } else if (event.type === 'model_retry') {
+        get().setRetryEvent(conversationId, event as RetryEvent)
+        set((s) => ({
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+        }))
+        continue
       } else if (event.type === 'model_failover') {
         // Append to the per-conversation banner list. Keep advancing the
         // applied-event cursor here so the next reattach doesn't replay it.
+        get().clearRetryEvent(conversationId)
         get().appendFailoverEvent(conversationId, event as FailoverEvent)
         set((s) => ({
           lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
@@ -1301,6 +1327,7 @@ async function consumeRunStream(
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
         flush()
+        get().clearRetryEvent(conversationId)
         let didTerminal = false
         set((s) => {
           const owns = ownsStreamingConversation(s, conversationId)
@@ -1338,6 +1365,7 @@ async function consumeRunStream(
         if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
         break
       } else if (event.type === 'done') {
+        get().clearRetryEvent(conversationId)
         const usage = (event.data as Record<string, unknown>).usage as
           import('../types').UsageSummary | undefined
         const paused = (event.data as Record<string, unknown>).paused === true
@@ -1445,6 +1473,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   pendingAsk: null,
   cancellingConversationIds: {},
   failoverEvents: {},
+  retryEvents: {},
   turnUsage: {},
   sessionUsage: {},
   contextWindow: {},
@@ -1461,6 +1490,18 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ...s.failoverEvents,
         [conversationId]: [...(s.failoverEvents[conversationId] ?? []), event],
       },
+    }))
+  },
+
+  setRetryEvent(conversationId, event) {
+    set((s) => ({
+      retryEvents: { ...s.retryEvents, [conversationId]: event },
+    }))
+  },
+
+  clearRetryEvent(conversationId) {
+    set((s) => ({
+      retryEvents: { ...s.retryEvents, [conversationId]: null },
     }))
   },
 
@@ -1956,6 +1997,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       pendingConfirmMap: {},
       pendingAsk: null,
       failoverEvents: { ...state.failoverEvents, [conversationId]: [] },
+      retryEvents: { ...state.retryEvents, [conversationId]: null },
       turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
 
@@ -2019,7 +2061,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           } else if (event.type === 'citation') {
             const citationData = event.data as unknown as import('../types').CitationData
             useCitationStore.getState().addCitation(conversationId, citationData)
+          } else if (event.type === 'model_retry') {
+            get().setRetryEvent(conversationId, event as RetryEvent)
+            set((s) => ({
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+            }))
+            continue
           } else if (event.type === 'model_failover') {
+            get().clearRetryEvent(conversationId)
             get().appendFailoverEvent(conversationId, event as FailoverEvent)
             set((s) => ({
               lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
@@ -2027,6 +2076,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             continue
           } else if (event.type === 'error') {
             const errData = event.data as ErrorEventData
+            get().clearRetryEvent(conversationId)
             const isActiveRunConflict = errData.error_code === 'active_run_conflict'
             const isTextOnly =
               (attachmentIds?.length ?? 0) === 0 && (attachments?.length ?? 0) === 0
@@ -2119,6 +2169,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
             break outer
           } else if (event.type === 'done') {
+            get().clearRetryEvent(conversationId)
             const usage = (event.data as Record<string, unknown>).usage as
               import('../types').UsageSummary | undefined
             const paused = (event.data as Record<string, unknown>).paused === true
@@ -2578,6 +2629,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       pendingConfirmMap: {},
       pendingAsk: null,
       cancellingConversationIds: {},
+      retryEvents: {},
       streamingConversationId: null,
       currentRunId: null,
       lastAppliedEventId: null,

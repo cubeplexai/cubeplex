@@ -26,20 +26,23 @@ from cubepi.providers.faux import FauxProvider
 from cubeplex.streams.run_manager import _subagent_model_for
 
 
-def _make_fallback_with_callback() -> tuple[FallbackBoundModel, Any]:
+def _make_fallback_with_callback() -> tuple[FallbackBoundModel, Any, Any]:
     primary = FauxProvider(provider_id="p1").model("m1")
     secondary = FauxProvider(provider_id="p2").model("m2")
 
     async def cb(failed: Any, nxt: Any, err: Any) -> None:  # pragma: no cover
         return None
 
-    fb = FallbackBoundModel(chain=(primary, secondary), on_failover=cb)
-    return fb, cb
+    async def retry_cb(failed: Any, err: Any, attempt: int, wait_s: float) -> None:
+        return None
+
+    fb = FallbackBoundModel(chain=(primary, secondary), on_failover=cb, on_retry=retry_cb)
+    return fb, cb, retry_cb
 
 
 def test_replace_strips_on_failover() -> None:
     """dataclasses.replace contract: copy with on_failover=None, original intact."""
-    fb, cb = _make_fallback_with_callback()
+    fb, cb, _retry_cb = _make_fallback_with_callback()
 
     stripped = replace(fb, on_failover=None)
 
@@ -51,15 +54,18 @@ def test_replace_strips_on_failover() -> None:
 
 
 def test_subagent_model_for_fallback_strips_callback() -> None:
-    """_subagent_model_for(FallbackBoundModel) returns a copy with on_failover=None."""
-    fb, cb = _make_fallback_with_callback()
+    """_subagent_model_for strips on_failover and on_retry so subagent hops
+    stay silent on the main conversation stream."""
+    fb, cb, retry_cb = _make_fallback_with_callback()
 
     sub = _subagent_model_for(fb)
 
     assert isinstance(sub, FallbackBoundModel)
     assert sub.on_failover is None
-    # Original main-agent model still carries the publisher closure.
+    assert sub.on_retry is None
+    # Original main-agent model still carries the publisher closures.
     assert fb.on_failover is cb
+    assert fb.on_retry is retry_cb
     assert sub.chain == fb.chain
 
 

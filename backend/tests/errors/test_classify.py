@@ -8,7 +8,9 @@ tests that cubepi typed exceptions map onto the correct ``ErrorCode``.
 from __future__ import annotations
 
 from cubepi.errors import (
+    ContentFiltered,
     ContextLengthExceeded,
+    ModelNotFound,
     ProviderAuthFailed,
     ProviderBadRequest,
     ProviderError,
@@ -67,6 +69,21 @@ def test_provider_bad_request_maps() -> None:
     exc = ProviderBadRequest("model_not_found", provider="openai", model="gpt-4o", status_code=400)
     code, _ = classify_exception(exc)
     assert code is ErrorCode.provider_bad_request
+
+
+def test_model_not_found_maps_before_parent_bad_request() -> None:
+    exc = ModelNotFound("unknown model", provider="openai", model="gpt-nope", status_code=404)
+    code, params = classify_exception(exc)
+    assert code is ErrorCode.model_not_found
+    assert params["model"] == "gpt-nope"
+    assert params["provider"] == "openai"
+
+
+def test_content_filtered_maps_before_parent_bad_request() -> None:
+    exc = ContentFiltered("content policy", provider="openai", model="gpt-4o", status_code=400)
+    code, params = classify_exception(exc)
+    assert code is ErrorCode.content_filtered
+    assert params["model"] == "gpt-4o"
 
 
 def test_unknown_provider_error_subclass_falls_back_to_bad_request() -> None:

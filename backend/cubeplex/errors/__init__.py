@@ -13,7 +13,9 @@ from enum import StrEnum
 from typing import Any
 
 from cubepi.errors import (
+    ContentFiltered,
     ContextLengthExceeded,
+    ModelNotFound,
     ProviderAuthFailed,
     ProviderBadRequest,
     ProviderError,
@@ -29,6 +31,8 @@ class ErrorCode(StrEnum):
     rate_limited = "rate_limited"
     provider_auth_failed = "provider_auth_failed"
     provider_unavailable = "provider_unavailable"
+    model_not_found = "model_not_found"
+    content_filtered = "content_filtered"
     provider_bad_request = "provider_bad_request"
     tool_failed = "tool_failed"
     internal_error = "internal_error"
@@ -87,6 +91,11 @@ def classify_exception(
         return ErrorCode.provider_auth_failed, _params_from(exc, override)
     if isinstance(exc, ProviderUnavailable):
         return ErrorCode.provider_unavailable, _params_from(exc, override)
+    # Subclasses of ProviderBadRequest — must precede the parent branch.
+    if isinstance(exc, ModelNotFound):
+        return ErrorCode.model_not_found, _params_from(exc, override)
+    if isinstance(exc, ContentFiltered):
+        return ErrorCode.content_filtered, _params_from(exc, override)
     if isinstance(exc, ProviderBadRequest):
         return ErrorCode.provider_bad_request, _params_from(exc, override)
     if isinstance(exc, ProviderError):
@@ -108,6 +117,10 @@ def english_fallback(code: ErrorCode, params: dict[str, Any]) -> str:
         return f"Authentication with the {model} provider failed. Check your API key."
     if code is ErrorCode.provider_unavailable:
         return f"The {model} provider is unavailable. Try again shortly."
+    if code is ErrorCode.model_not_found:
+        return f"{model} was not found. Check the model id or switch models."
+    if code is ErrorCode.content_filtered:
+        return f"The provider blocked this request to {model} for a content policy reason."
     if code is ErrorCode.provider_bad_request:
         return f"The request to {model} was rejected. See details for the raw error."
     if code is ErrorCode.tool_failed:

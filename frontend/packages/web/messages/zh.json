@@ -2221,6 +2221,8 @@
     "rate_limited": "{model} 触发了限流，请稍后再试。",
     "provider_auth_failed": "{provider} 鉴权失败，请到工作区设置检查 API key。",
     "provider_unavailable": "{provider} 暂时不可用，请稍后再试。",
+    "model_not_found": "{provider} 找不到模型 {model}。请检查模型 id 或换一个模型。",
+    "content_filtered": "{provider} 因内容策略拦截了对 {model} 的这次请求。",
     "provider_bad_request": "{provider} 拒绝了这次请求。在该轮详情中查看原始错误。",
     "tool_failed": "工具调用失败。在该轮详情中查看原始错误。",
     "internal_error": "发生了未知错误。在该轮详情中查看原始错误。"
