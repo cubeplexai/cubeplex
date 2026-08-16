@@ -34,32 +34,32 @@ function copyText(text: string): Promise<void> {
   })
 }
 
-const STATUS_LABEL: Record<Exclude<RunChipStatus, 'completed'>, string> = {
+const STATUS_LABEL = {
   stopping: 'statusStopping',
   stopped: 'statusStopped',
   reconnecting: 'statusReconnecting',
   disconnected: 'statusDisconnected',
   failed: 'statusFailed',
   incomplete: 'statusIncomplete',
-}
+} as const
 
-const STATUS_ARIA: Record<Exclude<RunChipStatus, 'completed'>, string> = {
+const STATUS_ARIA = {
   stopping: 'ariaStopping',
   stopped: 'ariaStopped',
   reconnecting: 'ariaReconnecting',
   disconnected: 'ariaDisconnected',
   failed: 'ariaFailed',
   incomplete: 'ariaIncomplete',
-}
+} as const
 
-const STATUS_DETAIL: Record<Exclude<RunChipStatus, 'completed'>, string> = {
+const STATUS_DETAIL = {
   stopping: 'detailStopping',
   stopped: 'detailStopped',
   reconnecting: 'detailReconnecting',
   disconnected: 'detailDisconnected',
   failed: 'detailFailed',
   incomplete: 'detailIncomplete',
-}
+} as const
 
 interface RunInfoChipProps {
   runId: string | null | undefined

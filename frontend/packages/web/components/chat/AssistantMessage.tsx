@@ -277,7 +277,6 @@ interface StreamingProps {
   sessionUsage?: never
   contextWindow?: never
   contextTokens?: never
-  workspaceId?: string | null
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
