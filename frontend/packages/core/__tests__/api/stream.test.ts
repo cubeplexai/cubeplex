@@ -55,4 +55,14 @@ describe('message stream errors', () => {
       params: { http_status: 409 },
     })
   })
+
+  it('does not invent a Connection lost run error when fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await expect(async () => {
+      for await (const _event of streamMessages(fakeClient(), 'conv-1', 'hello')) {
+        void _event
+      }
+    }).rejects.toThrow('Failed to fetch')
+  })
 })

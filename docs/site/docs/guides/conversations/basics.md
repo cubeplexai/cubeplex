@@ -78,7 +78,7 @@ Hover a completed assistant reply to reveal small action chips under the bubble:
 
 - **Copy** — copy that turn's text reply.
 - **Token usage** — the last LLM call's input/output/cache stats (session totals on the latest turn).
-- **Info** — show this turn's **Run ID** (and copy it). Useful when debugging with `cubepi trace` or filtering **Admin → Traces**.
+- **Info** — this turn's status and **Run ID**. A finished turn stays a quiet Info chip with the id (useful for `cubepi trace` or **Admin → Traces**). If you stopped the reply, the network dropped, the model failed, or the previous run was cut off, the chip stays visible with a short label. Open it for the reason, raw error (when there is one), and a copyable run id.
 - **Fork** — start a new conversation that continues from this turn.
 - **Timestamp** — relative time; hover for the absolute time.
 
@@ -86,7 +86,9 @@ Hover a completed assistant reply to reveal small action chips under the bubble:
 
 While the agent is responding, you can:
 
-- **Stop the response** — click the stop button (square icon) to cancel the current response. The composer stays locked and shows cancellation progress until the previous run has fully stopped.
+- **Stop the response** — click the stop button (square icon) to cancel the current response. That is not a failure: the chip under the turn says **Stopped**, and any text already generated stays. The composer stays locked until the previous run has fully stopped.
+
+If the browser disconnects mid-reply, the run keeps going on the server. The chip says **Reconnecting…** or **Connection lost** (with Retry) instead of treating it as a failed reply. Reconnect resumes the same turn; you can still press Stop.
 - **Steer mid-stream** — type a message while the agent is still responding and press Enter. This sends a "steer" instruction that redirects the agent without waiting for it to finish.
 
 When the agent needs your input (for example, a confirmation before proceeding), you can keep typing in the input bar. Text sent while the prompt card is waiting is queued as guidance for the same run; it does not answer the card. The agent receives that guidance after you answer, approve, deny, or cancel the card. Queued guidance survives a refresh and can be cancelled before the agent uses it.

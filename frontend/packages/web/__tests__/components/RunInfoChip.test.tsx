@@ -11,14 +11,33 @@ const messages = {
       runIdLabel: 'Run ID',
       copy: 'Copy run ID',
       copied: 'Copied',
+      retry: 'Retry',
+      statusStopping: 'Stopping…',
+      statusStopped: 'Stopped',
+      statusReconnecting: 'Reconnecting…',
+      statusDisconnected: 'Connection lost',
+      statusFailed: 'Reply failed',
+      statusIncomplete: 'Incomplete',
+      ariaStopping: 'This run is stopping',
+      ariaStopped: 'This run was stopped',
+      ariaReconnecting: 'Reconnecting to this run',
+      ariaDisconnected: 'Connection to this run was lost',
+      ariaFailed: 'This run failed',
+      ariaIncomplete: 'Previous response was incomplete',
+      detailStopping: 'Stopping this response.',
+      detailStopped: 'You stopped this response.',
+      detailReconnecting: 'Connection dropped. The run is still going.',
+      detailDisconnected: 'Connection dropped. The run is still going.',
+      detailFailed: 'The model or a tool failed during this turn.',
+      detailIncomplete: 'Previous response was incomplete (service exit). Please retry.',
     },
   },
 }
 
-function renderChip(runId: string | null | undefined) {
+function renderChip(runId: string | null | undefined, status?: 'completed' | 'stopped' | 'failed') {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <RunInfoChip runId={runId} />
+      <RunInfoChip runId={runId} status={status} />
     </NextIntlClientProvider>,
   )
 }
@@ -53,5 +72,13 @@ describe('RunInfoChip', () => {
       expect(writeText).toHaveBeenCalledWith('run-xyz')
     })
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+  })
+
+  it('shows a stopped label without treating it as a failure alert', () => {
+    renderChip('run-stop', 'stopped')
+    expect(screen.getByRole('button', { name: 'This run was stopped' })).toHaveTextContent(
+      'Stopped',
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

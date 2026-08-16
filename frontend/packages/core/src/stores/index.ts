@@ -7,6 +7,7 @@ export {
   type AgentStream,
   type PendingConfirm,
   type PendingAsk,
+  type StreamConnection,
 } from './messageStore'
 export {
   usePanelStore,

@@ -209,9 +209,10 @@ describe('messageStore.send', () => {
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
     expect(state.currentRunId).toBe('run-1')
     expect(state.isStreaming).toBe(true)
-    // socket closed mid-run → internal_error lands in errors[CONV_ID]
-    expect(state.errors[CONV_ID]).not.toBeNull()
-    expect(state.errors[CONV_ID]?.data.error_code).toBe('internal_error')
+    // socket closed mid-run → keep the run live and retry the GET stream
+    expect(state.errors[CONV_ID] ?? null).toBeNull()
+    expect(state.streamConnection).toBe('reconnecting')
+    useMessageStore.getState().clearStream()
   })
 
   it('keeps the bootstrap assistant content when history already contains it', async () => {

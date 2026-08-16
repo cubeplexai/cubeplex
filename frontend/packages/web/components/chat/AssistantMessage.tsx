@@ -12,8 +12,8 @@ import type {
   TurnUsage,
 } from '@cubeplex/core'
 import type { AgentStream } from '@cubeplex/core'
-import { useArtifactStore } from '@cubeplex/core'
-import { ChevronDown, ChevronRight, Sparkle, AlertCircle } from 'lucide-react'
+import { createApiClient, useArtifactStore, useMessageStore } from '@cubeplex/core'
+import { ChevronDown, ChevronRight, Sparkle } from 'lucide-react'
 import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageArtifactCard } from './ImageArtifactCard'
@@ -27,6 +27,7 @@ import { ToolCallItem } from './ToolCallItem'
 import { MessageActions } from './MessageActions'
 import { CopyButton, TimeChip } from './MessageMeta'
 import { RunInfoChip } from './RunInfoChip'
+import { deriveRunChipStatus } from '@/lib/runChipStatus'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
@@ -43,6 +44,53 @@ interface ReasoningBlockProps {
   isStreaming: boolean
   startedAt?: number
   durationMs?: number
+}
+
+function useTurnRunChip(opts: {
+  conversationId?: string
+  workspaceId?: string | null
+  runId?: string | null
+  stopReason?: string | null
+  isLive: boolean
+  isLastRun?: boolean
+}) {
+  const streamConnection = useMessageStore((s) => s.streamConnection)
+  const currentRunId = useMessageStore((s) => s.currentRunId)
+  const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
+  const cancelling = useMessageStore((s) =>
+    opts.conversationId ? Boolean(s.cancellingConversationIds[opts.conversationId]) : false,
+  )
+  const errorEntry = useMessageStore((s) =>
+    opts.conversationId ? (s.errors[opts.conversationId] ?? null) : null,
+  )
+  const live =
+    opts.isLive ||
+    (opts.runId != null &&
+      opts.runId === currentRunId &&
+      streamConnection != null &&
+      streamConnection !== 'connected')
+  const status = deriveRunChipStatus({
+    isLive: live,
+    cancelling,
+    streamConnection,
+    stopReason: opts.stopReason,
+    hasError: Boolean(
+      errorEntry && (opts.runId == null || !errorEntry.runId || errorEntry.runId === opts.runId),
+    ),
+    isStaleLastRun: Boolean(opts.isLastRun && lastRunStatus === 'stale'),
+  })
+  const onRetry =
+    opts.conversationId && (status === 'disconnected' || status === 'incomplete')
+      ? () => {
+          const client = createApiClient('')
+          if (opts.workspaceId) client.setWorkspaceId(opts.workspaceId)
+          void useMessageStore
+            .getState()
+            .loadMessages(client, opts.conversationId!, { force: true })
+        }
+      : undefined
+  const chipRunId = opts.runId ?? currentRunId
+  return { status, error: errorEntry?.data ?? null, onRetry, runId: chipRunId }
 }
 
 function formatDuration(ms: number): string {
@@ -229,6 +277,7 @@ interface StreamingProps {
   sessionUsage?: never
   contextWindow?: never
   contextTokens?: never
+  workspaceId?: string | null
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -663,12 +712,26 @@ export function AssistantMessage({
   const _hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)
 
-  // History assistants persisted from a failed turn have stop_reason="error"
-  // and an empty content list — without this branch the bubble renders nothing
-  // and the user sees a silent gap after their question. Surface the upstream
-  // error_message so the failure is at least visible (and addressable).
-  const errorMessage = (message?.error_message ?? '').trim()
-  const showErrorBubble = !isStreaming && message?.stop_reason === 'error' && errorMessage !== ''
+  const currentRunId = useMessageStore((s) => s.currentRunId)
+  const runChip = useTurnRunChip({
+    conversationId,
+    workspaceId,
+    runId: message?.run_id ?? currentRunId,
+    stopReason: message?.stop_reason,
+    isLive: isStreaming === true,
+    isLastRun,
+  })
+  const runChipError =
+    runChip.error ??
+    (message?.error_message ? { error_code: '', message: message.error_message } : null)
+  const runChipEl = (
+    <RunInfoChip
+      runId={runChip.runId}
+      status={runChip.status}
+      error={runChipError}
+      onRetry={runChip.onRetry}
+    />
+  )
 
   // Count subagent blocks for index assignment and cluster display
   let subagentCounter = 0
@@ -723,7 +786,7 @@ export function AssistantMessage({
 
   return (
     <div data-role="assistant" className="group space-y-2">
-      {(grouped.length > 0 || totalSubagents >= 2 || showErrorBubble) && (
+      {(grouped.length > 0 || totalSubagents >= 2 || runChip.status !== 'completed') && (
         <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, 'space-y-2')}>
           {totalSubagents >= 2 && (
             <SubAgentCluster
@@ -732,24 +795,7 @@ export function AssistantMessage({
             />
           )}
           {grouped.map((item, i) => renderItem(item, i))}
-          {showErrorBubble && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 px-3 py-2.5 rounded-lg
-                  bg-destructive/10 border border-destructive/20 text-destructive text-sm"
-            >
-              <AlertCircle className="size-4 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0 space-y-1">
-                <div className="font-medium">{t('assistantReplyFailed')}</div>
-                <pre
-                  className="whitespace-pre-wrap break-words font-mono text-xs leading-snug
-                      opacity-90 max-h-48 overflow-auto"
-                >
-                  {errorMessage}
-                </pre>
-              </div>
-            </div>
-          )}
+          {runChip.status !== 'completed' && runChipEl}
           {message && conversationId && showForkAction && (
             <div
               className="flex flex-wrap items-center gap-1 opacity-0
@@ -768,7 +814,7 @@ export function AssistantMessage({
               {isLastRun && workspaceId && (
                 <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
               )}
-              <RunInfoChip runId={message.run_id} />
+              {runChip.status === 'completed' && runChipEl}
               <MessageActions
                 conversationId={conversationId}
                 workspaceId={workspaceId ?? null}
@@ -793,29 +839,32 @@ export function AssistantMessage({
             <TaskProgressCard todos={historyTodos} isStreaming={false} />
           )}
           {isStreaming && (
-            <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-              {statusPhase === 'sandbox_creating' ? (
-                <span className="text-xs text-muted-foreground animate-pulse">
-                  {t('sandboxPreparing')}
-                </span>
-              ) : statusPhase === 'sandbox_failed' ? (
-                <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
-              ) : (
-                <>
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+            <div className="flex flex-wrap items-center gap-2">
+              <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
+                {statusPhase === 'sandbox_creating' ? (
+                  <span className="text-xs text-muted-foreground animate-pulse">
+                    {t('sandboxPreparing')}
+                  </span>
+                ) : statusPhase === 'sandbox_failed' ? (
+                  <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
+                ) : (
+                  <>
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:0ms]"
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+                    />
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:150ms]"
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+                    />
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:300ms]"
-                  />
-                </>
-              )}
+                    />
+                  </>
+                )}
+              </div>
+              {runChip.status !== 'completed' && runChipEl}
             </div>
           )}
         </div>

@@ -255,12 +255,7 @@ export async function* streamMessages(
     }
   } catch (err) {
     if ((err as Error).name === 'AbortError') return
-    yield {
-      type: 'error',
-      timestamp: new Date().toISOString(),
-      data: { message: 'Connection lost' },
-      agent_id: null,
-      agent_name: null,
-    } as AgentEvent
+    // Transport loss is not a run failure — the store reattaches via GET.
+    throw err
   }
 }
