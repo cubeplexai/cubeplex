@@ -2221,6 +2221,8 @@
     "rate_limited": "Rate limit hit for {model}. Wait a moment, then try again.",
     "provider_auth_failed": "Authentication with {provider} failed. Check your API key in workspace settings.",
     "provider_unavailable": "{provider} is unavailable right now. Try again shortly.",
+    "model_not_found": "{provider} does not offer {model}. Check the model id or switch models.",
+    "content_filtered": "{provider} blocked this request to {model} for a content policy reason.",
     "provider_bad_request": "{provider} rejected the request. Open this run's details to see the raw error.",
     "tool_failed": "A tool call failed during this turn. Open this run's details to see the raw error.",
     "internal_error": "Something went wrong. Open this run's details to see the raw error."

@@ -100,3 +100,35 @@ def test_chain_passes_on_failover_callback():
 
     bm = build_chain_model(snap, snap.model_presets[0], on_failover=cb)
     assert bm.on_failover is cb
+
+
+def test_chain_passes_on_retry_callback():
+    snap = LLMSnapshot(
+        providers={
+            "acme": ProviderConfig(
+                api="openai-completions",
+                base_url="https://x",
+                api_key="k",
+                models=[
+                    ModelConfig(id="m1", name="m1", context_window=128000, max_tokens=32000),
+                    ModelConfig(id="m2", name="m2", context_window=128000, max_tokens=32000),
+                ],
+            )
+        },
+        model_presets=(
+            ModelPreset(
+                key="d",
+                primary="acme/m1",
+                fallbacks=("acme/m2",),
+                kind="tier",
+                is_default=True,
+            ),
+        ),
+        task_routing={},
+    )
+
+    async def cb(failed, err, attempt, wait_s):
+        return None
+
+    bm = build_chain_model(snap, snap.model_presets[0], on_retry=cb)
+    assert bm.on_retry is cb

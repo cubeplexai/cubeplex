@@ -53,7 +53,7 @@ When thinking is enabled, the agent's response includes a collapsible **Thinking
 
 ## Model failover
 
-If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubePlex can automatically fail over to a backup model in the same preset's fallback chain. When this happens, a small banner appears in the chat naming the model it switched from and the one it switched to:
+If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubePlex can automatically fail over to a backup model in the same preset's fallback chain. Rate limits and brief outages are retried on the current model a few times first (up to about 15 seconds) before the switch — a banner in the chat shows the retry so the turn does not look stuck. When a failover happens, a small banner appears naming the model it switched from and the one it switched to:
 
 > Switched from `<provider>/<model>` to `<fallback-provider>/<fallback-model>`
 

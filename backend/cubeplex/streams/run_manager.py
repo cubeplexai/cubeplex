@@ -17,7 +17,14 @@ from loguru import logger
 from redis.asyncio import Redis
 from uuid_utils import uuid7
 
-from cubeplex.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, FailoverEvent, StatusEvent
+from cubeplex.agents.schemas import (
+    AgentEvent,
+    DoneEvent,
+    ErrorEvent,
+    FailoverEvent,
+    RetryEvent,
+    StatusEvent,
+)
 from cubeplex.errors import ErrorCode, classify_exception, english_fallback
 from cubeplex.services.usage import apply_last_llm_usage
 from cubeplex.streams.run_events import (
@@ -227,9 +234,35 @@ def _make_failover_publisher(
     return _on_failover
 
 
+def _make_retry_publisher(
+    run_id: str,
+    publish: Callable[[str, dict[str, Any]], Awaitable[None]],
+) -> Callable[[Any, BaseException, int, float], Awaitable[None]]:
+    """Build an on_retry callback that publishes a model_retry SSE event.
+
+    cubepi calls this before sleeping on a same-model retry
+    (RateLimited / ProviderUnavailable). The publish callable receives
+    (run_id, data_payload) — the data dict that will populate RetryEvent.data.
+    """
+
+    async def _on_retry(failed: Any, error: BaseException, attempt: int, wait_s: float) -> None:
+        await publish(
+            run_id,
+            {
+                "model_ref": f"{failed.spec.provider_id}/{failed.spec.id}",
+                "reason": str(error)[:256],
+                "attempt": attempt,
+                "wait_s": wait_s,
+            },
+        )
+
+    return _on_retry
+
+
 def _subagent_model_for(this_run_model: Any) -> Any:
-    """Strip ``on_failover`` so subagent failovers don't emit ``model_failover``
-    SSE events misattributed to the main agent (Fix-6).
+    """Strip ``on_failover`` / ``on_retry`` so subagent hops don't emit
+    ``model_failover`` / ``model_retry`` SSE events misattributed to the
+    main agent (Fix-6).
 
     Subagent failovers still occur transparently at the chain level — only the
     SSE notification is suppressed. ``FallbackBoundModel`` is a frozen
@@ -237,7 +270,7 @@ def _subagent_model_for(this_run_model: Any) -> Any:
     ``on_failover`` field, so pass through unchanged.
     """
     if isinstance(this_run_model, FallbackBoundModel):
-        return replace(this_run_model, on_failover=None)
+        return replace(this_run_model, on_failover=None, on_retry=None)
     return this_run_model
 
 
@@ -2560,7 +2593,15 @@ class RunManager:
             )
             await publish_stream_event(event, None)  # None agent_key = main agent
 
+        async def _publish_retry_dict(rid: str, data_payload: dict[str, Any]) -> None:
+            event = RetryEvent(
+                timestamp=datetime.now(UTC).isoformat(),
+                data=data_payload,
+            )
+            await publish_stream_event(event, None)
+
         on_failover_cb = _make_failover_publisher(run_id, _publish_failover_dict)
+        on_retry_cb = _make_retry_publisher(run_id, _publish_retry_dict)
 
         # chain_model is a BoundModel (single leg) or FallbackBoundModel (chain >1).
         this_run_model = build_chain_model(
@@ -2572,6 +2613,7 @@ class RunManager:
                 else None
             ),
             on_failover=on_failover_cb,
+            on_retry=on_retry_cb,
         )
 
         # Extract downstream-required vars from the bound model so middleware,

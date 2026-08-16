@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   useMessageStore,
@@ -29,9 +29,10 @@ import { SenderBadge } from './SenderBadge'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
+import { RetryBanner } from './RetryBanner'
 import { CompactionMarker } from './CompactionMarker'
 import { MessageAttachments } from './MessageAttachments'
-import type { FailoverEvent } from '@/lib/types/events'
+import type { FailoverEvent, RetryEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
@@ -48,6 +49,26 @@ interface MessageListProps {
 // Module-level stable empty array — avoids breaking Zustand's `===` selector
 // equality when the failover slice is missing/empty.
 const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
+
+function ModelChainBanners({
+  retryEvent,
+  failoverEvents,
+  showRetry,
+}: {
+  retryEvent: RetryEvent | null
+  failoverEvents: FailoverEvent[]
+  showRetry: boolean
+}) {
+  if (!showRetry && failoverEvents.length === 0) return null
+  return (
+    <>
+      {showRetry && retryEvent && <RetryBanner event={retryEvent} />}
+      {failoverEvents.map((event, idx) => (
+        <FailoverBanner key={`${event.timestamp}-${idx}`} event={event} />
+      ))}
+    </>
+  )
+}
 
 function msgTimestampMs(msg: Message): number {
   return msg.timestamp != null ? msg.timestamp * 1000 : 0
@@ -255,6 +276,9 @@ export function MessageList({ conversationId }: MessageListProps) {
     (s) =>
       (s.failoverEvents[conversationId] as FailoverEvent[] | undefined) ?? EMPTY_FAILOVER_EVENTS,
   )
+  const retryEvent = useMessageStore(
+    (s) => (s.retryEvents[conversationId] as RetryEvent | null | undefined) ?? null,
+  )
   const { workspaceId } = useWorkspaceContext()
   // Fork action needs to know whether this is a group chat (the backend
   // rejects forks on group chats, and we render the disabled-state UI for
@@ -400,6 +424,20 @@ export function MessageList({ conversationId }: MessageListProps) {
   // the last history assistant is still the PREVIOUS (pause-turn) one;
   // skipping it briefly hid the Thinking + Q/A card. Always render history.
   const lastAssistantId: string | null = null
+
+  // Failover/retry banners belong at the top of the current turn's model
+  // output. While streaming that is immediately above `mainStream`. After
+  // finalize, `mainStream` is gone and the same output lives in history —
+  // pin the banners immediately before the last assistant so they don't
+  // jump underneath the committed bubble.
+  const lastHistoryAssistantId = useMemo(() => {
+    const list = messages ?? []
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].role === 'assistant') return list[i].id
+    }
+    return null
+  }, [messages])
+  const bannersBeforeHistoryId = mainStream ? null : lastHistoryAssistantId
 
   // Per-run action row anchors: per cubepi semantics fork is run-granular
   // (``cp.fork`` takes ``after_run_id``, copies the whole run). A run may
@@ -587,77 +625,90 @@ export function MessageList({ conversationId }: MessageListProps) {
             // clicks a search hit. ``seq`` is missing only on the optimistic
             // user bubble before the run is claimed — those are never search
             // targets, so we just skip the anchor.
-            <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
-              {msg.role === 'user' &&
-                msg.metadata?.synthetic === true &&
-                (msg.metadata.synthetic_source === 'compaction' ||
-                  msg.metadata.kind === 'compaction') && (
-                  <CompactionMarker
-                    source={
-                      typeof msg.metadata.compaction === 'object' &&
-                      msg.metadata.compaction !== null &&
-                      'source' in msg.metadata.compaction
-                        ? String((msg.metadata.compaction as { source?: string }).source ?? '')
-                        : undefined
-                    }
-                  />
-                )}
-              {msg.role === 'user' && msg.metadata?.synthetic !== true && (
-                <>
-                  {/* Sender identity is stamped on every user message (incl. 1:1)
-                    so a 1:1→group conversion attributes past messages, but the
-                    badge only shows in group chats. */}
-                  {isGroupChat &&
-                    msg.metadata?.sender_display_name &&
-                    msg.metadata?.sender_user_id && (
-                      <SenderBadge
-                        userId={msg.metadata.sender_user_id}
-                        displayName={msg.metadata.sender_display_name}
-                      />
-                    )}
-                  {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
-                    <MessageAttachments
-                      attachments={msg.metadata.attachments}
-                      conversationId={conversationId}
+            <Fragment key={msg.id}>
+              {msg.id === bannersBeforeHistoryId && (
+                <ModelChainBanners
+                  retryEvent={retryEvent}
+                  failoverEvents={failoverEvents}
+                  showRetry={isStreaming}
+                />
+              )}
+              <div id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
+                {msg.role === 'user' &&
+                  msg.metadata?.synthetic === true &&
+                  (msg.metadata.synthetic_source === 'compaction' ||
+                    msg.metadata.kind === 'compaction') && (
+                    <CompactionMarker
+                      source={
+                        typeof msg.metadata.compaction === 'object' &&
+                        msg.metadata.compaction !== null &&
+                        'source' in msg.metadata.compaction
+                          ? String((msg.metadata.compaction as { source?: string }).source ?? '')
+                          : undefined
+                      }
                     />
                   )}
-                  <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
-                </>
-              )}
-              {msg.role === 'assistant' &&
-                msg.id !== lastAssistantId &&
-                (() => {
-                  const anchor = anchorByMessageId.get(msg.id)
-                  const isAnchor = anchor !== undefined
-                  const isLastRun = isAnchor && msg.id === lastAnchorMessageId
-                  return (
-                    <HistoryAssistantMessage
-                      message={msg}
-                      subagentDataMap={subagentDataMap}
-                      toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
-                      conversationId={conversationId}
-                      workspaceId={workspaceId}
-                      isGroupChat={isGroupChat}
-                      activeRunId={activeRunId}
-                      isStreamingTurn={isStreaming}
-                      showForkAction={isAnchor}
-                      turnUsage={anchor?.turnUsage ?? null}
-                      turnCopyText={anchor?.copyText ?? ''}
-                      isLastRun={isLastRun}
-                      sessionUsage={isLastRun ? sessionUsage : null}
-                      contextWindow={isLastRun ? contextWindow : null}
-                      contextTokens={isLastRun ? contextTokens : null}
-                      pendingConfirmMap={pendingConfirmMap}
-                      onSandboxConfirm={handleSandboxConfirm}
-                    />
-                  )
-                })()}
-            </div>
+                {msg.role === 'user' && msg.metadata?.synthetic !== true && (
+                  <>
+                    {/* Sender identity is stamped on every user message (incl. 1:1)
+                    so a 1:1→group conversion attributes past messages, but the
+                    badge only shows in group chats. */}
+                    {isGroupChat &&
+                      msg.metadata?.sender_display_name &&
+                      msg.metadata?.sender_user_id && (
+                        <SenderBadge
+                          userId={msg.metadata.sender_user_id}
+                          displayName={msg.metadata.sender_display_name}
+                        />
+                      )}
+                    {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                      <MessageAttachments
+                        attachments={msg.metadata.attachments}
+                        conversationId={conversationId}
+                      />
+                    )}
+                    <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
+                  </>
+                )}
+                {msg.role === 'assistant' &&
+                  msg.id !== lastAssistantId &&
+                  (() => {
+                    const anchor = anchorByMessageId.get(msg.id)
+                    const isAnchor = anchor !== undefined
+                    const isLastRun = isAnchor && msg.id === lastAnchorMessageId
+                    return (
+                      <HistoryAssistantMessage
+                        message={msg}
+                        subagentDataMap={subagentDataMap}
+                        toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
+                        conversationId={conversationId}
+                        workspaceId={workspaceId}
+                        isGroupChat={isGroupChat}
+                        activeRunId={activeRunId}
+                        isStreamingTurn={isStreaming}
+                        showForkAction={isAnchor}
+                        turnUsage={anchor?.turnUsage ?? null}
+                        turnCopyText={anchor?.copyText ?? ''}
+                        isLastRun={isLastRun}
+                        sessionUsage={isLastRun ? sessionUsage : null}
+                        contextWindow={isLastRun ? contextWindow : null}
+                        contextTokens={isLastRun ? contextTokens : null}
+                        pendingConfirmMap={pendingConfirmMap}
+                        onSandboxConfirm={handleSandboxConfirm}
+                      />
+                    )
+                  })()}
+              </div>
+            </Fragment>
           ))}
 
-          {failoverEvents.map((event, idx) => (
-            <FailoverBanner key={`${event.timestamp}-${idx}`} event={event} />
-          ))}
+          {bannersBeforeHistoryId == null && (
+            <ModelChainBanners
+              retryEvent={retryEvent}
+              failoverEvents={failoverEvents}
+              showRetry={isStreaming}
+            />
+          )}
 
           {mainStream && (
             <AssistantMessage
