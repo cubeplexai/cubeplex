@@ -121,8 +121,6 @@ function waitForReconnect(
     const poll = window.setInterval(() => {
       if (signal?.aborted || isStale?.()) onAbort()
     }, 50)
-    timer.unref?.()
-    poll.unref?.()
     signal?.addEventListener('abort', onAbort)
     if (typeof window !== 'undefined') {
       window.addEventListener('online', onWake)
