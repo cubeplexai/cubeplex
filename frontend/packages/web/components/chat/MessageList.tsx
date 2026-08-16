@@ -21,9 +21,7 @@ import type {
   SubagentSummary,
   TurnUsage,
 } from '@cubeplex/core'
-import { AlertCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
 import { SenderBadge } from './SenderBadge'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
@@ -245,7 +243,6 @@ export function MessageList({ conversationId }: MessageListProps) {
     mainStream,
     subAgentStreams,
     todos,
-    conversationError,
     toolResultMap,
     sessionUsage,
     contextWindow,
@@ -257,10 +254,8 @@ export function MessageList({ conversationId }: MessageListProps) {
   const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
   const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
   const oldestSeq = useMessageStore((s) => s.oldestSeqByConv[conversationId] ?? null)
-  const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
-  const isCancelling = useMessageStore((s) => Boolean(s.cancellingConversationIds[conversationId]))
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   // Active run guard for the per-message Fork action — MessageActions
   // greys the button when the clicked message is part of the still-running
@@ -719,6 +714,7 @@ export function MessageList({ conversationId }: MessageListProps) {
               toolResultMap={mergedToolResultMap}
               todos={todos}
               conversationId={conversationId}
+              workspaceId={workspaceId}
               pendingConfirmMap={pendingConfirmMap}
               onSandboxConfirm={handleSandboxConfirm}
             />
@@ -732,32 +728,6 @@ export function MessageList({ conversationId }: MessageListProps) {
                 onSubmit={handleAskUserSubmit}
                 onCancel={handleAskUserCancel}
               />
-            </div>
-          )}
-
-          {isCancelling && !pendingAsk && (
-            <div
-              role="status"
-              className={cn(
-                ASSISTANT_CONTENT_MAX_CLASS,
-                'my-2 flex items-center gap-2 rounded-lg border border-info-border',
-                'bg-info-surface px-3 py-2 text-sm text-info-fg',
-              )}
-            >
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-              <span>{t('cancellingRun')}</span>
-            </div>
-          )}
-
-          {conversationError && <RunErrorBubble data={conversationError.data} />}
-
-          {lastRunStatus === 'stale' && (
-            <div
-              className="flex items-start gap-2 px-3 py-2.5 rounded
-            bg-warning-surface border border-warning-border text-warning-fg text-sm"
-            >
-              <AlertCircle className="size-4 shrink-0 mt-0.5" />
-              <span>{t('incompletePreviousAnswer')}</span>
             </div>
           )}
         </div>

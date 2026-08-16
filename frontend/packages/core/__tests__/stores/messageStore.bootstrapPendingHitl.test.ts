@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useMessageStore } from '../../src/stores/messageStore'
 import type { ApiClient } from '../../src/api'
 
@@ -18,6 +18,7 @@ function makeBootstrapClient(body: Record<string, unknown>): ApiClient {
 }
 
 beforeEach(() => {
+  useMessageStore.getState().clearStream()
   useMessageStore.setState({
     pendingAsk: null,
     pendingConfirmMap: {},
@@ -26,6 +27,10 @@ beforeEach(() => {
     currentRunId: null,
     error: null,
   })
+})
+
+afterEach(() => {
+  useMessageStore.getState().clearStream()
 })
 
 describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {

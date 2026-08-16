@@ -48,7 +48,7 @@ describe('HistoryAssistantMessage', () => {
     expect(screen.getByText('hello world')).toBeInTheDocument()
   })
 
-  it('renders an error alert when stop_reason is "error" and content is empty', () => {
+  it('renders an error alert when stop_reason is "error" and content is empty', async () => {
     const errored = {
       id: 'msg-err',
       role: 'assistant',
@@ -66,7 +66,9 @@ describe('HistoryAssistantMessage', () => {
       />,
       { wrapper },
     )
-    const alert = screen.getByRole('alert')
-    expect(alert).toHaveTextContent(/messages\.347/)
+    const chip = screen.getByRole('button', { name: 'This run failed' })
+    expect(chip).toHaveTextContent('Reply failed')
+    chip.click()
+    expect(await screen.findByText(/messages\.347/)).toBeInTheDocument()
   })
 })

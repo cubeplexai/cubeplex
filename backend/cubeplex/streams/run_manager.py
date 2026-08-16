@@ -1692,6 +1692,25 @@ class RunManager:
         except asyncio.CancelledError:
             return
 
+    async def _record_user_cancel(self, *, run_id: str, conversation_id: str) -> None:
+        """Mark a user-stopped run cancelled. Do not publish an ErrorEvent.
+
+        Cancel is a status (cubepi persists ``stop_reason=aborted``). An
+        ``internal_error`` here is what the chat UI used to render as
+        "Reply failed / Run cancelled".
+        """
+        from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
+
+        await update_run_meta(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+            status="cancelled",
+        )
+        await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
+        with suppress(Exception):
+            await _repair_dangling_tool_calls(conversation_id)
+
     async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
         payload = event.model_dump()
         return await append_run_event(
@@ -1722,7 +1741,7 @@ class RunManager:
           - ``error_code`` + ``params``: emit a known code with explicit params
             (used by paths that already know what went wrong).
           - Legacy positional ``message`` / ``details``: emit an
-            ``internal_error`` event with the literal message (cancel path).
+            ``internal_error`` event with the literal message.
         """
 
         if exc is not None:
@@ -4078,22 +4097,12 @@ class RunManager:
                 cached_snapshot=extra_ref_holder.get("llm_snapshot"),
             )
         except asyncio.CancelledError:
-            await update_run_meta(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                status="cancelled",
-            )
-            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
             # Defense in depth: cubepi backfills tool_results for tool_calls
             # left dangling by a cancel, but if that cleanup was itself cut
             # short the persisted thread would still have orphan tool_calls
             # and every later turn would 400. Repair here too — idempotent, so
             # it's a no-op when cubepi already handled it.
-            with suppress(Exception):
-                await _repair_dangling_tool_calls(conversation_id)
-            with suppress(Exception):
-                await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
+            await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except Exception as exc:
             logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
@@ -4652,17 +4661,7 @@ class RunManager:
             # Mirror prompt-path cancel handling. We bypass the CAS guard
             # on cancel because cancel is itself the takeover signal — the
             # cancel route already set the meta state appropriately.
-            await update_run_meta(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                status="cancelled",
-            )
-            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
-            with suppress(Exception):
-                await _repair_dangling_tool_calls(conversation_id)
-            with suppress(Exception):
-                await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
+            await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except Exception as exc:
             logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
