@@ -484,6 +484,11 @@ class DingtalkConnector:
         del local_path, filename
         return False
 
+    async def upload_image(self, local_path: str) -> str | None:
+        """No inline-image key; image artifacts fall back to a share-link."""
+        del local_path
+        return None
+
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         """Send a rejection notice to the conversation."""
         return await self.reply_markdown(
