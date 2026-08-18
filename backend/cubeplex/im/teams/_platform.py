@@ -82,6 +82,26 @@ class TeamsPlatform:
 
         dispatcher = TeamsOpDispatcher(connector=connector, state=state)
 
+        from cubeplex.config import config
+        from cubeplex.im.artifacts import IMArtifactDispatcher
+
+        public_base = str(config.get("api.public_url", "") or "")
+        artifact_disp = IMArtifactDispatcher(
+            connector=connector,
+            redis=redis,
+            redis_key_prefix=key_prefix,
+            public_base_url=public_base,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+            conversation_id=queue_item.conversation_id,
+            card_state=state.card_state,
+            run_id=run_id,
+            platform="teams",
+            chat_id=channel_id,
+            reply_to_id=reply_to_id,
+            supports_inline_image=False,
+        )
+
         sender_open_id = queue_item.sender_open_id or queue_item.sender_im_user_id
         tailer = OutboundRunTailer(
             redis=redis,
@@ -90,6 +110,7 @@ class TeamsPlatform:
             connector=connector,
             state=state,
             dispatcher=dispatcher,
+            artifact_dispatcher=artifact_disp,
             responder_open_id=sender_open_id,
         )
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -201,3 +203,74 @@ async def test_tailer_drains_multi_segment_stream_before_wait() -> None:
     assert stream_count == 3
     assert dispatcher.sent_char_offset == 12
     assert dispatcher.ops[-1].kind == "finalize"
+
+
+@pytest.mark.asyncio
+async def test_tailer_flushes_presented_on_paused_hitl() -> None:
+    """present_file must go out at HITL pause, not wait for the user to answer.
+
+    Bug guarded: a login QR presented before ask_user would stay unsent
+    until resume (or forever if the user never answers).
+    """
+    state = RenderState(bot_name="bot", run_id="run-pf", stream_interval=0.0)
+    state.card_id = "card-1"
+    dispatcher = _RecordingDispatcher()
+    connector = _FakeConnector()
+    flushes = {"presented": 0, "artifacts": 0}
+
+    class _ArtDisp:
+        async def handle(self, _artifact: Any) -> None:
+            return None
+
+        async def handle_presented(self, _presented: Any) -> None:
+            return None
+
+        async def deliver_terminal_files(self) -> None:
+            flushes["artifacts"] += 1
+
+        async def deliver_terminal_presented(self) -> None:
+            flushes["presented"] += 1
+
+    tailer = OutboundRunTailer(
+        redis=AsyncMock(),
+        key_prefix="cb-",
+        run_id="run-pf",
+        connector=connector,
+        state=state,
+        dispatcher=dispatcher,
+        artifact_dispatcher=_ArtDisp(),
+        block_ms=1,
+    )
+
+    events: list[_FakeEvent] = [
+        _FakeEvent(
+            "1",
+            {"type": "presented_file", "data": {"presented_file": {"id": "pfile-1"}}},
+        ),
+        _FakeEvent("2", {"type": "done", "data": {"paused": True}}),
+    ]
+
+    async def _read(*_a: Any, **_k: Any) -> list[_FakeEvent]:
+        nonlocal events
+        batch, events = events, []
+        if not batch:
+            await asyncio.Event().wait()
+        return batch
+
+    import cubeplex.im.outbound as outbound_mod
+
+    original = outbound_mod.read_run_events_after
+    outbound_mod.read_run_events_after = _read  # type: ignore[assignment]
+    task = asyncio.create_task(tailer.run())
+    try:
+        for _ in range(100):
+            if flushes["presented"] == 1:
+                break
+            await asyncio.sleep(0.01)
+        assert flushes["presented"] == 1
+        assert flushes["artifacts"] == 0
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        outbound_mod.read_run_events_after = original  # type: ignore[assignment]

@@ -695,6 +695,20 @@ class OutboundRunTailer:
                                 logger.opt(exception=True).warning(
                                     "[outbound] deliver_terminal_presented raised"
                                 )
+                    elif (
+                        ev.payload.get("type") == "done"
+                        and bool((ev.payload.get("data") or {}).get("paused"))
+                        and self._artifact_dispatcher is not None
+                    ):
+                        # HITL pause is not a terminal finalize. present_file
+                        # is "show this now" — flush before the user answers
+                        # (QR / screenshot needed to continue).
+                        try:
+                            await self._artifact_dispatcher.deliver_terminal_presented()
+                        except Exception:
+                            logger.opt(exception=True).warning(
+                                "[outbound] paused-HITL presented flush raised"
+                            )
                 if pending_stream is not None and not done:
                     await self._flush_pending_stream(pending_stream)
                 if done:

@@ -3,6 +3,7 @@
 Guards the gap where present_file succeeded on the web but IM never sent.
 """
 
+import asyncio
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -188,6 +189,26 @@ async def test_presented_total_failure_releases_claim(
     await disp.deliver_terminal_presented()
     assert len(conn.send_file_calls) == 2
     assert claim_key in redis.store
+
+
+async def test_presented_cancelled_error_releases_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CancelledError is BaseException; a burned NX claim would skip replay."""
+
+    async def _boom(_p: dict[str, Any], **_kwargs: Any) -> Path:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(artifacts_mod, "download_presented_to_tempfile", _boom)
+    conn = _FakeConnector(send_ok=True)
+    redis = _FakeRedis()
+    disp = _dispatcher(conn, redis)
+    await disp.handle_presented(_presented())
+
+    claim_key = "t:im:presented_sent:run-1:pfile-1"
+    await disp.deliver_terminal_presented()
+    assert claim_key not in redis.store
+    assert conn.send_file_calls == []
 
 
 async def test_artifact_document_still_uses_send_file(

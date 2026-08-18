@@ -278,6 +278,10 @@ class IMArtifactDispatcher:
             logger.opt(exception=True).warning(
                 "[IM artifacts] terminal delivery raised for {}", artifact_id
             )
+        except BaseException:
+            # CancelledError is BaseException — must not leave a burned NX claim.
+            await self._release_claim(artifact_id)
+            raise
         if not delivered:
             # Nothing reached the user. Release the claim so a replay (tailer
             # restart) can retry rather than skipping at the claim check.
@@ -354,6 +358,10 @@ class IMArtifactDispatcher:
             logger.opt(exception=True).warning(
                 "[IM presented] terminal delivery raised for {}", file_id
             )
+        except BaseException:
+            # CancelledError is BaseException — must not leave a burned NX claim.
+            await self._release_presented_claim(file_id)
+            raise
         if not delivered:
             await self._release_presented_claim(file_id)
 

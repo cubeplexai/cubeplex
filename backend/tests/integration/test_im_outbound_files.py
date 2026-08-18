@@ -243,6 +243,25 @@ async def test_exception_during_delivery_releases_claim(
     assert len(conn.send_file_calls) == 1
 
 
+async def test_artifact_cancelled_error_releases_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CancelledError must not leave a burned artifact_sent claim."""
+    import asyncio
+
+    async def _boom(_a: dict[str, Any]) -> Path:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _boom)
+    conn = _FakeConnector(send_ok=True)
+    redis = _FakeRedis()
+    disp = _dispatcher(conn, redis)
+    await disp.handle(_artifact("document"))
+
+    await disp.deliver_terminal_files()
+    assert "t:im:artifact_sent:run-1:art-1" not in redis.store
+
+
 async def test_website_artifact_stays_share_link_never_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
