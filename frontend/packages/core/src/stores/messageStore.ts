@@ -903,7 +903,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     }
   }
 
-  if (event.type === 'artifact' || event.type === 'citation') {
+  if (event.type === 'artifact' || event.type === 'presented_file' || event.type === 'citation') {
     return base
   }
 

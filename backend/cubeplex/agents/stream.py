@@ -18,7 +18,7 @@ Two layers:
 
 cubeplex SSE event types (consumed by frontend):
     text_delta, reasoning, tool_call, tool_call_delta, tool_result,
-    usage, error, done, artifact, injected_message,
+    usage, error, done, artifact, presented_file, injected_message,
     sandbox_confirm_request, sandbox_confirm_resolved,
     ask_user_request, ask_user_resolved.
 """
@@ -112,6 +112,39 @@ def _artifact_event_from_tool_result(
         "type": "artifact",
         "action": parsed.get("action", "created"),
         "artifact": artifact,
+    }
+
+
+def _presented_file_event_from_tool_result(
+    tool_name: str, is_error: bool, result_text: str
+) -> dict[str, Any] | None:
+    """Build a presented_file SSE dict from a successful present_file result."""
+    if tool_name != "present_file" or is_error:
+        return None
+    try:
+        parsed = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    presented = parsed.get("presented_file")
+    if not isinstance(presented, dict) or not presented.get("id"):
+        return None
+    size_raw = presented.get("size_bytes") or 0
+    try:
+        size_bytes = int(size_raw)
+    except (TypeError, ValueError):
+        size_bytes = 0
+    return {
+        "type": "presented_file",
+        "presented_file": {
+            "id": str(presented["id"]),
+            "filename": str(presented.get("filename") or "file"),
+            "mime_type": str(presented.get("mime_type") or "application/octet-stream"),
+            "kind": str(presented.get("kind") or "other"),
+            "size_bytes": size_bytes,
+            "caption": presented.get("caption"),
+        },
     }
 
 
@@ -503,6 +536,9 @@ def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
         artifact_event = _artifact_event_from_tool_result(evt.tool_name, evt.is_error, text)
         if artifact_event is not None:
             out.append(artifact_event)
+        presented_event = _presented_file_event_from_tool_result(evt.tool_name, evt.is_error, text)
+        if presented_event is not None:
+            out.append(presented_event)
         return out
 
     if isinstance(evt, MessageEndEvent) and isinstance(evt.message, AssistantMessage):

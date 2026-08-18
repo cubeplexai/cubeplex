@@ -56,6 +56,7 @@ export type AgentEventType =
   | 'tool_call_delta'
   | 'tool_result'
   | 'artifact'
+  | 'presented_file'
   | 'error'
   | 'done'
   | 'citation'

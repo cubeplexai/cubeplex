@@ -871,6 +871,61 @@ class FeishuConnector:
             )
         return ok
 
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        """Upload and send a native ``image`` message to the bound chat."""
+        del filename  # Feishu image messages use image_key only.
+        if self._client is None or not self._channel_id:
+            return False
+        image_key = await self.upload_image(local_path)
+        if not image_key:
+            return False
+        payload = json.dumps({"image_key": image_key}, ensure_ascii=False)
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        if self._reply_to_id:
+            rbody = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type("image")
+                .reply_in_thread(False)
+                .build()
+            )
+            rreq = (
+                ReplyMessageRequest.builder()
+                .message_id(self._reply_to_id)
+                .request_body(rbody)
+                .build()
+            )
+            resp = await asyncio.to_thread(self._client.im.v1.message.reply, rreq)
+        else:
+            cbody = (
+                CreateMessageRequestBody.builder()
+                .receive_id(self._channel_id)
+                .msg_type("image")
+                .content(payload)
+                .build()
+            )
+            creq = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(cbody)
+                .build()
+            )
+            resp = await asyncio.to_thread(self._client.im.v1.message.create, creq)
+        ok = bool(getattr(resp, "success", lambda: False)())
+        if not ok:
+            logger.warning(
+                "[Feishu] send_image message failed: code={} msg={}",
+                getattr(resp, "code", None),
+                getattr(resp, "msg", None),
+            )
+        return ok
+
     # ------------------------------------------------------------------
     # Reactions (Task 10)
     # ------------------------------------------------------------------

@@ -234,6 +234,37 @@ def test_save_artifact_emits_artifact_event_after_tool_result() -> None:
     assert art_evt["artifact"] == artifact
 
 
+def test_present_file_emits_presented_file_event_after_tool_result() -> None:
+    """present_file success → tool_result + presented_file. IM outbound needs
+    the sibling; without it the tailer never sees the blob.
+    """
+    presented = {
+        "id": "pfile_1",
+        "filename": "qr.png",
+        "mime_type": "image/png",
+        "kind": "image",
+        "size_bytes": 12,
+        "caption": "Login QR",
+    }
+    payload = AgentToolResult(
+        content=[TextContent(text=json.dumps({"action": "presented", "presented_file": presented}))]
+    )
+    evt = ToolExecutionEndEvent(tool_call_id="tc-pf", tool_name="present_file", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result", "presented_file"]
+    assert out[1]["presented_file"]["id"] == "pfile_1"
+    assert out[1]["presented_file"]["kind"] == "image"
+
+
+def test_present_file_error_does_not_emit_presented_file_event() -> None:
+    payload = AgentToolResult(content=[TextContent(text='{"error": "Path not found"}')])
+    evt = ToolExecutionEndEvent(
+        tool_call_id="tc-pf-err", tool_name="present_file", result=payload, is_error=True
+    )
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result"]
+
+
 def test_save_artifact_error_does_not_emit_artifact_event() -> None:
     """An errored save_artifact result must not produce an artifact event."""
     payload = AgentToolResult(content=[TextContent(text='{"error": "Path not found"}')])

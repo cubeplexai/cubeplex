@@ -103,6 +103,17 @@ class ArtifactEvent(AgentEvent):
     )
 
 
+class PresentedFileEvent(AgentEvent):
+    """Presented-file event.
+
+    Emitted when the agent shows a sandbox file via present_file. IM outbound
+    consumes this; the web UI still renders from the tool_result.
+    """
+
+    type: Literal["presented_file"] = "presented_file"
+    data: dict[str, Any] = Field(description="presented_file object (id, filename, kind, …)")
+
+
 class ErrorEvent(AgentEvent):
     """Event emitted when an error occurs"""
 

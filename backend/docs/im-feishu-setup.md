@@ -103,6 +103,9 @@ HTTP boundary.
       is removed when the run completes.
 - [ ] DM the bot `draw me a chart` (or any prompt that emits an `image`
       artifact) → image appears inline as a Feishu image message.
+- [ ] DM the bot something that triggers `present_file` on a PNG (e.g. a
+      QR / screenshot) → a native Feishu **image** message arrives after
+      the card finalizes (not only a web-chat card).
 - [ ] DM the bot `build a tiny website` (or any non-image artifact) →
       "📎 view →" link appears in the thread; clicking it opens the share
       preview page; the preview disappears after the 7-day TTL.

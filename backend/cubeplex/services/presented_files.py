@@ -59,10 +59,23 @@ def normalize_sandbox_path(path: str) -> str:
     return normalized
 
 
+def presented_object_key(
+    *, org_id: str, workspace_id: str, conversation_id: str, file_id: str, filename: str
+) -> str:
+    """ObjectStore key for a presented file's original bytes."""
+    return f"presented/{org_id}/{workspace_id}/{conversation_id}/{file_id}/original/{filename}"
+
+
 def _build_object_key(
     *, org_id: str, workspace_id: str, conversation_id: str, file_id: str, filename: str
 ) -> str:
-    return f"presented/{org_id}/{workspace_id}/{conversation_id}/{file_id}/original/{filename}"
+    return presented_object_key(
+        org_id=org_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        file_id=file_id,
+        filename=filename,
+    )
 
 
 def _build_thumbnail_key(

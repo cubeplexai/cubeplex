@@ -236,6 +236,10 @@ class DiscordConnector:
         del local_path
         return None
 
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        """Discord has no distinct image message; attach via ``send_file``."""
+        return await self.send_file(local_path=local_path, filename=filename, mime=None)
+
     async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
         """Send a native file attachment to the bound channel."""
         del mime  # Discord infers type from the file.

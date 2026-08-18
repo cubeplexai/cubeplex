@@ -10,6 +10,7 @@ from cubeplex.middleware.artifacts import ArtifactMiddleware
 from cubeplex.services.presented_files import (
     PresentedFilePathError,
     normalize_sandbox_path,
+    presented_object_key,
 )
 
 
@@ -41,6 +42,19 @@ def test_normalize_sandbox_path_ok(raw: str, expected: str) -> None:
 def test_normalize_sandbox_path_rejects(raw: str) -> None:
     with pytest.raises(PresentedFilePathError):
         normalize_sandbox_path(raw)
+
+
+def test_presented_object_key_layout() -> None:
+    assert (
+        presented_object_key(
+            org_id="org-1",
+            workspace_id="ws-1",
+            conversation_id="conv-1",
+            file_id="pfile-1",
+            filename="qr.png",
+        )
+        == "presented/org-1/ws-1/conv-1/pfile-1/original/qr.png"
+    )
 
 
 def test_artifact_middleware_exposes_present_file() -> None:
