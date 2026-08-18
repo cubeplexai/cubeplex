@@ -88,6 +88,26 @@ class DingtalkPlatform:
             open_conversation_id=queue_item.channel_id,
         )
 
+        from cubeplex.config import config
+        from cubeplex.im.artifacts import IMArtifactDispatcher
+
+        public_base = str(config.get("api.public_url", "") or "")
+        artifact_disp = IMArtifactDispatcher(
+            connector=connector,
+            redis=app.state.redis,
+            redis_key_prefix=app.state.redis_key_prefix,
+            public_base_url=public_base,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+            conversation_id=queue_item.conversation_id,
+            card_state=state.card_state,
+            run_id=run_id,
+            platform="dingtalk",
+            chat_id=queue_item.channel_id,
+            reply_to_id=queue_item.reply_to_id,
+            supports_inline_image=False,
+        )
+
         shared_mode = False
         _sm = kwargs.get("session_maker")
         if _sm is not None:
@@ -107,6 +127,7 @@ class DingtalkPlatform:
             connector=connector,
             state=state,
             dispatcher=op_dispatcher,
+            artifact_dispatcher=artifact_disp,
             responder_open_id=queue_item.sender_open_id,
             shared_mode=shared_mode,
         )
