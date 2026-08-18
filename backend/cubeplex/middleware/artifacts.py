@@ -154,6 +154,7 @@ def _make_present_file_tool(
     conversation_id: str,
     org_id: str,
     workspace_id: str,
+    run_id: str | None = None,
 ) -> AgentTool[_PresentFileArgs]:
     """Build the present_file cubepi.AgentTool."""
 
@@ -178,6 +179,7 @@ def _make_present_file_tool(
                     conversation_id=conversation_id,
                     path=args.path,
                     caption=args.caption,
+                    run_id=run_id,
                 )
         except PresentedFilePathError as exc:
             return AgentToolResult(
@@ -261,17 +263,19 @@ class ArtifactMiddleware(Middleware):
         conversation_id: str,
         org_id: str,
         workspace_id: str,
+        run_id: str | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
         self.org_id = org_id
         self.workspace_id = workspace_id
+        self.run_id = run_id
 
         self._save_artifact_tool: AgentTool[Any] = _make_save_artifact_tool(
             sandbox, conversation_id, org_id, workspace_id
         )
         self._present_file_tool: AgentTool[Any] = _make_present_file_tool(
-            sandbox, conversation_id, org_id, workspace_id
+            sandbox, conversation_id, org_id, workspace_id, run_id
         )
 
     @property

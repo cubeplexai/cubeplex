@@ -480,6 +480,10 @@ class DingtalkConnector:
         del local_path, filename, mime
         return False
 
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        del local_path, filename
+        return False
+
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         """Send a rejection notice to the conversation."""
         return await self.reply_markdown(

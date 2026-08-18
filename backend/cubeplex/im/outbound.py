@@ -637,6 +637,17 @@ class OutboundRunTailer:
                             await self._artifact_dispatcher.handle(artifact_payload)
                         except Exception:
                             logger.opt(exception=True).warning("artifact dispatch failed")
+                    if (
+                        ev.payload.get("type") == "presented_file"
+                        and self._artifact_dispatcher is not None
+                    ):
+                        presented_payload = (ev.payload.get("data") or {}).get(
+                            "presented_file"
+                        ) or {}
+                        try:
+                            await self._artifact_dispatcher.handle_presented(presented_payload)
+                        except Exception:
+                            logger.opt(exception=True).warning("presented_file dispatch failed")
                     if op is None:
                         # Debounced text_deltas return None but still mutate
                         # card_state; refresh any pending stream so Feishu
@@ -677,6 +688,12 @@ class OutboundRunTailer:
                             except Exception:
                                 logger.opt(exception=True).warning(
                                     "[outbound] deliver_terminal_files raised"
+                                )
+                            try:
+                                await self._artifact_dispatcher.deliver_terminal_presented()
+                            except Exception:
+                                logger.opt(exception=True).warning(
+                                    "[outbound] deliver_terminal_presented raised"
                                 )
                 if pending_stream is not None and not done:
                     await self._flush_pending_stream(pending_stream)

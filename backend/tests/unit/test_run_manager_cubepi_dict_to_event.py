@@ -12,6 +12,7 @@ from __future__ import annotations
 from cubeplex.agents.schemas import (
     ArtifactEvent,
     ErrorEvent,
+    PresentedFileEvent,
     ReasoningEvent,
     TextDeltaEvent,
     ToolCallDeltaEvent,
@@ -36,6 +37,19 @@ def test_artifact_dict_maps_to_artifact_event() -> None:
     )
     assert isinstance(evt, ArtifactEvent)
     assert evt.data == {"action": "created", "artifact": artifact}
+
+
+def test_presented_file_dict_maps_to_event() -> None:
+    """Live presented_file dict must persist; unknown types are dropped."""
+    presented = {"id": "pfile_1", "filename": "qr.png", "kind": "image"}
+    evt = cubepi_dict_to_agent_event({"type": "presented_file", "presented_file": presented}, TS)
+    assert isinstance(evt, PresentedFileEvent)
+    assert evt.data == {"presented_file": presented}
+
+
+def test_presented_file_dict_without_id_is_dropped() -> None:
+    evt = cubepi_dict_to_agent_event({"type": "presented_file", "presented_file": {}}, TS)
+    assert evt is None
 
 
 def test_text_delta_dict_maps_to_text_delta_event() -> None:

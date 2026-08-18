@@ -1,14 +1,17 @@
-"""IM-side artifact dispatcher.
+"""IM-side artifact + presented-file dispatcher.
 
 Two responsibilities:
 
 - During the run, fold each artifact event into ``card_state.artifacts`` —
   inline image (where supported) or share-link, never a standalone message.
 - At run terminal, deliver file-kind artifacts as **native file messages**
-  (``deliver_terminal_files``), falling back to a share-link message on
-  oversize / upload failure.
+  (``deliver_terminal_files``) and ``present_file`` blobs as native image /
+  file messages (``deliver_terminal_presented``). Artifact oversize / upload
+  failure falls back to a share-link; presented files have no share URL and
+  fall back to a short text notice.
 
-See docs/dev/specs/2026-06-24-im-file-transfer-design.md.
+See docs/dev/specs/2026-06-24-im-file-transfer-design.md and
+docs/dev/specs/2026-08-17-im-present-file-design.md.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from cubeplex.im.types import OutboundConnector
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.objectstore.artifact_paths import artifact_file_key_candidates
 from cubeplex.services.artifact_share import mint_share_token as _default_mint
+from cubeplex.services.presented_files import presented_object_key
 
 MintShareToken = Callable[..., Awaitable[str]]
 
@@ -84,6 +88,49 @@ async def download_artifact_to_tempfile(artifact: dict[str, Any]) -> Path | None
         return Path(tmp.name)
 
 
+async def download_presented_to_tempfile(
+    presented: dict[str, Any],
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+) -> Path | None:
+    """Download a presented file from ObjectStore to a temp Path (caller unlinks)."""
+    file_id = str(presented.get("id") or "")
+    filename = str(presented.get("filename") or "")
+    if not file_id or not filename:
+        logger.warning("[IM presented] missing id/filename; cannot build key")
+        return None
+    conv = str(presented.get("conversation_id") or conversation_id)
+    key = presented_object_key(
+        org_id=org_id,
+        workspace_id=workspace_id,
+        conversation_id=conv,
+        file_id=file_id,
+        filename=filename,
+    )
+    store = get_objectstore_client()
+    try:
+        data, _ctype = await store.download_file(key)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code", "") in ("NoSuchKey", "404"):
+            logger.warning("[IM presented] objectstore file missing for {}", file_id)
+            return None
+        logger.opt(exception=True).warning(
+            "[IM presented] objectstore download failed for {}", file_id
+        )
+        return None
+    except (BotoCoreError, OSError, ValueError):
+        logger.opt(exception=True).warning(
+            "[IM presented] objectstore download failed for {}", file_id
+        )
+        return None
+    suffix = Path(filename).suffix
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(data)
+        return Path(tmp.name)
+
+
 @dataclass(slots=True)
 class IMArtifactDispatcher:
     """Bound to one run's card_state + share-link minting + native-file context."""
@@ -105,6 +152,8 @@ class IMArtifactDispatcher:
     # Raw artifact payloads captured at handle() time for terminal native-file
     # delivery (ArtifactItem on card_state lacks version/entry_file).
     _file_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # present_file payloads captured for terminal native image/file send.
+    _presented_files: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     async def handle(self, artifact: dict[str, Any]) -> None:
         artifact = {
@@ -173,6 +222,16 @@ class IMArtifactDispatcher:
         if url:
             item.share_url = url
 
+    async def handle_presented(self, presented: dict[str, Any]) -> None:
+        """Capture a presented_file event for terminal native delivery."""
+        file_id = str(presented.get("id") or "")
+        if not file_id:
+            return
+        self._presented_files[file_id] = {
+            **presented,
+            "conversation_id": presented.get("conversation_id") or self.conversation_id,
+        }
+
     async def deliver_terminal_files(self) -> None:
         """Send captured file-kind artifacts as native messages, concurrently.
 
@@ -184,6 +243,15 @@ class IMArtifactDispatcher:
             return
         await asyncio.gather(
             *(self._deliver_one(aid, art) for aid, art in self._file_artifacts.items()),
+            return_exceptions=True,
+        )
+
+    async def deliver_terminal_presented(self) -> None:
+        """Send captured present_file blobs as native image/file messages."""
+        if not self._presented_files:
+            return
+        await asyncio.gather(
+            *(self._deliver_presented_one(fid, pf) for fid, pf in self._presented_files.items()),
             return_exceptions=True,
         )
 
@@ -268,6 +336,90 @@ class IMArtifactDispatcher:
 
     def _claim_key(self, artifact_id: str) -> str:
         return f"{self.redis_key_prefix}:im:artifact_sent:{self.run_id}:{artifact_id}"
+
+    async def _deliver_presented_one(self, file_id: str, presented: dict[str, Any]) -> None:
+        try:
+            claimed = await self._claim_presented(file_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM presented] send-claim check failed for {}", file_id
+            )
+            return
+        if not claimed:
+            return
+        delivered = False
+        try:
+            delivered = await self._try_deliver_presented(presented)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM presented] terminal delivery raised for {}", file_id
+            )
+        if not delivered:
+            await self._release_presented_claim(file_id)
+
+    async def _try_deliver_presented(self, presented: dict[str, Any]) -> bool:
+        tmp_path = await download_presented_to_tempfile(
+            presented,
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            conversation_id=self.conversation_id,
+        )
+        if tmp_path is None:
+            return await self._presented_fallback(presented)
+        ok = False
+        filename = str(presented.get("filename") or "file")
+        mime = str(presented.get("mime_type") or "") or None
+        kind = str(presented.get("kind") or "")
+        try:
+            if tmp_path.stat().st_size <= outbound_size_cap(self.platform):
+                if kind == "image" and self.supports_inline_image:
+                    send = self.connector.send_image(local_path=str(tmp_path), filename=filename)
+                else:
+                    send = self.connector.send_file(
+                        local_path=str(tmp_path), filename=filename, mime=mime
+                    )
+                ok = bool(await asyncio.wait_for(send, timeout=_SEND_TIMEOUT))
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM presented] native send failed for {}", presented.get("id")
+            )
+            ok = False
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        if ok:
+            return True
+        return await self._presented_fallback(presented)
+
+    async def _claim_presented(self, file_id: str) -> bool:
+        if self.redis is None or not self.run_id:
+            return True
+        ttl = int(config.get("streaming.run_event_ttl_seconds", 43200))
+        return bool(await self.redis.set(self._presented_claim_key(file_id), "1", nx=True, ex=ttl))
+
+    async def _release_presented_claim(self, file_id: str) -> None:
+        if self.redis is None or not self.run_id:
+            return
+        try:
+            await self.redis.delete(self._presented_claim_key(file_id))
+        except Exception:
+            logger.opt(exception=True).warning("[IM presented] claim release failed")
+
+    def _presented_claim_key(self, file_id: str) -> str:
+        return f"{self.redis_key_prefix}:im:presented_sent:{self.run_id}:{file_id}"
+
+    async def _presented_fallback(self, presented: dict[str, Any]) -> bool:
+        """Text notice when native send is impossible. No presented share-link."""
+        name = str(presented.get("filename") or "file")
+        caption = presented.get("caption")
+        text = f"📎 {name}"
+        if isinstance(caption, str) and caption.strip():
+            text = f"📎 {name} — {caption.strip()}"
+        try:
+            sent = await self.connector.send_to_chat(self.chat_id, self.reply_to_id, text)
+            return sent is not None
+        except Exception:
+            logger.opt(exception=True).warning("[IM presented] fallback send_to_chat failed")
+            return False
 
     async def _fallback_link(self, item: ArtifactItem, artifact: dict[str, Any]) -> bool:
         """Send the artifact's share-link as a standalone message. Returns True

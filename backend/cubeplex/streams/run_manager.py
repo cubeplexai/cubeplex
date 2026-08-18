@@ -322,6 +322,7 @@ def _dicts_to_sse_events(
     from cubeplex.agents.schemas import (
         ArtifactEvent,
         CitationEvent,
+        PresentedFileEvent,
         ReasoningEvent,
         TextDeltaEvent,
         ToolCallDeltaEvent,
@@ -383,6 +384,15 @@ def _dicts_to_sse_events(
         elif evt_type == "artifact":
             events.append(
                 ArtifactEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "presented_file":
+            events.append(
+                PresentedFileEvent(
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
@@ -496,6 +506,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
         AskUserResolvedEvent,
         ErrorEvent,
         InjectedMessageEvent,
+        PresentedFileEvent,
         ReasoningEvent,
         SandboxConfirmRequestEvent,
         SandboxConfirmResolvedEvent,
@@ -569,6 +580,14 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
                 "action": d.get("action", "created"),
                 "artifact": d.get("artifact", {}),
             },
+        )
+    if t == "presented_file":
+        presented = d.get("presented_file") or {}
+        if not isinstance(presented, dict) or not presented.get("id"):
+            return None
+        return PresentedFileEvent(
+            timestamp=timestamp,
+            data={"presented_file": presented},
         )
     if t == "sandbox_confirm_request":
         args = d.get("args") or {}
@@ -3125,6 +3144,7 @@ class RunManager:
                     conversation_id=conversation_id,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
+                    run_id=run_id,
                 )
                 cubepi_middleware.append(artifact_mw)
                 # Middleware tools (save_artifact) collected for ordered merge below

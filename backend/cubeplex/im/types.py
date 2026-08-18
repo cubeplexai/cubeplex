@@ -22,14 +22,16 @@ class OutboundConnector(Protocol):
 
     Distinct from the stateless ``registry.PlatformConnector``: these methods
     run against a connector instance already bound to a chat (channel + reply
-    target). ``send_file`` is the explicit member that makes a missing
-    implementation a type error at the dispatcher rather than a runtime
-    ``AttributeError``. ``upload_image`` is included because the image path
-    calls it; connectors without an inline-image API return ``None`` so the
-    dispatcher falls back to a share-link.
+    target). ``send_file`` / ``send_image`` are explicit members so a
+    missing implementation is a type error at the dispatcher rather than a
+    runtime ``AttributeError``. ``upload_image`` is included because the
+    artifact image path calls it; connectors without an inline-image API
+    return ``None`` so the dispatcher falls back to a share-link.
     """
 
     async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool: ...
+
+    async def send_image(self, *, local_path: str, filename: str) -> bool: ...
 
     async def upload_image(self, local_path: str) -> str | None: ...
 

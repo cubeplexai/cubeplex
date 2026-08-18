@@ -59,6 +59,10 @@ class _FakeConnector:
         self.send_file_calls.append({"filename": filename})
         return self.send_ok
 
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        self.send_file_calls.append({"filename": filename})
+        return self.send_ok
+
     async def upload_image(self, local_path: str) -> str | None:
         return None
 

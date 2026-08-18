@@ -297,6 +297,10 @@ class SlackConnector:
         del local_path
         return None
 
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        """Slack has no distinct image message; attach via ``send_file``."""
+        return await self.send_file(local_path=local_path, filename=filename, mime=None)
+
     async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
         """Upload + send a native file to the bound channel via files_upload_v2."""
         del mime  # Slack infers type from the filename/bytes.

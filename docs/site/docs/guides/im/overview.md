@@ -14,7 +14,7 @@ Every platform follows the same four-step flow:
 1. **Bind a bot.** A workspace member registers the bot's credentials (app ID, secrets, tokens) against the workspace. CubePlex stores them encrypted and creates an **IM connector account**.
 2. **Inbound message arrives.** The platform delivers each message to CubePlex — either by pushing it to a webhook URL you configure in the platform's console, or over a persistent socket CubePlex opens to the platform (see [Delivery modes](#delivery-modes)).
 3. **Identity gate + agent run.** CubePlex figures out *which CubePlex user* the sender is (see [Identity linking](#identity-linking)), confirms they belong to the workspace, then starts an agent run on their behalf.
-4. **Reply.** The agent's response streams back into the chat. On Feishu it renders as a live-updating interactive card; on other platforms it posts as a message (and edits in place where the platform allows).
+4. **Reply.** The agent's response streams back into the chat. On Feishu it renders as a live-updating interactive card; on other platforms it posts as a message (and edits in place where the platform allows). Files the agent shows you (`present_file`) or saves as downloadable deliverables (`save_artifact`) are sent as native image or file messages on Feishu, Slack, and Discord when the run finishes. Interactive websites still arrive as a share link.
 
 The bot runs each message as a real CubePlex user, so permissions, model access, and tool access are exactly what that user would have in the web app. If a sender can't be matched to a workspace member, the bot replies that it can't help and the run never starts.
 

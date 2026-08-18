@@ -14,6 +14,8 @@ You do not create artifacts directly. The agent creates them by calling one of t
 - **`save_artifact`** — registers a file or set of files the agent wrote (a website, document, code project, data file, or skill bundle) as an artifact.
 - **`generate_image`** — produces an image artifact directly from a prompt.
 
+When the agent only needs you to **see a file right now** (a login QR code, a screenshot, a one-off export) it uses **`present_file`** instead. That file appears inline in the chat and is **not** added to the artifact gallery. On Feishu, Slack, or Discord the same file is delivered as a native image or file message when the reply finishes.
+
 This happens naturally when you ask the agent to build something concrete:
 
 - "Build me a landing page"
