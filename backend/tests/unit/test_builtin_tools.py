@@ -170,3 +170,84 @@ async def test_view_images_returns_error_when_model_has_no_image_support() -> No
     result = await tool.execute("tc-vi-1", args, signal=None, on_update=None)
     assert result.is_error is True
     assert "not support" in result.content[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_view_images_does_not_cold_start_lazy_sandbox() -> None:
+    """User-uploaded images live in ObjectStore. Hitting sandbox.download on
+    an unused LazySandbox would provision a container before the fallback."""
+    from collections.abc import AsyncGenerator
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    sandbox = MagicMock()
+    sandbox.initialized = False
+    sandbox.download = AsyncMock(side_effect=AssertionError("must not cold-start"))
+
+    mock_objectstore = MagicMock()
+    mock_capabilities = MagicMock()
+    mock_capabilities.supports_image.return_value = True
+
+    repo = MagicMock()
+    repo.find_by_sandbox_path = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def _ses() -> AsyncGenerator[MagicMock, None]:
+        yield MagicMock()
+
+    tool = make_view_images_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        objectstore=mock_objectstore,
+        capabilities=mock_capabilities,
+        sandbox=sandbox,
+    )
+    args = ViewImagesInput(paths=["/workspace/uploads/c1/a.png"])
+    with (
+        patch("cubeplex.db.engine.async_session_maker", _ses),
+        patch("cubeplex.repositories.AttachmentRepository", MagicMock(return_value=repo)),
+    ):
+        result = await tool.execute("tc-vi-2", args, signal=None, on_update=None)
+
+    sandbox.download.assert_not_called()
+    assert not result.is_error
+    assert "image not found" in result.content[-1].text
+
+
+@pytest.mark.asyncio
+async def test_view_images_reads_initialized_sandbox_first() -> None:
+    from collections.abc import AsyncGenerator
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    sandbox = MagicMock()
+    sandbox.initialized = True
+    sandbox.download = AsyncMock(return_value=[("/workspace/shot.png", b"not-an-image")])
+
+    mock_objectstore = MagicMock()
+    mock_objectstore.download_file = AsyncMock()
+    mock_capabilities = MagicMock()
+    mock_capabilities.supports_image.return_value = True
+
+    @asynccontextmanager
+    async def _ses() -> AsyncGenerator[MagicMock, None]:
+        yield MagicMock()
+
+    tool = make_view_images_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        objectstore=mock_objectstore,
+        capabilities=mock_capabilities,
+        sandbox=sandbox,
+    )
+    args = ViewImagesInput(paths=["/workspace/shot.png"])
+    with (
+        patch("cubeplex.db.engine.async_session_maker", _ses),
+        patch("cubeplex.repositories.AttachmentRepository", MagicMock()),
+    ):
+        result = await tool.execute("tc-vi-3", args, signal=None, on_update=None)
+
+    sandbox.download.assert_awaited_once_with(["/workspace/shot.png"])
+    mock_objectstore.download_file.assert_not_called()
+    # Bytes are not a real image, so resize fails and we report the error.
+    assert "error" in result.content[-1].text.lower()
