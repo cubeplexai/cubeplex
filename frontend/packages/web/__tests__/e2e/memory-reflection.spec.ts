@@ -18,11 +18,10 @@ test('preference message triggers reflection and surfaces memory chip', async ({
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
 
-  // After AgentEndEvent fires, the detached ReflectionRunner spawns a separate
-  // LLM call which reads the last turn and decides whether to save memory.
-  // The chip appears once the UserEvent reaches the frontend SSE channel.
-  // Generous timeout because reflection LLM latency varies by provider.
-  await expect(page.getByRole('button', { name: /已记住|已更新/ })).toBeVisible({
+  // MemoryUpdateChip is a permanent per-conversation count ("1 memories" /
+  // "1 条记忆"). The main agent may save via tools, or the detached
+  // ReflectionRunner publishes a UserEvent that refetches the count.
+  await expect(page.getByRole('button', { name: /\d+\s+(memories|条记忆)/ })).toBeVisible({
     timeout: 45_000,
   })
 })
