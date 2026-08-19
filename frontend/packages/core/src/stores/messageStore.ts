@@ -37,7 +37,13 @@ import {
   streamMessages,
   streamRun,
 } from '../api'
-import { canAutoOpenReplacePanel, shouldAutoOpenArtifactPreview } from '../lib/autoOpenPreview'
+import {
+  canAutoOpenBrowserPanel,
+  canAutoOpenReplacePanel,
+  isBrowserToolCall,
+  shouldAutoOpenArtifactPreview,
+  shouldAutoOpenBrowserPreview,
+} from '../lib/autoOpenPreview'
 import { useArtifactStore } from './artifactStore'
 import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
@@ -438,6 +444,31 @@ function applyArtifactSseEvent(
   panel.openArtifact(conversationId, artifact.id, 'auto')
 }
 
+/**
+ * Open the sandbox browser tab when the agent starts driving the live browser.
+ * Sync so focus cannot change between the gate check and openSandbox.
+ */
+function maybeAutoOpenBrowserPreview(
+  conversationId: string | null,
+  toolName: string,
+  args: Record<string, unknown>,
+): void {
+  if (!conversationId) return
+  if (!isBrowserToolCall(toolName, args)) return
+  const viewingId = useConversationStore.getState().viewingConversationId
+  if (!shouldAutoOpenBrowserPreview(conversationId, viewingId)) return
+  const panel = usePanelStore.getState()
+  if (!canAutoOpenBrowserPanel(panel.view)) return
+  if (
+    panel.view.type === 'sandbox' &&
+    panel.view.initialTab === 'browser' &&
+    !panel.view.initialFilePath
+  ) {
+    return
+  }
+  panel.openSandbox('browser')
+}
+
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
 const loadMessagesInFlight = new Map<string, Promise<void>>()
@@ -780,6 +811,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const existingStartedAt = state.toolStartedMap[e.data.tool_call_id]
     const nextTodos =
       e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : state.todos
+    maybeAutoOpenBrowserPreview(convId, e.data.name, e.data.arguments)
 
     return {
       ...base,

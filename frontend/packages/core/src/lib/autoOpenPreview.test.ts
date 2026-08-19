@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
   DEFAULT_AUTO_OPEN_ARTIFACTS,
+  canAutoOpenBrowserPanel,
   canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
+  isBrowserToolCall,
   parseAutoOpenArtifacts,
   setAutoOpenArtifactsEnabled,
   shouldAutoOpenArtifactPreview,
+  shouldAutoOpenBrowserPreview,
 } from './autoOpenPreview'
 
 describe('parseAutoOpenArtifacts', () => {
@@ -113,5 +116,46 @@ describe('canAutoOpenReplacePanel', () => {
     expect(canAutoOpenReplacePanel({ type: 'tool' }, 'conv-1', 'art-1')).toBe(false)
     expect(canAutoOpenReplacePanel({ type: 'sandbox' }, 'conv-1', 'art-1')).toBe(false)
     expect(canAutoOpenReplacePanel({ type: 'attachment' }, 'conv-1', 'art-1')).toBe(false)
+  })
+})
+
+describe('isBrowserToolCall', () => {
+  it('detects loading the preinstalled browser skill', () => {
+    expect(isBrowserToolCall('load_skill', { skill_name: 'browser' })).toBe(true)
+    expect(isBrowserToolCall('load_skill', { skill_name: 'acme:browser' })).toBe(true)
+    expect(isBrowserToolCall('load_skill', { skill_name: 'pdf' })).toBe(false)
+  })
+
+  it('detects execute commands that drive the sandbox browser', () => {
+    expect(isBrowserToolCall('execute', { cmd: 'agent-browser goto https://x' })).toBe(true)
+    expect(isBrowserToolCall('execute', { command: '/usr/local/bin/start-browser.sh' })).toBe(true)
+    expect(isBrowserToolCall('execute', { cmd: 'echo hello' })).toBe(false)
+  })
+
+  it('ignores unrelated tools', () => {
+    expect(isBrowserToolCall('web_search', { query: 'browser' })).toBe(false)
+    expect(isBrowserToolCall('write_file', { path: 'browser.md' })).toBe(false)
+  })
+})
+
+describe('shouldAutoOpenBrowserPreview', () => {
+  it('opens only while the chat surface is viewing that conversation', () => {
+    expect(shouldAutoOpenBrowserPreview('conv-1', 'conv-1')).toBe(true)
+    expect(shouldAutoOpenBrowserPreview('conv-1', 'conv-other')).toBe(false)
+    expect(shouldAutoOpenBrowserPreview('conv-1', null)).toBe(false)
+  })
+})
+
+describe('canAutoOpenBrowserPanel', () => {
+  it('opens a closed panel and retargets an already-open sandbox', () => {
+    expect(canAutoOpenBrowserPanel({ type: 'closed' })).toBe(true)
+    expect(canAutoOpenBrowserPanel({ type: 'sandbox' })).toBe(true)
+  })
+
+  it('may replace an auto-opened artifact but not a user-picked surface', () => {
+    expect(canAutoOpenBrowserPanel({ type: 'artifact', source: 'auto' })).toBe(true)
+    expect(canAutoOpenBrowserPanel({ type: 'artifact', source: 'user' })).toBe(false)
+    expect(canAutoOpenBrowserPanel({ type: 'tool' })).toBe(false)
+    expect(canAutoOpenBrowserPanel({ type: 'attachment' })).toBe(false)
   })
 })
