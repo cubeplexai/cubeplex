@@ -38,7 +38,10 @@ class AttachmentHydrator:
     async def hydrate(self, *, conversation_id: str, file_ids: list[str]) -> dict[str, str]:
         """Materialize each file_id into the sandbox if not already present.
 
-        Returns: mapping {file_id -> sandbox_path}
+        Image attachments are skipped: ``view_images`` reads them from
+        ObjectStore, and staging would cold-start a LazySandbox.
+
+        Returns: mapping {file_id -> sandbox_path} for files actually staged.
         Raises:  AttachmentHydrationError on first failure (run should abort).
         """
         result: dict[str, str] = {}
@@ -49,6 +52,12 @@ class AttachmentHydrator:
             )
             if row is None:
                 raise AttachmentHydrationError(file_id=fid, cause="row not found")
+
+            # Images are read by view_images from ObjectStore. Staging them
+            # onto the sandbox FS would cold-start a LazySandbox before the
+            # LLM turn starts (and the e2e "reply OK" path does not need it).
+            if row.kind == "image":
+                continue
 
             # shlex.quote prevents shell metacharacters in the user-supplied
             # filename (e.g. ``$(whoami).xlsx``, backticks, ``;``) from being

@@ -111,11 +111,10 @@ def make_view_images_tool(
                 label = path
                 dims: tuple[int, int] | None = None
 
-                # Sandbox-first: read the file straight from the run's sandbox FS.
-                # Covers images the agent created/processed in its sandbox AND
-                # hydrated attachments (which also land on the sandbox FS), with
-                # no object-store round-trip.
-                if sandbox is not None:
+                # Sandbox-first only when the FS is already live. A LazySandbox
+                # that has never been used would provision a container just to
+                # miss a user-uploaded image and fall back to ObjectStore.
+                if sandbox is not None and getattr(sandbox, "initialized", True):
                     try:
                         files = await sandbox.download([path])
                         if files and files[0][1]:
