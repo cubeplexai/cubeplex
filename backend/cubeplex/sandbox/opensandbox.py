@@ -217,13 +217,6 @@ class OpenSandbox(Sandbox):
     async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
         return self._panel_endpoint(self.TERMINAL_PORT, expires_in)
 
-    async def start_browser(self) -> None:
-        """Start Neko as root so supervisord can chown and drop to cubeplex."""
-        result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
-        if result.exit_code not in (0, None):
-            # Match base.start_browser / start_terminal: SandboxError → live-view 503.
-            raise SandboxError(f"failed to start sandbox browser: {result.output}")
-
     async def _write_terminal_env(self) -> None:
         """Drop the injected env where a terminal shell can source it.
 

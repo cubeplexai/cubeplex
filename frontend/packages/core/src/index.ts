@@ -13,11 +13,14 @@ export {
 export {
   AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
   DEFAULT_AUTO_OPEN_ARTIFACTS,
+  canAutoOpenBrowserPanel,
   canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
+  isBrowserToolCall,
   parseAutoOpenArtifacts,
   setAutoOpenArtifactsEnabled,
   shouldAutoOpenArtifactPreview,
+  shouldAutoOpenBrowserPreview,
 } from './lib/autoOpenPreview'
 export type * from './types/provider'
 export * from './api/providers'

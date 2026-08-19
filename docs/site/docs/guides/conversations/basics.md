@@ -19,7 +19,7 @@ The layout has three main areas:
 
 - **Sidebar** (left) — lists your recent conversations, workspace navigation (skills, tools, memory, settings), and workspace switcher.
 - **Chat area** (center) — the message thread and input bar.
-- **Side panel** (right, opens on demand) — previews artifacts, attachment images, tool call details, or the sandbox browser.
+- **Side panel** (right, opens on demand) — previews artifacts, attachment images, tool call details, or the sandbox browser. When the agent uses the browser skill, this panel opens on the **Browser** tab by itself and the live view follows the tab the agent is operating on. You can still take over at any time, or close the panel if you do not want to watch.
 
 ![Conversation view with the chat thread and an artifact preview panel](/img/conversations/conversation-layout.png)
 

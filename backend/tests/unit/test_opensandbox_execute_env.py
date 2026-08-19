@@ -188,12 +188,17 @@ async def test_start_browser_runs_as_root() -> None:
     await backend.start_browser()
 
     calls = backend._test_run_calls  # type: ignore[attr-defined]
-    assert len(calls) == 1
+    assert len(calls) == 2
     cmd, opts = calls[0]
     assert cmd == "/usr/local/bin/start-browser.sh"
     assert opts is not None
     assert opts.uid is None
     assert opts.gid is None
+    install_cmd, install_opts = calls[1]
+    assert "cubeplex-focus-browser-tab" in install_cmd
+    assert install_opts is not None
+    assert install_opts.uid is None
+    assert install_opts.gid is None
 
 
 @pytest.mark.asyncio

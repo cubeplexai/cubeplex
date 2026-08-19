@@ -100,7 +100,8 @@ class _RecordingSandbox(Sandbox):
 async def test_start_browser_runs_launch_script() -> None:
     sb = _RecordingSandbox()
     await sb.start_browser()
-    assert sb.commands == ["/usr/local/bin/start-browser.sh"]
+    assert sb.commands[0] == "/usr/local/bin/start-browser.sh"
+    assert any("cubeplex-focus-browser-tab" in cmd for cmd in sb.commands)
 
 
 @pytest.mark.asyncio

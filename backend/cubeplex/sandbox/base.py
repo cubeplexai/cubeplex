@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 if TYPE_CHECKING:
     from cubeplex.parsers import FileReadOutput, ParseOptions
 
@@ -157,6 +159,27 @@ class Sandbox(ABC):
         if result.exit_code not in (0, None):
             # SandboxError (not RuntimeError) so live-view maps this to retryable 503.
             raise SandboxError(f"failed to start sandbox browser: {result.output}")
+        await self.install_browser_tab_follow()
+
+    async def install_browser_tab_follow(self) -> None:
+        """Wrap ``agent-browser`` so the live view follows the agent's tab.
+
+        Best-effort: a failure here must not fail live-view (the stack is already
+        up). Re-run on every start so already-built images pick up the wrapper.
+        """
+        from cubeplex.sandbox.browser_tab_follow import tab_follow_install_command
+
+        try:
+            result = await self.execute(tab_follow_install_command(), timeout=15, as_root=True)
+        except Exception as exc:
+            logger.warning("browser tab-follow install failed: {}", exc)
+            return
+        if result.exit_code not in (0, None):
+            logger.warning(
+                "browser tab-follow install exited {}: {}",
+                result.exit_code,
+                result.output,
+            )
 
     async def start_terminal(self) -> None:
         """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
