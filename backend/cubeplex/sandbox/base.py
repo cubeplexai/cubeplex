@@ -155,17 +155,19 @@ class Sandbox(ABC):
         for CDP on 9222 — not a blind no-op. Runs as root so supervisord can
         chown runtime dirs and drop to the sandbox user.
         """
+        # Install the wrapper before Chromium is ready so the agent's first
+        # ``agent-browser connect`` after start-browser.sh is already wrapped.
+        await self.install_browser_tab_follow()
         result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
         if result.exit_code not in (0, None):
             # SandboxError (not RuntimeError) so live-view maps this to retryable 503.
             raise SandboxError(f"failed to start sandbox browser: {result.output}")
-        await self.install_browser_tab_follow()
 
     async def install_browser_tab_follow(self) -> None:
         """Wrap ``agent-browser`` so the live view follows the agent's tab.
 
-        Best-effort: a failure here must not fail live-view (the stack is already
-        up). Re-run on every start so already-built images pick up the wrapper.
+        Best-effort: a failure here must not fail live-view. Re-run on every
+        start so already-built images pick up the wrapper.
         """
         from cubeplex.sandbox.browser_tab_follow import tab_follow_install_command
 
