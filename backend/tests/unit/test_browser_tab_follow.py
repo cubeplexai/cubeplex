@@ -26,6 +26,20 @@ def test_choose_target_id_prefers_exact_match() -> None:
     assert choose_target_id(pages, "https://ex.com/path") == "long"
 
 
+def test_choose_target_id_does_not_prefix_match_a_parent_url() -> None:
+    pages = [
+        {"id": "home", "type": "page", "url": "https://ex.com"},
+        {"id": "login", "type": "page", "url": "https://ex.com/login"},
+    ]
+    assert choose_target_id(pages, "https://ex.com/login") == "login"
+    assert choose_target_id(pages, "https://ex.com/other") is None
+
+
+def test_choose_target_id_treats_trailing_slash_as_same_page() -> None:
+    pages = [{"id": "home", "type": "page", "url": "https://ex.com/"}]
+    assert choose_target_id(pages, "https://ex.com") == "home"
+
+
 def test_choose_target_id_ignores_empty_page_url() -> None:
     pages = [{"id": "blank", "type": "page", "url": ""}]
     assert choose_target_id(pages, "https://x.example/") is None
@@ -45,3 +59,5 @@ def test_install_command_embeds_wrapper_and_focus_helper() -> None:
     assert "CUBEPLEX_TAB_FOLLOW=1" in WRAPPER_SCRIPT
     assert "/json/activate/" in FOCUS_SCRIPT
     assert "__REAL_DEFAULT__" in WRAPPER_SCRIPT
+    assert "wrap_path.replace" in cmd
+    assert "_norm" in FOCUS_SCRIPT

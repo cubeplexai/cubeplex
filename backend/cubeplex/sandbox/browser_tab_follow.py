@@ -53,22 +53,21 @@ def current_url(real_bin):
     return lines[-1] if lines else None
 
 
+def _norm(u):
+    u = str(u or "").strip()
+    if not u:
+        return ""
+    return u.rstrip("/") or u
+
+
 def choose_target_id(pages, url):
-    if not pages or not url:
+    wanted = _norm(url)
+    if not pages or not wanted:
         return None
-    exact = [p for p in pages if p.get("url") == url]
-    pool = exact
-    if not pool:
-        pool = []
-        for p in pages:
-            page_url = str(p.get("url") or "")
-            if not page_url:
-                continue
-            if page_url.startswith(url) or url.startswith(page_url):
-                pool.append(p)
-    if not pool:
+    exact = [p for p in pages if _norm(p.get("url")) == wanted]
+    if not exact:
         return None
-    tid = pool[0].get("id")
+    tid = exact[0].get("id")
     return str(tid) if tid else None
 
 
@@ -130,8 +129,9 @@ def write_exec(path, body):
 
 if wrap_path.exists():
     existing = wrap_path.read_text(encoding="utf-8", errors="replace")
-    if "CUBEPLEX_TAB_FOLLOW=1" not in existing and not real_path.exists():
-        wrap_path.rename(real_path)
+    if "CUBEPLEX_TAB_FOLLOW=1" not in existing:
+        # Always keep the current real CLI as .real, even if an older copy exists.
+        wrap_path.replace(real_path)
 
 real = "/usr/local/bin/agent-browser.real"
 if not Path(real).exists():
@@ -143,22 +143,26 @@ write_exec(wrap_path, wrapper)
 """
 
 
+def _normalize_url(url: str | None) -> str:
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    return text.rstrip("/") or text
+
+
 def choose_target_id(pages: list[dict[str, Any]], url: str | None) -> str | None:
-    """Pick the CDP target id whose URL matches the agent's current page."""
-    if not pages or not url:
+    """Pick the CDP target id whose URL matches the agent's current page.
+
+    Exact match only (trailing slash ignored). Prefix matching would activate
+    ``https://ex.com`` when the agent is on ``https://ex.com/login``.
+    """
+    wanted = _normalize_url(url)
+    if not pages or not wanted:
         return None
-    exact = [p for p in pages if p.get("url") == url]
-    pool = exact
-    if not pool:
-        pool = [
-            p
-            for p in pages
-            if (page_url := str(p.get("url") or ""))
-            and (page_url.startswith(url) or url.startswith(page_url))
-        ]
-    if not pool:
+    exact = [p for p in pages if _normalize_url(str(p.get("url"))) == wanted]
+    if not exact:
         return None
-    tid = pool[0].get("id")
+    tid = exact[0].get("id")
     return str(tid) if tid else None
 
 

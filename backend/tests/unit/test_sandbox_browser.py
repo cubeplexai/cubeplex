@@ -100,8 +100,12 @@ class _RecordingSandbox(Sandbox):
 async def test_start_browser_runs_launch_script() -> None:
     sb = _RecordingSandbox()
     await sb.start_browser()
-    assert sb.commands[0] == "/usr/local/bin/start-browser.sh"
+    assert "/usr/local/bin/start-browser.sh" in sb.commands
     assert any("cubeplex-focus-browser-tab" in cmd for cmd in sb.commands)
+    # Wrapper must land before Chromium so the first connect is already wrapped.
+    assert sb.commands.index(
+        next(cmd for cmd in sb.commands if "cubeplex-focus-browser-tab" in cmd)
+    ) < sb.commands.index("/usr/local/bin/start-browser.sh")
 
 
 @pytest.mark.asyncio
