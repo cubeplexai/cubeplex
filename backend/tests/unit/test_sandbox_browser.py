@@ -45,6 +45,19 @@ def test_start_browser_script_ensures_chromium_when_stack_already_up() -> None:
     assert "ensure_chromium" in script.split("neko stack already running", 1)[1]
 
 
+def test_start_browser_preserves_neko_json_env_without_sourcing_it() -> None:
+    """TURN JSON must survive the non-root sudo re-exec unchanged.
+
+    Shell-sourcing raw ``env`` output strips JSON's double quotes, making
+    Neko reject its ICE-server configuration and leaving the live view blank.
+    """
+    script = (_REPO_ROOT / "deploy" / "images" / "sandbox" / "neko" / "start-browser.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'export "$_neko_name=$_neko_value"' in script
+    assert '. "$NEKO_ENV_FILE"' not in script
+
+
 def test_launch_chrome_bounds_certutil_so_restart_cannot_wedge() -> None:
     """Unbounded ``certutil -N`` on an existing NSS DB spins and blocks chrome.
 
