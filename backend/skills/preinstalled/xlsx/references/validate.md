@@ -7,7 +7,8 @@ Ensure every formula in an xlsx file is provably correct before delivery. A file
 ## Foundational Rules
 
 - **Never declare PASS without running `formula_check.py` first.** Visual inspection of a spreadsheet is not validation.
-- **Tier 1 (static) is mandatory in every scenario.** Tier 2 (dynamic) is mandatory when LibreOffice is available. If it is unavailable, you must state this explicitly in the report — you may not silently skip it.
+- **Tier 1 (static) is mandatory in every scenario.** Tier 2 (dynamic) is mandatory when LibreOffice is available **and the file contains formulas**. If it is unavailable, you must state this explicitly in the report — you may not silently skip it.
+- **Reports with no formulas skip Tier 2.** A *report* (see SKILL.md "Report vs Model") writes computed values directly and contains zero formulas. There is nothing for LibreOffice to recalculate, so Tier 2 does not apply — deliver after Tier 1 confirms the XML/structure is sound. Tier 2 is only required for *models* (live formulas).
 - **Never use openpyxl with `data_only=True` to check formula values.** Opening and saving a workbook in `data_only=True` mode permanently replaces all formulas with their last cached values. Formulas cannot be recovered afterward.
 - **Auto-fix only deterministic errors.** Any fix that requires understanding business logic must be flagged for human review.
 
@@ -322,6 +323,8 @@ Exit codes from `libreoffice_recalc.py`:
 **What the script does internally:**
 
 LibreOffice's `--convert-to xlsx` command opens the file using the full Calc engine with the `--infilter="Calc MS Excel 2007 XML"` filter, executes every formula, writes computed values into the `<v>` cache elements, and saves the output. This is the closest server-side equivalent of "open in Excel and press Save." The script also passes `--norestore` to prevent LibreOffice from attempting to restore previous sessions, which can cause hangs in automated environments.
+
+**New in this version (reliability):** the script (a) forces recalculation by launching LibreOffice with an isolated profile set to `OOXMLRecalcMode=0` — by default LibreOffice does *not* recompute xlsx formulas on load, which is exactly why freshly generated files shipped blank cells; (b) uses a per-run isolated profile so a leftover lock can never block a new run; and (c) **verifies after recalc** that formula cells actually received `<v>` values, failing hard (exit 1) if they did not. A run that exits 0 is guaranteed to have populated values.
 
 **If LibreOffice is not installed:**
 

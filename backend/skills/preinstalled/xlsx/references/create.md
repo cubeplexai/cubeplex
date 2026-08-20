@@ -1,7 +1,10 @@
 # Build New xlsx from Scratch
 
-Create new, production-quality xlsx files. NEVER hardcode Python-computed values —
-every derived number must be a live Excel formula.
+Create new, production-quality xlsx files. For a **model** (the user will keep editing
+inputs/assumptions), every derived number must be a live Excel formula. For a **report**
+(final snapshot — the common "analyze this data and give me a spreadsheet" case), write
+the already-computed value directly — no formula, no recalc. See SKILL.md "Report vs
+Model" to choose; when unsure, a report is the safer default.
 
 ---
 
@@ -38,10 +41,12 @@ recalculated (`libreoffice_recalc.py`) before `formula_check.py`.
 
 Before touching any file, internalize these four rules (they hold on both paths):
 
-1. **Formula-First**: Every calculated value (`SUM`, growth rate, ratio, subtotal, etc.)
-   MUST be a live formula (`=SUM(B2:B9)` in openpyxl, `<f>SUM(B2:B9)</f>` in XML), not a
-   hardcoded number. Hardcoded numbers go stale when source data changes. Only raw inputs
-   and assumption parameters may be hardcoded values.
+1. **Formula-First (models only)**: For a *model*, every calculated value (`SUM`, growth
+   rate, ratio, subtotal, etc.) MUST be a live formula (`=SUM(B2:B9)` in openpyxl,
+   `<f>SUM(B2:B9)</f>` in XML), not a hardcoded number — because the user will change
+   inputs and cells must recompute. For a *report*, do the opposite: write the
+   already-computed value directly (`ws["C2"] = round(value, 2)` / `<c r="C2"><v>123</v></c>`).
+   Hardcoded numbers in a report are correct final results, not "dead" cells.
 
 2. **openpyxl only on your own workbook**: openpyxl is the default writer when you build a
    *new* file in the same script. Never `load_workbook()` an existing file and re-save it —
@@ -121,16 +126,20 @@ in Excel 2019 and earlier. `formula_check.py` does NOT catch these — it treats
 valid names — so it's on you: unless the user targets Excel 365/2021+, use the classic
 equivalents (`INDEX`/`MATCH`, `SUMIF`, helper columns).
 
-**Then recalc + validate** (mandatory — openpyxl caches no results). Recalc into a
-separate file, confirm it, then deliver the recalculated file:
+**Then recalc + validate — models only** (openpyxl caches no results, so a model's
+formula cells are empty until recalced). Recalc into a separate file, confirm it, then
+deliver the recalculated file:
 ```bash
 python3 $SKILL_DIR/scripts/libreoffice_recalc.py output.xlsx /tmp/recalc.xlsx
 python3 $SKILL_DIR/scripts/formula_check.py /tmp/recalc.xlsx --report
 ```
-If LibreOffice is unavailable (exit 2), note it as SKIPPED and still run
-`formula_check.py` (static analysis needs no cache) — but warn the user that
-formula cells will read as empty in pandas/other headless readers until the file
-is opened once in Excel/WPS. Full recalc/validation detail: `validate.md`.
+The recalc script now *verifies* that formula cells actually received cached `<v>`
+values and fails hard if they didn't — so a silent "blank cells" result can no longer
+slip through. If LibreOffice is unavailable (exit 2), note it as SKIPPED and still run
+`formula_check.py` (static analysis needs no cache) — but warn the user that formula
+cells will read as empty for headless readers until the file is opened once in
+Excel/WPS. **A report writes values directly, so skip this step entirely.** Full
+recalc/validation detail: `validate.md`.
 
 The snippets above are the *how*; the authoritative visual standard is
 **`format.md` §14** (palette choice — Minimalist Monochrome vs Professional
@@ -651,7 +660,7 @@ Run through this list before handing the file to the user:
 | Cross-sheet ref to non-existent sheet | `#REF!` error | Check `workbook.xml` sheet list vs formula |
 | Number stored as text (`t="s"`) | Left-aligned, can't sum | Remove `t` attribute from number cells |
 | Year displayed as `2,024` | Readability issue | Use `s="11"` (numFmtId=1, format `0`) |
-| Hardcoded Python result instead of formula | "Dead table" — won't update | Replace `<v>N</v>` with `<f>formula</f><v></v>` |
+| Hardcoded Python result instead of formula (**in a model**) | "Dead table" — won't update when inputs change | Replace `<v>N</v>` with `<f>formula</f><v></v>` | Note: this is only a defect for *models*. In a *report*, writing the computed value directly is correct and preferred. |
 
 ---
 
