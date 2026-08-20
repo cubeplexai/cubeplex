@@ -90,6 +90,32 @@ def get_libreoffice_version(soffice: str) -> str:
         return "unknown"
 
 
+def _soffice_program_dir(soffice: str) -> str:
+    """Directory that holds soffice.bin and the VCL plugins."""
+    try:
+        real = os.path.realpath(soffice)
+    except OSError:
+        return os.path.dirname(soffice)
+    return os.path.dirname(real)
+
+
+def _has_svp_plugin(soffice: str) -> bool:
+    """
+    True if LibreOffice ships the headless (svp) VCL plugin.
+
+    On a server install without the svp plugin, the default 'gen' plugin needs
+    an X display, so a bare `--headless` invocation fails to load documents.
+    In that case we must run under `xvfb-run` (see _find_xvfb_run).
+    """
+    d = _soffice_program_dir(soffice)
+    return os.path.isfile(os.path.join(d, "libvclplug_svplo.so"))
+
+
+def _find_xvfb_run() -> str | None:
+    """Locate xvfb-run, used to provide a virtual display when svp is absent."""
+    return shutil.which("xvfb-run")
+
+
 # ── Isolated profile + forced recalc ────────────────────────────────────────
 
 def _write_recalc_profile(profile_dir: str) -> None:
@@ -247,6 +273,23 @@ def recalculate(
 
     version = get_libreoffice_version(soffice)
 
+    # Choose how to launch soffice. Headless conversion needs a VCL plugin that can
+    # run without a real display. If the svp (pure-headless) plugin is missing, fall
+    # back to `xvfb-run`, which provides a virtual X display for the gen plugin. This
+    # is the common case in minimal/server/sandbox images (e.g. cubeplex-sandbox).
+    svp = _has_svp_plugin(soffice)
+    xvfb = _find_xvfb_run()
+    launcher: list[str] = []
+    if not svp:
+        if xvfb:
+            launcher = [xvfb, "-a"]
+        else:
+            print(
+                "WARNING: no headless (svp) VCL plugin and no xvfb-run found; "
+                "LibreOffice may fail to load documents without a display.",
+                file=sys.stderr,
+            )
+
     tmpdir = tempfile.mkdtemp(prefix="xlsx_recalc_")
     profile_dir = os.path.join(tmpdir, "lo_profile")
     try:
@@ -257,17 +300,23 @@ def recalculate(
         _kill_matching_procs(profile_dir)
 
         # 3. Work on a copy so the source file is never touched.
-        tmp_input = os.path.join(tmpdir, os.path.basename(input_path))
+        #    Use a SEPARATE output dir — writing the converted file back into the
+        #    same directory under the same name collides with the input copy
+        #    ("Overwriting" + impl_store error) and can ship the un-recalc'd file.
+        src_dir = os.path.join(tmpdir, "src")
+        out_dir = os.path.join(tmpdir, "out")
+        os.makedirs(src_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
+        tmp_input = os.path.join(src_dir, os.path.basename(input_path))
         shutil.copy(input_path, tmp_input)
 
-        cmd = [
+        cmd = launcher + [
             soffice,
             f"-env:UserInstallation=file://{profile_dir}",
             "--headless",
             "--norestore",           # do not attempt to restore crashed sessions
-            "--infilter=Calc MS Excel 2007 XML",
             "--convert-to", "xlsx",
-            "--outdir", tmpdir,
+            "--outdir", out_dir,
             tmp_input,
         ]
 
@@ -297,24 +346,24 @@ def recalculate(
                 f"stdout: {stdout}"
             )
 
-        # LibreOffice writes: <tmpdir>/<stem>.xlsx
+        # LibreOffice writes: <out_dir>/<stem>.xlsx
         stem = os.path.splitext(os.path.basename(tmp_input))[0]
-        tmp_output = os.path.join(tmpdir, stem + ".xlsx")
+        tmp_output = os.path.join(out_dir, stem + ".xlsx")
 
         if not os.path.isfile(tmp_output):
-            # Try to find any .xlsx file in tmpdir (LibreOffice may behave differently)
+            # Try to find any .xlsx file in out_dir (LibreOffice may behave differently)
             xlsx_files = [
-                f for f in os.listdir(tmpdir)
+                f for f in os.listdir(out_dir)
                 if f.endswith(".xlsx") and f != os.path.basename(tmp_input)
             ]
             if xlsx_files:
-                tmp_output = os.path.join(tmpdir, xlsx_files[0])
+                tmp_output = os.path.join(out_dir, xlsx_files[0])
             else:
                 stdout = result.stdout.decode(errors="replace").strip()
                 return False, (
-                    f"LibreOffice succeeded (exit 0) but output file not found in {tmpdir}.\n"
+                    f"LibreOffice succeeded (exit 0) but output file not found in {out_dir}.\n"
                     f"stdout: {stdout}\n"
-                    f"Files in tmpdir: {os.listdir(tmpdir)}"
+                    f"Files in out_dir: {os.listdir(out_dir)}"
                 )
 
         # Copy recalculated file to final destination
@@ -325,7 +374,8 @@ def recalculate(
         ok, detail = verify_recalculated(output_path, min_populated_ratio)
         if not ok:
             return False, detail
-        return True, f"Recalculation complete. LibreOffice {version}. {detail}"
+        mode = "headless (svp)" if svp else ("xvfb-run" if xvfb else "headless (no svp/xvfb)")
+        return True, f"Recalculation complete ({mode}). LibreOffice {version}. {detail}"
 
     finally:
         # Always reap orphans and remove the temp area.
