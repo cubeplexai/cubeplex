@@ -142,7 +142,9 @@ You have creative authority over the accent color. Pick it from the document's s
 
 **Rule:** choose a color that a thoughtful designer would select for this specific document — not the type's default. Muted, desaturated tones work best; avoid vivid primaries. When in doubt, go darker and more neutral.
 
-**content.json block types:**
+**content.json format:** a top-level JSON **array** of block objects, one entry
+per element in the document, e.g. `[{...}, {...}]`. A `{"blocks": [...]}`
+wrapper object is also accepted. The table below lists the block types.
 
 | Block | Usage | Key fields |
 |---|---|---|
@@ -165,6 +167,14 @@ You have creative authority over the accent color. Pick it from the document's s
 | `caption` | Small muted label | `text` |
 | `pagebreak` | Force a new page | — |
 | `spacer` | Vertical whitespace | `pt` (default 12) |
+
+**table `col_widths`:** optional list of per-column widths, one value per
+column. **Fractions summing to 1.0** (e.g. `[0.2, 0.5, 0.3]`) are the
+documented format; absolute widths in points/pixels (e.g. `[90, 210, 210]`)
+are also accepted and normalized automatically so the table fits the page.
+If omitted, columns are equal width. Never write values larger than the
+usable page width — the renderer normalizes them, but extreme values
+previously made the whole table disappear.
 
 **chart / flowchart schemas:**
 ```json
