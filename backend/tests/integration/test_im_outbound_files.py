@@ -290,3 +290,49 @@ async def test_image_on_no_inline_platform_falls_back_to_share_link(
     await disp.handle(_artifact("image"))
     assert disp.card_state.artifacts[0].share_url is not None
     assert disp.card_state.artifacts[0].image_key is None
+
+
+async def test_file_artifact_uses_entry_file_basename_not_display_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The delivered file name must be the real file basename, not the artifact
+    display name. Regression guard for #511 (Feishu received 'Quarterly Report'
+    with no .xlsx and couldn't preview)."""
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _make_temp)
+    conn = _FakeConnector(send_ok=True)
+    disp = _dispatcher(conn, _FakeRedis())
+    await disp.handle(
+        {
+            "id": "art-1",
+            "artifact_type": "document",
+            "name": "Quarterly Report",
+            "version": 1,
+            "entry_file": "out.xlsx",
+            "conversation_id": "conv-1",
+        }
+    )
+    await disp.deliver_terminal_files()
+    assert len(conn.send_file_calls) == 1
+    assert conn.send_file_calls[0]["filename"] == "out.xlsx"
+
+
+async def test_file_artifact_entry_file_wins_over_named_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When both the display name and entry_file carry extensions, the real file
+    (entry_file) basename is authoritative — it's what we actually download."""
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _make_temp)
+    conn = _FakeConnector(send_ok=True)
+    disp = _dispatcher(conn, _FakeRedis())
+    await disp.handle(
+        {
+            "id": "art-1",
+            "artifact_type": "document",
+            "name": "report.pdf",
+            "version": 1,
+            "entry_file": "out.xlsx",
+            "conversation_id": "conv-1",
+        }
+    )
+    await disp.deliver_terminal_files()
+    assert conn.send_file_calls[0]["filename"] == "out.xlsx"

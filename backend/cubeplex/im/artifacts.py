@@ -17,6 +17,7 @@ docs/dev/specs/2026-08-17-im-present-file-design.md.
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -301,13 +302,23 @@ class IMArtifactDispatcher:
         tmp_path = await download_artifact_to_tempfile(artifact)
         if tmp_path is None:
             return await self._fallback_link(item, artifact)
+        # Feishu (and every other send_file connector) derives the delivered
+        # file's identity + inline preview from the file_name we send. The
+        # artifact display ``name`` is often a human title with no extension
+        # ("Quarterly Report"), so prefer the real file basename from
+        # ``entry_file`` / ``path`` and only fall back to ``item.name`` when
+        # that basename carries no extension. See issue #511.
+        real = (str(artifact.get("entry_file") or "") or str(artifact.get("path") or "")).rsplit(
+            "/", 1
+        )[-1]
+        filename = real if Path(real).suffix else item.name
         ok = False
         try:
             if tmp_path.stat().st_size <= outbound_size_cap(self.platform):
                 ok = bool(
                     await asyncio.wait_for(
                         self.connector.send_file(
-                            local_path=str(tmp_path), filename=item.name, mime=None
+                            local_path=str(tmp_path), filename=filename, mime=None
                         ),
                         timeout=_SEND_TIMEOUT,
                     )
@@ -378,6 +389,13 @@ class IMArtifactDispatcher:
         filename = str(presented.get("filename") or "file")
         mime = str(presented.get("mime_type") or "") or None
         kind = str(presented.get("kind") or "")
+        # A missing extension on the upstream filename makes the delivered file
+        # un-openable in Feishu; derive one from the mime type when absent. See
+        # issue #511.
+        if not Path(filename).suffix and mime:
+            ext = mimetypes.guess_extension(mime)
+            if ext:
+                filename = f"{filename}{ext}"
         try:
             if tmp_path.stat().st_size <= outbound_size_cap(self.platform):
                 if kind == "image" and self.supports_inline_image:
