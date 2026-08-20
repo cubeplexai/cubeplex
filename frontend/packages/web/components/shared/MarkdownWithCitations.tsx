@@ -18,10 +18,13 @@ import { resolveSandboxHref } from '@/lib/sandboxLinks'
 const CITATION_RE = /【\d+-\d+】/
 
 // singleTilde:false → only ~~text~~ is strikethrough, so "28~29℃" ranges render literally.
+// singleDollarTextMath:false → only `$$…$$` (display math) is parsed as KaTeX.
+// Plain single `$…$` (e.g. currency like "$271,677.37") renders literally instead of
+// being mis-detected as an inline formula.
 const REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
   [remarkGfm, { singleTilde: false }],
   remarkBreaks,
-  remarkMath,
+  [remarkMath, { singleDollarTextMath: false }],
 ]
 
 const REHYPE_PLUGINS: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
