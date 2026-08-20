@@ -83,6 +83,14 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
     data = event.get("data") or {}
 
     if etype == "text_delta":
+        # Sub-agent text streams must NOT land in the main card's content.
+        # When subagents run in parallel their deltas interleave with the
+        # main agent's own text and garble the card. Sub-agent activity is
+        # already surfaced via the SubAgentRow tool counts (see the
+        # ``tool_call`` handler), so we drop the deltas here — mirroring the
+        # ``tool_result`` no-op. Fixes #508.
+        if event.get("agent_id"):
+            return None
         delta = str(data.get("content", ""))
         if state.card_state.hitl_resolved:
             state.card_state.post_hitl_content += delta
@@ -424,6 +432,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 
     if etype == "done":
+        # A sub-agent terminal event must never finalize the PARENT card.
+        # cubepi_dict_to_agent_event drops a sub-agent ``done`` at translation
+        # time, so this guard is defensive against a stray sub-agent terminal
+        # that would otherwise mark the main card finalized and exit the
+        # tailer early. Fixes #508.
+        if event.get("agent_id"):
+            return None
         # RunManager stamps ``data.paused=true`` on the DoneEvent when the
         # final_status is ``paused_hitl`` (cubeplex/streams/run_manager.py).
         # That's a soft pause, not a terminal end — resume_run_with_answer
@@ -443,6 +458,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="finalize", final=True)
 
     if etype == "error":
+        # A sub-agent's own error must not finalize / fail the MAIN card.
+        # The parent agent surfaces the sub-agent failure through its own
+        # tool_result and keeps running; suppressing the terminal op here
+        # prevents a sub-agent error from ending the run prematurely. Fixes
+        # #508.
+        if event.get("agent_id"):
+            return None
         state.card_state.finalized = True
         state.card_state.error = str(data.get("message") or "the run failed")
         return OutboundOp(kind="finalize", final=True)
