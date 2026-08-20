@@ -24,7 +24,6 @@ _SCRIPTS = Path(__file__).parent.parent.parent / "skills/preinstalled/pdf/script
 sys.path.insert(0, str(_SCRIPTS))
 import render_body  # noqa: E402
 
-
 # ── _resolve_col_widths ────
 
 
@@ -63,6 +62,7 @@ def test_col_widths_non_positive_falls_back_equal():
 
 
 # ── normalize_content ──────────
+
 
 def test_normalize_list_passthrough():
     blocks = [{"type": "body", "text": "hi"}]
