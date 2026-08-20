@@ -236,3 +236,39 @@ async def test_artifact_document_still_uses_send_file(
     await disp.deliver_terminal_presented()
     assert len(conn.send_file_calls) == 1
     assert conn.send_image_calls == []
+
+
+async def test_presented_filename_missing_extension_derived_from_mime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A presented filename without an extension must get one from mime_type so
+    Feishu can open it. Regression guard for #511."""
+    monkeypatch.setattr(artifacts_mod, "download_presented_to_tempfile", _make_temp)
+    conn = _FakeConnector(send_ok=True)
+    disp = _dispatcher(conn, _FakeRedis())
+    await disp.handle_presented(
+        {
+            "id": "pfile-1",
+            "filename": "report",
+            "mime_type": "application/pdf",
+            "kind": "document",
+            "size_bytes": 100,
+            "conversation_id": "conv-1",
+        }
+    )
+    await disp.deliver_terminal_presented()
+    assert len(conn.send_file_calls) == 1
+    assert conn.send_file_calls[0]["filename"].endswith(".pdf")
+
+
+async def test_presented_filename_extension_preserved_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the upstream filename already has an extension, it must NOT be
+    double-appended."""
+    monkeypatch.setattr(artifacts_mod, "download_presented_to_tempfile", _make_temp)
+    conn = _FakeConnector(send_ok=True)
+    disp = _dispatcher(conn, _FakeRedis())
+    await disp.handle_presented(_presented(kind="document"))
+    await disp.deliver_terminal_presented()
+    assert conn.send_file_calls[0]["filename"] == "report.xlsx"
