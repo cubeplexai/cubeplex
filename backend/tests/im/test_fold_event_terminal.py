@@ -410,3 +410,38 @@ def test_first_event_stamps_run_start_monotonic() -> None:
     # Second event does not overwrite.
     fold_event({"type": "text_delta", "data": {"content": "."}}, state, now=99.0)
     assert state.card_state.run_start_monotonic == 42.0
+
+
+def test_subagent_done_does_not_finalize_main_card() -> None:
+    """Regression for #508: a sub-agent's terminal ``done`` must not mark the
+    parent card finalized (which would exit the tailer early and strand the
+    run). The guard is defensive — sub-agent ``done`` is dropped at
+    translation time, but a stray one must never finalize the main card."""
+    state = _state_with_card()
+    op = fold_event(
+        {"type": "done", "data": {}, "agent_id": "subagent:tc-1"},
+        state,
+        now=0.0,
+    )
+    assert op is None
+    assert state.card_state.finalized is False
+
+
+def test_subagent_error_does_not_finalize_main_card() -> None:
+    """Regression for #508: a sub-agent's own error must not finalize / fail
+    the MAIN card. The parent agent surfaces the sub-agent failure through
+    its own tool_result and keeps running; suppressing the terminal op here
+    prevents a sub-agent error from ending the run prematurely."""
+    state = _state_with_card()
+    op = fold_event(
+        {
+            "type": "error",
+            "agent_id": "subagent:tc-1",
+            "data": {"error_code": "run_error", "message": "sub boom", "details": "..."},
+        },
+        state,
+        now=0.0,
+    )
+    assert op is None
+    assert state.card_state.finalized is False
+    assert state.card_state.error != "sub boom"

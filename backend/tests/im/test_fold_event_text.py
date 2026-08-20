@@ -59,3 +59,32 @@ def test_throttled_delta_returns_none() -> None:
     op = fold_event({"type": "text_delta", "data": {"content": "b"}}, state, now=1.05)
     assert op is None
     assert state.card_state.streaming_content == "ab"
+
+
+def test_subagent_text_delta_does_not_pollute_main_card() -> None:
+    """Regression for #508: a sub-agent's text_delta must not pollute the
+    main card's streaming_content (nor emit a card_create). When subagents
+    run in parallel their deltas would otherwise interleave with the main
+    agent's text and garble the card. Sub-agent activity is surfaced
+    separately via SubAgentRow tool counts."""
+    state = _state()
+    op = fold_event(
+        {
+            "type": "text_delta",
+            "data": {"content": "subagent says hi"},
+            "agent_id": "subagent:tc-1",
+        },
+        state,
+        now=0.0,
+    )
+    assert op is None
+    assert state.card_state.streaming_content == ""
+    # The main agent's own stream is unaffected and still drives the card.
+    main_op = fold_event(
+        {"type": "text_delta", "data": {"content": "main says hello"}},
+        state,
+        now=0.1,
+    )
+    assert isinstance(main_op, OutboundOp)
+    assert main_op.kind == "card_create"
+    assert state.card_state.streaming_content == "main says hello"
