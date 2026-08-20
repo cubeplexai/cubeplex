@@ -15,7 +15,26 @@ set -eu
 # backend calls this with as_root=True, but agent commands run as
 # sandbox.run_uid (1000) — so re-exec through sudo instead of dying on the
 # first write, which also broke the "already running" fast path below.
-[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+#
+# /etc/sudoers sets `Defaults env_reset` and does not include NEKO_* in
+# env_keep, so a plain sudo would strip the TURN/STUN ICE config baked into
+# the sandbox image. Without it, Neko falls back to Google STUN only, the
+# WebRTC media path has no relay, and the live view white-screens. Preserve
+# the vars across the re-exec via a temp file the root branch reads back.
+if [ "$(id -u)" -ne 0 ]; then
+    _neko_env=$(mktemp /tmp/.neko-env.XXXXXX)
+    # shellcheck disable=SC2086
+    env | grep '^NEKO_' > "$_neko_env" || true
+    chmod 644 "$_neko_env"
+    # NEKO_ENV_FILE is set on the sudo command line, not the inherited env,
+    # so it survives env_reset and tells the root branch where to reload.
+    exec sudo NEKO_ENV_FILE="$_neko_env" "$0" "$@"
+fi
+if [ -n "${NEKO_ENV_FILE:-}" ] && [ -f "$NEKO_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a; . "$NEKO_ENV_FILE"; set +a
+    rm -f "$NEKO_ENV_FILE"
+fi
 
 # sudo resets USER to root, but neko/chromium.conf expands %(ENV_USER)s into its
 # `user=` and HOME directives — losing it runs Chromium and openbox as root and
