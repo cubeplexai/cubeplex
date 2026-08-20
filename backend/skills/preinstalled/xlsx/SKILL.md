@@ -1,6 +1,6 @@
 ---
 name: xlsx
-version: 1.1.0
+version: 1.2.0
 description: "Open, create, read, analyze, edit, or validate Excel/spreadsheet files (.xlsx, .xlsm, .csv, .tsv). Use when the user asks to create, build, modify, analyze, read, validate, or format any Excel spreadsheet, financial model, pivot table, or tabular data file. Covers: creating new xlsx from scratch, reading and analyzing existing files, editing existing xlsx with zero format loss, formula recalculation and validation, and applying professional financial formatting standards. Triggers on 'spreadsheet', 'Excel', '.xlsx', '.csv', 'pivot table', 'financial model', 'formula', or any request to produce tabular data in Excel format."
 license: MIT
 metadata:
@@ -45,8 +45,35 @@ precise `styles.xml` index control (see `references/format.md`).
 workbook *you* created in the same script.
 
 openpyxl writes formula *strings* but no cached results, so an openpyxl-created
-file MUST be recalculated (`libreoffice_recalc.py`) and checked
-(`formula_check.py`) before delivery — same gate as the XML path.
+**model** (one that uses formulas) MUST be recalculated (`libreoffice_recalc.py`) and
+checked (`formula_check.py`) before delivery — same gate as the XML path. A **report**
+that writes computed values directly needs neither step.
+
+## Report vs Model: do you need formulas at all?
+
+The Formula-First rule below applies to **models** — workbooks the *user will keep
+editing*, where they change inputs/assumptions and derived cells must recompute. Most
+"analyze this data and give me a spreadsheet" requests are **reports**: the numbers
+are already final, computed by pandas/openpyxl. Forcing live formulas + a LibreOffice
+recalc onto a report adds a slow, fragile external dependency for zero benefit — the
+data already knows the answer, and recalc can hang or silently skip cells.
+
+| Deliverable type | Use formulas? | Recalculate? | Why |
+|------------------|---------------|--------------|-----|
+| **Report** (analysis output, point-in-time snapshot) | **No** — write the computed value directly | No | Values are final; charts read the values. Zero external dependency, instant, always correct. |
+| **Model** (user will change inputs/assumptions) | **Yes** — every derived cell is a live formula | Yes (mandatory) | User edits inputs → other cells must recompute in Excel/WPS. |
+
+**Decide with one question:** *Will the user open this file and change numbers,
+expecting other cells to update?* If yes → Model (formulas + recalc). If no →
+Report (write values). When unsure, **a report is the safer default** — it always
+opens correctly with no recalc step.
+
+- **Report**: set each derived cell to its already-computed number (never a formula).
+  openpyxl: `ws["C2"] = round(revenue, 2)`. XML: `<c r="C2"><v>12345.67</v></c>` (no
+  `<f>`). No `libreoffice_recalc.py` step. Run `formula_check.py` only when you edited
+  an *existing* file (to catch XML/structure issues), not to check formulas.
+- **Model**: follow the Formula-First rules below; recalc is mandatory and is the
+  final step before delivery.
 
 ## Task Routing
 
@@ -73,9 +100,13 @@ cover pages, and styling with far less effort than raw XML. Alternative for
 byte-level determinism / precise style-index control: copy
 `templates/minimal_xlsx/` → edit XML directly → pack with `xlsx_pack.py`.
 
-Either way: every derived value MUST be an Excel formula (`=SUM(B2:B9)` /
-`<f>SUM(B2:B9)</f>`), never a hardcoded number. Apply font colors per
-`format.md`. Recalculate + `formula_check.py` before delivery.
+Either way, the strategy depends on Report vs Model (see that section):
+
+- **Model** (user will edit inputs): every derived value MUST be a live Excel formula
+  (`=SUM(B2:B9)` / `<f>SUM(B2:B9)</f>`), never a hardcoded number. Apply font colors
+  per `format.md`. Recalculate + `formula_check.py` before delivery.
+- **Report** (final snapshot): skip formulas entirely — write the computed values
+  directly and deliver immediately. Charts read the values; no recalc needed.
 
 ## EDIT — XML direct-edit (read `references/edit.md` first)
 
@@ -159,11 +190,20 @@ Run `formula_check.py` for static validation. Use `libreoffice_recalc.py` for dy
 
 ## Key Rules
 
-1. **Formula-First**: Every calculated cell MUST use an Excel formula, not a hardcoded number
+1. **Formula-First for Models, Values for Reports**: A *model* (user will edit inputs) MUST
+   use live formulas for every derived cell. A *report* (final snapshot) MUST write the
+   already-computed value directly — no formulas, no recalc. Decide by the "Report vs Model"
+   rule above; do not force formulas onto a report.
 2. **CREATE → openpyxl** by default (charts/formatting made easy); XML template only when you need byte-level control
 3. **EDIT existing → XML surgery**: never openpyxl round-trip on a file you didn't create — it drops VBA/pivots/charts. Use unpack/edit/pack scripts
 4. **Always produce the output file** — this is the #1 priority
-5. **Validate before delivery**: recalculate, then `formula_check.py` exit code 0 = safe
+5. **Validate before delivery (models only)**: recalculate (if formulas), then `formula_check.py` exit code 0 = safe. Reports with no formulas skip this.
+6. **Recalc is the final step — never overwrite the good copy.** `libreoffice_recalc.py`
+   now verifies that formula cells actually got cached `<v>` values; if it reports empty
+   `<v>` cells, that is a HARD FAILURE — do not deliver. In a report workflow there are no
+   formulas to recalc, so this never blocks you. If a model's recalc cannot be made to
+   succeed, ship a *report-style* file (write the computed values) rather than delivering
+   empty formula cells.
 
 ## Utility Scripts
 
