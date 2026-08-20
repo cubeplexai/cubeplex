@@ -29,3 +29,25 @@ describe('MarkdownWithCitations memoization', () => {
     expect(screen.getByText('beta')).toBeInTheDocument()
   })
 })
+
+describe('MarkdownWithCitations math rendering', () => {
+  it('renders currency amounts with single $ literally (no KaTeX)', () => {
+    const text =
+      'Monthly revenue increased from $271,677.37 in January to $272,748.58 in February'
+    const { container } = render(
+      <MarkdownWithCitations conversationId="conv-test">{text}</MarkdownWithCitations>,
+    )
+    // Single-$ spans must NOT be parsed as math (no katex markup injected).
+    expect(container.querySelector('.katex')).toBeNull()
+    // The dollar amounts must survive as literal text.
+    expect(container.textContent).toContain('$271,677.37')
+    expect(container.textContent).toContain('$272,748.58')
+  })
+
+  it('still renders $$…$$ display math as KaTeX', () => {
+    const { container } = render(
+      <MarkdownWithCitations conversationId="conv-test">{'E = mc^2 in $$E=mc^2$$ form'}</MarkdownWithCitations>,
+    )
+    expect(container.querySelector('.katex')).not.toBeNull()
+  })
+})
