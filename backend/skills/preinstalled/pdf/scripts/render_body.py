@@ -700,6 +700,39 @@ def _add_callout(story: list, item: dict, ctx: dict):
     story.append(Spacer(1, 8))
 
 
+def _resolve_col_widths(
+    col_widths, n_cols: int, usable_w: float
+) -> list[float]:
+    """Map a table's col_widths to absolute column widths in points.
+
+    Accepts either fractions summing to ~1.0 (the documented format) or
+    absolute widths in points/pixels. Values are normalized so the table
+    always fits within usable_w. Invalid, non-numeric, or length-mismatched
+    input falls back to equal column widths.
+
+    Without this guard, pixel-style values such as [90, 210, 210] were
+    multiplied by usable_w (~432pt), producing absurd column widths
+    (tens of thousands of points) that made ReportLab silently drop the
+    entire table from the output PDF.
+    """
+    if not isinstance(col_widths, list) or len(col_widths) != n_cols:
+        return [usable_w / n_cols] * n_cols
+    try:
+        vals = [float(w) for w in col_widths]
+    except (TypeError, ValueError):
+        return [usable_w / n_cols] * n_cols
+    if not vals or any(w <= 0 for w in vals):
+        return [usable_w / n_cols] * n_cols
+    total = sum(vals)
+    if 0.9 <= total <= 1.1:
+        # Documented format: fractions summing to ~1.0.
+        fracs = vals
+    else:
+        # Absolute widths (pt/px): normalize to fractions of the total.
+        fracs = [w / total for w in vals]
+    return [usable_w * f for f in fracs]
+
+
 def _add_table(story: list, item: dict, ctx: dict):
     t        = ctx["tokens"]
     styles   = ctx["styles"]
@@ -714,11 +747,7 @@ def _add_table(story: list, item: dict, ctx: dict):
     ]
     n_cols = len(item["headers"])
 
-    # Optional col_widths as fractions summing to 1.0
-    if "col_widths" in item and len(item["col_widths"]) == n_cols:
-        col_w = [usable_w * f for f in item["col_widths"]]
-    else:
-        col_w = [usable_w / n_cols] * n_cols
+    col_w = _resolve_col_widths(item.get("col_widths"), n_cols, usable_w)
 
     tbl = Table([headers] + rows, colWidths=col_w)
     tbl.setStyle(TableStyle([
@@ -991,6 +1020,25 @@ _RESETS_NUMBERED = frozenset({
 })
 
 
+def normalize_content(content) -> list:
+    """Accept a list of blocks or a {"blocks": [...]} wrapper; reject anything else loudly.
+
+    Agents have produced content.json with a top-level {"blocks": [...]} object
+    (the shape used by other document pipelines). Iterating that dict directly
+    yields string keys and crashes with a confusing ``'str' object has no
+    attribute 'get'`` inside build_story. Unwrap it here and fail loudly on
+    truly invalid shapes instead of failing somewhere opaque.
+    """
+    if isinstance(content, dict) and isinstance(content.get("blocks"), list):
+        content = content["blocks"]
+    if not isinstance(content, list) or any(not isinstance(b, dict) for b in content):
+        raise ValueError(
+            "content.json must be a list of block objects (or "
+            f'{{"blocks": [...]}}); got {type(content).__name__}'
+        )
+    return content
+
+
 def build_story(content: list, tokens: dict, styles: dict) -> list:
     usable_w = A4[0] - tokens["margin_left"] - tokens["margin_right"]
 
@@ -1042,7 +1090,8 @@ def build_story(content: list, tokens: dict, styles: dict) -> list:
 # Main build
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build(tokens: dict, content: list, out_path: str) -> dict:
+def build(tokens: dict, content, out_path: str) -> dict:
+    content = normalize_content(content)
     registered = register_fonts(tokens)
 
     # If the requested body font wasn't registered (e.g. not installed), fall back to built-ins.
