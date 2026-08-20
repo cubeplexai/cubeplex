@@ -17,10 +17,11 @@ set -eu
 # first write, which also broke the "already running" fast path below.
 #
 # /etc/sudoers sets `Defaults env_reset` and does not include NEKO_* in
-# env_keep, so a plain sudo would strip the TURN/STUN ICE config baked into
-# the sandbox image. Without it, Neko falls back to Google STUN only, the
-# WebRTC media path has no relay, and the live view white-screens. Preserve
-# the vars across the re-exec via a temp file the root branch reads back.
+# env_keep, so a plain sudo would strip the TURN/STUN ICE config baked into the
+# sandbox image. Without it, Neko falls back to Google STUN only, the WebRTC
+# media path has no relay, and the live view white-screens. Preserve the vars
+# across the re-exec via a temp file the root branch reads as data, not shell
+# source: the JSON in NEKO_WEBRTC_ICESERVERS_* contains quotes that source strips.
 if [ "$(id -u)" -ne 0 ]; then
     _neko_env=$(mktemp /tmp/.neko-env.XXXXXX)
     # shellcheck disable=SC2086
@@ -31,8 +32,11 @@ if [ "$(id -u)" -ne 0 ]; then
     exec sudo NEKO_ENV_FILE="$_neko_env" "$0" "$@"
 fi
 if [ -n "${NEKO_ENV_FILE:-}" ] && [ -f "$NEKO_ENV_FILE" ]; then
-    # shellcheck disable=SC1090
-    set -a; . "$NEKO_ENV_FILE"; set +a
+    while IFS= read -r _neko_entry; do
+        _neko_name=${_neko_entry%%=*}
+        _neko_value=${_neko_entry#*=}
+        export "$_neko_name=$_neko_value"
+    done < "$NEKO_ENV_FILE"
     rm -f "$NEKO_ENV_FILE"
 fi
 
