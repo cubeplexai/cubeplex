@@ -19,14 +19,15 @@ Design notes for future editors — change carefully:
       in the user's input language;
   (2) source text plus a trailing instruction — title must reflect the
       **intent** (and its language), not the body.
-- The literal sentinel ``<<<USER_MESSAGE>>>`` is substituted by the
-  service with the user's first message (already trimmed to
-  ``MAX_SNIPPET_CHARS``). We use a sentinel + ``str.replace`` rather than
-  ``str.format`` so curly braces inside the user's content can't blow up
-  templating.
+- The literal sentinels ``<<<USER_MESSAGE>>>`` and ``<<<UI_LANGUAGE>>>`` are
+  substituted by the service with the user's first message (already trimmed
+  to ``MAX_SNIPPET_CHARS``) and interface language. We use sentinels +
+  ``str.replace`` rather than ``str.format`` so curly braces inside the
+  user's content can't blow up templating.
 """
 
 TITLE_PROMPT_PLACEHOLDER: str = "<<<USER_MESSAGE>>>"
+UI_LANGUAGE_PLACEHOLDER: str = "<<<UI_LANGUAGE>>>"
 
 TITLE_GENERATION_PROMPT: str = """\
 You name conversations for a sidebar list. Read the user's first message
@@ -34,8 +35,12 @@ below and produce a SHORT TITLE describing the conversation's intent.
 
 Rules:
 - Length: 4-6 English words OR 6-10 Chinese characters. Hard cap.
-- Language: match the language of the user's PRIMARY INTENT (which may
-  be the trailing instruction, not the pasted source material).
+- Language: write the title in the language used by the user's message.
+- If the language is difficult to determine, such as for "hi", "OK", or
+  another very short message, use the user's interface language: <<<UI_LANGUAGE>>>.
+- Do not infer the title language from the examples below.
+- The primary intent may be the trailing instruction, not the pasted source
+  material.
 - Form: a noun phrase. Never start with a verb like "Use", "Asks",
   "How to", "Translate", "Help with", "帮我", "询问".
 - Front-load the topic: the first 2-3 words / 4-6 Chinese characters
@@ -49,9 +54,9 @@ Examples:
 
 Input:
 ```
-帮我写一个 React 的虚拟滚动列表组件,需要支持动态高度。
+Help me build a React virtualized list component with dynamic row heights.
 ```
-Title: React 虚拟滚动列表
+Title: React Virtualized List
 
 Input:
 ```

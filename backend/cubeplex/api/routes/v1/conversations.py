@@ -962,6 +962,7 @@ async def generate_title(
         )
 
     backend = getattr(raw_request.app.state, "encryption_backend", None)
+    ui_language = {"en": "English", "zh": "Chinese"}.get(ctx.user.language, "English")
     conversation = await generate_and_apply_title(
         repo=repo,
         session=session,
@@ -969,6 +970,8 @@ async def generate_title(
         encryption_backend=backend,
         conversation=conversation,
         content=body.content,
+        ui_language=ui_language,
+        tracer=getattr(raw_request.app.state, "tracer", None),
     )
     return _serialize_conversation(conversation)
 

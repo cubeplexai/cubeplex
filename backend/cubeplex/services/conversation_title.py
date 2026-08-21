@@ -15,13 +15,14 @@ with the first user message. This service:
   manual rename is never clobbered.
 - Swallows LLM/provider errors and returns the conversation unchanged.
 
-The LLM call is dispatched via ``cubepi.Provider.stream`` directly — title
-generation is a single-turn request, so no agent loop is needed.
+The LLM call is dispatched as a single-turn request. When tracing is enabled,
+``Tracer.oneshot`` records the provider call without introducing an agent loop;
+the untraced path uses ``cubepi.Provider.stream`` directly.
 """
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +31,11 @@ from cubeplex.llm.builder import build_chain_model
 from cubeplex.llm.resolver import resolve_task_preset
 from cubeplex.llm.snapshot import load_llm_snapshot
 from cubeplex.models import Conversation
-from cubeplex.prompts.title import TITLE_GENERATION_PROMPT, TITLE_PROMPT_PLACEHOLDER
+from cubeplex.prompts.title import (
+    TITLE_GENERATION_PROMPT,
+    TITLE_PROMPT_PLACEHOLDER,
+    UI_LANGUAGE_PLACEHOLDER,
+)
 from cubeplex.repositories import ConversationRepository
 
 logger = logging.getLogger(__name__)
@@ -125,8 +130,9 @@ def _looks_like_echo(title: str, snippet: str) -> bool:
     return norm_s.startswith(norm_t[:prefix_len])
 
 
-def _build_prompt(snippet: str) -> str:
-    return TITLE_GENERATION_PROMPT.replace(TITLE_PROMPT_PLACEHOLDER, snippet)
+def _build_prompt(snippet: str, ui_language: str) -> str:
+    prompt = TITLE_GENERATION_PROMPT.replace(TITLE_PROMPT_PLACEHOLDER, snippet)
+    return prompt.replace(UI_LANGUAGE_PLACEHOLDER, ui_language)
 
 
 async def _generate_title(
@@ -134,6 +140,8 @@ async def _generate_title(
     org_id: str,
     encryption_backend: EncryptionBackend,
     full_prompt: str,
+    tracer: Any | None = None,
+    trace_metadata: dict[str, str] | None = None,
 ) -> str:
     """One-shot title generation via cubepi.Provider direct call.
 
@@ -154,32 +162,50 @@ async def _generate_title(
     provider_slug = bound.spec.provider_id
     model_id = bound.spec.id
 
-    try:
-        stream = await bound.provider.stream(
-            model=bound.spec,
-            messages=[UserMessage(content=[TextContent(text=full_prompt)])],
-            system_prompt="",  # title-gen prompt is fully in the user message
-            # Force reasoning off: title-gen is latency-sensitive and a
-            # reasoning model here can stall (the 30s timeout incident).
-            options=StreamOptions(reasoning=ReasoningControl(mode="off")),
-        )
+    messages = [UserMessage(content=[TextContent(text=full_prompt)])]
 
-        parts: list[str] = []
-        async for evt in stream:
-            if evt.type == "text_delta":
-                if evt.delta:
-                    parts.append(evt.delta)
-            elif evt.type == "error":
-                raise RuntimeError(evt.error_message or "title generation failed")
-            elif evt.type == "done":
-                break
+    try:
+        if tracer is not None:
+            async with tracer.oneshot(
+                model=bound,
+                operation="conversation_title",
+                metadata=trace_metadata,
+            ) as title_session:
+                raw_text = cast(
+                    str,
+                    await title_session.generate(
+                        system="",
+                        messages=messages,
+                        max_output_tokens=LLM_MAX_TOKENS,
+                    ),
+                )
+        else:
+            stream = await bound.provider.stream(
+                model=bound.spec,
+                messages=messages,
+                system_prompt="",  # title-gen prompt is fully in the user message
+                # Force reasoning off: title-gen is latency-sensitive and a
+                # reasoning model here can stall (the 30s timeout incident).
+                options=StreamOptions(reasoning=ReasoningControl(mode="off")),
+            )
+
+            parts: list[str] = []
+            async for evt in stream:
+                if evt.type == "text_delta":
+                    if evt.delta:
+                        parts.append(evt.delta)
+                elif evt.type == "error":
+                    raise RuntimeError(evt.error_message or "title generation failed")
+                elif evt.type == "done":
+                    break
+            raw_text = "".join(parts)
     except BaseException as _exc:
         # Out-of-band, best-effort runtime status writeback (spec §4.4a).
         _schedule_writeback(org_id=org_id, provider_slug=provider_slug, model_id=model_id, exc=_exc)
         raise
     else:
         _schedule_writeback(org_id=org_id, provider_slug=provider_slug, model_id=model_id, exc=None)
-    return "".join(parts)
+    return raw_text
 
 
 async def generate_and_apply_title(
@@ -190,6 +216,8 @@ async def generate_and_apply_title(
     encryption_backend: EncryptionBackend | None,
     conversation: Conversation,
     content: str,
+    ui_language: str,
+    tracer: Any | None = None,
 ) -> Conversation:
     """Generate and persist an auto-title for ``conversation``.
 
@@ -214,10 +242,17 @@ async def generate_and_apply_title(
         logger.warning("Auto-title skipped: no encryption backend on app state")
         return conversation
 
-    full_prompt = _build_prompt(snippet)
+    full_prompt = _build_prompt(snippet, ui_language)
 
     try:
-        raw_title = await _generate_title(session, org_id, encryption_backend, full_prompt)
+        raw_title = await _generate_title(
+            session,
+            org_id,
+            encryption_backend,
+            full_prompt,
+            tracer=tracer,
+            trace_metadata={"conversation_id": conversation.id, "org_id": org_id},
+        )
     except Exception:
         logger.warning("Auto-title skipped: LLM call failed", exc_info=True)
         return conversation
