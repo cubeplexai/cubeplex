@@ -441,13 +441,11 @@ def _apply_edit_spans(current: str, edits: list[tuple[int, int, str]]) -> str:
 
 def _first_changed_line(current: str, updated: str) -> int | None:
     """Return the 1-indexed first line changed between two text values."""
-    for index, (before, after) in enumerate(
-        zip(current.splitlines(), updated.splitlines(), strict=False), start=1
-    ):
+    before_lines = current.splitlines(keepends=True)
+    after_lines = updated.splitlines(keepends=True)
+    for index, (before, after) in enumerate(zip(before_lines, after_lines, strict=False), start=1):
         if before != after:
             return index
-    before_lines = current.splitlines()
-    after_lines = updated.splitlines()
     if len(before_lines) != len(after_lines):
         return min(len(before_lines), len(after_lines)) + 1
     return None
@@ -489,7 +487,7 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
             )
         current = files[0][1].decode()
 
-        matched_edits: list[tuple[int, int, str]] = []
+        matched_edits: list[tuple[int, int, str, int]] = []
         fuzzy_matched = False
         for index, edit in enumerate(edit_specs, start=1):
             count = current.count(edit.old_string)
@@ -525,8 +523,9 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
                         content=[
                             TextContent(
                                 text=(
-                                    f"Error: edit {index}: old_string appears {norm_count} times "
-                                    f"in {args.file_path}. It must be unique — provide more context."
+                                    f"Error: edit {index}: old_string appears "
+                                    f"{norm_count} times in {args.file_path}. "
+                                    "It must be unique — provide more context."
                                 )
                             )
                         ]
@@ -543,23 +542,28 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
                     )
                 start, end = span
                 fuzzy_matched = True
-            matched_edits.append((start, end, edit.new_string))
+            matched_edits.append((start, end, edit.new_string, index))
 
         ordered = sorted(matched_edits)
-        for (_, previous_end, _), (start, _, _) in zip(ordered, ordered[1:], strict=False):
+        for (_, previous_end, _, previous_index), (start, _, _, edit_index) in zip(
+            ordered, ordered[1:], strict=False
+        ):
             if start < previous_end:
                 return AgentToolResult(
                     content=[
                         TextContent(
                             text=(
-                                f"Error: edits overlap in {args.file_path}; provide separate, "
-                                "non-overlapping old_string values."
+                                f"Error: edit {previous_index} overlaps edit {edit_index} "
+                                f"in {args.file_path}; provide separate, non-overlapping "
+                                "old_string values."
                             )
                         )
                     ]
                 )
 
-        updated = _apply_edit_spans(current, matched_edits)
+        updated = _apply_edit_spans(
+            current, [(start, end, new) for start, end, new, _ in matched_edits]
+        )
 
         await sandbox.upload([(args.file_path, updated.encode())])
 

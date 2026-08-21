@@ -69,7 +69,6 @@ export function EditFilePreviewView({ args, result, toolRef }: EditFilePreviewVi
         // Tool completed but no diff — shouldn't happen, show fallback
         <div className="p-4 text-sm text-muted-foreground">{result}</div>
       ) : (
-        // Tool still pending: show every old_string → new_string pair.
         <div className="p-4 space-y-4">
           {edits.map((edit, index) => (
             <div key={`${index}-${edit.old_string}`} className="space-y-2">
