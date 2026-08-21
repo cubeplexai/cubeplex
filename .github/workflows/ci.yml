@@ -371,7 +371,10 @@ jobs:
       CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL || 'http://127.0.0.1:9' }}
       CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY || 'ci-placeholder' }}
       CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID || 'ci-placeholder' }}
-      CUBEPLEX_E2E_REAL_LLM: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL != '' && secrets.CUBEPLEX_E2E_LLM_API_KEY != '' && secrets.CUBEPLEX_E2E_LLM_MODEL_ID != '' }}
+      # Never opt Playwright into the live LLM on the PR path. Tests tagged
+      # @real-llm are grepped out by `make frontend-test-e2e-ci` and run in
+      # nightly-real-llm.yml instead.
+      CUBEPLEX_E2E_REAL_LLM: 'false'
       CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN || '127.0.0.1:9' }}
       CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE || 'ci-placeholder' }}
       CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY || 'ci-placeholder' }}

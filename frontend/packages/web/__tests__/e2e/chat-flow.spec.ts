@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
+import { REAL_LLM_TAG, registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
-test('can send a message and see a response', async ({ page }) => {
+test('can send a message and see a response', { tag: REAL_LLM_TAG }, async ({ page }) => {
   skipWithoutRealLlm()
   await registerAndLand(page)
 
@@ -24,7 +24,7 @@ test('can send a message and see a response', async ({ page }) => {
   expect(text!.trim().length).toBeGreaterThan(0)
 })
 
-test('conversation history persists after page reload', async ({ page }) => {
+test('conversation history persists after page reload', { tag: REAL_LLM_TAG }, async ({ page }) => {
   skipWithoutRealLlm()
   await registerAndLand(page)
 

@@ -6,6 +6,16 @@ export function uniqueEmail(prefix = 'u'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.com`
 }
 
+/** Playwright tag for tests that call a live LLM. PR CI greps this out. */
+export const REAL_LLM_TAG = '@real-llm'
+
+/**
+ * Skip unless `CUBEPLEX_E2E_REAL_LLM=true`.
+ *
+ * Also tag the test `{ tag: REAL_LLM_TAG }` so PR CI
+ * (`pnpm test:e2e -- --grep-invert @real-llm`) excludes it. Nightly
+ * (`--grep @real-llm` in nightly-real-llm.yml) is the only CI that runs it.
+ */
 export function skipWithoutRealLlm(): void {
   test.skip(process.env.CUBEPLEX_E2E_REAL_LLM !== 'true', 'requires external LLM credentials')
 }

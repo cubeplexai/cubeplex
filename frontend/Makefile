@@ -1,4 +1,4 @@
-.PHONY: help install build-core build lint type-check format format-check test-unit test-e2e test-e2e-ci install-browsers check-i18n check-ci
+.PHONY: help install build-core build lint type-check format format-check test-unit test-e2e test-e2e-ci test-e2e-real-llm install-browsers check-i18n check-ci
 
 help:
 	@echo "Available commands:"
@@ -11,7 +11,8 @@ help:
 	@echo "  make format-check      - Check frontend formatting"
 	@echo "  make test-unit         - Run frontend unit tests"
 	@echo "  make test-e2e          - Run Playwright E2E tests"
-	@echo "  make test-e2e-ci       - Run Playwright E2E tests with CI output"
+	@echo "  make test-e2e-ci       - Run Playwright E2E tests with CI output (excludes @real-llm)"
+	@echo "  make test-e2e-real-llm - Run Playwright tests tagged @real-llm"
 	@echo "  make install-browsers  - Install Playwright Chromium browser"
 	@echo "  make check-i18n        - Check i18n locale parity + dynamic t() calls"
 	@echo "  make check-ci          - Run frontend CI checks"
@@ -44,7 +45,10 @@ test-e2e:
 	pnpm test:e2e
 
 test-e2e-ci:
-	PLAYWRIGHT_FORCE_TTY=1 pnpm test:e2e
+	PLAYWRIGHT_FORCE_TTY=1 pnpm test:e2e -- --grep-invert @real-llm
+
+test-e2e-real-llm:
+	PLAYWRIGHT_FORCE_TTY=1 pnpm test:e2e -- --grep @real-llm
 
 install-browsers:
 	pnpm exec playwright install --with-deps chromium
