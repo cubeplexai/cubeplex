@@ -60,8 +60,10 @@ Creates parent directories automatically. Refuses to overwrite an existing file 
 `overwrite=true` — on that error, pick a different name or use `edit_file`; pass \
 `overwrite=true` only when replacing the file is the explicit intent. Prefer this over \
 `echo`/`cat` heredocs.
-- `edit_file(file_path, old_string, new_string)` — Replace an exact string in an existing file. \
-old_string must appear exactly once. Prefer this over `sed`/`awk`.
+- `edit_file(file_path, edits)` — Apply one or more text replacements in an existing file. \
+Each `edits` item has `old_string` and `new_string`; every old_string must appear exactly once \
+and edits must not overlap. When making multiple changes to one file, include all of them in one \
+call. Prefer this over `sed`/`awk`.
 
 **When to use which:**
 - Creating new files → `write_file`

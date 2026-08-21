@@ -14,6 +14,14 @@ interface EditFileDetails {
   file_path?: string
   unified_diff?: string
   fuzzy_matched?: boolean
+  edit_count?: number
+  match_mode?: 'exact' | 'fuzzy'
+  first_changed_line?: number | null
+}
+
+interface EditSpec {
+  old_string: string
+  new_string: string
 }
 
 function isEditFileDetails(v: unknown): v is EditFileDetails {
@@ -32,9 +40,7 @@ export function EditFilePreviewView({ args, result, toolRef }: EditFilePreviewVi
   const unifiedDiff = editDetails?.unified_diff
   const fuzzyMatched = editDetails?.fuzzy_matched === true
 
-  // Fallback: show old_string → new_string plaintext if diff isn't available yet
-  const oldString = typeof args.old_string === 'string' ? args.old_string : null
-  const newString = typeof args.new_string === 'string' ? args.new_string : null
+  const edits = getEditSpecs(args)
 
   return (
     <div className="h-full overflow-auto">
@@ -45,6 +51,16 @@ export function EditFilePreviewView({ args, result, toolRef }: EditFilePreviewVi
             fuzzy match
           </span>
         )}
+        {editDetails?.edit_count && editDetails.edit_count > 1 && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {editDetails.edit_count} edits
+          </span>
+        )}
+        {editDetails?.first_changed_line != null && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            line {editDetails.first_changed_line}
+          </span>
+        )}
       </div>
 
       {unifiedDiff ? (
@@ -53,26 +69,48 @@ export function EditFilePreviewView({ args, result, toolRef }: EditFilePreviewVi
         // Tool completed but no diff — shouldn't happen, show fallback
         <div className="p-4 text-sm text-muted-foreground">{result}</div>
       ) : (
-        // Tool still pending: show old_string → new_string plaintext
-        <div className="p-4 space-y-3">
-          {oldString !== null && (
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-1">Old</div>
-              <pre className="text-xs bg-destructive/8 text-destructive p-3 rounded overflow-x-auto whitespace-pre">
-                {oldString}
-              </pre>
+        // Tool still pending: show every old_string → new_string pair.
+        <div className="p-4 space-y-4">
+          {edits.map((edit, index) => (
+            <div key={`${index}-${edit.old_string}`} className="space-y-2">
+              {edits.length > 1 && (
+                <div className="text-xs font-medium text-muted-foreground">Edit {index + 1}</div>
+              )}
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-1">Old</div>
+                <pre className="text-xs bg-destructive/8 text-destructive p-3 rounded overflow-x-auto whitespace-pre">
+                  {edit.old_string}
+                </pre>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-1">New</div>
+                <pre className="text-xs bg-success-surface/60 text-success-fg p-3 rounded overflow-x-auto whitespace-pre">
+                  {edit.new_string}
+                </pre>
+              </div>
             </div>
-          )}
-          {newString !== null && (
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-1">New</div>
-              <pre className="text-xs bg-success-surface/60 text-success-fg p-3 rounded overflow-x-auto whitespace-pre">
-                {newString}
-              </pre>
-            </div>
-          )}
+          ))}
         </div>
       )}
     </div>
   )
+}
+
+function isEditSpec(value: unknown): value is EditSpec {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'old_string' in value &&
+    'new_string' in value &&
+    typeof value.old_string === 'string' &&
+    typeof value.new_string === 'string'
+  )
+}
+
+export function getEditSpecs(args: Record<string, unknown>): EditSpec[] {
+  if (Array.isArray(args.edits)) return args.edits.filter(isEditSpec)
+  if (typeof args.old_string === 'string' && typeof args.new_string === 'string') {
+    return [{ old_string: args.old_string, new_string: args.new_string }]
+  }
+  return []
 }

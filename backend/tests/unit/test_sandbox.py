@@ -14,6 +14,7 @@ from cubepi.providers.base import TextContent
 from cubeplex.middleware.sandbox import (
     SandboxMiddleware,
     _EditFileArgs,
+    _EditSpec,
     _ExecuteArgs,
     _FileReadArgs,
     _make_edit_file_tool,
@@ -379,6 +380,112 @@ async def test_edit_file_exact_match_returns_diff_in_details() -> None:
     assert isinstance(result.details, dict)
     assert result.details["unified_diff"].startswith("--- a/")
     assert result.details["fuzzy_matched"] is False
+
+
+@pytest.mark.asyncio
+async def test_edit_file_applies_multiple_edits_with_one_upload() -> None:
+    sandbox = _make_sandbox()
+    original = "first = 1\nsecond = 2\nthird = 3\n"
+    sandbox.download = AsyncMock(return_value=[("/work/f.py", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.py",
+        edits=[
+            _EditSpec(old_string="first = 1", new_string="first = 10"),
+            _EditSpec(old_string="third = 3", new_string="third = 30"),
+        ],
+    )
+    result = await tool.execute("tc-1", args)
+
+    sandbox.upload.assert_called_once_with(
+        [("/work/f.py", b"first = 10\nsecond = 2\nthird = 30\n")]
+    )
+    assert "2 edits" in _text(result)
+    assert result.details is not None
+    assert result.details["edit_count"] == 2
+    assert result.details["match_mode"] == "exact"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_matches_all_edits_against_original_content() -> None:
+    sandbox = _make_sandbox()
+    original = "value = 1\n"
+    sandbox.download = AsyncMock(return_value=[("/work/f.py", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.py",
+        edits=[
+            _EditSpec(old_string="value", new_string="number"),
+            _EditSpec(old_string="1", new_string="2"),
+        ],
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    sandbox.upload.assert_called_once_with([("/work/f.py", b"number = 2\n")])
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_overlapping_edits_without_upload() -> None:
+    sandbox = _make_sandbox()
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", b"abcdef")])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        edits=[
+            _EditSpec(old_string="abc", new_string="x"),
+            _EditSpec(old_string="cde", new_string="y"),
+        ],
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "overlap" in _text(result)
+    sandbox.upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_later_failed_edit_without_upload() -> None:
+    sandbox = _make_sandbox()
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", b"first\nsecond")])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        edits=[
+            _EditSpec(old_string="first", new_string="changed"),
+            _EditSpec(old_string="missing", new_string="also changed"),
+        ],
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "edit 2" in _text(result)
+    assert "not found" in _text(result)
+    sandbox.upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_file_preserves_bom_and_crlf() -> None:
+    sandbox = _make_sandbox()
+    original = "\ufefffirst\r\nsecond\r\n"
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        edits=[_EditSpec(old_string="second", new_string="changed")],
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    sandbox.upload.assert_called_once_with([("/work/f.txt", "\ufefffirst\r\nchanged\r\n".encode())])
 
 
 # ---------------------------------------------------------------------------
