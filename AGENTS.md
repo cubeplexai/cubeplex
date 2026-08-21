@@ -38,7 +38,8 @@ Full-stack agent platform.
 8. **Stay on the feature branch** during multi-task work. No auto-switch to
    main or mid-execution merges.
 9. **Verify before claiming done.** Run the command; paste evidence. Pre-push
-   already runs `make check-ci` — don't run it by hand first.
+   already runs `make check-ci` for the side(s) whose code is in the push —
+   don't run it by hand first. Docs-only pushes skip both.
 10. **Act on valid review feedback** — push the fix; don't ask permission.
 11. **Incremental tests during dev** — only the changed module; full suite at
     pre-PR.

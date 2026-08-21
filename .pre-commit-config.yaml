@@ -1,6 +1,8 @@
 # Two-stage hooks:
 #   pre-commit (≤10s): staged-file checks, file hygiene + ruff check + format check + eslint/prettier --check
-#   pre-push   (≤3min): CI-equivalent backend-check + frontend-check
+#   pre-push: CI-equivalent check-ci per side, skipped when the push has no
+#   matching code (docs-only, opposite side). Makefile / this file still
+#   trigger both, because they are the gate.
 #
 # Policy: ZERO auto-fix. All hooks are check-only. Developers run `make format`
 # or `pnpm format` manually before committing.
@@ -69,7 +71,9 @@ repos:
         exclude: ^frontend/(node_modules|.*/dist|.*/\.next|test-results|playwright-report)/
         pass_filenames: false
 
-  # Pre-push: 跑 CI 等价检查
+  # Pre-push: CI-equivalent checks for the side(s) that changed.
+  # files/exclude use search() against paths in the push range (not the
+  # whole tree). Markdown is documentation even under backend/ or frontend/.
   - repo: local
     hooks:
       - id: backend-check-ci
@@ -78,11 +82,13 @@ repos:
         language: system
         stages: [pre-push]
         pass_filenames: false
-        always_run: true
+        files: ^(backend/|Makefile$|\.pre-commit-config\.yaml$)
+        exclude: \.(md|mdx|rst)$
       - id: frontend-check-ci
         name: frontend check-ci (build-core + lint + format + type-check + vitest + next build)
         entry: make frontend-check-ci
         language: system
         stages: [pre-push]
         pass_filenames: false
-        always_run: true
+        files: ^(frontend/|Makefile$|\.pre-commit-config\.yaml$)
+        exclude: \.(md|mdx|rst)$
