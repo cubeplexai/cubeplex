@@ -36,7 +36,7 @@ from cubepi.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import TextContent
 from cubepi.types import StructuredValue
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
@@ -140,10 +140,38 @@ class _WriteFileArgs(BaseModel):
     )
 
 
-class _EditFileArgs(BaseModel):
-    file_path: str = Field(description="Absolute path to the file to edit.")
+class _EditSpec(BaseModel):
     old_string: str = Field(description="The exact text to find and replace. Must be unique.")
     new_string: str = Field(description="The replacement text. Must differ from old_string.")
+
+
+class _EditFileArgs(BaseModel):
+    file_path: str = Field(description="Absolute path to the file to edit.")
+    edits: list[_EditSpec] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "One or more edits to apply to the file in a single call. All old_string values "
+            "must be unique in the original file and edits must not overlap."
+        ),
+    )
+    old_string: str | None = Field(
+        default=None,
+        description="Legacy single-edit form; use edits instead when making multiple changes.",
+    )
+    new_string: str | None = Field(
+        default=None,
+        description="Legacy single-edit form; use edits instead when making multiple changes.",
+    )
+
+    @model_validator(mode="after")
+    def validate_edit_shape(self) -> _EditFileArgs:
+        if self.edits is None and (self.old_string is None or self.new_string is None):
+            raise ValueError("Provide edits or both old_string and new_string.")
+        if self.edits is not None and (self.old_string is not None or self.new_string is not None):
+            raise ValueError("Provide edits or old_string/new_string, not both.")
+        return self
 
 
 class _FileReadArgs(BaseModel):
@@ -349,11 +377,11 @@ def _partial_normalize(text: str) -> str:
     return text
 
 
-def _fuzzy_replace(current: str, old_string: str, new_string: str) -> str | None:
-    """Find old_string in current via normalization and replace the original span.
+def _fuzzy_match_span(current: str, old_string: str) -> tuple[int, int] | None:
+    """Find the original span for one uniquely fuzzy-matched old_string.
 
-    Returns the updated content, or None if old_string is not found exactly
-    once after normalization (caller should already have verified count == 1).
+    Returns ``(start, end)`` in the un-normalized content, or None if the
+    normalized old string cannot be mapped back to the original content.
 
     Two-phase strategy to avoid the trailing-whitespace-stripping complication:
     1. Apply NFKC + substitutions (character-stable) to get `partial`.
@@ -400,7 +428,29 @@ def _fuzzy_replace(current: str, old_string: str, new_string: str) -> str | None
     orig_start = partial_to_orig[partial_survived[norm_start]]
     orig_end = partial_to_orig[partial_survived[norm_end - 1]] + 1
 
-    return current[:orig_start] + new_string + current[orig_end:]
+    return orig_start, orig_end
+
+
+def _apply_edit_spans(current: str, edits: list[tuple[int, int, str]]) -> str:
+    """Apply edits whose offsets all refer to the same original content."""
+    updated = current
+    for start, end, new_string in sorted(edits, reverse=True):
+        updated = updated[:start] + new_string + updated[end:]
+    return updated
+
+
+def _first_changed_line(current: str, updated: str) -> int | None:
+    """Return the 1-indexed first line changed between two text values."""
+    for index, (before, after) in enumerate(
+        zip(current.splitlines(), updated.splitlines(), strict=False), start=1
+    ):
+        if before != after:
+            return index
+    before_lines = current.splitlines()
+    after_lines = updated.splitlines()
+    if len(before_lines) != len(after_lines):
+        return min(len(before_lines), len(after_lines)) + 1
+    return None
 
 
 def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
@@ -415,10 +465,18 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
-        if args.old_string == args.new_string:
-            return AgentToolResult(
-                content=[TextContent(text="Error: old_string and new_string must differ.")]
-            )
+        edit_specs = args.edits or [
+            _EditSpec(old_string=args.old_string or "", new_string=args.new_string or "")
+        ]
+        for index, edit in enumerate(edit_specs, start=1):
+            if edit.old_string == edit.new_string:
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            text=f"Error: edit {index}: old_string and new_string must differ."
+                        )
+                    ]
+                )
         try:
             files = await sandbox.download([args.file_path])
         except FileNotFoundError:
@@ -431,47 +489,77 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
             )
         current = files[0][1].decode()
 
-        # --- exact match ---
-        count = current.count(args.old_string)
+        matched_edits: list[tuple[int, int, str]] = []
         fuzzy_matched = False
-        if count == 1:
-            updated = current.replace(args.old_string, args.new_string, 1)
-        elif count > 1:
-            return AgentToolResult(
-                content=[
-                    TextContent(
-                        text=(
-                            f"Error: old_string appears {count} times in {args.file_path}. "
-                            "It must be unique — provide more context."
-                        )
-                    )
-                ]
-            )
-        else:
-            # --- fuzzy fallback ---
-            norm_count = _normalize_for_fuzzy(current).count(_normalize_for_fuzzy(args.old_string))
-            if norm_count == 0:
-                return AgentToolResult(
-                    content=[TextContent(text=f"Error: old_string not found in {args.file_path}")]
-                )
-            if norm_count > 1:
+        for index, edit in enumerate(edit_specs, start=1):
+            count = current.count(edit.old_string)
+            if count == 1:
+                start = current.index(edit.old_string)
+                end = start + len(edit.old_string)
+            elif count > 1:
                 return AgentToolResult(
                     content=[
                         TextContent(
                             text=(
-                                f"Error: old_string appears {norm_count} times in "
+                                f"Error: edit {index}: old_string appears {count} times in "
                                 f"{args.file_path}. It must be unique — provide more context."
                             )
                         )
                     ]
                 )
-            result = _fuzzy_replace(current, args.old_string, args.new_string)
-            if result is None:
-                return AgentToolResult(
-                    content=[TextContent(text=f"Error: old_string not found in {args.file_path}")]
+            else:
+                norm_count = _normalize_for_fuzzy(current).count(
+                    _normalize_for_fuzzy(edit.old_string)
                 )
-            updated = result
-            fuzzy_matched = True
+                if norm_count == 0:
+                    return AgentToolResult(
+                        content=[
+                            TextContent(
+                                text=f"Error: edit {index}: old_string not found in "
+                                f"{args.file_path}"
+                            )
+                        ]
+                    )
+                if norm_count > 1:
+                    return AgentToolResult(
+                        content=[
+                            TextContent(
+                                text=(
+                                    f"Error: edit {index}: old_string appears {norm_count} times "
+                                    f"in {args.file_path}. It must be unique — provide more context."
+                                )
+                            )
+                        ]
+                    )
+                span = _fuzzy_match_span(current, edit.old_string)
+                if span is None:
+                    return AgentToolResult(
+                        content=[
+                            TextContent(
+                                text=f"Error: edit {index}: old_string not found in "
+                                f"{args.file_path}"
+                            )
+                        ]
+                    )
+                start, end = span
+                fuzzy_matched = True
+            matched_edits.append((start, end, edit.new_string))
+
+        ordered = sorted(matched_edits)
+        for (_, previous_end, _), (start, _, _) in zip(ordered, ordered[1:], strict=False):
+            if start < previous_end:
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            text=(
+                                f"Error: edits overlap in {args.file_path}; provide separate, "
+                                "non-overlapping old_string values."
+                            )
+                        )
+                    ]
+                )
+
+        updated = _apply_edit_spans(current, matched_edits)
 
         await sandbox.upload([(args.file_path, updated.encode())])
 
@@ -492,17 +580,28 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
         )
         suffix = " (fuzzy match)" if fuzzy_matched else ""
         return AgentToolResult(
-            content=[TextContent(text=f"Successfully edited {args.file_path}{suffix}")],
+            content=[
+                TextContent(
+                    text=f"Successfully edited {args.file_path}{suffix} "
+                    f"({len(edit_specs)} edit{'s' if len(edit_specs) != 1 else ''})"
+                )
+            ],
             details={
                 "file_path": args.file_path,
                 "unified_diff": "".join(diff_lines),
                 "fuzzy_matched": fuzzy_matched,
+                "edit_count": len(edit_specs),
+                "match_mode": "fuzzy" if fuzzy_matched else "exact",
+                "first_changed_line": _first_changed_line(current, updated),
             },
         )
 
     return AgentTool(
         name="edit_file",
-        description="Find and replace a unique string in an existing file.",
+        description=(
+            "Apply one or more unique, non-overlapping text edits to an existing file in one "
+            "call. When making multiple changes to the same file, include them all in edits."
+        ),
         parameters=_EditFileArgs,
         execute=_edit_file,
     )
