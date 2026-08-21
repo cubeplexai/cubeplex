@@ -114,7 +114,7 @@ def _att_row(*, fid: str, kind: str, filename: str = "f") -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_build_blocks_drops_documents_when_sandbox_unavailable() -> None:
-    """When sandbox is None, the file_read tool is not registered. Hint
+    """When sandbox is None, the read tool is not registered. Hint
     metadata for documents would tell the model to call a tool it can't see
     — drop those rows but keep image rows (view_images works without
     sandbox via direct ObjectStore reads).

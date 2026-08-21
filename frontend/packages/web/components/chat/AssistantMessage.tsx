@@ -12,7 +12,12 @@ import type {
   TurnUsage,
 } from '@cubeplex/core'
 import type { AgentStream } from '@cubeplex/core'
-import { createApiClient, useArtifactStore, useMessageStore } from '@cubeplex/core'
+import {
+  createApiClient,
+  isWriteOrEditTool,
+  useArtifactStore,
+  useMessageStore,
+} from '@cubeplex/core'
 import { ChevronDown, ChevronRight, Sparkle } from 'lucide-react'
 import { isMarkdownArtifact } from '@cubeplex/core'
 import { ArtifactCard } from './ArtifactCard'
@@ -581,7 +586,7 @@ function ContentBlockRenderer({
     return <PresentedFileCard file={null} captionFallback={caption || undefined} />
   }
   if (block.type === 'tool_call_streaming') {
-    const supportsPreview = block.name === 'write_file'
+    const supportsPreview = isWriteOrEditTool(block.name)
     return (
       <div className="min-w-0">
         <ToolCallItem
@@ -589,11 +594,11 @@ function ContentBlockRenderer({
           arguments={{}}
           toolCallId={block.tool_call_id ?? `streaming-${index}`}
           summaryOverride={
-            supportsPreview
+            supportsPreview && block.name === 'write'
               ? getWriteFileSummary({}, block.args_text)
               : block.args_text.trim() || undefined
           }
-          contentTypeOverride={supportsPreview ? 'write_file' : undefined}
+          contentTypeOverride={supportsPreview ? block.name : undefined}
           toolRef={
             supportsPreview
               ? {

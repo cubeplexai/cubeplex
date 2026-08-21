@@ -279,7 +279,7 @@ parsers:
     async_threshold_mb: 3
 ```
 
-The `file_read` tool converts PDF / office documents to markdown via a
+The `read` tool converts PDF / office documents to markdown via a
 docling-serve instance. Optional — see each guide's docling section for
 deploying one.
 

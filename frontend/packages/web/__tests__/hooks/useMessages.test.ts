@@ -533,7 +533,7 @@ describe('messageStore.send', () => {
             type: 'tool_call_delta',
             data: {
               tool_call_id: 'write-1',
-              name: 'write_file',
+              name: 'write',
               args_delta: '{"file_path":"/tmp/demo.txt","content":"hello"}',
               index: 0,
             },
@@ -545,7 +545,7 @@ describe('messageStore.send', () => {
             type: 'tool_call',
             data: {
               tool_call_id: 'write-1',
-              name: 'write_file',
+              name: 'write',
               arguments: {
                 file_path: '/tmp/demo.txt',
                 content: 'hello',
@@ -558,7 +558,7 @@ describe('messageStore.send', () => {
           {
             type: 'tool_result',
             data: {
-              tool_name: 'write_file',
+              tool_name: 'write',
               tool_call_id: 'write-1',
               content: 'Successfully wrote /tmp/demo.txt',
             },

@@ -292,7 +292,7 @@ default:
       client_id: "" # ENV: CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
       client_secret: "" # ENV: CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_SECRET
 
-  # File parsers (M6 file_read tool)
+  # File parsers (M6 read tool)
   parsers:
     docling_serve:
       base_url: "http://docling-serve:5001" # ENV: CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL

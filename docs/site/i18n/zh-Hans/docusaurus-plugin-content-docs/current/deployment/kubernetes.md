@@ -263,7 +263,7 @@ pods` 立刻能看到，不会等到第一条聊天消息才冒出 `no_default_p
 
 ### 4.5 Sandbox（可选）
 
-sandbox 是 agent 工具调用（bash、file_read 等）实际执行的容器运行时。
+sandbox 是 agent 工具调用（bash、read 等）实际执行的容器运行时。
 禁用后 agent 仍可对话，但工具调用会失败。
 
 ```yaml

@@ -27,7 +27,7 @@ WIDGET_GUIDELINES = """\
 
 Use `show_widget` when the answer is better seen than read (charts, diagrams,
 dashboards, sliders, comparisons). Stream an HTML fragment — do not
-`write_file` or `save_artifact` first.
+`write` or `save_artifact` first.
 
 Hard limits (always):
 

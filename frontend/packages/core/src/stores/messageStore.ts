@@ -21,6 +21,7 @@ import type {
   TodoItem,
   ToolCallDeltaEvent,
   ToolCallEvent,
+  ToolCallRef,
   ToolResultEvent,
   ToolResultMessage as ToolResultMessageType,
   UserMessage as UserMessageType,
@@ -39,10 +40,13 @@ import {
 } from '../api'
 import {
   canAutoOpenBrowserPanel,
+  canAutoOpenFilePreview,
   canAutoOpenReplacePanel,
   isBrowserToolCall,
+  isWriteOrEditTool,
   shouldAutoOpenArtifactPreview,
   shouldAutoOpenBrowserPreview,
+  shouldAutoOpenFilePreview,
 } from '../lib/autoOpenPreview'
 import { useArtifactStore } from './artifactStore'
 import { useAuthStore } from './authStore'
@@ -469,6 +473,34 @@ function maybeAutoOpenBrowserPreview(
   panel.openSandbox('browser')
 }
 
+/**
+ * Open the write/edit file preview when the agent mutates a sandbox file.
+ * Sync so focus cannot change between the gate check and openTool.
+ */
+function maybeAutoOpenFilePreview(
+  conversationId: string | null,
+  toolName: string,
+  args: Record<string, unknown>,
+  toolRef: ToolCallRef,
+): void {
+  if (!conversationId) return
+  if (!isWriteOrEditTool(toolName)) return
+  const viewingId = useConversationStore.getState().viewingConversationId
+  if (!shouldAutoOpenFilePreview(conversationId, viewingId)) return
+  const panel = usePanelStore.getState()
+  if (panel.view.type === 'tool') {
+    const current = panel.view.toolRef
+    const sameId = Boolean(toolRef.tool_call_id) && current?.tool_call_id === toolRef.tool_call_id
+    const sameIndex =
+      toolRef.index != null &&
+      current?.index === toolRef.index &&
+      current?.agent_id === toolRef.agent_id
+    if (sameId || sameIndex) return
+  }
+  if (!canAutoOpenFilePreview(panel.view)) return
+  panel.openTool(toolName, args, null, toolName, toolRef, undefined, 'auto')
+}
+
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
 const loadMessagesInFlight = new Map<string, Promise<void>>()
@@ -812,6 +844,11 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const nextTodos =
       e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : state.todos
     maybeAutoOpenBrowserPreview(convId, e.data.name, e.data.arguments)
+    maybeAutoOpenFilePreview(convId, e.data.name, e.data.arguments, {
+      agent_id: event.agent_id,
+      tool_call_id: e.data.tool_call_id,
+      index: null,
+    })
 
     return {
       ...base,
@@ -841,6 +878,18 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const e = event as ToolCallDeltaEvent
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
     const idx = e.data.index ?? 0
+    if (e.data.name) {
+      maybeAutoOpenFilePreview(
+        convId,
+        e.data.name,
+        {},
+        {
+          agent_id: event.agent_id,
+          tool_call_id: e.data.tool_call_id,
+          index: e.data.index,
+        },
+      )
+    }
     const blocks = [...prev.blocks]
     const startedAt = timestampToMs(event.timestamp)
     const nextToolStartedMap =
@@ -1882,7 +1931,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
 
         // Restore toolResultMap from history so tool preview panels remain
-        // interactive on reload (e.g. edit_file diff, write_file completed state).
+        // interactive on reload (e.g. edit diff, write completed state).
         const restoredToolResultMap: MessageStore['toolResultMap'] = {}
         for (const msg of messages) {
           if (msg.role !== 'tool_result' || !msg.tool_call_id) continue

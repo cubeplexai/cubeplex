@@ -49,7 +49,7 @@ export function resolveLiveWriteFile(
 
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i]
-    if (block.type === 'tool_call' && block.name === 'write_file') {
+    if (block.type === 'tool_call' && block.name === 'write') {
       if (toolRef.tool_call_id && block.id === toolRef.tool_call_id) {
         return {
           filePath: readFilePath(block.arguments),
@@ -58,7 +58,7 @@ export function resolveLiveWriteFile(
         }
       }
     }
-    if (block.type === 'tool_call_streaming' && block.name === 'write_file') {
+    if (block.type === 'tool_call_streaming' && block.name === 'write') {
       const sameId = toolRef.tool_call_id && block.tool_call_id === toolRef.tool_call_id
       const sameIndex = toolRef.index != null && block.index === toolRef.index
       if (sameId || sameIndex) {

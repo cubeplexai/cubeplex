@@ -21,7 +21,7 @@ def test_summarize_args_truncates_long_values() -> None:
 
 
 def test_read_file_summary_shows_path() -> None:
-    disp = TOOL_DISPLAY["read_file"]
+    disp = TOOL_DISPLAY["read"]
     assert "src/foo.py" in disp.summarize({"path": "src/foo.py"})
     assert disp.icon  # any non-empty icon
 

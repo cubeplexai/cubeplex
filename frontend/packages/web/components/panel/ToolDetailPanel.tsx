@@ -46,13 +46,13 @@ export function ToolDetailPanel() {
           />
         )}
         {contentType === 'skill' && <SkillView args={toolArgs} result={toolResult} />}
-        {contentType === 'write_file' && (
+        {contentType === 'write' && (
           <WriteFilePreviewView args={toolArgs} result={toolResult} toolRef={toolRef} />
         )}
-        {contentType === 'edit_file' && (
+        {contentType === 'edit' && (
           <EditFilePreviewView args={toolArgs} result={toolResult} toolRef={toolRef} />
         )}
-        {contentType === 'file_read' && (
+        {contentType === 'read' && (
           <FileReadView
             args={toolArgs}
             result={toolResult}

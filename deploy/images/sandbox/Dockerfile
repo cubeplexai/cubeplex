@@ -73,6 +73,7 @@ RUN if [ -n "$APT_MIRROR_HOST" ]; then \
         wget \
         file \
         git \
+        ripgrep \
         unzip \
         zip \
         sudo \

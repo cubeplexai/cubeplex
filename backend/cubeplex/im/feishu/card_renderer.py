@@ -212,7 +212,7 @@ def _summary_read_file(args: dict[str, Any]) -> str:
 
 
 def _summary_write_file(args: dict[str, Any]) -> str:
-    return _truncate(str(args.get("path", "")))
+    return _truncate(str(args.get("file_path") or args.get("path", "")))
 
 
 def _summary_bash(args: dict[str, Any]) -> str:
@@ -237,8 +237,9 @@ def _summary_recall_memory(args: dict[str, Any]) -> str:
 
 
 TOOL_DISPLAY: dict[str, ToolDisplay] = {
-    "read_file": ToolDisplay(icon="📄", summarize=_summary_read_file),
-    "write_file": ToolDisplay(icon="📝", summarize=_summary_write_file),
+    "read": ToolDisplay(icon="📄", summarize=_summary_read_file),
+    "write": ToolDisplay(icon="📝", summarize=_summary_write_file),
+    "edit": ToolDisplay(icon="✏️", summarize=_summary_write_file),
     "bash": ToolDisplay(icon="🖥️", summarize=_summary_bash),
     "execute": ToolDisplay(icon="🖥️", summarize=_summary_execute),
     "web_fetch": ToolDisplay(icon="🌐", summarize=_summary_web_fetch),

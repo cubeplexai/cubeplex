@@ -206,7 +206,7 @@ class ParserRegistry:
         }
         archive_exts = {"zip", "tar", "gz", "bz2", "rar", "7z", "tgz", "xz"}
         if mime in archive_mimes or ext in archive_exts:
-            return 'extract first via execute("unzip <file>") then file_read on contents'
+            return 'extract first via execute("unzip <file>") then read on contents'
         if ext in {"exe", "so", "dll", "dylib", "bin"}:
             return "binary executable; install a metadata parser plugin if needed"
         return None

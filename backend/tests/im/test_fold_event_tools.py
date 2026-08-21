@@ -212,7 +212,7 @@ def test_sub_agent_tool_call_routes_to_sub_agent_row_not_tool_steps() -> None:
             "type": "tool_call",
             "data": {
                 "tool_call_id": "tc_sub_1",
-                "name": "read_file",
+                "name": "read",
                 "arguments": "{}",
             },
             "agent_id": "subagent:parent_tc_1",

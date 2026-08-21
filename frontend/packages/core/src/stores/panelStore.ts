@@ -8,11 +8,11 @@ function mapContentType(toolName: string, backendContentType?: string): PanelCon
   const bare = bareToolName(toolName)
   if (bare === 'load_skill') return 'skill'
   if (bare === 'execute') return 'terminal'
-  if (bare === 'write_file') return 'write_file'
-  if (bare === 'edit_file') return 'edit_file'
+  if (bare === 'write') return 'write'
+  if (bare === 'edit') return 'edit'
   if (bare === 'code_execute' || bare === 'python') return 'code_execute'
-  if (bare === 'file_read') return 'file_read'
-  if (backendContentType === 'file_read') return 'file_read'
+  if (bare === 'read') return 'read'
+  if (backendContentType === 'read') return 'read'
 
   if (backendContentType === 'json') {
     if (bare === 'web_search' || bare === 'search') return 'search'
@@ -49,6 +49,8 @@ export type PanelView =
       toolRef: ToolCallRef | null
       highlightText: string | null
       highlightKey: number
+      /** Who opened the panel: user click vs auto-open on write/edit. */
+      source: 'user' | 'auto'
     }
   | {
       type: 'artifact'
@@ -83,6 +85,7 @@ export interface PanelStore {
     contentType?: string,
     toolRef?: ToolCallRef,
     highlightText?: string,
+    source?: 'user' | 'auto',
   ) => void
 
   openArtifact: (conversationId: string, artifactId: string, source?: 'user' | 'auto') => void
@@ -109,7 +112,15 @@ let sandboxRevisionCounter = 0
 export const usePanelStore = create<PanelStore>((set) => ({
   view: { type: 'closed' },
 
-  openTool: (toolName, toolArgs, toolResult, contentType, toolRef, highlightText) =>
+  openTool: (
+    toolName,
+    toolArgs,
+    toolResult,
+    contentType,
+    toolRef,
+    highlightText,
+    source = 'user',
+  ) =>
     set({
       view: {
         type: 'tool',
@@ -120,6 +131,7 @@ export const usePanelStore = create<PanelStore>((set) => ({
         toolRef: toolRef ?? null,
         highlightText: highlightText ?? null,
         highlightKey: ++highlightCounter,
+        source,
       },
     }),
 

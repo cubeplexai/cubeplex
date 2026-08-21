@@ -3,7 +3,7 @@
  * the corresponding work finishes (e.g. an artifact is saved mid-stream).
  *
  * Browser-local only for now — no server-backed user settings. Other panel
- * types (write_file, file_read, sandbox, …) can share this module later.
+ * types (write, read, sandbox, …) can share this module later.
  */
 
 import { bareToolName } from './toolName'
@@ -121,5 +121,40 @@ export function shouldAutoOpenBrowserPreview(
  */
 export function canAutoOpenBrowserPanel(view: { type: string; source?: 'user' | 'auto' }): boolean {
   if (view.type === 'closed' || view.type === 'sandbox') return true
+  return view.type === 'artifact' && view.source === 'auto'
+}
+
+/** True when this tool call is a sandbox write or edit — open the file preview. */
+export function isWriteOrEditTool(name: string): boolean {
+  const bare = bareToolName(name)
+  return bare === 'write' || bare === 'edit'
+}
+
+/**
+ * Whether a live write/edit tool call should open the file preview panel.
+ * Requires the mounted chat surface — same gate as artifact / browser auto-open.
+ */
+export function shouldAutoOpenFilePreview(
+  conversationId: string,
+  viewingConversationId: string | null,
+): boolean {
+  return viewingConversationId === conversationId
+}
+
+/**
+ * Whether write/edit auto-open may replace the current panel view.
+ *
+ * - Closed → open.
+ * - Already on a write/edit tool preview → follow the latest file mutation.
+ * - Auto-opened artifact → follow the live file instead.
+ * - User-picked artifact / sandbox / attachment / other tool → leave alone.
+ */
+export function canAutoOpenFilePreview(view: {
+  type: string
+  source?: 'user' | 'auto'
+  contentType?: string
+}): boolean {
+  if (view.type === 'closed') return true
+  if (view.type === 'tool' && isWriteOrEditTool(view.contentType ?? '')) return true
   return view.type === 'artifact' && view.source === 'auto'
 }

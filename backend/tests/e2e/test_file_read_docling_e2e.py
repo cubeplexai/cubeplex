@@ -1,4 +1,4 @@
-"""E2E: agent-facing file_read path reaches a real docling-serve.
+"""E2E: agent-facing read path reaches a real docling-serve.
 
 Runs only when ``DOCLING_URL`` is set and the endpoint answers its /health
 probe. No mocks — if docling is unreachable the tests skip with a reason.

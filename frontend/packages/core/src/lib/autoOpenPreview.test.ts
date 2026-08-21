@@ -4,13 +4,16 @@ import {
   AUTO_OPEN_ARTIFACTS_STORAGE_KEY,
   DEFAULT_AUTO_OPEN_ARTIFACTS,
   canAutoOpenBrowserPanel,
+  canAutoOpenFilePreview,
   canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
   isBrowserToolCall,
+  isWriteOrEditTool,
   parseAutoOpenArtifacts,
   setAutoOpenArtifactsEnabled,
   shouldAutoOpenArtifactPreview,
   shouldAutoOpenBrowserPreview,
+  shouldAutoOpenFilePreview,
 } from './autoOpenPreview'
 
 describe('parseAutoOpenArtifacts', () => {
@@ -134,7 +137,7 @@ describe('isBrowserToolCall', () => {
 
   it('ignores unrelated tools', () => {
     expect(isBrowserToolCall('web_search', { query: 'browser' })).toBe(false)
-    expect(isBrowserToolCall('write_file', { path: 'browser.md' })).toBe(false)
+    expect(isBrowserToolCall('write', { path: 'browser.md' })).toBe(false)
   })
 })
 
@@ -157,5 +160,39 @@ describe('canAutoOpenBrowserPanel', () => {
     expect(canAutoOpenBrowserPanel({ type: 'artifact', source: 'user' })).toBe(false)
     expect(canAutoOpenBrowserPanel({ type: 'tool' })).toBe(false)
     expect(canAutoOpenBrowserPanel({ type: 'attachment' })).toBe(false)
+  })
+})
+
+describe('isWriteOrEditTool', () => {
+  it('matches write and edit, including MCP-namespaced forms', () => {
+    expect(isWriteOrEditTool('write')).toBe(true)
+    expect(isWriteOrEditTool('edit')).toBe(true)
+    expect(isWriteOrEditTool('sandbox__write')).toBe(true)
+    expect(isWriteOrEditTool('read')).toBe(false)
+    expect(isWriteOrEditTool('execute')).toBe(false)
+  })
+})
+
+describe('shouldAutoOpenFilePreview', () => {
+  it('opens only while the chat surface is viewing that conversation', () => {
+    expect(shouldAutoOpenFilePreview('conv-1', 'conv-1')).toBe(true)
+    expect(shouldAutoOpenFilePreview('conv-1', 'conv-other')).toBe(false)
+    expect(shouldAutoOpenFilePreview('conv-1', null)).toBe(false)
+  })
+})
+
+describe('canAutoOpenFilePreview', () => {
+  it('opens a closed panel and follows an existing write/edit preview', () => {
+    expect(canAutoOpenFilePreview({ type: 'closed' })).toBe(true)
+    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'write' })).toBe(true)
+    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'edit', source: 'user' })).toBe(true)
+  })
+
+  it('may replace an auto-opened artifact but not a user-picked surface', () => {
+    expect(canAutoOpenFilePreview({ type: 'artifact', source: 'auto' })).toBe(true)
+    expect(canAutoOpenFilePreview({ type: 'artifact', source: 'user' })).toBe(false)
+    expect(canAutoOpenFilePreview({ type: 'sandbox' })).toBe(false)
+    expect(canAutoOpenFilePreview({ type: 'attachment' })).toBe(false)
+    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'search' })).toBe(false)
   })
 })

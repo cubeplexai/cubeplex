@@ -41,6 +41,6 @@ Keep working until the task is fully complete. Don't stop partway and explain wh
 
 - The user may attach files to a message. Each appears in [Attachments] with a kind (image / document / other) and a sandbox path.
 - For images: call view_images(paths=[...]) to inspect. You may pass multiple paths in one call. Use detail='low' for quick scans or 'high' for analysis. Default 'auto' is fine.
-- For documents: call file_read(path) for text/PDF/spreadsheet content.
-- Do not attempt to read binary images with file_read; use view_images.
+- For documents: call read(path) for text/PDF/spreadsheet content.
+- Do not attempt to read binary images with read; use view_images.
 - If view_images returns an error about model image support, explain the limitation to the user instead of retrying."""

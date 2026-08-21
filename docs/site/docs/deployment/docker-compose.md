@@ -422,7 +422,7 @@ Inspect with `docker ps --filter "name=sandbox-"`.
 
 ## Optional: document parsing (docling-serve)
 
-The backend's `file_read` tool converts uploaded PDF / office documents to
+The backend's `read` tool converts uploaded PDF / office documents to
 markdown by calling a [docling-serve](https://github.com/docling-project/docling-serve)
 instance. Without it, other file types still work but document parsing
 doesn't. The optional `compose.docling.yaml` overlay supports two
