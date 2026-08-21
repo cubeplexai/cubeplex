@@ -7,11 +7,20 @@ break and hard to spot in a manual smoke test.
 """
 
 from cubeplex.services.conversation_title import (
+    _build_prompt,
     _clean_title,
     _extract_text,
     _looks_like_echo,
     _normalise_whitespace,
 )
+
+
+def test_build_prompt_uses_ui_language_for_ambiguous_input() -> None:
+    prompt = _build_prompt("hi", "zh")
+
+    assert "user's interface language: zh" in prompt
+    assert "Help me build a React virtualized list" in prompt
+    assert "帮我写一个 React" not in prompt
 
 
 class TestExtractText:
