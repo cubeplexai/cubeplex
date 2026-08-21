@@ -82,7 +82,7 @@ def render_attachments_hint(blocks: list[dict[str, object]]) -> str:
             lines.append(
                 f"- {filename} (document, {_format_size(size)})\n"
                 f"  path: {path}\n"
-                f"  hint: call file_read(path) to inspect"
+                f"  hint: call read(path) to inspect"
             )
         else:
             lines.append(f"- {filename} ({_format_size(size)})\n  path: {path}")

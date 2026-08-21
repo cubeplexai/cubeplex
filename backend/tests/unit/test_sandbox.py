@@ -31,7 +31,7 @@ from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 # Helpers
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TOOL_NAMES = {"execute", "write_file", "edit_file", "file_read"}
+_EXPECTED_TOOL_NAMES = {"execute", "write", "edit", "read"}
 
 
 def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:

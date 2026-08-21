@@ -13,8 +13,9 @@ import { bareToolName } from '@cubeplex/core'
 
 const iconMap: Record<string, LucideIcon> = {
   execute: Terminal,
-  write_file: Code,
-  edit_file: Code,
+  write: Code,
+  edit: Code,
+  read: Code,
   web_search: Search,
   search: Search,
   web_fetch: Globe,
@@ -51,8 +52,8 @@ export function getParamSummary(
   let value = ''
   if (bare === 'execute') {
     value = String(args.command ?? args.cmd ?? '')
-  } else if (bare === 'write_file' || bare === 'edit_file') {
-    value = String(args.file_path ?? args.file_name ?? '')
+  } else if (bare === 'write' || bare === 'edit' || bare === 'read') {
+    value = String(args.file_path ?? args.file_name ?? args.path ?? '')
   } else if (bare === 'web_search' || bare === 'search') {
     value = String(args.query ?? args.q ?? '')
   } else if (bare === 'web_fetch' || bare === 'fetch') {

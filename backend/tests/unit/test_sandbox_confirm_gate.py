@@ -61,7 +61,7 @@ def _mw(channel, rules):
 async def test_non_execute_tool_is_ignored():
     ch = _StubChannel()
     mw = _mw(ch, [{"action": "confirm", "pattern": "rm *"}])
-    res = await mw.before_tool_call(_Ctx("write_file", "rm -rf /"), signal=None)
+    res = await mw.before_tool_call(_Ctx("write", "rm -rf /"), signal=None)
     assert res is None
     assert ch.calls == []
 

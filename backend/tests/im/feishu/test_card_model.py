@@ -21,7 +21,7 @@ def test_card_state_defaults_are_empty() -> None:
 
 
 def test_tool_step_status_transitions() -> None:
-    step = ToolStep(id="tc_1", name="read_file", args={"path": "a"})
+    step = ToolStep(id="tc_1", name="read", args={"path": "a"})
     assert step.status == "running"
     step.mark_succeeded(result={"ok": True}, elapsed_ms=312)
     assert step.status == "succeeded"

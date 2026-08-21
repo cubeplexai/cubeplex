@@ -3,7 +3,13 @@
 import { useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { AskQuestion, ContentBlock, PendingConfirm, ToolCallRef } from '@cubeplex/core'
+import {
+  isWriteOrEditTool,
+  type AskQuestion,
+  type ContentBlock,
+  type PendingConfirm,
+  type ToolCallRef,
+} from '@cubeplex/core'
 import { AskUserResolvedCard } from './AskUserResolvedCard'
 import { ToolCallItem } from './ToolCallItem'
 import { cn } from '@/lib/utils'
@@ -69,11 +75,9 @@ export function ToolCallGroup({
         name={block.name}
         arguments={block.arguments}
         toolCallId={block.id}
-        contentTypeOverride={
-          block.name === 'write_file' || block.name === 'edit_file' ? block.name : undefined
-        }
+        contentTypeOverride={isWriteOrEditTool(block.name) ? block.name : undefined}
         toolRef={
-          block.name === 'write_file' || block.name === 'edit_file'
+          isWriteOrEditTool(block.name)
             ? ({
                 agent_id: agentId ?? null,
                 tool_call_id: block.id,
@@ -84,7 +88,7 @@ export function ToolCallGroup({
         toolResult={result}
         timestamp={messageCreatedAt}
         isPending={isPending}
-        allowOpenWhenPending={block.name === 'write_file' || block.name === 'edit_file'}
+        allowOpenWhenPending={isWriteOrEditTool(block.name)}
         pendingConfirm={pendingConfirmMap?.[block.id] ?? null}
         onSandboxConfirm={onSandboxConfirm ? (d) => onSandboxConfirm(block.id, d) : undefined}
       />

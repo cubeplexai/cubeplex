@@ -667,7 +667,7 @@ async def _hydrate_attachments_into_sandbox(
 
     AttachmentService stamps every row with a promised path
     (``/workspace/uploads/<conv>/<atch>/<filename>``) and the system prompt
-    tells the LLM to ``file_read`` that path — but the bytes live in
+    tells the LLM to ``read`` that path — but the bytes live in
     ObjectStore until something stages them in. This function is the
     something. Idempotent (the hydrator checks for an existing file first).
     Failures are logged and swallowed: the agent will see "file not found"
@@ -716,8 +716,8 @@ async def _build_attachment_content_blocks(
     since hydration would have already failed for them.
 
     When ``sandbox_available`` is False, document/other attachments are
-    dropped: their hint tells the model to ``file_read`` a sandbox path,
-    but ``file_read`` is only registered when SandboxMiddleware loads, and
+    dropped: their hint tells the model to ``read`` a sandbox path,
+    but ``read`` is only registered when SandboxMiddleware loads, and
     hydration could not have placed bytes there either. Image attachments
     are kept because ``view_images`` reads bytes from ObjectStore directly
     and is registered regardless of sandbox availability.
@@ -745,7 +745,7 @@ async def _build_attachment_content_blocks(
             if not sandbox_available and row.kind != "image":
                 logger.warning(
                     "Skipping non-image attachment {} ({}) — sandbox unavailable, "
-                    "file_read tool is not registered",
+                    "read tool is not registered",
                     row.id,
                     row.kind,
                 )
@@ -2681,7 +2681,7 @@ class RunManager:
         # --- Compose tool list ---
         # Tool registration order is deliberately stable — changes invalidate
         # the prompt cache prefix. The intended order is:
-        #   sandbox(execute/write_file/edit_file/file_read)
+        #   sandbox(execute/write/edit/read)
         #   → save_artifact
         #   → write_todos
         #   → subagent
@@ -3369,7 +3369,7 @@ class RunManager:
                     config_loader=_sb_config_loader,
                 )
                 cubepi_middleware.append(sandbox_mw)
-                # Middleware tools (execute, write_file, edit_file, file_read) collected for
+                # Middleware tools (execute, write, edit, read) collected for
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
             except Exception as _exc:

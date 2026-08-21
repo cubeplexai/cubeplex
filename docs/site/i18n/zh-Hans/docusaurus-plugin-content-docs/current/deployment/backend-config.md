@@ -264,7 +264,7 @@ parsers:
     async_threshold_mb: 3
 ```
 
-`file_read` 工具通过 docling-serve 实例把 PDF / office 文档转成 markdown。
+`read` 工具通过 docling-serve 实例把 PDF / office 文档转成 markdown。
 可选——部署方式见各指南的 docling 章节。
 
 ## 附件

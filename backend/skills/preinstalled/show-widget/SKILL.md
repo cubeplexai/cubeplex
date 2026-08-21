@@ -21,7 +21,7 @@ keywords:
 # show-widget — inline interactive HTML
 
 Render with the **`show_widget`** tool. Stream `widget_code` as an HTML
-fragment; do **not** `write_file` + `save_artifact` first — the widget is the
+fragment; do **not** `write` + `save_artifact` first — the widget is the
 answer.
 
 ## When to use

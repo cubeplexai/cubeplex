@@ -42,12 +42,12 @@ export type PanelContentType =
   | 'code_execute'
   | 'web_fetch'
   | 'terminal'
-  | 'write_file'
-  | 'edit_file'
+  | 'write'
+  | 'edit'
   | 'generic'
   | 'artifact'
   | 'skill'
-  | 'file_read'
+  | 'read'
 
 export type AgentEventType =
   | 'text_delta'

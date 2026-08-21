@@ -4,7 +4,12 @@ import { useState, useEffect, useRef, memo } from 'react'
 import { useTranslations } from 'next-intl'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
-import type { AgentStream, ContentBlock, ToolCallRef } from '@cubeplex/core'
+import {
+  isWriteOrEditTool,
+  type AgentStream,
+  type ContentBlock,
+  type ToolCallRef,
+} from '@cubeplex/core'
 import { ToolCallItem } from './ToolCallItem'
 import { AgentAvatar } from './AgentAvatar'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
@@ -101,7 +106,7 @@ export const SubAgentCard = memo(function SubAgentCard({
 
   const renderToolBlock = (block: ToolDisplayBlock, i: number, showDivider = false) => {
     if (block.type === 'tool_call_streaming') {
-      const supportsPreview = block.name === 'write_file'
+      const supportsPreview = isWriteOrEditTool(block.name)
       return (
         <ToolCallItem
           key={block.tool_call_id ?? `streaming-${i}`}
@@ -109,11 +114,11 @@ export const SubAgentCard = memo(function SubAgentCard({
           arguments={{}}
           toolCallId={block.tool_call_id ?? `streaming-${i}`}
           summaryOverride={
-            supportsPreview
+            supportsPreview && block.name === 'write'
               ? getWriteFileSummary({}, block.args_text)
               : block.args_text.trim() || undefined
           }
-          contentTypeOverride={supportsPreview ? 'write_file' : undefined}
+          contentTypeOverride={supportsPreview ? block.name : undefined}
           toolRef={
             supportsPreview
               ? ({
@@ -131,15 +136,16 @@ export const SubAgentCard = memo(function SubAgentCard({
     }
 
     const result = toolResultMap[block.id] ?? null
+    const supportsPreview = isWriteOrEditTool(block.name)
     return (
       <ToolCallItem
         key={block.id || i}
         name={block.name}
         arguments={block.arguments}
         toolCallId={block.id}
-        contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
+        contentTypeOverride={supportsPreview ? block.name : undefined}
         toolRef={
-          block.name === 'write_file'
+          supportsPreview
             ? ({
                 agent_id: agentId ?? null,
                 tool_call_id: block.id,
@@ -149,7 +155,7 @@ export const SubAgentCard = memo(function SubAgentCard({
         }
         toolResult={result}
         isPending={isRunning && !result}
-        allowOpenWhenPending={block.name === 'write_file'}
+        allowOpenWhenPending={supportsPreview}
         showDivider={showDivider}
       />
     )

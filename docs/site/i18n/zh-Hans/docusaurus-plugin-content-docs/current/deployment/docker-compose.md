@@ -408,7 +408,7 @@ MITM CA 以及 server 拉起的沙箱容器会保留在主机 Docker 引擎上�
 
 ## 可选：文档解析（docling-serve）
 
-backend 的 `file_read` 工具通过调用
+backend 的 `read` 工具通过调用
 [docling-serve](https://github.com/docling-project/docling-serve) 实例，
 把上传的 PDF / Office 文档转换成 markdown。没有它时，其他文件类型仍然
 可用，只是文档解析不可用。可选的 `compose.docling.yaml` overlay 支持

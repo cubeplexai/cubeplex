@@ -72,7 +72,7 @@ async def test_image_attachment_includes_view_images_hint() -> None:
 
 
 @pytest.mark.asyncio
-async def test_document_attachment_includes_file_read_hint() -> None:
+async def test_document_attachment_includes_read_hint() -> None:
     mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="q")],
@@ -89,7 +89,7 @@ async def test_document_attachment_includes_file_read_hint() -> None:
     )
     out = await mw.transform_context([msg], ctx=object())
     text = out[0].content[0].text
-    assert "file_read" in text
+    assert "read(" in text
     assert "report.pdf" in text
 
 

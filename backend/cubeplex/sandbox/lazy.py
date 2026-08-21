@@ -2,7 +2,7 @@
 
 Tools are registered immediately so the LLM knows they exist,
 but the sandbox container is only created/connected when a tool
-is actually invoked (execute, write_file, edit_file, save_artifact).
+is actually invoked (execute, write, edit, save_artifact).
 
 If the underlying sandbox becomes unhealthy, the next call will
 transparently create a new one.
@@ -462,7 +462,7 @@ class LazySandbox(Sandbox):
         # Recreating the sandbox here would wipe /workspace AND still not
         # produce the file (a fresh sandbox can't hold work it never ran), so
         # the recreate is pure data loss. Surface the error to the caller
-        # instead — the file_read tool turns it into a corrigible error the
+        # instead — the read tool turns it into a corrigible error the
         # agent can act on. A genuinely dead sandbox is detected and recreated
         # by the next execute/upload call.
         return await sandbox.download(paths)

@@ -2,8 +2,8 @@
 
 Implements the cubepi ``Middleware`` protocol with two hooks:
 
-- ``tools``: exposes ``execute``, ``write_file``, ``edit_file``,
-  ``file_read``, and (when a config loader is provided) ``sandbox_config``
+- ``tools``: exposes ``execute``, ``write``, ``edit``,
+  ``read``, and (when a config loader is provided) ``sandbox_config``
   as ``cubepi.AgentTool`` instances.
 - ``transform_system_prompt``: appends the sandbox capability section
   (SANDBOX_PROMPT_TEMPLATE) to the system prompt.
@@ -313,10 +313,10 @@ def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
                     content=[
                         TextContent(
                             text=(
-                                f"Error: {args.file_path} already exists. write_file refuses to "
+                                f"Error: {args.file_path} already exists. write refuses to "
                                 f"overwrite an existing file by default (this protects against "
                                 f"silently clobbering work). Either choose a different path, or "
-                                f"call write_file again with overwrite=true if replacing this "
+                                f"call write again with overwrite=true if replacing this "
                                 f"file is the explicit intent."
                             )
                         )
@@ -328,7 +328,7 @@ def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
         return AgentToolResult(content=[TextContent(text=f"Successfully wrote {args.file_path}")])
 
     return AgentTool(
-        name="write_file",
+        name="write",
         description=(
             "Create a file with the given content. By default refuses to overwrite an "
             "existing file at the path (returns an error so you can rename or confirm); "
@@ -601,7 +601,7 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
         )
 
     return AgentTool(
-        name="edit_file",
+        name="edit",
         description=(
             "Apply one or more unique, non-overlapping text edits to an existing file in one "
             "call. When making multiple changes to the same file, include them all in edits."
@@ -626,10 +626,10 @@ USE THIS TOOL FOR:
 - Images (.png .jpg .webp .tiff) — returns OCR'd text content.
 
 WHEN OTHER TOOLS ARE BETTER:
-- Remote URLs — file_read only reads sandbox paths. Use a web-fetch
+- Remote URLs — this tool only reads sandbox paths. Use a web-fetch
   tool for URLs.
-- Grep / search — for pattern-find, execute("grep -n 'pattern' <file>")
-  is more direct than file_read + scan.
+- Grep / search — for pattern-find, execute("rg -n 'pattern' <file>")
+  is more direct than read + scan.
 - Tiny known-offset peeks — execute("sed -n '42p' <file>") skips
   parser overhead.
 
@@ -638,16 +638,16 @@ HOW UNSUPPORTED FORMATS BEHAVE:
   plugin handles the file's MIME type. Common cases — video, audio,
   archives, binary executables — fall here in the default deployment.
 - The `hint` field tells you what alternative to try (e.g., for
-  archives: extract first via execute("unzip <file>") then file_read
+  archives: extract first via execute("unzip <file>") then read
   on extracted files).
 - If you see kind="unsupported", surface the hint to the user; don't
-  retry file_read on the same path.
+  retry read on the same path.
 
 RETURN FORMAT (discriminated by `kind`):
 - "text"        : {content, mime, size_bytes, truncated, metadata}
 - "notebook"    : {cells: [{cell_type, source, outputs}, ...]}
 - "unsupported" : {reason, hint, mime, size_bytes}
-- "unchanged"   : file unchanged since previous file_read in this session
+- "unchanged"   : file unchanged since previous read in this session
 - "error"       : {error, retryable}
 
 PARAMETERS:
@@ -663,9 +663,9 @@ RANGE SYNTAX (page_range and line_range share these 4 forms):
 
 HOW TO CONTINUE READING WHEN truncated=true:
 - text/code/log: read metadata.next_line_to_read and call
-  file_read(path, line_range=f"{N}-") to continue from there.
+  read(path, line_range=f"{N}-") to continue from there.
 - PDF/DOCX/PPTX (best-effort): read metadata.next_page_to_read
-  and call file_read(path, page_range=f"{N}-"). If the field
+  and call read(path, page_range=f"{N}-"). If the field
   is absent (parser couldn't map char-offset back to page),
   fall back to ranges you guess or ask the user.
 - notebook: metadata.next_cell_index is informational only —
@@ -738,7 +738,7 @@ def _make_file_read_tool(
         return AgentToolResult(content=[TextContent(text=json.dumps(result.model_dump()))])
 
     return AgentTool(
-        name="file_read",
+        name="read",
         description=_FILE_READ_DESCRIPTION.rstrip(),
         parameters=_FileReadArgs,
         execute=_file_read,

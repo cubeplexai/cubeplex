@@ -1,5 +1,5 @@
 # Optional overlay: adds docling-serve (PDF/office document → markdown
-# parsing used by the backend's file_read tool). Self-contained — it does
+# parsing used by the backend's read tool). Self-contained — it does
 # not reference or extend any service from compose.yaml, so it works two
 # ways:
 #

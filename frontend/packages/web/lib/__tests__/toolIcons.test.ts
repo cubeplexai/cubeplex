@@ -15,8 +15,8 @@ describe('getParamSummary', () => {
     expect(getParamSummary('execute', { command: 'ls -la', description: '  ' })).toBe('ls -la')
   })
 
-  it('uses path for write_file when no description', () => {
-    expect(getParamSummary('write_file', { file_path: 'src/main.ts' })).toBe('src/main.ts')
+  it('uses path for write when no description', () => {
+    expect(getParamSummary('write', { file_path: 'src/main.ts' })).toBe('src/main.ts')
   })
 
   it('uses query for web_search', () => {

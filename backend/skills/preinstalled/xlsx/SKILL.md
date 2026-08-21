@@ -122,7 +122,7 @@ Never use openpyxl round-trip on existing files (corrupts VBA, pivots, sparkline
 ```bash
 python3 $SKILL_DIR/scripts/xlsx_unpack.py input.xlsx /tmp/xlsx_work/
 # Find the target sheet's XML via xl/workbook.xml → xl/_rels/workbook.xml.rels
-# Then use edit_file to add <f> inside the target <c> element:
+# Then use `edit` to add <f> inside the target <c> element:
 #   <c r="B3"><f>SUM('Sales Data'!D2:D13)</f><v></v></c>
 python3 $SKILL_DIR/scripts/xlsx_pack.py /tmp/xlsx_work/ output.xlsx
 ```
@@ -168,7 +168,7 @@ After running helper scripts, apply borders to ALL cells in the target row, not 
 **Manual XML edit** (for anything the helper scripts don't cover):
 ```bash
 python3 $SKILL_DIR/scripts/xlsx_unpack.py input.xlsx /tmp/xlsx_work/
-# ... edit XML with edit_file ...
+# ... edit XML with `edit` ...
 python3 $SKILL_DIR/scripts/xlsx_pack.py /tmp/xlsx_work/ output.xlsx
 ```
 

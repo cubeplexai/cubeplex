@@ -282,7 +282,7 @@ visible immediately in `kubectl get pods` instead of surfacing later as a
 
 ### 4.5 Sandbox (optional)
 
-The sandbox is the container runtime where agent tools (bash, file_read,
+The sandbox is the container runtime where agent tools (bash, read,
 …) execute. Disabled = agents can still chat but tool calls fail.
 
 ```yaml
