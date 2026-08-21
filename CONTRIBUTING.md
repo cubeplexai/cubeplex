@@ -68,9 +68,16 @@ We use pre-commit with **two stages** and a strict **no-auto-fix** policy — ho
   - Ruff `check --no-fix` and `ruff format --check` on staged Python files
   - ESLint (no `--fix`) and Prettier `--check` on staged frontend files
 
-- **pre-push** (runs on `git push`, ~3 minutes):
-  - `cd backend && make check-ci` (ruff + ruff-format + mypy + pytest unit)
-  - `pnpm -r type-check && pnpm -r lint && pnpm -r format:check && pnpm -r test`
+- **pre-push** (runs on `git push`; only the sides that changed):
+  - Backend `make check-ci` (ruff + ruff-format + mypy + pytest unit) when the
+    push includes backend code. Markdown under `backend/` does not count.
+  - Frontend `make check-ci` (core build, lint, format, type-check, vitest,
+    `next build`) when the push includes frontend code. Markdown under
+    `frontend/` does not count.
+  - Changing the root `Makefile` or `.pre-commit-config.yaml` runs both,
+    because those files are the gate.
+  - Docs-only and unrelated paths (`docs/`, `scripts/`, `deploy/`, …) skip
+    both checks. GitHub CI still runs the full suite on the PR.
 
 **If a hook fails, the hook does NOT modify your files.** Run the appropriate formatter manually and re-stage:
 
