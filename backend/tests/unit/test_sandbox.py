@@ -17,6 +17,7 @@ from cubeplex.middleware.sandbox import (
     _EditSpec,
     _ExecuteArgs,
     _FileReadArgs,
+    _first_changed_line,
     _make_edit_file_tool,
     _make_execute_tool,
     _make_file_read_tool,
@@ -445,7 +446,7 @@ async def test_edit_file_rejects_overlapping_edits_without_upload() -> None:
     )
     result = await tool.execute("tc-1", args)
 
-    assert "overlap" in _text(result)
+    assert "edit 1 overlaps edit 2" in _text(result)
     sandbox.upload.assert_not_called()
 
 
@@ -486,6 +487,36 @@ async def test_edit_file_preserves_bom_and_crlf() -> None:
 
     assert "Successfully edited" in _text(result)
     sandbox.upload.assert_called_once_with([("/work/f.txt", "\ufefffirst\r\nchanged\r\n".encode())])
+    assert result.details is not None
+    assert result.details["first_changed_line"] == 2
+
+
+@pytest.mark.asyncio
+async def test_edit_file_crlf_to_lf_reports_first_changed_line() -> None:
+    sandbox = _make_sandbox()
+    original = "first\r\nsecond\r\n"
+    sandbox.download = AsyncMock(return_value=[("/work/f.txt", original.encode())])
+    sandbox.upload = AsyncMock()
+
+    tool = _make_edit_file_tool(sandbox)
+    args = _EditFileArgs(
+        file_path="/work/f.txt",
+        edits=[_EditSpec(old_string="second\r\n", new_string="second\n")],
+    )
+    result = await tool.execute("tc-1", args)
+
+    assert "Successfully edited" in _text(result)
+    sandbox.upload.assert_called_once_with([("/work/f.txt", b"first\r\nsecond\n")])
+    assert result.details is not None
+    assert result.details["first_changed_line"] == 2
+
+
+def test_first_changed_line_detects_newline_style_only_change() -> None:
+    assert _first_changed_line("second\r\n", "second\n") == 1
+    assert _first_changed_line("foo", "foo\n") == 1
+    assert _first_changed_line("foo\n", "foo") == 1
+    assert _first_changed_line("a\nb", "a\nb\n") == 2
+    assert _first_changed_line("same\n", "same\n") is None
 
 
 # ---------------------------------------------------------------------------
