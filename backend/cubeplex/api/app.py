@@ -444,7 +444,13 @@ async def lifespan(_app: FastAPI):  # type: ignore
         await _im_runtime_shutdown.stop(_app)
         _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
+        logger.info(
+            "Starting run drain (timeout={}s, active_runs={})",
+            drain_timeout,
+            len(run_manager._tasks),
+        )
         await run_manager.drain(timeout_seconds=float(drain_timeout))
+        logger.info("Run drain completed")
         # Stop control listeners AFTER draining so in-flight runs can still be
         # cancelled/steered during graceful shutdown.
         await run_manager.stop_control_listeners()

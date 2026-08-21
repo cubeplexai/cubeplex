@@ -665,3 +665,37 @@ async def test_drain_timeout_force_cancels(memory_client: httpx.AsyncClient) -> 
     await rm.drain(timeout_seconds=0.2)
     assert cancelled_seen.is_set()
     assert "integration-long" not in rm._tasks
+
+
+@pytest.mark.asyncio
+async def test_cancel_all_does_not_wait_forever_for_stubborn_task(
+    memory_client: httpx.AsyncClient,
+) -> None:
+    """Forced shutdown must return when a run suppresses cancellation."""
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    rm = app.state.run_manager
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def stubborn_run() -> None:
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(stubborn_run(), name="run:integration-stubborn")
+    rm._tasks["integration-stubborn"] = task
+    rm._tasks_empty.clear()
+    task.add_done_callback(lambda _: rm._on_task_done("integration-stubborn"))
+    await started.wait()
+
+    start = time.monotonic()
+    await rm.cancel_all()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < rm._FORCED_CANCEL_WAIT_SECONDS + 1.0
+    assert not task.done()
+
+    release.set()
+    await task

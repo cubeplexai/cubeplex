@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from cubepi.providers.base import ReasoningControl
 from cubepi.providers.fallback import FallbackBoundModel
@@ -1041,6 +1041,8 @@ def _extract_tool_summaries(
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
+    _FORCED_CANCEL_WAIT_SECONDS: ClassVar[float] = 5.0
+
     def __init__(
         self,
         *,
@@ -1221,9 +1223,23 @@ class RunManager:
         tasks = list(self._tasks.values())
         for task in tasks:
             task.cancel()
-        for task in tasks:
-            with suppress(asyncio.CancelledError):
-                await task
+        if not tasks:
+            return
+
+        # A run can be stuck in a third-party await or accidentally swallow
+        # CancelledError. Awaiting each task directly here would make the
+        # graceful-shutdown timeout ineffective and keep the process alive
+        # forever. Give cancellation a bounded window, then let the event loop
+        # finish tearing down the remaining tasks.
+        _, pending = await asyncio.wait(
+            tasks,
+            timeout=self._FORCED_CANCEL_WAIT_SECONDS,
+        )
+        if pending:
+            logger.error(
+                "Forced run cancellation timed out; {} task(s) still pending",
+                len(pending),
+            )
 
     async def cancel_run(self, run_id: str) -> bool:
         """Cancel a single in-flight run and wait for cleanup to finish.
