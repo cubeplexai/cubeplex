@@ -32,8 +32,7 @@ describe('MarkdownWithCitations memoization', () => {
 
 describe('MarkdownWithCitations math rendering', () => {
   it('renders currency amounts with single $ literally (no KaTeX)', () => {
-    const text =
-      'Monthly revenue increased from $271,677.37 in January to $272,748.58 in February'
+    const text = 'Monthly revenue increased from $271,677.37 in January to $272,748.58 in February'
     const { container } = render(
       <MarkdownWithCitations conversationId="conv-test">{text}</MarkdownWithCitations>,
     )
@@ -46,7 +45,9 @@ describe('MarkdownWithCitations math rendering', () => {
 
   it('still renders $$…$$ display math as KaTeX', () => {
     const { container } = render(
-      <MarkdownWithCitations conversationId="conv-test">{'E = mc^2 in $$E=mc^2$$ form'}</MarkdownWithCitations>,
+      <MarkdownWithCitations conversationId="conv-test">
+        {'E = mc^2 in $$E=mc^2$$ form'}
+      </MarkdownWithCitations>,
     )
     expect(container.querySelector('.katex')).not.toBeNull()
   })
