@@ -1,4 +1,4 @@
-.PHONY: help install skills-restore backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-e2e-ci backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci test-ui-unit test-ui-e2e test-ui test-all clean
+.PHONY: help install skills-restore backend-install frontend-install backend-check-ci frontend-check-ci check-ci backend-migrate backend-test-e2e backend-test-e2e-ci backend-start backend-cleanup-sandboxes frontend-build-core frontend-install-browsers frontend-test-e2e frontend-test-e2e-ci frontend-test-e2e-real-llm test-ui-unit test-ui-e2e test-ui test-all clean
 
 help:
 	@echo "Available commands:"
@@ -17,7 +17,8 @@ help:
 	@echo "  make frontend-build-core        - Build @cubeplex/core"
 	@echo "  make frontend-install-browsers  - Install Playwright Chromium browser"
 	@echo "  make frontend-test-e2e          - Run frontend Playwright tests"
-	@echo "  make frontend-test-e2e-ci       - Run frontend Playwright tests with CI output"
+	@echo "  make frontend-test-e2e-ci       - Run frontend Playwright tests with CI output (excludes @real-llm)"
+	@echo "  make frontend-test-e2e-real-llm - Run frontend Playwright tests tagged @real-llm"
 	@echo "  make test-ui-unit               - Run frontend unit tests"
 	@echo "  make test-ui-e2e                - Run frontend Playwright tests"
 	@echo "  make test-ui                    - Run all frontend tests"
@@ -76,6 +77,9 @@ frontend-test-e2e:
 
 frontend-test-e2e-ci:
 	$(MAKE) -C frontend test-e2e-ci
+
+frontend-test-e2e-real-llm:
+	$(MAKE) -C frontend test-e2e-real-llm
 
 test-ui-unit:
 	$(MAKE) -C frontend test-unit

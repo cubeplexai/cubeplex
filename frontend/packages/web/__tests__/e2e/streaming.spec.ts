@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
+import { REAL_LLM_TAG, registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
-test('loading animation appears while streaming', async ({ page }) => {
+test('loading animation appears while streaming', { tag: REAL_LLM_TAG }, async ({ page }) => {
   skipWithoutRealLlm()
   // Cold sandbox provisioning for a fresh user can take ~80s in CI; raise the
   // per-test cap above the default 90s so the run can finish before timeout.
@@ -24,25 +24,31 @@ test('loading animation appears while streaming', async ({ page }) => {
   expect(text!.length).toBeGreaterThan(20)
 })
 
-test('input stays editable while streaming (so the user can steer)', async ({ page }) => {
-  skipWithoutRealLlm()
-  // Same cold-sandbox headroom as above (fresh user → ~80s provisioning).
-  test.setTimeout(150_000)
-  await registerAndLand(page)
+test(
+  'input stays editable while streaming (so the user can steer)',
+  {
+    tag: REAL_LLM_TAG,
+  },
+  async ({ page }) => {
+    skipWithoutRealLlm()
+    // Same cold-sandbox headroom as above (fresh user → ~80s provisioning).
+    test.setTimeout(150_000)
+    await registerAndLand(page)
 
-  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
-  await input.fill('Write a short poem.')
-  await input.press('Enter')
+    const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
+    await input.fill('Write a short poem.')
+    await input.press('Enter')
 
-  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
+    await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
-  // While the run streams, the composer must remain enabled — steering needs
-  // the user to type mid-run. (Previously the box was locked during streaming.)
-  await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
+    // While the run streams, the composer must remain enabled — steering needs
+    // the user to type mid-run. (Previously the box was locked during streaming.)
+    await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
 
-  // Same cold-sandbox headroom as the test above (fresh user → ~80s provisioning).
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
+    // Same cold-sandbox headroom as the test above (fresh user → ~80s provisioning).
+    await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
 
-  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
-})
+    await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
+  },
+)

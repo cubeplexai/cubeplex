@@ -99,7 +99,8 @@ Full rules: **[docs/testing.md](docs/testing.md)**. TDD judgment:
   - **If it opens `AsyncSession`, runs alembic, or hits the app → e2e.**
     Misplacement breaks `make check-ci`.
 - Real services at internal boundaries; mock only the outermost external the
-  test isn't about. Real-LLM: `@pytest.mark.real_llm`.
+  test isn't about. Real-LLM: `@pytest.mark.real_llm` (backend) or
+  Playwright `@real-llm` (frontend). Both run only in nightly-real-llm.yml.
 
 ---
 

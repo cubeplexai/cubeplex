@@ -38,7 +38,13 @@ A presence check is fine *as a step inside a real flow* (you click X, expect a c
 - **Real services, not mocks, at internal boundaries.** Postgres, Redis, rustfs, the running FastAPI app are all real. Mock only at the OUTERMOST external boundary the test isn't about — opensandbox SDK, lark_oapi token endpoint, Tempo HTTP client, cubepi LLM provider when not testing the LLM path itself.
 - **No fake-server E2E.** If the system genuinely can't be simulated (third-party SaaS, no test mode), drop down to a **unit test of the seam**, don't build a fake server.
 - **Skip honestly.** When external infra (e.g. opensandbox lacking pause API on a given backend) can't satisfy the test, `pytest.skip(reason="...")` with a *named* reason — never `xfail`, never silent. See `tests/e2e/test_sandbox_pause_resume.py` "G11" pattern.
-- **Real-LLM tests are tagged.** `@pytest.mark.real_llm`. CI fast lane runs `-m "not real_llm"`; the real-LLM suite runs separately. Don't drop real LLM calls into a test that doesn't need to assert about model behavior.
+- **Real-LLM tests are tagged and stay off the PR path.**
+  - Backend: `@pytest.mark.real_llm`. Fast lane is `-m "not real_llm"`;
+    nightly is `make test-real-llm` in `.github/workflows/nightly-real-llm.yml`.
+  - Frontend: Playwright `{ tag: '@real-llm' }` plus `skipWithoutRealLlm()`.
+    PR CI is `make frontend-test-e2e-ci` (`--grep-invert @real-llm`).
+    Nightly is `make frontend-test-e2e-real-llm` (`--grep @real-llm`).
+  Don't drop a live LLM call into a test that does not carry the marker.
 - **No fire-and-forget sleeps.** Replace `await asyncio.sleep(0.5)` with a bounded poll loop waiting on the observable state — `test_steer_endpoint.py:46` is the model.
 - **Cleanup per test.** Shared `DEFAULT_ORG/WS` is fine for read-only checks; tests that create rows must delete them (or use a per-test fresh workspace). Aggregate queries (`select count(*)`) across runs are a flake-bomb.
 

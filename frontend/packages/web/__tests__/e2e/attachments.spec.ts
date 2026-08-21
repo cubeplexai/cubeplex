@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
+import { REAL_LLM_TAG, registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test.describe('M7 attachments happy path', () => {
   // This test exercises the full attachment upload + send cycle including LLM response.
   // Allow up to 3 minutes to accommodate slow LLM endpoints.
   test.setTimeout(180_000)
 
-  test('upload image, send, see attachment in history', async ({ page }) => {
+  test('upload image, send, see attachment in history', { tag: REAL_LLM_TAG }, async ({ page }) => {
     skipWithoutRealLlm()
     await registerAndLand(page)
 
@@ -119,64 +119,70 @@ test.describe('M7 attachments — home page eager-create flow', () => {
     }
   })
 
-  test('uploads on the home page and sends with attachment above the bubble', async ({ page }) => {
-    skipWithoutRealLlm()
-    await registerAndLand(page)
+  test(
+    'uploads on the home page and sends with attachment above the bubble',
+    {
+      tag: REAL_LLM_TAG,
+    },
+    async ({ page }) => {
+      skipWithoutRealLlm()
+      await registerAndLand(page)
 
-    // Write a tiny valid PNG inline (re-use the same trick as the existing test).
-    const tmp = path.join(__dirname, '__tmp_homeflow.png')
-    fs.writeFileSync(
-      tmp,
-      Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-        'base64',
-      ),
-    )
+      // Write a tiny valid PNG inline (re-use the same trick as the existing test).
+      const tmp = path.join(__dirname, '__tmp_homeflow.png')
+      fs.writeFileSync(
+        tmp,
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+          'base64',
+        ),
+      )
 
-    try {
-      await page.getByTestId('composer-add-menu').click()
-      const fileChooserPromise = page.waitForEvent('filechooser')
-      await page.getByTestId('composer-add-upload').click()
-      const fc = await fileChooserPromise
-      await fc.setFiles(tmp)
-
-      // Wait for upload completion: the upload-progress spinner inside the chip
-      // disappears when the upload resolves.
-      await expect(page.locator('.animate-spin').first()).toBeHidden({ timeout: 15_000 })
-
-      // Send a short prompt.
-      await page.locator('textarea').fill('Reply with the single word OK')
-      await page.getByTestId('send-button').click()
-
-      // Navigation should land on the conversation page.
-      await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
-
-      // Wait for the LLM round to finish.
-      await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
-      await page.reload()
-
-      // After reload, the user message + attachments are in history. Wait
-      // for the message text first — that's the most reliable signal that
-      // the conversation history has loaded — then check attachments. Doing
-      // it the other way around races the history fetch on a cold backend.
-      const userMsg = page.getByText('Reply with the single word OK').first()
-      await expect(userMsg).toBeVisible({ timeout: 15_000 })
-
-      const attach = page.getByTestId('message-attachments').first()
-      await expect(attach).toBeVisible({ timeout: 5_000 })
-
-      // Attachments block is positioned ABOVE the user message in DOM/visual order.
-      const userBox = await userMsg.boundingBox()
-      const attachBox = await attach.boundingBox()
-      expect(userBox).not.toBeNull()
-      expect(attachBox).not.toBeNull()
-      expect(userBox!.y).toBeGreaterThan(attachBox!.y)
-    } finally {
       try {
-        fs.unlinkSync(tmp)
-      } catch {
-        // ignore
+        await page.getByTestId('composer-add-menu').click()
+        const fileChooserPromise = page.waitForEvent('filechooser')
+        await page.getByTestId('composer-add-upload').click()
+        const fc = await fileChooserPromise
+        await fc.setFiles(tmp)
+
+        // Wait for upload completion: the upload-progress spinner inside the chip
+        // disappears when the upload resolves.
+        await expect(page.locator('.animate-spin').first()).toBeHidden({ timeout: 15_000 })
+
+        // Send a short prompt.
+        await page.locator('textarea').fill('Reply with the single word OK')
+        await page.getByTestId('send-button').click()
+
+        // Navigation should land on the conversation page.
+        await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
+
+        // Wait for the LLM round to finish.
+        await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
+        await page.reload()
+
+        // After reload, the user message + attachments are in history. Wait
+        // for the message text first — that's the most reliable signal that
+        // the conversation history has loaded — then check attachments. Doing
+        // it the other way around races the history fetch on a cold backend.
+        const userMsg = page.getByText('Reply with the single word OK').first()
+        await expect(userMsg).toBeVisible({ timeout: 15_000 })
+
+        const attach = page.getByTestId('message-attachments').first()
+        await expect(attach).toBeVisible({ timeout: 5_000 })
+
+        // Attachments block is positioned ABOVE the user message in DOM/visual order.
+        const userBox = await userMsg.boundingBox()
+        const attachBox = await attach.boundingBox()
+        expect(userBox).not.toBeNull()
+        expect(attachBox).not.toBeNull()
+        expect(userBox!.y).toBeGreaterThan(attachBox!.y)
+      } finally {
+        try {
+          fs.unlinkSync(tmp)
+        } catch {
+          // ignore
+        }
       }
-    }
-  })
+    },
+  )
 })
