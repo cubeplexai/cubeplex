@@ -174,7 +174,7 @@ async def test_execute_tool_delegates_to_sandbox() -> None:
     sandbox.execute = AsyncMock(return_value=exec_result)
 
     tool = _make_execute_tool(sandbox)
-    args = _ExecuteArgs(command="echo hello world")
+    args = _ExecuteArgs(command="echo hello world", description="Echo a greeting")
     result = await tool.execute("tc-1", args, signal=None, on_update=None)
 
     sandbox.execute.assert_called_once_with("echo hello world", timeout=120)
@@ -191,7 +191,7 @@ async def test_execute_tool_appends_exit_code_on_failure() -> None:
     sandbox.execute = AsyncMock(return_value=exec_result)
 
     tool = _make_execute_tool(sandbox)
-    args = _ExecuteArgs(command="nonexistent")
+    args = _ExecuteArgs(command="nonexistent", description="Run a missing command")
     result = await tool.execute("tc-2", args)
 
     text = _text(result)
@@ -208,7 +208,7 @@ async def test_execute_tool_no_exit_code_suffix_on_success() -> None:
     sandbox.execute = AsyncMock(return_value=exec_result)
 
     tool = _make_execute_tool(sandbox)
-    args = _ExecuteArgs(command="true")
+    args = _ExecuteArgs(command="true", description="Succeed immediately")
     result = await tool.execute("tc-3", args)
 
     assert "[exit code:" not in _text(result)
@@ -224,7 +224,7 @@ async def test_execute_tool_timeout_returns_error_result() -> None:
     sandbox.execute = AsyncMock(return_value=exec_result)
 
     tool = _make_execute_tool(sandbox)
-    args = _ExecuteArgs(command="sleep 999")
+    args = _ExecuteArgs(command="sleep 999", description="Sleep past timeout")
     result = await tool.execute("tc-timeout", args)
 
     sandbox.execute.assert_called_once_with("sleep 999", timeout=120)
@@ -243,21 +243,49 @@ async def test_execute_tool_forwards_custom_timeout() -> None:
     sandbox.execute = AsyncMock(return_value=exec_result)
 
     tool = _make_execute_tool(sandbox)
-    args = _ExecuteArgs(command="pip install foo", timeout_seconds=300)
+    args = _ExecuteArgs(
+        command="pip install foo",
+        description="Install a package",
+        timeout_seconds=300,
+    )
     await tool.execute("tc-custom", args)
 
     sandbox.execute.assert_called_once_with("pip install foo", timeout=300)
+
+
+def test_execute_args_requires_description() -> None:
+    """description is required so the chat UI can show intent instead of the raw command."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _ExecuteArgs(command="ls")
+
+    args = _ExecuteArgs(command="ls", description="List files")
+    assert args.description == "List files"
+
+
+def test_execute_args_schema_tells_model_description_is_shown_in_chat() -> None:
+    schema = _ExecuteArgs.model_json_schema()
+    props = schema["properties"]
+    assert "description" in props
+    assert "description" in schema["required"]
+    field_doc = props["description"]["description"].lower()
+    assert "chat" in field_doc
 
 
 def test_execute_args_rejects_timeout_above_max() -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        _ExecuteArgs(command="sleep 1", timeout_seconds=1801)
+        _ExecuteArgs(command="sleep 1", description="Sleep briefly", timeout_seconds=1801)
 
 
 def test_execute_args_accepts_timeout_at_max() -> None:
-    args = _ExecuteArgs(command="pip install foo", timeout_seconds=1800)
+    args = _ExecuteArgs(
+        command="pip install foo",
+        description="Install a package",
+        timeout_seconds=1800,
+    )
     assert args.timeout_seconds == 1800
 
 
@@ -267,7 +295,10 @@ async def test_execute_tool_maps_timeout_exception_to_result() -> None:
     sandbox.execute = AsyncMock(side_effect=TimeoutError("timed out"))
 
     tool = _make_execute_tool(sandbox)
-    result = await tool.execute("tc-to", _ExecuteArgs(command="gh issue list"))
+    result = await tool.execute(
+        "tc-to",
+        _ExecuteArgs(command="gh issue list", description="List GitHub issues"),
+    )
 
     text = _text(result)
     assert text.startswith("[timeout]")

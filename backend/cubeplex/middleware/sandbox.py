@@ -115,6 +115,12 @@ MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 
 class _ExecuteArgs(BaseModel):
     command: str
+    description: str = Field(
+        description=(
+            "Short, user-facing summary of what this command does (5-10 words). "
+            "Shown in the chat UI instead of the raw command."
+        ),
+    )
     timeout_seconds: int | None = Field(
         default=None,
         ge=1,
