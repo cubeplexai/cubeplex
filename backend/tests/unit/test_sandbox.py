@@ -271,6 +271,11 @@ def test_execute_args_schema_tells_model_description_is_shown_in_chat() -> None:
     assert "description" in schema["required"]
     field_doc = props["description"]["description"].lower()
     assert "chat" in field_doc
+    # Property order is what models follow when streaming tool-call JSON.
+    # description first means the chat chip can render before a long command.
+    assert list(props)[0] == "description"
+    assert schema["required"][0] == "description"
+    assert "first" in field_doc
 
 
 def test_execute_args_rejects_timeout_above_max() -> None:
