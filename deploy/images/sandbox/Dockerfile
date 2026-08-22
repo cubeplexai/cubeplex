@@ -87,8 +87,17 @@ RUN if [ -n "$APT_MIRROR_HOST" ]; then \
         poppler-utils \
         tesseract-ocr \
         tesseract-ocr-chi-sim \
-        nodejs \
-        npm \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Ubuntu 24.04's archive ships Node 18. Use NodeSource's APT repository for
+# the Node 24 LTS line required by agent-browser; nodejs also supplies npm.
+RUN curl -fsSL --connect-timeout 30 --max-time 120 \
+        -o /tmp/nodesource_setup.sh \
+        https://deb.nodesource.com/setup_24.x \
+    && bash /tmp/nodesource_setup.sh \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -f /tmp/nodesource_setup.sh \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -134,7 +143,7 @@ RUN mkdir -p -m 755 /etc/apt/keyrings /etc/apt/sources.list.d \
 RUN npm install -g \
     typescript@5.8.3 \
     ts-node@10.9.2 \
-    pnpm@9.15.4 \
+    pnpm@11.0.0 \
     --no-audit \
     --no-fund \
     --prefer-online
@@ -230,8 +239,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # agent-browser CLI: the agent drives the streamed Chromium via CDP with it
-# (`agent-browser connect 9222`). See the preinstalled `browser` skill.
-RUN npm install -g agent-browser
+# (`agent-browser connect 9222`). Requires the Node 24/pnpm 11 toolchain above.
+RUN npm install -g --allow-scripts=agent-browser agent-browser
 
 # Neko runtime from the upstream image: server binary, configs, HTML5 client,
 # and the two custom Xorg modules (patched dummy video + the "neko" input driver
