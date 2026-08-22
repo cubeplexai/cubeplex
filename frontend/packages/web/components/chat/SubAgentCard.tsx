@@ -15,6 +15,7 @@ import { AgentAvatar } from './AgentAvatar'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { proseClasses } from '@/lib/utils'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
+import { getStreamingParamSummary } from '@/lib/toolIcons'
 
 interface Props {
   name: string
@@ -116,7 +117,7 @@ export const SubAgentCard = memo(function SubAgentCard({
           summaryOverride={
             supportsPreview && block.name === 'write'
               ? getWriteFileSummary({}, block.args_text)
-              : block.args_text.trim() || undefined
+              : getStreamingParamSummary(block.name || 'tool', block.args_text) || undefined
           }
           contentTypeOverride={supportsPreview ? block.name : undefined}
           toolRef={

@@ -114,13 +114,14 @@ MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 
 
 class _ExecuteArgs(BaseModel):
-    command: str
     description: str = Field(
         description=(
             "Short, user-facing summary of what this command does (5-10 words). "
-            "Shown in the chat UI instead of the raw command."
+            "Emit this FIRST, before command, so the chat UI can show it while "
+            "the command text is still streaming."
         ),
     )
+    command: str
     timeout_seconds: int | None = Field(
         default=None,
         ge=1,
@@ -283,6 +284,8 @@ def _make_execute_tool(
         name="execute",
         description=(
             "Execute a shell command in the sandbox environment. "
+            "Always set description first (a 5-10 word user-facing summary) "
+            "so the chat UI can show it while the command is still streaming. "
             "Default timeout is 120 seconds. For installs, downloads, or "
             "builds, pass timeout_seconds (max 1800). If you hit the limit, "
             "raise timeout_seconds or split the work and retry."

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getParamSummary } from '@/lib/toolIcons'
+import { getParamSummary, getStreamingParamSummary } from '@/lib/toolIcons'
 
 describe('getParamSummary', () => {
   it('prefers model-supplied description over command', () => {
@@ -33,6 +33,31 @@ describe('getParamSummary', () => {
   it('collapses whitespace in description', () => {
     expect(getParamSummary('task', { description: 'Find  auth\nmiddleware' })).toBe(
       'Find auth middleware',
+    )
+  })
+})
+
+describe('getStreamingParamSummary', () => {
+  it('reads description from incomplete execute JSON', () => {
+    expect(
+      getStreamingParamSummary(
+        'execute',
+        '{"description": "Install packages", "command": "npm install ',
+      ),
+    ).toBe('Install packages')
+  })
+
+  it('shows the description prefix while it is still streaming', () => {
+    expect(getStreamingParamSummary('execute', '{"description": "Install pac')).toBe('Install pac')
+  })
+
+  it('does not dump raw command JSON while waiting for description', () => {
+    expect(getStreamingParamSummary('execute', '{"command": "npm install a-very-long')).toBe('')
+  })
+
+  it('falls back to args text for tools without a description field', () => {
+    expect(getStreamingParamSummary('web_search', '{"query": "cubeplex')).toBe(
+      '{"query": "cubeplex',
     )
   })
 })
