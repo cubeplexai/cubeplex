@@ -495,7 +495,19 @@ function maybeAutoOpenFilePreview(
       toolRef.index != null &&
       current?.index === toolRef.index &&
       current?.agent_id === toolRef.agent_id
-    if (sameId || sameIndex) return
+    if (sameId || sameIndex) {
+      if (Object.keys(args).length > 0) {
+        usePanelStore.setState({
+          view: {
+            ...panel.view,
+            toolName,
+            toolArgs: args,
+            toolRef,
+          },
+        })
+      }
+      return
+    }
   }
   if (!canAutoOpenFilePreview(panel.view)) return
   panel.openTool(toolName, args, null, toolName, toolRef, undefined, 'auto')
