@@ -196,8 +196,9 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
   const stickToBottom = useRef(true)
   const prevStreamingRef = useRef(false)
   const liveBlocks = useMessageStore((s) => {
-    const agentId = toolRef?.agent_id
-    return agentId ? (s.streamAgents[agentId]?.blocks ?? EMPTY_BLOCKS) : EMPTY_BLOCKS
+    if (!toolRef) return EMPTY_BLOCKS
+    const agentKey = toolRef.agent_id ?? 'main'
+    return s.streamAgents[agentKey]?.blocks ?? EMPTY_BLOCKS
   })
 
   const parsed = useMemo(() => {
