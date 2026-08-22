@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { bareToolName } from '@cubeplex/core'
+import { extractJsonStringPrefix } from '@/lib/partialJson'
 
 const iconMap: Record<string, LucideIcon> = {
   execute: Terminal,
@@ -71,4 +72,19 @@ export function getParamSummary(
     return value.slice(0, maxLen) + '...'
   }
   return value
+}
+
+/**
+ * Summary for a still-streaming tool call, whose args are incomplete JSON.
+ * Prefer a completed-or-partial `description` so execute can render intent
+ * before a long `command` finishes. Execute does not fall back to raw JSON
+ * — that would dump the command as it streams.
+ */
+export function getStreamingParamSummary(toolName: string, argsText: string, maxLen = 60): string {
+  const desc = extractJsonStringPrefix(argsText, 'description')
+  if (desc.trim()) {
+    return getParamSummary(toolName, { description: desc }, maxLen)
+  }
+  if (bareToolName(toolName) === 'execute') return ''
+  return argsText.trim()
 }

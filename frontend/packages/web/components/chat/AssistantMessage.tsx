@@ -36,6 +36,7 @@ import { deriveRunChipStatus } from '@/lib/runChipStatus'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
+import { getStreamingParamSummary } from '@/lib/toolIcons'
 import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
@@ -596,7 +597,7 @@ function ContentBlockRenderer({
           summaryOverride={
             supportsPreview && block.name === 'write'
               ? getWriteFileSummary({}, block.args_text)
-              : block.args_text.trim() || undefined
+              : getStreamingParamSummary(block.name || 'tool', block.args_text) || undefined
           }
           contentTypeOverride={supportsPreview ? block.name : undefined}
           toolRef={

@@ -137,7 +137,10 @@ async def test_command_deny_blocks_and_filesystem_untouched(
 
     class _Ctx:
         tool_call = _ToolCall()
-        args = sandbox_mw._ExecuteArgs(command="rm -rf /workspace")
+        args = sandbox_mw._ExecuteArgs(
+            command="rm -rf /workspace",
+            description="Delete workspace",
+        )
 
     class _StubChannel:
         async def approve(self, **kwargs: Any) -> Any:  # pragma: no cover - guard
@@ -295,7 +298,10 @@ async def test_command_confirm_routes_through_hitl_channel(
 
     class _Ctx:
         tool_call = _ToolCall()
-        args = sandbox_mw._ExecuteArgs(command="git push origin main")
+        args = sandbox_mw._ExecuteArgs(
+            command="git push origin main",
+            description="Push to origin",
+        )
 
     from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
