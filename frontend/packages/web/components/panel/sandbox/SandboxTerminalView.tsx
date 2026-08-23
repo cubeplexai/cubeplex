@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 
 import { useSandboxTerminal } from '@/hooks/useSandboxTerminal'
 import { csrfHeaders } from '@/lib/csrf'
+import { cn } from '@/lib/utils'
 
 const KEEPALIVE_MS = 30_000
 
@@ -12,6 +13,30 @@ interface SandboxTerminalViewProps {
   workspaceId: string
   conversationId?: string | null
   refreshRef?: React.MutableRefObject<(() => Promise<unknown>) | null>
+}
+
+function TerminalFrame({ url }: { url: string }) {
+  const [loaded, setLoaded] = useState(false)
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-black">
+      {!loaded && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center
+            bg-black text-sm text-white/60"
+        >
+          Starting terminal…
+        </div>
+      )}
+      <iframe
+        title="Sandbox terminal"
+        src={url}
+        className={cn('h-full w-full border-0', !loaded && 'opacity-0')}
+        allow="fullscreen; clipboard-read; clipboard-write"
+        onLoad={() => setLoaded(true)}
+      />
+    </div>
+  )
 }
 
 export function SandboxTerminalView({
@@ -45,7 +70,7 @@ export function SandboxTerminalView({
     return (
       <div
         className="flex h-full items-center justify-center
-          text-sm text-muted-foreground"
+          bg-black text-sm text-white/60"
       >
         Starting terminal…
       </div>
@@ -76,12 +101,5 @@ export function SandboxTerminalView({
 
   if (!url) return null
 
-  return (
-    <iframe
-      title="Sandbox terminal"
-      src={url}
-      className="h-full w-full border-0"
-      allow="fullscreen; clipboard-read; clipboard-write"
-    />
-  )
+  return <TerminalFrame url={url} />
 }
