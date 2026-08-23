@@ -2,6 +2,7 @@
 
 import type { ReactNode, RefObject } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 
 interface ArtifactExpandDialogProps {
   open: boolean
@@ -10,6 +11,8 @@ interface ArtifactExpandDialogProps {
   title: string
   /** Stable identity so React remounts if selection swaps while open */
   identityKey: string
+  /** Optional stable rail slot that permanently owns the preview dialog portal. */
+  portalContainer?: HTMLElement
   header: ReactNode
   children: ReactNode
   /**
@@ -34,6 +37,7 @@ export function ArtifactExpandDialog({
   onOpenChange,
   title,
   identityKey,
+  portalContainer,
   header,
   children,
   initialFocusRef,
@@ -44,15 +48,30 @@ export function ArtifactExpandDialog({
       <DialogContent
         key={identityKey}
         showCloseButton={false}
-        className="flex h-[90vh] w-[min(90vw,1400px)] max-w-none flex-col gap-0 overflow-hidden
-          p-0 sm:max-w-none"
+        portalContainer={portalContainer}
+        portalClassName={portalContainer ? 'contents' : undefined}
+        keepMounted={Boolean(portalContainer)}
+        forceVisible={Boolean(portalContainer)}
+        className={cn(
+          'flex max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none',
+          open
+            ? 'fixed h-[90vh] w-[min(90vw,1400px)]'
+            : cn(
+                'absolute inset-0 z-0 h-full w-full translate-x-0 translate-y-0 rounded-none',
+                'bg-background ring-0 duration-0 data-closed:animate-none',
+              ),
+        )}
+        role={open ? 'dialog' : 'presentation'}
         aria-describedby={undefined}
         initialFocus={initialFocusRef}
         finalFocus={finalFocusRef}
       >
-        <DialogTitle className="sr-only">{title}</DialogTitle>
-        {header}
-        <div className="min-h-0 flex-1 overflow-hidden" data-testid="artifact-expand-preview">
+        {open && <DialogTitle className="sr-only">{title}</DialogTitle>}
+        {open && header}
+        <div
+          className="min-h-0 flex-1 overflow-hidden"
+          data-testid={open ? 'artifact-expand-preview' : 'artifact-rail-preview'}
+        >
           {children}
         </div>
       </DialogContent>
