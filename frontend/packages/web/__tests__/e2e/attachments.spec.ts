@@ -128,6 +128,47 @@ test.describe('M7 attachments — home page eager-create flow', () => {
       skipWithoutRealLlm()
       await registerAndLand(page)
 
+      let pendingRequestStartedResolve!: () => void
+      let allowPendingFetchResolve!: () => void
+      let pendingResponseReadyResolve!: () => void
+      let releasePendingResponseResolve!: () => void
+      let pendingResponseFulfilledResolve!: () => void
+      const pendingRequestStarted = new Promise<void>((resolve) => {
+        pendingRequestStartedResolve = resolve
+      })
+      const allowPendingFetch = new Promise<void>((resolve) => {
+        allowPendingFetchResolve = resolve
+      })
+      const pendingResponseReady = new Promise<void>((resolve) => {
+        pendingResponseReadyResolve = resolve
+      })
+      const releasePendingResponse = new Promise<void>((resolve) => {
+        releasePendingResponseResolve = resolve
+      })
+      const pendingResponseFulfilled = new Promise<void>((resolve) => {
+        pendingResponseFulfilledResolve = resolve
+      })
+      let pendingAttachmentCount = 0
+      let interceptedPendingRequest = false
+
+      await page.route(/\/attachments\?status=pending$/, async (route) => {
+        if (interceptedPendingRequest) {
+          await route.continue()
+          return
+        }
+        interceptedPendingRequest = true
+        pendingRequestStartedResolve()
+        await allowPendingFetch
+        const response = await route.fetch()
+        const body = await response.body()
+        const payload = JSON.parse(body.toString()) as { attachments: unknown[] }
+        pendingAttachmentCount = payload.attachments.length
+        pendingResponseReadyResolve()
+        await releasePendingResponse
+        await route.fulfill({ response, body })
+        pendingResponseFulfilledResolve()
+      })
+
       // Write a tiny valid PNG inline (re-use the same trick as the existing test).
       const tmp = path.join(__dirname, '__tmp_homeflow.png')
       fs.writeFileSync(
@@ -149,12 +190,30 @@ test.describe('M7 attachments — home page eager-create flow', () => {
         // disappears when the upload resolves.
         await expect(page.locator('.animate-spin').first()).toBeHidden({ timeout: 15_000 })
 
+        // The draft conversation mount starts a pending-attachment hydration.
+        // Let it read the uploaded file, but hold that stale response until
+        // after submit clears staging and navigation mounts the conversation.
+        await pendingRequestStarted
+        allowPendingFetchResolve()
+        await pendingResponseReady
+        expect(pendingAttachmentCount).toBe(1)
+
         // Send a short prompt.
         await page.locator('textarea').fill('Reply with the single word OK')
         await page.getByTestId('send-button').click()
 
         // Navigation should land on the conversation page.
         await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
+
+        releasePendingResponseResolve()
+        await pendingResponseFulfilled
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            }),
+        )
+        await expect(page.getByRole('button', { name: 'Remove __tmp_homeflow.png' })).toHaveCount(0)
 
         // Wait for the LLM round to finish.
         await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
@@ -177,6 +236,8 @@ test.describe('M7 attachments — home page eager-create flow', () => {
         expect(attachBox).not.toBeNull()
         expect(userBox!.y).toBeGreaterThan(attachBox!.y)
       } finally {
+        allowPendingFetchResolve()
+        releasePendingResponseResolve()
         try {
           fs.unlinkSync(tmp)
         } catch {
