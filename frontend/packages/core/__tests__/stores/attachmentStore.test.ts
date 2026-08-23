@@ -26,7 +26,7 @@ import { uploadAttachment, deleteAttachment, listAttachments } from '../../src/a
 
 describe('attachmentStore', () => {
   beforeEach(() => {
-    useAttachmentStore.setState({ staging: {} })
+    useAttachmentStore.setState({ staging: {}, hydrateGeneration: {}, skipHydrate: {} })
     vi.clearAllMocks()
   })
 
@@ -99,6 +99,24 @@ describe('attachmentStore', () => {
     const list = useAttachmentStore.getState().staging.conv1
     expect(list?.length).toBe(1)
     expect(list?.[0].serverFile?.id).toBe('srv-1')
+  })
+
+  it('does not restore submitted attachments from an older hydrate request', async () => {
+    let resolveList!: (value: { attachments: AttachmentDto[]; total: number }) => void
+    ;(listAttachments as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve
+      }),
+    )
+
+    const hydratePromise = useAttachmentStore.getState().hydrate({} as never, 'conv1')
+    useAttachmentStore.getState().clear('conv1')
+    useAttachmentStore.getState().markSkipHydrate('conv1')
+
+    resolveList({ attachments: [fakeServerDto], total: 1 })
+    await hydratePromise
+
+    expect(useAttachmentStore.getState().staging.conv1).toBeUndefined()
   })
 
   describe('cancel', () => {
