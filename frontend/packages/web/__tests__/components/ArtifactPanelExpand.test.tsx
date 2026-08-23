@@ -134,9 +134,10 @@ describe('ArtifactPanel expand theater', () => {
     expect(usePanelStore.getState().view).toEqual({ type: 'closed' })
   })
 
-  it('opens in-app expand and unmounts rail preview (single host)', () => {
+  it('opens in-app expand and reparents the same preview host', () => {
     renderPanel()
     expect(screen.getByTestId('artifact-rail-preview')).toBeInTheDocument()
+    const previewBefore = screen.getByTestId('preview-host')
     expect(screen.getAllByTestId('preview-host')).toHaveLength(1)
 
     fireEvent.click(screen.getByTitle('Expand preview'))
@@ -144,11 +145,29 @@ describe('ArtifactPanel expand theater', () => {
     expect(screen.getByTestId('artifact-rail-placeholder')).toBeInTheDocument()
     expect(screen.queryByTestId('artifact-rail-preview')).not.toBeInTheDocument()
     expect(screen.getByTestId('artifact-expand-preview')).toBeInTheDocument()
-    // Only the theater hosts the preview while expanded.
+    // Same single preview — Office/HTML iframes must not remount.
     expect(screen.getAllByTestId('preview-host')).toHaveLength(1)
-    expect(
-      within(screen.getByTestId('artifact-expand-preview')).getByTestId('preview-host'),
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+    expect(within(screen.getByTestId('artifact-expand-preview')).getByTestId('preview-host')).toBe(
+      previewBefore,
+    )
+  })
+
+  it('exit expand reparents the same preview host back to the rail', () => {
+    renderPanel()
+    const previewBefore = screen.getByTestId('preview-host')
+    fireEvent.click(screen.getByTitle('Expand preview'))
+    expect(screen.getByTestId('artifact-expand-preview')).toBeInTheDocument()
+    expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+
+    fireEvent.click(screen.getAllByTitle('Exit expand')[0]!)
+
+    expect(screen.queryByTestId('artifact-expand-preview')).not.toBeInTheDocument()
+    expect(screen.getByTestId('artifact-rail-preview')).toBeInTheDocument()
+    expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+    expect(within(screen.getByTestId('artifact-rail-preview')).getByTestId('preview-host')).toBe(
+      previewBefore,
+    )
   })
 
   it.each([
