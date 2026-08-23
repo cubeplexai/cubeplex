@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListChecks } from 'lucide-react'
 import type { TodoItem } from '@cubeplex/core'
@@ -12,16 +12,7 @@ interface TaskProgressCardProps {
 
 export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) {
   const t = useTranslations('chat')
-  const [isExpanded, setIsExpanded] = useState(false)
-  const prevStreamingRef = useRef(isStreaming)
-
-  // Auto-collapse when streaming ends
-  useEffect(() => {
-    if (!isStreaming && prevStreamingRef.current) {
-      setIsExpanded(false)
-    }
-    prevStreamingRef.current = isStreaming
-  }, [isStreaming])
+  const [isExpanded, setIsExpanded] = useState(true)
 
   if (todos.length === 0) return null
 
