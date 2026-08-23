@@ -16,6 +16,9 @@ export interface UploadingFile {
 
 interface AttachmentStoreState {
   staging: Record<string, UploadingFile[]>
+  // Invalidates hydrate requests that started before a local clear. Without
+  // this, a slow pending-attachment response can restore files after submit.
+  hydrateGeneration: Record<string, number>
   // Convs whose next hydrate() call should be skipped. Set by clear() callers
   // (home-page submit) that navigate immediately without awaiting send(), so
   // the server's mark_attached_bulk hasn't run yet when the conversation page
@@ -38,6 +41,7 @@ const abortControllers: Record<string, AbortController> = {}
 
 export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
   staging: {},
+  hydrateGeneration: {},
   skipHydrate: {},
 
   async upload(client, convId, files) {
@@ -143,7 +147,13 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
     set((s) => {
       const next = { ...s.staging }
       delete next[convId]
-      return { staging: next }
+      return {
+        staging: next,
+        hydrateGeneration: {
+          ...s.hydrateGeneration,
+          [convId]: (s.hydrateGeneration[convId] ?? 0) + 1,
+        },
+      }
     })
   },
 
@@ -169,12 +179,14 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
       })
       return
     }
+    const generation = get().hydrateGeneration[convId] ?? 0
     let list: Awaited<ReturnType<typeof listAttachments>>
     try {
       list = await listAttachments(client, convId, 'pending')
     } catch {
       return
     }
+    if ((get().hydrateGeneration[convId] ?? 0) !== generation) return
     if (!list.attachments.length) return
     set((s) => ({
       staging: {
