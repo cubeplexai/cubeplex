@@ -1,16 +1,6 @@
 'use client'
 
-import {
-  useState,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useCallback,
-  useSyncExternalStore,
-  type Ref,
-} from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useEffect, useRef, useCallback, type Ref } from 'react'
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubeplex/core'
 import type { Artifact, ArtifactVersion } from '@cubeplex/core'
@@ -228,43 +218,6 @@ export function PreviewContent({
   }
 }
 
-const subscribeNoop = (): (() => void) => () => {}
-
-/** True only after client hydration (SSR snapshot is false). */
-function useIsClient(): boolean {
-  return useSyncExternalStore(
-    subscribeNoop,
-    () => true,
-    () => false,
-  )
-}
-
-/**
- * Imperative portal host for PreviewContent. React portals into this element;
- * we reparent it between rail and theater so heavy previews (Office iframe,
- * PDF worker, HTML) are not destroyed on expand/exit.
- *
- * Created once on the client (not during SSR). Cleanup removes the node on unmount.
- */
-function usePreviewHost(): HTMLDivElement | null {
-  const isClient = useIsClient()
-  const host = useMemo(() => {
-    if (!isClient) return null
-    const el = document.createElement('div')
-    el.dataset.artifactPreviewHost = 'true'
-    el.className = 'h-full w-full min-h-0'
-    return el
-  }, [isClient])
-
-  useEffect(() => {
-    return () => {
-      host?.remove()
-    }
-  }, [host])
-
-  return host
-}
-
 export function ArtifactPanel() {
   const view = usePanelStore((s) => s.view)
   const close = usePanelStore((s) => s.close)
@@ -287,52 +240,14 @@ export function ArtifactPanel() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const expanded = expandedKey !== null && expandedKey === identityKey
 
-  const host = usePreviewHost()
-  const railSlotRef = useRef<HTMLDivElement | null>(null)
-  const theaterSlotRef = useRef<HTMLDivElement | null>(null)
-
-  const attachHost = useCallback(
-    (slot: HTMLDivElement | null) => {
-      if (!host || !slot || host.parentElement === slot) return
-      slot.appendChild(host)
-    },
-    [host],
-  )
-
-  // Default: keep host in the rail. Theater attach happens via theater slot
-  // callback ref (dialog content mounts in a portal, so a plain layout effect
-  // can race and see a null theaterSlotRef).
-  useLayoutEffect(() => {
-    if (!expanded) attachHost(railSlotRef.current)
-  }, [expanded, host, attachHost])
-
-  const setRailSlot = useCallback(
-    (el: HTMLDivElement | null) => {
-      railSlotRef.current = el
-      if (!expanded) attachHost(el)
-    },
-    [expanded, attachHost],
-  )
-
-  const setTheaterSlot = useCallback(
-    (el: HTMLDivElement | null) => {
-      theaterSlotRef.current = el
-      if (expanded) attachHost(el)
-    },
-    [expanded, attachHost],
-  )
+  const [railSlotEl, setRailSlotEl] = useState<HTMLDivElement | null>(null)
 
   const openExpand = (): void => {
     if (identityKey) setExpandedKey(identityKey)
   }
   const closeExpand = useCallback((): void => {
-    // Move host out of the dialog tree before React unmounts the dialog.
-    const rail = railSlotRef.current
-    if (host && rail && host.parentElement !== rail) {
-      rail.appendChild(host)
-    }
     setExpandedKey(null)
-  }, [host])
+  }, [])
 
   const [railPortalEl, setRailPortalEl] = useState<HTMLElement | null>(null)
   const [theaterPortalEl, setTheaterPortalEl] = useState<HTMLElement | null>(null)
@@ -346,8 +261,6 @@ export function ArtifactPanel() {
 
   useEffect(() => {
     if (!isDesktop) {
-      // Reparent before the theater unmounts so the iframe stays attached.
-      // Deriving `expanded` from isDesktop would detach it with the dialog.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       closeExpand()
     }
@@ -396,17 +309,6 @@ export function ArtifactPanel() {
     workspaceId,
   }
 
-  const previewPortal =
-    host &&
-    createPortal(
-      <PreviewContent
-        artifact={artifact}
-        version={currentSelectedVersion}
-        workspaceId={workspaceId}
-      />,
-      host,
-    )
-
   return (
     <div ref={setRailPortalEl} className="flex flex-col h-full bg-background">
       <ArtifactPanelHeader
@@ -424,33 +326,32 @@ export function ArtifactPanel() {
           Without this, percentage heights collapse to content (~150px iframe). */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <div
-          ref={setRailSlot}
-          className="h-full w-full min-h-0"
-          data-testid={expanded ? 'artifact-rail-placeholder' : 'artifact-rail-preview'}
+          ref={setRailSlotEl}
+          className="relative h-full w-full min-h-0"
+          data-testid="artifact-preview-slot"
         />
         {expanded && (
           <div
             className="pointer-events-none absolute inset-0 flex items-center justify-center
               px-4 text-center text-sm text-muted-foreground"
+            data-testid="artifact-rail-placeholder"
           >
             {t('expandedPlaceholder')}
           </div>
         )}
       </div>
 
-      {previewPortal}
-
-      {/* Theater chrome only while expanded. PreviewContent lives in `host`
-          and is reparented into the dialog slot so iframes are not remounted.
-          Modal backdrop makes the rail inert — exit expand, then rail Close. */}
-      {expanded && (
+      {/* Keep the dialog portal rooted in the rail slot. Expanding changes only
+          popup layout, so iframe browsing contexts are never reparented. */}
+      {railSlotEl && (
         <ArtifactExpandDialog
-          open
+          open={expanded}
           onOpenChange={(open) => {
             if (!open) closeExpand()
           }}
           title={artifact.name}
           identityKey={identityKey}
+          portalContainer={railSlotEl}
           initialFocusRef={exitExpandButtonRef}
           finalFocusRef={expandButtonRef}
           header={
@@ -465,7 +366,13 @@ export function ArtifactPanel() {
             </div>
           }
         >
-          <div ref={setTheaterSlot} className="h-full w-full min-h-0" />
+          <div data-artifact-preview-host className="h-full w-full min-h-0">
+            <PreviewContent
+              artifact={artifact}
+              version={currentSelectedVersion}
+              workspaceId={workspaceId}
+            />
+          </div>
         </ArtifactExpandDialog>
       )}
     </div>

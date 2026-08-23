@@ -134,10 +134,14 @@ describe('ArtifactPanel expand theater', () => {
     expect(usePanelStore.getState().view).toEqual({ type: 'closed' })
   })
 
-  it('opens in-app expand and reparents the same preview host', () => {
+  it('opens in-app expand without reparenting the preview host', () => {
     renderPanel()
     expect(screen.getByTestId('artifact-rail-preview')).toBeInTheDocument()
     const previewBefore = screen.getByTestId('preview-host')
+    const hostBefore = previewBefore.closest('[data-artifact-preview-host]')
+    const parentBefore = hostBefore?.parentElement
+    expect(hostBefore).toBeTruthy()
+    expect(parentBefore).toBeTruthy()
     expect(screen.getAllByTestId('preview-host')).toHaveLength(1)
 
     fireEvent.click(screen.getByTitle('Expand preview'))
@@ -148,23 +152,31 @@ describe('ArtifactPanel expand theater', () => {
     // Same single preview — Office/HTML iframes must not remount.
     expect(screen.getAllByTestId('preview-host')).toHaveLength(1)
     expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+    expect(screen.getByTestId('preview-host').closest('[data-artifact-preview-host]')).toBe(
+      hostBefore,
+    )
+    expect(hostBefore?.parentElement).toBe(parentBefore)
     expect(within(screen.getByTestId('artifact-expand-preview')).getByTestId('preview-host')).toBe(
       previewBefore,
     )
   })
 
-  it('exit expand reparents the same preview host back to the rail', () => {
+  it('exit expand keeps the preview host under the same parent', () => {
     renderPanel()
     const previewBefore = screen.getByTestId('preview-host')
+    const hostBefore = previewBefore.closest('[data-artifact-preview-host]')
+    const parentBefore = hostBefore?.parentElement
     fireEvent.click(screen.getByTitle('Expand preview'))
     expect(screen.getByTestId('artifact-expand-preview')).toBeInTheDocument()
     expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+    expect(hostBefore?.parentElement).toBe(parentBefore)
 
     fireEvent.click(screen.getAllByTitle('Exit expand')[0]!)
 
     expect(screen.queryByTestId('artifact-expand-preview')).not.toBeInTheDocument()
     expect(screen.getByTestId('artifact-rail-preview')).toBeInTheDocument()
     expect(screen.getByTestId('preview-host')).toBe(previewBefore)
+    expect(hostBefore?.parentElement).toBe(parentBefore)
     expect(within(screen.getByTestId('artifact-rail-preview')).getByTestId('preview-host')).toBe(
       previewBefore,
     )
