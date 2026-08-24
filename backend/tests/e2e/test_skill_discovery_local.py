@@ -147,16 +147,18 @@ async def test_preinstalled_skill_is_enabled_after_seed_reconcile(
     """New preinstalled skills must be loadable without a manual install.
 
     Seed reconcile auto-installs missing preinstalled skills with auto_bind=True
-    so agents can load_skill('show-widget') / deep-research after deploy.
+    so agents can load the built-in research workflows after deploy.
     """
     client, ws_id = member_client
     disc = await client.get(f"/api/v1/ws/{ws_id}/skills/discover", params={"q": "research"})
     assert disc.status_code == 200
-    cand = next(c for c in disc.json() if c["name"] == "deep-research")
-    assert cand["install_state"] == "enabled"
+    discovered = {candidate["name"]: candidate for candidate in disc.json()}
+    assert discovered["deep-research"]["install_state"] == "enabled"
+    assert discovered["wide-research"]["install_state"] == "enabled"
 
     enabled = await client.get(f"/api/v1/ws/{ws_id}/skills", params={"scope": "workspace"})
-    assert any(s["name"] == "deep-research" for s in enabled.json())
+    enabled_names = {skill["name"] for skill in enabled.json()}
+    assert {"deep-research", "wide-research"} <= enabled_names
 
 
 @pytest.mark.asyncio
