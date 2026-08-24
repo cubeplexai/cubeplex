@@ -41,7 +41,6 @@ import {
 import {
   canAutoOpenBrowserPanel,
   canAutoOpenFilePreview,
-  canAutoOpenReplacePanel,
   isBrowserToolCall,
   isWriteOrEditTool,
   shouldAutoOpenArtifactPreview,
@@ -425,7 +424,7 @@ async function reconcileAfterStop(
  * History/bootstrap never emit these events — only live / reattach streams.
  *
  * Sync (no dynamic import) so focus cannot change between the gate check and
- * openArtifact. Does not clobber a user-chosen non-artifact panel.
+ * openArtifact. A newly saved artifact always becomes the current preview.
  */
 function applyArtifactSseEvent(
   conversationId: string,
@@ -435,19 +434,7 @@ function applyArtifactSseEvent(
   useArtifactStore.getState().addOrUpdate(conversationId, artifact)
   const viewingId = useConversationStore.getState().viewingConversationId
   if (!shouldAutoOpenArtifactPreview(conversationId, viewingId)) return
-  const panel = usePanelStore.getState()
-  if (!canAutoOpenReplacePanel(panel.view, conversationId, artifact.id)) return
-  // Same artifact already open: store update above is enough. Do not re-open
-  // with source:'auto' — that would downgrade a user selection and let a later
-  // different artifact steal the panel via the auto-chain gate.
-  if (
-    panel.view.type === 'artifact' &&
-    panel.view.conversationId === conversationId &&
-    panel.view.artifactId === artifact.id
-  ) {
-    return
-  }
-  panel.openArtifact(conversationId, artifact.id, 'auto')
+  usePanelStore.getState().openArtifact(conversationId, artifact.id, 'auto')
 }
 
 /**

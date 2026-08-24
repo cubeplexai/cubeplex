@@ -16,7 +16,6 @@ export {
   DEFAULT_AUTO_OPEN_ARTIFACTS,
   canAutoOpenBrowserPanel,
   canAutoOpenFilePreview,
-  canAutoOpenReplacePanel,
   isAutoOpenArtifactsEnabled,
   isBrowserToolCall,
   isWriteOrEditTool,
