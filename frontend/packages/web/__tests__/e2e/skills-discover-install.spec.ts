@@ -28,7 +28,9 @@ test('skills page loads with the deep-research skill in the local list', async (
 
   // The deep-research skill ships preinstalled and is auto-bound at registration,
   // so it appears in the workspace skills list without any user action.
-  await expect(page.getByTestId('skills-list').getByText('deep-research')).toBeVisible({
+  await expect(
+    page.getByTestId('skills-list').getByText('deep-research', { exact: true }),
+  ).toBeVisible({
     timeout: 10_000,
   })
 })
@@ -40,7 +42,7 @@ test('preinstalled skill is auto-bound to a fresh workspace', async ({ page }) =
   await page.goto(`/w/${wsId}/skills`)
 
   // The skills list contains the preinstalled skill on first load.
-  const localCard = page.getByTestId('skills-list').getByText('deep-research')
+  const localCard = page.getByTestId('skills-list').getByText('deep-research', { exact: true })
   await expect(localCard).toBeVisible({ timeout: 10_000 })
 
   // Clicking the card opens the detail panel for the skill.
