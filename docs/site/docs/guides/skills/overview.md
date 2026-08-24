@@ -36,6 +36,20 @@ Skills from remote registries carry a trust indicator so you know what you are i
 
 Built-in and uploaded skills are inherently trusted because they come from CubePlex or your own organization.
 
+## Built-in research skills
+
+CubePlex includes two research workflows with different goals:
+
+- **Deep Research** investigates one topic through multiple sources and follow-up
+  questions, then produces an evidence-backed explanation or report.
+- **Wide Research** builds a comprehensive list or dataset by researching many
+  independent entities or discovery lanes in parallel, validating every row,
+  deduplicating the results, and reporting coverage gaps.
+
+Use Wide Research for requests such as “find all matching vendors,” “map this
+market,” or “enrich every company in this list.” Use Deep Research when the hard
+part is understanding one subject in depth rather than covering a large set.
+
 ## Installation scopes
 
 A skill can be installed at two levels:
