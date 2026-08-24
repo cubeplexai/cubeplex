@@ -24,6 +24,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
     <div className="bg-card border border-border rounded-xl px-3 py-2.5">
       <button
         type="button"
+        aria-expanded={isExpanded}
         onClick={() => setIsExpanded((prev) => !prev)}
         className="flex items-center gap-1.5 text-xs text-muted-foreground
           transition-colors group w-full text-left hover:text-foreground cursor-pointer"
@@ -42,19 +43,20 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
               {t('tasksDone', { completed, total: todos.length })}
             </span>
           </>
-        ) : isStreaming && inProgress ? (
+        ) : inProgress && !isExpanded ? (
           <>
             <Loader2 className="size-3 text-primary animate-spin shrink-0" />
             <span className="text-foreground truncate">{inProgress.description}</span>
-            <span className="text-muted-foreground/50 ml-auto shrink-0">
-              {completed}/{todos.length}
+            <span className="text-muted-foreground/60 ml-auto shrink-0">
+              {t('tasksCompleted', { completed, total: todos.length })}
             </span>
           </>
         ) : (
           <>
             <ListChecks className="size-3 text-muted-foreground/70 shrink-0" />
-            <span className="text-foreground">
-              {t('tasksProgress', { completed, total: todos.length })}
+            <span className="text-foreground">{t('tasksProgress')}</span>
+            <span className="text-muted-foreground/60 ml-auto shrink-0">
+              {t('tasksCompleted', { completed, total: todos.length })}
             </span>
           </>
         )}
