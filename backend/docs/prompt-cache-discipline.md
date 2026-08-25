@@ -37,8 +37,9 @@ message tail** (after the cache breakpoint), not the system prompt.
 skill bodies into the system prompt or persistent agent extra state. The tool
 result is replayed with conversation history while it remains in context, which
 preserves the earlier cacheable prefix instead of changing the system prompt at
-the load boundary. If compaction removes those instructions and they are needed
-again, the agent should call `load_skill` again.
+the load boundary. Compaction replaces an old skill body with only its canonical
+name. A stable system-prompt rule tells the agent to call `load_skill` again when
+that skill remains relevant, resolving the currently enabled version.
 
 ---
 
