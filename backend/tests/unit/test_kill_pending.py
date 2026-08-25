@@ -184,6 +184,10 @@ async def test_cleanup_expired_skips_in_flight_provisioning() -> None:
             new=AsyncMock(return_value=[record]),
         ),
         patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get",
+            new=AsyncMock(return_value=record),
+        ),
+        patch(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
             new=mark_terminated,
         ),
@@ -196,19 +200,24 @@ async def test_cleanup_expired_skips_in_flight_provisioning() -> None:
 
 @pytest.mark.asyncio
 async def test_cleanup_expired_reaps_stuck_provisioning_past_create_timeout() -> None:
-    """A provisioning row older than create_timeout is still an orphan."""
+    """A provisioning row older than create+ready budget is still an orphan."""
     mgr = _make_manager()
     mgr._session_factory = _AsyncSessionFactory(MagicMock())  # type: ignore[assignment]
+    budget = mgr._create_timeout + mgr._ready_timeout
     record = _make_record(
         sandbox_id=None,
         status="provisioning",
-        last_activity_at=datetime.now(UTC) - timedelta(seconds=mgr._create_timeout + 10),
+        last_activity_at=datetime.now(UTC) - timedelta(seconds=budget + 10),
     )
     mark_terminated = AsyncMock()
     with (
         patch(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
             new=AsyncMock(return_value=[record]),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get",
+            new=AsyncMock(return_value=record),
         ),
         patch(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
@@ -218,4 +227,43 @@ async def test_cleanup_expired_reaps_stuck_provisioning_past_create_timeout() ->
     ):
         await mgr.cleanup_expired()
     mark_terminated.assert_awaited_once_with(record.id)
+    kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_uses_fresh_row_not_stale_snapshot() -> None:
+    """A revive claimed after list_expired must not be reaped from the snapshot."""
+    mgr = _make_manager()
+    mgr._session_factory = _AsyncSessionFactory(MagicMock())  # type: ignore[assignment]
+    budget = mgr._create_timeout + mgr._ready_timeout
+    stale = _make_record(
+        record_id="rec-1",
+        sandbox_id=None,
+        status="provisioning",
+        last_activity_at=datetime.now(UTC) - timedelta(seconds=budget + 10),
+    )
+    fresh = _make_record(
+        record_id="rec-1",
+        sandbox_id=None,
+        status="provisioning",
+        last_activity_at=datetime.now(UTC),
+    )
+    mark_terminated = AsyncMock()
+    with (
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
+            new=AsyncMock(return_value=[stale]),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get",
+            new=AsyncMock(return_value=fresh),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            new=mark_terminated,
+        ),
+        patch.object(mgr, "_kill_record", new=AsyncMock()) as kill,
+    ):
+        await mgr.cleanup_expired()
+    mark_terminated.assert_not_called()
     kill.assert_not_called()

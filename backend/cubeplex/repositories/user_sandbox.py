@@ -103,6 +103,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             raise ValueError(f"sandbox record {record_id} vanished mid-create")
         record.sandbox_id = sandbox_id
         record.status = "running"
+        record.last_activity_at = datetime.now(UTC)
         if image is not None:
             record.image = image
         await self.session.commit()

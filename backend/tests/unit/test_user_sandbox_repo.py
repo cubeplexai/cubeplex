@@ -68,11 +68,17 @@ async def test_promote_sets_running_and_sandbox_id(session: AsyncSession) -> Non
         scope_type="user",
         scope_id="user-1",
     )
+    rec.last_activity_at = datetime.now(UTC) - timedelta(hours=1)
+    await session.commit()
     await repo.promote_to_running(rec.id, sandbox_id="prov-abc")
     refreshed = await repo.get(rec.id)
     assert refreshed is not None
     assert refreshed.status == "running"
     assert refreshed.sandbox_id == "prov-abc"
+    got = refreshed.last_activity_at
+    if got.tzinfo is None:
+        got = got.replace(tzinfo=UTC)
+    assert got > datetime.now(UTC) - timedelta(minutes=1)
 
 
 async def test_delete_record_frees_the_slot(session: AsyncSession) -> None:
