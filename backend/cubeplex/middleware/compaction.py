@@ -40,7 +40,10 @@ def _preserve_artifact(message: ToolResultMessage) -> str | None:
         return None
 
     payload = _result_payload(message)
-    artifact = payload.get("artifact") if payload else None
+    if payload is None:
+        return None
+
+    artifact = payload.get("artifact")
     if not isinstance(artifact, dict):
         return None
 
