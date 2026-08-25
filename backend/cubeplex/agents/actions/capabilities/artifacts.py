@@ -34,6 +34,17 @@ async def _list(ctx: ScopeContext, session: AsyncSession, inp: ListInput) -> dic
     return {"artifacts": [artifact.to_dict() for artifact in items], "total": total}
 
 
+async def _list_current(ctx: ScopeContext, session: AsyncSession, inp: ListInput) -> dict[str, Any]:
+    """List artifacts belonging to the conversation executing this run."""
+    del inp
+    if ctx.conversation_id is None:
+        return {"artifacts": [], "total": 0}
+
+    artifacts = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    items = await artifacts.list_by_conversation(ctx.conversation_id)
+    return {"artifacts": [artifact.to_dict() for artifact in items], "total": len(items)}
+
+
 ARTIFACTS_CAPABILITY = AgentCapability(
     name="artifacts",
     description="List artifacts from conversations you can access.",
@@ -44,6 +55,13 @@ ARTIFACTS_CAPABILITY = AgentCapability(
             input_model=ListInput,
             handler=_list,
             mutates=False,
-        )
+        ),
+        AgentOperation(
+            name="list_current",
+            description="List artifacts from the current conversation.",
+            input_model=ListInput,
+            handler=_list_current,
+            mutates=False,
+        ),
     ],
 )

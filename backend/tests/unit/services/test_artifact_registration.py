@@ -143,21 +143,21 @@ async def test_second_call_same_path_auto_matches_and_bumps_version(
 
 @pytest.mark.asyncio
 async def test_explicit_artifact_id_cannot_update_another_conversation(
-    db_session: AsyncSession, fake_sandbox_ok: MagicMock
+    fake_sandbox_ok: MagicMock,
 ) -> None:
     """An artifact ID from another conversation must not be versioned."""
-    with _patch_session_maker(db_session), _patch_objectstore():
-        existing = await register_artifact_from_sandbox(
-            sandbox=fake_sandbox_ok,
-            conversation_id="conv-owner",
-            org_id="org-1",
-            workspace_id="ws-1",
-            name="Owned artifact",
-            artifact_type="file",
-            path="/out/owned.txt",
-        )
+    existing = MagicMock(id="art-owner", conversation_id="conv-owner")
+    mock_repo = MagicMock()
+    mock_repo.get_by_id = AsyncMock(return_value=existing)
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    with _patch_session_maker(db_session), _patch_objectstore():
+    with (
+        patch("cubeplex.db.engine.async_session_maker", return_value=mock_session),
+        patch("cubeplex.repositories.ArtifactRepository", return_value=mock_repo),
+        patch("cubeplex.repositories.ArtifactVersionRepository"),
+    ):
         with pytest.raises(ValueError, match="another conversation"):
             await register_artifact_from_sandbox(
                 sandbox=fake_sandbox_ok,
@@ -169,6 +169,8 @@ async def test_explicit_artifact_id_cannot_update_another_conversation(
                 path="/out/other.txt",
                 artifact_id=existing.id,
             )
+
+    mock_repo.update.assert_not_called()
 
 
 @pytest.mark.asyncio
