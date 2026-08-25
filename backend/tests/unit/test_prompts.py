@@ -49,6 +49,18 @@ def test_system_prompt_mentions_tools():
     assert "tool" in BASE_SYSTEM_PROMPT.lower()
 
 
+def test_subagent_prompt_explains_parallel_independence_and_dependency_order():
+    normalized = " ".join(SUBAGENT_PROMPT.split())
+
+    assert "same assistant response run concurrently" in normalized
+    assert "If task B needs task A's result" in normalized
+    assert "Do not make several workers independently discover the same source" in normalized
+
+
+def test_subagent_prompt_stays_concise():
+    assert len(SUBAGENT_PROMPT.split()) <= 250
+
+
 def test_sandbox_prompt_mentions_execute():
     rendered = SANDBOX_PROMPT_TEMPLATE.format(workdir="/root")
     assert "execute" in rendered.lower()
