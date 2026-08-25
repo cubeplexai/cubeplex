@@ -1,6 +1,6 @@
-"""Skills system prompt template — injected by SkillsMiddleware."""
+"""Available-skills system prompt template."""
 
-# This is a template — formatted by SkillsMiddleware with discovered skills
+# The run manager formats this template with the workspace's discovered skills.
 SKILLS_PROMPT_TEMPLATE = """\
 
 # Available skills

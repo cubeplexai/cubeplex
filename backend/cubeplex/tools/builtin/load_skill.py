@@ -1,16 +1,4 @@
-"""load_skill tool ported to cubepi.AgentTool (M2.3, skeleton).
-
-M2: tool returns skill content as the tool result (JSON matching LoadSkillOutput).
-M3 SkillsMiddleware will:
-  - Watch for load_skill tool_result messages
-  - Append the loaded skill content to subsequent system prompts via
-    transform_system_prompt hook
-  - Optionally cache loaded skills in ctx.extra["loaded_skills"]
-
-For M2, the cubepi runtime path can invoke load_skill and get the
-content back, but won't yet inject it into future system prompts.
-That's M3's coordination.
-"""
+"""Load a skill's instructions into the conversation as a tool result."""
 
 from __future__ import annotations
 
@@ -106,12 +94,13 @@ def create_load_skill_tool(
     return AgentTool(
         name="load_skill",
         description=(
-            "Read a skill's instructions. Returns the SKILL.md content, its "
-            "version, and `path` — the exact sandbox directory holding the "
-            "skill's sibling files (scripts/, templates/, references/). Use that "
-            "`path` verbatim to reference those files; do not build the path from "
-            "the skill name. Skills are listed in your system prompt; pass the "
-            "exact name."
+            "Read a skill's instructions. Follow the SKILL.md content returned in "
+            "this tool result for the current task. The result also includes its "
+            "version and `path` — the exact sandbox directory holding the skill's "
+            "sibling files (scripts/, templates/, references/). Use that `path` "
+            "verbatim to reference those files; do not build the path from the "
+            "skill name. Skills are listed in your system prompt; pass the exact "
+            "name."
         ),
         parameters=LoadSkillInput,
         execute=_execute,
