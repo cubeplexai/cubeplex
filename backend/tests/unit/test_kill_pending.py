@@ -1,5 +1,6 @@
 """Unit tests: _kill_record uses kill_pending for retry on failure."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,10 +47,11 @@ def _make_manager() -> SandboxManager:
 def _make_record(
     *,
     record_id: str = "rec-1",
-    sandbox_id: str = "sbx-1",
+    sandbox_id: str | None = "sbx-1",
     org_id: str = "org-1",
     workspace_id: str = "ws-1",
     status: str = "running",
+    last_activity_at: datetime | None = None,
 ) -> MagicMock:
     record = MagicMock()
     record.id = record_id
@@ -57,6 +59,7 @@ def _make_record(
     record.org_id = org_id
     record.workspace_id = workspace_id
     record.status = status
+    record.last_activity_at = last_activity_at or datetime.now(UTC)
     return record
 
 
@@ -143,3 +146,76 @@ async def test_kill_404_marks_terminated() -> None:
 
     repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
+
+
+class _AsyncSessionFactory:
+    def __init__(self, session: MagicMock) -> None:
+        self._session = session
+
+    def __call__(self) -> "_AsyncSessionFactory":
+        return self
+
+    async def __aenter__(self) -> MagicMock:
+        return self._session
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_skips_in_flight_provisioning() -> None:
+    """ttl < create_timeout must not reap a live create/revive.
+
+    list_expired_system can still return the row when the persisted ttl is
+    shorter than Sandbox.create; last_activity_at is the start of this
+    attempt, so the reaper must wait out create_timeout.
+    """
+    mgr = _make_manager()
+    mgr._session_factory = _AsyncSessionFactory(MagicMock())  # type: ignore[assignment]
+    record = _make_record(
+        sandbox_id=None,
+        status="provisioning",
+        last_activity_at=datetime.now(UTC),
+    )
+    mark_terminated = AsyncMock()
+    with (
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
+            new=AsyncMock(return_value=[record]),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            new=mark_terminated,
+        ),
+        patch.object(mgr, "_kill_record", new=AsyncMock()) as kill,
+    ):
+        await mgr.cleanup_expired()
+    mark_terminated.assert_not_called()
+    kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_reaps_stuck_provisioning_past_create_timeout() -> None:
+    """A provisioning row older than create_timeout is still an orphan."""
+    mgr = _make_manager()
+    mgr._session_factory = _AsyncSessionFactory(MagicMock())  # type: ignore[assignment]
+    record = _make_record(
+        sandbox_id=None,
+        status="provisioning",
+        last_activity_at=datetime.now(UTC) - timedelta(seconds=mgr._create_timeout + 10),
+    )
+    mark_terminated = AsyncMock()
+    with (
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
+            new=AsyncMock(return_value=[record]),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            new=mark_terminated,
+        ),
+        patch.object(mgr, "_kill_record", new=AsyncMock()) as kill,
+    ):
+        await mgr.cleanup_expired()
+    mark_terminated.assert_awaited_once_with(record.id)
+    kill.assert_not_called()
