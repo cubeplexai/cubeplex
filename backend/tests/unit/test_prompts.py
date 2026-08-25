@@ -21,6 +21,15 @@ def test_template_prompts_have_expected_placeholders():
     assert "{skills_list}" in SKILLS_PROMPT_TEMPLATE
 
 
+def test_skills_prompt_resolves_overlapping_candidates_before_acting():
+    rendered = SKILLS_PROMPT_TEMPLATE.format(skills_list="- `one`\n- `two`")
+    normalized = " ".join(rendered.split())
+
+    assert "smallest plausible set" in normalized
+    assert "choose one primary workflow" in normalized
+    assert "Do not load every available skill" in normalized
+
+
 def test_non_template_prompts_have_no_placeholders():
     """Prompts used directly (not as templates) must have no unformatted {} placeholders."""
     for prompt in [BASE_SYSTEM_PROMPT, SUBAGENT_PROMPT]:
