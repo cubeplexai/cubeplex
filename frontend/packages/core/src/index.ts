@@ -1,7 +1,8 @@
 export * from './types'
 export * from './api'
 export * from './stores'
-export { bareToolName } from './lib/toolName'
+export { bareToolName, humanizeToolName, splitToolName } from './lib/toolName'
+export type { ToolNameParts } from './lib/toolName'
 export { formatSkillLabel } from './lib/formatSkillLabel'
 export type { SkillLabelParts } from './lib/formatSkillLabel'
 export {
