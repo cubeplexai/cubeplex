@@ -385,3 +385,22 @@ async def test_artifact_list_excludes_inaccessible_conversation_artifacts(seed: 
         ).max_tokens
         == 2_000
     )
+
+
+@pytest.mark.asyncio
+async def test_current_artifact_list_filters_and_paginates(seed: Seed) -> None:
+    from cubeplex.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY
+
+    result = await _invoke(
+        ARTIFACTS_CAPABILITY,
+        seed.member_context,
+        "list_current",
+        n=1,
+        q=seed.visible_artifact_id,
+        artifact_type="report",
+        offset=0,
+    )
+
+    payload = json.loads(result.content[0].text)
+    assert payload["total"] == 1
+    assert [item["id"] for item in payload["artifacts"]] == [seed.visible_artifact_id]

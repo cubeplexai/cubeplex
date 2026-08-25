@@ -36,13 +36,18 @@ async def _list(ctx: ScopeContext, session: AsyncSession, inp: ListInput) -> dic
 
 async def _list_current(ctx: ScopeContext, session: AsyncSession, inp: ListInput) -> dict[str, Any]:
     """List artifacts belonging to the conversation executing this run."""
-    del inp
     if ctx.conversation_id is None:
         return {"artifacts": [], "total": 0}
 
     artifacts = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
-    items = await artifacts.list_by_conversation(ctx.conversation_id)
-    return {"artifacts": [artifact.to_dict() for artifact in items], "total": len(items)}
+    items, total = await artifacts.list_by_conversation_page(
+        ctx.conversation_id,
+        artifact_type=inp.artifact_type,
+        name_query=inp.q,
+        limit=inp.n,
+        offset=inp.offset,
+    )
+    return {"artifacts": [artifact.to_dict() for artifact in items], "total": total}
 
 
 ARTIFACTS_CAPABILITY = AgentCapability(
