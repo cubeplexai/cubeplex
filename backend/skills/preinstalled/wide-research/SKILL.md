@@ -7,7 +7,7 @@ description: >
   all or many matching entities, map a market or literature set, enrich a known
   list, or apply the same research contract across many inputs; use
   deep-research instead for one topic that needs multi-step investigation.
-version: 1.0.0
+version: 1.1.0
 keywords:
   - research
   - wide-research
@@ -21,323 +21,171 @@ keywords:
 
 # Wide Research
 
-Build a verifiable set of research rows, not a pile of mini-reports. The main
-agent owns the research contract, partition plan, shared ledger, validation,
-coverage assessment, and final deliverable. Subagents independently discover or
-verify bounded slices and return structured evidence.
+Build a verifiable set of rows, not a collection of mini-reports. The main agent
+owns the universe definition, source strategy, row contract, partition manifest,
+canonical ledger, validation, coverage assessment, and final dataset. Subagents
+only execute bounded, independent slices using that shared design.
 
-## Choose the right research mode
-
-Use this workflow when breadth is the hard part:
-
-- enumerate all or many entities satisfying shared constraints
-- research the same fields for a known list of inputs
-- build a market map, catalog, landscape, bibliography, or comparison matrix
-- search multiple independent regions, categories, registries, or source types
-- produce a structured dataset whose missing and uncertain rows must remain visible
-
-Use `deep-research` instead when the task centers on one subject, depends on a
-chain of discoveries, or mainly needs causal analysis and narrative synthesis.
-Use direct search for one quick fact. For mixed tasks, run wide discovery first,
-then investigate only ambiguous or high-value rows in depth.
+Use this workflow when breadth is the hard part: enumerating many entities,
+enriching a known list, traversing a registry, or building a market map. Use
+`deep-research` when one subject needs a chain of discoveries or causal analysis.
+Use direct search for one quick fact.
 
 ## Non-negotiable invariants
 
-1. Define the set and row schema before large-scale dispatch.
-2. Partition by independent objects or orthogonal discovery lanes. Do not give
-   multiple subagents the same vague topic.
-3. Every accepted field must trace to evidence. Missing means `unknown`, never a guess.
-4. Preserve excluded, uncertain, failed, and unprocessed items; never silently drop them.
-5. Separate discovery from qualification when the candidate universe is unknown.
-6. Use deterministic code for mechanical normalization, schema validation, set
-   operations, and exact deduplication when tools permit. Reserve model judgment
-   for semantic aliases, conflicting evidence, and qualification decisions.
-7. Never claim an open-web result is exhaustive unless the universe is bounded by
-   an authoritative source that was fully traversed.
+1. Define the universe, row schema, and evidence threshold before large fan-out.
+2. Select and test shared sources before splitting collection work.
+3. Give every input or partition one owner and preserve every terminal state.
+4. Separate discovery from qualification when the candidate universe is unknown.
+5. Store non-trivial research in a durable ledger; conversation context is not
+   the source of truth.
+6. Use deterministic code for parsing, normalization, schema checks, exact
+   deduplication, joins, and counts. Use model judgment for semantic conflicts.
+7. Never claim an open-web result is exhaustive. Claim completeness for a
+   bounded universe only after its declared source boundaries were traversed.
 
-## Workflow
+## 1. Define the research contract
 
-### 1. Ground the request
-
-Before creating a large plan or dispatching subagents, determine:
-
-- **research object** — company, product, paper, policy, repository, person, etc.
-- **universe** — known input list, bounded registry/catalog, or unknown open web
-- **inclusion and exclusion rules** — conditions a row must satisfy
-- **required fields** — the shared output columns
-- **time boundary** — as-of date, publication window, or event period
-- **evidence threshold** — preferred source types and any cross-check requirement
-- **deliverable** — table, JSON/CSV, report, files, or a combination
-- **budget** — useful limits on waves, tool calls, cost, or wall time
-
-If the request is time-sensitive, call the available datetime tool first and
-carry that date into every subagent brief. If a missing choice would materially
-change membership in the set, ask one concise clarification. Otherwise state a
-reasonable assumption and proceed.
-
-### 2. Write the research contract
-
-Record a compact contract before fan-out. At minimum it must contain:
+Resolve choices that change membership in the set; ask one concise clarification
+only when a safe assumption would materially change the result. Record:
 
 ```text
-Goal:
-Universe:
-As-of date / time range:
-Include when:
-Exclude when:
-Required fields:
-Evidence standard:
+Goal and research object:
+Universe: known list | bounded source | open web
+As-of date or time range:
+Include when / exclude when:
+Required fields and field semantics:
+Evidence threshold:
 Output format:
-Stopping rule:
+Stopping rule and budget:
 ```
 
-Define field semantics precisely enough that independent workers make compatible
-decisions. For example, distinguish native support from integrations, current
-CEO from founder, announced availability from generally available, and calendar
-year from fiscal year.
+Each row needs a stable identifier, normalized fields, qualification status,
+claim-level evidence, gaps, conflicts, and confidence. Missing values remain
+`unknown`; they are never inferred during synthesis.
 
-Use a row contract shaped like this unless the task needs another schema:
+For substantial work, use workflow-stage todos such as contract and pilot,
+collection, validation, gap filling, and delivery. Keep partition and item state
+in the ledger, not in hundreds of todo entries.
 
-```json
-{
-  "canonical_name": "...",
-  "aliases": [],
-  "status": "verified|excluded|uncertain|failed",
-  "qualification": {
-    "decision": "include|exclude|unknown",
-    "reason": "..."
-  },
-  "fields": {},
-  "evidence": [
-    {
-      "claim": "...",
-      "source_title": "...",
-      "source_url": "https://...",
-      "source_date": "YYYY-MM-DD|unknown",
-      "evidence_summary": "..."
-    }
-  ],
-  "gaps": [],
-  "conflicts": [],
-  "confidence": "high|medium|low"
-}
-```
+## 2. Map and pilot the sources
 
-Keep claim-level evidence: one homepage URL attached to an entire row is not
-sufficient when different fields come from different sources.
+Do not dispatch collection workers until the main agent has determined:
 
-### 3. Create workflow-stage todos
+- whether the universe is known, bounded by authoritative sources, or open-web
+- the preferred source for each part of the universe and allowed fallbacks
+- whether one source covers the full time range or where source boundaries change
+- how pagination, date limits, categories, and official totals prove coverage
+- which populated fields need primary evidence or an independent cross-check
+- the shared extraction, normalization, and deduplication method
 
-For a substantial run, use `write_todos` to track phases, not individual
-entities or subagents. Keep exactly one phase active. A typical plan is:
+If several workers would rediscover the same source or method, resolve it once
+centrally before fan-out. Different source segments are acceptable only when the
+source map records their coverage boundary, overlapping range, normalization
+rule, and reconciliation method.
 
-```text
-1. Define and sample-check the research contract
-2. Run broad discovery or known-list collection
-3. Validate candidates and resolve conflicts
-4. Measure coverage and fill material gaps
-5. Produce the dataset and research summary
-```
+Pilot the complete method on a small, varied sample before scaling. Include an
+ordinary row, an exclusion or missing value, and an ambiguous or conflicting
+case when available. Confirm that the source is traversable, the schema fits,
+evidence supports individual fields, and expected cost is acceptable. Revise the
+contract or source strategy before launching a large batch.
 
-The partition manifest and item statuses belong in the research ledger, not in
-hundreds of todo entries.
+## 3. Create the durable ledger
 
-### 4. Pilot before scaling
+A durable ledger is required when the work has multiple partitions or waves,
+may be compacted or truncated, or needs validation, retries, deduplication, or
+conflict tracking.
 
-Run the full contract against a small, varied sample before wide dispatch. Choose
-examples likely to expose ambiguity, not merely the easiest rows. Check whether:
+Choose the internal format for the state shape:
 
-- workers interpret inclusion rules consistently
-- every required field can be represented by the schema
-- evidence supports individual claims
-- `unknown`, exclusion, and source conflict cases are expressible
-- one row's typical cost and runtime fit the budget
-
-Revise the contract once if the pilot exposes a structural problem. Do not launch
-dozens of workers with a broken schema.
-
-### 5. Partition the work
-
-Choose the partition strategy from the universe type.
-
-#### Known input list
-
-Split by entity or by balanced batches of entities. Each input must have one
-owner in the manifest. Use smaller batches for hard or heterogeneous inputs and
-larger batches for uniform lookups.
-
-#### Bounded registry or catalog
-
-Partition by non-overlapping page range, category, date interval, or registry
-segment. Record the traversal boundaries so coverage can be proven later.
-
-#### Unknown open-web universe
-
-Use multiple orthogonal discovery lanes, such as:
-
-- geography or language
-- product/category taxonomy
-- source type: official registries, industry directories, papers, repositories
-- query family and domain terminology
-- time window
-
-Overlap between lanes is useful evidence of saturation, but the lanes must not
-all be paraphrases of the same search. Discovery workers return candidates;
-separate validation workers decide whether they qualify.
-
-Run independent partitions in parallel up to the available concurrency. If the
-input count exceeds practical concurrency, process it through bounded waves.
-Do not dispatch dependent validation before its candidates exist.
-
-### 6. Brief subagents with a complete contract
-
-Each `subagent` call must be self-contained because subagents do not see the
-conversation. Include:
-
-```text
-CONTEXT
-- Current date and research goal
-- Shared definitions needed for this slice
-
-SLICE
-- Exact inputs or discovery boundary owned by this worker
-- Explicit non-overlap with other workers
-
-METHOD
-- Sources and tools to prefer
-- Inclusion/exclusion checks
-- Cross-check requirement
-
-OUTPUT
-- The shared row schema, one record per candidate/input
-- Source URL or preserved citation marker for every factual claim
-
-BOUNDARIES
-- Do not write the final report
-- Do not expand beyond the assigned slice
-- Do not infer missing values
-- Return excluded, unknown, and failed rows explicitly
-```
-
-For discovery workers, require a stable candidate identifier, aliases, discovery
-source, and the reason the candidate may qualify. For validation workers, provide
-the candidate record and require a fresh qualification decision rather than a
-rubber stamp.
-
-### 7. Maintain a durable ledger
-
-After every wave, merge results into one ledger. For small work, an in-context
-table is enough. For larger work, persist JSONL, CSV, or a small database under a
-writable workspace path so context compaction cannot erase the set.
+- **CSV** for flat rows with a fixed schema
+- **JSONL** for aliases, multiple evidence records, conflicts, and attempt history
+- **SQLite** for large datasets or frequent querying and updates
+- **Excel** as a user-facing export, not the internal source of truth
 
 Track at least:
 
-- partition ID and assigned boundary
-- candidate or input ID
-- processing status and attempt count
-- normalized row
-- claim-level evidence
-- unresolved gaps and conflicts
-- exclusion reason
+```text
+partition_id and owned boundary
+canonical item ID
+processing status and attempt count
+qualification decision and reason
+normalized fields
+claim-level evidence and provenance
+gaps, conflicts, and exclusion reason
+last completed research phase
+```
 
-Validate every returned record against the schema before merging it. Retry a
-malformed or transiently failed slice only within the stated budget; otherwise
-keep it as `failed` with the reason.
+Use explicit states such as `pending`, `processing`, `verified`, `excluded`,
+`uncertain`, and `failed`. Absence of a row never means completion.
 
-### 8. Normalize, deduplicate, and validate
+Subagents must not concurrently edit the same ledger file. Each worker returns
+structured records or writes a partition-specific file. The main agent validates
+and merges results into the canonical ledger after each wave. Generate the final
+dataset and optional Excel workbook deterministically from that ledger; do not
+use the user-facing export as mutable research state.
 
-Apply deterministic normalization first: whitespace, case, URLs, dates, units,
-and exact identifiers. Then review likely semantic duplicates such as aliases,
-renamed products, parent/subsidiary relationships, or the same paper in multiple
-indexes. Preserve merge provenance so evidence is not lost.
+## 4. Partition into independent waves
 
-Validation should answer separately:
+Choose boundaries from the universe and source strategy:
 
-1. Does the candidate satisfy every required inclusion rule?
-2. Does each populated field have evidence that supports that exact value?
-3. Are sources current enough for the contract's time boundary?
-4. Do sources conflict, and if so can the difference be explained?
-5. Is the row `verified`, `excluded`, `uncertain`, or `failed`?
+- **Known list:** assign each input once, individually or in balanced batches.
+- **Bounded source:** split non-overlapping page ranges, registry segments,
+  categories, or date intervals from the already selected source.
+- **Open web:** use orthogonal discovery lanes such as geography, terminology,
+  source type, or category; later validate the merged candidate set separately.
 
-Prefer first-party or primary sources for qualification. Use independent
-secondary sources for discovery or cross-checking. If evidence is weak or
-conflicting, keep the row uncertain and launch a narrowly scoped verifier only
-when resolving it matters to the requested result.
+Time is a valid partition only after the shared source, filters, schema, and
+validation method are fixed. Do not mechanically assign different years to
+workers who must each rediscover the same data source and invent a method.
 
-### 9. Measure coverage and run gap-filling waves
+Before a wave, record a partition manifest containing the partition ID, exact
+owned boundary, explicit non-overlap, input artifact, expected output path or
+schema, and terminal status. Tasks in one wave must be independently completable
+from inputs that already exist. Do not dispatch qualification, enrichment, or
+synthesis tasks before their candidate or collection artifacts exist.
 
-Review coverage after each meaningful wave.
+Every subagent brief must carry the shared contract plus its exact slice, source
+policy, validation checks, output schema, and boundaries. Workers must return
+excluded, uncertain, failed, and unprocessed items explicitly and must not write
+the final report.
 
-For a known list, report:
+## 5. Merge, validate, and fill gaps
 
-- total inputs, processed inputs, verified, excluded, uncertain, and failed
-- completeness of each required field
-- any unprocessed IDs
+After each wave, the main agent must:
 
-For a bounded source, also report partitions/pages traversed versus expected.
+1. validate every partition output against the shared schema
+2. merge it into the canonical ledger without losing provenance
+3. normalize exact identifiers, dates, units, names, and URLs deterministically
+4. inspect semantic duplicates, aliases, renamed entities, and source conflicts
+5. reconcile row counts against known inputs, traversed boundaries, or official totals
+6. mark each partition and item with an explicit state
+7. launch another wave only for a named gap, conflict, or failed partition
 
-For an unknown universe, absolute recall is unknowable. Assess method coverage:
+Discovery evidence makes an item a candidate, not automatically `verified`.
+Qualification should prefer primary sources and check every inclusion rule and
+populated field. Keep weak or conflicting records `uncertain` unless a targeted
+verifier resolves them.
 
-- which geographies, categories, languages, source types, and query families ran
-- how many new qualified candidates each lane and wave contributed
-- how much independent-lane overlap occurred
-- which material segments remain weak
+Measure coverage by universe type:
 
-Launch another wave only for a named gap, conflict, failed partition, or newly
-productive lead. Each wave should be narrower than the last.
+- known list: every input has a terminal state and field-completeness metrics
+- bounded source: every declared boundary was traversed and counts reconciled
+- open web: report lanes attempted, overlap, new candidates by wave, and weak areas
 
-Default stopping rules:
+Stop when all known inputs or bounded partitions have terminal states, or when
+the declared open-web lanes and gap-filling budget are exhausted. Budget
+exhaustion is a limitation, not evidence of completeness.
 
-- known list: every input has a terminal status
-- bounded source: every declared partition was traversed
-- open web: required lanes ran and two consecutive gap-filling waves produced no
-  material new qualified items, or the agreed budget was reached
+## 6. Deliver honestly
 
-Budget exhaustion is a limitation, not evidence of completeness.
+Deliver the normalized dataset before the narrative. The summary should state
+the contract and as-of date, headline counts, artifact location, status counts,
+unresolved gaps and conflicts, coverage method, stopping condition, and limits
+on completeness. Preserve source URLs or citation markers with the claims they
+support.
 
-### 10. Deliver the dataset before the narrative
-
-The primary deliverable is the normalized dataset. For non-trivial results, save
-it as an artifact in the user's requested format; CSV or JSON is preferable for
-reuse, with a Markdown summary for humans. Do not squeeze a large result set into
-chat and silently truncate it.
-
-The summary should state:
-
-1. research contract and as-of date
-2. headline counts and strongest findings
-3. link to or location of the complete dataset
-4. exclusions, uncertain rows, failures, and unresolved conflicts
-5. coverage method and stopping condition
-6. limitations on any completeness claim
-
-Preserve inline citations or source URLs in both the dataset and summary. The
-reader must be able to trace each accepted claim back to its supporting source.
-
-## Quality gate
-
-Before finalizing, verify:
-
-- every partition has a recorded terminal status
-- every input or discovered candidate remains accounted for
-- accepted fields have claim-level evidence
-- duplicates were merged without losing provenance
-- uncertain, excluded, and failed rows are visible
-- coverage metrics match the universe type
-- the stopping rule was actually met or its failure is disclosed
-- “all”, “complete”, and “exhaustive” are used only when justified
-- the structured dataset is available without chat truncation
-
-If any item fails, run a targeted correction wave or disclose the limitation.
-
-## Common failure modes
-
-- **Many agents, one vague prompt** — creates duplicate searches rather than breadth.
-- **Discovery equals verification** — candidates are presented as qualified results.
-- **Free-form mini-reports** — aggregation becomes lossy and inconsistent.
-- **One source per row** — individual field claims cannot be audited.
-- **Silent tail loss** — timeouts, empty results, and malformed rows disappear.
-- **Context-only ledger** — a long run loses state after compaction.
-- **Writer fills blanks** — synthesis converts unknowns into hallucinated facts.
-- **Search saturation equals completeness** — open-web recall is overstated.
-- **Unbounded fan-out** — cost rises without improving independent coverage.
+Before finalizing, verify that every partition is accounted for, accepted fields
+have evidence, duplicates retain provenance, uncertain and failed records remain
+visible, and the completeness language matches the measured coverage. If not,
+run a targeted correction wave or disclose the limitation.
