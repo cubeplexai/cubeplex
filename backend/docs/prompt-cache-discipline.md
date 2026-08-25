@@ -31,6 +31,15 @@ across turns of the same conversation.** The stable prefix consists of:
 If the model needs current time, inject it into the **most recent user
 message tail** (after the cache breakpoint), not the system prompt.
 
+### Loaded skill instructions stay in tool history
+
+`load_skill` returns the full `SKILL.md` as its tool result. Do not copy loaded
+skill bodies into the system prompt or persistent agent extra state. The tool
+result is replayed with conversation history while it remains in context, which
+preserves the earlier cacheable prefix instead of changing the system prompt at
+the load boundary. If compaction removes those instructions and they are needed
+again, the agent should call `load_skill` again.
+
 ---
 
 ## Per-turn Relevance Memory and the Snapshot Channel

@@ -1,4 +1,4 @@
-"""load_skill tool ported to cubepi (M2.3) — unit tests."""
+"""Unit tests for the cubepi load_skill tool."""
 
 from __future__ import annotations
 
@@ -164,6 +164,7 @@ def test_load_skill_tool_metadata() -> None:
     assert tool.name == "load_skill"
     assert tool.description
     assert "skill" in tool.description.lower()
+    assert "tool result" in tool.description.lower()
 
 
 def test_load_skill_tool_parameters_schema() -> None:

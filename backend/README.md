@@ -89,7 +89,7 @@ export CUBEPLEX_LLM__PROVIDER=anthropic
 
 1. **Agent Graph Factory** - `create_cubeplex_agent()` wires the cubepi Provider, tools, and
    middleware stack into a `cubepi.Agent`
-2. **Middleware Stack** - SandboxMiddleware, SubAgentMiddleware, SkillsMiddleware
+2. **Middleware Stack** - SandboxMiddleware, SubAgentMiddleware, memory, and compaction
 3. **LLM Integration** - Multi-provider LLM support (OpenAI, OpenAI-compatible)
 4. **Tool Registry** - Built-in and MCP tools management
 5. **Memory System** - Short-term and long-term memory

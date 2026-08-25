@@ -1845,7 +1845,7 @@ class RunManager:
         from cubeplex.agents.stream import StreamConverter
         from cubeplex.middleware.citations.counter import citation_counter_var
 
-        # extra_ref late-binding: compaction, skills, and todo all need access
+        # extra_ref late-binding: compaction and todo both need access
         # to agent._extra, which is only available after the agent is built.
         # The holder is passed in from _execute_run so the outer except block
         # can read model/provider/context_window when we raise from here.
@@ -1918,8 +1918,8 @@ class RunManager:
                 agent._extra.clear()
                 agent._extra.update(_hist.extra)
 
-            # Late-bind extra_ref to the live agent._extra dict so compaction /
-            # skills / todo middleware can read and write persistent state.
+            # Late-bind extra_ref to the live agent._extra dict so compaction
+            # and todo middleware can read and write persistent state.
             # The factory already populated the closure via extra_ref_holder;
             # this is the post-build assignment those closures resolve to.
             extra_ref_holder["extra"] = agent._extra
@@ -3375,15 +3375,7 @@ class RunManager:
             except Exception as _exc:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
-        # 7. SkillsMiddleware — needs extra_ref
-        try:
-            from cubeplex.middleware.skills import SkillsMiddleware
-
-            cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
-        except Exception as _exc:
-            logger.warning("SkillsMiddleware unavailable: {}", _exc)
-
-        # 8. SubagentMiddleware — cubepi built-in; cubeplex only maps events to SSE.
+        # 7. SubagentMiddleware — cubepi built-in; cubeplex only maps events to SSE.
         try:
             from cubepi.middleware.subagents import SubagentMiddleware
 
@@ -3434,7 +3426,7 @@ class RunManager:
         except Exception as _exc:
             logger.warning("SubagentMiddleware unavailable: {}", _exc)
 
-        # 9. CostMiddleware — needs org/workspace/user/conversation IDs
+        # 8. CostMiddleware — needs org/workspace/user/conversation IDs
         try:
             from cubeplex.llm.config import ModelCost
             from cubeplex.middleware.cost import CostMiddleware
@@ -3463,7 +3455,7 @@ class RunManager:
         except Exception as _exc:
             logger.warning("CostMiddleware unavailable: {}", _exc)
 
-        # 10. TimestampMiddleware — no deps
+        # 9. TimestampMiddleware — no deps
         try:
             from cubeplex.middleware.timestamps import TimestampMiddleware
 
@@ -3471,7 +3463,7 @@ class RunManager:
         except Exception as _exc:
             logger.warning("TimestampMiddleware unavailable: {}", _exc)
 
-        # 11. TodoListMiddleware — needs extra_ref
+        # 10. TodoListMiddleware — needs extra_ref
         try:
             from cubepi.middleware.todo import TodoListMiddleware
 
@@ -3853,9 +3845,9 @@ class RunManager:
 
         try:
             # Open a long-lived session for the SkillCatalogService — used by
-            # both SkillsMiddleware (read prompts) and LazySandbox (push files
-            # to sandbox on first use). Same session is fine: skill reads are
-            # idempotent and no writes happen here.
+            # load_skill and LazySandbox (which pushes files to the sandbox on
+            # first use). Same session is fine: skill reads are idempotent and
+            # no writes happen here.
             try:
                 from pathlib import Path
 

@@ -283,7 +283,7 @@ def test_skills_capability_mutation_gate() -> None:
     deps = _make_deps()
     cap = build_skills_capability(deps)
     # Sanity: 4 operations declared, capability is renamed to platform_skills
-    # (disambiguates from load_skill's prompt-content disclosure system).
+    # (disambiguates from load_skill's tool-result disclosure path).
     assert cap.name == "platform_skills"
     assert {op.name for op in cap.operations} == {"find", "preview", "install", "publish_skill"}
     assert next(op for op in cap.operations if op.name == "install").mutates is True

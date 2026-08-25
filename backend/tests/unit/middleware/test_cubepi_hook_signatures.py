@@ -13,7 +13,6 @@ from cubeplex.middleware.attachments import AttachmentHintMiddleware
 from cubeplex.middleware.citation import CitationMiddleware
 from cubeplex.middleware.memory import MemoryMiddleware
 from cubeplex.middleware.sandbox import SandboxMiddleware
-from cubeplex.middleware.skills import SkillsMiddleware
 from cubeplex.middleware.timestamps import TimestampMiddleware
 
 
@@ -34,7 +33,6 @@ def test_context_and_prompt_hooks_require_ctx() -> None:
         TodoListMiddleware.transform_context,
         MemoryMiddleware.transform_system_prompt,
         MemoryMiddleware.transform_context,
-        SkillsMiddleware.transform_system_prompt,
         CitationMiddleware.transform_system_prompt,
         SandboxMiddleware.transform_system_prompt,
         ArtifactMiddleware.transform_system_prompt,
