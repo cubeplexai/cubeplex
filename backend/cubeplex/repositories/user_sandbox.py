@@ -476,7 +476,15 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def claim_for_provisioning(self, record_id: str) -> bool:
         """Atomic claim for reviving a terminated/failed row: transition to
         'provisioning' only if still terminated/failed. Prevents double-
-        provision when two concurrent get_or_create calls race."""
+        provision when two concurrent get_or_create calls race.
+
+        Restarts ``last_activity_at``. A terminated row's activity timestamp
+        is from the previous container and is typically already past TTL
+        (that's why it was reaped). Without this bump, ``cleanup_expired``
+        matches the in-flight revive immediately — ``sandbox_id`` is still
+        None until create returns — and concurrent waiters 503 with
+        "provisioning race lost".
+        """
         stmt = (
             update(UserSandbox)
             .where(
@@ -485,7 +493,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 UserSandbox.status.in_(("terminated", "failed")),  # type: ignore[attr-defined]
             )
-            .values(status="provisioning")
+            .values(status="provisioning", last_activity_at=datetime.now(UTC))
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()

@@ -457,3 +457,65 @@ async def test_mark_running_rejects_terminal_and_paused_states(
     await db_session.refresh(resuming_row)
     assert resuming_row.status == "running"
     assert resuming_row.last_resumed_at is not None
+
+
+async def test_claim_for_provisioning_does_not_look_expired_to_reaper(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """Reviving a TTL-expired row must not match list_expired_system.
+
+    The terminated row keeps the previous container's last_activity_at, which
+    is already past TTL (that's why it was reaped). claim_for_provisioning
+    flips status to provisioning — a reapable status — with sandbox_id still
+    None. If the activity clock is not restarted, the next cleanup_expired
+    pass reaps the in-flight revive as an orphan and waiters 503.
+    """
+    repo = _mk_repo(db_session, scope)
+    row = await repo.add(
+        UserSandbox(
+            user_id=scope["user_id"],
+            sandbox_id=None,
+            image="img:latest",
+            status="terminated",
+            ttl_seconds=1,
+            last_activity_at=datetime.now(UTC) - timedelta(seconds=120),
+            scope_type="user",
+            scope_id=scope["user_id"],
+        )
+    )
+
+    expired_before = await UserSandboxRepository.list_expired_system(db_session)
+    assert all(r.id != row.id for r in expired_before)
+
+    assert await repo.claim_for_provisioning(row.id) is True
+
+    expired_after = await UserSandboxRepository.list_expired_system(db_session)
+    assert all(r.id != row.id for r in expired_after), (
+        "in-flight revive must not be reaped as an expired orphan"
+    )
+
+
+async def test_list_expired_system_still_reaps_stuck_provisioning(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """A provisioning row whose own TTL has elapsed is still expired.
+
+    Protects the crashed-mid-create path: the reaper must still free a slot
+    that never reached running.
+    """
+    repo = _mk_repo(db_session, scope)
+    row = await repo.add(
+        UserSandbox(
+            user_id=scope["user_id"],
+            sandbox_id=None,
+            image="img:latest",
+            status="provisioning",
+            ttl_seconds=1,
+            last_activity_at=datetime.now(UTC) - timedelta(seconds=120),
+            scope_type="user",
+            scope_id=scope["user_id"],
+        )
+    )
+
+    expired = await UserSandboxRepository.list_expired_system(db_session)
+    assert any(r.id == row.id for r in expired)
