@@ -197,6 +197,8 @@ function failedPendingSteers(state: MessageStore, conversationId: string): Pendi
 
 export interface MessageStore {
   messages: Record<string, Message[]>
+  /** Per-conversation bootstrap state for the initial history window. */
+  loadingMessagesByConv: Record<string, boolean>
   pendingSteers: Record<string, PendingSteer[]>
   runLifecycle: Record<string, RunLifecycle>
   streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
@@ -1668,6 +1670,7 @@ const unreadMarkAt: Record<string, number> = {}
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
+  loadingMessagesByConv: {},
   pendingSteers: {},
   runLifecycle: {},
   streamAgents: {},
@@ -1760,6 +1763,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       if (!force) return existingLoad
       await existingLoad
     }
+    set((s) => ({
+      loadingMessagesByConv: {
+        ...s.loadingMessagesByConv,
+        [conversationId]: true,
+      },
+    }))
     const promise = (async () => {
       try {
         const bootstrap = await getConversationBootstrap(client, conversationId)
@@ -2075,6 +2084,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       await promise
     } finally {
       loadMessagesInFlight.delete(conversationId)
+      set((s) => ({
+        loadingMessagesByConv: {
+          ...s.loadingMessagesByConv,
+          [conversationId]: false,
+        },
+      }))
     }
   },
 

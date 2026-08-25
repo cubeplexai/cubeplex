@@ -419,6 +419,7 @@
     "cancellingRun": "Cancelling run…",
     "cancelFailed": "Could not cancel the current run. Try again.",
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
+    "loadingConversation": "Loading conversation…",
     "loadEarlier": "Load earlier messages",
     "loadingEarlier": "Loading earlier messages…",
     "thinking": "Thinking",
