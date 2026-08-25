@@ -11,7 +11,7 @@ Skills are packaged capabilities that extend what your agent can do. A skill bun
 
 1. **A skill is installed** into your workspace (or org-wide by an admin).
 2. **The agent sees it** listed among its available skills at the start of every conversation in that workspace.
-3. **When relevant, the agent loads it** — either because you asked for something the skill covers, or because you explicitly requested it. The complete instructions are returned in the `load_skill` tool result and remain in the conversation context.
+3. **When relevant, the agent loads it** — either because you asked for something the skill covers, or because you explicitly requested it. The complete instructions are returned in the `load_skill` tool result and remain in the conversation context until compaction. If the skill is still relevant afterward, the agent reloads its currently enabled version by name.
 4. **The agent follows the instructions** to complete the task, using any supporting files the skill provides (templates, scripts, etc.) inside the sandbox.
 
 You do not need to memorize skill names. The agent matches your intent to installed skills automatically. For example, if you say "create a presentation about Q3 results," the agent will load a presentation skill if one is available.

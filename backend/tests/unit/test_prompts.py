@@ -30,6 +30,15 @@ def test_skills_prompt_resolves_overlapping_candidates_before_acting():
     assert "Do not load every available skill" in normalized
 
 
+def test_skills_prompt_reloads_relevant_skills_after_compaction():
+    rendered = SKILLS_PROMPT_TEMPLATE.format(skills_list="- `deep-research`")
+    normalized = " ".join(rendered.split())
+
+    assert "Previously loaded skill" in normalized
+    assert "full instructions are no longer visible" in normalized
+    assert "load_skill" in normalized
+
+
 def test_non_template_prompts_have_no_placeholders():
     """Prompts used directly (not as templates) must have no unformatted {} placeholders."""
     for prompt in [BASE_SYSTEM_PROMPT, SUBAGENT_PROMPT]:
