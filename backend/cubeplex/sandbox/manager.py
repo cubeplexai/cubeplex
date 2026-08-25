@@ -1211,6 +1211,11 @@ class SandboxManager:
 
             logger.info("Found {} expired sandbox(es) to clean up", len(expired))
 
+            # Drop the list_expired identity-map snapshot so the per-row
+            # get() below sees a concurrent claim's last_activity_at, not
+            # the stale instance loaded by the SELECT.
+            session.expire_all()
+
             # create POST + check_ready; last_activity_at is the attempt start.
             provision_budget = self._create_timeout + self._ready_timeout
             for record in expired:
@@ -1220,9 +1225,8 @@ class SandboxManager:
                         org_id=record.org_id,
                         workspace_id=record.workspace_id,
                     )
-                    # Re-read: list_expired_system is a snapshot. A stuck row
-                    # may have been claimed for a new revive (fresh
-                    # last_activity_at) between select and now.
+                    # Re-read after expire_all: a stuck row may have been
+                    # claimed for a new revive between select and now.
                     current = await scoped_repo.get(record.id)
                     if current is None:
                         continue
