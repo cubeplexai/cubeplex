@@ -132,6 +132,28 @@ class ArtifactRepository(ScopedRepository[Artifact]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_by_conversation_page(
+        self,
+        conversation_id: str,
+        *,
+        artifact_type: str | None = None,
+        name_query: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[list[Artifact], int]:
+        """List one filtered page of artifacts from a conversation."""
+        stmt = self._scoped_select().where(Artifact.conversation_id == conversation_id)
+        if artifact_type:
+            stmt = stmt.where(Artifact.artifact_type == artifact_type)
+        if name_query:
+            stmt = stmt.where(cast(Any, Artifact.name).ilike(f"%{name_query}%"))
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(count_stmt)).scalar_one()
+        page_stmt = stmt.order_by(Artifact.created_at).limit(limit).offset(offset)
+        result = await self.session.execute(page_stmt)
+        return list(result.scalars().all()), total
+
     async def list_by_workspace(
         self,
         *,
