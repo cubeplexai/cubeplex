@@ -22,6 +22,7 @@ import type {
   TurnUsage,
 } from '@cubeplex/core'
 import { toast } from 'sonner'
+import { Loader2 } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { SenderBadge } from './SenderBadge'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
@@ -251,6 +252,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const loadOlderMessages = useMessageStore((s) => s.loadOlderMessages)
   const loadOlderUntilSeq = useMessageStore((s) => s.loadOlderUntilSeq)
+  const isLoadingMessages = useMessageStore((s) => s.loadingMessagesByConv[conversationId] ?? false)
   const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
   const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
   const oldestSeq = useMessageStore((s) => s.oldestSeqByConv[conversationId] ?? null)
@@ -593,6 +595,22 @@ export function MessageList({ conversationId }: MessageListProps) {
       controller.abort()
     }
   }, [conversationId, messagesLoaded, loadOlderUntilSeq, workspaceId])
+
+  if (isLoadingMessages && messages.length === 0) {
+    return (
+      <div
+        role="status"
+        aria-label={t('loadingConversation')}
+        aria-live="polite"
+        className="flex flex-1 items-center justify-center"
+      >
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 aria-hidden className="size-4 animate-spin" />
+          <span>{t('loadingConversation')}</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <ScrollArea ref={scrollRef} className="flex-1" onScroll={handleScroll}>

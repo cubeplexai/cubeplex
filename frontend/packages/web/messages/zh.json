@@ -419,6 +419,7 @@
     "cancellingRun": "正在取消运行…",
     "cancelFailed": "无法取消当前运行，请重试。",
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
+    "loadingConversation": "正在加载对话…",
     "loadEarlier": "加载更早的消息",
     "loadingEarlier": "正在加载更早的消息…",
     "thinking": "思考中",
