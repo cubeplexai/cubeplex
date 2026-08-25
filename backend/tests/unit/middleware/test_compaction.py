@@ -7,7 +7,7 @@ import json
 from cubepi.middleware.compaction.pruner import prune_tool_results
 from cubepi.providers.base import TextContent, ToolResultMessage
 
-from cubeplex.middleware.compaction import compact_loaded_skill
+from cubeplex.middleware.compaction import preserve_tool_result_for_compaction
 
 
 def _result(payload: dict[str, object], *, is_error: bool = False) -> ToolResultMessage:
@@ -19,8 +19,8 @@ def _result(payload: dict[str, object], *, is_error: bool = False) -> ToolResult
     )
 
 
-def test_compact_loaded_skill_preserves_name_without_content_or_version() -> None:
-    compacted = compact_loaded_skill(
+def test_preserve_loaded_skill_keeps_name_without_content_or_version() -> None:
+    compacted = preserve_tool_result_for_compaction(
         _result(
             {
                 "skill_name": "deep-research",
@@ -52,7 +52,7 @@ def test_compaction_pruner_keeps_only_reload_metadata() -> None:
     pruned, preserved = prune_tool_results(
         [result],
         tail_start=1,
-        compressor=compact_loaded_skill,
+        compressor=preserve_tool_result_for_compaction,
     )
 
     assert preserved == {
@@ -61,9 +61,9 @@ def test_compaction_pruner_keeps_only_reload_metadata() -> None:
     assert pruned[0].content == [TextContent(text="[load_skill] preserved")]
 
 
-def test_compact_loaded_skill_ignores_failed_load() -> None:
+def test_preserve_loaded_skill_ignores_failed_load() -> None:
     assert (
-        compact_loaded_skill(
+        preserve_tool_result_for_compaction(
             _result(
                 {"skill_name": "deep-research", "loaded": False},
                 is_error=True,
@@ -73,7 +73,7 @@ def test_compact_loaded_skill_ignores_failed_load() -> None:
     )
 
 
-def test_compact_loaded_skill_ignores_other_tools_and_malformed_results() -> None:
+def test_preserve_tool_result_ignores_other_tools_and_malformed_results() -> None:
     other = ToolResultMessage(
         tool_call_id="tc-2",
         tool_name="calculator",
@@ -85,5 +85,60 @@ def test_compact_loaded_skill_ignores_other_tools_and_malformed_results() -> Non
         content=[TextContent(text="not json")],
     )
 
-    assert compact_loaded_skill(other) is None
-    assert compact_loaded_skill(malformed) is None
+    assert preserve_tool_result_for_compaction(other) is None
+    assert preserve_tool_result_for_compaction(malformed) is None
+
+
+def test_preserve_tool_result_keeps_artifact_metadata() -> None:
+    result = ToolResultMessage(
+        tool_call_id="tc-artifact",
+        tool_name="save_artifact",
+        content=[
+            TextContent(
+                text=json.dumps(
+                    {
+                        "action": "updated",
+                        "artifact": {
+                            "id": "art-123",
+                            "name": "report.xlsx",
+                            "artifact_type": "data",
+                            "version": 2,
+                            "path": "/workspace/report.xlsx",
+                        },
+                    }
+                )
+            )
+        ],
+    )
+
+    assert preserve_tool_result_for_compaction(result) == (
+        "Artifact updated: id=art-123 name='report.xlsx' type=data "
+        "version=2 path=/workspace/report.xlsx"
+    )
+
+
+def test_preserve_tool_result_keeps_generated_artifact_metadata() -> None:
+    result = ToolResultMessage(
+        tool_call_id="tc-image",
+        tool_name="generate_image",
+        content=[
+            TextContent(
+                text=json.dumps(
+                    {
+                        "action": "created",
+                        "artifact": {
+                            "id": "art-image",
+                            "name": "hero.png",
+                            "artifact_type": "image",
+                            "version": 1,
+                            "path": "/workspace/hero.png",
+                        },
+                    }
+                )
+            )
+        ],
+    )
+
+    compacted = preserve_tool_result_for_compaction(result)
+    assert compacted is not None
+    assert "Artifact created: id=art-image" in compacted
