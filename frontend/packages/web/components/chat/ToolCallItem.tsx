@@ -112,6 +112,8 @@ export const ToolCallItem = memo(function ToolCallItem({
   const toolIdentifier = mcpEntry?.bare_name ?? nameParts.tool
   const FallbackIcon = getToolIcon(toolIdentifier)
   const summary = summaryOverride ?? getParamSummary(toolIdentifier, args)
+  const visibleMcpIconSrc = mcpIconSrc && !mcpIconFailed ? mcpIconSrc : null
+  const hasMcpLogo = visibleMcpIconSrc !== null
   const canOpen = Boolean(toolResult) || allowOpenWhenPending
   const labelTooltip = mcpEntry
     ? `${mcpEntry.server_name} · ${mcpEntry.bare_name}`
@@ -146,10 +148,10 @@ export const ToolCallItem = memo(function ToolCallItem({
             : 'cursor-default text-muted-foreground',
         )}
       >
-        {mcpIconSrc && !mcpIconFailed ? (
+        {visibleMcpIconSrc ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={mcpIconSrc}
+            src={visibleMcpIconSrc}
             alt=""
             className="size-4 shrink-0 rounded-[4px] object-contain opacity-90"
             onError={() => setMcpIconFailed(true)}
@@ -161,7 +163,7 @@ export const ToolCallItem = memo(function ToolCallItem({
         )}
 
         <span className="min-w-0 flex-1 truncate">
-          {isMcpTool && serverName && (
+          {isMcpTool && serverName && !hasMcpLogo && (
             <span className="mr-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/60">
               {serverName}
             </span>
