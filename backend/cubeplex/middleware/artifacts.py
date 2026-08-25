@@ -4,10 +4,9 @@ Implements the cubepi Middleware protocol with two hooks:
 
 - ``tools``: exposes ``save_artifact`` and ``present_file`` as cubepi tools
   so the graph factory can include them in the agent tool list.
-- ``transform_system_prompt``: queries the artifact registry and appends the
-  ARTIFACT_PROMPT + current artifact list to the system prompt. Using the
-  system prompt (stable prefix) rather than the per-turn user message is
-  critical for prompt-cache correctness.
+- ``transform_system_prompt``: appends the static artifact instructions to the
+  system prompt. Dynamic artifact state is available through agent tools so it
+  does not invalidate the prompt-cache prefix.
 """
 
 from __future__ import annotations
@@ -283,25 +282,6 @@ class ArtifactMiddleware(Middleware):
         """Return the cubepi.AgentTool list for this middleware."""
         return [self._save_artifact_tool, self._present_file_tool]
 
-    async def _build_artifact_list(self) -> str:
-        """Query DB for existing artifacts and format as a prompt section."""
-        from cubeplex.db.engine import async_session_maker
-        from cubeplex.repositories import ArtifactRepository
-
-        async with async_session_maker() as session:
-            repo = ArtifactRepository(session, org_id=self.org_id, workspace_id=self.workspace_id)
-            artifacts = await repo.list_by_conversation(self.conversation_id)
-
-        if not artifacts:
-            return "\n**Existing artifacts:** None yet.\n"
-
-        lines = ["\n**Existing artifacts:**"]
-        for a in artifacts:
-            lines.append(
-                f'- id=`{a.id}` name="{a.name}" type={a.artifact_type} path=`{a.path}` v{a.version}'
-            )
-        return "\n".join(lines) + "\n"
-
     async def transform_system_prompt(
         self,
         system_prompt: str,
@@ -309,18 +289,6 @@ class ArtifactMiddleware(Middleware):
         ctx: AgentContext,
         signal: asyncio.Event | None = None,
     ) -> str:
-        """Append the artifact prompt + registry state to the system prompt.
-
-        Mirrors ``ArtifactMiddleware.awrap_model_call`` which appends the
-        artifact section to the system message. Using the system prompt
-        (stable prefix) rather than the per-turn user message is critical
-        for prompt-cache correctness: the artifact list changes as artifacts
-        accumulate, but it belongs in the stable prefix because the *schema*
-        (ARTIFACT_PROMPT) is constant and the *list* is conversation-scoped
-        (not turn-scoped). Appending to the user message breaks OpenAI
-        auto-cache because the user message content changes every turn.
-        """
+        """Append the static artifact instructions to the system prompt."""
         del ctx, signal
-        artifact_list = await self._build_artifact_list()
-        injection = ARTIFACT_PROMPT + artifact_list
-        return system_prompt + "\n\n" + injection
+        return system_prompt + "\n\n" + ARTIFACT_PROMPT
