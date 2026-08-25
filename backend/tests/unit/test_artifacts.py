@@ -86,40 +86,24 @@ def test_tools_property_returns_fresh_list_each_time() -> None:
 
 
 # ---------------------------------------------------------------------------
-# transform_system_prompt — appends artifact section to system prompt
+# transform_system_prompt — appends static artifact instructions only
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_artifact_prompt_appended_to_system_prompt() -> None:
     mw = _make_middleware()
-    artifact_list = "\n**Existing artifacts:** None yet.\n"
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_system_prompt("Base system prompt.", ctx=object(), signal=None)
+    out = await mw.transform_system_prompt("Base system prompt.", ctx=object(), signal=None)
     assert "Base system prompt." in out
     assert "Artifacts" in out  # from ARTIFACT_PROMPT
     assert "save_artifact" in out  # from ARTIFACT_PROMPT
-    assert "None yet" in out
-
-
-@pytest.mark.asyncio
-async def test_artifact_list_appended_when_artifacts_exist() -> None:
-    mw = _make_middleware()
-    artifact_list = (
-        '\n**Existing artifacts:**\n- id=`art-1` name="site" type=website path=`/out` v1\n'
-    )
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_system_prompt("System.", ctx=object(), signal=None)
-    assert "art-1" in out
-    assert "site" in out
+    assert "Existing artifacts" not in out
 
 
 @pytest.mark.asyncio
 async def test_empty_system_prompt_still_injects() -> None:
     mw = _make_middleware()
-    artifact_list = "\n**Existing artifacts:** None yet.\n"
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_system_prompt("", ctx=object(), signal=None)
+    out = await mw.transform_system_prompt("", ctx=object(), signal=None)
     assert "Artifacts" in out
 
 
@@ -127,8 +111,7 @@ async def test_empty_system_prompt_still_injects() -> None:
 async def test_transform_system_prompt_does_not_mutate_input() -> None:
     mw = _make_middleware()
     original = "Original prompt."
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="**list**")):
-        out = await mw.transform_system_prompt(original, ctx=object(), signal=None)
+    out = await mw.transform_system_prompt(original, ctx=object(), signal=None)
     # Original string is immutable in Python; just verify return is different
     assert out != original
     assert original in out
@@ -137,8 +120,7 @@ async def test_transform_system_prompt_does_not_mutate_input() -> None:
 @pytest.mark.asyncio
 async def test_transform_system_prompt_returns_string() -> None:
     mw = _make_middleware()
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="")):
-        out = await mw.transform_system_prompt("prompt", ctx=object(), signal=None)
+    out = await mw.transform_system_prompt("prompt", ctx=object(), signal=None)
     assert isinstance(out, str)
 
 
