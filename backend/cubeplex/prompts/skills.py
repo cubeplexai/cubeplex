@@ -12,6 +12,10 @@ Use `load_skill(name)` to read a skill's instructions. Its result includes a
 (scripts, templates, references). Reference those files using that `path`
 verbatim; do not construct the path from the skill name yourself.
 
+If compacted conversation context identifies a "Previously loaded skill" but
+its full instructions are no longer visible, call `load_skill(name)` again
+before continuing when that skill remains relevant to the current task.
+
 When one skill clearly matches, load only that skill. When descriptions leave
 multiple skills plausibly overlapping, load the smallest plausible set before
 acting, normally two and no more than three. Compare their full instructions,
