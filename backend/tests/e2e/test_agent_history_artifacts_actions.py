@@ -6,7 +6,7 @@ import json
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -393,7 +393,7 @@ async def test_current_artifact_list_filters_and_paginates(seed: Seed) -> None:
 
     result = await _invoke(
         ARTIFACTS_CAPABILITY,
-        seed.member_context,
+        replace(seed.member_context, conversation_id=seed.visible_conversation_id),
         "list_current",
         n=1,
         q=seed.visible_artifact_id,
