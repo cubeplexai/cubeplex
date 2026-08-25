@@ -3225,7 +3225,7 @@ class RunManager:
             from cubepi.middleware.compaction import CompactionMiddleware
 
             from cubeplex.config import config as _comp_cfg
-            from cubeplex.middleware.compaction import compact_loaded_skill
+            from cubeplex.middleware.compaction import preserve_tool_result_for_compaction
 
             if _comp_cfg.get("compaction.enabled", False):
                 # Summarizer model comes from the admin model-settings
@@ -3268,7 +3268,7 @@ class RunManager:
                         min_compact_messages=int(
                             _comp_cfg.get("compaction.min_compact_messages", 4)
                         ),
-                        tool_result_compressor=compact_loaded_skill,
+                        tool_result_compressor=preserve_tool_result_for_compaction,
                     )
                 )
                 logger.info(
