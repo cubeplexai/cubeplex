@@ -6,9 +6,8 @@ handlers must close over run-scoped dependencies: a SkillCatalogService,
 the catalog AsyncSession, a SkillsAdapterManager (itself built async at
 run start), and the org id/slug.
 
-load_skill is intentionally NOT migrated here. It is runtime infrastructure
-(SkillsMiddleware intercepts its result to append SKILL.md to the next
-system prompt) and stays wired directly in run_manager.
+load_skill is intentionally NOT migrated here. It returns SKILL.md directly
+to the model as runtime infrastructure and stays wired in run_manager.
 """
 
 from __future__ import annotations
