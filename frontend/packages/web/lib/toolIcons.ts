@@ -18,9 +18,11 @@ const iconMap: Record<string, LucideIcon> = {
   edit: Code,
   read: Code,
   web_search: Search,
+  search_web: Search,
   search: Search,
   web_fetch: Globe,
   fetch: Globe,
+  read_url: Globe,
   code_execute: Code,
   python: Code,
   subagent: Bot,
@@ -55,7 +57,7 @@ export function getParamSummary(
     value = String(args.command ?? args.cmd ?? '')
   } else if (bare === 'write' || bare === 'edit' || bare === 'read') {
     value = String(args.file_path ?? args.file_name ?? args.path ?? '')
-  } else if (bare === 'web_search' || bare === 'search') {
+  } else if (bare === 'web_search' || bare === 'search_web' || bare === 'search') {
     value = String(args.query ?? args.q ?? '')
   } else if (bare === 'web_fetch' || bare === 'fetch') {
     value = String(args.url ?? '')

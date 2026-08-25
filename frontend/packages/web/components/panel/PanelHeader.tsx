@@ -5,6 +5,7 @@ import { X, Copy, Check, Plug, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
+import { humanizeToolName, splitToolName } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { useMcpToolRegistryStore } from '@cubeplex/core'
 
@@ -62,7 +63,8 @@ export function PanelHeader({
   let copyText: string | undefined
 
   if (source.kind === 'tool') {
-    const displayName = mcpEntry?.bare_name ?? source.toolName
+    const nameParts = splitToolName(source.toolName)
+    const displayName = humanizeToolName(mcpEntry?.bare_name ?? nameParts.tool)
     const pickSrc = (icons: { src: string; cached_src?: string | null }[]) => {
       for (const i of icons) {
         if (i.cached_src) return i.cached_src
@@ -74,7 +76,7 @@ export function PanelHeader({
     const mcpIconSrc = mcpEntry
       ? (pickSrc(mcpEntry.tool_icons) ?? pickSrc(mcpEntry.server_icons))
       : null
-    const FallbackIcon = getToolIcon(displayName)
+    const FallbackIcon = getToolIcon(mcpEntry?.bare_name ?? nameParts.tool)
     icon = mcpIconSrc ? (
       // eslint-disable-next-line @next/next/no-img-element
       <img src={mcpIconSrc} alt="" className="size-3.5 rounded-xs shrink-0 object-contain" />
@@ -85,7 +87,8 @@ export function PanelHeader({
       <FallbackIcon className="size-3.5 text-muted-foreground shrink-0" />
     )
     title = displayName
-    subtitle = getParamSummary(displayName, source.toolArgs, 40) || undefined
+    subtitle =
+      getParamSummary(mcpEntry?.bare_name ?? nameParts.tool, source.toolArgs, 40) || undefined
     copyText = source.toolResult ?? JSON.stringify(source.toolArgs, null, 2)
   } else {
     icon = source.icon

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, memo } from 'react'
 import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubeplex/core'
+import { humanizeToolName, splitToolName } from '@cubeplex/core'
 import { Check, Loader2, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useMcpToolRegistryStore, useToolDetailStore } from '@cubeplex/core'
@@ -98,20 +99,27 @@ export const ToolCallItem = memo(function ToolCallItem({
     : elapsed
 
   const mcpEntry = useMcpToolRegistryStore((s) => s.lookup(name))
-  const displayName = mcpEntry?.bare_name ?? name
+  const nameParts = splitToolName(name)
+  const isMcpTool = Boolean(mcpEntry) || nameParts.server !== null
+  const displayName = humanizeToolName(mcpEntry?.bare_name ?? nameParts.tool)
+  const serverName =
+    mcpEntry?.server_name ?? (nameParts.server ? humanizeToolName(nameParts.server) : null)
   const mcpIconSrc = mcpEntry ? pickIconSrc(mcpEntry.tool_icons, mcpEntry.server_icons) : null
   const [mcpIconFailed, setMcpIconFailed] = useState(false)
   useEffect(() => {
     setMcpIconFailed(false)
   }, [mcpIconSrc])
-  const FallbackIcon = getToolIcon(displayName)
-  const summary = summaryOverride ?? getParamSummary(displayName, args)
+  const toolIdentifier = mcpEntry?.bare_name ?? nameParts.tool
+  const FallbackIcon = getToolIcon(toolIdentifier)
+  const summary = summaryOverride ?? getParamSummary(toolIdentifier, args)
   const canOpen = Boolean(toolResult) || allowOpenWhenPending
   const labelTooltip = mcpEntry
     ? `${mcpEntry.server_name} · ${mcpEntry.bare_name}`
-    : summary
-      ? `${displayName} — ${summary}`
-      : displayName
+    : serverName
+      ? `${serverName} · ${displayName}${summary ? ` — ${summary}` : ''}`
+      : summary
+        ? `${displayName} — ${summary}`
+        : displayName
 
   const handleViewInPanel = () => {
     openPanel(
@@ -131,10 +139,10 @@ export const ToolCallItem = memo(function ToolCallItem({
         disabled={!canOpen}
         title={labelTooltip}
         className={cn(
-          'group flex w-full max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5',
-          'text-left text-[12.5px] leading-5 transition-colors',
+          'group flex w-full max-w-full items-center gap-2 rounded-lg border border-transparent px-2 py-1',
+          'text-left text-[12px] leading-5 transition-colors',
           canOpen
-            ? 'cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+            ? 'cursor-pointer text-muted-foreground hover:border-border/60 hover:bg-muted/55 hover:text-foreground'
             : 'cursor-default text-muted-foreground',
         )}
       >
@@ -143,29 +151,26 @@ export const ToolCallItem = memo(function ToolCallItem({
           <img
             src={mcpIconSrc}
             alt=""
-            className="size-3 shrink-0 rounded-[2px] object-contain opacity-80"
+            className="size-4 shrink-0 rounded-[4px] object-contain opacity-90"
             onError={() => setMcpIconFailed(true)}
           />
         ) : mcpEntry ? (
-          <Plug className="size-3 shrink-0 opacity-70" />
+          <Plug className="size-3.5 shrink-0 opacity-70" />
         ) : (
-          <FallbackIcon className="size-3 shrink-0 opacity-70" />
+          <FallbackIcon className="size-3.5 shrink-0 opacity-70" />
         )}
 
-        <span
-          className={cn(
-            'shrink-0 font-medium',
-            isPending ? 'text-foreground' : 'text-foreground/90',
+        <span className="min-w-0 flex-1 truncate">
+          {isMcpTool && serverName && (
+            <span className="mr-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/60">
+              {serverName}
+            </span>
           )}
-        >
-          {displayName}
+          <span className={cn('font-medium', isPending ? 'text-foreground' : 'text-foreground/90')}>
+            {displayName}
+          </span>
+          {summary && <span className="ml-2 text-muted-foreground/70">{summary}</span>}
         </span>
-
-        {summary ? (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground/80">{summary}</span>
-        ) : (
-          <span className="min-w-0 flex-1" />
-        )}
 
         <span className="ml-auto flex shrink-0 items-center gap-1 tabular-nums text-[11px] text-muted-foreground/70">
           {pendingConfirm ? null : isPending ? (
