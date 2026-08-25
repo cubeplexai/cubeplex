@@ -252,7 +252,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const loadOlderMessages = useMessageStore((s) => s.loadOlderMessages)
   const loadOlderUntilSeq = useMessageStore((s) => s.loadOlderUntilSeq)
-  const isLoadingMessages = useMessageStore((s) => s.loadingMessagesByConv[conversationId] ?? false)
+  const messagesLoadingState = useMessageStore((s) => s.loadingMessagesByConv[conversationId])
   const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
   const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
   const oldestSeq = useMessageStore((s) => s.oldestSeqByConv[conversationId] ?? null)
@@ -596,21 +596,11 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [conversationId, messagesLoaded, loadOlderUntilSeq, workspaceId])
 
-  if (isLoadingMessages && messages.length === 0) {
-    return (
-      <div
-        role="status"
-        aria-label={t('loadingConversation')}
-        aria-live="polite"
-        className="flex flex-1 items-center justify-center"
-      >
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 aria-hidden className="size-4 animate-spin" />
-          <span>{t('loadingConversation')}</span>
-        </div>
-      </div>
-    )
-  }
+  // A missing state entry means this conversation has not started its first
+  // bootstrap yet. Treat that first render as loading so the UI never paints
+  // an unexplained blank frame before the effects start the request. Once a
+  // request settles, the explicit false also lets errors replace the loader.
+  const showHistoryLoading = messagesLoadingState !== false && messages.length === 0
 
   return (
     <ScrollArea ref={scrollRef} className="flex-1" onScroll={handleScroll}>
@@ -618,6 +608,19 @@ export function MessageList({ conversationId }: MessageListProps) {
           inset; CHAT_COLUMN_CLASS keeps max-width + centering in sync with InputBar. */}
       <div className="px-4 py-4">
         <div ref={contentRef} className={cn(CHAT_COLUMN_CLASS, 'space-y-4')}>
+          {showHistoryLoading && (
+            <div
+              role="status"
+              aria-label={t('loadingConversation')}
+              aria-live="polite"
+              className="flex min-h-[50vh] items-center justify-center"
+            >
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 aria-hidden className="size-4 animate-spin" />
+                <span>{t('loadingConversation')}</span>
+              </div>
+            </div>
+          )}
           {hasMoreOlder && (
             <div className="flex justify-center py-2">
               <button
