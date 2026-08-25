@@ -235,6 +235,7 @@ async def test_tool_execute_updates_existing_artifact() -> None:
 
     fake_artifact = MagicMock()
     fake_artifact.id = "art-xyz"
+    fake_artifact.conversation_id = "conv-1"
     fake_artifact.name = "Updated Site"
     fake_artifact.artifact_type = "website"
     fake_artifact.version = 2
@@ -246,6 +247,7 @@ async def test_tool_execute_updates_existing_artifact() -> None:
     }
 
     mock_repo = AsyncMock()
+    mock_repo.get_by_id = AsyncMock(return_value=fake_artifact)
     mock_repo.update = AsyncMock(return_value=fake_artifact)
 
     mock_version_repo = AsyncMock()

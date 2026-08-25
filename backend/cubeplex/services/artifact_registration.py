@@ -61,6 +61,11 @@ async def register_artifact_from_sandbox(
                 )
 
         if artifact_id:
+            existing = await repo.get_by_id(artifact_id)
+            if existing is None:
+                raise ValueError(f"Artifact not found: {artifact_id}")
+            if existing.conversation_id != conversation_id:
+                raise ValueError(f"Artifact belongs to another conversation: {artifact_id}")
             artifact = await repo.update(
                 artifact_id,
                 name=name,
