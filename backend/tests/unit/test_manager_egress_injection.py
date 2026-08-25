@@ -758,6 +758,8 @@ async def test_cleanup_expired_revokes_refs(
     fake_record.org_id = "org-1"
     fake_record.workspace_id = "ws-1"
     fake_record.id = "rec-expired"
+    fake_record.status = "running"
+    fake_record.last_activity_at = datetime.now(UTC) - timedelta(hours=1)
 
     manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
@@ -766,6 +768,10 @@ async def test_cleanup_expired_revokes_refs(
         patch(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
             new=AsyncMock(return_value=[fake_record]),
+        ),
+        patch(
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get",
+            new=AsyncMock(return_value=fake_record),
         ),
         patch(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",

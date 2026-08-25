@@ -1211,6 +1211,8 @@ class SandboxManager:
 
             logger.info("Found {} expired sandbox(es) to clean up", len(expired))
 
+            # create POST + check_ready; last_activity_at is the attempt start.
+            provision_budget = self._create_timeout + self._ready_timeout
             for record in expired:
                 try:
                     scoped_repo = UserSandboxRepository(
@@ -1218,24 +1220,30 @@ class SandboxManager:
                         org_id=record.org_id,
                         workspace_id=record.workspace_id,
                     )
+                    # Re-read: list_expired_system is a snapshot. A stuck row
+                    # may have been claimed for a new revive (fresh
+                    # last_activity_at) between select and now.
+                    current = await scoped_repo.get(record.id)
+                    if current is None:
+                        continue
+                    record = current
                     # A live create (fresh reserve or revive) is `provisioning`
-                    # for up to create_timeout, with last_activity_at stamped at
-                    # the start of this attempt. If ttl < create_timeout, the
-                    # TTL filter still matches mid-create; do not reap until
-                    # the create budget has also elapsed.
+                    # through Sandbox.create + check_ready. If ttl is shorter
+                    # than that budget, the TTL filter still matches mid-create;
+                    # do not reap until the budget has also elapsed.
                     if record.status == "provisioning":
                         started = record.last_activity_at
                         if started is not None:
                             if started.tzinfo is None:
                                 started = started.replace(tzinfo=UTC)
                             age = (datetime.now(UTC) - started).total_seconds()
-                            if age < self._create_timeout:
+                            if age < provision_budget:
                                 logger.debug(
                                     "Skipping in-flight provisioning {} "
-                                    "(age={:.0f}s < create_timeout={})",
+                                    "(age={:.0f}s < provision_budget={})",
                                     record.id,
                                     age,
-                                    self._create_timeout,
+                                    provision_budget,
                                 )
                                 continue
                     if not record.sandbox_id:
