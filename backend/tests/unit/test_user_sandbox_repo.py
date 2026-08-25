@@ -2,12 +2,14 @@
 hardening."""
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 
 
@@ -220,3 +222,36 @@ async def test_rekey_moves_active_row_across_scope_keys(session: AsyncSession) -
     moved = await repo.get_active_by_scope(scope_type="conversation", scope_id="conv-xyz")
     assert moved is not None and moved.id == rec.id
     assert moved.sandbox_id == "prov-uc"
+
+
+async def test_claim_for_provisioning_refreshes_last_activity(session: AsyncSession) -> None:
+    """Revive must restart the TTL clock.
+
+    A terminated row keeps ``last_activity_at`` from the previous container.
+    Without a bump, ``cleanup_expired`` treats the in-flight provisioning row
+    as an expired orphan (``sandbox_id`` is still None until create returns)
+    and concurrent terminal waiters 503 with "provisioning race lost".
+    """
+    repo = UserSandboxRepository(session, org_id="org-1", workspace_id="ws-1")
+    stale = datetime.now(UTC) - timedelta(hours=1)
+    row = await repo.add(
+        UserSandbox(
+            user_id="user-1",
+            sandbox_id=None,
+            image="ubuntu:22.04",
+            status="terminated",
+            ttl_seconds=600,
+            last_activity_at=stale,
+            scope_type="user",
+            scope_id="user-1",
+        )
+    )
+
+    assert await repo.claim_for_provisioning(row.id) is True
+    refreshed = await repo.get(row.id)
+    assert refreshed is not None
+    assert refreshed.status == "provisioning"
+    got = refreshed.last_activity_at
+    if got.tzinfo is None:
+        got = got.replace(tzinfo=UTC)
+    assert got > stale + timedelta(minutes=50)
