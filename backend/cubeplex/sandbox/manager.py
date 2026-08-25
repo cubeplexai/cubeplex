@@ -1211,23 +1211,23 @@ class SandboxManager:
 
             logger.info("Found {} expired sandbox(es) to clean up", len(expired))
 
-            # Drop the list_expired identity-map snapshot so the per-row
-            # get() below sees a concurrent claim's last_activity_at, not
-            # the stale instance loaded by the SELECT.
+            # Snapshot PKs/scope before expire_all: AsyncSession cannot lazy-
+            # load expired attributes synchronously (MissingGreenlet).
+            to_reap = [(row.id, row.org_id, row.workspace_id) for row in expired]
             session.expire_all()
 
             # create POST + check_ready; last_activity_at is the attempt start.
             provision_budget = self._create_timeout + self._ready_timeout
-            for record in expired:
+            for record_id, org_id, workspace_id in to_reap:
                 try:
                     scoped_repo = UserSandboxRepository(
                         session,
-                        org_id=record.org_id,
-                        workspace_id=record.workspace_id,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
                     )
                     # Re-read after expire_all: a stuck row may have been
                     # claimed for a new revive between select and now.
-                    current = await scoped_repo.get(record.id)
+                    current = await scoped_repo.get(record_id)
                     if current is None:
                         continue
                     record = current
@@ -1262,7 +1262,7 @@ class SandboxManager:
                 except Exception:
                     logger.opt(exception=True).warning(
                         "Unexpected error cleaning up sandbox {}",
-                        record.sandbox_id,
+                        record_id,
                     )
 
     async def _resume_record(
