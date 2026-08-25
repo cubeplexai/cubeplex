@@ -46,8 +46,6 @@ existing artifact, you MUST pass the existing `artifact_id` to create a new vers
 instead of a new artifact.
 - This applies even if the file path or filename changes (e.g. rewriting `snake.html` \
 as `snake-v2.html` is still the same artifact).
-- If you need to find an existing artifact, use the artifact library capability
-  before calling `save_artifact`.
 - Only create a new artifact (omit artifact_id) when the deliverable is genuinely new \
 and unrelated to any existing artifact.
 """
