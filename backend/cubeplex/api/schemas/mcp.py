@@ -323,6 +323,8 @@ class McpActiveToolOut(BaseModel):
     bare_name: str
     connector_id: str
     server_name: str
+    # Catalog brand key, resolved by the frontend to /mcp-icons/{icon}.svg.
+    icon: str | None = None
     server_icons: list[McpIconOut] = Field(default_factory=list)
     tool_icons: list[McpIconOut] = Field(default_factory=list)
 

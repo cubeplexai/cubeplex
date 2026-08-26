@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Literal, cast
 
 from cubeplex.mcp.exceptions import OAuthRefreshFailed
+from cubeplex.mcp.icons import template_icon_key
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
 from cubeplex.models import (
     MCPConnector,
@@ -174,6 +175,7 @@ class MCPRuntimeConnectorSpec:
     timeout: float = 30.0
     sse_read_timeout: float = 300.0
     template_id: str | None = None
+    template_icon: str | None = None
     org_id: str = ""
     workspace_id: str = ""
     grant: MCPCredentialGrant | None = None
@@ -256,6 +258,9 @@ class MCPEffectiveConnectorService:
                 timeout=row.connector.timeout,
                 sse_read_timeout=row.connector.sse_read_timeout,
                 template_id=row.connector.template_id,
+                template_icon=template_icon_key(
+                    row.template.template_metadata if row.template is not None else None
+                ),
                 org_id=row.connector.org_id,
                 workspace_id=workspace_id,
                 grant=row.grant,
