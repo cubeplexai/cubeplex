@@ -23,6 +23,7 @@ def _make_deps(
     registry: Any | None = None,
     catalog: Any | None = None,
     catalog_session: Any | None = None,
+    on_skills_changed: Any | None = None,
 ) -> SkillDeps:
     return SkillDeps(
         catalog=catalog or MagicMock(),
@@ -31,6 +32,7 @@ def _make_deps(
         org_id="org-test",
         org_slug="org-slug",
         workspace_id="ws-test",
+        on_skills_changed=on_skills_changed,
     )
 
 
@@ -226,7 +228,8 @@ async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(_skills_mod, "_SkillInstallService", lambda **_kw: fake_svc)
     monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: MagicMock())
 
-    deps = _make_deps()
+    on_skills_changed = AsyncMock()
+    deps = _make_deps(on_skills_changed=on_skills_changed)
     cid = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
     fake_session = MagicMock()
 
@@ -242,6 +245,7 @@ async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) 
         "version": "1.0.0",
     }
     fake_svc.install.assert_awaited_once_with(cid)
+    on_skills_changed.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -253,7 +257,8 @@ async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(_skills_mod, "_SkillInstallService", lambda **_kw: fake_svc)
     monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: MagicMock())
 
-    deps = _make_deps()
+    on_skills_changed = AsyncMock()
+    deps = _make_deps(on_skills_changed=on_skills_changed)
     cid = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
 
     with pytest.raises(ActionInvalidInput, match="trust tier too low"):
@@ -263,6 +268,7 @@ async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatc
             MagicMock(),
             InstallInput(candidate_id=cid),
         )
+    on_skills_changed.assert_not_awaited()
 
 
 # --- mutation gate ---
@@ -335,7 +341,8 @@ async def test_publish_skill_success(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_skill_repo.get = AsyncMock(return_value=fake_skill)
     monkeypatch.setattr(_skills_mod, "_SkillRepository", lambda _s: fake_skill_repo)
 
-    deps = _make_deps()
+    on_skills_changed = AsyncMock()
+    deps = _make_deps(on_skills_changed=on_skills_changed)
     fake_session = MagicMock()
 
     result = await _handle_publish_skill_impl(
@@ -354,6 +361,7 @@ async def test_publish_skill_success(monkeypatch: pytest.MonkeyPatch) -> None:
         artifact_id="art-abc",
         workspace_id="ws-test",
     )
+    on_skills_changed.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

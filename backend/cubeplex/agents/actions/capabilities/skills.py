@@ -12,6 +12,7 @@ to the model as runtime infrastructure and stays wired in run_manager.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,6 +75,7 @@ class SkillDeps:
     org_id: str
     org_slug: str
     workspace_id: str | None
+    on_skills_changed: Callable[[], Awaitable[None]] | None = None
 
 
 # --- Input models per operation ---
@@ -235,6 +237,9 @@ async def _handle_install_impl(
     except SkillInstallError as exc:
         raise ActionInvalidInput(str(exc)) from exc
 
+    if deps.on_skills_changed is not None:
+        await deps.on_skills_changed()
+
     return {
         "installed": True,
         "canonical_name": result.canonical_name,
@@ -266,6 +271,9 @@ async def _handle_publish_skill_impl(
 
     skill = await _SkillRepository(session).get(sv.skill_id)
     canonical_name = skill.name if skill is not None else sv.skill_id
+
+    if deps.on_skills_changed is not None:
+        await deps.on_skills_changed()
 
     return {
         "published": True,
