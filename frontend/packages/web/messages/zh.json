@@ -728,6 +728,8 @@
     "viaRegistry": "来自",
     "uninstall": "卸载",
     "confirmUninstall": "确认卸载？",
+    "deleteFromCatalog": "从目录删除",
+    "confirmDelete": "删除该 skill 及其所有 workspace 安装？",
     "defaultLinkAll": "默认关联所有 Workspace",
     "defaultLinkAllEnabled": "所有 Workspace 默认启用此 skill（可在各 Workspace 单独关闭）",
     "defaultLinkAllDisabled": "各 Workspace 需手动启用此 skill",

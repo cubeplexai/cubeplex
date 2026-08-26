@@ -88,6 +88,10 @@ export default function SkillsPage() {
             <SkillDetailPanel
               skillId={selection?.kind === 'skill' ? selection.id : null}
               onActionDone={() => void refresh()}
+              onDeleted={() => {
+                setSelection(null)
+                void refresh()
+              }}
             />
           )
         }

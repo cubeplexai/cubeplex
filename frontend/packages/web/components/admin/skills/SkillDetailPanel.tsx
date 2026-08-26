@@ -24,6 +24,7 @@ const ReactDiffViewer = dynamic(() => import('react-diff-viewer-continued'), { s
 interface SkillDetailPanelProps {
   skillId: string | null
   onActionDone: () => void
+  onDeleted?: () => void
 }
 
 const contentFetcher = async (url: string): Promise<SkillContent> => {
@@ -421,7 +422,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
 
 // ─── Main Panel ──────────────────────────────────────────────────────────────
 
-export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProps) {
+export function SkillDetailPanel({ skillId, onActionDone, onDeleted }: SkillDetailPanelProps) {
   const t = useTranslations('adminSkills')
   const tExtra = useTranslations('adminSkillsExtra')
   const { skill, loading, error, refresh } = useAdminSkill(skillId)
@@ -497,7 +498,12 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
             </Badge>
           )}
           <div className="ml-auto">
-            <OrgInstallActions key={skill.id} skill={skill} onActionDone={handleActionDone} />
+            <OrgInstallActions
+              key={skill.id}
+              skill={skill}
+              onActionDone={handleActionDone}
+              onDeleted={onDeleted}
+            />
           </div>
         </div>
         <SkillCanonicalNameRow

@@ -57,7 +57,8 @@ Once a registry is connected (and enabled), its skills surface in the discovery 
 From **Admin > Skills** you control which skills exist in your organization and how they reach workspaces:
 
 - **Install** a skill org-wide so it becomes available to every workspace. Each org-wide install carries an **auto-bind** setting: when on, the skill is automatically enabled in workspaces; when off, a workspace owner must turn it on per workspace. Preinstalled skills default to auto-bind on; uploaded skills default to off.
-- **Uninstall** a skill to remove it from the org. This also removes its per-workspace bindings. Uninstalling a *preinstalled* skill records a tombstone so CubePlex does not restore it on the next system update.
+- **Uninstall** a skill to remove the org-wide install pin. This also removes its per-workspace bindings. The catalog row stays, so a workspace can still install it privately. Uninstalling a *preinstalled* skill records a tombstone so CubePlex does not restore it on the next system update.
+- **Delete from catalog** (uploaded skills only) permanently removes the skill, its versions, and any org-wide or workspace-private installs. Use this for skills that were uploaded or installed from a workspace and should no longer appear in the org catalog. Preinstalled skills cannot be deleted; uninstall them instead.
 
 Whether a specific workspace can use an org-installed skill is then a per-workspace toggle (managed by the workspace owner from the workspace **Skills** page, or by an admin from the skill's workspace-bindings view). Disabling a skill for a workspace hides it from the agent there; historical conversation output is unaffected.
 

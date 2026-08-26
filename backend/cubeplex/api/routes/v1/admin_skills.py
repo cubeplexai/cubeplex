@@ -558,6 +558,31 @@ async def uninstall_skill(
     await session.commit()
 
 
+@router.delete("/{skill_id}", status_code=204)
+async def delete_catalog_skill(
+    skill_id: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Remove an uploaded skill from the org catalog.
+
+    Preinstalled skills cannot be deleted (uninstall + tombstone instead).
+    Cascades org-wide and workspace-private installs plus version rows.
+    """
+    org_id = await resolve_current_org_id(user, session)
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+    if skill.source != "uploaded":
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "CANNOT_DELETE_PREINSTALLED"},
+        )
+    publisher = SkillPublishService(session=session, cache=_cache())
+    await publisher.delete_uploaded(org_id=org_id, skill=skill)
+
+
 @router.post("/upload", status_code=201)
 async def upload_skill(
     file: Annotated[UploadFile, File(...)],

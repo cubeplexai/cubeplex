@@ -69,6 +69,8 @@ The agent keeps using the installed version until an upgrade completes; later co
 
 To remove a skill from your workspace, open its detail panel and use the uninstall action. This removes the workspace binding but does not delete the skill from the org catalog — other workspaces that use the same skill are unaffected.
 
+A skill uploaded or installed in a workspace is also registered on the org catalog. Removing the workspace install leaves that catalog row behind. An org admin can delete it from **Admin > Skills** with **Delete from catalog**.
+
 For org-wide skills, only an admin can fully uninstall them. See [Administration > Skills Management](../../admin/skills-management.md) for details.
 
 **Built-in skills** have special handling: if an admin uninstalls a preinstalled skill for the org, CubePlex records that decision so the skill is not automatically restored on the next system update.

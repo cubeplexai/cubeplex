@@ -7,6 +7,7 @@ Concurrent calls for the same skill_version_id deduplicate via per-key asyncio l
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 from loguru import logger
@@ -27,9 +28,7 @@ class SkillCache:
     def _lock_for(self, skill_version_id: str) -> asyncio.Lock:
         return self._locks.setdefault(skill_version_id, asyncio.Lock())
 
-    async def ensure_extracted(
-        self, skill_version_id: str, *, storage_prefix: str
-    ) -> Path:
+    async def ensure_extracted(self, skill_version_id: str, *, storage_prefix: str) -> Path:
         """Returns local cache dir for this version. Fetches on miss."""
         target = self.cache_dir(skill_version_id)
         sentinel = target / ".extracted"
@@ -54,7 +53,7 @@ class SkillCache:
             keys = await store.list_objects(storage_prefix)
             written = 0
             for key in keys:
-                rel = key[len(storage_prefix):]
+                rel = key[len(storage_prefix) :]
                 if not rel:
                     continue
                 data, _ = await store.download_file(key)
@@ -72,18 +71,20 @@ class SkillCache:
                 )
                 return target
             sentinel.write_bytes(b"")
-            logger.debug(
-                "Skill cache: extracted {} files for {}", written, skill_version_id
-            )
+            logger.debug("Skill cache: extracted {} files for {}", written, skill_version_id)
         return target
+
+    def purge(self, skill_version_id: str) -> None:
+        """Drop the on-disk cache dir for a version. Best-effort."""
+        target = self.cache_dir(skill_version_id)
+        shutil.rmtree(target, ignore_errors=True)
+        self._locks.pop(skill_version_id, None)
 
     async def list_files(
         self, skill_version_id: str, *, storage_prefix: str
     ) -> list[tuple[str, bytes]]:
         """Returns [(rel_path, bytes), ...]. Fetches via cache (extracts if missing)."""
-        cache_dir = await self.ensure_extracted(
-            skill_version_id, storage_prefix=storage_prefix
-        )
+        cache_dir = await self.ensure_extracted(skill_version_id, storage_prefix=storage_prefix)
         out: list[tuple[str, bytes]] = []
         for path in cache_dir.rglob("*"):
             if not path.is_file() or path.name == ".extracted":
