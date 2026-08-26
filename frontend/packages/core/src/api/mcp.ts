@@ -441,6 +441,8 @@ export interface MCPActiveTool {
   connector_id: string
   /** Install display name (the slug source for namespacing). */
   server_name: string
+  /** Catalog brand key, rendered from the local /mcp-icons asset set. */
+  icon: string | null
   server_icons: MCPToolIcon[]
   tool_icons: MCPToolIcon[]
 }

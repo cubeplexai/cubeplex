@@ -635,6 +635,7 @@ async def list_workspace_active_tools(
                     bare_name=bare,
                     connector_id=spec.connector_id,
                     server_name=spec.name,
+                    icon=spec.template_icon,
                     server_icons=server_icons,
                     tool_icons=_icons_for(tool_icons_map.get(bare)),
                 )

@@ -31,6 +31,11 @@ function pickIconSrc(toolIcons: MCPToolIcon[], serverIcons: MCPToolIcon[]): stri
   return null
 }
 
+function pickCatalogIconSrc(icon: string | null | undefined): string | null {
+  if (!icon || !/^[a-zA-Z0-9_-]{1,64}$/.test(icon)) return null
+  return `/mcp-icons/${icon}.svg`
+}
+
 interface ToolCallItemProps {
   name: string
   arguments: Record<string, unknown>
@@ -104,7 +109,9 @@ export const ToolCallItem = memo(function ToolCallItem({
   const displayName = humanizeToolName(mcpEntry?.bare_name ?? nameParts.tool)
   const serverName =
     mcpEntry?.server_name ?? (nameParts.server ? humanizeToolName(nameParts.server) : null)
-  const mcpIconSrc = mcpEntry ? pickIconSrc(mcpEntry.tool_icons, mcpEntry.server_icons) : null
+  const mcpIconSrc = mcpEntry
+    ? (pickCatalogIconSrc(mcpEntry.icon) ?? pickIconSrc(mcpEntry.tool_icons, mcpEntry.server_icons))
+    : null
   const [mcpIconFailed, setMcpIconFailed] = useState(false)
   useEffect(() => {
     setMcpIconFailed(false)
