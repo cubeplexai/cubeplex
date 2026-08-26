@@ -16,7 +16,9 @@ overrides:
   joi@<17.13.4: ^17.13.4
   uuid@<11.1.1: ^11.1.1
   js-yaml@<3.15.0: ^3.15.0
-  js-yaml@>=4.0.0 <4.2.0: ^4.2.0
+  js-yaml@>=4.0.0 <4.3.1: ^4.3.1
+  fast-uri@>=3.0.0 <3.1.5: ^3.1.5
+  brace-expansion@<1.1.18: ^1.1.18
   esbuild@>=0.27.3 <0.28.1: ^0.28.1
 
 importers:
@@ -2674,8 +2676,8 @@ packages:
     resolution: {integrity: sha512-2hCgjEmP8YLWQ130n2FerGv7rYpfBmnmp9Uy2Le1vge6X3gZIfSmEzP5QTDElFxcvVcXlEn8Aq6MU/PZygIOog==}
     engines: {node: '>=14.16'}
 
-  brace-expansion@1.1.16:
-    resolution: {integrity: sha512-IDw48K2/2kRkg9LdJxurvq3lV3aBgq0REY89duEqFRthjlPdXHKMj7EnQOXVckxzgisinf3nHfrcE2FufFLXMw==}
+  brace-expansion@1.1.18:
+    resolution: {integrity: sha512-Edep/X9fGqVNmzKBVsDYIOtD+z1tuezV70LBjdCst9Tqu76lsnvRiZ6oTic1n+/BIwX6QDGAO94PN4N2SADvtw==}
 
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
@@ -3412,8 +3414,8 @@ packages:
   fast-json-stable-stringify@2.1.0:
     resolution: {integrity: sha512-lhd/wF+Lk98HZoTCtlVraHtfh5XYijIjalXck7saUtuanSDyLMxnHhSXEDJqHxD7msR8D0uCmqlkwjCV8xvwHw==}
 
-  fast-uri@3.1.2:
-    resolution: {integrity: sha512-rVjf7ArG3LTk+FS6Yw81V1DLuZl1bRbNrev6Tmd/9RaroeeRRJhAt7jg/6YFxbvAQXUCavSoZhPPj6oOx+5KjQ==}
+  fast-uri@3.1.6:
+    resolution: {integrity: sha512-7Ical1vFEMr0onbVzEDIreM22I4khW+fzyQPwvAFWBp1iwdshSZRsL4jjRvPG9JP1uiqMHRto+YU6R2/CzDz5Q==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -3930,8 +3932,8 @@ packages:
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
-  js-yaml@4.3.0:
-    resolution: {integrity: sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==}
+  js-yaml@4.3.1:
+    resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
 
   jsdom@30.0.1:
@@ -6256,7 +6258,7 @@ snapshots:
 
   '@11ty/gray-matter@1.0.0':
     dependencies:
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       kind-of: 6.0.3
       section-matter: 1.0.0
       strip-bom-string: 1.0.0
@@ -7882,7 +7884,7 @@ snapshots:
       '@types/react-router-config': 5.0.11
       combine-promises: 1.2.0
       fs-extra: 11.3.6
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       lodash: 4.18.1
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -8477,7 +8479,7 @@ snapshots:
       '@docusaurus/utils-common': 3.10.2(@swc/core@1.15.43)(postcss@8.5.26)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       fs-extra: 11.3.6
       joi: 17.13.4
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       lodash: 4.18.1
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -8511,7 +8513,7 @@ snapshots:
       github-slugger: 1.5.0
       globby: 11.1.0
       jiti: 1.21.7
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       lodash: 4.18.1
       micromatch: 4.0.8
       p-queue: 6.6.2
@@ -8552,7 +8554,7 @@ snapshots:
       github-slugger: 1.5.0
       globby: 11.1.0
       jiti: 1.21.7
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       lodash: 4.18.1
       micromatch: 4.0.8
       p-queue: 6.6.2
@@ -9774,7 +9776,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.2
+      fast-uri: 3.1.6
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -9963,7 +9965,7 @@ snapshots:
       widest-line: 4.0.1
       wrap-ansi: 8.1.0
 
-  brace-expansion@1.1.16:
+  brace-expansion@1.1.18:
     dependencies:
       balanced-match: 1.0.2
       concat-map: 0.0.1
@@ -10219,7 +10221,7 @@ snapshots:
   cosmiconfig@8.3.6(typescript@7.0.2):
     dependencies:
       import-fresh: 3.3.1
-      js-yaml: 4.3.0
+      js-yaml: 4.3.1
       parse-json: 5.2.0
       path-type: 4.0.0
     optionalDependencies:
@@ -10726,7 +10728,7 @@ snapshots:
 
   fast-json-stable-stringify@2.1.0: {}
 
-  fast-uri@3.1.2: {}
+  fast-uri@3.1.6: {}
 
   fastq@1.20.1:
     dependencies:
@@ -11298,7 +11300,7 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  js-yaml@4.3.0:
+  js-yaml@4.3.1:
     dependencies:
       argparse: 2.0.1
 
@@ -12076,7 +12078,7 @@ snapshots:
 
   minimatch@3.1.5:
     dependencies:
-      brace-expansion: 1.1.16
+      brace-expansion: 1.1.18
 
   minimist@1.2.8: {}
 
