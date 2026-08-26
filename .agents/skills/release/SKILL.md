@@ -5,15 +5,17 @@ description: Prepare and publish cubeplex releases across backend, frontend, san
 
 # Cubeplex release workflow
 
-Use this skill for a production or self-hosted cubeplex release. Follow the
-workflow in [references/release-workflow.md](references/release-workflow.md) for
-the exact version, image, tag, and deployment contracts.
+Use this skill for a production or self-hosted cubeplex release. The exact
+version, image, tag, docs, and deployment contracts live in
+[docs/releasing.md](../../../docs/releasing.md) — **read that file before
+acting**. Do not invent a shorter checklist.
 
 ## Required sequence
 
 1. Inspect the current branch, worktree, `origin/main`, and existing release tags.
-2. Prepare a release PR that bumps the application package/chart versions and,
-   only when sandbox contents change, `deploy/images/sandbox/VERSION`.
+2. Prepare a release PR that bumps every version source in `docs/releasing.md`
+   (packages, chart, hardcoded code refs, `uv.lock`, compose `.env.example`,
+   **and** the English + Chinese deploy-doc snippets).
 3. Run the version-consistency check and the repository CI-equivalent checks.
 4. Merge the release PR into `main`.
 5. Create `v<semver>` on that exact merged commit and push the tag.
@@ -31,3 +33,4 @@ the exact version, image, tag, and deployment contracts.
 - Keep registry credentials and runtime secrets out of release manifests.
 - If the image build fails, fix the build; do not manually push a replacement image
   under the same tag.
+- Do not put this process on the user-facing docs site (`docs/site/`).

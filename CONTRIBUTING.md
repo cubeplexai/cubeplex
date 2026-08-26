@@ -114,3 +114,10 @@ cd backend && make check-ci
 # Run frontend tests
 cd frontend && pnpm -r test
 ```
+
+## Releasing
+
+Cutting a production or self-hosted release (version bump, tag, images, Helm
+chart, GitHub Release, and the user-facing deploy-doc snippets) is documented
+in [docs/releasing.md](docs/releasing.md). Do not put that process on the
+user-facing docs site.
