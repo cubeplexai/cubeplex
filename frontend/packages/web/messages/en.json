@@ -728,6 +728,8 @@
     "viaRegistry": "via",
     "uninstall": "Uninstall",
     "confirmUninstall": "Confirm uninstall?",
+    "deleteFromCatalog": "Delete from catalog",
+    "confirmDelete": "Delete this skill and all workspace installs?",
     "defaultLinkAll": "Link all workspaces by default",
     "defaultLinkAllEnabled": "All workspaces enable this skill by default (can be individually disabled)",
     "defaultLinkAllDisabled": "Each workspace must manually enable this skill",

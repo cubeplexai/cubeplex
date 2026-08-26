@@ -10,21 +10,24 @@ import { jsonHeaders, csrfHeaders, readApiError } from '@/lib/csrf'
 interface OrgInstallActionsProps {
   skill: SkillDetail
   onActionDone: () => void
+  onDeleted?: () => void
 }
 
-type Action = 'install' | 'upgrade' | 'uninstall' | 'refresh' | null
+type Action = 'install' | 'upgrade' | 'uninstall' | 'refresh' | 'delete' | null
 
-export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProps) {
+export function OrgInstallActions({ skill, onActionDone, onDeleted }: OrgInstallActionsProps) {
   const t = useTranslations('adminSkills')
   const [busy, setBusy] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshNote, setRefreshNote] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Reset confirm dialog whenever install_state changes (e.g. after upgrade or version switch)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfirmUninstall(false)
+    setConfirmDelete(false)
   }, [skill.install_state])
 
   async function install(version: string): Promise<void> {
@@ -39,6 +42,15 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
 
   async function uninstall(): Promise<void> {
     const res = await fetch(`/api/v1/admin/skills/${skill.id}/install`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: csrfHeaders(),
+    })
+    if (!res.ok && res.status !== 204) throw new Error(await readApiError(res))
+  }
+
+  async function deleteFromCatalog(): Promise<void> {
+    const res = await fetch(`/api/v1/admin/skills/${skill.id}`, {
       method: 'DELETE',
       credentials: 'include',
       headers: csrfHeaders(),
@@ -67,13 +79,18 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
     }
   }
 
-  async function run(action: Exclude<Action, null>, fn: () => Promise<void>): Promise<void> {
+  async function run(
+    action: Exclude<Action, null>,
+    fn: () => Promise<void>,
+    after?: () => void,
+  ): Promise<void> {
     setBusy(action)
     setError(null)
     setRefreshNote(null)
     try {
       await fn()
-      onActionDone()
+      if (after) after()
+      else onActionDone()
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -84,6 +101,7 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
   const installed =
     skill.install_state === 'installed' || skill.install_state === 'update_available'
   const canRefresh = Boolean(skill.imported_from_registry_id)
+  const canDelete = skill.source === 'uploaded'
 
   return (
     <div className="flex flex-col items-end gap-1.5">
@@ -135,7 +153,10 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
             variant="ghost"
             className="cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive"
             disabled={busy !== null}
-            onClick={() => setConfirmUninstall(true)}
+            onClick={() => {
+              setConfirmDelete(false)
+              setConfirmUninstall(true)
+            }}
             data-testid="skill-uninstall-button"
           >
             <Trash2 className="size-3.5" />
@@ -158,6 +179,44 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
               type="button"
               className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
               onClick={() => setConfirmUninstall(false)}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
+
+        {canDelete && !confirmDelete && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={busy !== null}
+            onClick={() => {
+              setConfirmUninstall(false)
+              setConfirmDelete(true)
+            }}
+            data-testid="skill-delete-button"
+          >
+            <Trash2 className="size-3.5" />
+            {t('deleteFromCatalog')}
+          </Button>
+        )}
+
+        {canDelete && confirmDelete && (
+          <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5">
+            <span className="text-xs text-destructive">{t('confirmDelete')}</span>
+            <button
+              type="button"
+              className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/20"
+              disabled={busy !== null}
+              onClick={() => void run('delete', deleteFromCatalog, onDeleted ?? onActionDone)}
+            >
+              <Check className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
+              onClick={() => setConfirmDelete(false)}
             >
               <X className="size-3.5" />
             </button>

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from loguru import logger
-from sqlalchemy import exists, or_, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models import (
@@ -457,6 +457,70 @@ class SkillPublishService:
                 installed_by_user_id=actor_user_id,
             )
         return sv
+
+    async def delete_uploaded(self, *, org_id: str, skill: Skill) -> None:
+        """Remove an org-owned uploaded skill from the catalog.
+
+        Cascades workspace bindings, org-wide and workspace-private installs,
+        versions, and best-effort object-store / local-cache files. Caller must
+        have already checked visibility and ``source == "uploaded"``.
+        """
+        versions = await SkillVersionRepository(self.session).list_for_skill(skill.id)
+        prefixes = [v.storage_prefix for v in versions]
+        version_ids = [v.id for v in versions]
+
+        install_rows = list(
+            (
+                await self.session.execute(
+                    select(OrgSkillInstall).where(
+                        OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                        OrgSkillInstall.skill_id == skill.id,  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        install_ids = [row.id for row in install_rows]
+        if install_ids:
+            await self.session.execute(
+                delete(WorkspaceSkillBinding).where(
+                    WorkspaceSkillBinding.org_skill_install_id.in_(install_ids)  # type: ignore[attr-defined]
+                )
+            )
+            await self.session.flush()
+            await self.session.execute(
+                delete(OrgSkillInstall).where(
+                    OrgSkillInstall.id.in_(install_ids)  # type: ignore[attr-defined]
+                )
+            )
+
+        await self.session.execute(
+            delete(OrgPreinstalledTombstone).where(
+                OrgPreinstalledTombstone.org_id == org_id,  # type: ignore[arg-type]
+                OrgPreinstalledTombstone.skill_id == skill.id,  # type: ignore[arg-type]
+            )
+        )
+        await self.session.execute(
+            delete(SkillVersion).where(SkillVersion.skill_id == skill.id)  # type: ignore[arg-type]
+        )
+        await self.session.execute(delete(Skill).where(Skill.id == skill.id))  # type: ignore[arg-type]
+        await self.session.commit()
+
+        store = get_objectstore_client()
+        for prefix in prefixes:
+            try:
+                keys = await store.list_objects(prefix)
+            except Exception:
+                logger.exception("Failed listing skill objects for prefix {}", prefix)
+                continue
+            for key in keys:
+                try:
+                    await store.delete_file(key)
+                except Exception:
+                    logger.exception("Failed deleting skill object {}", key)
+        for version_id in version_ids:
+            self.cache.purge(version_id)
 
 
 def _extract_zip(zip_bytes: bytes) -> dict[str, bytes]:
