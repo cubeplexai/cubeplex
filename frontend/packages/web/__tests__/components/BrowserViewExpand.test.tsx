@@ -3,12 +3,16 @@ import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePanelStore } from '@cubeplex/core'
 
+let liveViewUrl = 'https://neko.example/live'
+const refreshLiveView = vi.fn<() => Promise<{ url: string } | undefined>>()
+
 vi.mock('@/hooks/useBrowserLiveView', () => ({
   useBrowserLiveView: () => ({
-    url: 'https://neko.example/live',
+    url: liveViewUrl,
     loading: false,
+    validating: false,
     error: undefined,
-    refresh: vi.fn(),
+    refresh: refreshLiveView,
   }),
 }))
 
@@ -41,6 +45,9 @@ function renderView(hideHeader = true) {
 
 describe('BrowserView expand theater', () => {
   beforeEach(() => {
+    liveViewUrl = 'https://neko.example/live'
+    refreshLiveView.mockReset()
+    refreshLiveView.mockResolvedValue({ url: liveViewUrl })
     vi.stubGlobal(
       'matchMedia',
       (query: string) =>
@@ -156,5 +163,58 @@ describe('BrowserView expand theater', () => {
     // 800×600 parent → largest 1280:900 box is 800 × 562.5 → rounded
     expect(frame.style.width).toBe('800px')
     expect(frame.style.height).toBe('563px')
+  })
+
+  it('refreshes a changed signed URL once and resets takeover', async () => {
+    refreshLiveView.mockImplementation(async () => {
+      liveViewUrl = 'https://neko.example/live-new-token'
+      return { url: liveViewUrl }
+    })
+    renderView(false)
+    const iframe = await waitFor(() => screen.getByTitle('Sandbox browser'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Take over' }))
+    expect(screen.getByRole('button', { name: 'Hand back to agent' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh live view' }))
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Sandbox browser')).toHaveAttribute(
+        'src',
+        'https://neko.example/live-new-token',
+      )
+    })
+    expect(screen.getByTitle('Sandbox browser')).toBe(iframe)
+    expect(screen.getByRole('button', { name: 'Take over' })).toBeInTheDocument()
+  })
+
+  it('coalesces refresh clicks while endpoint resolution is in flight', async () => {
+    let resolveRefresh: ((value: { url: string }) => void) | undefined
+    refreshLiveView.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+    renderView(false)
+    await waitFor(() => screen.getByTitle('Sandbox browser'))
+    const refreshButton = screen.getByRole('button', { name: 'Refresh live view' })
+
+    fireEvent.click(refreshButton)
+    fireEvent.click(refreshButton)
+
+    expect(refreshLiveView).toHaveBeenCalledTimes(1)
+    resolveRefresh?.({ url: liveViewUrl })
+    await waitFor(() => expect(refreshButton).not.toBeDisabled())
+  })
+
+  it('remounts once when refresh returns the same signed URL', async () => {
+    renderView(false)
+    const iframe = await waitFor(() => screen.getByTitle('Sandbox browser'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh live view' }))
+
+    await waitFor(() => expect(screen.getByTitle('Sandbox browser')).not.toBe(iframe))
+    expect(refreshLiveView).toHaveBeenCalledTimes(1)
   })
 })

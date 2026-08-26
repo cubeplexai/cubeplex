@@ -46,7 +46,7 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const initialTab = sandboxView?.initialTab
   const sandboxRevision = sandboxView?.revision ?? null
   const { mutate } = useSWRConfig()
-  const browserRefreshRef = useRef<(() => void) | null>(null)
+  const browserRefreshRef = useRef<(() => Promise<void>) | null>(null)
   const terminalRefreshRef = useRef<(() => Promise<unknown>) | null>(null)
   const scopeKey = sandboxScopeKey(workspaceId, conversationId)
 
@@ -87,8 +87,7 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
       if (activeTab === 'files') {
         await mutate((key: unknown) => typeof key === 'string' && key.includes('/sandbox/files'))
       } else if (activeTab === 'browser') {
-        browserRefreshRef.current?.()
-        await new Promise((r) => setTimeout(r, 400))
+        await browserRefreshRef.current?.()
       } else if (activeTab === 'terminal') {
         await terminalRefreshRef.current?.()
       }

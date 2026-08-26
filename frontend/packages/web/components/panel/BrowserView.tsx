@@ -42,7 +42,7 @@ interface BrowserViewProps {
   /** Hide the PanelHeader when embedded in another panel (e.g. SandboxPanel). */
   hideHeader?: boolean
   /** Expose the refresh function to a parent component. */
-  refreshRef?: React.MutableRefObject<(() => void) | null>
+  refreshRef?: React.MutableRefObject<(() => Promise<void>) | null>
   /** Route live-view + keepalive to the conversation's shared sandbox (group chat / topic). */
   conversationId?: string | null
 }
@@ -243,12 +243,33 @@ export function BrowserView({
   const close = usePanelStore((s) => s.close)
   const t = useTranslations('panel.header')
   const [takeover, setTakeover] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshInFlight = useRef(false)
   // Explicit refresh remounts the Neko iframe even when the signed URL is stable.
   const [frameKey, setFrameKey] = useState(0)
-  const handleRefresh = useCallback(() => {
-    setFrameKey((k) => k + 1)
-    void refresh()
-  }, [refresh])
+  const handleRefresh = useCallback(async (): Promise<void> => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    setRefreshing(true)
+    // A refreshed iframe creates a new Neko session. Never carry the old
+    // session's takeover claim into it.
+    setTakeover(false)
+    try {
+      const previousUrl = url
+      const next = await refresh()
+      // A new signed URL navigates the existing iframe by itself. Only force a
+      // remount when the endpoint returned the same URL, otherwise one refresh
+      // would tear down two consecutive WebRTC sessions.
+      if (!next?.url || next.url === previousUrl) {
+        setFrameKey((k) => k + 1)
+      }
+    } catch {
+      // SWR retains the error for the existing error UI; keep the old frame.
+    } finally {
+      refreshInFlight.current = false
+      setRefreshing(false)
+    }
+  }, [refresh, url])
   // User intent; AND with isDesktop so a narrow viewport never shows theater
   // (no setState-in-effect to clear).
   const [expandIntent, setExpandIntent] = useState(false)
@@ -345,6 +366,7 @@ export function BrowserView({
     <button
       type="button"
       onClick={() => setTakeover((v) => !v)}
+      disabled={refreshing}
       className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
     >
       {takeover ? 'Hand back to agent' : 'Take over'}
@@ -379,7 +401,8 @@ export function BrowserView({
     <>
       <button
         type="button"
-        onClick={handleRefresh}
+        onClick={() => void handleRefresh()}
+        disabled={refreshing}
         className="p-1 rounded-xs text-muted-foreground hover:bg-accent transition-colors duration-fast"
         aria-label="Refresh live view"
       >
