@@ -3097,6 +3097,7 @@ class RunManager:
                                 org_id=ctx.org_id,
                                 org_slug=_org.slug,
                                 workspace_id=ctx.workspace_id,
+                                on_skills_changed=getattr(sandbox, "refresh_skills", None),
                             )
                     except Exception as _skill_exc:  # noqa: BLE001
                         logger.warning(

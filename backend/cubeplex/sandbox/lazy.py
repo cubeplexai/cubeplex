@@ -286,33 +286,52 @@ class LazySandbox(Sandbox):
             # Second concurrent call may have already completed the sync.
             if self._synced_for_this_run:
                 return
-            result = await _sync_skills(
-                catalog=self._catalog,
-                workspace_id=self._workspace_id,
-                org_id=self._org_id,
-                sandbox=sandbox,
-            )
-            # Hot path: nothing changed → no event, no snapshot bump
-            if result.status == "noop":
-                self._synced_for_this_run = True
+            await self._sync_skills_locked(sandbox)
+
+    async def _sync_skills_locked(self, sandbox: Sandbox) -> None:
+        """Run one sync while the caller holds ``_sync_lock``."""
+        assert self._catalog is not None
+        result = await _sync_skills(
+            catalog=self._catalog,
+            workspace_id=self._workspace_id,
+            org_id=self._org_id,
+            sandbox=sandbox,
+        )
+        # Hot path: nothing changed → no event, no snapshot bump
+        if result.status == "noop":
+            self._synced_for_this_run = True
+            return
+        # Cold / delta / failed → emit event (best-effort)
+        if self._event_service is not None and self._user_sandbox_id is not None:
+            try:
+                await self._event_service.record(
+                    user_sandbox_id=self._user_sandbox_id,
+                    org_id=self._org_id,
+                    workspace_id=self._workspace_id,
+                    result=result,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record sync event for ws {}; continuing",
+                    self._workspace_id,
+                )
+        if result.status == "success":
+            self._synced_for_this_run = True
+        # status == "failed" → flag stays False (F4 invariant)
+
+    async def refresh_skills(self) -> None:
+        """Refresh an existing sandbox after the enabled skill set changes.
+
+        Keep sandbox creation lazy. If this run has not used the sandbox yet,
+        its first filesystem operation will perform the normal initial sync.
+        """
+        if self._catalog is None:
+            return
+        async with self._sync_lock:
+            self._synced_for_this_run = False
+            if self._sandbox is None:
                 return
-            # Cold / delta / failed → emit event (best-effort)
-            if self._event_service is not None and self._user_sandbox_id is not None:
-                try:
-                    await self._event_service.record(
-                        user_sandbox_id=self._user_sandbox_id,
-                        org_id=self._org_id,
-                        workspace_id=self._workspace_id,
-                        result=result,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to record sync event for ws {}; continuing",
-                        self._workspace_id,
-                    )
-            if result.status == "success":
-                self._synced_for_this_run = True
-            # status == "failed" → flag stays False (F4 invariant)
+            await self._sync_skills_locked(self._sandbox)
 
     async def _ensure_with_retry(self) -> Sandbox:
         """Ensure sandbox, retrying once if the existing one is broken."""

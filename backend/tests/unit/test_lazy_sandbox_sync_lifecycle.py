@@ -65,6 +65,55 @@ async def test_sync_runs_once_per_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_refresh_skills_resyncs_an_initialized_sandbox() -> None:
+    """A skill installed mid-run must reach a sandbox already synced this run."""
+    installed_skill = SimpleNamespace(
+        name="org:slides",
+        version="1.0.0",
+        skill_version_id="skv-slides",
+        content_hash="sha256:slides",
+        storage_prefix="skills/slides/1.0.0/",
+    )
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(
+        side_effect=[[], [installed_skill]],
+    )
+    catalog.list_files_for_sandbox_sync = AsyncMock(
+        return_value=[("SKILL.md", b"# Slides")],
+    )
+    sandbox = _make_sandbox()
+    lazy = _make_lazy(catalog, sandbox)
+
+    await lazy.execute("true")
+    refresh_skills = getattr(lazy, "refresh_skills", None)
+
+    assert refresh_skills is not None, "LazySandbox must expose a mid-run skill refresh"
+    await refresh_skills()
+
+    assert catalog.list_enabled_for_workspace.await_count == 2
+    catalog.list_files_for_sandbox_sync.assert_awaited_once_with(
+        "skv-slides",
+        storage_prefix="skills/slides/1.0.0/",
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_skills_keeps_an_uninitialized_sandbox_lazy() -> None:
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = _make_sandbox()
+    lazy = _make_lazy(catalog, sandbox)
+    refresh_skills = getattr(lazy, "refresh_skills", None)
+
+    assert refresh_skills is not None, "LazySandbox must expose a mid-run skill refresh"
+    await refresh_skills()
+
+    assert lazy.initialized is False
+    lazy._manager.get_or_create.assert_not_awaited()
+    catalog.list_enabled_for_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sync_failure_does_not_set_flag_so_next_call_retries() -> None:
     catalog = MagicMock()
     catalog.list_enabled_for_workspace = AsyncMock(
