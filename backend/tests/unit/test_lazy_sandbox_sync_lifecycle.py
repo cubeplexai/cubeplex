@@ -5,8 +5,8 @@ If F3/F4/F5 regress, these tests catch it.
 F3: two concurrent execute calls must not both run _sync_skills → independent
     _sync_lock serialises them; double-check pattern lets the second skip.
 F4: a sync failure must NOT set the flag; the next execute must retry.
-F5: sandbox recreate (execute / upload failure path) must reset
-    _synced_for_this_run so the new sandbox gets synced.
+F5: sandbox recreate (execute / upload failure path) must advance the sync
+    generation so the new sandbox gets synced.
 """
 
 from __future__ import annotations
@@ -111,6 +111,70 @@ async def test_refresh_skills_keeps_an_uninitialized_sandbox_lazy() -> None:
     assert lazy.initialized is False
     lazy._manager.get_or_create.assert_not_awaited()
     catalog.list_enabled_for_workspace.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_does_not_mark_a_replacement_sandbox_synced() -> None:
+    """An old-sandbox refresh must not suppress sync on a concurrent replacement."""
+    refresh_download_started = asyncio.Event()
+    allow_refresh_download = asyncio.Event()
+    command_started = asyncio.Event()
+    allow_command_failure = asyncio.Event()
+
+    old_sandbox = _make_sandbox()
+    old_download_count = 0
+
+    async def old_download(_paths: list[str]) -> list[tuple[str, bytes]]:
+        nonlocal old_download_count
+        old_download_count += 1
+        if old_download_count == 2:
+            refresh_download_started.set()
+            await allow_refresh_download.wait()
+        return []
+
+    old_execute_count = 0
+
+    async def old_execute(*_args: object, **_kwargs: object) -> MagicMock:
+        nonlocal old_execute_count
+        old_execute_count += 1
+        if old_execute_count == 2:
+            command_started.set()
+            await allow_command_failure.wait()
+            raise RuntimeError("old sandbox died")
+        return MagicMock(output="", exit_code=0)
+
+    old_sandbox.download = AsyncMock(side_effect=old_download)
+    old_sandbox.execute = AsyncMock(side_effect=old_execute)
+    new_sandbox = _make_sandbox()
+
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    lazy = _make_lazy(catalog, old_sandbox)
+    lazy._manager.get_or_create = AsyncMock(
+        side_effect=[
+            SandboxAttachment(sandbox=old_sandbox, user_sandbox_id="uss-old"),
+            SandboxAttachment(sandbox=new_sandbox, user_sandbox_id="uss-new"),
+        ]
+    )
+
+    await lazy.execute("initial")
+    command_task = asyncio.create_task(lazy.execute("fails"))
+    await command_started.wait()
+
+    refresh_task = asyncio.create_task(lazy.refresh_skills())
+    await refresh_download_started.wait()
+    allow_command_failure.set()
+    for _ in range(100):
+        if lazy._manager.get_or_create.await_count == 2:
+            break
+        await asyncio.sleep(0)
+    assert lazy._manager.get_or_create.await_count == 2
+
+    allow_refresh_download.set()
+    await asyncio.gather(command_task, refresh_task)
+
+    assert catalog.list_enabled_for_workspace.await_count == 3
+    new_sandbox.download.assert_awaited_once()
 
 
 @pytest.mark.asyncio
