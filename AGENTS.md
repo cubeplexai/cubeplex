@@ -15,7 +15,7 @@ Full-stack agent platform.
 |---|---|
 | `backend/` | FastAPI + cubepi streaming runtime, SSE API, Postgres history, MCP |
 | `frontend/` | Next.js + React 19 monorepo (`packages/web`, `@cubeplex/core`) |
-| `docs/` | Cross-cutting docs; all specs/plans/notes under `docs/dev/{specs,plans,notes}` |
+| `docs/` | Cross-cutting docs; living process docs at `docs/{worktrees,testing,releasing}.md`; specs/plans/notes under `docs/dev/` |
 | `backend/docs/`, `frontend/docs/` | Area reference (see Critical Subsystems) |
 | `scripts/` | Worktree provisioning, dev helpers |
 
@@ -118,6 +118,7 @@ Wrong changes here are expensive (cache bills, auth, data corruption).
 | Frontend auth, CSRF, SSE proxy, deploy mode | [frontend/docs/auth-and-sse.md](frontend/docs/auth-and-sse.md) |
 | Worktree provisioning, rebase / migration drift | [docs/worktrees.md](docs/worktrees.md) |
 | Tests — writing, placing, reviewing | [docs/testing.md](docs/testing.md) |
+| Cutting a release (versions, tags, images, deploy-doc snippets) | [docs/releasing.md](docs/releasing.md) |
 
 Env vars, commands, layouts (reference only):
 [backend/docs/quick-reference.md](backend/docs/quick-reference.md),
@@ -137,6 +138,7 @@ Load on demand when the situation matches.
 | `/cubeplex-tdd` | Feature, business logic, durable bug-fix contracts |
 | `/debug-cubeplex` | Bug or test failure — **before** proposing fixes |
 | `/pr-codex-review-loop` | After pushing a PR |
+| `/release` | Cutting a production or self-hosted release |
 
 **Domains**
 
