@@ -221,7 +221,8 @@ class LazySandbox(Sandbox):
         self._sandbox: Sandbox | None = None
         self._user_sandbox_id: str | None = None
         self._lock = asyncio.Lock()
-        self._synced_for_this_run = False
+        self._skills_generation = 0
+        self._synced_skills_generation: int | None = None
         self._sync_lock = asyncio.Lock()  # independent of _lock; serialises _sync_skills
 
     # ------------------------------------------------------------------
@@ -280,17 +281,20 @@ class LazySandbox(Sandbox):
         Double-check pattern: fast path avoids lock acquisition after first sync.
         Failure does NOT set the flag so the next tool call retries (F4).
         """
-        if self._catalog is None or self._synced_for_this_run:
+        generation = self._skills_generation
+        if self._catalog is None or self._synced_skills_generation == generation:
             return
         async with self._sync_lock:
+            generation = self._skills_generation
             # Second concurrent call may have already completed the sync.
-            if self._synced_for_this_run:
+            if self._synced_skills_generation == generation:
                 return
-            await self._sync_skills_locked(sandbox)
+            await self._sync_skills_locked(sandbox, generation)
 
-    async def _sync_skills_locked(self, sandbox: Sandbox) -> None:
+    async def _sync_skills_locked(self, sandbox: Sandbox, generation: int) -> None:
         """Run one sync while the caller holds ``_sync_lock``."""
         assert self._catalog is not None
+        user_sandbox_id = self._user_sandbox_id
         result = await _sync_skills(
             catalog=self._catalog,
             workspace_id=self._workspace_id,
@@ -299,13 +303,14 @@ class LazySandbox(Sandbox):
         )
         # Hot path: nothing changed → no event, no snapshot bump
         if result.status == "noop":
-            self._synced_for_this_run = True
+            if self._skills_generation == generation:
+                self._synced_skills_generation = generation
             return
         # Cold / delta / failed → emit event (best-effort)
-        if self._event_service is not None and self._user_sandbox_id is not None:
+        if self._event_service is not None and user_sandbox_id is not None:
             try:
                 await self._event_service.record(
-                    user_sandbox_id=self._user_sandbox_id,
+                    user_sandbox_id=user_sandbox_id,
                     org_id=self._org_id,
                     workspace_id=self._workspace_id,
                     result=result,
@@ -315,9 +320,15 @@ class LazySandbox(Sandbox):
                     "Failed to record sync event for ws {}; continuing",
                     self._workspace_id,
                 )
-        if result.status == "success":
-            self._synced_for_this_run = True
-        # status == "failed" → flag stays False (F4 invariant)
+        if result.status == "success" and self._skills_generation == generation:
+            self._synced_skills_generation = generation
+        # Failed or superseded syncs leave the current generation unsynced.
+
+    def _invalidate_skills_sync(self) -> int:
+        """Advance the generation so an older sync cannot mark current state ready."""
+        self._skills_generation += 1
+        self._synced_skills_generation = None
+        return self._skills_generation
 
     async def refresh_skills(self) -> None:
         """Refresh an existing sandbox after the enabled skill set changes.
@@ -328,10 +339,10 @@ class LazySandbox(Sandbox):
         if self._catalog is None:
             return
         async with self._sync_lock:
-            self._synced_for_this_run = False
+            generation = self._invalidate_skills_sync()
             if self._sandbox is None:
                 return
-            await self._sync_skills_locked(self._sandbox)
+            await self._sync_skills_locked(self._sandbox, generation)
 
     async def _ensure_with_retry(self) -> Sandbox:
         """Ensure sandbox, retrying once if the existing one is broken."""
@@ -341,7 +352,7 @@ class LazySandbox(Sandbox):
             # First attempt failed — reset and try creating a fresh one
             async with self._lock:
                 self._sandbox = None
-                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
+                self._invalidate_skills_sync()
                 self._user_sandbox_id = None
             logger.warning(
                 "Lazy sandbox: first attempt failed for scope {}/{}, retrying",
@@ -451,7 +462,7 @@ class LazySandbox(Sandbox):
             # Sandbox may have died — invalidate and retry once
             async with self._lock:
                 self._sandbox = None
-                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
+                self._invalidate_skills_sync()
                 self._user_sandbox_id = None
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
@@ -467,7 +478,7 @@ class LazySandbox(Sandbox):
         except Exception:
             async with self._lock:
                 self._sandbox = None
-                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
+                self._invalidate_skills_sync()
                 self._user_sandbox_id = None
             logger.warning("Lazy sandbox: upload failed, recreating sandbox")
             sandbox = await self._ensure()
