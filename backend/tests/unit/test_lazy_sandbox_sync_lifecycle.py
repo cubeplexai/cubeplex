@@ -114,6 +114,17 @@ async def test_refresh_skills_keeps_an_uninitialized_sandbox_lazy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_refresh_skills_without_a_catalog_is_a_noop() -> None:
+    sandbox = _make_sandbox()
+    lazy = _make_lazy(None, sandbox)
+
+    await lazy.refresh_skills()
+
+    assert lazy.initialized is False
+    lazy._manager.get_or_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_refresh_does_not_mark_a_replacement_sandbox_synced() -> None:
     """An old-sandbox refresh must not suppress sync on a concurrent replacement."""
     refresh_download_started = asyncio.Event()
