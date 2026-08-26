@@ -95,6 +95,14 @@ class PreviewInput(BaseModel):
             "content so you can describe the skill before suggesting installation."
         ),
     )
+    description: str = Field(
+        default="",
+        description=(
+            "Human-readable name or short intent of the skill being previewed. "
+            "The UI displays this in the tool-call chip instead of the raw "
+            "candidate_id. Always pass the skill's `name` from the find result."
+        ),
+    )
 
 
 class InstallInput(BaseModel):
@@ -102,6 +110,14 @@ class InstallInput(BaseModel):
         description=(
             "The candidate_id from a find result. "
             "Only call this after the user has explicitly confirmed they want to install."
+        ),
+    )
+    description: str = Field(
+        default="",
+        description=(
+            "Human-readable name or short intent of the skill being installed. "
+            "The UI displays this in the tool-call chip instead of the raw "
+            "candidate_id. Always pass the skill's `name` from the find result."
         ),
     )
 
@@ -144,8 +160,9 @@ async def _handle_find_impl(
         "hint": (
             "To use an 'enabled' candidate now, call load_skill(canonical_name). "
             "To install an 'in_catalog' or 'available' candidate: present it to the "
-            "user with platform_skills_preview(candidate_id=...) so they can see "
-            "what it does, then call platform_skills_install(candidate_id=...) "
+            "user with platform_skills_preview(candidate_id=..., description='<name>') "
+            "so they can see what it does (pass the skill name as description for UI), "
+            "then call platform_skills_install(candidate_id=..., description='<name>') "
             "only when the user explicitly asks to install. Never install silently."
         ),
     }
@@ -320,7 +337,9 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Fetch the full SKILL.md for a candidate so you can describe it "
                     "to the user before suggesting installation. Use after find. "
-                    'Example: {"candidate_id":"<candidate_id from find>"}'
+                    "Pass the skill name from the find result as `description` so "
+                    "the UI displays a meaningful label. "
+                    'Example: {"candidate_id":"<candidate_id from find>","description":"Web Search"}'
                 ),
                 input_model=PreviewInput,
                 handler=preview_handler,
@@ -331,7 +350,9 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Install a skill candidate into the current workspace. "
                     "Only call when the user has explicitly asked to install. "
-                    'Example: {"candidate_id":"<candidate_id from find>"}'
+                    "Pass the skill name from the find result as `description` so "
+                    "the UI displays a meaningful label. "
+                    'Example: {"candidate_id":"<candidate_id from find>","description":"Web Search"}'
                 ),
                 input_model=InstallInput,
                 handler=install_handler,
