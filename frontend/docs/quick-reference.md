@@ -3,7 +3,8 @@
 Reference content for the CubePlex frontend monorepo. For workflow
 discipline, hard rules, and skill triggers, see the root
 [AGENTS.md](../../AGENTS.md). For auth, CSRF, SSE, and deployment-mode
-behavior, see [auth-and-sse.md](auth-and-sse.md).
+behavior, see [auth-and-sse.md](auth-and-sse.md). For product UI tokens
+and visual language, see [design.md](../design.md).
 
 ## Repository Structure
 
