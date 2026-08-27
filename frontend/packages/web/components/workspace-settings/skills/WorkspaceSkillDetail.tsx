@@ -583,6 +583,11 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
           >
             {t(STATE_KEY[skill.workspaceState])}
           </Badge>
+          {skill.workspaceState === 'workspace-private' && (
+            <Badge variant="outline" className={cn(STATE_BADGE_VARIANT['org-enabled'].className)}>
+              {t(STATE_KEY['org-enabled'])}
+            </Badge>
+          )}
           {skill.install_state === 'update_available' && (
             <Badge variant="outline" className="border-warning-border text-warning-fg">
               {t('stateUpgradable')}
