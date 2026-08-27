@@ -154,18 +154,17 @@ class SkillsShAdapter:
     ) -> str:
         """Resolve the actual GitHub directory path for a skillId.
 
-        skills.sh sometimes prefixes skillIds with an owner alias
-        (e.g. "sleek-design-mobile-apps" for dir "design-mobile-apps").
-        If no exact match, progressively strip the leading dash-segment
-        until a match is found or the slug is exhausted.
+        skills.sh sometimes prefixes skillIds with a single owner-alias
+        segment (e.g. "sleek-design-mobile-apps" for dir "design-mobile-apps").
+        Only that one leading segment is stripped. Going further lets a
+        distinct catalog name (website-to-hyperframes) steal a sibling
+        directory (hyperframes) and emit a duplicate candidate_id.
         """
         if (source, slug) in skill_paths:
             return skill_paths[(source, slug)]
-        parts = slug.split("-")
-        for i in range(1, len(parts)):
-            candidate = "-".join(parts[i:])
-            if (source, candidate) in skill_paths:
-                return skill_paths[(source, candidate)]
+        _, sep, rest = slug.partition("-")
+        if sep and rest and (source, rest) in skill_paths:
+            return skill_paths[(source, rest)]
         return slug
 
     def trust_for_ref(self, source_ref: str) -> TrustTier:

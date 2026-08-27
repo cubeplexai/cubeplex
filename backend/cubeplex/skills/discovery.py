@@ -48,6 +48,29 @@ def _dedupe_key(c: SkillCandidate) -> str:
     return c.name.split(":", 1)[-1].strip().lower()
 
 
+def _path_leaf(source_ref: str) -> str:
+    return source_ref.rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def _prefer_same_id(
+    incumbent: SkillCandidate, challenger: SkillCandidate, *, query: str
+) -> SkillCandidate:
+    """Pick one candidate when two share an install handle (candidate_id).
+
+    Prefer the display name that matches the directory leaf so a catalog
+    alias (website-to-hyperframes) does not hide the real slug (hyperframes).
+    """
+    inc_exact = _dedupe_key(incumbent) == _path_leaf(incumbent.source_ref)
+    ch_exact = _dedupe_key(challenger) == _path_leaf(challenger.source_ref)
+    if ch_exact and not inc_exact:
+        return challenger
+    if inc_exact and not ch_exact:
+        return incumbent
+    if _score(challenger, query) < _score(incumbent, query):
+        return challenger
+    return incumbent
+
+
 def _tokens(text: str) -> set[str]:
     return {t for t in re.split(r"[^a-z0-9]+", text.lower()) if t}
 
@@ -85,18 +108,30 @@ def _score(c: SkillCandidate, query: str) -> tuple[int, int, int, int]:
 def rank_candidates(
     candidates: list[SkillCandidate], *, query: str, limit: int
 ) -> list[SkillCandidate]:
-    """Dedupe by normalized display slug (local wins), then sort and truncate.
+    """Dedupe by install handle then display slug (local wins), sort, truncate.
 
     Drop candidates with no query overlap (bucket 3) only if local — remote
     API sources (skills.sh, etc.) have already filtered for relevance, so
     bucket 3 filtering should not apply to them. LocalCatalogAdapter returns
     every visible skill regardless of query, so filtering it prevents
     spurious results like discover?q=<nonsense>.
+
+    candidate_id collapse runs first: two catalog names that resolve to the
+    same source_ref are the same install target and must not both reach the
+    client (React keys on candidate_id).
     """
-    by_slug: dict[str, SkillCandidate] = {}
+    by_id: dict[str, SkillCandidate] = {}
     for c in candidates:
         if c.source_kind == "local" and _score(c, query)[0] >= 3:
             continue  # drop unrelated local skills only
+        prev = by_id.get(c.candidate_id)
+        if prev is None:
+            by_id[c.candidate_id] = c
+        else:
+            by_id[c.candidate_id] = _prefer_same_id(prev, c, query=query)
+
+    by_slug: dict[str, SkillCandidate] = {}
+    for c in by_id.values():
         key = _dedupe_key(c)
         prev = by_slug.get(key)
         if prev is None:
