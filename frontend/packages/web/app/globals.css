@@ -182,8 +182,10 @@
 
   /* ============================================================
      OPERATOR — alt theme family inspired by cubepi docs + e2b.
-     Two variants: .operator-light and .operator-dark; user picks
-     light/dark independently from picking the Operator flavor.
+     Two variants: .operator-light and .operator-dark. The product UI
+     ships the default family; Operator stays registered as an alt
+     family (next-themes names + these classes). Light/dark is
+     independent of family.
      Shared traits:
      - Inter Tight headlines, JetBrains Mono chrome
      - Inverse elevation: page is the softer surface, panels are

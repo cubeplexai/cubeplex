@@ -25,12 +25,11 @@ import {
   LogOut,
   Moon,
   Shield,
-  Sparkles,
   Sun,
-  Terminal,
   User as UserIcon,
 } from 'lucide-react'
 import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
+import { resolveColorMode } from '@/lib/themeFlavor'
 
 export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
   const t = useTranslations('avatar')
@@ -44,6 +43,7 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
   const [mounted, setMounted] = useState(false)
   const [langOpen, setLangOpen] = useState(false)
   const currentLocale = useLocale()
+  const currentMode = resolveColorMode(theme, resolvedTheme)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -143,56 +143,20 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
           <span>{t('profileSettings')}</span>
         </Link>
 
-        {mounted &&
-          (() => {
-            // Two orthogonal axes: flavor (default / operator) × mode (light / dark).
-            // Compose to a concrete next-themes value: light, dark,
-            // operator-light, operator-dark. resolvedTheme handles 'system'.
-            const isOperator = theme === 'operator-light' || theme === 'operator-dark'
-            const currentMode =
-              theme === 'operator-light' || theme === 'light'
-                ? 'light'
-                : theme === 'operator-dark' || theme === 'dark'
-                  ? 'dark'
-                  : (resolvedTheme ?? 'light')
-            const toggleMode = () => {
-              const nextMode = currentMode === 'dark' ? 'light' : 'dark'
-              setTheme(isOperator ? `operator-${nextMode}` : nextMode)
-            }
-            const toggleFlavor = () => {
-              setTheme(isOperator ? currentMode : `operator-${currentMode}`)
-            }
-            return (
-              <>
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
-                >
-                  {currentMode === 'dark' ? (
-                    <Sun className="size-3.5 text-muted-foreground" />
-                  ) : (
-                    <Moon className="size-3.5 text-muted-foreground" />
-                  )}
-                  <span>{currentMode === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleFlavor}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
-                >
-                  {isOperator ? (
-                    <Sparkles className="size-3.5 text-muted-foreground" />
-                  ) : (
-                    <Terminal className="size-3.5 text-muted-foreground" />
-                  )}
-                  <span className="font-mono uppercase tracking-wider text-[11px]">
-                    {isOperator ? 'Default theme' : 'Operator theme'}
-                  </span>
-                </button>
-              </>
-            )
-          })()}
+        {mounted && (
+          <button
+            type="button"
+            onClick={() => setTheme(currentMode === 'dark' ? 'light' : 'dark')}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+          >
+            {currentMode === 'dark' ? (
+              <Sun className="size-3.5 text-muted-foreground" />
+            ) : (
+              <Moon className="size-3.5 text-muted-foreground" />
+            )}
+            <span>{currentMode === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
+          </button>
+        )}
 
         {(() => {
           const languages = [

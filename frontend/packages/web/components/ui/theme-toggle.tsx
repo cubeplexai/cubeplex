@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Button } from './button'
 import { Moon, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { resolveColorMode } from '@/lib/themeFlavor'
 
 export function ThemeToggle() {
   const t = useTranslations('avatar')
@@ -18,18 +19,12 @@ export function ThemeToggle() {
 
   if (!mounted) return null
 
-  // Theme is two-axis: flavor (default | operator) × mode (light | dark).
-  // This button toggles mode only, preserving the active flavor.
-  const isOperator = theme === 'operator-light' || theme === 'operator-dark'
-  const currentMode =
-    theme === 'operator-light' || theme === 'light'
-      ? 'light'
-      : theme === 'operator-dark' || theme === 'dark'
-        ? 'dark'
-        : (resolvedTheme ?? 'light')
+  // Product UI writes the default family only (light | dark). Operator names
+  // still resolve so a leftover stored value shows the right icon.
+  const currentMode = resolveColorMode(theme, resolvedTheme)
   const label = currentMode === 'dark' ? t('lightTheme') : t('darkTheme')
   const next = currentMode === 'dark' ? 'light' : 'dark'
-  const onClick = () => setTheme(isOperator ? `operator-${next}` : next)
+  const onClick = () => setTheme(next)
 
   return (
     <Button variant="ghost" size="sm" aria-label={label} title={label} onClick={onClick}>

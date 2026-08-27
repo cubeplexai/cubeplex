@@ -5,6 +5,7 @@ import { Inter_Tight, JetBrains_Mono } from 'next/font/google'
 import { NextIntlClientProvider } from 'next-intl'
 import { getLocale, getMessages } from 'next-intl/server'
 import { ThemeProvider } from 'next-themes'
+import { DefaultThemeGuard } from '@/components/ui/default-theme-guard'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
@@ -46,8 +47,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             attribute="class"
             defaultTheme="system"
             enableSystem
+            // Operator family stays registered so its CSS classes still resolve.
             themes={['light', 'dark', 'operator-light', 'operator-dark']}
           >
+            <DefaultThemeGuard />
             {children}
             <Toaster />
           </ThemeProvider>
