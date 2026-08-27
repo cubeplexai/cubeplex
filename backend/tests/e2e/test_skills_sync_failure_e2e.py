@@ -10,10 +10,9 @@ Two complementary blocks:
      ``_sync_skills`` itself and that the manifest is NOT written (no half-state).
      Subsequent successful sync heals the state.
   2. LazySandbox gate: drives the same failure through ``_ensure_skills_synced``
-     so we verify the outer ``except Exception`` catch (F4 invariant) —
-     ``_synced_for_this_run`` stays False on failure, then becomes True after
-     the healing retry.  Uses the same outer-boundary ``MemSandbox.execute``
-     patch as Block 1 — no internal function patching.
+     so we verify the F4 invariant — the current skills generation stays
+     unsynced on failure, then matches after a successful retry. Uses the
+     same outer-boundary ``MemSandbox.execute`` patch as Block 1.
 """
 
 from __future__ import annotations
@@ -153,16 +152,14 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
     fresh_workspace_and_sandbox: SimpleNamespace,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """F4 invariant: _ensure_skills_synced must NOT set _synced_for_this_run on failure.
+    """F4: a failed sync must not mark the current skills generation ready.
 
     Patches ``MemSandbox.execute`` at the outer boundary to raise on the
     tar-extract command (first occurrence only), which causes the real
-    ``_sync_skills`` to raise, which ``_ensure_skills_synced`` catches without
-    setting the flag.  The second ``lazy.execute`` retries the real sync path
-    and heals.
+    ``_sync_skills`` to raise. ``_sync_skills_locked`` then leaves
+    ``_synced_skills_generation`` unset so the next ``lazy.execute`` retries.
 
-    Invariant: if F4 regresses (flag set on failure), the second execute would
-    short-circuit and leave _synced_for_this_run True and skills stale.
+    If F4 regresses, the second execute short-circuits and skills stay stale.
     """
     from tests.e2e.conftest import install_skill_for_workspace, uninstall_skill_for_workspace
 
@@ -198,7 +195,7 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
         # Must accept as_root: LazySandbox always forwards it. Dropping the
         # kwarg raises TypeError after the intentional tar failure; the lazy
         # retry path then wipes the injected MemSandbox, re-syncs successfully,
-        # and spuriously sets _synced_for_this_run True (F4 false-positive).
+        # and spuriously marks the current generation synced (F4 false-positive).
         if "tar -xzf" in command and not fail_once["done"]:
             fail_once["done"] = True
             raise RuntimeError("simulated extract failure")
@@ -228,16 +225,16 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
             lazy._sandbox = sandbox
 
             # First execute: _ensure_skills_synced → real _sync_skills →
-            # sandbox.execute(tar cmd) raises → caught by _ensure_skills_synced
-            # → _synced_for_this_run stays False.  The execute itself must NOT raise.
+            # sandbox.execute(tar cmd) raises → generation stays unsynced.
+            # The execute itself must NOT raise.
             result = await lazy.execute("true")
             assert result.exit_code in (0, None), (
                 f"sandbox not usable after sync failure: exit={result.exit_code}"
             )
 
-            # F4: flag must remain False so the next execute retries.
-            assert lazy._synced_for_this_run is False, (
-                "_synced_for_this_run was set True despite _sync_skills failure — F4 violated"
+            # F4: current generation must stay unsynced so the next execute retries.
+            assert lazy._synced_skills_generation is None, (
+                "current generation was marked synced despite _sync_skills failure"
             )
 
             # Manifest must NOT be present (first sync failed before writing it).
@@ -256,9 +253,9 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
             # Second execute: real _sync_skills runs without interference → heals.
             await lazy.execute("true")
 
-            # Flag becomes True after the successful retry.
-            assert lazy._synced_for_this_run is True, (
-                "_synced_for_this_run should be True after successful retry"
+            # Current generation is marked synced after the successful retry.
+            assert lazy._synced_skills_generation == lazy._skills_generation, (
+                "current generation should be synced after successful retry"
             )
 
             # Manifest must now be populated.
