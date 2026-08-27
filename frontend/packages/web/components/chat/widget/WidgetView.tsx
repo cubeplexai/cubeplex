@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Copy, Maximize2, Minimize2, RotateCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { htmlIsDark } from '@/lib/themeFlavor'
 import { WIDGET_SHELL_HTML } from './widgetShell'
 
 const READY_TIMEOUT_MS = 5000
@@ -40,7 +41,7 @@ function resolveThemeTokens(isDark: boolean): ThemeTokens {
 }
 
 function isAppDark(): boolean {
-  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  return typeof document !== 'undefined' && htmlIsDark(document.documentElement)
 }
 
 interface WidgetViewProps {
@@ -301,7 +302,7 @@ function WidgetFrame({
     const push = () => {
       const win = iframeRef.current?.contentWindow
       if (!win) return
-      const t = resolveThemeTokens(html.classList.contains('dark'))
+      const t = resolveThemeTokens(htmlIsDark(html))
       win.postMessage({ widgetId, type: 'theme', ...t }, '*')
     }
     if (ready) push()
