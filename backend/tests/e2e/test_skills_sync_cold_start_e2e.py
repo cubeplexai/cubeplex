@@ -6,7 +6,7 @@ Two complementary assertion blocks:
   1. Direct ``_sync_skills`` call into a ``MemSandbox`` — asserts manifest +
      file content without any LazySandbox overhead (fast, readable).
   2. ``LazySandbox.execute("true")`` gate — exercises ``_ensure_skills_synced``
-     / ``_synced_for_this_run`` / ``_sync_lock`` end-to-end with a
+     / ``_synced_skills_generation`` / ``_sync_lock`` end-to-end with a
      ``_CountingCatalog`` wrapper to verify the second execute call short-circuits.
 """
 
@@ -118,7 +118,7 @@ async def test_cold_start_writes_files_and_manifest(
     # -----------------------------------------------------------------------
     # Block 2: Drive sync through the LazySandbox gate.
     #
-    # Exercises _ensure_skills_synced / _synced_for_this_run / _sync_lock —
+    # Exercises _ensure_skills_synced / generation flag / _sync_lock —
     # code paths that the direct _sync_skills call above bypasses.
     # -----------------------------------------------------------------------
     from cryptography.fernet import Fernet
@@ -147,16 +147,16 @@ async def test_cold_start_writes_files_and_manifest(
 
         # First execute: _ensure_skills_synced runs → list_enabled called once.
         await lazy2.execute("true")
-        assert lazy2._synced_for_this_run is True, (
-            "_synced_for_this_run should be True after first execute"
+        assert lazy2._synced_skills_generation == lazy2._skills_generation, (
+            "current generation should be synced after first execute"
         )
         assert counting_catalog.list_enabled_calls == 1, (
             f"expected 1 list_enabled call after first execute, got {counting_catalog.list_enabled_calls}"
         )
 
-        # Second execute: short-circuit — _synced_for_this_run already True.
+        # Second execute: short-circuit — current generation already synced.
         await lazy2.execute("true")
-        assert lazy2._synced_for_this_run is True
+        assert lazy2._synced_skills_generation == lazy2._skills_generation
         assert counting_catalog.list_enabled_calls == 1, (
             "second execute must NOT trigger another sync — "
             f"list_enabled_calls={counting_catalog.list_enabled_calls}"
