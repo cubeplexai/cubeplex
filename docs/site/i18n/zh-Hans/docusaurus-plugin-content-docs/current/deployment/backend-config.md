@@ -113,7 +113,7 @@ auth:
   csrf_secret: "…"         # 必填
   vault_key: "…"           # 必填（Fernet key）
   cookie_secure: true      # 纯 HTTP 必须设为 false
-  jwt_lifetime_seconds: 86400
+  jwt_lifetime_seconds: 2592000
   cookie_samesite: "lax"
   password_policy: "high"  # high | low
   rate_limit:
@@ -129,7 +129,7 @@ auth:
 | Key | 默认 | 说明 |
 |---|---|---|
 | `auth.cookie_secure` | `true`（生产） | **纯 HTTP 下必须设为 `false`**，否则浏览器会静默丢弃 auth cookie。 |
-| `auth.jwt_lifetime_seconds` | `86400` | 会话时长（24h）。 |
+| `auth.jwt_lifetime_seconds` | `2592000` | 会话时长（30 天）。 |
 | `auth.cookie_name` / `csrf_cookie_name` | `cubeplex_auth` / `cubeplex_csrf` | Cookie 名。 |
 | `auth.password_policy` | `high` | `high` 强制更强的密码；`low` 放宽。 |
 | `auth.rate_limit.*` | 5 / 3 每分钟 | 登录 / 注册限流。 |

@@ -119,7 +119,7 @@ auth:
   csrf_secret: "…"         # required
   vault_key: "…"           # required (Fernet key)
   cookie_secure: true      # MUST be false on plain HTTP
-  jwt_lifetime_seconds: 86400
+  jwt_lifetime_seconds: 2592000
   cookie_samesite: "lax"
   password_policy: "high"  # high | low
   rate_limit:
@@ -135,7 +135,7 @@ auth:
 | Key | Default | Notes |
 |---|---|---|
 | `auth.cookie_secure` | `true` (prod) | **Set `false` on plain HTTP**, or browsers silently drop the auth cookie. |
-| `auth.jwt_lifetime_seconds` | `86400` | Session lifetime (24h). |
+| `auth.jwt_lifetime_seconds` | `2592000` | Session lifetime (30 days). |
 | `auth.cookie_name` / `csrf_cookie_name` | `cubeplex_auth` / `cubeplex_csrf` | Cookie names. |
 | `auth.password_policy` | `high` | `high` enforces stronger passwords; `low` relaxes it. |
 | `auth.rate_limit.*` | 5 / 3 per min | Login / register throttles. |

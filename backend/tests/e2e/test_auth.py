@@ -1,8 +1,10 @@
 """E2E auth tests: register, login, logout, duplicate email, me-requires-auth."""
 
 import secrets
+import time
 
 import httpx
+import jwt
 import pytest
 from sqlalchemy import select
 
@@ -20,6 +22,8 @@ from tests.e2e.conftest import (
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
+
+SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 
 
 @pytest.mark.asyncio
@@ -106,11 +110,32 @@ async def test_register_and_login_sets_cookie(unauthenticated_memory_client):
     )
     assert r.status_code == 201, r.text
 
+    before_login = int(time.time())
     r = await unauthenticated_memory_client.post(
         "/api/v1/auth/login", data={"username": email, "password": pw}
     )
+    after_login = int(time.time())
     assert r.status_code == 204
     assert _auth_cookie_name() in unauthenticated_memory_client.cookies
+    auth_cookie = next(
+        cookie
+        for cookie in r.headers.get_list("set-cookie")
+        if cookie.startswith(f"{_auth_cookie_name()}=")
+    )
+    assert f"Max-Age={SESSION_LIFETIME_SECONDS}" in auth_cookie
+    token = unauthenticated_memory_client.cookies.get(_auth_cookie_name())
+    assert token is not None
+    claims = jwt.decode(token, options={"verify_signature": False})
+    assert before_login + SESSION_LIFETIME_SECONDS <= claims["exp"]
+    assert claims["exp"] <= after_login + SESSION_LIFETIME_SECONDS
+
+    me = await unauthenticated_memory_client.get("/api/v1/auth/me")
+    csrf_cookie = next(
+        cookie
+        for cookie in me.headers.get_list("set-cookie")
+        if cookie.startswith(f"{csrf_cookie_name()}=")
+    )
+    assert f"Max-Age={SESSION_LIFETIME_SECONDS}" in csrf_cookie
 
 
 @pytest.mark.asyncio

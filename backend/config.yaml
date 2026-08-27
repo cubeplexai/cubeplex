@@ -246,7 +246,7 @@ default:
   # Auth Configuration (P1)
   auth:
     jwt_secret: "CHANGE_ME_IN_PRODUCTION_NOT_SECURE" # ENV: CUBEPLEX_AUTH__JWT_SECRET
-    jwt_lifetime_seconds: 86400 # 24h
+    jwt_lifetime_seconds: 2592000 # 30d
     cookie_name: "cubeplex_auth"
     csrf_cookie_name: "cubeplex_csrf"
     cookie_secure: false # production: true

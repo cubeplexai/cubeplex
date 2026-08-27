@@ -26,6 +26,7 @@ class CSRFMiddleware:
         self.auth_cookie = config.get("auth.cookie_name", "cubeplex_auth")
         self.csrf_cookie = config.get("auth.csrf_cookie_name", "cubeplex_csrf")
         self.cookie_secure = config.get("auth.cookie_secure", False)
+        self.cookie_max_age = config.get("auth.jwt_lifetime_seconds", 2_592_000)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -59,7 +60,7 @@ class CSRFMiddleware:
                     cookie[csrf_name] = new_token
                     cookie[csrf_name]["path"] = "/"
                     cookie[csrf_name]["samesite"] = "Lax"
-                    cookie[csrf_name]["max-age"] = "86400"
+                    cookie[csrf_name]["max-age"] = str(self.cookie_max_age)
                     if cookie_secure:
                         cookie[csrf_name]["secure"] = True
                     headers.append("set-cookie", cookie[csrf_name].OutputString())
