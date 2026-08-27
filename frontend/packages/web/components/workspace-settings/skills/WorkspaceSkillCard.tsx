@@ -23,7 +23,7 @@ interface WorkspaceSkillCardProps {
   onClick: () => void
 }
 
-function StateBadge({ state }: { state: WorkspaceSkillState }) {
+function StateBadges({ state }: { state: WorkspaceSkillState }) {
   const t = useTranslations('wsSettings.skillCard')
   if (state === 'org-enabled') {
     return (
@@ -43,10 +43,16 @@ function StateBadge({ state }: { state: WorkspaceSkillState }) {
   }
   if (state === 'workspace-private') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-        <Lock className="size-3" />
-        {t('private')}
-      </span>
+      <>
+        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <Lock className="size-3" />
+          {t('private')}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-success-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-success-fg">
+          <CheckCircle2 className="size-3" />
+          {t('enabled')}
+        </span>
+      </>
     )
   }
   return (
@@ -87,7 +93,7 @@ export function WorkspaceSkillCard({ skill, active, onClick }: WorkspaceSkillCar
         >
           {label.primary}
         </span>
-        <StateBadge state={skill.workspaceState} />
+        <StateBadges state={skill.workspaceState} />
         {upgradable && (
           <span className="inline-flex items-center gap-1 rounded-full bg-warning-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
             <ArrowUpCircle className="size-3" />

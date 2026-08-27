@@ -14,7 +14,7 @@ Open the **Skills** page from the workspace sidebar to see every skill available
 - **Name** and short description. Uploaded skills are stored as `org-slug:skill-slug` for uniqueness, but the card shows only the short skill slug. Hover the name or open the detail panel to see the full canonical name (which is what agents pass to `load_skill`).
 - **Source** — whether the skill is built-in (preinstalled) or uploaded.
 - **Version** — the currently installed version.
-- **State** — whether the skill is enabled, disabled, or available but not yet installed.
+- **State** — whether the skill is enabled, disabled, or available but not yet installed. Workspace-private skills show both **Private** and **Enabled** because they are always enabled.
 
 You can filter the list by source (preinstalled / uploaded), by state (enabled / disabled / available), or by a text search.
 
