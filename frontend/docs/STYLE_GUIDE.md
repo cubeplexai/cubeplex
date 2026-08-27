@@ -1,6 +1,10 @@
 # CubePlex Frontend 样式指南
 
-> 本文档基于 cubetrace/frontend 的设计系统整理而成，所有前端开发需遵循此规范。
+> **Superseded.** Product UI tokens and visual language live in
+> [`../design.md`](../design.md). Do not follow the palettes, fonts, or
+> dark-first rules below — they describe a previous product.
+>
+> 本文档基于 cubetrace/frontend 的设计系统整理而成，已不再作为实现依据。
 
 ---
 

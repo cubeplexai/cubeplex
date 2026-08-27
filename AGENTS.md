@@ -116,6 +116,7 @@ Wrong changes here are expensive (cache bills, auth, data corruption).
 | Agent middleware, request flow, event types | [backend/docs/agent-system-design.md](backend/docs/agent-system-design.md) |
 | MCP catalog / OAuth / connector install | [backend/docs/mcp_catalog_oauth.md](backend/docs/mcp_catalog_oauth.md) |
 | Frontend auth, CSRF, SSE proxy, deploy mode | [frontend/docs/auth-and-sse.md](frontend/docs/auth-and-sse.md) |
+| Frontend product UI, theme, tokens | [frontend/design.md](frontend/design.md) |
 | Worktree provisioning, rebase / migration drift | [docs/worktrees.md](docs/worktrees.md) |
 | Tests — writing, placing, reviewing | [docs/testing.md](docs/testing.md) |
 | Cutting a release (versions, tags, images, deploy-doc snippets) | [docs/releasing.md](docs/releasing.md) |
@@ -146,7 +147,7 @@ Load on demand when the situation matches.
 |---|---|
 | `cubepi` | Agents on CubePi — API, providers, tools, middleware, MCP, HITL |
 | `cubepi-trace` | Debug a cubepi run (spans, tool I/O, tokens, cache) |
-| `web-design-guidelines` | UI a11y / design review |
+| `web-design-guidelines` | UI a11y / design review (after [frontend/design.md](frontend/design.md)) |
 | `playwright-cli` | Playwright tests |
 
 Escape hatch: `/codex:rescue` — stuck; want a second opinion.
