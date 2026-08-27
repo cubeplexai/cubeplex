@@ -95,6 +95,44 @@ def test_non_matching_query_drops_unrelated_candidates():
     assert rank_candidates(cands, query="quantum origami", limit=5) == []
 
 
+def test_dedupe_same_candidate_id_keeps_path_matching_name():
+    """Two catalog names that resolve to the same install target collapse to one.
+
+    Prefer the candidate whose display name matches the directory leaf, so
+    'hyperframes' wins over 'website-to-hyperframes' when they share a
+    candidate_id.
+    """
+    shared_id = "remote-hyperframes-dir"
+    shared_ref = "heygen-com/hyperframes/main/skills/hyperframes"
+    alias = SkillCandidate(
+        candidate_id=shared_id,
+        name="website-to-hyperframes",
+        canonical_name="website-to-hyperframes",
+        description="",
+        source_kind="remote",
+        source_ref=shared_ref,
+        keywords=[],
+        stars=1,
+    )
+    canonical = SkillCandidate(
+        candidate_id=shared_id,
+        name="hyperframes",
+        canonical_name="hyperframes",
+        description="",
+        source_kind="remote",
+        source_ref=shared_ref,
+        keywords=[],
+        stars=10,
+    )
+    ranked = rank_candidates([alias, canonical], query="hyperframes", limit=20)
+    assert len(ranked) == 1
+    assert ranked[0].name == "hyperframes"
+
+    ranked_reverse = rank_candidates([canonical, alias], query="hyperframes", limit=20)
+    assert len(ranked_reverse) == 1
+    assert ranked_reverse[0].name == "hyperframes"
+
+
 def test_matching_subset_survives_when_others_dont():
     target = _c("slide-deck", desc="Build presentations", keywords=["slides"], kind="local")
     noise = _c("data-pipeline", desc="ETL jobs", keywords=["etl"], kind="local")

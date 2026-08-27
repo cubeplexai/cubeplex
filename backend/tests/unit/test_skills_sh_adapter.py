@@ -120,6 +120,44 @@ def test_index_skill_paths_root_level_skill_md():
     assert skill_paths[("jackwener/twitter-cli", "twitter-cli")] == ""
 
 
+def _adapter() -> SkillsShAdapter:
+    return SkillsShAdapter(
+        source_id="test-registry",
+        trust_tier="community",
+        source_name="skills.sh",
+        github_token=None,
+    )
+
+
+def test_resolve_keeps_owner_alias_to_real_directory():
+    """skills.sh prefixes some skillIds with a single owner-alias segment."""
+    adapter = _adapter()
+    source = "sleek/skills"
+    skill_paths = {(source, "design-mobile-apps"): "skills/design-mobile-apps"}
+    assert (
+        adapter._resolve_skill_path(source, "sleek-design-mobile-apps", skill_paths)
+        == "skills/design-mobile-apps"
+    )
+
+
+def test_resolve_does_not_steal_sibling_directory_via_suffix():
+    """website-to-hyperframes must not bind to the sibling hyperframes folder.
+
+    Progressive suffix matching used to strip 'website-to-' and land on
+    skills/hyperframes, so two catalog names shared one candidate_id.
+    """
+    adapter = _adapter()
+    source = "heygen-com/hyperframes"
+    skill_paths = {
+        (source, "hyperframes"): "skills/hyperframes",
+        (source, "hyperframes-cli"): "skills/hyperframes-cli",
+    }
+    assert adapter._resolve_skill_path(source, "hyperframes", skill_paths) == ("skills/hyperframes")
+    assert adapter._resolve_skill_path(source, "website-to-hyperframes", skill_paths) == (
+        "website-to-hyperframes"
+    )
+
+
 def test_official_source_detection():
     """Test that official status comes only from the whitelist, not registry config."""
     from cubeplex.skills.sources.base import TrustTier
