@@ -51,45 +51,37 @@ boundary.
 
 ## Demos
 
-OpenMontage-generated walkthroughs of CubePlex in action. Each clip is hosted on
-GitHub's attachment CDN (not committed to the repo). Replace the placeholder
-`src` URLs with the `user-attachments` URLs after uploading the videos.
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/716b9d39-e74a-4ae6-a053-d0c8d7a0af47" width="100%" controls></video>
+</div>
+
+> **Build Interactive Website** — a full product website generated from a single prompt.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-ONE-PAGE-PDF" width="100%" controls></video>
+  <video src="https://github.com/user-attachments/assets/d93360b7-8141-42c9-bc4f-3d9488a309b1" width="100%" controls></video>
+</div>
+
+> **Skills Workflow** — find a skill, install it and use it to build agentic frontend, end to end.
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/85975ccb-b512-45ff-96d2-0b7df7c8de57" width="100%" controls></video>
+</div>
+
+> **Data Analysis** — transform raw tabular data into a formatted spreadsheet.
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/c8ad3c71-4102-4bcb-931a-5fc9378be140" width="100%" controls></video>
 </div>
 
 > **One-Page PDF** — turn a one-page PDF into a polished, navigable page.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-BIG-MAC-WEBSITE" width="100%" controls></video>
-</div>
-
-> **Big Mac Website** — a full product website generated from a single prompt.
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-FRONTEND-SKILL" width="100%" controls></video>
-</div>
-
-> **Frontend Skill** — agentic frontend build, end to end.
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-CSV-TO-EXCEL" width="100%" controls></video>
-</div>
-
-> **CSV to Excel** — transform raw tabular data into a formatted spreadsheet.
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-BROWSER-CONTROL" width="100%" controls></video>
+  <video src="https://github.com/user-attachments/assets/1d979ec6-7ddc-489b-bb43-9f4c78c89b38" width="100%" controls></video>
 </div>
 
 > **Browser Control** — an agent drives the browser to complete a task autonomously.
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/REPLACE-CUBEPLEX-VIDEO1" width="100%" controls></video>
-</div>
 
-> **CubePlex Video 1** — the CubePlex brand film, produced through OpenMontage.
 
 ## Features
 
