@@ -25,6 +25,15 @@ def test_sandbox_image_enables_neko_implicit_hosting() -> None:
     assert "NEKO_SESSION_IMPLICIT_HOSTING=true" in text
     assert "implicit_hosting: false/implicit_hosting: true" in text
     assert "fa-mouse-pointer" in text
+    # Upstream clipboard panel has no close control; CubePlex injects × / Esc.
+    assert "cubeplex-clipboard-close" in text
+    # Keep Neko's overlay positioning. `position:relative` on `.clipboard`
+    # shrinks the live-view desktop instead of floating over it.
+    assert ".clipboard{position:relative}" not in text
+    assert ".clipboard .cubeplex-clipboard-close{position:absolute" in text
+    # Dockerfile sed is single-quoted; do not backslash-escape JS strings.
+    assert 'document.querySelector("video")' in text
+    assert r"querySelector(\"video\")" not in text
 
 
 def test_start_browser_script_ensures_chromium_when_stack_already_up() -> None:
