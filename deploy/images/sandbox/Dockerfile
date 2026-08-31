@@ -263,10 +263,17 @@ RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.ya
 #   with implicit_hosting the interactive toggle is already a no-op status icon).
 # The script forces the <video> muted so it autoplays (browser autoplay policy
 # only allows muted autoplay; volume=0 alone still triggers the prompt), making
-# the now-hidden overlay unnecessary. Keep clipboard + fullscreen, but add an
-# explicit close (× / Esc) because upstream clipboard has no close button and
-# iframe embeds often make "click outside" unreliable.
-RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.video-menu li:has(.fa-mouse-pointer),.video-menu li:has(.fa-computer-mouse),.video-menu li:has(.fa-mouse){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><style id="cubeplex-clipboard-close">.clipboard .cubeplex-clipboard-close{position:absolute;top:2px;right:4px;z-index:2;width:22px;height:22px;border:0;border-radius:4px;background:transparent;color:#dcddde;font:700 16px/22px Whitney,Helvetica,Arial,sans-serif;cursor:pointer;opacity:.85}.clipboard .cubeplex-clipboard-close:hover{opacity:1;background:rgba(0,0,0,.25)}.clipboard textarea{padding-right:28px;box-sizing:border-box}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script><script id="cubeplex-clipboard-close">(function(){function closeClipboard(){if(document.querySelector(".clipboard"))document.body.click()}function ensureClose(panel){if(!panel||panel.querySelector(".cubeplex-clipboard-close"))return;var btn=document.createElement("button");btn.type="button";btn.className="cubeplex-clipboard-close";btn.setAttribute("aria-label","Close clipboard");btn.title="Close";btn.textContent="\u00d7";btn.addEventListener("click",function(e){e.preventDefault();e.stopPropagation();closeClipboard()});panel.appendChild(btn)}function scan(){document.querySelectorAll(".clipboard").forEach(ensureClose)}document.addEventListener("keydown",function(e){if(e.key==="Escape"&&document.querySelector(".clipboard")){e.preventDefault();closeClipboard()}},true);var obs=new MutationObserver(scan);if(document.body){obs.observe(document.body,{childList:true,subtree:true});scan()}else{document.addEventListener("DOMContentLoaded",function(){obs.observe(document.body,{childList:true,subtree:true});scan()})}})();</script></head>#' /var/www/index.html
+# the now-hidden overlay unnecessary. Keep clipboard + fullscreen. The closer
+# cannot go in this `sed` — its CSS uses `#dcddde`, which collides with the
+# `#` delimiter and fails the image build.
+RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.video-menu li:has(.fa-mouse-pointer),.video-menu li:has(.fa-computer-mouse),.video-menu li:has(.fa-mouse){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
+# Explicit close (× / Esc) for Neko clipboard: upstream has no close button,
+# and iframe embeds often make "click outside" unreliable. Keep the panel a
+# floating overlay — do not set `.clipboard { position: relative }`.
+COPY neko/clipboard-close.html /tmp/cubeplex-clipboard-close.html
+COPY neko/inject-clipboard-close.py /tmp/inject-clipboard-close.py
+RUN python3 /tmp/inject-clipboard-close.py \
+    && rm -f /tmp/cubeplex-clipboard-close.html /tmp/inject-clipboard-close.py
 
 # Default sandbox user `cubeplex` at uid/gid 1000 (matches backend agent
 # run_uid/run_gid). Also used by the Neko browser stack (ENV USER below).
