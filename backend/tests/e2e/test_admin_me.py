@@ -147,3 +147,30 @@ async def test_admin_me_uses_org_membership_not_workspace_admin(member_client, s
     resp = await client.get("/api/v1/admin/me")
     assert resp.status_code == 200, resp.text
     assert resp.json()["is_admin"] is False
+
+
+async def test_admin_provider_route_rejects_ambiguous_org(admin_client, session_factory):
+    """An admin in two orgs must select one before an admin route can run."""
+    import secrets
+
+    from sqlalchemy import select
+
+    from cubeplex.models import User
+    from cubeplex.models.organization_membership import OrgRole
+    from cubeplex.repositories import OrganizationMembershipRepository, OrganizationRepository
+
+    client, _workspace_id = admin_client
+    me = (await client.get("/api/v1/auth/me")).json()
+    async with session_factory() as session:
+        user = (await session.execute(select(User).where(User.id == me["id"]))).scalar_one()
+        org = await OrganizationRepository(session).create(
+            name="Second admin org", slug=f"second-admin-{secrets.token_hex(4)}"
+        )
+        await OrganizationMembershipRepository(session).grant(
+            user_id=user.id, org_id=org.id, role=OrgRole.ADMIN
+        )
+
+    response = await client.get("/api/v1/admin/providers")
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error_code"] == "ambiguous_org"
