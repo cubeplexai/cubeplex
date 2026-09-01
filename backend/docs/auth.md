@@ -14,7 +14,9 @@ via `OrgScopedMixin`.
 
 - **fastapi-users** with JWT cookie strategy.
 - Auth cookie: `cubeplex_auth`.
-- Register / login endpoints are rate-limited via slowapi.
+- Register / login endpoints are rate-limited via slowapi, using Redis so the
+  limit is shared by backend replicas. Requests forwarded by the frontend are
+  keyed by the original address in `X-Forwarded-For`.
 
 ### CSRF
 
