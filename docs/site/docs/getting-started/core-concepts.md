@@ -11,7 +11,7 @@ This page explains the building blocks of CubePlex. Understanding these will hel
 
 CubePlex uses a hierarchical structure:
 
-**Organization** is the top-level account. It owns billing, provider API keys, and org-wide policies. Every user belongs to exactly one organization.
+**Organization** is the top-level account. It owns billing, provider API keys, and org-wide policies. A user can belong to more than one organization.
 
 **Workspaces** live inside an organization. Each workspace is an isolated collaboration space with its own conversations, skills, memory, and MCP tool grants. A user can be a member of multiple workspaces.
 
@@ -53,7 +53,7 @@ Memory lets the agent remember information across conversations. CubePlex uses a
 
 | Tier | Visibility | Example use |
 |---|---|---|
-| **Personal** | Only you, across all your workspaces | "I prefer Python over JavaScript" |
+| **Personal** | Only you, in the current workspace | "I prefer Python over JavaScript" |
 | **Workspace** | All members of the workspace | "Our API uses snake_case for JSON keys" |
 | **Organization** | All members across all workspaces | "Company name is Acme Corp, founded 2020" |
 

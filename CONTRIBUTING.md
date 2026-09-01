@@ -7,12 +7,12 @@ Thanks for your interest! This doc covers how to set up your local environment s
 - Python 3.12+
 - Node.js 20+
 - pnpm 10+
-- Docker (for running MySQL / Redis / RustFS locally, optional)
+- Docker (for running PostgreSQL / Redis / RustFS locally, optional)
 
 ## First-time setup
 
 ```bash
-git clone https://github.com/xfgong/cubeplex.git
+git clone https://github.com/cubeplexai/cubeplex.git
 cd cubeplex
 
 # Agent skills — restore vendored skills (content + symlinks) from skills-lock.json

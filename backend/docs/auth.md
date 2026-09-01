@@ -1,130 +1,54 @@
 # Auth, Identity & RBAC
 
-**Read before modifying:** registration flow, login, CSRF, org/workspace
-bootstrap, RBAC enforcement, admin tooling.
+**Read before modifying:** registration, login, CSRF, onboarding, invitations, API keys, org/workspace bootstrap, RBAC enforcement, or admin tooling.
 
-## Identity Model
+## Identity model
 
-`Organization → Workspace → Membership → User`. One user can belong to
-many workspaces via memberships; each membership carries a `Role`
-(`admin` | `member`). All business tables carry `(org_id, workspace_id)`
-via `OrgScopedMixin`.
+`Organization → Workspace → Membership → User` is the workspace access path. Users can belong to more than one organization and more than one workspace. `OrganizationMembership` carries an organization role (`owner`, `admin`, or `member`); `Membership` carries the workspace role (`admin` or `member`).
 
-## Auth Mechanics
+Business data is scoped by `(org_id, workspace_id)` through `OrgScopedMixin` and `ScopedRepository[T]`. This is structural query isolation, not an ACL check added after a query. A user with several organization memberships must resolve an organization explicitly where the operation is organization-scoped; `AmbiguousOrgError` prevents silently choosing one.
 
-- **fastapi-users** with JWT cookie strategy.
-- Auth cookie: `cubeplex_auth`.
-- Register / login endpoints are rate-limited via slowapi, using Redis so the
-  limit is shared by backend replicas. Requests forwarded by the frontend are
-  keyed by the original address in `X-Forwarded-For`.
+## Sessions, OTP, and CSRF
 
-### CSRF
+Authentication uses fastapi-users with a JWT in the configurable, HTTP-only `cubeplex_auth` cookie. Registration and password login are rate-limited through Redis so limits are shared by backend replicas; frontend-forwarded requests are keyed by their original address in `X-Forwarded-For`. When email verification is enabled, registration issues a one-time password; `/verify-otp` verifies it and establishes the cookie session. `/resend-otp` deliberately returns success even when delivery fails, so it does not reveal whether an address exists.
 
-Double-submit cookie pattern. A `cubeplex_csrf` cookie is set on login;
-mutating requests (POST/PUT/PATCH/DELETE) must echo it in the
-`X-CSRF-Token` header whenever the `cubeplex_auth` cookie is present.
+CSRF uses double-submit cookies. `CSRFMiddleware` creates the configurable `cubeplex_csrf` cookie on a safe request when it is absent. A request with an auth cookie must send the same value in `X-CSRF-Token` for `POST`, `PUT`, `PATCH`, or `DELETE`.
 
-### Workspace Scoping
+## Registration and onboarding
 
-Every business route lives under `/api/v1/ws/{workspace_id}/...`. The
-workspace id is a **path parameter**, not a header. The `request_context`
-dependency extracts it via FastAPI `Path`, validates membership, and
-produces a `RequestContext` (user + org_id + workspace_id + role).
+Registration creates the user; it does not use a system setup endpoint. The authenticated user's `GET /api/v1/auth/me` response includes `needs_onboarding`, which is true until the user has a workspace membership.
 
-- Workspace not found → 404.
-- Not a member → 403.
+`POST /api/v1/onboarding` provisions the first usable workspace:
 
-Path-based scoping lets browser-direct loads (`<img>`, `<iframe>`,
-`<a href>`) work without custom headers.
+- With no organization membership, the request needs `org_name`, `org_slug`, and `workspace_name`; it creates the organization and workspace.
+- With an organization membership but no workspace membership, it needs only `workspace_name`; it creates a workspace in that organization.
+- A user who already has a workspace receives `409 onboarding_not_required`.
 
-### Repository Layer
+The deployment mode remains available for product configuration, and onboarding is the setup flow. In a single-tenant deployment, creating an additional organization may require the multi-org license; concurrent first organization creation is protected by the bootstrap guard.
 
-`OrgScopedMixin` + `ScopedRepository[T]`
-(`cubeplex/repositories/base.py`) automatically filter every query by
-`(org_id, workspace_id)` — **structural isolation, not an ACL check
-bolted on top**. New business repositories should subclass
-`ScopedRepository`.
+## Workspace scoping and RBAC
 
-## Endpoints
+Business routes use `/api/v1/ws/{workspace_id}/...`. The workspace ID is a path parameter, never a request header. `request_context` resolves membership and provides the user, organization ID, workspace ID, and role. A missing workspace is a 404; a workspace the caller cannot access is a 403.
 
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
-- `GET/POST /api/v1/workspaces`
-- `POST /api/v1/workspaces/{ws}/invites` (admin only)
-- `POST /api/v1/workspaces/invites/accept`
-- `/api/v1/ws/{workspace_id}/conversations/...`
-- `/api/v1/ws/{workspace_id}/conversations/{cid}/artifacts/...`
-- All scoped business endpoints live under `/api/v1/ws/{workspace_id}/`.
+Organization-admin routes remain separate under `/api/v1/admin/...` even when they share a lower-level service with a workspace route. Do not introduce a `scope` query parameter or a route-level role switch to combine them.
 
-## Register Bootstrap (M9, mode-aware)
+## Key endpoints
 
-`UserManager.on_after_register` branches on `deployment.mode`:
+- `POST /api/v1/auth/register`, `/login`, `/logout`
+- `POST /api/v1/auth/verify-otp`, `/resend-otp`
+- `GET` and `PATCH /api/v1/auth/me`
+- `POST /api/v1/onboarding`
+- `GET /api/v1/system/info` (public): `deployment_mode`, `version`, `sandbox_enabled`, `password_policy`, `edition`, `features`, and `public_base_url`
+- `GET`, `POST`, and `DELETE /api/v1/me/api-keys...`
+- `POST /api/v1/admin/orgs/invites` and `POST /api/v1/orgs/invites/accept`
+- `/api/v1/ws/{workspace_id}/...` for scoped business operations
 
-### `multi_tenant` (cloud SaaS)
+Personal-access API key plaintext is returned only once when it is created. Store it immediately; later list responses expose only its prefix and last-use time.
 
-- Per-user org auto-created (`"<local>'s Org"`).
-- Personal workspace + workspace-admin membership.
-- `OrganizationMembership(role=owner)` on the new org.
+## Org invites
 
-### `single_tenant` (OSS default)
+An organization admin creates an invite with an `admin` or `member` role; owners cannot be assigned by an invite. An authenticated recipient accepts a valid, unexpired single-use token at `/api/v1/orgs/invites/accept`. Accepting an org invitation may leave the user needing workspace-only onboarding.
 
-- **First user** is a **pending owner** (only the `User` row exists).
-  They complete `POST /api/v1/system/setup` to name the org and pick a
-  slug.
-- **Subsequent users** attach to the singleton org as
-  `OrgRole.MEMBER` and get their own Personal workspace +
-  workspace-admin membership.
-- A **PostgreSQL advisory lock** plus a
-  `user_count > 1 AND org_count == 0` check serialize concurrent first
-  registrations and return 409 `setup_in_progress` for races.
+## Credential vault
 
-If any bootstrap step fails the `User` row is best-effort deleted before
-the exception propagates, so registration appears atomic to the client.
-
-Register response: `{id, email, default_workspace_id}` (empty string in
-the single-tenant pending-owner case).
-
-## Org-level Role Model (M9)
-
-`OrganizationMembership`:
-
-- Table: `organization_memberships`
-- Composite PK: `(user_id, org_id)`
-- `role` from `OrgRole = {OWNER, ADMIN, MEMBER}`
-- DB-level partial unique index `uq_org_membership_owner ON (org_id) WHERE role = 'owner'` — at most one owner per org.
-
-Admin gates (`require_org_admin`, `/admin/me`, cost routes) read this
-row — **distinct from workspace-level `Membership.role`.**
-
-## Operator CLI (M9)
-
-```bash
-cubeplex admin grant-admin <email> [--org-slug X]   # promote → org admin
-cubeplex admin revoke-admin <email> [--org-slug X]  # demote admin → member
-```
-
-`--org-slug` is required when more than one org exists. `revoke-admin`
-refuses to touch an owner.
-
-## System Info / Setup Endpoints (M9)
-
-- `GET /api/v1/system/info` — **public, pre-login** —
-  `{deployment_mode, version, needs_org_setup}` for frontend mode
-  discovery.
-- `POST /api/v1/system/setup` — auth, `single_tenant` only — accepts
-  `{org_name, slug}`. Slug regex `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`,
-  length 3..32.
-  - 404 in `multi_tenant`.
-  - 409 if org already exists or another setup is in flight.
-- Startup check: in `single_tenant`, the lifespan refuses to boot when
-  the DB has more than 1 org.
-
-## Credential Vault
-
-System creds use `org_id=NULL` + partial unique index
-(`uq_credential_system_kind_name`). Same table as org-scoped creds —
-reuse this pattern when adding a new vault kind.
-
-Rotation: see [quick-reference.md](quick-reference.md#vault-key-rotation).
+System credentials use `org_id=NULL` and the partial unique index `uq_credential_system_kind_name`. Reuse the same vault pattern for a new credential kind. For key rotation, see [quick-reference.md](quick-reference.md#vault-key-rotation).
