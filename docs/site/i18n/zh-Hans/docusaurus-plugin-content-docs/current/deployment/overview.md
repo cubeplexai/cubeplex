@@ -147,7 +147,9 @@ volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai
 | `csrf_secret` | CSRF 双提交 cookie | `openssl rand -hex 32` |
 | `vault_key` | 加密 MCP / 凭证 vault 的 Fernet key | `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 
-三者都是必填项——两种安装方式在任一项为空时都会直接安装失败。
+三者都是必填项。测试环境以外，任一签名密钥为空、少于 32 个字符，或使用
+`REPLACE_ME`、`USE ENV`、`CHANGE_ME…` 等已知占位符时，后端都会拒绝启动。
+Helm 也会在安装时拒绝这些占位符。
 
 ## 下一步
 

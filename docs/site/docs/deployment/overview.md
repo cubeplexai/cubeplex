@@ -153,7 +153,10 @@ Every deployment needs three auth secrets, regardless of mode:
 | `csrf_secret` | CSRF double-submit cookie | `openssl rand -hex 32` |
 | `vault_key` | Fernet key encrypting the MCP / credentials vault | `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
 
-All three are required — both installers fail fast if any is empty.
+All three are required. The backend refuses to start outside tests if either
+signing secret is empty, fewer than 32 characters, or a known placeholder such
+as `REPLACE_ME`, `USE ENV`, or `CHANGE_ME…`. Helm also rejects those
+placeholders during installation.
 
 ## Upgrading artifact object keys
 
