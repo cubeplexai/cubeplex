@@ -1,8 +1,13 @@
 """Tests for HTTP rate-limit client identification."""
 
+from limits.storage import MemoryStorage
 from starlette.requests import Request
 
 from cubeplex.api.middleware.rate_limit import limiter
+
+
+def test_rate_limiter_uses_in_memory_storage_in_tests() -> None:
+    assert isinstance(limiter._storage, MemoryStorage)
 
 
 def test_rate_limit_client_uses_original_forwarded_address() -> None:

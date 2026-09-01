@@ -98,6 +98,9 @@ test:
   # Auth: relax rate limits so playwright e2e (multiple registrations from 127.0.0.1) don't hit 429
   auth:
     rate_limit:
+      # Unit tests must not depend on a live Redis server. Production defaults
+      # to redis.url so rate-limit windows are shared across backend replicas.
+      storage_uri: "memory://"
       login_per_minute: 1000
       register_per_minute: 1000
     # Low policy + verification=auto (False, since email.backend=log) keep the

@@ -19,7 +19,12 @@ def get_rate_limit_client(request: Request) -> str:
 
 limiter = Limiter(
     key_func=get_rate_limit_client,
-    storage_uri=str(config.get("redis.url", "redis://localhost:6379/0")),
+    storage_uri=str(
+        config.get(
+            "auth.rate_limit.storage_uri",
+            config.get("redis.url", "redis://localhost:6379/0"),
+        )
+    ),
     key_prefix=f"{config.get('redis.key_prefix', 'cubeplex')}:rate-limit",
 )
 
