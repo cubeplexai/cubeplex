@@ -50,7 +50,7 @@ ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
 从[发布页](https://github.com/cubeplexai/cubeplex/releases)选一个版本 tag——
-backend 和 frontend 共用同一个应用版本，例如 `v0.6.0`——在下一步设为
+backend 和 frontend 共用同一个应用版本，例如 `v0.7.0`——在下一步设为
 `BACKEND_TAG` / `FRONTEND_TAG`。`IMAGE_REGISTRY` / `IMAGE_REPO` 已默认为
 `ghcr.io` / `cubeplexai`，标准安装无需改动。GHCR 发布镜像是公开的，无需
 `docker login`。
@@ -95,8 +95,8 @@ $EDITOR .env
 ```dotenv
 IMAGE_REGISTRY=ghcr.io
 IMAGE_REPO=cubeplexai
-BACKEND_TAG=v0.6.0        # 发布页上的一个版本 tag
-FRONTEND_TAG=v0.6.0
+BACKEND_TAG=v0.7.0        # 发布页上的一个版本 tag
+FRONTEND_TAG=v0.7.0
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
@@ -305,7 +305,7 @@ $EDITOR config/opensandbox.toml          # 设置 api_key、eip/host_ip、execd_
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # 这个 overlay 里的 Docker DNS 名称
-#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.6.0"
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.0"
 #     api_key: "<与 opensandbox.toml 中 [server].api_key 相同>"
 
 # 3. backend 非密钥配置 —— 启用 sandbox
