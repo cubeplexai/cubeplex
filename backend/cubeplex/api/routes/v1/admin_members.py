@@ -18,11 +18,6 @@ router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 ASSIGNABLE_ROLES = {"admin", "member"}
 
 
-class AddOrgMemberRequest(BaseModel):
-    email: str
-    role: str
-
-
 class ChangeOrgRoleRequest(BaseModel):
     role: str
 
@@ -33,13 +28,6 @@ class OrgMemberOut(BaseModel):
     display_name: str | None = None
     role: str
     created_at: str
-
-
-class AddOrgMemberResponse(BaseModel):
-    user_id: str
-    email: str
-    display_name: str | None = None
-    role: str
 
 
 class ChangeOrgRoleResponse(BaseModel):
@@ -72,33 +60,6 @@ async def list_org_members(
         )
         for m in members
     ]
-
-
-@router.post("", response_model=AddOrgMemberResponse, status_code=status.HTTP_201_CREATED)
-async def add_org_member(
-    body: AddOrgMemberRequest,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> AddOrgMemberResponse:
-    if body.role not in ASSIGNABLE_ROLES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="role must be admin or member")
-    org_id = await resolve_current_org_id(user, session)
-
-    target = (
-        await session.execute(select(User).where(User.email == body.email))  # type: ignore[arg-type]
-    ).scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No user with this email")
-
-    om_repo = OrganizationMembershipRepository(session)
-    existing = await om_repo.get_role(user_id=target.id, org_id=org_id)
-    if existing is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Already a member")
-
-    await om_repo.grant(user_id=target.id, org_id=org_id, role=OrgRole(body.role))
-    return AddOrgMemberResponse(
-        user_id=target.id, email=target.email, display_name=target.display_name, role=body.role
-    )
 
 
 @router.patch("/{user_id}/role", response_model=ChangeOrgRoleResponse)
