@@ -2,8 +2,8 @@ apiVersion: v2
 name: cubeplex
 description: CubePlex AI agent platform (backend + frontend + bundled infra)
 type: application
-version: 0.7.0
-appVersion: "0.7.0"
+version: 0.7.1
+appVersion: "0.7.1"
 
 kubeVersion: ">=1.21.0-0"
 
