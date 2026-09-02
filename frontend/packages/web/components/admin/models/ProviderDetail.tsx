@@ -454,6 +454,15 @@ export function ProviderDetail({
           <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 py-10 text-center">
             <Box className="size-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">{t('noModels')}</p>
+            <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
+              {provider.has_api_key ? t('noModelsSetupHint') : t('noModelsApiKeyHint')}
+            </p>
+            <Link
+              href={PRESETS_ADMIN_PATH}
+              className="text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+            >
+              {t('noModelsPresetsLink')}
+            </Link>
             {!isSystem && (
               <Button
                 variant="outline"

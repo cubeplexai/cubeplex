@@ -95,6 +95,16 @@ export function InputBar({
   const steer = useMessageStore((s) => s.steer)
   const appendHistoryMessage = useMessageStore((s) => s.appendHistoryMessage)
   const { workspaceId } = useWorkspaceContext()
+  // Keep subscriptions unconditional: tests and non-workspace shells may have
+  // no workspace id, but a workspace composer still needs fresh preset state.
+  const presetStore = useMemo(
+    () => getPresetSelectionStore(workspaceId ?? '__no-workspace__'),
+    [workspaceId],
+  )
+  const presetFetchStatus = presetStore((s) => s.presetFetchStatus)
+  const presets = presetStore((s) => s.presets)
+  const noUsablePresets =
+    Boolean(workspaceId) && presetFetchStatus === 'ready' && presets.length === 0
   const requestOpenShare = useComposerChromeStore((s) => s.requestOpenShare)
   const requestRename = useComposerChromeStore((s) => s.requestRename)
   const consumeRenameRequest = useComposerChromeStore((s) => s.consumeRenameRequest)
@@ -223,6 +233,7 @@ export function InputBar({
       uploadInFlight ||
       isCancelling ||
       modelSyncPending ||
+      noUsablePresets ||
       !canSendPayload
     )
       return
@@ -732,7 +743,7 @@ export function InputBar({
                   (isSubmitting && !shouldSteer) ||
                   uploadInFlight ||
                   isCancelling ||
-                  (modelSyncPending && !shouldSteer)
+                  (!shouldSteer && (modelSyncPending || noUsablePresets))
                 }
                 title={composerLockMessage ?? undefined}
                 className={cn(

@@ -10,6 +10,10 @@ const messages = {
     context_length_exceeded:
       "Conversation exceeded {model}'s context window ({tokens_in, number} / {context_window, number} tokens). Start a new chat or switch models.",
     rate_limited: 'Rate limit hit for {model}. Wait a moment, then try again.',
+    no_default_preset:
+      'No default model preset is configured. Ask an organization admin to enable a preset and set it as default.',
+    broken_preset:
+      'The selected model preset references an unavailable model. Ask an organization admin to update the preset.',
   },
 }
 
@@ -57,6 +61,16 @@ describe('RunErrorBubble', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       /The raw English fallback line from the backend\./,
     )
+  })
+
+  it.each([
+    ['no_default_preset', 'No default model preset is configured.'],
+    ['broken_preset', 'The selected model preset references an unavailable model.'],
+  ])('localizes the %s setup error', (error_code, expected) => {
+    renderWithIntl(<RunErrorBubble data={{ error_code, message: 'raw backend fallback' }} />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent(expected)
+    expect(screen.getByRole('alert')).not.toHaveTextContent('raw backend fallback')
   })
 
   it('renders the alert role for accessibility', () => {

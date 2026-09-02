@@ -148,7 +148,13 @@ describe('InputBar', () => {
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
-    getPresetSelectionStore('ws-1').setState({ modelKey: null, thinking: 'off' })
+    getPresetSelectionStore('ws-1').setState({
+      modelKey: null,
+      thinking: 'off',
+      presets: [],
+      presetFetchStatus: 'idle',
+      presetFetchError: null,
+    })
   })
 
   it('keeps the textarea editable once a streamed run is in flight (for steering)', async () => {
@@ -408,6 +414,44 @@ describe('InputBar', () => {
       model_key: 'reasoning',
       reasoning: { mode: 'on', effort: 'medium', summary: 'none' },
     })
+  })
+
+  it('blocks send after a successful preset fetch confirms there are no usable presets', async () => {
+    storeMocks.send.mockResolvedValue(undefined)
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    await waitFor(() => {
+      expect(getPresetSelectionStore('ws-1').getState().presetFetchStatus).toBe('ready')
+    })
+    getPresetSelectionStore('ws-1').setState({
+      presets: [],
+      presetFetchStatus: 'ready',
+      presetFetchError: null,
+    })
+
+    const textarea = screen.getByTestId('chat-input')
+    fireEvent.change(textarea, { target: { value: 'hello' } })
+    await waitFor(() => expect(screen.getByTestId('send-button')).toBeDisabled())
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(storeMocks.send).not.toHaveBeenCalled()
+  })
+
+  it('does not block send while the first preset request is still loading', async () => {
+    storeMocks.send.mockResolvedValue(undefined)
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    getPresetSelectionStore('ws-1').setState({
+      presets: [],
+      presetFetchStatus: 'loading',
+      presetFetchError: null,
+    })
+
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hello' } })
+    await waitFor(() => expect(screen.getByTestId('send-button')).not.toBeDisabled())
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => expect(storeMocks.send).toHaveBeenCalled())
   })
 
   it('blocks send while the conversation model is still syncing', () => {

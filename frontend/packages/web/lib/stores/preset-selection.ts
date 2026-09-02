@@ -13,9 +13,15 @@ import { persist } from 'zustand/middleware'
 
 import type { ThinkingLevel, WorkspacePresetSummary } from '@/lib/types/presets'
 
+export type PresetFetchStatus = 'idle' | 'loading' | 'ready' | 'error'
+
 export interface PresetSelectionState {
-  /** The workspace preset list, refetched on mount. Not persisted. */
+  /** The workspace preset list, refetched on mount. Persisted as a last-known-good cache. */
   presets: WorkspacePresetSummary[]
+  /** Remote refresh state. Deliberately not persisted: cached presets must not masquerade as fresh. */
+  presetFetchStatus: PresetFetchStatus
+  /** Human-readable refresh error, if the latest fetch failed. Not persisted. */
+  presetFetchError: string | null
   /**
    * Selected preset key — a **tier** name (`pro`, `max`, …) or custom label,
    * never a concrete model id. Persisted so admin remaps of a tier's primary
@@ -26,6 +32,7 @@ export interface PresetSelectionState {
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
+  setPresetFetchState: (status: PresetFetchStatus, error?: string | null) => void
   setModelKey: (key: string | null) => void
   setThinking: (t: ThinkingLevel) => void
   reset: () => void
@@ -85,9 +92,13 @@ export function getPresetSelectionStore(
     persist(
       (set) => ({
         presets: [],
+        presetFetchStatus: 'idle' as PresetFetchStatus,
+        presetFetchError: null,
         modelKey: null,
         thinking: 'medium' as ThinkingLevel,
         setPresets: (presets) => set({ presets }),
+        setPresetFetchState: (presetFetchStatus, presetFetchError = null) =>
+          set({ presetFetchStatus, presetFetchError }),
         setModelKey: (modelKey) => set({ modelKey }),
         setThinking: (thinking) => set({ thinking }),
         reset: () => set({ modelKey: null, thinking: 'medium' as ThinkingLevel }),

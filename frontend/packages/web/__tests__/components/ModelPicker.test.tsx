@@ -2,11 +2,17 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const adminAccess = vi.hoisted(() => ({ isAdmin: false, loading: false }))
+
 // ModelBrandLogo pulls @lobehub/icons, which breaks under vitest (emoji-mart JSON).
 vi.mock('@/components/models/ModelBrandLogo', () => ({
   ModelBrandLogo: ({ label }: { label: string; brand: string | null }) => (
     <span data-testid="model-brand-logo" aria-label={label} />
   ),
+}))
+
+vi.mock('@/hooks/useAdminAccess', () => ({
+  useAdminAccess: () => ({ ...adminAccess, orgId: null, orgName: '', error: undefined }),
 }))
 
 import en from '../../messages/en.json'
@@ -65,6 +71,8 @@ const PRESETS = [
 beforeEach(() => {
   localStorage.clear()
   clearAllPresetSelectionStores()
+  adminAccess.isAdmin = false
+  adminAccess.loading = false
 })
 
 afterEach(() => {
@@ -112,15 +120,89 @@ describe('ModelPicker', () => {
     })
   })
 
-  it('keeps the selection null when fetch fails (composer falls back to default)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+  it('shows an actionable empty state instead of a blank list after a successful empty fetch', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: [] }))
+    adminAccess.isAdmin = true
+
+    renderWithIntl(<ModelPicker wsId="ws_empty" />)
+
+    await waitFor(() => {
+      expect(getPresetSelectionStore('ws_empty').getState().presetFetchStatus).toBe('ready')
+    })
+    expect(screen.getByTestId('model-picker-trigger')).toHaveTextContent(
+      en.chat.modelPicker.noModel,
+    )
+
+    fireEvent.click(screen.getByTestId('model-picker-trigger'))
+    expect(screen.getByText(en.chat.modelPicker.emptyTitle)).toBeInTheDocument()
+    expect(screen.getByText(en.chat.modelPicker.emptyDescription)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: en.chat.modelPicker.openProviders })).toHaveAttribute(
+      'href',
+      '/admin/models',
+    )
+    expect(screen.getByRole('link', { name: en.chat.modelPicker.openPresets })).toHaveAttribute(
+      'href',
+      '/admin/presets',
+    )
+  })
+
+  it('shows a visible fetch error and retries instead of silently treating it as empty', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(jsonResponse({ presets: PRESETS }))
 
     renderWithIntl(<ModelPicker wsId="ws_offline" />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: en.chat.modelPickerAria })).toBeInTheDocument()
+      expect(getPresetSelectionStore('ws_offline').getState().presetFetchStatus).toBe('error')
     })
-    expect(getPresetSelectionStore('ws_offline').getState().modelKey).toBeNull()
+    fireEvent.click(screen.getByTestId('model-picker-trigger'))
+    expect(screen.getByText(en.chat.modelPicker.loadFailedTitle)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: en.chat.modelPicker.retry }))
+
+    await waitFor(() => {
+      expect(getPresetSelectionStore('ws_offline').getState().presetFetchStatus).toBe('ready')
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(
+      screen.getByRole('button', { name: /Pro · anthropic\/claude-opus-4-7/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps cached presets selectable when a refresh fails', async () => {
+    const store = getPresetSelectionStore('ws_cached')
+    store.setState({ presets: PRESETS, presetFetchStatus: 'idle', presetFetchError: null })
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
+
+    renderWithIntl(<ModelPicker wsId="ws_cached" />)
+
+    await waitFor(() => {
+      expect(store.getState().presetFetchStatus).toBe('error')
+    })
+    fireEvent.click(screen.getByTestId('model-picker-trigger'))
+
+    expect(screen.getByText(en.chat.modelPicker.cachedLoadFailed)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Pro · anthropic\/claude-opus-4-7/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(en.chat.modelPicker.emptyTitle)).not.toBeInTheDocument()
+  })
+
+  it('asks a non-admin to contact an organization admin for an empty preset list', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: [] }))
+
+    renderWithIntl(<ModelPicker wsId="ws_member_empty" />)
+
+    await waitFor(() => {
+      expect(getPresetSelectionStore('ws_member_empty').getState().presetFetchStatus).toBe('ready')
+    })
+    fireEvent.click(screen.getByTestId('model-picker-trigger'))
+
+    expect(screen.getByText(en.chat.modelPicker.contactAdmin)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: en.chat.modelPicker.openProviders }),
+    ).not.toBeInTheDocument()
   })
 
   it('defaults the thinking level to medium', () => {
