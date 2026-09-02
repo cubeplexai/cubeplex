@@ -52,7 +52,7 @@ ghcr.io/cubeplexai/cubeplex-frontend:<version>
 
 Pick a version tag from the
 [releases page](https://github.com/cubeplexai/cubeplex/releases) — backend and
-frontend share one app version, e.g. `v0.7.0` — and set it as `BACKEND_TAG` /
+frontend share one app version, e.g. `v0.7.1` — and set it as `BACKEND_TAG` /
 `FRONTEND_TAG` in the next step. `IMAGE_REGISTRY` / `IMAGE_REPO` already default
 to `ghcr.io` / `cubeplexai`, so you don't need to change them for a standard
 install. GHCR release images are public — no `docker login` needed.
@@ -99,8 +99,8 @@ Required:
 ```dotenv
 IMAGE_REGISTRY=ghcr.io
 IMAGE_REPO=cubeplexai
-BACKEND_TAG=v0.7.0        # a release version from the releases page
-FRONTEND_TAG=v0.7.0
+BACKEND_TAG=v0.7.1        # a release version from the releases page
+FRONTEND_TAG=v0.7.1
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
@@ -316,7 +316,7 @@ $EDITOR config/opensandbox.toml          # set api_key, eip/host_ip, execd_image
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # Docker DNS name from this overlay
-#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.0"
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.1"
 #     api_key: "<same as [server].api_key in opensandbox.toml>"
 
 # 3. backend non-secret — enable sandbox
