@@ -54,6 +54,12 @@ export default function WorkspaceHomePage({
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     try {
+      // The home page bypasses InputBar's normal send path. Fail closed only
+      // once the presets endpoint has confirmed there are no usable choices.
+      const currentSelection = getPresetSelectionStore(wsId).getState()
+      if (currentSelection.presetFetchStatus === 'ready' && currentSelection.presets.length === 0) {
+        return
+      }
       const convId = await ensureConversation()
 
       const stagingItems = useAttachmentStore.getState().staging[convId] ?? []

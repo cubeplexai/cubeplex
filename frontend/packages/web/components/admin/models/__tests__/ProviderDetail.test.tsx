@@ -61,14 +61,15 @@ function makeModel(overrides: Partial<Model> = {}): Model {
 
 function renderDetail(
   onDeleteModel: (client: ApiClient, providerId: string, modelId: string) => Promise<void>,
+  options: { models?: Model[]; provider?: Provider } = {},
 ) {
   const noop = async () => {}
   const noopModel = async () => makeModel()
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
       <ProviderDetail
-        provider={makeProvider()}
-        models={[makeModel()]}
+        provider={options.provider ?? makeProvider()}
+        models={options.models ?? [makeModel()]}
         modelsLoading={false}
         modelsError={null}
         client={fakeClient}
@@ -125,6 +126,24 @@ describe('extractPresetRefs', () => {
     expect(extractPresetRefs({})).toEqual([])
     expect(extractPresetRefs({ refs: 'nope' })).toEqual([])
     expect(extractPresetRefs({ refs: [{ org_id: 1 }] })).toEqual([])
+  })
+})
+
+describe('ProviderDetail — empty model state', () => {
+  it('explains the provider → preset → chat setup path and links to presets', () => {
+    renderDetail(async () => {}, { models: [] })
+
+    expect(screen.getByText(en.adminModels.noModelsSetupHint)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: en.adminModels.noModelsPresetsLink })).toHaveAttribute(
+      'href',
+      '/admin/presets',
+    )
+  })
+
+  it('prompts for an API key before the model and preset setup path', () => {
+    renderDetail(async () => {}, { models: [], provider: makeProvider({ has_api_key: false }) })
+
+    expect(screen.getByText(en.adminModels.noModelsApiKeyHint)).toBeInTheDocument()
   })
 })
 

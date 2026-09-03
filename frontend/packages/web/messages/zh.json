@@ -458,6 +458,19 @@
     "thinkingLevelMax": "最高",
     "modelPickerAria": "模型与思考深度",
     "modelSectionLabel": "模型",
+    "modelPicker": {
+      "noModel": "暂无模型",
+      "loading": "正在加载模型…",
+      "emptyTitle": "暂无可用模型",
+      "emptyDescription": "当前组织尚未配置带主模型的启用预设。",
+      "loadFailedTitle": "无法加载模型",
+      "loadFailedDescription": "请检查网络连接后重试。",
+      "cachedLoadFailed": "模型刷新失败，正在显示已保存的选择。",
+      "retry": "重试",
+      "openProviders": "打开模型提供商",
+      "openPresets": "打开模型预设",
+      "contactAdmin": "请联系组织管理员配置模型。"
+    },
     "modelTooltipProvider": "Provider",
     "modelTooltipModelId": "模型 ID",
     "modelTooltipDisplayName": "显示名称",
@@ -789,6 +802,9 @@
     "systemReadonly": "系统 Provider 由配置定义，无法编辑或删除",
     "modelsHeading": "模型 ({count})",
     "noModels": "暂无模型",
+    "noModelsSetupHint": "添加模型后，还需要将其设为启用预设的主模型，才能在聊天中使用。",
+    "noModelsApiKeyHint": "请先添加 API Key，再添加模型并将其设为启用预设的主模型，才能在聊天中使用。",
+    "noModelsPresetsLink": "打开模型预设",
     "addModel": "添加模型",
     "deleteModel": "删除",
     "deleteModelConfirm": "确认删除模型 {name}？",
@@ -2248,6 +2264,8 @@
     "content_filtered": "{provider} 因内容策略拦截了对 {model} 的这次请求。",
     "provider_bad_request": "{provider} 拒绝了这次请求。在该轮详情中查看原始错误。",
     "tool_failed": "工具调用失败。在该轮详情中查看原始错误。",
+    "no_default_preset": "尚未配置默认模型预设。请联系组织管理员启用预设并设为默认。",
+    "broken_preset": "所选模型预设引用了不可用模型。请联系组织管理员修复该预设。",
     "internal_error": "发生了未知错误。在该轮详情中查看原始错误。"
   },
   "scheduledTasks": {

@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import en from '../../messages/en.json'
 import WorkspaceHomePage from '../../app/(app)/w/[wsId]/page'
+import { getPresetSelectionStore } from '../../lib/stores/preset-selection'
 
 const storeMocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -132,6 +133,13 @@ describe('WorkspaceHomePage', () => {
     storeMocks.renameConversation.mockResolvedValue({ id: 'conv-1', title: 'Reply with' })
     storeMocks.send.mockResolvedValue(undefined)
     storeMocks.attachedIds.mockReturnValue(['file-1'])
+    getPresetSelectionStore('ws-1').setState({
+      modelKey: null,
+      thinking: 'medium',
+      presets: [],
+      presetFetchStatus: 'idle',
+      presetFetchError: null,
+    })
     // AppShell uses useMediaQuery → window.matchMedia (jsdom has none by default).
     // matches:false → mobile branch (no react-resizable-panels Group mount).
     Object.defineProperty(window, 'matchMedia', {
@@ -202,6 +210,26 @@ describe('WorkspaceHomePage', () => {
     expect(storeMocks.push).toHaveBeenCalledWith('/w/ws-1/conversations/conv-1')
     // Conversation creation is cached — second call (on submit) does NOT re-create.
     expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not create a conversation after a successful preset fetch confirms there are no usable presets', async () => {
+    await act(async () => {
+      renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
+      await Promise.resolve()
+    })
+
+    const input = await screen.findByTestId('chat-input')
+    getPresetSelectionStore('ws-1').setState({
+      presets: [],
+      presetFetchStatus: 'ready',
+      presetFetchError: null,
+    })
+    fireEvent.change(input, { target: { value: 'Hello in workspace 1' } })
+    await waitFor(() => expect(screen.getByTestId('send-button')).toBeDisabled())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(storeMocks.createConversation).not.toHaveBeenCalled()
+    expect(storeMocks.send).not.toHaveBeenCalled()
   })
 
   it('does not clear the composer when conversation creation fails', async () => {
