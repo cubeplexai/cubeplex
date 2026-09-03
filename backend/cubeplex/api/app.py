@@ -20,6 +20,36 @@ from redis.asyncio import Redis
 from cubeplex.credentials.encryption import FernetBackend
 from cubeplex.utils import log
 
+_MIN_AUTH_SECRET_LENGTH = 32
+_AUTH_SECRET_PLACEHOLDERS = {"replace_me", "use env"}
+
+
+def validate_auth_secrets() -> None:
+    """Reject unsafe signing secrets before the application accepts requests."""
+    if os.getenv("ENV_FOR_DYNACONF", "development").lower() in {"test", "testing"}:
+        return
+
+    from cubeplex.config import config
+
+    for setting, env_var in (
+        ("auth.jwt_secret", "CUBEPLEX_AUTH__JWT_SECRET"),
+        ("auth.csrf_secret", "CUBEPLEX_AUTH__CSRF_SECRET"),
+    ):
+        raw_secret = config.get(setting)
+        secret = str(raw_secret).strip() if raw_secret is not None else ""
+        normalized_secret = secret.lower()
+        if not secret:
+            raise RuntimeError(f"{env_var} is required")
+        if (
+            normalized_secret.startswith("change_me")
+            or normalized_secret in _AUTH_SECRET_PLACEHOLDERS
+        ):
+            raise RuntimeError(f"{env_var} must not use a placeholder value")
+        if len(secret) < _MIN_AUTH_SECRET_LENGTH:
+            raise RuntimeError(
+                f"{env_var} must be at least {_MIN_AUTH_SECRET_LENGTH} characters long"
+            )
+
 
 def _build_encryption_backend() -> FernetBackend:
     """Build the process-wide credential vault encryption backend."""
@@ -54,6 +84,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # ==================== Startup ====================
     log.init()
     logger.info("Application starting up")
+    validate_auth_secrets()
     _app.state.encryption_backend = _build_encryption_backend()
     _app.state.mcp_user_token_signer = _build_mcp_user_token_signer()
 
@@ -498,7 +529,7 @@ def create_app(
     app = FastAPI(
         title="CubePlex API",
         description="AI Agent System Backend",
-        version="0.6.0",
+        version="0.7.1",
         lifespan=lifespan,
     )
 

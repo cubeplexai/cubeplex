@@ -188,10 +188,10 @@ async def require_org_admin(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    """User has org-level admin or owner role in their current org."""
+    """Require one unambiguous org-level admin or owner membership."""
     from cubeplex.repositories import OrganizationMembershipRepository
 
-    org_id = await resolve_current_org_id(user, session)
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
     is_admin = await OrganizationMembershipRepository(session).is_admin(
         user_id=user.id, org_id=org_id
     )

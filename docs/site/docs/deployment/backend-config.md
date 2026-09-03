@@ -73,12 +73,13 @@ rather not write to disk.
 
 ## Required in production
 
-The install fails fast if these are empty — set them before first boot:
+The install fails fast if these are empty. The backend also refuses to boot when
+an auth signing secret is a known placeholder or has fewer than 32 characters:
 
 | Key | Purpose |
 |---|---|
-| `auth.jwt_secret` | Signs session JWTs. `openssl rand -hex 32`. |
-| `auth.csrf_secret` | CSRF double-submit cookie. `openssl rand -hex 32`. |
+| `auth.jwt_secret` | Signs session JWTs. `openssl rand -hex 32`; placeholders and values under 32 characters are rejected. |
+| `auth.csrf_secret` | CSRF double-submit cookie. `openssl rand -hex 32`; placeholders and values under 32 characters are rejected. |
 | `auth.vault_key` | Fernet key encrypting the MCP / credentials vault. |
 | `database.password` | Postgres password (match your infra). |
 | `redis.url` | Includes the Redis password. |
@@ -200,7 +201,7 @@ for the user-facing behaviour and each deployment guide for wiring it up.
 sandbox:
   enabled: true
   domain: "…"             # OpenSandbox API host:port (no scheme)
-  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.6.0"
+  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.1"
   api_key: "…"
   use_server_proxy: false # true when the backend can't reach sandbox pods/ports directly
   secure_access: true     # false for docker-runtime OpenSandbox

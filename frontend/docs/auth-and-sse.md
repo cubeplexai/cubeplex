@@ -1,112 +1,38 @@
-# Frontend Auth, CSRF, SSE & Deployment Mode
+# Frontend Auth, CSRF & SSE
 
-**Read before modifying:** login/register flows, proxy middleware, workspace
-URL routing, SSE proxy route, CSRF handling, deployment-mode UI surfaces.
+**Read before modifying:** login and registration, onboarding, proxy middleware, workspace URL routing, SSE proxy routes, CSRF handling, or deployment-mode UI.
 
-## Route Structure
+## Routes and session gating
 
-- `(auth)/{login,register}` — unauthenticated pages.
-- `(app)/{workspaces, w/[wsId]/...}` — authenticated pages.
-- `/` — server redirect: logged in → first workspace; else → `/login`.
+- `(auth)/{login,register}` contains unauthenticated screens.
+- `(setup)/onboarding` completes first-workspace onboarding.
+- `(app)/{workspaces,w/[wsId]/...}` contains authenticated screens.
+- `/` redirects an authenticated user to a workspace and everyone else to `/login`.
 
-## Proxy Middleware (`proxy.ts`)
+`proxy.ts` checks the configurable auth-cookie name. It redirects unauthenticated requests for `/w/*`, `/workspaces`, `/admin`, and `/onboarding` to login; it redirects an already authenticated visitor away from login and registration.
 
-Checks for the `cubeplex_auth` cookie:
+`authStore.loadMe()` loads `GET /api/v1/auth/me`. When the returned user has `needs_onboarding`, the app layout sends them to `/onboarding`. The onboarding form calls `POST /api/v1/onboarding` and then navigates to its returned workspace ID.
 
-- Unauthenticated hits to `/w/*` or `/workspaces` → redirect to
-  `/login?next=<path>`.
-- Logged-in hits to `/login` or `/register` → redirect to `/`.
+## Active workspace
 
-## Active Workspace
-
-The URL segment `[wsId]` is the **single source of truth**.
-`useWorkspaceContext()` (in the `(app)` tree) reads it.
-
-The `ApiClient` instance each page creates via `createApiClient('')`
-calls `client.setWorkspaceId(wsId)`, which automatically rewrites scoped
-paths:
+The `[wsId]` URL segment is the single source of truth. `useWorkspaceContext()` reads it, and a page's `ApiClient` calls `client.setWorkspaceId(wsId)`. The client rewrites scoped routes:
 
 ```
 /api/v1/conversations/...  →  /api/v1/ws/{wsId}/conversations/...
 ```
 
-Paths under `/api/v1/auth/` and `/api/v1/workspaces` are
-workspace-neutral and not rewritten.
-
-For browser-direct loads (`<img>`, `<iframe>`, `<a href>`, pdf.js), use
-the URL builders in
-`components/panel/artifact/previewUtils.ts`
-(`buildPreviewUrl`, `buildDownloadUrl`), or call
-`client.resolvePath(...)`.
+Auth, onboarding, system, and other explicitly workspace-neutral paths are not rewritten. For browser-direct loads such as images, iframes, links, or pdf.js, use the artifact preview URL builders or `client.resolvePath(...)`.
 
 ## CSRF
 
-Double-submit pattern. `ApiClient` reads `cubeplex_csrf` from
-`document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend
-seeds the cookie on login.
+CSRF is double-submit. `ApiClient` reads the configurable `cubeplex_csrf` cookie and sends it as `X-CSRF-Token` on non-GET calls. Server-side proxy route handlers must forward the request cookie and CSRF header to the backend.
 
-## Stores
+## SSE and long-running proxies
 
-- `authStore` — `{id, email}` of the current user, or `null`. Populated
-  by `loadMe` on `(app)` mount.
-- `workspaceStore` — list of the user's workspaces +
-  `create(client, name)` (currently reuses the first workspace's
-  `org_id`; **M1 assumption: one user = one org**).
+The conversation and run-stream route handlers under `app/api/v1/ws/[wsId]/` forward `cookie`, `X-CSRF-Token`, and `x-user-id`. Workspace scope is always in the URL path, not a header.
 
-**Known one-user-one-org assumption:** `workspaceStore.create` reads
-`workspaces[0].org_id`. When multi-org-per-user ships (P2), this must
-take an explicit org id.
+Next rewrites buffer SSE when compression is enabled, so keep `compress: false`. The global `/api/*` rewrite has an approximately 30-second proxy timeout. Endpoints that can exceed it, such as sandbox browser live view, need a filesystem route handler under `app/api/...` rather than a longer global rewrite timeout.
 
-## SSE Proxy
+## Deployment info
 
-The Next.js route handler at
-`app/api/v1/ws/[wsId]/conversations/[id]/messages/route.ts` forwards
-`cookie`, `X-CSRF-Token`, and `x-user-id` to the backend. Workspace
-scoping rides in the URL path, **not a header**.
-
-**Gotcha:** Next.js rewrite buffers SSE if `compress` is on. Keep
-`compress: false`.
-
-## Long-running API proxies (browser live-view)
-
-`next.config.ts` rewrites `/api/*` to the backend with a **hardcoded ~30s
-http-proxy timeout**. Anything slower (sandbox browser cold start can be
-30–120s) dies as `socket hang up` / `ECONNRESET` even when the backend later
-returns 200 — the UI then shows a proxy 500.
-
-Long-running endpoints that must wait on the backend use a **filesystem
-route handler** under `app/api/...` so they take precedence over the rewrite
-fallback and are not bound by that 30s ceiling:
-
-- `app/api/v1/ws/[wsId]/browser/live-view/route.ts` — sandbox Neko live-view
-  URL mint (`maxDuration = 180`)
-
-Same pattern as the SSE/messages handlers above. Prefer a dedicated route
-handler over raising a global rewrite timeout.
-
-## Deployment Mode (M9)
-
-The backend exposes `GET /api/v1/system/info` (public, pre-login)
-returning `{deployment_mode, version, needs_org_setup}`. The
-`useDeploymentMode()` hook in `@cubeplex/core` reads it.
-
-### `single_tenant` (OSS default)
-
-- One shared org for the whole deployment.
-- First registrant becomes a **pending owner**; an extra `/setup` step
-  (route group `(setup)/setup`) collects org name + slug.
-- Subsequent users join the singleton org as members.
-
-### `multi_tenant` (Cloud SaaS)
-
-- Per-user org auto-created on register (current behavior).
-
-### Frontend Contract
-
-- `MeResult` carries `needs_org_setup?: boolean`.
-- `(app)/layout.tsx` redirects pending owners (and any user with
-  `needs_org_setup === true`) to `/setup`.
-- Any UI surface that lets a user create another org or switch between
-  orgs **must** be hidden when `mode === 'single_tenant'`. M9 itself
-  adds no such surfaces; future work landing org chrome must respect
-  this contract.
+`useDeploymentMode()` reads the public `GET /api/v1/system/info` response. It provides deployment mode, version, sandbox availability, and password policy; the app currently uses it for UI configuration such as sandbox-only controls. It does not represent a system setup state.

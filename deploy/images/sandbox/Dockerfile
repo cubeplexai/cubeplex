@@ -263,8 +263,17 @@ RUN sed -i 's/implicit_hosting: false/implicit_hosting: true/' /etc/neko/neko.ya
 #   with implicit_hosting the interactive toggle is already a no-op status icon).
 # The script forces the <video> muted so it autoplays (browser autoplay policy
 # only allows muted autoplay; volume=0 alone still triggers the prompt), making
-# the now-hidden overlay unnecessary. Keep clipboard + fullscreen.
+# the now-hidden overlay unnecessary. Keep clipboard + fullscreen. The closer
+# cannot go in this `sed` — its CSS uses `#dcddde`, which collides with the
+# `#` delimiter and fails the image build.
 RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.video-menu li:has(.fa-mouse-pointer),.video-menu li:has(.fa-computer-mouse),.video-menu li:has(.fa-mouse){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
+# Explicit close (× / Esc) for Neko clipboard: upstream has no close button,
+# and iframe embeds often make "click outside" unreliable. Keep the panel a
+# floating overlay — do not set `.clipboard { position: relative }`.
+COPY neko/clipboard-close.html /tmp/cubeplex-clipboard-close.html
+COPY neko/inject-clipboard-close.py /tmp/inject-clipboard-close.py
+RUN python3 /tmp/inject-clipboard-close.py \
+    && rm -f /tmp/cubeplex-clipboard-close.html /tmp/inject-clipboard-close.py
 
 # Default sandbox user `cubeplex` at uid/gid 1000 (matches backend agent
 # run_uid/run_gid). Also used by the Neko browser stack (ENV USER below).

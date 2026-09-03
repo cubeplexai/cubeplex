@@ -4,6 +4,73 @@ import pytest
 from cryptography.fernet import Fernet
 
 
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("auth.jwt_secret", "REPLACE_ME", "placeholder"),
+        ("auth.jwt_secret", "CHANGE_ME_IN_PRODUCTION_NOT_SECURE", "placeholder"),
+        ("auth.csrf_secret", "USE ENV", "placeholder"),
+        ("auth.jwt_secret", "too-short", "at least 32 characters"),
+        ("auth.csrf_secret", "", "is required"),
+    ],
+)
+def test_validate_auth_secrets_rejects_unsafe_production_values(
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("ENV_FOR_DYNACONF", "production")
+    from cubeplex.config import config
+
+    original_value = config.get(setting)
+    original_jwt_secret = config.get("auth.jwt_secret")
+    original_csrf_secret = config.get("auth.csrf_secret")
+    config.set("auth.jwt_secret", "a" * 32)
+    config.set("auth.csrf_secret", "b" * 32)
+    config.set(setting, value)
+
+    from cubeplex.api.app import validate_auth_secrets
+
+    try:
+        with pytest.raises(RuntimeError, match=message):
+            validate_auth_secrets()
+    finally:
+        config.set(setting, original_value)
+        config.set("auth.jwt_secret", original_jwt_secret)
+        config.set("auth.csrf_secret", original_csrf_secret)
+
+
+def test_validate_auth_secrets_allows_test_profile_placeholders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENV_FOR_DYNACONF", "test")
+
+    from cubeplex.api.app import validate_auth_secrets
+
+    validate_auth_secrets()
+
+
+def test_validate_auth_secrets_accepts_strong_production_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENV_FOR_DYNACONF", "production")
+    from cubeplex.config import config
+
+    original_jwt_secret = config.get("auth.jwt_secret")
+    original_csrf_secret = config.get("auth.csrf_secret")
+    config.set("auth.jwt_secret", "a" * 32)
+    config.set("auth.csrf_secret", "b" * 32)
+
+    from cubeplex.api.app import validate_auth_secrets
+
+    try:
+        validate_auth_secrets()
+    finally:
+        config.set("auth.jwt_secret", original_jwt_secret)
+        config.set("auth.csrf_secret", original_csrf_secret)
+
+
 def test_build_encryption_backend_requires_vault_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CUBEPLEX_AUTH__VAULT_KEY", raising=False)
     from cubeplex.config import config

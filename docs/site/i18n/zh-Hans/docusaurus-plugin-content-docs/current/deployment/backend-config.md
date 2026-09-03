@@ -67,12 +67,13 @@ production:
 
 ## 生产环境必填
 
-以下为空时安装会直接失败——首次启动前请先设置：
+以下为空时安装会直接失败。认证签名密钥若使用已知占位符或少于 32 个字符，
+后端也会拒绝启动：
 
 | Key | 用途 |
 |---|---|
-| `auth.jwt_secret` | 签发会话 JWT。`openssl rand -hex 32`。 |
-| `auth.csrf_secret` | CSRF 双提交 cookie。`openssl rand -hex 32`。 |
+| `auth.jwt_secret` | 签发会话 JWT。`openssl rand -hex 32`；占位符和少于 32 个字符的值会被拒绝。 |
+| `auth.csrf_secret` | CSRF 双提交 cookie。`openssl rand -hex 32`；占位符和少于 32 个字符的值会被拒绝。 |
 | `auth.vault_key` | 加密 MCP / 凭证 vault 的 Fernet key。 |
 | `database.password` | Postgres 密码（与你的基础设施一致）。 |
 | `redis.url` | 包含 Redis 密码。 |
@@ -190,7 +191,7 @@ objectstore:
 sandbox:
   enabled: true
   domain: "…"             # OpenSandbox API 地址（不带 schema）
-  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.6.0"
+  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.1"
   api_key: "…"
   use_server_proxy: false # 后端无法直连 sandbox pod/端口时设为 true
   secure_access: true     # docker-runtime OpenSandbox 下设为 false

@@ -25,6 +25,29 @@ def test_sandbox_image_enables_neko_implicit_hosting() -> None:
     assert "NEKO_SESSION_IMPLICIT_HOSTING=true" in text
     assert "implicit_hosting: false/implicit_hosting: true" in text
     assert "fa-mouse-pointer" in text
+    # Clipboard closer lives in a copied snippet, not the `sed s#...#...#`
+    # trim — `#dcddde` would collide with sed's `#` delimiter.
+    assert "neko/clipboard-close.html" in text
+    assert "inject-clipboard-close.py" in text
+    assert "#dcddde" not in text.split("RUN sed -i", 1)[1].split("\n", 1)[0]
+    # Dockerfile sed is single-quoted; do not backslash-escape JS strings.
+    assert 'document.querySelector("video")' in text
+    assert r"querySelector(\"video\")" not in text
+
+
+def test_neko_clipboard_close_snippet_stays_an_overlay() -> None:
+    """The closer must float over the desktop, not shrink the live view."""
+    snippet = (
+        _REPO_ROOT / "deploy" / "images" / "sandbox" / "neko" / "clipboard-close.html"
+    ).read_text(encoding="utf-8")
+    injector = (
+        _REPO_ROOT / "deploy" / "images" / "sandbox" / "neko" / "inject-clipboard-close.py"
+    ).read_text(encoding="utf-8")
+    assert "cubeplex-clipboard-close" in snippet
+    assert "color:#dcddde" in snippet
+    assert ".clipboard{position:relative}" not in snippet
+    assert ".clipboard .cubeplex-clipboard-close{position:absolute" in snippet
+    assert "html.replace(NEEDLE, snippet + NEEDLE, 1)" in injector
 
 
 def test_start_browser_script_ensures_chromium_when_stack_already_up() -> None:
