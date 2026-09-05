@@ -60,6 +60,41 @@ _REJECTION_LINK_REQUIRED = (
 )
 
 
+async def resolve_current_linked_member(
+    *,
+    session: AsyncSession,
+    account: IMConnectorAccount,
+    event: InboundEvent,
+) -> tuple[str | None, str | None]:
+    """Resolve a cached identity only, rechecking current workspace membership."""
+    im_user_id = event.sender_ref or event.sender_open_id or ""
+    if not im_user_id:
+        return None, _REJECTION_LINK_REQUIRED
+    cached = (
+        await session.execute(
+            select(IMIdentityLink).where(
+                IMIdentityLink.account_id == account.id,  # type: ignore[arg-type]
+                IMIdentityLink.im_user_id == im_user_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if cached is None:
+        return None, _REJECTION_LINK_REQUIRED
+    membership = (
+        await session.execute(
+            select(Membership).where(
+                Membership.user_id == cached.user_id,  # type: ignore[arg-type]
+                Membership.workspace_id == account.workspace_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is not None:
+        return cached.user_id, None
+    await session.delete(cached)
+    await session.flush()
+    return None, _REJECTION_NOT_MEMBER
+
+
 async def resolve_or_reject(
     *,
     session: AsyncSession,

@@ -75,6 +75,7 @@ const sidebars: SidebarsConfig = {
             'guides/im/dingtalk',
             'guides/im/teams',
             'guides/im/discord',
+            'guides/im/wecom',
           ],
         },
         {

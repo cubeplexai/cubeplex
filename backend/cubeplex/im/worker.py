@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cubeplex.models.im_connector import IMConnectorAccount, IMIdentityLink, IMRunQueueItem
 from cubeplex.repositories.im_connector import (
+    CONNECTION_DELIVERY_MODES,
     claim_pending_queue_item,
     mark_queue_item_completed,
     mark_queue_item_for_retry_or_fail,
@@ -52,6 +53,8 @@ class _RunStarter(Protocol):
 RunStartedCallback = Callable[[str, IMRunQueueItem], Awaitable[None]]
 # (queue item, uploader user id) -> (attachment ids, rejected-file notes)
 ResolveInboundAttachments = Callable[[IMRunQueueItem, str], Awaitable[tuple[list[str], list[str]]]]
+DeliverableConnectionIds = Callable[[], set[str]]
+ConnectionLeaseValidator = Callable[[str], Awaitable[bool]]
 
 
 async def process_one_queue_item(
@@ -61,10 +64,18 @@ async def process_one_queue_item(
     on_run_started: RunStartedCallback | None,
     lease_seconds: int,
     resolve_inbound_attachments: ResolveInboundAttachments | None = None,
+    deliverable_connection_ids: DeliverableConnectionIds | None = None,
+    validate_connection_lease: ConnectionLeaseValidator | None = None,
 ) -> bool:
     """Claim and process at most one queue row. Returns True iff a row was processed."""
     async with session_maker() as session:
-        item = await claim_pending_queue_item(session, lease_seconds=lease_seconds)
+        item = await claim_pending_queue_item(
+            session,
+            lease_seconds=lease_seconds,
+            deliverable_connection_ids=(
+                deliverable_connection_ids() if deliverable_connection_ids is not None else None
+            ),
+        )
         if item is None:
             return False
         account = (
@@ -170,6 +181,7 @@ async def process_one_queue_item(
             "is_group_chat": (conv_row.is_group_chat if conv_row is not None else False),
             "sandbox_mode": sandbox_mode,
             "topic_creator_user_id": topic_creator_user_id,
+            "delivery_mode": account.delivery_mode,
         }
         captured_item = item
 
@@ -198,6 +210,20 @@ async def process_one_queue_item(
                 row.attachment_ids = ids
                 row.content = captured["content"]
                 await session.commit()
+
+    if (
+        validate_connection_lease is not None
+        and captured["delivery_mode"] in CONNECTION_DELIVERY_MODES
+        and not await validate_connection_lease(captured_item.account_id)
+    ):
+        logger.info(
+            "[IM worker] queue item {} lost live connection ownership before start",
+            captured_item.id,
+        )
+        async with session_maker() as session:
+            await rewind_queue_item_no_attempt_charge(session, item_id=captured_item.id)
+            await session.commit()
+        return False
 
     try:
         run_id = await run_manager.start_run(
@@ -299,6 +325,8 @@ class IMRunQueueWorker:
         run_manager: _RunStarter,
         on_run_started: RunStartedCallback | None,
         resolve_inbound_attachments: ResolveInboundAttachments | None = None,
+        deliverable_connection_ids: DeliverableConnectionIds | None = None,
+        validate_connection_lease: ConnectionLeaseValidator | None = None,
         poll_interval: float = 1.0,
         lease_seconds: int = 300,
     ) -> None:
@@ -306,6 +334,8 @@ class IMRunQueueWorker:
         self._run_manager = run_manager
         self._on_run_started = on_run_started
         self._resolve_inbound_attachments = resolve_inbound_attachments
+        self._deliverable_connection_ids = deliverable_connection_ids
+        self._validate_connection_lease = validate_connection_lease
         self._poll_interval = poll_interval
         self._lease_seconds = lease_seconds
         self._task: asyncio.Task[None] | None = None
@@ -320,6 +350,8 @@ class IMRunQueueWorker:
                     on_run_started=self._on_run_started,
                     lease_seconds=self._lease_seconds,
                     resolve_inbound_attachments=self._resolve_inbound_attachments,
+                    deliverable_connection_ids=self._deliverable_connection_ids,
+                    validate_connection_lease=self._validate_connection_lease,
                 )
             except Exception:
                 logger.opt(exception=True).warning("[IM worker] poll error")

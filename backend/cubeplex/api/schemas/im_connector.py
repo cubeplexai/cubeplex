@@ -83,6 +83,15 @@ class ConnectTeamsAccountIn(BaseModel):
     acting_user_id: str = Field(default="self", min_length=1)
 
 
+class ConnectWecomAccountIn(BaseModel):
+    """Payload for a WeCom AI Bot WebSocket account."""
+
+    platform: Literal["wecom"] = "wecom"
+    bot_id: str = Field(min_length=1, max_length=128)
+    secret: str = Field(min_length=1)
+    acting_user_id: str = Field(default="self", min_length=1)
+
+
 class ImRuntimeStatus(BaseModel):
     """Runtime status snapshot embedded on every ``IMAccountOut``.
 
@@ -140,7 +149,8 @@ ConnectIMAccountIn = Annotated[
     | Annotated[ConnectDiscordAccountIn, Tag("discord")]
     | Annotated[ConnectSlackAccountIn, Tag("slack")]
     | Annotated[ConnectDingtalkAccountIn, Tag("dingtalk")]
-    | Annotated[ConnectTeamsAccountIn, Tag("teams")],
+    | Annotated[ConnectTeamsAccountIn, Tag("teams")]
+    | Annotated[ConnectWecomAccountIn, Tag("wecom")],
     Discriminator("platform"),
 ]
 

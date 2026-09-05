@@ -52,7 +52,7 @@ class Conversation(CubeplexBase, OrgScopedMixin, table=True):
     model_key: str | None = Field(default=None, max_length=64)
     reasoning: dict[str, Any] = Field(
         default_factory=lambda: dict(DEFAULT_REASONING),
-        sa_column=Column(JSON),
+        sa_column=Column(JSON, nullable=False),
     )
     # Source metadata (e.g. IM-bot linkage under an "im" key). Mirrors
     # Topic.attributes; see docs/dev/specs/2026-06-23-im-bot-settings-design.md.

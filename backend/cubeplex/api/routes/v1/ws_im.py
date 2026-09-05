@@ -17,6 +17,7 @@ from cubeplex.api.schemas.im_connector import (
     ConnectIMAccountIn,
     ConnectSlackAccountIn,
     ConnectTeamsAccountIn,
+    ConnectWecomAccountIn,
     DingtalkAppsIn,
     DingtalkAppsOut,
     IdentityLinkListOut,
@@ -256,6 +257,45 @@ async def _connect_teams(
     return _to_out(account)
 
 
+async def _connect_wecom(
+    body: ConnectWecomAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    from cubeplex.im.wecom.gateway import WecomAuthenticationError, WecomUnavailableError
+
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
+    try:
+        account = await svc.connect_wecom(
+            workspace_id=ctx.workspace_id,
+            bot_id=body.bot_id,
+            secret=body.secret,
+            acting_user_id=acting,
+        )
+    except WecomAuthenticationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except WecomUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    starter = getattr(request.app.state, "im_connect_account", None)
+    if starter is not None and account.enabled:
+        try:
+            await starter(account)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM ws] WeCom gateway startup failed for {}",
+                account.id,
+            )
+    return _to_out(account)
+
+
 @router.post("/accounts", status_code=status.HTTP_201_CREATED, response_model=IMAccountOut)
 async def connect_account(
     workspace_id: str,
@@ -278,6 +318,8 @@ async def connect_account(
         return await _connect_dingtalk(body, request, ctx, session, backend)
     elif isinstance(body, ConnectTeamsAccountIn):
         return await _connect_teams(body, request, ctx, session, backend)
+    elif isinstance(body, ConnectWecomAccountIn):
+        return await _connect_wecom(body, request, ctx, session, backend)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -323,7 +365,13 @@ async def list_accounts(
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     gateways = getattr(request.app.state, "im_gateways", None) or {}
     return await build_im_list_out(
-        svc=svc, session=session, long_conns=long_conns, gateways=gateways, accounts=accounts
+        svc=svc,
+        session=session,
+        long_conns=long_conns,
+        gateways=gateways,
+        redis=request.app.state.redis,
+        redis_key_prefix=request.app.state.redis_key_prefix,
+        accounts=accounts,
     )
 
 
@@ -344,6 +392,9 @@ async def delete_account(
     await svc.delete(account_id=account_id, workspace_id=ctx.workspace_id)
     # Tear down any live connection so a deleted account stops accepting
     # events immediately, not after the next API restart.
+    runtime_disconnect = getattr(request.app.state, "im_disconnect_account", None)
+    if runtime_disconnect is not None:
+        await runtime_disconnect(account_id)
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
     if lc is not None:
@@ -393,6 +444,9 @@ async def disable_workspace_account(
     updated = await svc.set_enabled(account_id=account_id, enabled=False)
     assert updated is not None
     # Drop any live connection so the bot stops responding immediately.
+    runtime_disconnect = getattr(request.app.state, "im_disconnect_account", None)
+    if runtime_disconnect is not None:
+        await runtime_disconnect(account_id)
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
     if lc is not None:

@@ -26,11 +26,12 @@ export function StepVerify({
   const tDyn = t as unknown as DynamicT
   const code = (chunks: React.ReactNode) => <code>{chunks}</code>
   const strong = (chunks: React.ReactNode) => <strong>{chunks}</strong>
+  const identity = form[descriptor.identityField ?? 'app_id'] ?? ''
   if (busy) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <Loader2 className="size-4 animate-spin" />
-        <p>{t.rich('im.wizard.verifyBody.verifying', { appId: form.app_id, code })}</p>
+        <p>{t.rich('im.wizard.verifyBody.verifying', { appId: identity, code })}</p>
       </div>
     )
   }
@@ -39,7 +40,7 @@ export function StepVerify({
       <p>
         {t.rich('im.wizard.verifyBody.ready', {
           platform: tDyn(descriptor.labelKey),
-          appId: form.app_id,
+          appId: identity,
           strong,
           code,
         })}

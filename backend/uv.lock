@@ -920,6 +920,7 @@ version = "0.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "aioboto3" },
+    { name = "aiohttp" },
     { name = "aiosmtplib" },
     { name = "alembic" },
     { name = "authlib" },
@@ -991,6 +992,7 @@ licensed = [
 [package.metadata]
 requires-dist = [
     { name = "aioboto3", specifier = ">=15.5.0" },
+    { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "aiosmtplib", specifier = ">=5.1.1" },
     { name = "alembic", specifier = ">=1.18.4" },
     { name = "authlib", specifier = ">=1.7.2" },

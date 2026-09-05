@@ -195,6 +195,153 @@ async def test_worker_returns_false_when_queue_empty(
     assert rm.calls == []
 
 
+async def test_connection_queue_requires_local_deliverability(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-affinity",
+            channel_id="oc_chat",
+            scope_key="u:affinity",
+            scope_kind="participant",
+            reply_to_id="req-affinity",
+            inbound_message_id="ev-affinity",
+            sender_ref="affinity",
+            sender_open_id="affinity",
+            text="owner only",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    rm = _FakeRunManager()
+
+    non_owner_ran = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        deliverable_connection_ids=lambda: set(),
+    )
+    assert non_owner_ran is False
+    assert rm.calls == []
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        assert item.status == "pending"
+        assert item.attempts == 0
+
+    owner_ran = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        deliverable_connection_ids=lambda: {account.id},
+    )
+    assert owner_ran is True
+    assert len(rm.calls) == 1
+
+
+async def test_disabled_account_queue_is_parked_without_starting_a_run(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-disabled",
+            channel_id="oc_chat",
+            scope_key="u:disabled",
+            scope_kind="participant",
+            reply_to_id="req-disabled",
+            inbound_message_id="ev-disabled",
+            sender_ref="disabled",
+            sender_open_id="disabled",
+            text="do not start",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        stored_account = await session.get(IMConnectorAccount, account.id)
+        assert stored_account is not None
+        stored_account.enabled = False
+        await session.commit()
+
+    rm = _FakeRunManager()
+    ran = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        deliverable_connection_ids=lambda: {account.id},
+    )
+
+    assert ran is True
+    assert rm.calls == []
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        assert item.status == "completed"
+
+
+async def test_failed_live_lease_validation_rewinds_without_attempt_charge(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-stale-owner",
+            channel_id="oc_chat",
+            scope_key="u:stale-owner",
+            scope_kind="participant",
+            reply_to_id="req-stale-owner",
+            inbound_message_id="ev-stale-owner",
+            sender_ref="stale-owner",
+            sender_open_id="stale-owner",
+            text="do not start",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    rm = _FakeRunManager()
+
+    ran = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        deliverable_connection_ids=lambda: {account.id},
+        validate_connection_lease=lambda _account_id: _false(),
+    )
+
+    assert ran is False
+    assert rm.calls == []
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        assert item.status == "pending"
+        assert item.attempts == 0
+
+
+async def _false() -> bool:
+    return False
+
+
 async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:

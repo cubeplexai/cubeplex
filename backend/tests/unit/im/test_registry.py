@@ -44,3 +44,9 @@ def test_double_register_raises() -> None:
     register_platform("double_test", FakePlatform())
     with pytest.raises(ValueError, match="double_test"):
         register_platform("double_test", FakePlatform())
+
+
+def test_wecom_platform_registers() -> None:
+    import cubeplex.im.wecom  # noqa: F401
+
+    assert get_platform("wecom") is not None

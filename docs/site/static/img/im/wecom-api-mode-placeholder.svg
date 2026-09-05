@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="#f5f5f5"/>
+  <rect x="120" y="90" width="960" height="495" rx="10" fill="#ffffff" stroke="#d4d4d4"/>
+  <text x="600" y="310" text-anchor="middle" font-family="sans-serif" font-size="30" fill="#666666">WeCom AI Bot · API mode</text>
+  <text x="600" y="360" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#999999">Screenshot placeholder: Bot ID, Secret, and long connection</text>
+</svg>

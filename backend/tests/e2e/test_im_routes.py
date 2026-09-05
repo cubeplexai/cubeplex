@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets as _secrets
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -15,6 +15,109 @@ def _unique_app_id(tag: str) -> str:
 
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_workspace_connect_list_delete_wecom_account(
+    async_client: httpx.AsyncClient,
+) -> None:
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    bot_id = _unique_app_id("wecom")
+    with (
+        patch(
+            "cubeplex.im.wecom.gateway.probe_wecom_credentials",
+            new_callable=AsyncMock,
+        ) as probe,
+        patch("cubeplex.im.wecom.gateway.WecomGateway.start", new_callable=AsyncMock) as start,
+        patch("cubeplex.im.wecom.gateway.WecomGateway.stop", new_callable=AsyncMock),
+        patch("cubeplex.im.wecom.gateway.WecomGateway.is_open", return_value=True),
+    ):
+        create = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts",
+            json={
+                "platform": "wecom",
+                "bot_id": bot_id,
+                "secret": "wecom-secret",
+            },
+        )
+        assert create.status_code == 201, create.text
+        account = create.json()
+        assert account["platform"] == "wecom"
+        assert account["external_account_id"] == bot_id
+        assert account["delivery_mode"] == "stream"
+        probe.assert_awaited_once_with(bot_id=bot_id, secret="wecom-secret")
+        start.assert_awaited_once()
+
+        duplicate = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts",
+            json={"platform": "wecom", "bot_id": bot_id, "secret": "different"},
+        )
+        assert duplicate.status_code == 409
+        assert probe.await_count == 1
+
+        listed = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
+        assert listed.status_code == 200
+        listed_account = next(
+            row for row in listed.json()["accounts"] if row["id"] == account["id"]
+        )
+        assert listed_account["runtime"]["connection_state"] == "connected"
+        assert "wecom-secret" not in listed.text
+
+        disabled = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}/disable"
+        )
+        assert disabled.status_code == 200
+        enabled = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}/enable"
+        )
+        assert enabled.status_code == 200
+        assert start.await_count == 2
+
+        admin_disabled = await async_client.post(
+            f"/api/v1/admin/im/accounts/{account['id']}/disable"
+        )
+        assert admin_disabled.status_code == 200
+        admin_enabled = await async_client.post(f"/api/v1/admin/im/accounts/{account['id']}/enable")
+        assert admin_enabled.status_code == 200
+        assert start.await_count == 3
+
+        deleted = await async_client.delete(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}"
+        )
+        assert deleted.status_code == 204
+
+
+@pytest.mark.parametrize(
+    ("error_type", "expected_status"),
+    [("auth", 400), ("unavailable", 503)],
+)
+async def test_wecom_probe_errors_do_not_create_accounts(
+    async_client: httpx.AsyncClient,
+    error_type: str,
+    expected_status: int,
+) -> None:
+    from cubeplex.im.wecom.gateway import WecomAuthenticationError, WecomUnavailableError
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    bot_id = _unique_app_id(f"wecom-{error_type}")
+    error = (
+        WecomAuthenticationError("WeCom rejected the supplied credentials")
+        if error_type == "auth"
+        else WecomUnavailableError("WeCom is unavailable; please try again")
+    )
+    with patch(
+        "cubeplex.im.wecom.gateway.probe_wecom_credentials",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        response = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts",
+            json={"platform": "wecom", "bot_id": bot_id, "secret": "never-store"},
+        )
+    assert response.status_code == expected_status
+    listed = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
+    assert all(row["external_account_id"] != bot_id for row in listed.json()["accounts"])
+    assert "never-store" not in response.text
 
 
 @patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")

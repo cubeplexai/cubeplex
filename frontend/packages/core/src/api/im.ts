@@ -83,12 +83,20 @@ export interface ConnectTeamsAccountIn {
   acting_user_id?: string
 }
 
+export interface ConnectWecomAccountIn {
+  platform: 'wecom'
+  bot_id: string
+  secret: string
+  acting_user_id?: string
+}
+
 export type ConnectImAccountIn =
   | ConnectFeishuAccountIn
   | ConnectDiscordAccountIn
   | ConnectSlackAccountIn
   | ConnectDingtalkAccountIn
   | ConnectTeamsAccountIn
+  | ConnectWecomAccountIn
 
 // ── Workspace scope ──────────────────────────────────────────────────────────
 

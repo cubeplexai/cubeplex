@@ -2498,6 +2498,9 @@
       },
       "dingtalk": {
         "label": "钉钉"
+      },
+      "wecom": {
+        "label": "企业微信"
       }
     },
     "status": {
@@ -2592,6 +2595,17 @@
           "tenantId": "目录(租户) ID — Azure Bot → 配置 → App Tenant ID（或 Entra ID → 概述）"
         }
       },
+      "wecom": {
+        "prereq": {
+          "bot": "在企业微信管理后台创建智能机器人",
+          "websocket": "启用 WebSocket 长连接模式，无需公网回调地址",
+          "credentials": "从智能机器人配置中复制 Bot ID 和 Secret"
+        },
+        "field": {
+          "botId": "Bot ID",
+          "secret": "Secret"
+        }
+      },
       "dingtalk": {
         "prereq": {
           "app": "在 open.dingtalk.com 开发者后台创建企业内部应用",
@@ -2629,6 +2643,7 @@
         "duplicateApp": "这个应用已经被绑定过了。",
         "duplicateAppGoTo": "查看已有绑定",
         "hydrationFailed": "无法验证 bot 身份。请确认应用版本已发布、bot 已启用。",
+        "upstreamUnavailable": "聊天平台服务暂时不可用，请检查网络后重试。",
         "retry": "重试",
         "unknown": "出错了。Log id：{logId}"
       },

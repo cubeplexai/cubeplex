@@ -75,7 +75,13 @@ async def list_org_accounts(
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     gateways = getattr(request.app.state, "im_gateways", None) or {}
     return await build_im_list_out(
-        svc=svc, session=session, long_conns=long_conns, gateways=gateways, accounts=accounts
+        svc=svc,
+        session=session,
+        long_conns=long_conns,
+        gateways=gateways,
+        redis=request.app.state.redis,
+        redis_key_prefix=request.app.state.redis_key_prefix,
+        accounts=accounts,
     )
 
 
@@ -87,6 +93,10 @@ async def _disconnect_account(request: Request, account_id: str) -> None:
     into ``ingest_inbound_event`` and the bot keeps responding until the
     next API restart.
     """
+    runtime_disconnect = getattr(request.app.state, "im_disconnect_account", None)
+    if runtime_disconnect is not None:
+        await runtime_disconnect(account_id)
+        return
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
     if lc is not None:
@@ -128,6 +138,7 @@ async def disable_account(
 @router.post("/accounts/{account_id}/enable", response_model=IMAccountOut)
 async def enable_account(
     account_id: str,
+    request: Request,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
@@ -136,9 +147,14 @@ async def enable_account(
     account = await svc.set_enabled(account_id=account_id, enabled=True)
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
-    # NOTE: Re-binding a long-connection client requires the full lifespan
-    # context (secret cache, ingest callable, client cache) that lives only
-    # in ``_start_im_runtime``. v1 path for re-enable: restart the API. This
-    # is documented in the setup guide. Webhook accounts pick up immediately
-    # because the ingress route reloads the enabled flag per request.
+    if account.delivery_mode in ("long_connection", "gateway", "stream"):
+        starter = getattr(request.app.state, "im_connect_account", None)
+        if starter is not None:
+            try:
+                await starter(account)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM admin] connection startup failed on enable for {}",
+                    account_id,
+                )
     return _to_out(account)

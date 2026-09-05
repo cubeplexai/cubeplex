@@ -24,6 +24,8 @@ async def build_im_list_out(
     session: AsyncSession,
     long_conns: dict[str, Any],
     gateways: dict[str, Any] | None = None,
+    redis: Any | None = None,
+    redis_key_prefix: str = "",
     accounts: list[IMConnectorAccount],
 ) -> IMAccountListOut:
     """Populate ``runtime`` on every IMAccountOut.
@@ -34,6 +36,15 @@ async def build_im_list_out(
     directly so we never poke at the service's private attributes.
     """
     aggs = await collect_runtime_aggregates(session, account_ids=[a.id for a in accounts])
+    shared_connected_ids: set[str] | None = None
+    if redis is not None:
+        from cubeplex.im.runtime import read_connection_heartbeats
+
+        shared_connected_ids = await read_connection_heartbeats(
+            redis,
+            account_ids=[a.id for a in accounts],
+            prefix=redis_key_prefix,
+        )
     out_rows: list[IMAccountOut] = []
     for a in accounts:
         bot_open_id = await svc.load_bot_open_id(a)
@@ -43,6 +54,7 @@ async def build_im_list_out(
             gateways=gateways or {},
             agg=aggs.get(a.id) or _RuntimeAgg(),
             bot_open_id=bot_open_id,
+            shared_connected_ids=shared_connected_ids,
         )
         cfg = a.config or {}
         out_rows.append(
