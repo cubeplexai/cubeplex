@@ -83,8 +83,10 @@ same `self` default and impersonation rules as every other platform. The account
 
 Before storing credentials, the service rejects an existing `(platform, external_account_id)`
 pair and performs a short WebSocket subscribe handshake. An authentication error rejects the
-request without creating either a credential or an account. After the transaction succeeds,
-the existing `im_connect_account` hook starts the persistent gateway immediately.
+request with HTTP 400 without creating either a credential or an account. DNS, connect, and
+handshake timeout failures are reported as retryable HTTP 503 responses, not invalid Secrets,
+and likewise create no durable rows. After the transaction succeeds, the existing
+`im_connect_account` hook starts the persistent gateway immediately.
 
 The Bot ID is used as the displayed account identifier because the subscribe protocol does
 not provide a supported bot-profile lookup. The account itself needs no new column: the
@@ -128,6 +130,12 @@ Disabling and re-enabling the account clears the marker and explicitly retries t
 Disable, delete, and application shutdown cancel the read, heartbeat, and reconnect tasks and
 resolve pending waiters before returning.
 
+Suspension-aware lease acquisition is one Redis Lua operation: it verifies that the suspension
+key is absent and acquires or confirms the account lease without a check/acquire gap. The
+terminal path writes the suspension marker before compare-and-deleting its lease. A sweep that
+races with that transition therefore either sees the old lease or the new suspension and cannot
+open a replacement socket.
+
 The socket reader only parses frames and resolves matching ACK waiters. It schedules each
 inbound callback handler as a tracked task instead of awaiting it inline: link, reset, rejection,
 and agent paths can all await passive-reply ACKs that only the reader can receive. Completed
@@ -140,6 +148,13 @@ lease renewal; disconnect and shutdown remove it. Account-list handlers batch-re
 heartbeats, so a request served by a non-owner replica reports the same `connected`,
 `disconnected`, or `never_connected` state as the owner without adding a WeCom-specific status
 model.
+
+Lease ownership and deliverability are separate runtime states. An ordinary transport loss
+keeps the lease while the gateway reconnects, but immediately removes the account from the
+worker's deliverable set and deletes its shared heartbeat. Successful re-authentication restores
+both. The worker checks `gateway.is_open()` as well as the atomic lease renewal immediately
+before `start_run`, so queued work waits through reconnect backoff instead of starting a run that
+cannot be returned.
 
 The WebSocket URL is a code constant in v1. It is not accepted from the API or stored in the
 credential, which prevents a workspace member from turning the gateway into an arbitrary
@@ -185,7 +200,7 @@ The gateway reloads account-level routing settings for each message through
 `lookup_binding_mode`, then delegates to the shared inbound transaction. Conversation
 resolution and run startup remain shared. Queue claiming gains connection-owner affinity:
 workers may claim webhook work on any instance, but may claim an enabled `long_connection`,
-`gateway`, or `stream` account only when that account is in the instance's live lease-owner set.
+`gateway`, or `stream` account only when that account is in the instance's live deliverable set.
 After attachment preparation and immediately before `start_run`, the worker also atomically
 compares and renews the live Redis lease. A failed validation rewinds the queue item without
 charging an attempt. The snapshot is only an efficient claim filter; the atomic pre-start check
@@ -210,12 +225,14 @@ Command replies use the current callback `req_id`; they do not depend on a later
 lookup.
 
 Every recognized command first inserts the same durable `(account_id, msgid)` receipt used by
-ordinary ingestion. The receipt insert, a generic response payload, and any reset database
-mutation share a transaction. Its existing receipt lease then grants one callback delivery the
-right to send the saved response. A successful gateway delivery result, including the existing
-post-write ACK-timeout policy, marks it completed; a send failure releases the claim and a
-crashed sender's claim expires. A replay can therefore retry an undelivered link or reset reply
-without signing another durable response or rotating the conversation again.
+ordinary ingestion. The receipt insert, a generic semantic response payload, and any reset
+database mutation share a transaction. Reset payloads retain the outcome text; link payloads
+retain the normalized email and claims needed to sign a fresh ten-minute token, not an expiring
+URL. Its existing receipt lease then grants one callback delivery the right to render and send
+the response. A successful gateway delivery result, including the existing post-write
+ACK-timeout policy, marks it completed; a send failure releases the claim and a crashed sender's
+claim expires. A replay can therefore retry an undelivered link or reset reply without rotating
+the conversation again, and a delayed link retry cannot send an already-expired token.
 
 ### Outbound protocol and rendering
 
@@ -301,12 +318,15 @@ and interactive-input limits. Missing console screenshots use explicit placehold
 - Redis gateway leases prevent duplicate connections across CubePlex instances and restrict
   connection-account queue claims to the live lease owner.
 - Workers atomically validate and renew the current Redis owner value immediately before
-  `start_run`; a stale snapshot alone never authorizes run startup.
+  `start_run` and require the local gateway to remain open; a stale snapshot or reconnecting
+  transport never authorizes run startup.
 - Runtime reconciliation closes a locally owned connection after its account is disabled,
   deleted, or leased by another instance; an enabled-row check at ingress blocks work before
   that cleanup completes.
 - A shared terminal-disconnect suspension prevents immediate reacquisition, while shared
   connection heartbeats make runtime status consistent across replicas.
+- Suspension checking and lease acquisition are atomic, and both workspace and admin enable
+  paths clear suspension through the same lower-layer runtime hook.
 - The fixed WeCom endpoint and TLS defaults are used; the connector does not accept arbitrary
   transport URLs.
 - A failed credential probe creates no durable rows. A later gateway disconnect leaves the
@@ -331,6 +351,8 @@ and interactive-input limits. Missing console screenshots use explicit placehold
   instances, and disable/delete/shutdown stops it within the bounded reconciliation interval.
 - Only the instance owning a connection account's live gateway can claim its queued work, so a
   run cannot be started on an instance that is unable to deliver the reply.
+- Ordinary transport loss removes deliverable ownership until re-authentication succeeds, even
+  while the same instance retains the lease for reconnect.
 - A terminal WeCom disconnect releases queue ownership and suppresses automatic reacquisition
   until an operator toggles the account.
 - A linked member's direct message creates or reuses the expected DM conversation and receives
@@ -341,7 +363,7 @@ and interactive-input limits. Missing console screenshots use explicit placehold
   member is rejected on their next message.
 - Duplicate `msgid` delivery creates only one queue item, run, or command side effect.
 - An unacknowledged command reply can be retried from its durable receipt without repeating the
-  command side effect.
+  command side effect, and a delayed `/link` retry signs a fresh token from semantic claims.
 - Intermediate frames never overtake one another; finalization waits behind an outstanding
   frame, and an intermediate timeout switches to proactive final instead of reusing its ACK key.
 - Expired passive streams and automated runs without an inbound `req_id` deliver one proactive

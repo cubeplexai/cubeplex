@@ -76,8 +76,9 @@ SDK.
 **Interfaces:**
 
 - `probe_wecom_credentials(bot_id: str, secret: str) -> None` opens a temporary connection,
-  completes `aibot_subscribe`, closes it, and raises `ValueError` with a non-secret-bearing
-  message on authentication or timeout failure.
+  completes `aibot_subscribe`, and closes it. An explicit non-zero authentication response raises
+  `WecomAuthenticationError`; DNS, connection, transport, and timeout failures raise
+  `WecomUnavailableError`. Neither exception message contains credentials.
 - `WecomGateway.start() -> None`, `stop() -> None`, and `is_open() -> bool` match the gateway
   lifecycle consumed by `im/runtime.py`.
 - `send_passive(req_id: str, body: dict[str, Any], *, final: bool,
@@ -108,6 +109,9 @@ SDK.
   a runtime callback that removes local queue ownership, clears the shared connection heartbeat,
   writes a shared suspension marker, and releases the lease; sweeps skip the account until an
   explicit disable/re-enable clears the marker.
+- Ordinary transport loss retains lease ownership for reconnect but removes the account from the
+  deliverable-worker set and clears its shared heartbeat. Successful re-authentication restores
+  both; queue work waits during the 2–60 second backoff.
 - Gateway stop cancels heartbeat/read/reconnect work and every tracked inbound handler, gathers
   them, fails pending futures, and closes the socket and aiohttp session without waiting for the
   next backoff interval.
@@ -124,9 +128,12 @@ SDK.
   cancellation on stop.
 - Protect terminal disconnect clearing owner/heartbeat state and suppressing reacquisition until
   an explicit account toggle.
+- Protect ordinary disconnect removing deliverability while retaining the reconnect lease, and
+  successful authentication restoring deliverability.
 - Protect a command handler's passive-reply ACK through the real read loop, proving the reader
   remains live while the handler awaits it; also protect tracked-handler cancellation on stop.
-- Protect credential-probe cleanup on success, authentication failure, and timeout.
+- Protect credential-probe cleanup and typed errors on success, explicit authentication failure,
+  timeout, DNS failure, and transport closure.
 
 ## Unit 3 — Route inbound messages, identity commands, and conversation resets
 
@@ -155,15 +162,19 @@ SDK.
   rejection_notifier=bound_connector)`.
 - `/link <email>` signs the existing `IMLinkClaims` with `platform="wecom"` and sends the
   confirmation URL using the current callback `req_id`.
-- The command transaction inserts the durable receipt and response payload before returning any
-  effect. `/link` is admitted without identity; `/new`, `/reset`, and `新对话` resolve the sender's
-  current identity link and workspace membership, then reset the normalized channel and scope
-  in the same transaction.
+- The command transaction inserts the durable receipt and semantic response payload before
+  returning any effect. `/link` is admitted without identity and saves normalized claims rather
+  than a signed URL; `/new`, `/reset`, and `新对话` resolve the sender's current identity link and
+  workspace membership, then reset the normalized channel and scope in the same transaction and
+  save the resulting reply.
 - Before sending, a callback claims the receipt response with a finite `lease_expires_at`. A
   successful gateway delivery result, including the existing post-write ACK-timeout policy,
   marks the receipt completed; send failure clears the claim, and a process crash leaves it
   retryable after expiry. Duplicate callbacks may claim and send the saved response but never
   repeat the command mutation.
+- Rendering a claimed link response signs a fresh ten-minute token from its saved semantic
+  claims. A delayed retry therefore replaces an expired URL without repeating a database side
+  effect; reset responses render directly from their saved outcome.
 
 **Core logic:**
 
@@ -194,6 +205,7 @@ SDK.
   protect unlinked and removed members from resetting both isolated and shared group scopes.
 - Protect failure after command commit but before ACK: a redelivery reclaims and sends the saved
   response without repeating the reset; protect concurrent and expired response claims.
+- Protect a `/link` redelivery after the original token TTL producing a newly signed, valid URL.
 
 ## Unit 4 — Stream run output through WeCom
 
@@ -225,15 +237,17 @@ SDK.
   contract.
 - `WecomPlatform.on_account_enabled(...)` starts one `WecomGateway` and stores it in the shared
   `gateways` map; `on_account_disabled(...)` removes and stops it.
-- `IMRunQueueWorker` receives a callable snapshot of locally owned connection account IDs.
+- `IMRunQueueWorker` receives a callable snapshot of locally deliverable connection account IDs.
   `claim_pending_queue_item` joins the account row and permits enabled `long_connection`,
   `gateway`, or `stream` work only when its account ID is in that snapshot. Webhook accounts and
   disabled rows remain claimable by any worker, with disabled rows taking the existing terminal
   park path.
 - The worker also receives an async lease validator. After all attachment preparation and
   immediately before `start_run`, it atomically compares the Redis owner value with this
-  instance and renews it. Failed validation rewinds the claimed item without charging an
-  attempt; the in-memory snapshot is never sufficient authorization to start a run.
+  instance and renews it, then synchronously verifies that the process-local gateway is still
+  open before its next await enters `start_run`. Failed validation rewinds the claimed item
+  without charging an attempt; the in-memory snapshot is never sufficient authorization to
+  start a run.
 - The lease owner publishes a short-lived Redis connection heartbeat only while its transport
   reports open. Account-list builders batch-read those keys and pass the shared state into
   `compute_runtime`, so owner and non-owner replicas return the same status.
@@ -250,17 +264,20 @@ SDK.
   suppress intermediate sends and proactively send only the final result.
 - Do not start native file upload. The artifact dispatcher mints share URLs and the renderer
   includes them in the final text.
-- Add an explicit runtime owner set only after lease acquisition and successful connection
-  startup. Release the lease when startup fails. On each sweep, stop and remove any local
-  connection whose account is missing, disabled, or no longer leased by this instance, then
-  renew or acquire enabled orphan accounts. The WeCom callback handler separately reloads the
-  account's enabled state before commands or normal ingestion, closing the sweep race window.
+- Track leased and deliverable account sets separately. Add an account to the deliverable set
+  only after successful authentication; ordinary socket loss removes it until re-authentication.
+  Release the lease when startup fails. On each sweep, stop and remove any local connection whose
+  account is missing, disabled, or no longer leased by this instance, then renew or acquire
+  enabled orphan accounts. The WeCom callback handler separately reloads the account's enabled
+  state before commands or normal ingestion, closing the sweep race window.
 - Use compare-and-expire Lua for lease validation/renewal so an expired old owner cannot extend a
   lease already acquired by another instance. Refresh the shared connection heartbeat only
   after that atomic renewal and only while `is_open()` is true.
 - A terminal-disconnect callback removes the account from the owner set, deletes its heartbeat,
-  sets a shared suspension marker, and releases the lease. All sweep instances check that marker
-  before acquisition. Disable/re-enable clears it as an operator-authorized retry.
+  sets a shared suspension marker, and releases the lease. Suspension check plus lease
+  acquisition/confirmation is one Lua operation, so no sweep can pass the check before the
+  marker and acquire after lease release. Disable/re-enable clears it as an operator-authorized
+  retry.
 
 **Tests:**
 
@@ -273,11 +290,15 @@ SDK.
   the owner can and webhook work remains instance-agnostic.
 - Protect a stale snapshot whose live Redis lease belongs to another instance: the immediate
   pre-start validation rewinds the item and `start_run` is never called.
+- Protect a reconnecting but still leased gateway: both the claim filter and immediate open-state
+  check prevent `start_run`, and re-authentication makes the same item claimable again.
 - Protect owner reconciliation after disable, delete, and lease loss, including local gateway
   shutdown, owner-set removal, and lease release; protect the ingress enabled-row guard during
   the reconciliation interval.
 - Protect shared heartbeat publication/removal and an account-list request served by a non-owner
   replica reporting the owner's live WeCom connection state.
+- Protect suspension/acquisition atomicity with two racing instances so a terminal disconnect
+  cannot be followed by an automatic replacement socket.
 
 ## Unit 5 — Add the workspace account contract
 
@@ -289,6 +310,8 @@ SDK.
   preflight, credential probe, encrypted storage, and orphan cleanup.
 - Modify `backend/cubeplex/api/routes/v1/ws_im.py` to dispatch WeCom account creation and start
   its gateway after commit.
+- Modify `backend/cubeplex/api/routes/v1/admin_im.py` so the separate org-admin enable handler
+  invokes the same lower-layer runtime enable hook as the workspace handler.
 - Extend `backend/tests/unit/test_im_schemas.py` and
   `backend/tests/e2e/test_im_routes.py` for the public API contract.
 
@@ -307,10 +330,12 @@ SDK.
 - Duplicate preflight happens before credential validation and creation. Credential probe
   happens before durable writes. Credential and account creation preserve the existing
   best-effort atomic cleanup used by the other platforms.
-- `ValueError` from authentication maps to 400; duplicate account/race maps to 409. Neither
-  response includes the submitted Secret.
-- Workspace scoping and acting-user impersonation continue through the existing route helper;
-  admin list/toggle routes remain separate and unchanged.
+- `WecomAuthenticationError` maps to 400; `WecomUnavailableError` maps to 503; duplicate
+  account/race maps to 409. None of these responses includes the submitted Secret.
+- Workspace scoping and acting-user impersonation continue through the existing route helper.
+  Workspace and admin toggle handlers remain separate for scope isolation, but both enable paths
+  call a shared runtime hook below the route layer to clear terminal suspension and attempt the
+  connection.
 
 **Tests:**
 
@@ -318,8 +343,10 @@ SDK.
 - Protect connect/list/delete through the real FastAPI app, Postgres, and credential vault while
   mocking only `probe_wecom_credentials`.
 - Protect invalid credentials creating neither account nor credential, duplicate creation
-  returning 409, and list/admin responses not leaking the Secret.
+  returning 409, upstream outage returning 503, and list/admin responses not leaking the Secret.
 - Protect immediate gateway-start invocation after a successful workspace bind.
+- Protect both workspace and org-admin disable/re-enable clearing terminal suspension and
+  invoking the shared runtime enable hook without sharing route handlers.
 
 ## Unit 6 — Add the connection wizard and client types
 
@@ -342,7 +369,8 @@ SDK.
 - The descriptor ID union gains `wecom`; `buildPayload` returns `{platform: "wecom", bot_id,
   secret, acting_user_id: "self"}`.
 - `classifyConnectError` receives the attempted platform so HTTP 400 can select `secret` for
-  WeCom without changing the existing field mapping for other connectors.
+  WeCom without changing the existing field mapping for other connectors; HTTP 503 stays a
+  retryable banner/toast and does not mark the Secret invalid.
 
 **Core logic:**
 
@@ -355,8 +383,8 @@ SDK.
 **Tests:**
 
 - Protect the exact core API payload and path.
-- Protect that WeCom HTTP 400 maps to the `secret` field while duplicate and network failures
-  keep the shared banner/toast behavior.
+- Protect that WeCom HTTP 400 maps to the `secret` field while HTTP 503, duplicate, and network
+  failures keep the shared banner/toast behavior.
 - Skip DOM-presence tests: the descriptor and shared wizard do not create a new client state
   machine.
 
