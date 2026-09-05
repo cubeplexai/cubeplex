@@ -12,15 +12,22 @@ verbatim copy would silently never match and turn a recoverable race into a
 500 to Feishu. Do not assume.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.im.conversation_resolver import resolve_im_conversation
-from cubeplex.im.identity import IdentityResolver, RejectionNotifier, resolve_or_reject
+from cubeplex.im.identity import (
+    IdentityResolver,
+    RejectionNotifier,
+    resolve_current_linked_member,
+    resolve_or_reject,
+)
 from cubeplex.im.types import InboundEvent
 from cubeplex.models.im_connector import (
     IMConnectorAccount,
@@ -47,6 +54,82 @@ class IngestResult:
 
     outcome: str
     conversation_id: str | None
+
+
+CommandResponseBuilder = Callable[[AsyncSession, str | None], Awaitable[dict[str, Any]]]
+
+
+@dataclass(slots=True)
+class CommandIngestResult:
+    outcome: Literal["created", "duplicate", "invalid"]
+    receipt_id: str | None
+    response_payload: dict[str, Any] | None
+
+
+async def ingest_command_response(
+    event: InboundEvent,
+    *,
+    account: IMConnectorAccount,
+    session_maker: async_sessionmaker[Any],
+    build_response: CommandResponseBuilder,
+    require_current_identity: bool = False,
+) -> CommandIngestResult:
+    """Persist one command mutation and its semantic reply atomically."""
+    if not event.platform_event_id:
+        return CommandIngestResult(outcome="invalid", receipt_id=None, response_payload=None)
+
+    async with session_maker() as session:
+        receipt = IMWebhookReceipt(
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+            account_id=account.id,
+            platform_event_id=event.platform_event_id,
+            status="pending",
+        )
+        session.add(receipt)
+        try:
+            await session.flush()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not _is_receipt_unique_violation(exc):
+                raise
+            existing = (
+                await session.execute(
+                    select(IMWebhookReceipt).where(
+                        IMWebhookReceipt.account_id == account.id,  # type: ignore[arg-type]
+                        IMWebhookReceipt.platform_event_id == event.platform_event_id,  # type: ignore[arg-type]
+                    )
+                )
+            ).scalar_one()
+            return CommandIngestResult(
+                outcome="duplicate",
+                receipt_id=existing.id,
+                response_payload=existing.response_payload,
+            )
+
+        user_id: str | None = None
+        rejection_text: str | None = None
+        if require_current_identity:
+            user_id, rejection_text = await resolve_current_linked_member(
+                session=session,
+                account=account,
+                event=event,
+            )
+        if rejection_text is not None:
+            response_payload: dict[str, Any] = {
+                "kind": "text",
+                "text": rejection_text,
+            }
+        else:
+            response_payload = await build_response(session, user_id)
+        receipt.response_payload = response_payload
+        session.add(receipt)
+        await session.commit()
+        return CommandIngestResult(
+            outcome="created",
+            receipt_id=receipt.id,
+            response_payload=response_payload,
+        )
 
 
 def _constraint_name(exc: IntegrityError) -> str:

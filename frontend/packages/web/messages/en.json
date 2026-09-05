@@ -2498,6 +2498,9 @@
       },
       "dingtalk": {
         "label": "DingTalk"
+      },
+      "wecom": {
+        "label": "WeCom"
       }
     },
     "status": {
@@ -2592,6 +2595,17 @@
           "tenantId": "Directory (tenant) ID — Azure Bot → Configuration → App Tenant ID (or Entra ID → Overview)"
         }
       },
+      "wecom": {
+        "prereq": {
+          "bot": "Create an AI Bot in the WeCom administration console",
+          "websocket": "Enable WebSocket connection mode; no public callback URL is required",
+          "credentials": "Copy the Bot ID and Secret from the AI Bot configuration"
+        },
+        "field": {
+          "botId": "Bot ID",
+          "secret": "Secret"
+        }
+      },
       "dingtalk": {
         "prereq": {
           "app": "Create an internal app on open.dingtalk.com (Developer Backend → Apps)",
@@ -2629,6 +2643,7 @@
         "duplicateApp": "This app is already connected.",
         "duplicateAppGoTo": "Go to existing",
         "hydrationFailed": "Could not verify the bot identity. Make sure the app version is published and the bot is enabled in the Feishu console.",
+        "upstreamUnavailable": "The chat platform is temporarily unavailable. Check your connection and retry.",
         "retry": "Retry",
         "unknown": "Something went wrong. Log id: {logId}"
       },

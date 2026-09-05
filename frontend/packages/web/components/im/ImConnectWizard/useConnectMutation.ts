@@ -27,10 +27,15 @@ export type ConnectError = {
  * Map a backend HTTP status + body into the 3-shape UI taxonomy from
  * spec §6. Pure function so it's trivially unit-testable.
  */
-export function classifyConnectError(status: number, body: unknown): ConnectError {
+export function classifyConnectError(
+  status: number,
+  body: unknown,
+  platform?: ConnectImAccountIn['platform'],
+): ConnectError {
   if (status === 0) return { shape: 'toast', messageKey: 'im.error.toast.network' }
   if (status === 409) return { shape: 'banner', messageKey: 'im.error.banner.duplicateApp' }
   if (status === 502) return { shape: 'banner', messageKey: 'im.error.banner.hydrationFailed' }
+  if (status === 503) return { shape: 'banner', messageKey: 'im.error.banner.upstreamUnavailable' }
   if (status === 422) {
     const detail = (body as { detail?: Array<{ loc?: string[] }> } | null)?.detail
     const loc = Array.isArray(detail) && detail[0]?.loc
@@ -38,7 +43,11 @@ export function classifyConnectError(status: number, body: unknown): ConnectErro
     return { shape: 'field', field, messageKey: 'im.error.field.appIdFormat' }
   }
   if (status === 400) {
-    return { shape: 'field', field: 'app_secret', messageKey: 'im.error.field.appSecretBad' }
+    return {
+      shape: 'field',
+      field: platform === 'wecom' ? 'secret' : 'app_secret',
+      messageKey: 'im.error.field.appSecretBad',
+    }
   }
   return { shape: 'banner', messageKey: 'im.error.banner.unknown' }
 }
@@ -64,7 +73,7 @@ export function useConnectMutation(client: ApiClient, wsId: string) {
             : 0
       const errBody =
         e instanceof ApiError ? { detail: e.detail } : ((e as { body?: unknown })?.body ?? null)
-      const c = classifyConnectError(status, errBody)
+      const c = classifyConnectError(status, errBody, body.platform)
       setError(c)
       return null
     } finally {

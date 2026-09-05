@@ -42,6 +42,19 @@ def test_disconnected_when_long_conn_missing_and_no_recent_webhook() -> None:
     assert out.connection_state == "disconnected"
 
 
+def test_shared_heartbeat_reports_remote_connection() -> None:
+    acc = _mk_account(mode="stream")
+    out = compute_runtime(
+        acc,
+        long_conns={},
+        gateways={},
+        agg=_RuntimeAgg(),
+        bot_open_id="bot-id",
+        shared_connected_ids={acc.id},
+    )
+    assert out.connection_state == "connected"
+
+
 def test_connected_via_recent_webhook_for_webhook_mode() -> None:
     acc = _mk_account(mode="webhook")
     agg = _RuntimeAgg(last_receipt_at=datetime.now(UTC) - timedelta(minutes=5))

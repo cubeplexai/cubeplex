@@ -133,6 +133,10 @@ class IMWebhookReceipt(CubeplexBase, OrgScopedMixin, table=True):
     )
     platform_event_id: str = Field(max_length=255)
     status: str = Field(default="pending", max_length=16)
+    response_payload: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     lease_expires_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

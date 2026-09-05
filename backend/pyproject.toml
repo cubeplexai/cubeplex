@@ -56,6 +56,7 @@ dependencies = [
     "dingtalk-stream>=0.24.3",
     "microsoft-teams-apps>=2.0.13.4",
     "websockets>=11,<18",
+    "aiohttp>=3.14.3",
 ]
 
 [project.optional-dependencies]

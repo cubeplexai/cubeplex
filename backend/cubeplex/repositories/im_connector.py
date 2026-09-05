@@ -24,6 +24,8 @@ from cubeplex.models.im_connector import (
     IMWebhookReceipt,
 )
 
+CONNECTION_DELIVERY_MODES = frozenset({"long_connection", "gateway", "stream"})
+
 
 @dataclass(slots=True)
 class _RuntimeAgg:
@@ -37,6 +39,14 @@ class _RuntimeAgg:
     pending_count: int = 0
     matched_24h: int = 0
     rejected_24h: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResponseClaim:
+    """A fenced command-response delivery lease."""
+
+    payload: dict[str, object]
+    lease_expires_at: datetime
 
 
 async def collect_runtime_aggregates(
@@ -130,6 +140,91 @@ async def get_account_by_external_id_unscoped(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def claim_command_response(
+    session: AsyncSession,
+    *,
+    receipt_id: str,
+    lease_seconds: int = 30,
+) -> CommandResponseClaim | None:
+    """Claim a persisted command reply with a finite delivery lease."""
+    now = datetime.now(UTC)
+    receipt = (
+        await session.execute(
+            select(IMWebhookReceipt)
+            .where(
+                IMWebhookReceipt.id == receipt_id,  # type: ignore[arg-type]
+                IMWebhookReceipt.status == "pending",  # type: ignore[arg-type]
+                IMWebhookReceipt.response_payload.is_not(None),  # type: ignore[union-attr]
+                or_(
+                    IMWebhookReceipt.lease_expires_at.is_(None),  # type: ignore[union-attr]
+                    IMWebhookReceipt.lease_expires_at <= now,  # type: ignore[arg-type,operator]
+                ),
+            )
+            .with_for_update(skip_locked=True)
+        )
+    ).scalar_one_or_none()
+    if receipt is None or receipt.response_payload is None:
+        return None
+    lease_expires_at = now + timedelta(seconds=lease_seconds)
+    receipt.lease_expires_at = lease_expires_at
+    session.add(receipt)
+    return CommandResponseClaim(
+        payload=dict(receipt.response_payload),
+        lease_expires_at=lease_expires_at,
+    )
+
+
+async def release_command_response_claim(
+    session: AsyncSession,
+    *,
+    receipt_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    """Release a command reply claim after a failed send."""
+    receipt = (
+        await session.execute(
+            select(IMWebhookReceipt)
+            .where(
+                IMWebhookReceipt.id == receipt_id,  # type: ignore[arg-type]
+                IMWebhookReceipt.status == "pending",  # type: ignore[arg-type]
+                IMWebhookReceipt.lease_expires_at == lease_expires_at,  # type: ignore[arg-type]
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if receipt is not None:
+        receipt.lease_expires_at = None
+        session.add(receipt)
+        return True
+    return False
+
+
+async def mark_command_response_delivered(
+    session: AsyncSession,
+    *,
+    receipt_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    """Mark a command reply as delivered."""
+    receipt = (
+        await session.execute(
+            select(IMWebhookReceipt)
+            .where(
+                IMWebhookReceipt.id == receipt_id,  # type: ignore[arg-type]
+                IMWebhookReceipt.status == "pending",  # type: ignore[arg-type]
+                IMWebhookReceipt.lease_expires_at == lease_expires_at,  # type: ignore[arg-type]
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if receipt is not None and receipt.response_payload is not None:
+        receipt.status = "completed"
+        receipt.lease_expires_at = None
+        session.add(receipt)
+        return True
+    return False
+
+
 async def get_or_create_thread_link(
     session: AsyncSession,
     *,
@@ -195,6 +290,7 @@ async def claim_pending_queue_item(
     *,
     lease_seconds: int,
     max_attempts: int = 5,
+    deliverable_connection_ids: set[str] | None = None,
 ) -> IMRunQueueItem | None:
     """Claim one pending or stale-leased queue row with FOR UPDATE SKIP LOCKED.
 
@@ -239,20 +335,31 @@ async def claim_pending_queue_item(
         if receipt is not None:
             receipt.status = "failed"
             session.add(receipt)
-    stmt = (
-        select(IMRunQueueItem)
-        .where(
-            IMRunQueueItem.attempts < max_attempts,  # type: ignore[arg-type]
-            or_(
-                IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
-                and_(
-                    IMRunQueueItem.status == "started",  # type: ignore[arg-type]
-                    IMRunQueueItem.claim_lease_expires_at.is_not(None),  # type: ignore[union-attr]
-                    IMRunQueueItem.claim_lease_expires_at < now,  # type: ignore[arg-type,operator]
-                ),
+    stmt = select(IMRunQueueItem).join(
+        IMConnectorAccount,
+        IMConnectorAccount.id == IMRunQueueItem.account_id,  # type: ignore[arg-type]
+    )
+    stmt = stmt.where(
+        IMRunQueueItem.attempts < max_attempts,  # type: ignore[arg-type]
+        or_(
+            IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+            and_(
+                IMRunQueueItem.status == "started",  # type: ignore[arg-type]
+                IMRunQueueItem.claim_lease_expires_at.is_not(None),  # type: ignore[union-attr]
+                IMRunQueueItem.claim_lease_expires_at < now,  # type: ignore[arg-type,operator]
             ),
+        ),
+    )
+    if deliverable_connection_ids is not None:
+        stmt = stmt.where(
+            or_(
+                IMConnectorAccount.enabled == False,  # type: ignore[arg-type]  # noqa: E712
+                ~IMConnectorAccount.delivery_mode.in_(CONNECTION_DELIVERY_MODES),  # type: ignore[attr-defined]
+                IMConnectorAccount.id.in_(deliverable_connection_ids),  # type: ignore[attr-defined]
+            )
         )
-        .order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
+    stmt = (
+        stmt.order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
         .limit(1)
         .with_for_update(skip_locked=True)
     )

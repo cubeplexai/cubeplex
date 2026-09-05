@@ -56,6 +56,18 @@ describe('IM SDK', () => {
     )
   })
 
+  it('posts the exact WeCom payload to the workspace account path', async () => {
+    const client = mockClient({ ok: true, body: { id: 'imac-wecom' } })
+    const payload = {
+      platform: 'wecom' as const,
+      bot_id: 'bot-id',
+      secret: 'bot-secret',
+      acting_user_id: 'self',
+    }
+    await wsConnectImAccount(client, 'ws-1', payload)
+    expect(client.post).toHaveBeenCalledWith('/api/v1/ws/ws-1/im/accounts', payload)
+  })
+
   it('throws when the response is not ok', async () => {
     const client = mockClient({ ok: false, status: 409, body: { detail: 'dup' } })
     await expect(

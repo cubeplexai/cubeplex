@@ -41,7 +41,7 @@ export type WizardStepDef = {
 }
 
 export type PlatformDescriptor = {
-  id: 'feishu' | 'discord' | 'slack' | 'teams' | 'dingtalk'
+  id: 'feishu' | 'discord' | 'slack' | 'teams' | 'dingtalk' | 'wecom'
   labelKey: string
   iconName: string
   live: boolean
@@ -49,5 +49,6 @@ export type PlatformDescriptor = {
   credentialFields: FieldDef[]
   steps: WizardStepDef[]
   buildPayload: (form: FormState) => ConnectImAccountIn
+  identityField?: string
   scopeConsoleUrl: (appId: string) => string
 }

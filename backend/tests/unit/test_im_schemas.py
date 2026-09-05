@@ -1,6 +1,14 @@
-"""ImAccountOut should embed ImRuntimeStatus with the documented fields."""
+"""Public IM connector schema contracts."""
 
-from cubeplex.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
+import pytest
+from pydantic import TypeAdapter, ValidationError
+
+from cubeplex.api.schemas.im_connector import (
+    ConnectIMAccountIn,
+    ConnectWecomAccountIn,
+    IMAccountOut,
+    ImRuntimeStatus,
+)
 
 
 def test_runtime_status_required_fields() -> None:
@@ -35,3 +43,14 @@ def test_account_out_embeds_runtime() -> None:
         ),
     )
     assert out.runtime.connection_state == "never_connected"
+
+
+def test_wecom_input_is_discriminated_and_requires_credentials() -> None:
+    parsed = TypeAdapter(ConnectIMAccountIn).validate_python(
+        {"platform": "wecom", "bot_id": "bot-1", "secret": "secret-1"}
+    )
+    assert isinstance(parsed, ConnectWecomAccountIn)
+    assert parsed.acting_user_id == "self"
+
+    with pytest.raises(ValidationError):
+        TypeAdapter(ConnectIMAccountIn).validate_python({"platform": "wecom", "bot_id": "bot-1"})

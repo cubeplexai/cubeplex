@@ -37,6 +37,63 @@ from cubeplex.models.im_connector import IMConnectorAccount
 # ---------------------------------------------------------------------------
 LEASE_TTL = 30
 SWEEP_INTERVAL = 15
+CONNECTION_HEARTBEAT_TTL = 45
+
+_ACQUIRE_LEASE_LUA = """
+-- cubeplex-im-acquire
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local owner = redis.call('GET', KEYS[1])
+if not owner then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+if owner == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+"""
+
+_COMPARE_EXPIRE_LUA = """
+-- cubeplex-im-renew
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+"""
+
+_COMPARE_DELETE_LUA = """
+-- cubeplex-im-release
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_SUSPEND_LUA = """
+-- cubeplex-im-suspend
+redis.call('SET', KEYS[2], '1')
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+end
+if redis.call('GET', KEYS[3]) == ARGV[1] then
+  redis.call('DEL', KEYS[3])
+end
+return 1
+"""
+
+
+def _lease_key(prefix: str, account_id: str) -> str:
+    return f"{prefix}:im:gateway:{account_id}:owner"
+
+
+def _suspension_key(prefix: str, account_id: str) -> str:
+    return f"{prefix}:im:gateway:{account_id}:suspended"
+
+
+def _heartbeat_key(prefix: str, account_id: str) -> str:
+    return f"{prefix}:im:gateway:{account_id}:connected"
 
 
 # ---------------------------------------------------------------------------
@@ -45,39 +102,101 @@ SWEEP_INTERVAL = 15
 
 
 async def try_acquire_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> bool:
-    """Claim ownership of *account_id* via NX, or confirm we already own it."""
-    key = f"{prefix}:im:gateway:{account_id}:owner"
-    if await redis.set(key, instance_id, nx=True, ex=LEASE_TTL):
-        return True
-    current = await redis.get(key)
-    if current is not None:
-        decoded = current.decode() if isinstance(current, bytes) else current
-        if decoded == instance_id:
-            await redis.expire(key, LEASE_TTL)
-            return True
-    return False
+    """Atomically claim/renew ownership unless terminal suspension is set."""
+    result = await redis.eval(
+        _ACQUIRE_LEASE_LUA,
+        2,
+        _lease_key(prefix, account_id),
+        _suspension_key(prefix, account_id),
+        instance_id,
+        LEASE_TTL,
+    )
+    return bool(result)
 
 
 async def release_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> None:
     """Release lease only if we still own it (compare-and-delete)."""
-    key = f"{prefix}:im:gateway:{account_id}:owner"
-    current = await redis.get(key)
-    if current is not None:
-        decoded = current.decode() if isinstance(current, bytes) else current
-        if decoded == instance_id:
-            await redis.delete(key)
+    await redis.eval(
+        _COMPARE_DELETE_LUA,
+        1,
+        _lease_key(prefix, account_id),
+        instance_id,
+    )
 
 
 async def renew_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> bool:
     """Extend the TTL on a lease we own. Returns False if we lost it."""
-    key = f"{prefix}:im:gateway:{account_id}:owner"
-    current = await redis.get(key)
-    if current is not None:
-        decoded = current.decode() if isinstance(current, bytes) else current
-        if decoded == instance_id:
-            await redis.expire(key, LEASE_TTL)
-            return True
-    return False
+    result = await redis.eval(
+        _COMPARE_EXPIRE_LUA,
+        1,
+        _lease_key(prefix, account_id),
+        instance_id,
+        LEASE_TTL,
+    )
+    return bool(result)
+
+
+async def suspend_connection(
+    redis: Any,
+    *,
+    account_id: str,
+    instance_id: str,
+    prefix: str,
+) -> None:
+    """Atomically suspend reconnect and release this instance's live state."""
+    await redis.eval(
+        _SUSPEND_LUA,
+        3,
+        _lease_key(prefix, account_id),
+        _suspension_key(prefix, account_id),
+        _heartbeat_key(prefix, account_id),
+        instance_id,
+    )
+
+
+async def clear_connection_suspension(redis: Any, *, account_id: str, prefix: str) -> None:
+    await redis.delete(_suspension_key(prefix, account_id))
+
+
+async def publish_connection_heartbeat(
+    redis: Any,
+    *,
+    account_id: str,
+    instance_id: str,
+    prefix: str,
+) -> None:
+    await redis.set(
+        _heartbeat_key(prefix, account_id),
+        instance_id,
+        ex=CONNECTION_HEARTBEAT_TTL,
+    )
+
+
+async def remove_connection_heartbeat(
+    redis: Any,
+    *,
+    account_id: str,
+    instance_id: str,
+    prefix: str,
+) -> None:
+    await redis.eval(
+        _COMPARE_DELETE_LUA,
+        1,
+        _heartbeat_key(prefix, account_id),
+        instance_id,
+    )
+
+
+async def read_connection_heartbeats(
+    redis: Any,
+    *,
+    account_ids: list[str],
+    prefix: str,
+) -> set[str]:
+    if not account_ids:
+        return set()
+    values = await redis.mget([_heartbeat_key(prefix, account_id) for account_id in account_ids])
+    return {account_id for account_id, value in zip(account_ids, values, strict=True) if value}
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +242,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     import cubeplex.im.feishu  # noqa: F401
     import cubeplex.im.slack  # noqa: F401
     import cubeplex.im.teams  # noqa: F401
+    import cubeplex.im.wecom  # noqa: F401
 
     instance_id = str(uuid.uuid4())
 
@@ -169,6 +289,104 @@ async def start(app: FastAPI, run_manager: Any) -> None:
 
     # Dict of account_id → gateway object (Discord) or long-connection (Feishu)
     gateways: dict[str, Any] = {}
+    owned_accounts: set[str] = set()
+    deliverable_accounts: set[str] = set()
+    connection_locks: dict[str, asyncio.Lock] = {}
+
+    def _transport_for(account_id: str) -> Any:
+        return gateways.get(account_id) or app.state.im_long_connections.get(account_id)
+
+    def _transport_is_open(account_id: str) -> bool:
+        transport = _transport_for(account_id)
+        check = getattr(transport, "is_open", None)
+        if transport is None or not callable(check):
+            return False
+        try:
+            return bool(check())
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM] connection health check failed for {}",
+                account_id,
+            )
+            return False
+
+    async def _connection_opened(account_id: str) -> None:
+        still_owned = await renew_lease(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+        if not still_owned:
+            owned_accounts.discard(account_id)
+            deliverable_accounts.discard(account_id)
+            await remove_connection_heartbeat(
+                app.state.redis,
+                account_id=account_id,
+                instance_id=instance_id,
+                prefix=app.state.redis_key_prefix,
+            )
+            raise RuntimeError(f"connection lease ownership lost for {account_id}")
+        owned_accounts.add(account_id)
+        if not _transport_is_open(account_id):
+            return
+        deliverable_accounts.add(account_id)
+        await publish_connection_heartbeat(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+
+    async def _connection_closed(account_id: str) -> None:
+        deliverable_accounts.discard(account_id)
+        await remove_connection_heartbeat(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+
+    async def _terminal_disconnect(account_id: str) -> None:
+        deliverable_accounts.discard(account_id)
+        owned_accounts.discard(account_id)
+        gateways.pop(account_id, None)
+        await suspend_connection(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+
+    async def _validate_connection_lease(account_id: str) -> bool:
+        owned = await renew_lease(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+        if not owned:
+            owned_accounts.discard(account_id)
+            deliverable_accounts.discard(account_id)
+            await remove_connection_heartbeat(
+                app.state.redis,
+                account_id=account_id,
+                instance_id=instance_id,
+                prefix=app.state.redis_key_prefix,
+            )
+            return False
+        if not _transport_is_open(account_id):
+            deliverable_accounts.discard(account_id)
+            await remove_connection_heartbeat(
+                app.state.redis,
+                account_id=account_id,
+                instance_id=instance_id,
+                prefix=app.state.redis_key_prefix,
+            )
+            return False
+        owned_accounts.add(account_id)
+        deliverable_accounts.add(account_id)
+        return True
 
     async def _on_run_started(run_id: str, item: Any) -> None:
         from cubeplex.im.registry import get_platform
@@ -221,46 +439,117 @@ async def start(app: FastAPI, run_manager: Any) -> None:
         resolve_inbound_attachments=resolve_inbound_attachments,
         poll_interval=1.0,
         lease_seconds=300,
+        deliverable_connection_ids=lambda: set(deliverable_accounts),
+        validate_connection_lease=_validate_connection_lease,
     )
     worker.start()
     app.state.im_run_queue_worker = worker
     app.state.im_long_connections = {}
+    app.state.im_owned_connections = owned_accounts
+    app.state.im_deliverable_connections = deliverable_accounts
+    app.state.im_instance_id = instance_id
 
     async def _connect_one(account: IMConnectorAccount) -> None:
         from cubeplex.im.registry import get_platform
 
-        try:
-            secrets = await _load_secrets(account)
-            platform = get_platform(account.platform)
+        lock = connection_locks.setdefault(account.id, asyncio.Lock())
+        async with lock:
+            try:
+                acquired = await try_acquire_lease(
+                    app.state.redis,
+                    account_id=account.id,
+                    instance_id=instance_id,
+                    prefix=app.state.redis_key_prefix,
+                )
+                if not acquired:
+                    logger.debug(
+                        "[IM] lease for {} owned by another instance, skipping",
+                        account.id,
+                    )
+                    return
+                if _transport_is_open(account.id):
+                    await _connection_opened(account.id)
+                    return
+                if _transport_for(account.id) is not None:
+                    await _stop_local_connection(account.id, release=False)
 
-            acquired = await try_acquire_lease(
+                owned_accounts.add(account.id)
+                secrets = await _load_secrets(account)
+                platform = get_platform(account.platform)
+
+                async def connection_opened() -> None:
+                    await _connection_opened(account.id)
+
+                async def connection_closed() -> None:
+                    await _connection_closed(account.id)
+
+                async def terminal_disconnect() -> None:
+                    await _terminal_disconnect(account.id)
+
+                await platform.on_account_enabled(
+                    account,
+                    secrets=secrets,
+                    gateways=gateways,
+                    session_maker=async_session_maker,
+                    run_manager=run_manager,
+                    redis_key_prefix=app.state.redis_key_prefix,
+                    long_connections=app.state.im_long_connections,
+                    app=app,
+                    connection_opened=connection_opened,
+                    connection_closed=connection_closed,
+                    terminal_disconnect=terminal_disconnect,
+                )
+                if _transport_is_open(account.id):
+                    await _connection_opened(account.id)
+                else:
+                    raise RuntimeError("connection did not become ready")
+            except Exception:
+                logger.exception(
+                    "[IM] connection startup failed for account {} ({})",
+                    account.id,
+                    account.platform,
+                )
+                await _stop_local_connection(account.id, release=False)
+                await release_lease(
+                    app.state.redis,
+                    account_id=account.id,
+                    instance_id=instance_id,
+                    prefix=app.state.redis_key_prefix,
+                )
+
+    async def _stop_local_connection(account_id: str, *, release: bool) -> None:
+        gateway = gateways.pop(account_id, None)
+        if gateway is not None:
+            try:
+                await gateway.stop()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM] gateway shutdown failed for {}",
+                    account_id,
+                )
+        connection = app.state.im_long_connections.pop(account_id, None)
+        if connection is not None:
+            try:
+                await connection.disconnect()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM] long-connection shutdown failed for {}",
+                    account_id,
+                )
+        deliverable_accounts.discard(account_id)
+        owned_accounts.discard(account_id)
+        await remove_connection_heartbeat(
+            app.state.redis,
+            account_id=account_id,
+            instance_id=instance_id,
+            prefix=app.state.redis_key_prefix,
+        )
+        if release:
+            await release_lease(
                 app.state.redis,
-                account_id=account.id,
+                account_id=account_id,
                 instance_id=instance_id,
                 prefix=app.state.redis_key_prefix,
-            )
-            if not acquired:
-                logger.debug(
-                    "[IM] lease for {} owned by another instance, skipping",
-                    account.id,
-                )
-                return
-
-            await platform.on_account_enabled(
-                account,
-                secrets=secrets,
-                gateways=gateways,
-                session_maker=async_session_maker,
-                run_manager=run_manager,
-                redis_key_prefix=app.state.redis_key_prefix,
-                long_connections=app.state.im_long_connections,
-                app=app,
-            )
-        except Exception:
-            logger.exception(
-                "[IM] connection startup failed for account {} ({})",
-                account.id,
-                account.platform,
             )
 
     # Query all enabled accounts with connection-based delivery
@@ -312,50 +601,92 @@ async def start(app: FastAPI, run_manager: Any) -> None:
 
     # Expose the connector so the workspace POST /im/accounts route can
     # spin up the connection inline instead of waiting for the next restart.
-    app.state.im_connect_account = _connect_one
+    async def _enable_account(account: IMConnectorAccount) -> None:
+        await clear_connection_suspension(
+            app.state.redis,
+            account_id=account.id,
+            prefix=app.state.redis_key_prefix,
+        )
+        await _connect_one(account)
+
+    async def _disable_account(account_id: str) -> None:
+        await _stop_local_connection(account_id, release=True)
+        await clear_connection_suspension(
+            app.state.redis,
+            account_id=account_id,
+            prefix=app.state.redis_key_prefix,
+        )
+
+    app.state.im_connect_account = _enable_account
+    app.state.im_disconnect_account = _disable_account
     app.state.im_gateways = gateways
 
     # ----- Lease sweep task: renew owned leases, claim orphans -----
-    async def _sweep() -> None:
-        while True:
-            await asyncio.sleep(SWEEP_INTERVAL)
-            try:
-                async with async_session_maker() as s:
-                    all_accounts = (
-                        (
-                            await s.execute(
-                                select(IMConnectorAccount).where(
-                                    IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
-                                    IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
-                                        ["long_connection", "gateway", "stream"]
-                                    ),
-                                )
-                            )
+    async def _sweep_once() -> None:
+        async with async_session_maker() as s:
+            all_accounts = (
+                (
+                    await s.execute(
+                        select(IMConnectorAccount).where(
+                            IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
+                            IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
+                                ["long_connection", "gateway", "stream"]
+                            ),
                         )
-                        .scalars()
-                        .all()
                     )
-                for acct in all_accounts:
-                    owned = await renew_lease(
+                )
+                .scalars()
+                .all()
+            )
+        enabled_by_id = {account.id: account for account in all_accounts}
+        for account_id in set(owned_accounts) | set(gateways) | set(app.state.im_long_connections):
+            if account_id not in enabled_by_id:
+                await _stop_local_connection(account_id, release=True)
+
+        for acct in all_accounts:
+            if acct.id in owned_accounts:
+                owned = await renew_lease(
+                    app.state.redis,
+                    account_id=acct.id,
+                    instance_id=instance_id,
+                    prefix=app.state.redis_key_prefix,
+                )
+                if not owned:
+                    await _stop_local_connection(acct.id, release=False)
+                    continue
+                if _transport_is_open(acct.id):
+                    deliverable_accounts.add(acct.id)
+                    await publish_connection_heartbeat(
                         app.state.redis,
                         account_id=acct.id,
                         instance_id=instance_id,
                         prefix=app.state.redis_key_prefix,
                     )
-                    if not owned:
-                        acquired = await try_acquire_lease(
-                            app.state.redis,
-                            account_id=acct.id,
-                            instance_id=instance_id,
-                            prefix=app.state.redis_key_prefix,
-                        )
-                        if acquired:
-                            logger.info(
-                                "[IM] claimed orphan lease for {} ({})",
-                                acct.id,
-                                acct.platform,
-                            )
-                            await _connect_one(acct)
+                else:
+                    await _connection_closed(acct.id)
+                continue
+
+            acquired = await try_acquire_lease(
+                app.state.redis,
+                account_id=acct.id,
+                instance_id=instance_id,
+                prefix=app.state.redis_key_prefix,
+            )
+            if acquired:
+                logger.info(
+                    "[IM] claimed orphan lease for {} ({})",
+                    acct.id,
+                    acct.platform,
+                )
+                await _connect_one(acct)
+
+    app.state.im_reconcile_connections = _sweep_once
+
+    async def _sweep() -> None:
+        while True:
+            await asyncio.sleep(SWEEP_INTERVAL)
+            try:
+                await _sweep_once()
             except Exception:
                 logger.opt(exception=True).warning("[IM] lease sweep failed")
 
@@ -376,7 +707,7 @@ async def stop(app: FastAPI) -> None:
 
     # Stop long-connections (Feishu)
     long_conns = getattr(app.state, "im_long_connections", None) or {}
-    for lc in long_conns.values():
+    for lc in list(long_conns.values()):
         try:
             await lc.disconnect()
         except Exception:
@@ -384,11 +715,32 @@ async def stop(app: FastAPI) -> None:
 
     # Stop gateways (Discord)
     gws = getattr(app.state, "im_gateways", None) or {}
-    for gw in gws.values():
+    for gw in list(gws.values()):
         try:
             await gw.stop()
         except Exception:
             logger.opt(exception=True).warning("[IM] gateway stop failed")
+
+    instance_id = getattr(app.state, "im_instance_id", None)
+    prefix = getattr(app.state, "redis_key_prefix", "")
+    owned = getattr(app.state, "im_owned_connections", None) or set()
+    if instance_id:
+        for account_id in list(owned):
+            await remove_connection_heartbeat(
+                app.state.redis,
+                account_id=account_id,
+                instance_id=instance_id,
+                prefix=prefix,
+            )
+            await release_lease(
+                app.state.redis,
+                account_id=account_id,
+                instance_id=instance_id,
+                prefix=prefix,
+            )
+    owned.clear()
+    deliverable = getattr(app.state, "im_deliverable_connections", None) or set()
+    deliverable.clear()
 
     # Stop worker
     worker = getattr(app.state, "im_run_queue_worker", None)
@@ -405,5 +757,10 @@ __all__ = [
     "try_acquire_lease",
     "release_lease",
     "renew_lease",
+    "suspend_connection",
+    "clear_connection_suspension",
+    "publish_connection_heartbeat",
+    "remove_connection_heartbeat",
+    "read_connection_heartbeats",
     "LEASE_TTL",
 ]

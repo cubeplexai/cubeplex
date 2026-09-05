@@ -84,12 +84,32 @@ function DiscordLogo(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+function WecomLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        d="M7 25.5C7 15.3 16.8 7 29 7s22 8.3 22 18.5S41.2 44 29 44c-2.5 0-4.9-.3-7.1-1l-9.8 5.1 2.7-8.4C10 36.3 7 31.2 7 25.5Z"
+        fill="#2F67D8"
+      />
+      <path
+        d="M28 37.5C28 28.9 36 22 46 22s18 6.9 18 15.5S56 53 46 53c-2 0-4-.3-5.8-.8L32 56l2.4-7C30.4 46.2 28 42.1 28 37.5Z"
+        fill="#19B56B"
+      />
+      <circle cx="21" cy="25" r="2" fill="white" />
+      <circle cx="33" cy="25" r="2" fill="white" />
+      <circle cx="42" cy="37" r="1.8" fill="white" />
+      <circle cx="52" cy="37" r="1.8" fill="white" />
+    </svg>
+  )
+}
+
 const LOGOS: Record<string, (props: SVGProps<SVGSVGElement>) => React.ReactElement> = {
   feishu: FeishuLogo,
   dingtalk: DingtalkLogo,
   discord: DiscordLogo,
   slack: SlackLogo,
   teams: TeamsLogo,
+  wecom: WecomLogo,
 }
 
 interface Props {

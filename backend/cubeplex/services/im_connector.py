@@ -37,6 +37,7 @@ def compute_runtime(
     gateways: dict[str, Any] | None = None,
     agg: _RuntimeAgg,
     bot_open_id: str | None,
+    shared_connected_ids: set[str] | None = None,
 ) -> ImRuntimeStatus:
     """Derive ``ImRuntimeStatus`` from raw aggregates + in-process state.
 
@@ -47,6 +48,11 @@ def compute_runtime(
     state: str
     if bot_open_id is None:
         state = "never_connected"
+    elif (
+        account.delivery_mode in ("long_connection", "gateway", "stream")
+        and shared_connected_ids is not None
+    ):
+        state = "connected" if account.id in shared_connected_ids else "disconnected"
     elif account.delivery_mode == "long_connection":
         lc = long_conns.get(account.id)
         if lc is not None and getattr(lc, "is_open", lambda: False)():
@@ -443,6 +449,77 @@ class IMConnectorService:
             except Exception:
                 logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back",
+                    credential_id,
+                )
+            raise
+
+    async def connect_wecom(
+        self,
+        *,
+        workspace_id: str,
+        bot_id: str,
+        secret: str,
+        acting_user_id: str,
+    ) -> IMConnectorAccount:
+        """Validate and bind one WeCom AI Bot WebSocket account."""
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == bot_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(f"wecom account already exists for bot_id={bot_id}")
+
+        from cubeplex.im.wecom.gateway import probe_wecom_credentials
+
+        await probe_wecom_credentials(bot_id=bot_id, secret=secret)
+        secret_payload = json.dumps({"bot_id": bot_id, "secret": secret, "bot_open_id": bot_id})
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"wecom:{bot_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(
+                f"wecom account already exists for bot_id={bot_id} (credential race)"
+            ) from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="wecom",
+                external_account_id=bot_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="stream",
+                config={},
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except IntegrityError as exc:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM] orphan WeCom credential {} could not be rolled back",
+                    credential_id,
+                )
+            raise ValueError(f"wecom account already exists for bot_id={bot_id}") from exc
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM] orphan WeCom credential {} could not be rolled back",
                     credential_id,
                 )
             raise
