@@ -11,7 +11,9 @@ frames and uses proactive sends when no passive reply is available. Account stor
 links, conversation routing, run queues, leases, and runtime aggregation remain shared.
 
 **Tech stack:** FastAPI/Pydantic, asyncio + aiohttp, SQLModel/PostgreSQL, Redis gateway leases,
-pytest, Next.js/React 19, strict TypeScript, next-intl.
+pytest, Next.js/React 19, strict TypeScript, next-intl. Add `aiohttp` as a direct backend
+dependency with `uv add aiohttp`; do not rely on its transitive installation through another IM
+SDK.
 
 ## Unit 1 — Normalize WeCom callbacks and expose the connector seam
 
@@ -68,6 +70,8 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   connection lifecycle, request/ACK correlation, and inbound dispatch.
 - Create `backend/tests/unit/im/wecom/test_gateway.py` for the socket protocol and lifecycle
   contracts.
+- Modify `backend/pyproject.toml` and `backend/uv.lock` through `uv add aiohttp` so the WebSocket
+  transport has a direct dependency declaration.
 
 **Interfaces:**
 
@@ -87,8 +91,9 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
 
 - Subscribe to the fixed `wss://openws.work.weixin.qq.com` endpoint with Bot ID, Secret, and a
   random device ID; start the read loop only after a successful matching acknowledgement.
-- Register response futures before sending. Route callback commands to inbound handling and
-  route other matching request IDs to request or reply-ACK waiters.
+- Register response futures before sending. The socket reader resolves matching request or
+  reply-ACK waiters itself, but dispatches each callback handler in a tracked background task so
+  a handler can await a passive-reply ACK without blocking the only reader that can resolve it.
 - Permit one unacknowledged intermediate frame per passive request. Skip newer cumulative
   intermediate frames while it is pending; before a final frame, drain or time out the pending
   frame and then await the final frame's own ACK for 15 seconds.
@@ -98,8 +103,9 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
 - Send application pings every 30 seconds. On transport loss, fail waiters, close resources,
   and reconnect with bounded backoff. Stop reconnecting after
   `aibot_event_callback/disconnected_event` to avoid mutual kicking.
-- Gateway stop cancels heartbeat/read/reconnect work, fails pending futures, and closes the
-  socket and aiohttp session without waiting for the next backoff interval.
+- Gateway stop cancels heartbeat/read/reconnect work and every tracked inbound handler, gathers
+  them, fails pending futures, and closes the socket and aiohttp session without waiting for the
+  next backoff interval.
 
 **Tests:**
 
@@ -110,6 +116,8 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   and late final-ACK no-resend behavior.
 - Protect reconnect after ordinary closure, no reconnect after `disconnected_event`, and prompt
   cancellation on stop.
+- Protect a command handler's passive-reply ACK through the real read loop, proving the reader
+  remains live while the handler awaits it; also protect tracked-handler cancellation on stop.
 - Protect credential-probe cleanup on success, authentication failure, and timeout.
 
 ## Unit 3 — Route inbound messages, identity commands, and conversation resets
@@ -117,10 +125,13 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
 **Files:**
 
 - Extend `backend/cubeplex/im/wecom/gateway.py` with the account-bound inbound handler.
+- Extend `backend/cubeplex/im/inbound.py` with a receipt-backed command transaction that can
+  optionally require a current identity link and workspace membership before applying a
+  database mutation.
 - Create `backend/tests/e2e/test_im_wecom_ingress.py` for the real database/queue identity and
   routing flow, mocking only the WeCom send boundary.
-- Reuse `backend/cubeplex/im/link.py`, `backend/cubeplex/im/reset_command.py`, and
-  `backend/cubeplex/im/inbound.py` without changing their public contracts.
+- Reuse `backend/cubeplex/im/link.py` and the session-level reset operation behind
+  `backend/cubeplex/im/reset_command.py`.
 
 **Interfaces:**
 
@@ -129,13 +140,19 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   rejection_notifier=bound_connector)`.
 - `/link <email>` signs the existing `IMLinkClaims` with `platform="wecom"` and sends the
   confirmation URL using the current callback `req_id`.
-- `/new`, `/reset`, and `新对话` call `apply_reset_command` with the normalized channel and
-  scope, then passively send `format_reset_reply`.
+- The command transaction inserts the durable receipt before returning any effect. `/link` is
+  admitted without identity; `/new`, `/reset`, and `新对话` resolve the sender's current identity
+  link and workspace membership, then reset the normalized channel and scope in the same
+  transaction before the gateway sends `format_reset_reply`.
 
 **Core logic:**
 
-- Intercept link and reset commands before the identity gate so first-time users can link and
-  stale sessions can be rotated without starting an agent run.
+- Intercept commands before ordinary run ingestion, but let only `/link` bypass identity. Reset
+  commands from unlinked or removed users receive the same rejection as ordinary messages and
+  cannot mutate a shared channel conversation.
+- Reserve the `(account_id, msgid)` receipt before command handling. A replay observes the
+  existing receipt and returns without signing a second link response, rotating a second
+  conversation, or sending a duplicate confirmation.
 - Normal messages pass through the existing receipt transaction and membership gate. An
   unlinked user receives the standard link instruction; a linked user produces one queue row;
   duplicate `msgid` delivery produces no second row.
@@ -148,10 +165,12 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   row.
 - Protect that a confirmed link allows the next callback to create one queue row whose
   `reply_to_id` is the WebSocket request ID.
-- Protect duplicate-receipt idempotency and membership revocation.
+- Protect duplicate-receipt idempotency and membership revocation for ordinary messages.
 - Protect isolated versus shared group conversation resolution through the real Postgres
   models.
 - Protect `/link` token claims and `/new` binding rotation without starting an agent run.
+- Protect duplicate `/link` and reset callbacks producing one reply and one reset, and protect
+  unlinked and removed members from resetting both isolated and shared group scopes.
 
 ## Unit 4 — Stream run output through WeCom
 
@@ -160,9 +179,15 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
 - Create `backend/cubeplex/im/wecom/renderer.py` with `WecomOpDispatcher`.
 - Create `backend/cubeplex/im/wecom/_platform.py` with the four-method `PlatformConnector`
   implementation.
-- Modify `backend/cubeplex/im/runtime.py` to import/register WeCom during startup.
+- Modify `backend/cubeplex/im/runtime.py` to import/register WeCom, track live lease ownership,
+  and reconcile local connections with enabled database accounts.
+- Modify `backend/cubeplex/im/worker.py` and
+  `backend/cubeplex/repositories/im_connector.py` so connection-based queue work is claimable
+  only by the instance that owns the account's live connection.
 - Create `backend/tests/unit/im/wecom/test_renderer.py` and extend
   `backend/tests/unit/im/test_registry.py` for dispatcher and registration contracts.
+- Extend `backend/tests/e2e/test_im_worker.py` and runtime lease tests for multi-instance queue
+  affinity and connection reconciliation.
 
 **Interfaces:**
 
@@ -174,6 +199,11 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   contract.
 - `WecomPlatform.on_account_enabled(...)` starts one `WecomGateway` and stores it in the shared
   `gateways` map; `on_account_disabled(...)` removes and stops it.
+- `IMRunQueueWorker` receives a callable snapshot of locally owned connection account IDs.
+  `claim_pending_queue_item` joins the account row and permits enabled `long_connection`,
+  `gateway`, or `stream` work only when its account ID is in that snapshot. Webhook accounts and
+  disabled rows remain claimable by any worker, with disabled rows taking the existing terminal
+  park path.
 
 **Core logic:**
 
@@ -187,6 +217,11 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
   suppress intermediate sends and proactively send only the final result.
 - Do not start native file upload. The artifact dispatcher mints share URLs and the renderer
   includes them in the final text.
+- Add an explicit runtime owner set only after lease acquisition and successful connection
+  startup. Release the lease when startup fails. On each sweep, stop and remove any local
+  connection whose account is missing, disabled, or no longer leased by this instance, then
+  renew or acquire enabled orphan accounts. The WeCom callback handler separately reloads the
+  account's enabled state before commands or normal ingestion, closing the sweep race window.
 
 **Tests:**
 
@@ -195,6 +230,11 @@ pytest, Next.js/React 19, strict TypeScript, next-intl.
 - Protect expired-stream and no-`req_id` proactive-final behavior.
 - Protect final render inclusion of errors, artifact links, and pending-input web notices.
 - Protect gateway start/stop wiring through the registry and shared runtime maps.
+- Protect that a non-owner worker cannot claim or start a run for a connection account, while
+  the owner can and webhook work remains instance-agnostic.
+- Protect owner reconciliation after disable, delete, and lease loss, including local gateway
+  shutdown, owner-set removal, and lease release; protect the ingress enabled-row guard during
+  the reconciliation interval.
 
 ## Unit 5 — Add the workspace account contract
 

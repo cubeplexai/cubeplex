@@ -34,8 +34,10 @@ Store a Bot ID and Secret, subscribe to `wss://openws.work.weixin.qq.com`, and u
 
 This matches CubePlex's existing gateway lifecycle, works behind a firewall, supports direct
 and group chats, and needs only two credentials. The protocol has no official Python SDK, but
-it is small enough to implement directly with the already-installed `aiohttp` package and can
-be checked against Tencent's Node SDK and the Hermes Python implementation.
+it is small enough to implement directly with `aiohttp` and can be checked against Tencent's
+Node SDK and the Hermes Python implementation. `aiohttp` is added as a direct backend
+dependency with `uv add`; relying on another IM SDK to install it transitively would make the
+WeCom transport's dependency contract accidental.
 
 ### 2. WeCom self-built app callbacks
 
@@ -92,6 +94,13 @@ Account list, admin list, disable, enable, delete, bot settings, identity-link l
 status, and channel routing routes remain shared with the other platforms. There is no new
 org-admin route.
 
+The API process handling disable or delete may not own the account's socket. The runtime lease
+sweep therefore also reconciles its locally owned connection IDs against enabled database
+accounts. A missing, disabled, or no-longer-owned account is disconnected locally, removed from
+the owner set, and has its lease released within one sweep interval. The WeCom inbound handler
+also reloads the account and drops a callback when the row is missing or disabled, so no command
+or agent run can start during that bounded connection-cleanup window.
+
 ### WebSocket gateway
 
 Each enabled WeCom account owns one `WecomGateway`, registered through the existing
@@ -112,6 +121,12 @@ with bounded backoff of 2, 5, 10, 30, then 60 seconds. A server
 the gateway stops reconnecting instead of creating a mutual-kick loop. Disable, delete, and
 application shutdown cancel the read, heartbeat, and reconnect tasks and resolve pending
 waiters before returning.
+
+The socket reader only parses frames and resolves matching ACK waiters. It schedules each
+inbound callback handler as a tracked task instead of awaiting it inline: link, reset, rejection,
+and agent paths can all await passive-reply ACKs that only the reader can receive. Completed
+tasks are removed with exception logging, and gateway shutdown cancels and gathers every
+outstanding inbound task before closing the socket.
 
 `is_open()` returns true only while an authenticated socket and live read task exist. The
 existing runtime aggregation therefore reports `connected`, `disconnected`, or
@@ -158,8 +173,12 @@ passive-reply capability across normal process boundaries without adding a WeCom
 column. The original WeCom `msgid` remains available separately as `inbound_message_id`.
 
 The gateway reloads account-level routing settings for each message through
-`lookup_binding_mode`, then delegates to the existing `ingest_inbound_event` transaction. No
-changes are made to conversation resolution, queue claiming, or run startup.
+`lookup_binding_mode`, then delegates to the shared inbound transaction. Conversation
+resolution and run startup remain shared. Queue claiming gains connection-owner affinity:
+workers may claim webhook work on any instance, but may claim an enabled `long_connection`,
+`gateway`, or `stream` account only when that account is in the instance's live lease-owner set.
+This keeps `start_run` and the process-local outbound gateway on the same instance and prevents
+a non-owner from billing a run it cannot deliver.
 
 ### Identity and commands
 
@@ -168,15 +187,21 @@ The gateway therefore supplies `NullIdentityResolver` and a WeCom rejection noti
 unlinked sender receives the existing `/link <your-email>` instruction, and no agent run starts
 until the identity is confirmed. Workspace membership is still rechecked on every message.
 
-The gateway intercepts these text commands before the identity gate:
+The gateway recognizes these text commands before ordinary agent ingestion:
 
-- `/link <email>`: sign the existing ten-minute identity token and passively reply with the
-  confirmation URL.
-- `/new` and `/reset` (plus the existing `新对话` alias): rotate the conversation binding and
-  passively reply with the standard reset result.
+- `/link <email>`: this is the only command allowed to bypass identity. It signs the existing
+  ten-minute identity token and passively replies with the confirmation URL.
+- `/new` and `/reset` (plus the existing `新对话` alias): require a current identity link and
+  workspace membership before rotating the conversation binding and passively replying with
+  the standard reset result. This applies equally to isolated and shared group scopes.
 
 Command replies use the current callback `req_id`; they do not depend on a later active-send
 lookup.
+
+Every recognized command first inserts the same durable `(account_id, msgid)` receipt used by
+ordinary ingestion. The receipt insert and any reset database mutation share a transaction;
+only the winning delivery performs the command or emits its reply. Replayed `/link`, `/new`, or
+`/reset` callbacks therefore have no second side effect.
 
 ### Outbound protocol and rendering
 
@@ -253,9 +278,13 @@ and interactive-input limits. Missing console screenshots use explicit placehold
   Secret or full callback payload.
 - Malformed JSON and unknown commands are logged and dropped without terminating the read
   loop.
-- Duplicate inbound messages are handled by the existing database receipt constraint rather
-  than an in-memory deduplication cache.
-- Redis gateway leases prevent duplicate connections across CubePlex instances.
+- Duplicate inbound messages and commands are handled by the existing database receipt
+  constraint rather than an in-memory deduplication cache.
+- Redis gateway leases prevent duplicate connections across CubePlex instances and restrict
+  connection-account queue claims to the live lease owner.
+- Runtime reconciliation closes a locally owned connection after its account is disabled,
+  deleted, or leased by another instance; an enabled-row check at ingress blocks work before
+  that cleanup completes.
 - The fixed WeCom endpoint and TLS defaults are used; the connector does not accept arbitrary
   transport URLs.
 - A failed credential probe creates no durable rows. A later gateway disconnect leaves the
@@ -277,18 +306,21 @@ and interactive-input limits. Missing console screenshots use explicit placehold
 - A workspace member can bind a valid Bot ID and Secret; invalid credentials create no account
   or credential, and secrets never appear in API responses.
 - Exactly one authenticated WeCom WebSocket connection runs per enabled account across API
-  instances, and disable/delete/shutdown stops it promptly.
+  instances, and disable/delete/shutdown stops it within the bounded reconciliation interval.
+- Only the instance owning a connection account's live gateway can claim its queued work, so a
+  run cannot be started on an instance that is unable to deliver the reply.
 - A linked member's direct message creates or reuses the expected DM conversation and receives
   one streamed final answer.
 - A linked member's group mention uses participant scope in isolated mode and channel scope in
   shared mode.
 - An unlinked sender receives `/link` instructions and cannot start a run; a removed workspace
   member is rejected on their next message.
-- Duplicate `msgid` delivery creates only one queue item and one run.
+- Duplicate `msgid` delivery creates only one queue item, run, or command side effect.
 - Intermediate frames never overtake one another; finalization waits behind an outstanding
   frame and late final ACKs do not cause duplicate answers.
 - Expired passive streams and automated runs without an inbound `req_id` deliver one proactive
   final message.
-- `/link`, `/new`, and `/reset` work in direct messages and group mentions.
+- `/link` works before identity is established; `/new` and `/reset` require current workspace
+  membership in direct messages and group mentions.
 - The workspace wizard can create a WeCom account in English and Simplified Chinese, and the
   setup guide describes the shipped behavior and limits.
