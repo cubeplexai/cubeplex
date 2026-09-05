@@ -376,10 +376,10 @@ class WecomGateway:
                 self._running = False
                 await self._mark_disconnected()
                 tasks: list[asyncio.Task[None]] = []
-                for task in (self._heartbeat_task, *self._inbound_tasks):
-                    if task is not None and not task.done():
-                        task.cancel()
-                        tasks.append(task)
+                for background_task in (self._heartbeat_task, *self._inbound_tasks):
+                    if background_task is not None and not background_task.done():
+                        background_task.cancel()
+                        tasks.append(background_task)
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
                 self._inbound_tasks.clear()
