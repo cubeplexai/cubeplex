@@ -70,7 +70,7 @@
   "devDependencies": {
     "@types/node": "^26.4.1",
     "@types/react": "^19.2.18",
-    "@vitest/ui": "^4.1.11",
+    "@vitest/ui": "^5.0.0",
     "jsdom": "^30.0.1",
     "react": "19.2.8",
     "typescript": "^6.0.3",

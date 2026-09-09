@@ -60,7 +60,7 @@
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/ui": "^4.1.11",
+    "@vitest/ui": "^5.0.0",
     "dotenv": "^17.4.2",
     "jsdom": "^30.0.1",
     "tailwindcss": "^4",
