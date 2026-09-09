@@ -9,16 +9,18 @@ production:
   # Deployment Configuration
   deployment:
     mode: multi_tenant
-  
+
   api:
     reload: false
   
   # Sandbox Configuration for Production
   sandbox:
     enabled: true
-    domain: "USE ENV"  # Set via SANDBOX_DOMAIN env var
-    image: "USE ENV"   # Set via SANDBOX_IMAGE env var
-    api_key: "USE ENV" # Set via SANDBOX_API_KEY env var
+    # Required from CUBEPLEX_SANDBOX__DOMAIN / __IMAGE / __API_KEY or a
+    # production local/secrets configuration file. Startup rejects empty values.
+    domain: ""
+    image: ""
+    api_key: ""
 
   # Auth (production overrides — secrets MUST come from env)
   auth:
@@ -33,4 +35,3 @@ production:
       max_attempts: 5
       resend_cooldown_seconds: 60
       rate_limit_per_hour: 10
-  

@@ -22,6 +22,7 @@ from cubeplex.utils import log
 
 _MIN_AUTH_SECRET_LENGTH = 32
 _AUTH_SECRET_PLACEHOLDERS = {"replace_me", "use env"}
+_SANDBOX_CONFIG_PLACEHOLDERS = {"replace_me", "use env"}
 
 
 def validate_auth_secrets() -> None:
@@ -63,9 +64,16 @@ def validate_sandbox_config() -> None:
         ("sandbox.image", "CUBEPLEX_SANDBOX__IMAGE"),
         ("sandbox.api_key", "CUBEPLEX_SANDBOX__API_KEY"),
     ):
-        value = config.get(setting)
-        if not isinstance(value, str) or not value.strip():
+        raw_value = config.get(setting)
+        value = str(raw_value).strip() if raw_value is not None else ""
+        normalized_value = value.lower()
+        if not value:
             raise RuntimeError(f"{env_var} is required")
+        if (
+            normalized_value.startswith("change_me")
+            or normalized_value in _SANDBOX_CONFIG_PLACEHOLDERS
+        ):
+            raise RuntimeError(f"{env_var} must not use a placeholder value")
 
 
 def _build_encryption_backend() -> FernetBackend:
@@ -292,9 +300,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     )
     logger.info("SandboxManager initialized")
     cleanup_interval = config.get("sandbox.cleanup_interval", 60)
-    cleanup_task = asyncio.create_task(
-        sandbox_cleanup_loop(manager, interval=cleanup_interval)
-    )
+    cleanup_task = asyncio.create_task(sandbox_cleanup_loop(manager, interval=cleanup_interval))
     logger.info("Sandbox cleanup loop started")
 
     # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).

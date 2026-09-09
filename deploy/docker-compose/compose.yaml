@@ -151,8 +151,8 @@ services:
       start_period: 30s
 
   # OpenSandbox is required for agent tool execution. It creates sibling
-  # sandbox containers through the host Docker daemon; do not expose this API
-  # outside the private compose network.
+  # sandbox containers through the host Docker daemon and stays reachable only
+  # through the private compose network.
   opensandbox-server:
     image: ${OPENSANDBOX_IMAGE:-opensandbox/server:v0.2.2}
     <<: *restart-policy
@@ -163,8 +163,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config/opensandbox.toml:/etc/opensandbox/config.toml:ro
-    ports:
-      - "${OPENSANDBOX_PORT:-8090}:8090"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health', timeout=2).status == 200 else 1)"]
       interval: 10s

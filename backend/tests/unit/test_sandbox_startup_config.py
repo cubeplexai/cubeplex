@@ -21,6 +21,14 @@ import pytest
             {"sandbox.enabled": True, "sandbox.api_key": ""},
             "CUBEPLEX_SANDBOX__API_KEY is required",
         ),
+        (
+            {"sandbox.enabled": True, "sandbox.domain": "USE ENV"},
+            "CUBEPLEX_SANDBOX__DOMAIN must not use a placeholder value",
+        ),
+        (
+            {"sandbox.enabled": True, "sandbox.api_key": "REPLACE_ME"},
+            "CUBEPLEX_SANDBOX__API_KEY must not use a placeholder value",
+        ),
     ],
 )
 def test_validate_sandbox_config_rejects_incomplete_required_configuration(
