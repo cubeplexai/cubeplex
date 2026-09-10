@@ -106,13 +106,31 @@ Do not also depend on the `cubepi` shim.
 Every live `from cubepi…` / `import cubepi…` becomes `cubeloop`. That
 includes application code, tests, and Alembic `env.py`.
 
-Historical Alembic revisions that import helpers
-(`write_schema_version_op`, `upgrade_vN_to_v{N+1}_op`,
-`create_message_partitions_op`) must change the **Python import** to
-`cubeloop.checkpointer.postgres.alembic_helpers`. The **SQL they emit
-stays `cubepi_*`**. Upstream kept those historical helpers on the old
-table names on purpose: a fresh database still replays v1→v5 against
-`cubepi_*`, then v6 renames.
+Historical Alembic helper imports are **not** a blanket swap. In
+cubeloop 0.14, current-schema factories emit `cubeloop_*` names;
+only some historical helpers still emit `cubepi_*`:
+
+| Helper | 0.14 SQL | CubePlex callers |
+|---|---|---|
+| `create_message_partitions_op()` | `cubeloop_messages_pXX PARTITION OF cubeloop_messages` | `555c11215b57` (v1) |
+| `create_runs_partitions_op()` | `cubeloop_runs_pXX` | none (v4 inlined cubepi names via `upgrade_v3_to_v4_op`) |
+| `upgrade_v3_to_v4_op()`, `upgrade_v4_to_v5_op()`, `add_pending_request_column_op()`, `add_run_id_column_op()` | still `cubepi_*` | v4 / v5 revisions |
+| `write_schema_version_op()` | writes `EXPECTED_SCHEMA_VERSION` (now 6) to `cubeloop_schema_version` if that table exists, else `cubepi_schema_version` | v1–v5 |
+
+v1 (`555c11215b57`) creates `cubepi_messages` then calls
+`create_message_partitions_op()`. After the pin that helper would
+`PARTITION OF cubeloop_messages`, which does not exist yet — greenfield
+`alembic upgrade head` dies at v1. **Stop calling that helper from v1.**
+Inline the original SQL in the revision: `CREATE TABLE cubepi_messages_p00…p63
+PARTITION OF cubepi_messages FOR VALUES WITH (modulus 64, remainder N)`.
+
+v2–v5 may switch the import path to
+`cubeloop.checkpointer.postgres.alembic_helpers` because the helpers
+they call still emit `cubepi_*`. `write_schema_version_op()` writing 6
+from v1 on a greenfield replay is the existing host contract (today v1
+already writes current expected, which is 5). Alembic runs v1→v6 in one
+`upgrade head`; the checkpointer is not opened against the intermediate
+row. Do not rewrite those calls to insert historical version numbers.
 
 Exception: `eef196f4c8f9` already `try/except ImportError`s
 `cubepi.providers.catalog` (deleted years ago). Leave that import as
@@ -151,17 +169,17 @@ New Alembic revision, same pattern as `c2f1a7b9d340` (v4→v5):
    - Import `cubeloop_metadata` from
      `cubeloop.checkpointer.postgres.models`.
    - `target_metadata = [SQLModel.metadata, cubeloop_metadata]`.
-   - `_CHECKPOINT_TABLES` lists **both** `cubepi_*` and `cubeloop_*`
-     parent names (`threads` is not in the set today because it is
-     created by an early revision autogen saw; after v6 the live tables
-     are cubeloop-named). Exclude both prefixes for partitions
-     (`cubepi_messages_p` / `cubepi_runs_p` **and** `cubeloop_messages_p`
-     / `cubeloop_runs_p`).
-   - Why both prefixes: if autogen runs against a DB that has not yet
-     applied v6, metadata is cubeloop-named and the reflected tables are
-     still `cubepi_*`. Excluding only the new names would let autogen
-     propose `DROP cubepi_*` / `CREATE cubeloop_*`, which would destroy
-     conversation history.
+   - `_CHECKPOINT_TABLES` must list **both** old and new parent names,
+     including **`cubepi_threads` and `cubeloop_threads`**. Today
+     `cubepi_threads` is *not* in the set (v1 autogen created it). After
+     metadata points at cubeloop-named tables, a still-v5 DB still has
+     `cubepi_threads`; omitting it lets autogen propose
+     `DROP cubepi_threads` (CASCADE onto messages/runs/hitl). Also
+     exclude both partition prefixes (`cubepi_messages_p` /
+     `cubepi_runs_p` **and** `cubeloop_messages_p` / `cubeloop_runs_p`).
+   - Full table set: existing langgraph leftovers, plus
+     `cubepi_{threads,messages,runs,hitl_answers,schema_version}` and
+     `cubeloop_{threads,messages,runs,hitl_answers,schema_version}`.
 2. `alembic revision --autogenerate -m "cubeloop v5 to v6 rename"`.
    Body is empty. Hand-add:
 
@@ -175,9 +193,23 @@ New Alembic revision, same pattern as `c2f1a7b9d340` (v4→v5):
    partitions, 64 run partitions, `cubepi_hitl_answers`, the version
    table, and `ix_cubepi_*` indexes.
 3. Downgrade **reverses the rename**. It must not `DROP` the tables —
-   that would delete every conversation. Hand-write the inverse
-   `ALTER TABLE cubeloop_* RENAME TO cubepi_*` (including partitions and
-   indexes) and set `cubepi_schema_version` back to 5.
+   that would delete every conversation. PostgreSQL `ALTER TABLE …
+   RENAME TO` on a partitioned parent does **not** rename children, so
+   the inverse must rename each of the 128 partitions the same way the
+   upgrade helper does. Required order (names only; FKs follow relation
+   identity):
+
+   1. `ix_cubeloop_*` → `ix_cubepi_*` (the three indexes the helper
+      renamed)
+   2. `cubeloop_schema_version` → `cubepi_schema_version`
+   3. `cubeloop_hitl_answers` → `cubepi_hitl_answers`
+   4. `cubeloop_runs_p00…p63` then `cubeloop_runs` → `cubepi_runs*`
+   5. `cubeloop_messages_p00…p63` then `cubeloop_messages` → `cubepi_messages*`
+   6. `cubeloop_threads` → `cubepi_threads`
+   7. Write version 5 into `cubepi_schema_version`
+
+   Verify with a throwaway-DB round trip: v5 → v6 → v5 → v6, then
+   `\dt cubeloop_*` / partition count / version row.
 
 `write_schema_version_op()` in 0.14 writes to `cubeloop_schema_version`
 if that table exists, else to `cubepi_schema_version`. Historical
@@ -308,8 +340,9 @@ should only hit those classes.
 - After `alembic upgrade head` on a DB that already had v5: `\dt
   cubeloop_*` shows parents + 64+64 partitions; `cubepi_*` data tables
   are gone; `SELECT version FROM cubeloop_schema_version` is `6`.
-- A greenfield `alembic upgrade head` (replay of v1→v6) ends on the same
-  schema.
+- A greenfield `alembic upgrade head` (empty DB, replay of v1→v6,
+  including the inlined v1 `cubepi_messages_pXX` DDL) ends on the same
+  schema. This is what the e2e test-DB bootstrap already does.
 - Opening a checkpointer against that DB does not raise
   `CubeloopSchemaMismatch` / `CubeloopSchemaUninitialized`.
 - Admin trace list/detail/tag-values work against `cubeloop.*` fixtures

@@ -71,18 +71,24 @@ This unit will not boot the agent path by itself (imports still say
 **Files**
 
 - `backend/alembic/env.py` — `cubeloop_metadata`; exclude both
-  `cubepi_*` and `cubeloop_*` parents and partition prefixes from
-  autogenerate.
+  `cubepi_*` and `cubeloop_*` parents (including **threads**) and both
+  partition prefixes from autogenerate.
 - `backend/alembic/versions/<auto>_cubeloop_v5_to_v6_rename.py` —
   created via `--autogenerate`, body filled with the upstream helpers.
-- Historical revisions that import
-  `cubepi.checkpointer.postgres.alembic_helpers` — import path only
-  becomes `cubeloop.checkpointer.postgres.alembic_helpers`. SQL they
-  emit stays `cubepi_*`.
+- `backend/alembic/versions/555c11215b57_add_cubepi_checkpointer_tables.py`
+  — **do not** retarget `create_message_partitions_op()`. Drop that
+  import and inline `CREATE TABLE cubepi_messages_p00…p63 PARTITION OF
+  cubepi_messages …`. Keep `write_schema_version_op` but import it from
+  `cubeloop.checkpointer.postgres.alembic_helpers`.
+- v2–v5 revisions that import `upgrade_v3_to_v4_op` /
+  `upgrade_v4_to_v5_op` / `write_schema_version_op` — import path only
+  becomes `cubeloop.checkpointer.postgres.alembic_helpers`. Those
+  helpers still emit `cubepi_*`.
 - `eef196f4c8f9` — leave the `cubepi.providers.catalog` ImportError
   branch; that module never existed on cubeloop.
 - `backend/tests/unit/test_alembic_env.py` — assert `cubeloop_metadata`
-  / `cubeloop.checkpointer.postgres`.
+  and that `_CHECKPOINT_TABLES` contains both `cubepi_threads` and
+  `cubeloop_threads`.
 
 **Interfaces**
 
@@ -97,19 +103,29 @@ def upgrade() -> None:
     op.execute(write_schema_version_op())  # writes 6 into cubeloop_schema_version
 ```
 
-Downgrade reverses the rename (parents, 64+64 partitions, hitl_answers,
-schema_version, `ix_cubeloop_*` → `ix_cubepi_*`) and writes version 5
-into `cubepi_schema_version`. It must not `DROP` those tables.
+Downgrade is the inverse of `upgrade_v5_to_v6_op()`, not a DROP. Parent
+`ALTER TABLE … RENAME TO` does not rename partitions; list all 128
+children. Order:
+
+1. Rename `ix_cubeloop_messages_metadata_gin`,
+   `ix_cubeloop_messages_thread_run`, `ix_cubeloop_runs_thread_seq`
+   back to `ix_cubepi_*`.
+2. `cubeloop_schema_version` → `cubepi_schema_version`
+3. `cubeloop_hitl_answers` → `cubepi_hitl_answers`
+4. `cubeloop_runs_p00…p63` then `cubeloop_runs` → `cubepi_runs*`
+5. `cubeloop_messages_p00…p63` then `cubeloop_messages` → `cubepi_messages*`
+6. `cubeloop_threads` → `cubepi_threads`
+7. Write version 5 into `cubepi_schema_version`
 
 `env.py` exclusion set after this unit:
 
-- Tables: existing checkpoint leftovers plus `cubepi_hitl_answers`,
-  `cubepi_messages`, `cubepi_runs`, `cubepi_schema_version`,
-  `cubeloop_hitl_answers`, `cubeloop_messages`, `cubeloop_runs`,
-  `cubeloop_schema_version`, `cubeloop_threads` (threads was never in
-  the set because the v1 autogen created it; adding the cubeloop name
-  prevents a post-rename autogen from trying to drop it as "not in
-  SQLModel metadata" if reflection and metadata ever disagree).
+- Tables: existing checkpoint leftovers plus **`cubepi_threads`**,
+  `cubepi_messages`, `cubepi_runs`, `cubepi_hitl_answers`,
+  `cubepi_schema_version`, **`cubeloop_threads`**, `cubeloop_messages`,
+  `cubeloop_runs`, `cubeloop_hitl_answers`, `cubeloop_schema_version`.
+  `cubepi_threads` is the load-bearing add: it is not excluded today,
+  and after metadata is cubeloop-named a still-v5 DB would otherwise
+  get `DROP cubepi_threads`.
 - Prefixes: `cubepi_messages_p`, `cubepi_runs_p`, `cubeloop_messages_p`,
   `cubeloop_runs_p`.
 
@@ -117,25 +133,36 @@ into `cubepi_schema_version`. It must not `DROP` those tables.
 
 Order is load-bearing:
 
-1. Edit `env.py` so autogen against a still-v5 DB does not propose
-   `DROP cubepi_*` / `CREATE cubeloop_*`.
-2. `cd backend && uv run alembic heads` — single head; capture it.
-3. `uv run alembic revision --autogenerate -m "cubeloop v5 to v6 rename"`.
-   Empty body is the expected outcome.
-4. Hand-add the two `op.execute` calls. `down_revision` is the captured
-   head.
-5. Then change historical helper imports.
+1. Edit `env.py` (including `cubepi_threads`) so autogen against a
+   still-v5 DB does not propose `DROP cubepi_*` / `CREATE cubeloop_*`.
+2. Inline v1 partition DDL in `555c11215b57` **before** the pin is
+   used to run alembic on an empty DB.
+3. `cd backend && uv run alembic heads` — single head; capture it.
+4. `uv run alembic revision --autogenerate -m "cubeloop v5 to v6 rename"`.
+   Empty body is the expected outcome. Inspect the file: no
+   `DROP TABLE cubepi_threads` / no `CREATE TABLE cubeloop_*`.
+5. Hand-add the two `op.execute` calls plus the reverse-rename
+   downgrade. `down_revision` is the captured head.
+6. Retarget v2–v5 helper imports (not v1's `create_message_partitions_op`).
 
 `write_schema_version_op()` in 0.14 already chooses cubeloop vs cubepi
-version table by which one exists. Do not special-case old revisions.
+version table by which one exists. Do not rewrite historical calls to
+insert version 1/2/3/4/5 by hand.
 
 **Tests**
 
-- Unit: `test_alembic_env.py` updated.
-- Verify (command, not a new test file): on the worktree **dev** DB
-  (already at v5 from worktree init) run `alembic upgrade head`, then
+- Unit: `test_alembic_env.py` asserts both `cubepi_threads` and
+  `cubeloop_threads` are excluded.
+- Worktree **dev** DB (already at v5): `alembic upgrade head`, then
   `\dt cubeloop_*`, `\dt cubepi_*` (data tables gone), `SELECT version
   FROM cubeloop_schema_version` → `6`.
+- Greenfield replay: e2e test-DB bootstrap (`alembic upgrade head` on
+  an empty `cubeplex_test_*` database) is the v1→v6 replay. If v1 still
+  calls `create_message_partitions_op()`, this fails first.
+- Throwaway-DB round trip after the new revision exists:
+  upgrade to v6, downgrade one revision, upgrade again; confirm 64+64
+  partitions and version 6. Not a committed test; a command check in
+  this unit.
 - E2E that opens the checkpointer (`test_cubeloop_checkpointer_integration`,
   renamed in Unit 3) is the contract that `_verify_schema` accepts 6.
 
@@ -440,18 +467,20 @@ Focused, in order:
 ## Risk register
 
 1. **Autogen against a v5 DB after env.py points metadata at cubeloop.**
-   Mitigation: exclude both prefixes before generating the v6 revision;
+   Mitigation: exclude **both** `cubepi_threads` and `cubeloop_threads`
+   (and the rest of both prefixes) before generating the v6 revision;
    never apply an autogen that drops `cubepi_*`.
-2. **Historical revision replay.** v1–v5 SQL must keep creating
-   `cubepi_*`; only the Python import of helpers moves. v6 then renames.
-   `write_schema_version_op()` already writes to whichever version table
-   exists.
+2. **v1 `create_message_partitions_op()` after the pin.** 0.14's helper
+   partitions `cubeloop_messages`, which v1 has not created. Mitigation:
+   inline `cubepi_messages_pXX PARTITION OF cubepi_messages` in
+   `555c11215b57`. Greenfield e2e alembic is the tripwire.
 3. **Tempo 0.14 traces invisible if Unit 5 slips.** The attribute rename
    must ship in the same PR as the pin. Pre-0.14 `cubepi.*` traces going
    dark is accepted (no dual-read).
-4. **Downgrade that DROPs.** A copy-paste of the v4→v5 downgrade shape
-   (`DROP TABLE`) would delete conversation history. v6 downgrade is a
-   reverse rename.
+4. **Downgrade that DROPs or skips partitions.** A copy-paste of the
+   v4→v5 downgrade shape (`DROP TABLE`) would delete conversation
+   history. Parent rename does not rename 128 children. v6 downgrade is
+   the full inverse sequence in Unit 2; round-trip on a throwaway DB.
 5. **Lockfile churn.** Review `uv.lock` for unrelated bumps before
    commit.
 6. **Identifier rename misses a patch string.** Tests that monkeypatch
