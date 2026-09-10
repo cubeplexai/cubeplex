@@ -220,7 +220,10 @@ calls to target `cubeloop_schema_version` by name.
 Opening 0.14 against an unmigrated v5 database raises
 `CubeloopSchemaMismatch` pointing at `upgrade_v5_to_v6_op()`, not
 "tables not found". CubePlex must ship the Alembic revision in the same
-release as the pin.
+release as the pin. Implementation order inside that slice: inline v1
+partition SQL first (still valid on cubepi 0.13.5), then `uv add`
+cubeloop, then env.py + helper imports + the v6 revision, with no
+`alembic upgrade` / empty-DB e2e in between.
 
 ### Live SQL against checkpointer tables
 

@@ -12,6 +12,12 @@ traces are not dual-read. Frozen `docs/dev` snapshots and the SQL inside
 historical Alembic revisions stay as they are. CubePlex does not install
 the `cubepi` 0.14 shim.
 
+**Units 1 and 2 are one implementation slice.** Inline v1's partition
+DDL *before* `uv add` removes `cubepi`. After the pin, finish env.py +
+helper imports + the v6 revision before any `alembic upgrade` or e2e
+that bootstraps an empty test DB. Do not land Unit 1 on main (or even
+run alembic locally) without Unit 2.
+
 **Tech stack:** Python 3.13 / `uv` / cubeloop 0.14.0 (git tag `v0.14.0`
 on `cubeplexai/cubeloop`) / Postgres checkpointer schema 6 / Tempo
 TraceQL / FastAPI / pytest.
@@ -22,8 +28,16 @@ Spec: [2026-09-10-cubeloop-rename-design.md](../specs/2026-09-10-cubeloop-rename
 
 ## Unit 1 — Pin cubeloop 0.14.0
 
+Prerequisite (same slice as Unit 2): inline v1 partition SQL in
+`555c11215b57` **before** this `uv add`. After `uv add`, do not run
+alembic or e2e until Unit 2 is finished.
+
 **Files**
 
+- `backend/alembic/versions/555c11215b57_add_cubepi_checkpointer_tables.py`
+  — first: drop `create_message_partitions_op()` and inline
+  `CREATE TABLE cubepi_messages_p00…p63 PARTITION OF cubepi_messages`.
+  This edit is valid on the current cubepi pin.
 - `backend/pyproject.toml` — replace the `cubepi[…]` project dep and
   the `[tool.uv.sources]` git override with `cubeloop` pointed at
   `https://github.com/cubeplexai/cubeloop.git` rev `v0.14.0`. Description
@@ -62,7 +76,9 @@ compaction / conversation E2E later.
 - `git diff backend/uv.lock` reviewed before commit.
 
 This unit will not boot the agent path by itself (imports still say
-`cubepi`). Do not land it on main alone.
+`cubepi`). Combined with Unit 2 in one commit; do not land it on main
+alone, and do not run `alembic upgrade` / e2e between the pin and
+Unit 2.
 
 ---
 
@@ -131,19 +147,19 @@ children. Order:
 
 **Core logic**
 
-Order is load-bearing:
+Order is load-bearing. Steps 1–2 of Unit 1 (v1 inline, then pin) have
+already happened. Continue immediately, no alembic/e2e in between:
 
 1. Edit `env.py` (including `cubepi_threads`) so autogen against a
    still-v5 DB does not propose `DROP cubepi_*` / `CREATE cubeloop_*`.
-2. Inline v1 partition DDL in `555c11215b57` **before** the pin is
-   used to run alembic on an empty DB.
+2. Retarget v1's remaining `write_schema_version_op` import and v2–v5
+   helper imports to `cubeloop.checkpointer.postgres.alembic_helpers`.
 3. `cd backend && uv run alembic heads` — single head; capture it.
 4. `uv run alembic revision --autogenerate -m "cubeloop v5 to v6 rename"`.
    Empty body is the expected outcome. Inspect the file: no
    `DROP TABLE cubepi_threads` / no `CREATE TABLE cubeloop_*`.
 5. Hand-add the two `op.execute` calls plus the reverse-rename
    downgrade. `down_revision` is the captured head.
-6. Retarget v2–v5 helper imports (not v1's `create_message_partitions_op`).
 
 `write_schema_version_op()` in 0.14 already chooses cubeloop vs cubepi
 version table by which one exists. Do not rewrite historical calls to
