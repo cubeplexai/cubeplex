@@ -1,15 +1,16 @@
 # CubePlex cutover to CubeLoop 0.14 — plan
 
 **Goal:** Pin CubePlex on `cubeloop` 0.14.0, migrate checkpointer tables
-v5→v6, rewrite live imports/identifiers/SQL, dual-read Tempo traces, and
-update current docs and skills.
+v5→v6, rewrite live imports/identifiers/SQL, cut Tempo over to
+`cubeloop.*` attributes, and update current docs and skills.
 
 **Architecture:** One release-shaped cutover. The pin, the Alembic
-rename, the import rewrite, and the Tempo dual-read must ship together:
-opening 0.14 against v5 raises `CubeloopSchemaMismatch`, and 0.14 spans
-are invisible to today's `span.cubepi.*` TraceQL. Frozen `docs/dev`
-snapshots and the SQL inside historical Alembic revisions stay as they
-are. CubePlex does not install the `cubepi` 0.14 shim.
+rename, the import rewrite, and the Tempo attribute rename must ship
+together: opening 0.14 against v5 raises `CubeloopSchemaMismatch`, and
+0.14 spans are invisible to today's `span.cubepi.*` TraceQL. Pre-0.14
+traces are not dual-read. Frozen `docs/dev` snapshots and the SQL inside
+historical Alembic revisions stay as they are. CubePlex does not install
+the `cubepi` 0.14 shim.
 
 **Tech stack:** Python 3.13 / `uv` / cubeloop 0.14.0 (git tag `v0.14.0`
 on `cubeplexai/cubeloop`) / Postgres checkpointer schema 6 / Tempo
@@ -254,25 +255,26 @@ set.
 
 ---
 
-## Unit 5 — Tempo dual-read
+## Unit 5 — Tempo cubeloop-only attribute names
 
 **Files**
 
 - `backend/cubeplex/services/tempo_client.py` — parser, TraceQL,
-  search-hit summary.
+  search-hit summary: every `cubepi.` vendor key becomes `cubeloop.`.
 - `backend/cubeplex/api/routes/v1/admin_traces.py` — tag allowlist and
   `_has_foreign_org_span`.
 - `backend/cubeplex/api/schemas/trace.py` — comments only (`cubeloop.turn`).
 - `backend/tests/unit/test_tempo_client.py`, `test_tempo_parser.py`
-- `backend/tests/fixtures/tempo/` — keep 0.13 JSON; add a 0.14 twin.
+- `backend/tests/fixtures/tempo/` — rewrite `cubepi.*` keys in the JSON
+  fixtures to `cubeloop.*`.
 - `backend/tests/e2e/test_admin_traces.py` — allowlist tag names.
 
 **Interfaces**
 
-Parser: for each vendor key, new then old.
+Parser keys (cubeloop only; no cubepi fallback):
 
 ```
-cubeloop.run_id                  / cubepi.run_id
+cubeloop.run_id
 cubeloop.metadata.{org,workspace,user,conversation}_id
 cubeloop.turn / cubeloop.turn.index / .stop_reason / .tool_calls.count
 cubeloop.agent.tools
@@ -280,51 +282,48 @@ cubeloop.llm.raw_request / raw_response
 cubeloop.tool.is_error / execution_mode
 ```
 
-`gen_ai.*` is unchanged.
+`gen_ai.*` is unchanged. Span name `cubepi.turn` is no longer classified
+as a turn.
 
-TraceQL org gate (and each optional filter) is an OR of the two
-namespaces, still as sibling spansets so org_id on `invoke_agent` and
-`gen_ai.request.model` on a chat span can match independently:
+TraceQL org gate (and each optional filter) stays as sibling spansets so
+org_id on `invoke_agent` and `gen_ai.request.model` on a chat span can
+match independently — only the vendor prefix changes:
 
 ```
 { resource.service.name="cubeplex" &&
-  (span.cubeloop.metadata.org_id="…" || span.cubepi.metadata.org_id="…") }
+  span.cubeloop.metadata.org_id="…" }
 ```
 
-`select(...)` lists both spellings so 0.13 hits still populate
-workspace/user/conversation/run_id on the summary.
+`select(...)` lists the cubeloop spellings.
 
-Tag allowlist contains both `cubeloop.metadata.*` and `cubepi.metadata.*`
-plus `gen_ai.request.model`. Detail defence-in-depth treats a span as
-in-org if **either** org attribute matches, and as foreign if **either**
-is present and differs. A span with neither org attribute is not
-foreign (same as today: the summary-level `org_id is None → 404`
-catches traces that have no org at all).
+Tag allowlist is `cubeloop.metadata.{workspace,user,conversation}_id`
+plus `gen_ai.request.model`. `_has_foreign_org_span` reads
+`cubeloop.metadata.org_id` only.
 
 **Core logic**
 
-Prefer `cubeloop.tracing.schema.attr` for dict lookups so CubePlex does
-not fork the fallback. TraceQL cannot use that helper; emit both keys
-explicitly.
+String-replace the vendor prefix in the viewer. Do not dual-read, do
+not dual-write. CubePlex already passes unprefixed metadata into
+`tracing_context`; 0.14 prefixes it `cubeloop.metadata.*`. Pre-0.14
+Tempo documents with `cubepi.*` keys stop matching search and fail the
+org-id gate on detail (`org_id is None → 404`). That is accepted.
 
-Do not dual-write attributes. CubePlex already passes unprefixed
-metadata into `tracing_context`; 0.14 prefixes it `cubeloop.metadata.*`.
+**Tests**
 
-**Tests** (TDD — this is the one behavioural contract)
+Unit, in `tests/unit/test_tempo_parser.py` / `test_tempo_client.py`
+(update the existing assertions; no new dual-namespace cases):
 
-Unit, in `tests/unit/test_tempo_parser.py` / `test_tempo_client.py`:
-
-1. Existing 0.13 fixture still parses business ids, turn kind, raw
+1. Rewritten cubeloop fixtures still parse business ids, turn kind, raw
    request/response.
-2. A 0.14 fixture (only `cubeloop.*`) parses the same view-model.
-3. Search TraceQL for an org contains **both**
-   `span.cubeloop.metadata.org_id` and `span.cubepi.metadata.org_id`.
-4. Tag-values allowlist accepts both spellings; a random tag still 400s.
-5. `_has_foreign_org_span` flags a child with the other org on either
-   namespace.
+2. Search TraceQL for an org contains `span.cubeloop.metadata.org_id`
+   and does **not** contain `span.cubepi.`.
+3. Tag-values allowlist accepts the cubeloop spellings; a `cubepi.*`
+   tag and a random tag still 400.
+4. `_has_foreign_org_span` flags a child whose
+   `cubeloop.metadata.org_id` differs.
 
 E2E `test_admin_traces.py` keeps covering the HTTP 404-on-foreign-org
-path; update the raw_attributes keys to also cover cubeloop.
+path with `cubeloop.metadata.org_id`.
 
 ---
 
@@ -447,9 +446,9 @@ Focused, in order:
    `cubepi_*`; only the Python import of helpers moves. v6 then renames.
    `write_schema_version_op()` already writes to whichever version table
    exists.
-3. **Tempo 0.14 traces invisible.** Dual-read is mandatory in the same
-   PR as the pin. Parser tests cover both fixtures; TraceQL tests assert
-   both keys are emitted.
+3. **Tempo 0.14 traces invisible if Unit 5 slips.** The attribute rename
+   must ship in the same PR as the pin. Pre-0.14 `cubepi.*` traces going
+   dark is accepted (no dual-read).
 4. **Downgrade that DROPs.** A copy-paste of the v4→v5 downgrade shape
    (`DROP TABLE`) would delete conversation history. v6 downgrade is a
    reverse rename.
@@ -464,5 +463,5 @@ Focused, in order:
 ## Out of this plan
 
 Matches the spec: no PyPI-instead-of-git switch, no shim dep, no frozen
-docs rewrite, no JSONL directory migration, no dual-write of OTel
-attrs, no new CubeLoop APIs.
+docs rewrite, no JSONL directory migration, no dual-read or dual-write
+of OTel attrs, no new CubeLoop APIs.

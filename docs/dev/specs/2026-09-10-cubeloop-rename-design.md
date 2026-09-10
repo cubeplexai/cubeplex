@@ -35,7 +35,7 @@ What actually moved in 0.14, and what CubePlex touches:
 | Checkpointer tables | `cubepi_threads`, `cubepi_messages` (+ 64 partitions), `cubepi_runs` (+ 64), `cubepi_hitl_answers`, `cubepi_schema_version` | `cubeloop_*` same suffix | Alembic v5→v6 + every raw SQL |
 | SQLAlchemy metadata | `cubepi_metadata` | `cubeloop_metadata` | `alembic/env.py` |
 | Schema version | 5 | 6 | Opening 0.14 against v5 raises `CubeloopSchemaMismatch` |
-| OTel vendor attrs / span name | `cubepi.run_id`, `cubepi.metadata.*`, `cubepi.turn`, … | `cubeloop.*` same suffix | Admin Tempo viewer: new spans invisible unless dual-read |
+| OTel vendor attrs / span name | `cubepi.run_id`, `cubepi.metadata.*`, `cubepi.turn`, … | `cubeloop.*` same suffix | Admin Tempo viewer cut over to `cubeloop.*` only; pre-0.14 traces drop out of the UI |
 | JSONL default dir | `./cubepi-traces` | `./cubeloop-traces` | config, Dockerfile, gitignore, uvicorn reload exclude |
 | CLI | `cubepi trace` | `cubeloop trace` | docs + skills |
 | Skills | `cubepi`, `cubepi-trace` from `cubeplexai/cubepi` | `cubeloop`, `cubeloop-trace` from `cubeplexai/cubeloop` | `skills-lock.json`, `.agents/skills/`, `AGENTS.md` |
@@ -74,11 +74,12 @@ layer.
 ### 3. Full live-code cutover; frozen history stays — chosen
 
 Depend on `cubeloop` directly. Rewrite live imports, identifiers, SQL,
-config, current docs, and skills. Dual-read Tempo / JSONL that still
-carry `cubepi.*` so existing traces remain searchable. Do **not** rewrite
-frozen `docs/dev/{specs,plans,notes}` or the SQL inside historical
-Alembic revisions (those revisions must keep emitting `cubepi_*` table
-names so a greenfield replay of v1→v5 still works).
+config, current docs, and skills. Tempo and the admin trace viewer
+cut over to `cubeloop.*` only — pre-0.14 traces in Tempo are not
+kept searchable. Do **not** rewrite frozen `docs/dev/{specs,plans,notes}`
+or the SQL inside historical Alembic revisions (those revisions must
+keep emitting `cubepi_*` table names so a greenfield replay of v1→v5
+still works).
 
 ## Design
 
@@ -208,38 +209,36 @@ after the migration the old names are gone.
 `recovery._stamp_cubepi_runs` already goes through
 `cp.mark_run_complete`; only the function name and log text change.
 
-### Tracing (the one dual-read)
+### Tracing — cubeloop-only, no dual-read
 
 Writers (CubeLoop itself) emit `cubeloop.*` only. CubePlex stamps
 unprefixed metadata (`conversation_id`, `org_id`, …) via
 `tracing_context`; the library prefixes it. No CubePlex write-path
 change beyond comments.
 
-Readers CubePlex owns must accept **both** namespaces, because Tempo
-already holds 0.13 traces and JSONL on disk may still be under
-`cubepi-traces/`:
+Readers CubePlex owns cut over to `cubeloop.*` in the same way. Pre-0.14
+Tempo traces and on-disk JSONL that still carry `cubepi.*` are out of
+scope for the admin viewer: they will not appear in search, detail, or
+tag-values. Upstream `cubeloop trace` still dual-reads JSONL on its own;
+CubePlex does not.
 
-**Parser** (`tempo_client.parse_trace_detail` and friends): for every
-vendor key, try `cubeloop.<suffix>` then `cubepi.<suffix>`. Span
-classification treats both `cubeloop.turn` and `cubepi.turn` as
-`SpanKind.TURN`. Reuse `cubeloop.tracing.schema.attr` for the fallback
-rather than duplicating it, if the import stays lazy-safe without the
-`tracing` extra (CubePlex already installs that extra).
+**Parser** (`tempo_client.parse_trace_detail` and friends): every vendor
+key is `cubeloop.<suffix>`. Span classification treats `cubeloop.turn`
+as `SpanKind.TURN` (`cubepi.turn` is no longer recognized). Do not call
+`cubeloop.tracing.schema.attr` for a cubepi fallback.
 
-**TraceQL search / tag-values:** every `span.cubepi.metadata.X` /
-`span.cubepi.run_id` clause becomes
-`(span.cubeloop.metadata.X = … || span.cubepi.metadata.X = …)`. The
-org-scope gate on detail (`_has_foreign_org_span`) reads either
-`cubeloop.metadata.org_id` or `cubepi.metadata.org_id`. A trace with
-**neither** stays invisible, same as today.
+**TraceQL search / tag-values:** `span.cubepi.metadata.X` /
+`span.cubepi.run_id` become `span.cubeloop.metadata.X` /
+`span.cubeloop.run_id`. The org-scope gate on detail
+(`_has_foreign_org_span`) reads `cubeloop.metadata.org_id` only. A
+trace with no cubeloop org attribute stays invisible.
 
-**Allowlist** for `/admin/traces/tag-values`: both
-`cubeloop.metadata.{workspace,user,conversation}_id` and the `cubepi.*`
-spellings. `gen_ai.request.model` is unchanged.
+**Allowlist** for `/admin/traces/tag-values`:
+`cubeloop.metadata.{workspace,user,conversation}_id` and
+`gen_ai.request.model`. Drop the `cubepi.*` spellings.
 
-**Fixtures:** keep the existing 0.13 Tempo JSON fixtures (they are the
-legacy corpus). Add a 0.14 twin that uses only `cubeloop.*` so the
-parser is proven on both.
+**Fixtures:** rewrite the existing Tempo JSON fixtures from `cubepi.*`
+to `cubeloop.*`. No 0.13 corpus is kept for the viewer tests.
 
 **JSONL directory:** default `tracing.directory` becomes
 `./cubeloop-traces`. No automatic fallback to `./cubepi-traces` (matches
@@ -278,7 +277,6 @@ upstream CLI). Operators who already set the path keep their setting.
   shipped).
 - SQL **strings** inside historical Alembic revisions (v1–v5 helpers
   still create/alter `cubepi_*`).
-- Tempo dual-read of `cubepi.*` attributes on the read path.
 - `.gitignore` entry for `cubepi-traces/`.
 - The `eef196f4c8f9` `cubepi.providers.catalog` ImportError branch.
 
@@ -293,7 +291,10 @@ should only hit those classes.
 - Rewriting frozen `docs/dev` snapshots or git history.
 - Renaming Alembic revision **filenames** (`555c11215b57_add_cubepi_…`).
 - Migrating on-disk JSONL from `cubepi-traces/` into `cubeloop-traces/`.
-- Dual-writing OTel attributes (upstream does not; CubePlex must not).
+- Dual-reading or dual-writing OTel attributes. The admin viewer and
+  Tempo TraceQL are cubeloop-only; pre-0.14 `cubepi.*` traces drop out
+  of the UI. (Upstream `cubeloop trace` still dual-reads JSONL; that is
+  not CubePlex's job.)
 - Product/UI copy that says "CubePlex" — this is the runtime rename,
   not a CubePlex rebrand.
 - Adopting new CubeLoop APIs that 0.14 did not introduce (fork wiring,
@@ -311,9 +312,9 @@ should only hit those classes.
   schema.
 - Opening a checkpointer against that DB does not raise
   `CubeloopSchemaMismatch` / `CubeloopSchemaUninitialized`.
-- Admin trace list/detail/tag-values return 0.13 Tempo fixtures
-  (`cubepi.*`) **and** 0.14 fixtures (`cubeloop.*`). A 0.14-only trace
-  is org-scoped by `cubeloop.metadata.org_id`.
+- Admin trace list/detail/tag-values work against `cubeloop.*` fixtures
+  and are org-scoped by `cubeloop.metadata.org_id`. A leftover 0.13
+  Tempo payload with only `cubepi.*` keys is not a supported input.
 - `history_window` / conversation bootstrap / fork / user-or-workspace
   delete still read and delete the renamed tables.
 - `rg -n "from cubepi|import cubepi" backend/cubeplex backend/tests
