@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom'
+import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
 
 // @lobehub/icons transitively imports @emoji-mart/data JSON that Vitest cannot
