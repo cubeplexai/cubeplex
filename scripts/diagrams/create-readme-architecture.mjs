@@ -25,7 +25,7 @@ const label = (x, y, text, anchor = 'middle') =>
 const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1170" role="img" aria-labelledby="title desc">
   <title id="title">CubePlex architecture overview</title>
-  <desc id="desc">Web and IM clients connect to the CubePlex application and CubePi agent runtime. The runtime uses skills, memory, MCP tools, automations, artifacts, workspace sandboxes, model providers, MCP servers, and persistent infrastructure.</desc>
+  <desc id="desc">Web and IM clients connect to the CubePlex application and CubeLoop agent runtime. The runtime uses skills, memory, MCP tools, automations, artifacts, workspace sandboxes, model providers, MCP servers, and persistent infrastructure.</desc>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#27272a" stroke-width=".7"/></pattern>
     <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7Z" fill="#6a83e3"/></marker>
@@ -64,7 +64,7 @@ const svg = `
   <rect x="472" y="132" width="842" height="705" rx="14" class="panel"/>
   <text x="502" y="164" class="section">CUBEPLEX APPLICATION</text>
   ${box({ x: 502, y: 194, w: 782, h: 76, kind: 'key', title: 'Organization, workspace, and access governance', body: 'memberships · roles · model policy · workspace-scoped APIs', titleSize: 20 })}
-  ${box({ x: 502, y: 311, w: 782, h: 108, kind: 'key', title: 'FastAPI + CubePi agent runtime', body: 'streaming conversation runs · tool orchestration · approvals · checkpoints', small: 'SSE API · provider routing · policy enforcement', titleSize: 22 })}
+  ${box({ x: 502, y: 311, w: 782, h: 108, kind: 'key', title: 'FastAPI + CubeLoop agent runtime', body: 'streaming conversation runs · tool orchestration · approvals · checkpoints', small: 'SSE API · provider routing · policy enforcement', titleSize: 22 })}
 
   <text x="502" y="465" class="section">RUNTIME CAPABILITIES</text>
   ${box({ x: 502, y: 493, w: 182, h: 95, title: 'Skills', body: 'packaged workflows', small: 'built-in · uploaded · registry' })}
@@ -106,7 +106,7 @@ const svg = `
 
   <rect x="472" y="890" width="1280" height="200" rx="14" class="panel"/>
   <text x="502" y="922" class="section">PERSISTENCE AND DEPLOYMENT</text>
-  ${box({ x: 502, y: 954, w: 220, h: 96, kind: 'infra', title: 'PostgreSQL', body: 'organizations · conversations · state', small: 'CubePi checkpoints · governance' })}
+  ${box({ x: 502, y: 954, w: 220, h: 96, kind: 'infra', title: 'PostgreSQL', body: 'organizations · conversations · state', small: 'CubeLoop checkpoints · governance' })}
   ${box({ x: 742, y: 954, w: 220, h: 96, kind: 'infra', title: 'Redis', body: 'coordination · caches · queues', small: 'OAuth and active-run state' })}
   ${box({ x: 982, y: 954, w: 220, h: 96, kind: 'infra', title: 'S3-compatible storage', body: 'attachments · artifacts · skills', small: 'RustFS in Docker Compose' })}
   ${box({ x: 1222, y: 954, w: 502, h: 96, kind: 'key', title: 'Deploy on Docker Compose or Kubernetes with Helm', body: 'the same frontend and backend images; optional OpenSandbox integration', titleSize: 17 })}

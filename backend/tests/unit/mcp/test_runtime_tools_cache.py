@@ -1,4 +1,4 @@
-"""Unit tests for the tools_cache fast path in cubepi_runtime.
+"""Unit tests for the tools_cache fast path in cubeloop_runtime.
 
 The eager MCP loader now builds AgentTools from the install's persisted
 ``tools_cache`` instead of a live ``initialize`` + ``tools/list`` round
@@ -24,8 +24,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cubeplex.mcp import cubepi_runtime
-from cubeplex.mcp.cubepi_runtime import (
+from cubeplex.mcp import cubeloop_runtime
+from cubeplex.mcp.cubeloop_runtime import (
     _build_tools_from_cache,
     _make_refresh_auth_callback,
     schedule_tools_cache_refresh,
@@ -61,7 +61,7 @@ def test_cache_built_tool_matches_live_loader_shape() -> None:
     """If the cache-built tool schema drifted from what the live loader
     produces for the same descriptor, the LLM tool payload (and the
     prompt-cache prefix) would differ between cache-hit and live sends."""
-    from cubepi.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp._adapter import make_mcp_agent_tool
 
     entry = {
         "name": "get_weather",
@@ -122,8 +122,8 @@ def test_automatic_cache_refresh_has_failure_cooldown(monkeypatch: Any) -> None:
         return object()
 
     monkeypatch.setattr(asyncio, "create_task", fake_create_task)
-    monkeypatch.setattr(cubepi_runtime, "_cache_refresh_in_flight", set())
-    monkeypatch.setattr(cubepi_runtime, "_cache_refresh_last_attempt", {})
+    monkeypatch.setattr(cubeloop_runtime, "_cache_refresh_in_flight", set())
+    monkeypatch.setattr(cubeloop_runtime, "_cache_refresh_last_attempt", {})
     spec = replace(
         _make_spec(_PING_CACHE),
         org_id="org_test",
@@ -141,7 +141,7 @@ def test_automatic_cache_refresh_has_failure_cooldown(monkeypatch: Any) -> None:
     }
 
     schedule_tools_cache_refresh(**kwargs)  # type: ignore[arg-type]
-    cubepi_runtime._cache_refresh_in_flight.clear()  # first attempt completed
+    cubeloop_runtime._cache_refresh_in_flight.clear()  # first attempt completed
     schedule_tools_cache_refresh(**kwargs)  # type: ignore[arg-type]
 
     assert len(created) == 1
@@ -160,7 +160,7 @@ def _unauthorized() -> BaseException:
 
 
 def _install_fake_session(monkeypatch: Any, opened_auth: list[str | None]) -> None:
-    """Fake cubepi's ``_open_session``: 401 unless the fresh token is sent.
+    """Fake cubeloop's ``_open_session``: 401 unless the fresh token is sent.
 
     Records the Authorization header of every session-open attempt.
     """
@@ -181,8 +181,8 @@ def _install_fake_session(monkeypatch: Any, opened_auth: list[str | None]) -> No
 
         yield _Session(), lambda: None
 
-    monkeypatch.setattr("cubepi.mcp.http_loader._open_session", fake_open_session)
-    monkeypatch.setattr("cubepi.mcp.http_loader._serialize_call_tool_response", lambda resp: resp)
+    monkeypatch.setattr("cubeloop.mcp.http_loader._open_session", fake_open_session)
+    monkeypatch.setattr("cubeloop.mcp.http_loader._serialize_call_tool_response", lambda resp: resp)
 
 
 _PING_CACHE = [{"name": "ping", "description": "", "input_schema": {"type": "object"}}]

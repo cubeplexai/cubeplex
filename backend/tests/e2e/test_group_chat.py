@@ -3,7 +3,7 @@
 Companion to ``test_topics.py`` which covers Topic CRUD and participant
 management. This module exercises the run-time behaviour that depends on
 ``Conversation.topic_id`` + topic participants — message access gates,
-sandbox mode dispatch, IM resume refusal, and the cubepi-side sender
+sandbox mode dispatch, IM resume refusal, and the cubeloop-side sender
 attribution helper.
 
 Send-message tests assert ``status_code != 404`` because the
@@ -461,17 +461,17 @@ class TestIMResumeRefusesTopicConversation:
         run_manager.resume_run_with_answer.assert_awaited_once()
 
 
-class TestSenderAttributionViaCubepi:
-    """Sender attribution moved to cubepi (provider boundary). CubePlex sets
-    ``metadata.sender_display_name`` on the UserMessage and cubepi's
+class TestSenderAttributionViaCubeloop:
+    """Sender attribution moved to cubeloop (provider boundary). CubePlex sets
+    ``metadata.sender_display_name`` on the UserMessage and cubeloop's
     ``apply_sender_attribution`` rewrites the first text block. This smoke
-    test pins the contract so a bad cubepi pin bump fails here, not deep
+    test pins the contract so a bad cubeloop pin bump fails here, not deep
     inside a provider call.
     """
 
     @pytest.mark.anyio
     async def test_apply_sender_attribution_prefixes_first_text_block(self) -> None:
-        from cubepi.providers.base import (
+        from cubeloop.providers.base import (
             TextContent,
             UserMessage,
             apply_sender_attribution,
@@ -489,7 +489,7 @@ class TestSenderAttributionViaCubepi:
 
     @pytest.mark.anyio
     async def test_apply_sender_attribution_noop_without_metadata(self) -> None:
-        from cubepi.providers.base import (
+        from cubeloop.providers.base import (
             TextContent,
             UserMessage,
             apply_sender_attribution,

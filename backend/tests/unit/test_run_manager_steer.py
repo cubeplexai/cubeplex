@@ -10,7 +10,7 @@ class _FakeAgent:
         self.steered: list = []
         self.cancelled: list[str] = []
 
-    def steer(self, message) -> None:  # noqa: ANN001 - cubepi Message
+    def steer(self, message) -> None:  # noqa: ANN001 - cubeloop Message
         self.steered.append(message)
 
     def cancel_steer(self, steer_id: str) -> bool:  # noqa: ANN001

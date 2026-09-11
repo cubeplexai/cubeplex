@@ -32,7 +32,7 @@ const realUserMessage = {
   timestamp: 1_700_000_000,
 } as unknown as Message
 
-// Mirrors a cubepi synthetic_user_message after the API round-trip
+// Mirrors a cubeloop synthetic_user_message after the API round-trip
 // (e.g. a todo-guard nudge persisted into history).
 const syntheticMessage = {
   id: 'msg-synthetic',

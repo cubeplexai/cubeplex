@@ -27,8 +27,8 @@ def server_url_hash(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-# Regex defining what counts as a "non-namespace character" in the cubepi
-# runtime's tool slug. Kept here (rather than buried in cubepi_runtime) so
+# Regex defining what counts as a "non-namespace character" in the cubeloop
+# runtime's tool slug. Kept here (rather than buried in cubeloop_runtime) so
 # the alembic generated-column ``Computed(...)`` expression and the
 # service-layer preflight share one source of truth — the Postgres
 # expression below MUST stay in sync with this Python regex byte-for-byte.

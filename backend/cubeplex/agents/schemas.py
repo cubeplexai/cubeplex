@@ -174,7 +174,7 @@ class UsageEvent(AgentEvent):
 
 
 class InjectedMessageEvent(AgentEvent):
-    """A user message injected mid-run (a steer) that cubepi has now drained
+    """A user message injected mid-run (a steer) that cubeloop has now drained
     into the thread. Carries the join key so the frontend can match it to a
     pending chip and commit it at the real transcript position.
     """

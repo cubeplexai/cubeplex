@@ -36,7 +36,7 @@ class AttachmentRepository(ScopedRepository[Attachment]):
     ) -> Attachment | None:
         """Resolve an attachment, walking up the fork chain on miss.
 
-        A forked conversation's cloned cubepi messages still reference the
+        A forked conversation's cloned cubeloop messages still reference the
         SOURCE conversation's attachment ids (the messages were copied
         verbatim, and Attachment rows are PK'd by id under a single
         conversation_id — no per-fork clone, no row aliasing). Without
@@ -54,7 +54,7 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         )
         if row is not None:
             return row
-        # Climb the fork chain.  Direct SQL against the cubepi-owned table
+        # Climb the fork chain.  Direct SQL against the cubeloop-owned table
         # (no SQLModel for it on the cubeplex side) — kept to a single
         # column SELECT so the coupling is minimal and obvious.
         current = conversation_id

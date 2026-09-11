@@ -1,6 +1,6 @@
 """CitationMiddleware.
 
-Implements two cubepi ``Middleware`` hooks:
+Implements two cubeloop ``Middleware`` hooks:
 
 - ``transform_system_prompt``: appends ``CITATION_PROMPT`` to the system
   prompt when any citation configs are registered, instructing the LLM to
@@ -14,7 +14,7 @@ Pure helpers (``chunk_text``, ``CitationCounter``, ``CitationConfig``,
 ``_extract_text_content``) live alongside the middleware.
 
 Citations land at ``AfterToolCallResult.details["citations"]`` (a list of
-citation dicts).  The cubepi agent loop merges this into the final
+citation dicts).  The cubeloop agent loop merges this into the final
 ``AgentToolResult.details`` so downstream stream handlers can emit
 ``citation`` SSE events.
 """
@@ -25,9 +25,9 @@ import asyncio
 import json
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentContext
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import Content, TextContent
+from cubeloop.agent.types import AfterToolCallContext, AfterToolCallResult, AgentContext
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import Content, TextContent
 from loguru import logger
 
 from cubeplex.middleware.citations.chunker import chunk_text
@@ -37,14 +37,14 @@ from cubeplex.prompts.citations import CITATION_PROMPT
 
 
 def _extract_text_content(content: list[Any]) -> str:
-    """Extract plain text from a cubepi ``Content`` list.
+    """Extract plain text from a cubeloop ``Content`` list.
 
-    cubepi content items are ``TextContent(text=...)`` objects (or dicts with
+    cubeloop content items are ``TextContent(text=...)`` objects (or dicts with
     ``type="text"`` from MCP adapters).
     """
     texts: list[str] = []
     for block in content:
-        # cubepi TextContent pydantic model
+        # cubeloop TextContent pydantic model
         if hasattr(block, "text"):
             texts.append(str(block.text))
         # raw dict form (MCP content blocks)

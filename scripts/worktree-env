@@ -667,7 +667,7 @@ def cmd_reseed_db(args: argparse.Namespace) -> int:
     migrations from scratch.
 
     Why this exists: after a rebase that pulls in main migrations newer than
-    the cubepi migration on this branch, alembic's stored revision pointer
+    the cubeloop migration on this branch, alembic's stored revision pointer
     already shows ``head`` (because the worktree's DB had the branch's old
     head applied), so ``alembic upgrade head`` is a no-op even though the
     underlying tables are missing the columns those skipped migrations were

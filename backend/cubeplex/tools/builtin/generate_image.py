@@ -1,4 +1,4 @@
-"""generate_image tool — cubepi.AgentTool (image generation + artifact registration).
+"""generate_image tool — cubeloop.AgentTool (image generation + artifact registration).
 
 Factory pattern: call make_generate_image_tool(...) at agent-construction time.
 The tool calls the supplied images_provider instance, writes the result to the
@@ -13,10 +13,10 @@ import re
 import shlex
 from typing import Protocol
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.errors import ProviderError
-from cubepi.providers.base import ImageContent, TextContent
-from cubepi.providers.images import (
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.errors import ProviderError
+from cubeloop.providers.base import ImageContent, TextContent
+from cubeloop.providers.images import (
     AssistantImages,
     ImagesContext,
     ImagesModel,
@@ -30,7 +30,7 @@ from cubeplex.services.attachments import resize_to_long_edge
 
 
 class _ImagesProvider(Protocol):
-    """Structural type for a cubepi images provider instance."""
+    """Structural type for a cubeloop images provider instance."""
 
     async def generate_images(
         self,
@@ -85,7 +85,7 @@ def make_generate_image_tool(
     images_provider: _ImagesProvider,
     images_model: ImagesModel,
 ) -> AgentTool[GenerateImageInput]:
-    """Build the generate_image cubepi.AgentTool with bound dependencies.
+    """Build the generate_image cubeloop.AgentTool with bound dependencies.
 
     images_provider must be a per-run instance (e.g. OpenAIImagesProvider or
     FauxImagesProvider) created by the caller — never the global registry.

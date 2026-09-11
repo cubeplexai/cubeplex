@@ -1,4 +1,4 @@
-"""Memory tools ported to cubepi (M2.2) — unit tests."""
+"""Memory tools ported to cubeloop (M2.2) — unit tests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
-from cubepi.agent.types import AgentTool
+from cubeloop.agent.types import AgentTool
 
 from cubeplex.models.memory import MemoryScope, MemoryStatus, MemoryType
 from cubeplex.services.memory import MemoryPermissionError
@@ -112,7 +112,7 @@ def service_factory(fake_svc: _FakeMemoryService):  # type: ignore[no-untyped-de
 def test_create_memory_tools_returns_three_agent_tools(
     service_factory: Any,
 ) -> None:
-    """Factory returns exactly three cubepi.AgentTool instances."""
+    """Factory returns exactly three cubeloop.AgentTool instances."""
     tools = create_memory_tools(service_factory=service_factory)
     assert len(tools) == 3
     for t in tools:
@@ -120,7 +120,7 @@ def test_create_memory_tools_returns_three_agent_tools(
 
 
 def test_create_memory_tools_tool_names(service_factory: Any) -> None:
-    """Tool names are stable across the cubepi migration (prompt-cache contract)."""
+    """Tool names are stable across the cubeloop migration (prompt-cache contract)."""
     tools = create_memory_tools(service_factory=service_factory)
     names = {t.name for t in tools}
     assert names == {"memory_save", "memory_search", "memory_update"}

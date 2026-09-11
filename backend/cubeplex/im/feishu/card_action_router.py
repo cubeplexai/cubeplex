@@ -2,11 +2,11 @@
 
 `parse_action_payload(event)` extracts a typed `ActionPayload` from the
 raw event body. `dispatch(payload, expected_responder_open_id)` validates
-the responder identity and produces the `ResumeAction` cubepi should
+the responder identity and produces the `ResumeAction` cubeloop should
 consume, or `None` to silently drop (the caller surfaces a Feishu toast).
 
 IO-free; the webhook ingress (Task 15) calls these helpers and then
-invokes the cubepi resume API (Task 17).
+invokes the cubeloop resume API (Task 17).
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ class ActionPayload:
     operator_open_id: str
     question_id: str = ""
     answer_key: str = ""
-    """cubepi form-schema key the resume call uses to build {answer_key: choice}."""
+    """cubeloop form-schema key the resume call uses to build {answer_key: choice}."""
     answers: dict[str, Any] | None = None
     """Full answer dict from a form submit (multi-question / multi-select /
-    free-text). When set, resume passes this through as the cubepi answer
+    free-text). When set, resume passes this through as the cubeloop answer
     instead of wrapping ``choice`` under ``answer_key``."""
 
 
@@ -51,8 +51,8 @@ def _normalize_form_value(form_value: dict[str, Any]) -> dict[str, Any]:
     """Drop submit-button noise and keep only user-filled field values.
 
     Feishu form_value keys match each field's ``name`` (we set those to the
-    cubepi question keys). Multi-select returns a list; select/input return
-    scalars. Empty strings for optional fields are kept so cubepi can decide.
+    cubeloop question keys). Multi-select returns a list; select/input return
+    scalars. Empty strings for optional fields are kept so cubeloop can decide.
     """
     answers: dict[str, Any] = {}
     for key, value in form_value.items():
@@ -121,7 +121,7 @@ def dispatch(
     *,
     expected_responder_open_id: str | None,
 ) -> ResumeAction | None:
-    """Validate responder and produce the ResumeAction cubepi consumes.
+    """Validate responder and produce the ResumeAction cubeloop consumes.
 
     Returns None when the responder does not match (caller surfaces a
     toast and otherwise no-ops). `expected_responder_open_id=None` denies

@@ -72,7 +72,7 @@ def test_ask_user_request_with_dict_options() -> None:
     pending = state.card_state.pending_input
     assert pending is not None
     # No ``value`` field on the options — the renderer mirrors ``key`` as the
-    # label (legacy fixture compatibility). When real cubepi emits
+    # label (legacy fixture compatibility). When real cubeloop emits
     # {label, value}, the next test verifies label/value diverge correctly.
     assert pending.choices == [
         ("a", "a", "primary"),
@@ -82,10 +82,10 @@ def test_ask_user_request_with_dict_options() -> None:
 
 
 def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
-    """cubepi's normal option shape is {label, value} — the button text is
-    ``label`` (human-visible) and the answer cubepi expects back is ``value``.
+    """cubeloop's normal option shape is {label, value} — the button text is
+    ``label`` (human-visible) and the answer cubeloop expects back is ``value``.
     If we used ``label`` for both, an option like {label:"Yes", value:"yes"}
-    would send "Yes" to cubepi, which would reject the schema mismatch.
+    would send "Yes" to cubeloop, which would reject the schema mismatch.
     """
     state = _state_with_card()
     fold_event(
@@ -111,7 +111,7 @@ def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
     pending = state.card_state.pending_input
     assert pending is not None
     # Button TEXT is the human-readable label; button VALUE is the schema key
-    # cubepi expects in the answer dict.
+    # cubeloop expects in the answer dict.
     assert pending.choices == [
         ("Yes", "yes", "primary"),
         ("No", "no", "danger"),

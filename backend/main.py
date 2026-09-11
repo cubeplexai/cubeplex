@@ -22,14 +22,14 @@ if __name__ == "__main__":
         #
         # An absolute exclude that doesn't exist yet is fatal, not ignored:
         # uvicorn falls back to `Path.cwd().glob(pattern)`, and pathlib refuses
-        # an absolute glob pattern (NotImplementedError on 3.13). cubepi-traces
+        # an absolute glob pattern (NotImplementedError on 3.13). cubeloop-traces
         # is gitignored and created lazily on the first agent run, so a fresh
         # checkout / worktree would crash on `python main.py` before it exists.
         # mkdir it up front so the existing-dir short-circuit always applies.
         backend_dir = Path(__file__).resolve().parent
         excluded_dirs = [
             backend_dir / ".venv",
-            backend_dir / "cubepi-traces",
+            backend_dir / "cubeloop-traces",
             backend_dir / "skills_cache",
         ]
         for d in excluded_dirs:

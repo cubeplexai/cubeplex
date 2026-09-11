@@ -216,11 +216,11 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
-    """Without a tracer, consolidation uses cubepi Provider.generate directly."""
+    """Without a tracer, consolidation uses cubeloop Provider.generate directly."""
     import contextlib
     from unittest.mock import AsyncMock, MagicMock
 
-    from cubepi.providers.base import AssistantMessage, TextContent
+    from cubeloop.providers.base import AssistantMessage, TextContent
 
     @contextlib.asynccontextmanager
     async def _fake_init_checkpointer_nonempty():
@@ -287,7 +287,7 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
     import contextlib
     from unittest.mock import AsyncMock, MagicMock
 
-    from cubepi.providers.base import AssistantMessage
+    from cubeloop.providers.base import AssistantMessage
 
     @contextlib.asynccontextmanager
     async def _fake_init_checkpointer_nonempty():

@@ -9,7 +9,7 @@ import re
 from contextvars import ContextVar
 from typing import Any
 
-from cubepi.providers.base import Message
+from cubeloop.providers.base import Message
 
 # Matches the 【N-M】 markers CitationMiddleware injects into tool result
 # content. We only need group 1 (citation_id) to recover the watermark.

@@ -1,9 +1,9 @@
 from cubeplex.agents.schemas import InjectedMessageEvent
-from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
+from cubeplex.streams.run_manager import cubeloop_dict_to_agent_event
 
 
 def test_injected_message_dict_becomes_typed_event():
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {"type": "injected_message", "content": "do X", "steer_id": "s1"},
         "2026-05-25T00:00:00+00:00",
     )
@@ -12,7 +12,7 @@ def test_injected_message_dict_becomes_typed_event():
 
 
 def test_injected_message_dict_forwards_group_chat_sender():
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "injected_message",
             "content": "do X",

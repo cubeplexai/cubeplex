@@ -1,4 +1,4 @@
-"""Unit tests for the cubepi_runtime static-auth dispatch.
+"""Unit tests for the cubeloop_runtime static-auth dispatch.
 
 The runtime supports three static-auth styles:
   * ``bearer``  → ``Authorization: Bearer <token>`` (default; legacy shape).
@@ -14,7 +14,7 @@ mcp-installs E2E suite.
 
 from __future__ import annotations
 
-from cubeplex.mcp.cubepi_runtime import _apply_static_credential, _inject_query_param
+from cubeplex.mcp.cubeloop_runtime import _apply_static_credential, _inject_query_param
 from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 

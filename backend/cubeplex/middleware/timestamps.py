@@ -1,4 +1,4 @@
-"""TimestampMiddleware — cubepi port of TimestampMiddleware (M3.d.2).
+"""TimestampMiddleware — cubeloop port of TimestampMiddleware (M3.d.2).
 
 Stamps timing data across the full hook surface:
 
@@ -19,7 +19,7 @@ Cache-discipline contract
 **Timestamps NEVER appear in prompt text, system prompt, or message
 content.**  They land exclusively in:
 
-- ``UserMessage.metadata`` (cubepi side channel, not forwarded to the LLM)
+- ``UserMessage.metadata`` (cubeloop side channel, not forwarded to the LLM)
 - ``AssistantMessage.metadata`` (out-of-band, never converted to LLM payload)
 - ``AfterToolCallResult.details`` (tool result details dict, not in content)
 
@@ -35,14 +35,14 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     BeforeToolCallContext,
 )
-from cubepi.middleware.base import Middleware, TurnAction
-from cubepi.providers.base import AssistantMessage, Message
+from cubeloop.middleware.base import Middleware, TurnAction
+from cubeloop.providers.base import AssistantMessage, Message
 
 from cubeplex.utils.time import utc_isoformat
 

@@ -42,7 +42,7 @@ self-hosted deploy on Docker Compose or Kubernetes.
 </p>
 
 The diagram reflects the current application architecture. CubePlex's agent
-runtime is built on [CubePi](https://github.com/cubeplexai/cubepi), an
+runtime is built on [CubeLoop](https://github.com/cubeplexai/cubeloop), an
 async-native agent framework for multi-provider model access, tool execution,
 streaming, middleware, and durable checkpoints. Workspace sandboxes
 are isolated execution environments with persistent working state; external
@@ -131,7 +131,7 @@ Local setup also needs backend env/config files described in the
 ## Repository layout
 
 ```text
-backend/    FastAPI API and Cubepi-based agent runtime
+backend/    FastAPI API and Cubeloop-based agent runtime
 frontend/   Next.js web app and shared TypeScript packages
 deploy/     Docker Compose and Kubernetes/Helm assets
 docs/       Product docs site and engineering reference

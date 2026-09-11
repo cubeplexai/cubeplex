@@ -1,4 +1,4 @@
-"""Unit tests for the cubepi load_skill tool."""
+"""Unit tests for the cubeloop load_skill tool."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 // frontend/packages/core/src/types/events.ts
 import type { CitationData } from './citation'
-// Mirrors cubepi's content-block union (cubepi/providers/base.py): TextContent,
+// Mirrors cubeloop's content-block union (cubeloop/providers/base.py): TextContent,
 // ThinkingContent, ToolCall. `tool_call_streaming` is a frontend-only block used
 // during live SSE to render partial tool-call args before the full call lands.
 export type ContentBlock =
@@ -8,7 +8,7 @@ export type ContentBlock =
   | {
       type: 'thinking'
       thinking: string
-      started_at?: number // milliseconds since epoch (live) / cubepi seconds * 1000 (bootstrap)
+      started_at?: number // milliseconds since epoch (live) / cubeloop seconds * 1000 (bootstrap)
       duration_ms?: number
     }
   | {
@@ -104,8 +104,8 @@ export interface FailoverEvent extends AgentEvent {
 }
 
 /**
- * Emitted by cubepi ``FallbackBoundModel.on_retry`` before a same-model
- * retry sleep. ``wait_s`` is 0 when cubepi retries immediately.
+ * Emitted by cubeloop ``FallbackBoundModel.on_retry`` before a same-model
+ * retry sleep. ``wait_s`` is 0 when cubeloop retries immediately.
  */
 export interface RetryEvent extends AgentEvent {
   type: 'model_retry'

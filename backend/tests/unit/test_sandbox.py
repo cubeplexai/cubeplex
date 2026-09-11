@@ -8,8 +8,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 
 from cubeplex.middleware.sandbox import (
     SandboxMiddleware,
@@ -697,7 +697,7 @@ async def test_file_read_delegates_to_sandbox() -> None:
 
 @pytest.mark.asyncio
 async def test_file_read_returns_error_kind_when_file_missing() -> None:
-    """FileNotFoundError must surface as ErrorOutput, not cubepi's generic
+    """FileNotFoundError must surface as ErrorOutput, not cubeloop's generic
     str(exc) wrapper (which would leak the bare path as 'file contents').
     """
     sandbox = _make_sandbox()
@@ -736,7 +736,7 @@ async def test_file_read_returns_error_kind_on_sandbox_error() -> None:
 @pytest.mark.asyncio
 async def test_file_read_returns_error_kind_on_transport_error() -> None:
     """Transient transport errors (httpx etc.) must also surface as ErrorOutput
-    with retryable=True — otherwise cubepi's str(exc) wrapper leaks raw error
+    with retryable=True — otherwise cubeloop's str(exc) wrapper leaks raw error
     text as tool content, the same trap as the bare FileNotFoundError case.
     """
     sandbox = _make_sandbox()

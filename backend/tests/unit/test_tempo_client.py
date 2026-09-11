@@ -39,9 +39,10 @@ async def test_search_builds_traceql_with_filters(search_json: dict) -> None:
     assert route.called
     q = route.calls.last.request.url.params["q"]
     assert 'resource.service.name="cubeplex"' in q
-    assert 'cubepi.metadata.org_id="org-1"' in q
-    assert 'cubepi.metadata.workspace_id="ws-1"' in q
-    assert 'cubepi.metadata.conversation_id="conv-9"' in q
+    assert 'span.cubeloop.metadata.org_id="org-1"' in q
+    assert 'cubeloop.metadata.workspace_id="ws-1"' in q
+    assert 'cubeloop.metadata.conversation_id="conv-9"' in q
+    assert "span.cubepi." not in q
     assert isinstance(summaries, list)
 
 
@@ -77,7 +78,7 @@ async def test_get_trace_returns_detail() -> None:
 
 @respx.mock
 async def test_get_trace_extracts_agent_and_turn_payloads() -> None:
-    """The invoke_agent (root) span and cubepi.turn spans carry their own
+    """The invoke_agent (root) span and cubeloop.turn spans carry their own
     gen_ai.input.messages/output.messages/system_instructions. This real
     captured fixture has some of these truncated mid-sentence (an actual
     tracing-pipeline artifact, not a synthetic edge case) - exercising both
@@ -113,9 +114,9 @@ async def test_get_trace_extracts_agent_and_turn_payloads() -> None:
 
 @respx.mock
 async def test_chat_span_derives_output_messages_from_raw_response() -> None:
-    """`gen_ai.output.messages` is never set on `chat` spans in this cubepi
-    version (only on invoke_agent/cubepi.turn) - the chat span's own response
-    content has to come from cubepi.llm.raw_response instead (OpenAI chat
+    """`gen_ai.output.messages` is never set on `chat` spans in this cubeloop
+    version (only on invoke_agent/cubeloop.turn) - the chat span's own response
+    content has to come from cubeloop.llm.raw_response instead (OpenAI chat
     completions shape: choices[0].message.{content,tool_calls}).
     """
     raw_response = json.dumps(
@@ -157,7 +158,7 @@ async def test_chat_span_derives_output_messages_from_raw_response() -> None:
                                         "value": {"stringValue": "chat"},
                                     },
                                     {
-                                        "key": "cubepi.llm.raw_response",
+                                        "key": "cubeloop.llm.raw_response",
                                         "value": {"stringValue": raw_response},
                                     },
                                 ],
@@ -186,7 +187,9 @@ async def test_chat_span_derives_output_messages_from_raw_response() -> None:
 @respx.mock
 async def test_tag_values_passes_through() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/v2/search/tag/span.cubepi.metadata.workspace_id/values").mock(
+    respx.get(
+        "http://tempo.local/api/v2/search/tag/span.cubeloop.metadata.workspace_id/values"
+    ).mock(
         return_value=httpx.Response(
             200,
             json={
@@ -198,7 +201,7 @@ async def test_tag_values_passes_through() -> None:
         )
     )
     values = await client.tag_values(
-        tag="cubepi.metadata.workspace_id",
+        tag="cubeloop.metadata.workspace_id",
         org_id="org-1",
     )
     assert values == ["ws-a", "ws-b"]
@@ -212,12 +215,12 @@ async def test_tag_values_uses_v2_path_with_span_prefix_as_single_segment() -> N
     """
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     correct = respx.get(
-        "http://tempo.local/api/v2/search/tag/span.cubepi.metadata.user_id/values"
+        "http://tempo.local/api/v2/search/tag/span.cubeloop.metadata.user_id/values"
     ).mock(return_value=httpx.Response(200, json={"tagValues": []}))
     wrong = respx.get(
-        "http://tempo.local/api/v2/search/tag/span/cubepi.metadata.user_id/values"
+        "http://tempo.local/api/v2/search/tag/span/cubeloop.metadata.user_id/values"
     ).mock(return_value=httpx.Response(200, json={"tagValues": []}))
-    await client.tag_values(tag="cubepi.metadata.user_id", org_id="org-1")
+    await client.tag_values(tag="cubeloop.metadata.user_id", org_id="org-1")
     assert correct.called, "tag_values must hit the single-segment v2 path"
     assert not wrong.called, "tag_values must NOT split scope into its own path segment"
 
@@ -235,16 +238,16 @@ async def test_search_handles_null_traces() -> None:
 @respx.mock
 async def test_tag_values_handles_null_values() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/v2/search/tag/span.cubepi.metadata.workspace_id/values").mock(
-        return_value=httpx.Response(200, json={"tagValues": None})
-    )
-    result = await client.tag_values(tag="cubepi.metadata.workspace_id", org_id="org-1")
+    respx.get(
+        "http://tempo.local/api/v2/search/tag/span.cubeloop.metadata.workspace_id/values"
+    ).mock(return_value=httpx.Response(200, json={"tagValues": None}))
+    result = await client.tag_values(tag="cubeloop.metadata.workspace_id", org_id="org-1")
     assert result == []
 
 
 @respx.mock
 async def test_tag_values_scopes_org_and_tag_as_sibling_spansets() -> None:
-    """Regression: cubepi.metadata.org_id lives on the invoke_agent span while
+    """Regression: cubeloop.metadata.org_id lives on the invoke_agent span while
     e.g. gen_ai.request.model lives on a child chat span. A single {...}
     selector requires both conditions on the same span and silently returns
     zero values (verified against a live Tempo instance). The org scope and
@@ -256,7 +259,7 @@ async def test_tag_values_scopes_org_and_tag_as_sibling_spansets() -> None:
     )
     await client.tag_values(tag="gen_ai.request.model", org_id="org-1")
     q = route.calls.last.request.url.params["q"]
-    assert '{ resource.service.name="cubeplex" && span.cubepi.metadata.org_id="org-1" }' in q
+    assert '{ resource.service.name="cubeplex" && span.cubeloop.metadata.org_id="org-1" }' in q
     assert '{ span.gen_ai.request.model != "" }' in q
 
 
@@ -304,18 +307,18 @@ async def test_search_extracts_metadata_from_spansets() -> None:
                             "spanID": "s1",
                             "attributes": [
                                 {
-                                    "key": "cubepi.metadata.workspace_id",
+                                    "key": "cubeloop.metadata.workspace_id",
                                     "value": {"stringValue": "ws-a"},
                                 },
                                 {
-                                    "key": "cubepi.metadata.user_id",
+                                    "key": "cubeloop.metadata.user_id",
                                     "value": {"stringValue": "usr-x"},
                                 },
                                 {
-                                    "key": "cubepi.metadata.conversation_id",
+                                    "key": "cubeloop.metadata.conversation_id",
                                     "value": {"stringValue": "conv-7"},
                                 },
-                                {"key": "cubepi.run_id", "value": {"stringValue": "run-99"}},
+                                {"key": "cubeloop.run_id", "value": {"stringValue": "run-99"}},
                             ],
                         }
                     ],
@@ -385,7 +388,7 @@ async def test_search_extracts_model_from_sibling_spanset() -> None:
                                 "spanID": "a1",
                                 "attributes": [
                                     {
-                                        "key": "cubepi.metadata.workspace_id",
+                                        "key": "cubeloop.metadata.workspace_id",
                                         "value": {"stringValue": "ws-7"},
                                     },
                                 ],
@@ -458,7 +461,7 @@ async def test_search_reads_spansets_plural() -> None:
                                 "spanID": "s1",
                                 "attributes": [
                                     {
-                                        "key": "cubepi.metadata.workspace_id",
+                                        "key": "cubeloop.metadata.workspace_id",
                                         "value": {"stringValue": "ws-plural"},
                                     },
                                 ],

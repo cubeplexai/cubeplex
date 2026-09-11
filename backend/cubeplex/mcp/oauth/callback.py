@@ -212,7 +212,7 @@ class OAuthCallbackHandler:
         # the AS doesn't prove the server accepts the token — only an
         # actual ``tools/list`` does. Failures land in
         # install.discovery_status / last_error.
-        # Local import: ``mcp_discovery`` pulls in cubepi_runtime which
+        # Local import: ``mcp_discovery`` pulls in cubeloop_runtime which
         # transitively imports OAuthTokenManager via effective.py, so
         # importing it at module top would create a circular import
         # through ``cubeplex.mcp.oauth.__init__``.

@@ -1,13 +1,13 @@
 """Unit tests for ``_drain_subagent_citation_queue`` (regression #1).
 
 Regression background: when the langgraph dispatch branch was removed in
-the cubepi cleanup (M6.6), the ``while True: event_q.get()`` consumer
+the cubeloop cleanup (M6.6), the ``while True: event_q.get()`` consumer
 loop went with it. subagent and citation middleware kept
 pushing tagged tuples onto ``event_q`` (set into both
 ``subagent_event_queue`` and ``citation_event_queue`` ContextVars by
 ``_execute_run``), but nothing drained them — so subagent live streaming
 and citation live events were silently dropped. They only resurfaced
-after a page reload via the cubepi checkpointer's ``details`` round-trip.
+after a page reload via the cubeloop checkpointer's ``details`` round-trip.
 
 This test pins the contract of the replacement drainer that consumes
 3-tuple items from the shared event queue and forwards typed AgentEvents
@@ -160,9 +160,9 @@ async def test_drainer_skips_unknown_kinds() -> None:
 
 @pytest.mark.asyncio
 async def test_drainer_skips_subagent_dicts_with_unmappable_type() -> None:
-    """Subagent SSE dicts that the cubepi→AgentEvent translator can't map
+    """Subagent SSE dicts that the cubeloop→AgentEvent translator can't map
     (e.g. tool_call_delta, done) are silently dropped, mirroring
-    _drain_cubepi_sse_queue's behavior for the main agent stream."""
+    _drain_cubeloop_sse_queue's behavior for the main agent stream."""
     queue: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
     published: list[Any] = []
 

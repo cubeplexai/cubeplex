@@ -114,8 +114,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
     _app.state.encryption_backend = _build_encryption_backend()
     _app.state.mcp_user_token_signer = _build_mcp_user_token_signer()
 
-    # Build the process-level cubepi Tracer once (None when tracing is disabled
-    # or unavailable). Each run attaches/detaches it via cubepi.tracing.trace;
+    # Build the process-level cubeloop Tracer once (None when tracing is disabled
+    # or unavailable). Each run attaches/detaches it via cubeloop.tracing.trace;
     # it is shut down in the shutdown phase below.
     from cubeplex.agents.tracing import build_tracer
 
@@ -451,7 +451,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     await recover_stranded_runs(redis_client, prefix=_app.state.redis_key_prefix)
 
-    # Warm the process-wide cubepi checkpointer pool so the first send
+    # Warm the process-wide cubeloop checkpointer pool so the first send
     # doesn't pay the pool-open round trips. Best-effort: on failure the
     # first shared_checkpointer() call retries the open.
     from cubeplex.agents.checkpointer import get_shared_checkpointer

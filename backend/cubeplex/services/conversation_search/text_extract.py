@@ -1,6 +1,6 @@
-"""Extract human-readable, search-worthy text from a cubepi message."""
+"""Extract human-readable, search-worthy text from a cubeloop message."""
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     Message,
     TextContent,

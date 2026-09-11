@@ -1,10 +1,10 @@
-"""E2E: cubepi path invokes a builtin tool (M2.6).
+"""E2E: cubeloop path invokes a builtin tool (M2.6).
 
 Prompts the model to use the calculator tool; asserts the SSE stream
 contains tool_call + tool_result + final text. Confirms M2's full
 tool-loading + dispatch is functional under real LLM.
 
-Runtime: config.test.yaml sets agents.runtime = "cubepi" so no app.state
+Runtime: config.test.yaml sets agents.runtime = "cubeloop" so no app.state
 override is needed — the route is active for all E2E tests in this worktree.
 """
 
@@ -61,7 +61,7 @@ def _flatten_content(evt: dict) -> str:  # type: ignore[type-arg]
 
 
 @pytest.mark.asyncio
-async def test_cubepi_path_invokes_calculator_tool(
+async def test_cubeloop_path_invokes_calculator_tool(
     member_client: tuple,  # type: ignore[type-arg]
 ) -> None:
     """POST a prompt that should trigger the calculator tool.
@@ -78,7 +78,7 @@ async def test_cubepi_path_invokes_calculator_tool(
     # 1. Create a conversation
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations",
-        params={"title": "cubepi-m2-tool-smoke"},
+        params={"title": "cubeloop-m2-tool-smoke"},
     )
     assert resp.status_code == 201, f"conversation creation failed: {resp.text}"
     conv_id = resp.json()["id"]

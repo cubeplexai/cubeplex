@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from cubepi.errors import RateLimited
-from cubepi.providers.images import FauxImagesProvider
+from cubeloop.errors import RateLimited
+from cubeloop.providers.images import FauxImagesProvider
 
 from cubeplex.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
 

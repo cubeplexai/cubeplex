@@ -78,7 +78,7 @@ Hover a completed assistant reply to reveal small action chips under the bubble:
 
 - **Copy** — copy that turn's text reply.
 - **Token usage** — the last LLM call's input/output/cache stats (session totals on the latest turn).
-- **Info** — this turn's status and **Run ID**. A finished turn stays a quiet Info chip with the id (useful for `cubepi trace` or **Admin → Traces**). If you stopped the reply, the network dropped, the model failed, or the previous run was cut off, the chip stays visible with a short label. Open it for the reason, raw error (when there is one), and a copyable run id.
+- **Info** — this turn's status and **Run ID**. A finished turn stays a quiet Info chip with the id (useful for `cubeloop trace` or **Admin → Traces**). If you stopped the reply, the network dropped, the model failed, or the previous run was cut off, the chip stays visible with a short label. Open it for the reason, raw error (when there is one), and a copyable run id.
 - **Fork** — start a new conversation that continues from this turn.
 - **Timestamp** — relative time; hover for the absolute time.
 

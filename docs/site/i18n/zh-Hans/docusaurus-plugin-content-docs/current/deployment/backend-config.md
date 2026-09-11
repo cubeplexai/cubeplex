@@ -229,7 +229,7 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # 在 context_window * ratio 处压缩
   keep_tail_tokens: 8000         # 逐字保留的近期 token
-  max_summary_tokens: null       # null = cubepi 动态预算
+  max_summary_tokens: null       # null = cubeloop 动态预算
   fallback_context_window: 128000
 ```
 
@@ -368,7 +368,7 @@ image_generation:
 ```yaml
 tracing:
   enabled: false
-  directory: "./cubepi-traces"
+  directory: "./cubeloop-traces"
   record_content: false  # true 会捕获完整 prompt/响应/工具 I/O（更大、敏感）
   otlp:
     endpoint: null       # 如 http://localhost:4318/v1/traces 以外发 span
@@ -377,7 +377,7 @@ tracing:
     query_endpoint: null # 设置后启用 admin trace 查看器
 ```
 
-开启后把每次 run 的 cubepi span 写到磁盘，并可选外发到 OTLP collector（Grafana
+开启后把每次 run 的 cubeloop span 写到磁盘，并可选外发到 OTLP collector（Grafana
 Tempo 等）。`record_content: true` 对调试很有用，但会捕获可能敏感的 prompt/工具
 数据。
 

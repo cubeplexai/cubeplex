@@ -10,9 +10,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.deferred import DeferredToolGroup, DeferredToolsMiddleware
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.deferred import DeferredToolGroup, DeferredToolsMiddleware
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel
 
 from cubeplex.mcp.disclosure import (
@@ -229,7 +229,7 @@ class TestMiddlewareIntegration:
         )
 
         # Middleware contributes load_tools + deferred_tool_call dispatcher
-        # (dispatch mode is the default in cubepi >= 0.11).
+        # (dispatch mode is the default in cubeloop >= 0.11).
         tool_names = {t.name for t in mw.tools}
         assert tool_names == {"load_tools", "deferred_tool_call"}
 
@@ -295,7 +295,7 @@ class TestMiddlewareIntegration:
         specs = [_make_spec("A"), _make_spec("B")]
         assert not disclosure_active(settings, server_count=len(specs))
         # The run_manager code path would NOT call build_deferred_groups —
-        # it goes through the eager load_workspace_mcp_tools_for_cubepi path.
+        # it goes through the eager load_workspace_mcp_tools_for_cubeloop path.
 
 
 @pytest.mark.e2e
@@ -326,11 +326,11 @@ class TestDeferredLoaderSessionLifecycle:
         mock_signer.sign = AsyncMock(return_value="fake-jwt-token")
 
         with patch(
-            "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
+            "cubeplex.mcp.cubeloop_runtime.load_mcp_tools_http",
             new_callable=AsyncMock,
             return_value=fake_discovery,
         ):
-            from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs_deferred
+            from cubeplex.mcp.cubeloop_runtime import _load_tools_for_specs_deferred
 
             tools, citations = await _load_tools_for_specs_deferred(
                 specs=[spec],

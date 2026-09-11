@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1170" role="img" aria-labelledby="title desc">
   <title id="title">CubePlex architecture overview</title>
-  <desc id="desc">Web and IM clients connect to the CubePlex application and CubePi agent runtime. The runtime uses skills, memory, MCP tools, automations, artifacts, workspace sandboxes, model providers, MCP servers, and persistent infrastructure.</desc>
+  <desc id="desc">Web and IM clients connect to the CubePlex application and CubeLoop agent runtime. The runtime uses skills, memory, MCP tools, automations, artifacts, workspace sandboxes, model providers, MCP servers, and persistent infrastructure.</desc>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#27272a" stroke-width=".7"/></pattern>
     <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7Z" fill="#6a83e3"/></marker>
@@ -49,7 +49,7 @@
     <text x="893" y="249" text-anchor="middle" class="sub">memberships · roles · model policy · workspace-scoped APIs</text>
 
   <rect x="502" y="311" width="782" height="108" rx="9" class="key"/>
-    <text x="893" y="341" text-anchor="middle" class="name" style="font-size:22px">FastAPI + CubePi agent runtime</text>
+    <text x="893" y="341" text-anchor="middle" class="name" style="font-size:22px">FastAPI + CubeLoop agent runtime</text>
     <text x="893" y="363" text-anchor="middle" class="sub">streaming conversation runs · tool orchestration · approvals · checkpoints</text>
     <text x="893" y="384" text-anchor="middle" class="tiny mono">SSE API · provider routing · policy enforcement</text>
 
@@ -129,7 +129,7 @@
   <rect x="502" y="954" width="220" height="96" rx="9" class="infra"/>
     <text x="612" y="984" text-anchor="middle" class="name" style="font-size:19px">PostgreSQL</text>
     <text x="612" y="1006" text-anchor="middle" class="sub">organizations · conversations · state</text>
-    <text x="612" y="1027" text-anchor="middle" class="tiny mono">CubePi checkpoints · governance</text>
+    <text x="612" y="1027" text-anchor="middle" class="tiny mono">CubeLoop checkpoints · governance</text>
   <rect x="742" y="954" width="220" height="96" rx="9" class="infra"/>
     <text x="852" y="984" text-anchor="middle" class="name" style="font-size:19px">Redis</text>
     <text x="852" y="1006" text-anchor="middle" class="sub">coordination · caches · queues</text>

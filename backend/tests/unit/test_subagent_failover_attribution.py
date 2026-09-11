@@ -20,8 +20,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from cubepi.providers.fallback import FallbackBoundModel
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.fallback import FallbackBoundModel
+from cubeloop.providers.faux import FauxProvider
 
 from cubeplex.streams.run_manager import _subagent_model_for
 

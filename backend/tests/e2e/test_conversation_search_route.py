@@ -51,8 +51,8 @@ def _default_user_id(client: TestClient) -> str:
 
 
 async def _seed_indexed_conversation(client: TestClient) -> str:
-    """Create a conversation via the API, append cubepi messages, run the worker."""
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    """Create a conversation via the API, append cubeloop messages, run the worker."""
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     from cubeplex.agents.checkpointer import init_checkpointer
 

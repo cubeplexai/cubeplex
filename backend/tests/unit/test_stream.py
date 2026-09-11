@@ -1,16 +1,16 @@
-"""stream tests — cubepi StreamEvent → cubeplex SSE (M1.3)."""
+"""stream tests — cubeloop StreamEvent → cubeplex SSE (M1.3)."""
 
 import json
 
-from cubepi import AgentToolResult
-from cubepi.agent.types import (
+from cubeloop import AgentToolResult
+from cubeloop.agent.types import (
     HitlAnswerEvent,
     HitlRequestEvent,
     MessageEndEvent,
     ToolExecutionEndEvent,
 )
-from cubepi.hitl.types import ApproveAnswer, ApproveRequest, HitlRequest
-from cubepi.providers.base import (
+from cubeloop.hitl.types import ApproveAnswer, ApproveRequest, HitlRequest
+from cubeloop.providers.base import (
     AssistantMessage,
     StreamEvent,
     TextContent,
@@ -82,15 +82,15 @@ def test_toolcall_delta_emits_tool_call_delta() -> None:
 def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
     """End-to-end live seam: a streamed ``toolcall_delta`` must survive both
     translation hops (``convert_agent_event_to_sse`` then
-    ``cubepi_dict_to_agent_event``) and arrive as a ``ToolCallDeltaEvent`` in
+    ``cubeloop_dict_to_agent_event``) and arrive as a ``ToolCallDeltaEvent`` in
     the exact shape the frontend reducer consumes. This is the regression that
-    broke during the langgraph→cubepi migration: the live drainer dropped
+    broke during the langgraph→cubeloop migration: the live drainer dropped
     tool_call_delta, so file_write / subagent previews only appeared at
     toolcall_end instead of streaming."""
-    from cubepi.agent.types import MessageUpdateEvent
+    from cubeloop.agent.types import MessageUpdateEvent
 
     from cubeplex.agents.schemas import ToolCallDeltaEvent
-    from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
+    from cubeplex.streams.run_manager import cubeloop_dict_to_agent_event
 
     partial = _mk_assistant(tool_calls=[ToolCall(id="tc1", name="file_write", arguments={})])
     stream_evt = StreamEvent(
@@ -102,7 +102,7 @@ def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
     dicts = convert_agent_event_to_sse(MessageUpdateEvent(message=partial, stream_event=stream_evt))
     assert len(dicts) == 1
 
-    evt = cubepi_dict_to_agent_event(dicts[0], "2026-05-27T00:00:00+00:00")
+    evt = cubeloop_dict_to_agent_event(dicts[0], "2026-05-27T00:00:00+00:00")
     assert isinstance(evt, ToolCallDeltaEvent)
     assert evt.data == {
         "tool_call_id": "tc1",
@@ -194,7 +194,7 @@ def test_message_end_with_none_usage_is_dropped() -> None:
 # ---------------------------------------------------------------------------
 # convert_agent_event_to_sse — ToolExecutionEndEvent → tool_result
 #
-# Regression: cubepi's ToolExecutionEndEvent.result is an ``AgentToolResult``
+# Regression: cubeloop's ToolExecutionEndEvent.result is an ``AgentToolResult``
 # Pydantic model. The previous implementation forwarded the model object as
 # the SSE dict's ``result`` field; downstream ``str()`` produced a Pydantic
 # repr like ``content=[TextContent(text='{"foo":1}')] details=None ...``
@@ -445,7 +445,7 @@ def test_hitl_request_event_emits_sandbox_confirm_request() -> None:
 
 def test_hitl_request_non_approve_kind_is_dropped() -> None:
     # ConfirmRequest / AskRequest — not sandbox approve; drop silently
-    from cubepi.hitl.types import ConfirmRequest
+    from cubeloop.hitl.types import ConfirmRequest
 
     req = HitlRequest(
         question_id="q2",

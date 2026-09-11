@@ -1,7 +1,7 @@
-"""AttachmentHintMiddleware port to cubepi (M3.a.1).
+"""AttachmentHintMiddleware port to cubeloop (M3.a.1).
 
-Reads attachments from cubepi.UserMessage.metadata["attachments"] (set by
-wire_input_to_cubepi_user_message in convert.py) and renders them as a
+Reads attachments from cubeloop.UserMessage.metadata["attachments"] (set by
+wire_input_to_cubeloop_user_message in convert.py) and renders them as a
 [Attachments] text section appended to that message's text content.
 
 Design note: every UserMessage with attachments is augmented — not just the
@@ -16,9 +16,9 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import Message, TextContent, UserMessage
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import Message, TextContent, UserMessage
 
 
 class AttachmentHintMiddleware(Middleware):
@@ -59,7 +59,7 @@ def render_attachments_hint(blocks: list[dict[str, object]]) -> str:
     """Render file_attachment blocks as an [Attachments] text section.
 
     Inlined from the deleted cubeplex.agents.convert module (M6) since the
-    cubepi runtime is the only consumer of this helper.
+    cubeloop runtime is the only consumer of this helper.
     """
     if not blocks:
         return ""

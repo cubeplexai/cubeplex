@@ -1,7 +1,7 @@
-"""Builder plumbs capability + model_capability_overrides into cubepi providers.
+"""Builder plumbs capability + model_capability_overrides into cubeloop providers.
 
 Task 3 (LLM provider platform, slice 2). Verifies that DB JSON capability columns
-flow through ProviderConfig -> build_provider -> cubepi provider classes as
+flow through ProviderConfig -> build_provider -> cubeloop provider classes as
 typed CapabilityDescriptor objects.
 """
 

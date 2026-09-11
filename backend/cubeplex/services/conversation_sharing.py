@@ -51,7 +51,7 @@ def filter_messages_for_snapshot(
 
 
 async def build_snapshot(conversation_id: str) -> list[dict[str, Any]]:
-    """Load messages from cubepi checkpointer, filter for public snapshot."""
+    """Load messages from cubeloop checkpointer, filter for public snapshot."""
     from cubeplex.agents.stream import unwrap_deferred_in_message_dicts
 
     async with shared_checkpointer() as cp:

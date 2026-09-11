@@ -46,7 +46,7 @@ def test_aggregate_liveness_fail_is_blocking():
 
 
 class _StubProvider:
-    """Fake cubepi.Provider for probe tests. Records calls, returns canned events."""
+    """Fake cubeloop.Provider for probe tests. Records calls, returns canned events."""
 
     def __init__(self, *, events=None, raise_error=None, result_content=None):
         self._events = events or []
@@ -55,7 +55,7 @@ class _StubProvider:
         self.calls: list[dict] = []
 
     def model(self, id: str, **kwargs):  # type: ignore[override]
-        from cubepi.providers.base import BoundModel, Model
+        from cubeloop.providers.base import BoundModel, Model
 
         return BoundModel(provider=self, spec=Model(id=id, **kwargs))  # type: ignore[arg-type]
 
@@ -78,7 +78,7 @@ class _StubProvider:
                 # Default: report non-zero usage so the advisory usage probe
                 # passes for the orchestrator happy-path tests. ``result_content``
                 # lets a test return e.g. a ToolCall block.
-                from cubepi.providers.base import AssistantMessage, Usage
+                from cubeloop.providers.base import AssistantMessage, Usage
 
                 return AssistantMessage(
                     content=result_content, usage=Usage(input_tokens=5, output_tokens=2)
@@ -107,7 +107,7 @@ async def test_probe_liveness_fail_on_exception():
 
 @pytest.mark.asyncio
 async def test_probe_reasoning_skips_when_capability_empty():
-    from cubepi.providers.capability import CapabilityDescriptor
+    from cubeloop.providers.capability import CapabilityDescriptor
 
     step = await probe_reasoning_toggle(
         _StubProvider(), model_id="m", capability=CapabilityDescriptor()
@@ -117,7 +117,7 @@ async def test_probe_reasoning_skips_when_capability_empty():
 
 @pytest.mark.asyncio
 async def test_probe_reasoning_runs_both_off_and_on():
-    from cubepi.providers.capability import CapabilityDescriptor, ReasoningCapability
+    from cubeloop.providers.capability import CapabilityDescriptor, ReasoningCapability
 
     cap = CapabilityDescriptor(
         reasoning=ReasoningCapability(
@@ -173,7 +173,7 @@ def test_aggregate_advisory_fail_does_not_block_or_degrade():
 
 @pytest.mark.asyncio
 async def test_probe_temperature_pass():
-    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+    from cubeloop.providers.capability import CapabilityDescriptor, TemperatureSpec
 
     cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="free", default=1.0))
     provider = _StubProvider(events=[type("E", (), {"type": "text_delta", "delta": "OK"})()])
@@ -184,7 +184,7 @@ async def test_probe_temperature_pass():
 
 @pytest.mark.asyncio
 async def test_probe_temperature_skips_when_ignored():
-    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+    from cubeloop.providers.capability import CapabilityDescriptor, TemperatureSpec
 
     cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="ignored"))
     step = await probe_temperature(_StubProvider(), model_id="m", capability=cap)
@@ -203,7 +203,7 @@ async def test_probe_tools_pass_on_toolcall_event():
 async def test_probe_tools_pass_on_result_toolcall_without_stream_event():
     # Buffering gateway: no per-chunk toolcall_* event, but the assembled result
     # carries a ToolCall block. Must still pass.
-    from cubepi.providers.base import ToolCall
+    from cubeloop.providers.base import ToolCall
 
     provider = _StubProvider(
         events=[type("E", (), {"type": "text_delta", "delta": "ok"})()],
@@ -236,7 +236,7 @@ async def test_probe_streaming_fails_on_zero_chunks():
 
 @pytest.mark.asyncio
 async def test_probe_liveness_fails_on_error_event():
-    # cubepi surfaces a 401 as an `error` stream event (not an exception); it must
+    # cubeloop surfaces a 401 as an `error` stream event (not an exception); it must
     # NOT count as a successful "1 event" liveness pass.
     err = type("E", (), {"type": "error", "error": "401 Unauthorized"})()
     step = await probe_liveness(_StubProvider(events=[err]), model_id="m")
@@ -245,9 +245,9 @@ async def test_probe_liveness_fails_on_error_event():
 
 
 @pytest.mark.asyncio
-async def test_probe_liveness_surfaces_cubepi_error_message():
-    # cubepi's StreamEvent carries the upstream failure in `error_message` (see
-    # cubepi.providers.base.StreamEvent), NOT `error`/`message`/`detail`. The
+async def test_probe_liveness_surfaces_cubeloop_error_message():
+    # cubeloop's StreamEvent carries the upstream failure in `error_message` (see
+    # cubeloop.providers.base.StreamEvent), NOT `error`/`message`/`detail`. The
     # probe must read that field so a 401 reaches the UI instead of a generic
     # "stream returned an error event".
     err = type(
@@ -374,7 +374,7 @@ def _good_event():
 
 
 def _reasoning_cap():
-    from cubepi.providers.capability import CapabilityDescriptor, ReasoningCapability
+    from cubeloop.providers.capability import CapabilityDescriptor, ReasoningCapability
 
     return CapabilityDescriptor(
         reasoning=ReasoningCapability(
@@ -485,7 +485,7 @@ async def test_run_model_probe_model_not_found_is_unavailable():
 
 @pytest.mark.asyncio
 async def test_run_model_probe_skipped_reasoning_still_detects_unavailable():
-    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+    from cubeloop.providers.capability import CapabilityDescriptor, TemperatureSpec
 
     # Empty reasoning payloads → reasoning SKIPS, so temperature is the first
     # real call. The stub always raises model_not_found, so the robustness path
@@ -517,7 +517,7 @@ class _UsageStub(_StubProvider):
         usage = self._usage
 
         async def _result():
-            from cubepi.providers.base import AssistantMessage
+            from cubeloop.providers.base import AssistantMessage
 
             return AssistantMessage(content=[], usage=usage)
 
@@ -527,7 +527,7 @@ class _UsageStub(_StubProvider):
 
 @pytest.mark.asyncio
 async def test_probe_usage_pass_when_usage_present():
-    from cubepi.providers.base import Usage
+    from cubeloop.providers.base import Usage
 
     from cubeplex.services.provider_probe import probe_usage
 

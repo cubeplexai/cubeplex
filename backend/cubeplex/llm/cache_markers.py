@@ -1,4 +1,4 @@
-"""cubeplex-side CacheMarkerPolicy implementation for cubepi.AnthropicProvider.
+"""cubeplex-side CacheMarkerPolicy implementation for cubeloop.AnthropicProvider.
 
 Walks back through the message list to find the most recent completed
 AssistantMessage and marks it. The system prompt and last tool definition
@@ -7,7 +7,7 @@ also get markers (cubeplex's prompt cache discipline; see backend/docs/prompt-ca
 
 from __future__ import annotations
 
-from cubepi.providers.base import AssistantMessage, Message
+from cubeloop.providers.base import AssistantMessage, Message
 
 
 class CubeplexCacheMarkerPolicy:

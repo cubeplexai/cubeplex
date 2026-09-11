@@ -1,4 +1,4 @@
-"""Single-flight delivery of Postgres-backed HITL steering into CubePi."""
+"""Single-flight delivery of Postgres-backed HITL steering into CubeLoop."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import TextContent, UserMessage
 from loguru import logger
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -33,7 +33,7 @@ class SteeringRunScope:
     conversation_id: str
 
 
-def steering_message_to_cubepi(row: SteeringMessage) -> UserMessage:
+def steering_message_to_cubeloop(row: SteeringMessage) -> UserMessage:
     metadata: dict[str, Any] = {
         "steer_id": row.client_steer_id,
         "sender_user_id": row.sender_user_id,
@@ -259,7 +259,7 @@ class DurableSteeringCoordinator:
 
             for index, row in enumerate(claimed):
                 try:
-                    agent.steer(steering_message_to_cubepi(row))
+                    agent.steer(steering_message_to_cubeloop(row))
                 except Exception:
                     logger.opt(exception=True).warning(
                         "durable steering delivery failed synchronously for row {}",

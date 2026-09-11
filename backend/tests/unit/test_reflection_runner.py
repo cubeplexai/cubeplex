@@ -1,7 +1,7 @@
 """Unit tests for ReflectionRunner.
 
 Uses lightweight mock agents to exercise the runner logic without running
-a real cubepi event loop or hitting the database.
+a real cubeloop event loop or hitting the database.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubepi.agent.types import AgentToolResult, ToolExecutionEndEvent
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentToolResult, ToolExecutionEndEvent
+from cubeloop.providers.base import TextContent
 
 from cubeplex.models.user_event import UserEventType
 from cubeplex.services.reflection_runner import (
@@ -45,7 +45,7 @@ class _MockAgent:
     async def prompt(self, text: str) -> None:
         if self._listener is not None:
             for ev in self._events:
-                # cubepi calls listener(event, signal) — pass None for signal
+                # cubeloop calls listener(event, signal) — pass None for signal
                 self._listener(ev, None)
 
     async def wait_for_idle(self) -> None:
@@ -278,7 +278,7 @@ class TestBuildSeedPrompt:
     def test_existing_memory_renders_block(self) -> None:
         items = [
             ("mem-abc", "preference", "用户偏好中文交流"),
-            ("mem-def", "project_fact", "CubePi 是 Agent 框架"),
+            ("mem-def", "project_fact", "CubeLoop 是 Agent 框架"),
         ]
         seed = self._runner()._build_seed_prompt(self._inp(existing=items))
         assert "this workspace" in seed

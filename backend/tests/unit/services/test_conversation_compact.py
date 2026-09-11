@@ -7,8 +7,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from cubepi.middleware.compaction.state import CompactionState
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.middleware.compaction.state import CompactionState
+from cubeloop.providers.base import TextContent, UserMessage
 
 from cubeplex.services import conversation_compact as compact_mod
 from cubeplex.services.conversation_compact import (

@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from cubepi.providers.base import AssistantMessage, TextContent, Usage
+from cubeloop.providers.base import AssistantMessage, TextContent, Usage
 
 from cubeplex.llm.config import ModelCost
 from cubeplex.middleware.cost import CostMiddleware, _compute_cost_micro, _extract_usage

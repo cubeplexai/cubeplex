@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from cubepi.errors import RateLimited
-from cubepi.providers.faux import FauxProvider
+from cubeloop.errors import RateLimited
+from cubeloop.providers.faux import FauxProvider
 
 from cubeplex.streams.run_manager import _make_retry_publisher
 

@@ -1,7 +1,7 @@
-"""MCP tool loading for the cubepi runtime (four-layer only).
+"""MCP tool loading for the cubeloop runtime (four-layer only).
 
 Consumes :class:`MCPRuntimeConnectorSpec` from the effective service and
-produces a list of :class:`cubepi.AgentTool` plus citation configs.
+produces a list of :class:`cubeloop.AgentTool` plus citation configs.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from datetime import timedelta
 from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from cubepi.agent.types import AgentTool
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.agent.types import AgentTool
+from cubeloop.mcp import load_mcp_tools_http
 from pydantic import ValidationError
 
 from cubeplex.credentials.exceptions import CredentialNotFound
@@ -79,7 +79,7 @@ def _build_namespaced_name(server_name: str, tool_name: str) -> str:
     return _build_namespaced_name_with_prefix(_slugify_for_namespace(server_name), tool_name)
 
 
-async def load_workspace_mcp_tools_for_cubepi(
+async def load_workspace_mcp_tools_for_cubeloop(
     *,
     effective_service: MCPEffectiveConnectorService,
     token_manager: OAuthTokenManager,
@@ -207,7 +207,7 @@ def _build_tools_from_cache(
 
     Skips the per-send ``initialize`` + ``tools/list`` round trip: the cache
     already carries every field the live loader would extract from the
-    descriptor (name / description / input_schema), and cubepi MCP tools
+    descriptor (name / description / input_schema), and cubeloop MCP tools
     open a fresh session per ``tools/call`` anyway, so execution is
     identical to a live-discovered tool.
 
@@ -216,34 +216,34 @@ def _build_tools_from_cache(
     shared ``headers`` dict in place (so every tool of this spec reuses
     the new token), and retries once.
 
-    Returns None when the cache is unusable (empty, or cubepi's private
+    Returns None when the cache is unusable (empty, or cubeloop's private
     helpers moved) — callers fall back to the live loader.
 
-    NOTE: reaches into ``cubepi.mcp``'s private modules for the session
-    opener and result serializer the live loader uses. cubepi doesn't yet
+    NOTE: reaches into ``cubeloop.mcp``'s private modules for the session
+    opener and result serializer the live loader uses. cubeloop doesn't yet
     expose "build tool from cached descriptor" publicly; upstream that
     instead of growing this.
     """
     if not spec.tools_cache:
         return None
     try:
-        from cubepi.mcp._adapter import make_mcp_agent_tool
-        from cubepi.mcp.http_loader import (
+        from cubeloop.mcp._adapter import make_mcp_agent_tool
+        from cubeloop.mcp.http_loader import (
             _open_session,
             _serialize_call_tool_response,
             _split_address,
         )
-    except ImportError as exc:  # cubepi internals moved — live loader still works
-        logger.warning("tools_cache fast path unavailable (cubepi drift): %s", exc)
+    except ImportError as exc:  # cubeloop internals moved — live loader still works
+        logger.warning("tools_cache fast path unavailable (cubeloop drift): %s", exc)
         return None
 
     timeout = spec.timeout
     transport = cast(MCPTransport, spec.transport)
 
     async def _call_once(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        # Mirrors cubepi.mcp.http_loader's per-call session semantics,
+        # Mirrors cubeloop.mcp.http_loader's per-call session semantics,
         # including W3C traceparent propagation into the MCP server.
-        from cubepi.mcp._tracing import current_traceparent
+        from cubeloop.mcp._tracing import current_traceparent
 
         call_headers = headers or None
         tp = current_traceparent()
@@ -502,7 +502,7 @@ async def _load_tools_for_specs(
         # Cache-first: build tools from the persisted tools_cache and skip
         # the live initialize+tools/list round trip. Falls back to live
         # discovery when the cache is empty/unusable (e.g. first run before
-        # discovery persisted, or cubepi internals drifted).
+        # discovery persisted, or cubeloop internals drifted).
         tools = _build_tools_from_cache(
             spec=spec, headers=headers, server_url=server_url, refresh_auth=refresh_auth
         )

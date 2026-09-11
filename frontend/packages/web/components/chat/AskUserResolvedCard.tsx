@@ -5,7 +5,7 @@ import type { AskQuestion } from '@cubeplex/core'
 
 interface AskUserResolvedCardProps {
   questions: AskQuestion[]
-  /** Raw `tool_result.content` body from cubepi. Backend formats it as
+  /** Raw `tool_result.content` body from cubeloop. Backend formats it as
    * `User answers:\n{json}` on success, or a free-text string on
    * cancel / timeout / error. We try to parse the JSON to render
    * per-question answers; we fall back to displaying the raw body. */

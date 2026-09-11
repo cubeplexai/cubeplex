@@ -1,4 +1,4 @@
-"""Build the process-level cubepi Tracer from cubeplex config.
+"""Build the process-level cubeloop Tracer from cubeplex config.
 
 Tracing is opt-in via the ``tracing:`` config block. When disabled — or when
 construction fails for any reason — this returns ``None`` and runs proceed
@@ -6,7 +6,7 @@ untraced. A tracing fault must never break the app, so every failure path
 returns ``None``.
 
 The Tracer is built once at app startup and reused across runs (each run
-attaches/detaches via :func:`cubepi.tracing.trace`); it is shut down once at
+attaches/detaches via :func:`cubeloop.tracing.trace`); it is shut down once at
 app shutdown.
 
 Two exporters can run in parallel: the JSONL file exporter (always on when
@@ -24,7 +24,7 @@ from loguru import logger
 from cubeplex.config import config
 
 if TYPE_CHECKING:
-    from cubepi.tracing import Tracer
+    from cubeloop.tracing import Tracer
     from opentelemetry.sdk.trace.export import SpanExporter
 
 
@@ -54,7 +54,7 @@ def _build_otlp_exporter() -> SpanExporter | None:
 
 
 def build_tracer() -> Tracer | None:
-    """Return a configured cubepi Tracer, or ``None`` when tracing is disabled.
+    """Return a configured cubeloop Tracer, or ``None`` when tracing is disabled.
 
     Reads ``tracing.enabled`` / ``tracing.directory`` / ``tracing.record_content``
     and (optionally) ``tracing.otlp.*`` from config. Import or construction
@@ -64,9 +64,9 @@ def build_tracer() -> Tracer | None:
         if not config.get("tracing.enabled", False):
             return None
 
-        from cubepi.tracing import JsonlSpanExporter, Tracer
+        from cubeloop.tracing import JsonlSpanExporter, Tracer
 
-        directory = config.get("tracing.directory", "./cubepi-traces")
+        directory = config.get("tracing.directory", "./cubeloop-traces")
         record_content = bool(config.get("tracing.record_content", False))
 
         exporters: list[Any] = [JsonlSpanExporter(directory=directory)]

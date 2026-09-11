@@ -1,4 +1,4 @@
-// epochSeconds matches cubepi's Message.timestamp convention.
+// epochSeconds matches cubeloop's Message.timestamp convention.
 
 const MINUTE = 60
 const HOUR = 60 * MINUTE

@@ -60,7 +60,7 @@ async def test_touch_run_heartbeat_updates_last_event_at_without_events(redis) -
 async def test_in_flight_tool_heartbeat_starts_and_stops() -> None:
     import asyncio
 
-    from cubepi.agent.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+    from cubeloop.agent.types import ToolExecutionEndEvent, ToolExecutionStartEvent
 
     from cubeplex.streams.run_manager import _InFlightToolHeartbeat
 

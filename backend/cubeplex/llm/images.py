@@ -1,4 +1,4 @@
-"""Image provider builder — cubepi 0.7.
+"""Image provider builder — cubeloop 0.7.
 
 Picks a capability descriptor based on the image_generation.api string and
 returns a (capability, base_url) pair ready to feed OpenAIImagesProvider.
@@ -6,7 +6,7 @@ returns a (capability, base_url) pair ready to feed OpenAIImagesProvider.
 
 from __future__ import annotations
 
-from cubepi.providers.images.capability import (
+from cubeloop.providers.images.capability import (
     ImagesCapabilityDescriptor,
     SizeSpec,
 )

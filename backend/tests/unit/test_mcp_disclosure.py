@@ -202,9 +202,9 @@ class TestComputeNamespacedToolNames:
 class TestLoadToolsForSpecs:
     @pytest.mark.asyncio
     async def test_returns_namespaced_tools_and_citations(self) -> None:
-        from cubepi.agent.types import AgentTool
+        from cubeloop.agent.types import AgentTool
 
-        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubeloop_runtime import _load_tools_for_specs
 
         fake_tool = AgentTool(
             name="create_issue",
@@ -228,12 +228,12 @@ class TestLoadToolsForSpecs:
 
         with (
             patch(
-                "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
+                "cubeplex.mcp.cubeloop_runtime._resolve_auth_from_spec",
                 new_callable=AsyncMock,
                 return_value=({}, spec.server_url),
             ),
             patch(
-                "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
+                "cubeplex.mcp.cubeloop_runtime.load_mcp_tools_http",
                 new_callable=AsyncMock,
                 return_value=discovery,
             ),
@@ -256,11 +256,11 @@ class TestLoadToolsForSpecs:
 
     @pytest.mark.asyncio
     async def test_handles_auth_failure_gracefully(self) -> None:
-        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubeloop_runtime import _load_tools_for_specs
 
         spec = _make_spec(name="BadServer")
         with patch(
-            "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
+            "cubeplex.mcp.cubeloop_runtime._resolve_auth_from_spec",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
@@ -360,7 +360,7 @@ class TestBuildDeferredGroups:
 
     @pytest.mark.asyncio
     async def test_loader_calls_load_tools_for_specs(self) -> None:
-        from cubepi.agent.types import AgentTool
+        from cubeloop.agent.types import AgentTool
 
         fake_tool = AgentTool(
             name="GitHub__create_issue",

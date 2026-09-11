@@ -127,7 +127,7 @@ def assert_cache_hit_anthropic(
         f"  Turn 1 usage: {usage1_info}\n"
         f"  Turn 2 usage: {usage2_info}\n"
         "  Diagnosis: provider does not cache for this request shape at raw API level.\n"
-        "  This is a provider limitation — unrelated to cubepi runtime."
+        "  This is a provider limitation — unrelated to cubeloop runtime."
     )
     print(f"[{provider_label}] CACHE HIT confirmed: cache_read_input_tokens={cache_read}")
 
@@ -152,7 +152,7 @@ def assert_cache_hit_openai(
         f"  Turn 1 usage: {usage1_info}\n"
         f"  Turn 2 usage: {usage2_info}\n"
         "  Diagnosis: provider does not cache for this request shape at raw API level.\n"
-        "  This is a provider limitation — unrelated to cubepi runtime."
+        "  This is a provider limitation — unrelated to cubeloop runtime."
     )
     print(f"[{provider_label}] CACHE HIT confirmed: cached_tokens={cache_read} via {field_used}")
 
@@ -180,7 +180,7 @@ def assert_cache_hit_openai_either(
         f"  Turn 1 usage: {usage1_info}\n"
         f"  Turn 2 usage: {usage2_info}\n"
         "  Diagnosis: provider does not cache for this request shape at raw API level.\n"
-        "  This is a provider limitation — unrelated to cubepi runtime."
+        "  This is a provider limitation — unrelated to cubeloop runtime."
     )
     hit_turn = 1 if hit1 > 0 else 2
     hit_val = hit1 if hit1 > 0 else hit2

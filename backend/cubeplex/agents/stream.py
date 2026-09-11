@@ -1,11 +1,11 @@
-"""cubepi event → cubeplex SSE event dict translation.
+"""cubeloop event → cubeplex SSE event dict translation.
 
 Two layers:
 
 1. ``StreamConverter`` — stateful per-stream translator. Use one instance per
-   agent run when you need progressive unwrap of cubepi's
+   agent run when you need progressive unwrap of cubeloop's
    ``deferred_tool_call`` dispatcher (the LLM-streamed deltas carry the
-   wrapper JSON ``{"tool_name": ..., "arguments": ...}``; cubepi rewrites the
+   wrapper JSON ``{"tool_name": ..., "arguments": ...}``; cubeloop rewrites the
    call at execute time, so the ``tool_result`` arrives under the real name
    but the streamed ``tool_call_delta`` events would otherwise look like
    ``deferred_tool_call`` until ``toolcall_end``).
@@ -28,8 +28,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cubepi import AgentToolResult
-from cubepi.agent.types import (
+from cubeloop import AgentToolResult
+from cubeloop.agent.types import (
     AgentEvent,
     HitlAnswerEvent,
     HitlRequestEvent,
@@ -37,8 +37,8 @@ from cubepi.agent.types import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
 )
-from cubepi.hitl.types import ApproveAnswer
-from cubepi.providers.base import (
+from cubeloop.hitl.types import ApproveAnswer
+from cubeloop.providers.base import (
     AssistantMessage,
     StreamEvent,
     TextContent,
@@ -46,18 +46,18 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-# cubepi's deferred dispatcher exposes this tool name to the model. Matches
-# ``DISPATCH_TOOL_NAME`` in cubepi.deferred._dispatch_tool; pinned by string
+# cubeloop's deferred dispatcher exposes this tool name to the model. Matches
+# ``DISPATCH_TOOL_NAME`` in cubeloop.deferred._dispatch_tool; pinned by string
 # because it's a wire contract — changing it requires coordinated updates on
 # both sides.
 _DEFERRED_DISPATCH_TOOL_NAME = "deferred_tool_call"
 
 
 def _stringify_tool_result(result: Any) -> tuple[str, Any]:
-    """Extract a string and details payload from a cubepi tool result.
+    """Extract a string and details payload from a cubeloop tool result.
 
     ``ToolExecutionEndEvent.result`` is typed ``Any`` but is in practice an
-    ``AgentToolResult`` whose ``content`` is a list of cubepi content blocks
+    ``AgentToolResult`` whose ``content`` is a list of cubeloop content blocks
     (text/image/etc.). The previous implementation forwarded the model
     object as-is and let downstream ``str()`` produce a Pydantic repr —
     which broke frontend JSON parsers (e.g. ``save_artifact`` rendering
@@ -366,11 +366,11 @@ class _DeferredCallState:
 
 
 class StreamConverter:
-    """Stateful translator from cubepi events to cubeplex SSE dicts.
+    """Stateful translator from cubeloop events to cubeplex SSE dicts.
 
     Use one instance per agent run / subscriber listener. The state holds
     in-progress ``deferred_tool_call`` buffers keyed by ``content_index`` —
-    cubepi's provider emits ``toolcall_delta`` events whose ``partial`` carries
+    cubeloop's provider emits ``toolcall_delta`` events whose ``partial`` carries
     the resolved wrapper name (``deferred_tool_call``) but not the raw JSON
     being streamed inside ``arguments``; that JSON only exists as the
     concatenation of every ``delta`` chunk we receive. We accumulate locally,
@@ -388,7 +388,7 @@ class StreamConverter:
     # Top-level entrypoints
 
     def convert(self, evt: StreamEvent) -> list[dict[str, Any]]:
-        """Translate a single cubepi StreamEvent into 0..N cubeplex SSE dicts."""
+        """Translate a single cubeloop StreamEvent into 0..N cubeplex SSE dicts."""
         t = evt.type
         if t == "text_delta":
             return [{"type": "text_delta", "delta": evt.delta or ""}]
@@ -405,7 +405,7 @@ class StreamConverter:
         return []
 
     def convert_agent_event(self, evt: AgentEvent) -> list[dict[str, Any]]:
-        """Translate a single cubepi AgentEvent into 0..N cubeplex SSE dicts."""
+        """Translate a single cubeloop AgentEvent into 0..N cubeplex SSE dicts."""
         if isinstance(evt, MessageUpdateEvent):
             return self.convert(evt.stream_event)
         return _convert_terminal_agent_event(evt)
@@ -489,16 +489,16 @@ class StreamConverter:
             ]
 
         # block.arguments at toolcall_end is the parsed wrapper dict:
-        # {"tool_name": "<real>", "arguments": {...}}. cubepi's resolver will
+        # {"tool_name": "<real>", "arguments": {...}}. cubeloop's resolver will
         # rewrite the call to <real> + inner arguments before execute; we
         # surface the same shape to the frontend so the tool_call event lines
         # up with the eventual tool_result event (which uses the real name).
         resolved = _resolve_deferred_wrapper(block.arguments)
         self._deferred.pop(idx, None)
         if resolved is None:
-            # Wrapper failed cubepi's resolver checks (missing/non-str
+            # Wrapper failed cubeloop's resolver checks (missing/non-str
             # tool_name, or non-dict non-None arguments) — emit the raw
-            # dispatcher call so cubepi's "Unknown deferred tool" / dispatcher
+            # dispatcher call so cubeloop's "Unknown deferred tool" / dispatcher
             # error fallback still surfaces in the same card.
             return [
                 {
@@ -644,19 +644,19 @@ def unwrap_deferred_in_message_dicts(
     """Rewrite persisted ``deferred_tool_call`` wrapper blocks to their resolved
     real tool form, for read-side display.
 
-    cubepi's ``resolve_tool_call`` rewrites the dispatched call at execute time
+    cubeloop's ``resolve_tool_call`` rewrites the dispatched call at execute time
     but does NOT mutate the persisted AssistantMessage — the dispatcher block
     stays in checkpoint history as ``name="deferred_tool_call"`` with the
     wrapper arguments. The tool_result, by contrast, gets persisted under the
-    resolved name (cubepi emits ``ToolExecutionEndEvent`` with the rewritten
+    resolved name (cubeloop emits ``ToolExecutionEndEvent`` with the rewritten
     ``rtc.name``), so without this read-side fix a reloaded conversation
     renders mismatched cards (``deferred_tool_call`` request → real-name
     result) and loses any frontend rendering keyed off real tool names.
 
-    We touch only the dict copy — the underlying cubepi messages remain
+    We touch only the dict copy — the underlying cubeloop messages remain
     intact, so model replay still sees the dispatcher block (whichever name
     is in the prompt cache stays in the prompt cache). Malformed wrappers
-    (inner ``tool_name`` not a string) pass through unchanged so cubepi's
+    (inner ``tool_name`` not a string) pass through unchanged so cubeloop's
     "Unknown deferred tool" error chain stays visible in the UI.
     """
     out: list[dict[str, Any]] = []
@@ -704,10 +704,10 @@ def _unwrap_deferred_block(block: Any) -> Any:
 def _resolve_deferred_wrapper(wrapper: Any) -> tuple[str, dict[str, Any]] | None:
     """Resolve the inner (real_name, args) target from a dispatcher wrapper.
 
-    Mirrors ``cubepi.deferred.middleware.DeferredToolsMiddleware.resolve_tool_call``:
+    Mirrors ``cubeloop.deferred.middleware.DeferredToolsMiddleware.resolve_tool_call``:
     ``tool_name`` must be a string; ``arguments`` must be a dict OR ``None``
-    (the latter is the explicit no-arg path cubepi coerces to ``{}``). Any
-    other non-dict ``arguments`` value makes cubepi's resolver return
+    (the latter is the explicit no-arg path cubeloop coerces to ``{}``). Any
+    other non-dict ``arguments`` value makes cubeloop's resolver return
     ``None`` so the dispatcher's own ``_execute`` runs and produces an
     is_error AgentToolResult — UI rewrites must defer to the same fate so
     the user sees the dispatcher error against the dispatcher name, not a

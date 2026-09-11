@@ -1,7 +1,7 @@
-"""Unit tests for the reflection agent factory closure built in _run_cubepi_path.
+"""Unit tests for the reflection agent factory closure built in _run_cubeloop_path.
 
 Rather than running the full RunManager (which needs a DB, Redis, and a real
-cubepi provider), we test the inline factory pattern in isolation: given a fake
+cubeloop provider), we test the inline factory pattern in isolation: given a fake
 provider + model + memory_service_factory, the constructed Agent should carry
 the REFLECTION_SYSTEM_PROMPT and memory tools.
 """
@@ -47,7 +47,7 @@ def test_make_reflection_agent_uses_reflection_system_prompt(
 ) -> None:
     """Smoke-check the system_prompt + tools kwargs the factory closure passes.
 
-    Note: this does not construct a real cubepi.Agent — it mirrors the factory's
+    Note: this does not construct a real cubeloop.Agent — it mirrors the factory's
     kwarg assembly. Wiring drift between the real closure in run_manager.py and
     this test must be caught by integration tests (T10).
     """
@@ -57,7 +57,7 @@ def test_make_reflection_agent_uses_reflection_system_prompt(
 
     # Mirror exactly what run_manager builds inline.
     def _make_reflection_agent(inp: ReflectionInput) -> MagicMock:
-        from cubepi import Model
+        from cubeloop import Model
 
         from cubeplex.tools.builtin.memory import create_memory_tools
 
@@ -110,7 +110,7 @@ def test_stringify_user_msg_str() -> None:
     def _stringify(msg: object) -> str:
         if isinstance(msg, str):
             return msg
-        from cubepi.providers.base import TextContent
+        from cubeloop.providers.base import TextContent
 
         content = getattr(msg, "content", None)
         if isinstance(content, str):
@@ -124,10 +124,10 @@ def test_stringify_user_msg_str() -> None:
 
 
 def test_stringify_user_msg_user_message() -> None:
-    """_stringify_user_msg should extract text from a cubepi UserMessage."""
+    """_stringify_user_msg should extract text from a cubeloop UserMessage."""
     import time
 
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubeloop.providers.base import TextContent, UserMessage
 
     msg = UserMessage(
         content=[TextContent(text="first"), TextContent(text="second")],
@@ -137,7 +137,7 @@ def test_stringify_user_msg_user_message() -> None:
     def _stringify(msg: object) -> str:
         if isinstance(msg, str):
             return msg
-        from cubepi.providers.base import TextContent
+        from cubeloop.providers.base import TextContent
 
         content = getattr(msg, "content", None)
         if isinstance(content, str):
@@ -154,7 +154,7 @@ def test_last_assistant_text_returns_none_on_empty() -> None:
     """_last_assistant_text should return None when there are no AssistantMessages."""
 
     def _last_assistant_text(messages: list) -> str | None:
-        from cubepi.providers.base import AssistantMessage, TextContent
+        from cubeloop.providers.base import AssistantMessage, TextContent
 
         for msg in reversed(messages):
             if isinstance(msg, AssistantMessage):
@@ -172,10 +172,10 @@ def test_last_assistant_text_extracts_text() -> None:
     """_last_assistant_text picks the last AssistantMessage and joins TextContent blocks."""
     import time
 
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     def _last_assistant_text(messages: list) -> str | None:
-        from cubepi.providers.base import AssistantMessage, TextContent
+        from cubeloop.providers.base import AssistantMessage, TextContent
 
         for msg in reversed(messages):
             if isinstance(msg, AssistantMessage):

@@ -1,8 +1,8 @@
 """Tempo HTTP query client + OTLP→view-model parser.
 
-This module is the single point where cubepi span attribute names are
+This module is the single point where cubeloop span attribute names are
 translated into the API contract (cubeplex.api.schemas.trace). Update both
-in lockstep when cubepi semantic conventions change.
+in lockstep when cubeloop semantic conventions change.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def _attrs_to_dict(attrs: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _classify(name: str, attrs: dict[str, Any]) -> SpanKind:
-    # Stable signal: gen_ai.operation.name (set explicitly by cubepi).
-    # Fall back to span name only when the attribute is absent, so a cubepi
+    # Stable signal: gen_ai.operation.name (set explicitly by cubeloop).
+    # Fall back to span name only when the attribute is absent, so a cubeloop
     # rename of the span string doesn't silently degrade all LLM spans.
     op = attrs.get("gen_ai.operation.name")
     if op == "invoke_agent":
@@ -57,7 +57,7 @@ def _classify(name: str, attrs: dict[str, Any]) -> SpanKind:
         return SpanKind.CHAT
     if op == "execute_tool":
         return SpanKind.TOOL
-    if name == "cubepi.turn":
+    if name == "cubeloop.turn":
         return SpanKind.TURN
     if name == "invoke_agent":
         return SpanKind.AGENT
@@ -162,7 +162,7 @@ def parse_trace_detail(payload: dict[str, Any]) -> TraceDetail:
 
 
 def _summary_metadata(all_attrs: list[dict[str, Any]]) -> dict[str, str]:
-    """Scan every span for cubepi.metadata.* and cubepi.run_id.
+    """Scan every span for cubeloop.metadata.* and cubeloop.run_id.
 
     Picks the first non-empty value seen. Falls back across span kinds so a
     trace without an `invoke_agent` root still surfaces its identifiers.
@@ -172,11 +172,11 @@ def _summary_metadata(all_attrs: list[dict[str, Any]]) -> dict[str, str]:
     for attrs in all_attrs:
         for k in keys:
             if k not in out:
-                v = attrs.get(f"cubepi.metadata.{k}")
+                v = attrs.get(f"cubeloop.metadata.{k}")
                 if v not in (None, ""):
                     out[k] = str(v)
         if "run_id" not in out:
-            v = attrs.get("cubepi.run_id")
+            v = attrs.get("cubeloop.run_id")
             if v not in (None, ""):
                 out["run_id"] = str(v)
     return out
@@ -184,16 +184,16 @@ def _summary_metadata(all_attrs: list[dict[str, Any]]) -> dict[str, str]:
 
 def _extract_turn(attrs: dict[str, Any]) -> TurnPayload:
     return TurnPayload(
-        index=int(attrs.get("cubepi.turn.index", 0) or 0),
-        stop_reason=attrs.get("cubepi.turn.stop_reason"),
-        tool_calls_count=int(attrs.get("cubepi.turn.tool_calls.count", 0) or 0),
+        index=int(attrs.get("cubeloop.turn.index", 0) or 0),
+        stop_reason=attrs.get("cubeloop.turn.stop_reason"),
+        tool_calls_count=int(attrs.get("cubeloop.turn.tool_calls.count", 0) or 0),
         messages=_decode_messages(attrs.get("gen_ai.input.messages")),
         output_messages=_decode_messages(attrs.get("gen_ai.output.messages")),
     )
 
 
 def _extract_agent(attrs: dict[str, Any]) -> AgentPayload:
-    tools_raw = attrs.get("cubepi.agent.tools")
+    tools_raw = attrs.get("cubeloop.agent.tools")
     tools = [str(t) for t in tools_raw] if isinstance(tools_raw, list) else []
     return AgentPayload(
         provider=attrs.get("gen_ai.provider.name"),
@@ -270,8 +270,8 @@ def _decode_tools(raw: Any) -> list[ToolDefinition]:
 
 def _derive_output_from_raw_response(raw_response: str | None) -> list[ChatMessage]:
     """Fallback for `chat` spans: `gen_ai.output.messages` is never set on
-    them in this cubepi version (only on invoke_agent/cubepi.turn spans) -
-    but `cubepi.llm.raw_response` carries the same content in the provider's
+    them in this cubeloop version (only on invoke_agent/cubeloop.turn spans) -
+    but `cubeloop.llm.raw_response` carries the same content in the provider's
     wire format. Reconstruct a single assistant ChatMessage from it when the
     response looks like an OpenAI-compatible chat completion (the only shape
     observed in this deployment - openai.api.type=chat_completions). Any
@@ -340,14 +340,14 @@ def _extract_llm(attrs: dict[str, Any]) -> LlmCallPayload:
         system_instructions=_decode_messages(attrs.get("gen_ai.system_instructions")),
         messages=_decode_messages(attrs.get("gen_ai.input.messages")),
         output_messages=_decode_messages(attrs.get("gen_ai.output.messages"))
-        or _derive_output_from_raw_response(attrs.get("cubepi.llm.raw_response")),
+        or _derive_output_from_raw_response(attrs.get("cubeloop.llm.raw_response")),
         tools=_decode_tools(
             attrs.get("gen_ai.tool.definitions")
             or attrs.get("gen_ai.request.tools")
-            or attrs.get("cubepi.agent.tools")
+            or attrs.get("cubeloop.agent.tools")
         ),
-        raw_request=attrs.get("cubepi.llm.raw_request"),
-        raw_response=attrs.get("cubepi.llm.raw_response"),
+        raw_request=attrs.get("cubeloop.llm.raw_request"),
+        raw_response=attrs.get("cubeloop.llm.raw_response"),
     )
 
 
@@ -357,8 +357,8 @@ def _extract_tool(attrs: dict[str, Any]) -> ToolCallPayload:
         description=attrs.get("gen_ai.tool.description"),
         arguments=attrs.get("gen_ai.tool.call.arguments"),
         result=attrs.get("gen_ai.tool.call.result"),
-        is_error=bool(attrs.get("cubepi.tool.is_error", False)),
-        execution_mode=attrs.get("cubepi.tool.execution_mode"),
+        is_error=bool(attrs.get("cubeloop.tool.is_error", False)),
+        execution_mode=attrs.get("cubeloop.tool.execution_mode"),
         tool_call_id=attrs.get("gen_ai.tool.call.id"),
     )
 
@@ -429,26 +429,26 @@ class TempoClient:
         end: datetime | None = None,
         limit: int = 20,
     ) -> list[TraceSummary]:
-        # cubepi.metadata.org_id lives on invoke_agent spans; gen_ai.request.model
+        # cubeloop.metadata.org_id lives on invoke_agent spans; gen_ai.request.model
         # lives on chat spans. A single {…} selector requires both on the same span,
         # which would miss cross-span matches. Use sibling spansets joined at the top
         # level so each selector matches independently within the same trace.
         metadata_clauses = [
             'resource.service.name="cubeplex"',
-            f"span.cubepi.metadata.org_id={_quote_traceql(org_id)}",
+            f"span.cubeloop.metadata.org_id={_quote_traceql(org_id)}",
         ]
         if workspace_id:
             metadata_clauses.append(
-                f"span.cubepi.metadata.workspace_id={_quote_traceql(workspace_id)}"
+                f"span.cubeloop.metadata.workspace_id={_quote_traceql(workspace_id)}"
             )
         if user_id:
-            metadata_clauses.append(f"span.cubepi.metadata.user_id={_quote_traceql(user_id)}")
+            metadata_clauses.append(f"span.cubeloop.metadata.user_id={_quote_traceql(user_id)}")
         if conversation_id:
             metadata_clauses.append(
-                f"span.cubepi.metadata.conversation_id={_quote_traceql(conversation_id)}"
+                f"span.cubeloop.metadata.conversation_id={_quote_traceql(conversation_id)}"
             )
         if run_id:
-            metadata_clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
+            metadata_clauses.append(f"span.cubeloop.run_id={_quote_traceql(run_id)}")
 
         model_clauses: list[str] = []
         if model:
@@ -459,10 +459,10 @@ class TempoClient:
             q += " && { " + " && ".join(model_clauses) + " }"
         q += (
             " | select("
-            "span.cubepi.metadata.workspace_id, "
-            "span.cubepi.metadata.user_id, "
-            "span.cubepi.metadata.conversation_id, "
-            "span.cubepi.run_id, "
+            "span.cubeloop.metadata.workspace_id, "
+            "span.cubeloop.metadata.user_id, "
+            "span.cubeloop.metadata.conversation_id, "
+            "span.cubeloop.run_id, "
             "span.gen_ai.request.model"
             ")"
         )
@@ -511,7 +511,7 @@ class TempoClient:
         # 2.8.2), which would leak workspace/user/conversation/model identifiers
         # across orgs via autocomplete. v2 honors the org-scoping TraceQL.
         #
-        # Same cross-span pitfall as search() above: cubepi.metadata.org_id
+        # Same cross-span pitfall as search() above: cubeloop.metadata.org_id
         # lives on the invoke_agent span, but e.g. gen_ai.request.model lives
         # on a child chat span. A single {...} selector requires both on the
         # same span and would silently return zero values. Use sibling
@@ -527,11 +527,11 @@ class TempoClient:
         now = datetime.now(UTC)
         params: dict[str, Any] = {
             "q": '{ resource.service.name="cubeplex" '
-            f'&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }} && {{ span.{tag} != "" }}',
+            f'&& span.cubeloop.metadata.org_id={_quote_traceql(org_id)} }} && {{ span.{tag} != "" }}',
             "start": str(int((now - timedelta(hours=167)).timestamp())),
             "end": str(int(now.timestamp())),
         }
-        # Tempo v2 takes the FULL prefixed tag name (e.g. `span.cubepi.run_id`)
+        # Tempo v2 takes the FULL prefixed tag name (e.g. `span.cubeloop.run_id`)
         # as a single path segment — NOT `span/<tag>` as two segments. All tags
         # in _ALLOWED_TAGS live on spans, so we prepend `span.` here.
         quoted = urllib.parse.quote(tag, safe=".")
@@ -557,7 +557,7 @@ class TempoClient:
 
 def _total_span_count(t: dict[str, Any]) -> int:
     # `spanSet(s).matched` counts spans that matched the *search selector*
-    # (e.g. 1, since only the invoke_agent span carries cubepi.metadata.org_id)
+    # (e.g. 1, since only the invoke_agent span carries cubeloop.metadata.org_id)
     # - not the trace's real span count. `serviceStats.<service>.spanCount`
     # is Tempo's actual per-trace span total; sum across services in case a
     # trace ever spans more than one.
@@ -604,10 +604,10 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
         duration_ms=int(t.get("durationMs", 0)),
         span_count=_total_span_count(t),
-        workspace_id=first("cubepi.metadata.workspace_id"),
-        user_id=first("cubepi.metadata.user_id"),
-        conversation_id=first("cubepi.metadata.conversation_id"),
-        run_id=first("cubepi.run_id"),
+        workspace_id=first("cubeloop.metadata.workspace_id"),
+        user_id=first("cubeloop.metadata.user_id"),
+        conversation_id=first("cubeloop.metadata.conversation_id"),
+        run_id=first("cubeloop.run_id"),
         model=first("gen_ai.request.model"),
     )
 

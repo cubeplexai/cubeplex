@@ -8,9 +8,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
-from cubepi.types import StructuredValue
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
+from cubeloop.types import StructuredValue
 from pydantic import BaseModel
 
 from cubeplex.services.sandbox_runtime_config import load_agent_view

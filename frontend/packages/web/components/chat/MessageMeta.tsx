@@ -70,7 +70,7 @@ export function CopyButton({ content }: CopyButtonProps) {
 }
 
 interface TimeChipProps {
-  // cubepi Message.timestamp convention (epoch seconds). Null renders nothing.
+  // cubeloop Message.timestamp convention (epoch seconds). Null renders nothing.
   timestamp: number | null | undefined
 }
 

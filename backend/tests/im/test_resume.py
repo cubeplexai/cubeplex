@@ -108,7 +108,7 @@ async def test_resume_paused_run_ask_user_passes_choice_dict(
         run_manager=_FakeRunManager(),
     )
     assert ok is True
-    # cubepi expects the answer dict keyed by the question schema's `key`.
+    # cubeloop expects the answer dict keyed by the question schema's `key`.
     assert seen[0]["answer"] == {"approve_deploy": "yes"}
 
 
@@ -148,8 +148,8 @@ async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answe
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the card payload didn't carry answer_key (legacy / defensive),
-    the answer falls back to ``{"choice": choice}`` so cubepi at least gets a
-    syntactically valid dict — schema mismatch is then cubepi's to report."""
+    the answer falls back to ``{"choice": choice}`` so cubeloop at least gets a
+    syntactically valid dict — schema mismatch is then cubeloop's to report."""
     from cubeplex.im import resume as resume_mod
 
     seen: list[dict[str, Any]] = []

@@ -23,13 +23,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AfterToolCallContext,
     AgentContext,
     AgentToolResult,
     BeforeToolCallContext,
 )
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
 
 from cubeplex.middleware.timestamps import TimestampMiddleware, _turn_started_at
 

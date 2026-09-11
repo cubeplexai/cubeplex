@@ -1,4 +1,4 @@
-"""Tests for the auto-detach listener wired into ``_run_cubepi_path``.
+"""Tests for the auto-detach listener wired into ``_run_cubeloop_path``.
 
 The listener schedules ``agent.detach()`` exactly once when the agent
 emits a ``HitlRequestEvent`` so the worker can release the run while the
@@ -11,8 +11,8 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubepi.agent.types import HitlRequestEvent
-from cubepi.hitl.types import ApproveRequest, HitlRequest
+from cubeloop.agent.types import HitlRequestEvent
+from cubeloop.hitl.types import ApproveRequest, HitlRequest
 
 from cubeplex.streams.run_manager import _build_auto_detach_listener
 

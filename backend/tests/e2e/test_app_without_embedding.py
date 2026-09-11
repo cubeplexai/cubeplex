@@ -51,7 +51,7 @@ async def test_search_route_returns_lexical_results_without_provider(
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.delenv("CUBEPLEX_TEST_LOCAL_EMBED", raising=False)
 
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     from cubeplex.agents.checkpointer import init_checkpointer
     from cubeplex.db.engine import async_session_maker

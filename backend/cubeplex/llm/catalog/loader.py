@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from cubepi.providers.capability import CapabilityDescriptor
+from cubeloop.providers.capability import CapabilityDescriptor
 
 from cubeplex.llm.catalog.types import (
     Catalog,

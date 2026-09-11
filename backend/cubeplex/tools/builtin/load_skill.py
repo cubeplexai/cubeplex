@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.skills.sandbox_paths import sandbox_skill_dir
@@ -40,7 +40,7 @@ def create_load_skill_tool(
     workspace_id: str,
     org_id: str,
 ) -> AgentTool[LoadSkillInput]:
-    """Build the cubepi load_skill tool.
+    """Build the cubeloop load_skill tool.
 
     Mirrors cubeplex.tools.builtin.load_skill.create_load_skill_tool — same tool
     name, same schema, same business logic.  Only the wrapper shape changes:

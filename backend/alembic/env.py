@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
-from cubepi.checkpointer.postgres.models import (  # noqa: F401
-    cubepi_metadata,
+from cubeloop.checkpointer.postgres.models import (  # noqa: F401
+    cubeloop_metadata,
 )
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
@@ -57,9 +57,9 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = [SQLModel.metadata, cubepi_metadata]
+target_metadata = [SQLModel.metadata, cubeloop_metadata]
 
-# Tables managed by cubepi PostgresCheckpointer — exclude from autogenerate
+# Tables managed by cubeloop PostgresCheckpointer — exclude from autogenerate
 _CHECKPOINT_TABLES = {
     "checkpoint_migrations",
     "checkpoints",
@@ -88,7 +88,7 @@ def include_object(
     reflected: bool,
     compare_to: object,
 ) -> bool:
-    """Exclude cubepi-checkpointer tables and hand-built indexes from autogenerate."""
+    """Exclude cubeloop-checkpointer tables and hand-built indexes from autogenerate."""
     if type_ == "table" and name is not None:
         if name in _CHECKPOINT_TABLES:
             return False

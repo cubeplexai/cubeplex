@@ -2,11 +2,11 @@
 
 Covers the four contract guarantees the route promises (happy path,
 group-chat reject, cross-workspace 404, bogus run → 400). We seed
-cubepi state directly with ``claim_run`` + ``append`` + ``mark_run_complete``
+cubeloop state directly with ``claim_run`` + ``append`` + ``mark_run_complete``
 so the test does not need to call a real LLM — fork semantics are about
 state mechanics, not model behavior.
 
-Each test cleans up its source + fork rows AND the corresponding cubepi
+Each test cleans up its source + fork rows AND the corresponding cubeloop
 threads + messages + runs. The default workspace is shared across the
 suite; orphan rows accumulating here would flake any later test that
 list/counts conversations under it.
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -74,7 +74,7 @@ async def _set_group_chat(conversation_id: str) -> None:
 
 
 async def _cleanup(conversation_ids: list[str]) -> None:
-    """Hard-delete the conv rows AND their cubepi state.
+    """Hard-delete the conv rows AND their cubeloop state.
 
     The route soft-deletes (sets ``deleted_at``); we want hard deletes so
     counts/aggregates over the shared default workspace stay clean across
@@ -92,7 +92,7 @@ async def _cleanup(conversation_ids: list[str]) -> None:
     try:
         async with maker() as session:
             for cid in reversed(conversation_ids):
-                # cubepi state — ``cubepi_runs`` has FK into ``cubepi_threads``,
+                # cubeloop state — ``cubepi_runs`` has FK into ``cubepi_threads``,
                 # so messages + runs go before the thread row.
                 await session.execute(
                     text("DELETE FROM cubepi_messages WHERE thread_id = :t"),
@@ -196,7 +196,7 @@ async def test_fork_run_not_completed_returns_400(memory_client: httpx.AsyncClie
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{src_id}/fork",
             json={"after_run_id": "run-does-not-exist"},
         )
-        # cubepi raises RunNotCompletedError for both "no row" and "row not done".
+        # cubeloop raises RunNotCompletedError for both "no row" and "row not done".
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"]["code"] == "run_not_completed"
     finally:

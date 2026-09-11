@@ -388,7 +388,7 @@ class ProviderService:
     def _provider_factory_from_config(
         self, cfg: ProviderConfig, *, provider_name: str
     ) -> Callable[[], Any]:
-        """Zero-arg callable that builds a fresh cubepi provider for the probe.
+        """Zero-arg callable that builds a fresh cubeloop provider for the probe.
 
         The probe orchestrators call the factory each phase, so each invocation
         must yield an independent provider instance.
@@ -403,7 +403,7 @@ class ProviderService:
     def _resolve_capability(self, cfg: ProviderConfig, model_id: str, *, provider_name: str) -> Any:
         """Effective CapabilityDescriptor for ``model_id`` (override > base).
 
-        Built off a throwaway cubepi provider so we reuse the exact same merge
+        Built off a throwaway cubeloop provider so we reuse the exact same merge
         logic the runtime uses (``provider._resolve_capability``), avoiding a
         second copy of the override-precedence rule.
         """

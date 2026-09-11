@@ -13,7 +13,7 @@ Full-stack agent platform.
 
 | Path | Role |
 |---|---|
-| `backend/` | FastAPI + cubepi streaming runtime, SSE API, Postgres history, MCP |
+| `backend/` | FastAPI + cubeloop streaming runtime, SSE API, Postgres history, MCP |
 | `frontend/` | Next.js + React 19 monorepo (`packages/web`, `@cubeplex/core`) |
 | `docs/` | Cross-cutting docs; living process docs at `docs/{worktrees,testing,releasing}.md`; specs/plans/notes under `docs/dev/` |
 | `backend/docs/`, `frontend/docs/` | Area reference (see Critical Subsystems) |
@@ -145,8 +145,8 @@ Load on demand when the situation matches.
 
 | Skill | Trigger |
 |---|---|
-| `cubepi` | Agents on CubePi — API, providers, tools, middleware, MCP, HITL |
-| `cubepi-trace` | Debug a cubepi run (spans, tool I/O, tokens, cache) |
+| `cubeloop` | Agents on CubeLoop — API, providers, tools, middleware, MCP, HITL |
+| `cubeloop-trace` | Debug a cubeloop run (spans, tool I/O, tokens, cache) |
 | `web-design-guidelines` | UI a11y / design review (after [frontend/design.md](frontend/design.md)) |
 | `playwright-cli` | Playwright tests |
 

@@ -1,6 +1,6 @@
 """Pure resolver — turns an LLMSnapshot + caller intent into a ModelPreset.
 
-Functions are sync, no I/O, no cubepi imports. Tests construct snapshots
+Functions are sync, no I/O, no cubeloop imports. Tests construct snapshots
 directly.
 """
 

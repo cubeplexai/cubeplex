@@ -47,10 +47,10 @@ async def test_dangling_ask_cleanup_emits_typed_resolved_event():
 
 
 async def test_dangling_cleanup_raises_on_unknown_kind():
-    """Future cubepi kind (e.g. 'confirm') must surface loudly, not silently
+    """Future cubeloop kind (e.g. 'confirm') must surface loudly, not silently
     drop the synthetic event — otherwise the frontend card sticks."""
     publish = AsyncMock()
     pending = MagicMock()
-    pending.payload.kind = "confirm"  # cubepi ConfirmRequest, not used by cubeplex today
+    pending.payload.kind = "confirm"  # cubeloop ConfirmRequest, not used by cubeplex today
     with pytest.raises(ValueError, match="unhandled HITL kind"):
         await _emit_synthetic_resolved(publish, pending, "q1")

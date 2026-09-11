@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_text
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool

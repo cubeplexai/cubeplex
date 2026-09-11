@@ -1,7 +1,7 @@
-"""Memory CRUD tools as cubepi.AgentTool instances.
+"""Memory CRUD tools as cubeloop.AgentTool instances.
 
 Factory: ``create_memory_tools(service_factory, ...)`` returns three
-``cubepi.AgentTool`` instances (save / search / update). MemoryMiddleware
+``cubeloop.AgentTool`` instances (save / search / update). MemoryMiddleware
 identifies them by name, so the tool names and schemas are part of the
 public contract.
 """
@@ -13,8 +13,8 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryStatus, MemoryType
@@ -67,7 +67,7 @@ def create_memory_tools(
     run_id: str | None = None,
     max_creates: int | None = None,
 ) -> list[AgentTool]:  # type: ignore[type-arg]
-    """Build the three memory cubepi.AgentTool instances backed by a service factory.
+    """Build the three memory cubeloop.AgentTool instances backed by a service factory.
 
     ``max_creates`` caps successful ``memory_save`` calls (used by reflection to
     limit per-run extract spam). ``None`` means unlimited.

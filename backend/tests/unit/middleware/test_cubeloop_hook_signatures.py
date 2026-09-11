@@ -1,4 +1,4 @@
-"""Middleware hook signatures must match cubepi's clean-break API."""
+"""Middleware hook signatures must match cubeloop's clean-break API."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
-from cubepi.middleware.todo import TodoListMiddleware
+from cubeloop.middleware.todo import TodoListMiddleware
 
 from cubeplex.middleware.artifacts import ArtifactMiddleware
 from cubeplex.middleware.attachments import AttachmentHintMiddleware
@@ -25,7 +25,7 @@ def _assert_requires_keyword_ctx(method: Callable[..., Any]) -> None:
 
 
 def test_context_and_prompt_hooks_require_ctx() -> None:
-    """cubepi no longer supports old hook signatures without ctx."""
+    """cubeloop no longer supports old hook signatures without ctx."""
     hooks = [
         AttachmentHintMiddleware.transform_context,
         TimestampMiddleware.transform_context,

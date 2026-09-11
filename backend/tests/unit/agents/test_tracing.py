@@ -1,4 +1,4 @@
-"""Unit tests for the process-level cubepi Tracer factory."""
+"""Unit tests for the process-level cubeloop Tracer factory."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def test_build_tracer_missing_key_defaults_disabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
-    from cubepi.tracing import Tracer
+    from cubeloop.tracing import Tracer
 
     monkeypatch.setattr(
         tracing_mod,
@@ -54,7 +54,7 @@ async def test_build_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_build_tracer_attaches_otlp_when_endpoint_set(monkeypatch, tmp_path):
-    from cubepi.tracing import Tracer
+    from cubeloop.tracing import Tracer
 
     monkeypatch.setattr(
         tracing_mod,

@@ -45,7 +45,7 @@ export function MessageAttachments({
     }
     return attachments.map((a) => ({
       ...a,
-      // Historical messages reloaded from cubepi only carry file_id, so we
+      // Historical messages reloaded from cubeloop only carry file_id, so we
       // build thumbnail/download URLs ourselves when not pre-filled.
       thumbnail_url: fix(
         a.thumbnail_url ?? (a.kind === 'image' ? `./attachments/${a.file_id}/thumbnail` : null),

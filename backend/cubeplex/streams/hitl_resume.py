@@ -188,7 +188,7 @@ async def finalize_run_meta_if_claim_matches(
     flow has taken over the row (CAS lost).
 
     Defensive guard against a future race where two flows could land in
-    the same _run_cubepi_respond_path's finally block — see spec §5.
+    the same _run_cubeloop_respond_path's finally block — see spec §5.
     """
     result = await redis.eval(  # type: ignore[misc]
         _FINALIZE_IF_CLAIM_MATCHES_LUA,
@@ -203,7 +203,7 @@ async def finalize_run_meta_if_claim_matches(
 def _as_dict(obj: Any) -> dict[str, Any]:
     """Pydantic ``.model_dump()`` if available, else assume already a dict.
 
-    JSONB round-trip may produce either, depending on the cubepi version
+    JSONB round-trip may produce either, depending on the cubeloop version
     and how the checkpointer rehydrates ``HitlRequest.payload``.
     """
     if hasattr(obj, "model_dump"):
@@ -212,14 +212,14 @@ def _as_dict(obj: Any) -> dict[str, Any]:
 
 
 def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
-    """Convert a cubepi ``HitlRequest`` into the frontend ``PendingHitl``
+    """Convert a cubeloop ``HitlRequest`` into the frontend ``PendingHitl``
     payload (see :mod:`cubeplex.api.schemas.conversations` and spec §7).
 
     Defensive against:
 
     * JSONB round-trip leaving inner objects as plain dicts (not Pydantic
       models).
-    * ``ApproveRequest.details`` being ``None`` (cubepi default).
+    * ``ApproveRequest.details`` being ``None`` (cubeloop default).
     * ``ApproveRequest.args`` being absent (defensive).
     """
     from cubeplex.utils.time import utc_isoformat

@@ -15,8 +15,8 @@ interface Props {
   models: string[]
 }
 
-// cubepi prefixes a provider name it doesn't canonically recognize with
-// "unknown:" (see cubepi/tracing/schema.py::map_provider_name) - real,
+// cubeloop prefixes a provider name it doesn't canonically recognize with
+// "unknown:" (see cubeloop/tracing/schema.py::map_provider_name) - real,
 // intentional signal, not a bug. Show the actual name as the primary text,
 // full value (with the prefix) as a tooltip so the signal isn't lost.
 function formatProvider(provider: string): { label: string; title: string } {

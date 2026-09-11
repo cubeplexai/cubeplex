@@ -1,14 +1,14 @@
-"""E2E smoke test for the cubepi runtime path (M1.6).
+"""E2E smoke test for the cubeloop runtime path (M1.6).
 
-Sends one conversation turn through cubeplex's public API with the cubepi
+Sends one conversation turn through cubeplex's public API with the cubeloop
 runtime active. Verifies the SSE stream emits at least one text_delta and a
 final done — confirming end-to-end wiring through:
 
-  ProviderConfig → cubepi.AnthropicProvider/OpenAIProvider →
-  cubepi.Agent (no cubeplex middleware in M1) → AgentEvent stream →
+  ProviderConfig → cubeloop.AnthropicProvider/OpenAIProvider →
+  cubeloop.Agent (no cubeplex middleware in M1) → AgentEvent stream →
   convert_agent_event_to_sse → cubeplex SSE.
 
-The test environment (config.test.yaml) already sets agents.runtime = "cubepi"
+The test environment (config.test.yaml) already sets agents.runtime = "cubeloop"
 so no app.state override is needed here — the route is active for all E2E
 tests in this worktree.
 """
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.real_llm
 
 
 @pytest.mark.asyncio
-async def test_cubepi_path_round_trip_one_turn(
+async def test_cubeloop_path_round_trip_one_turn(
     member_client,  # type: ignore[no-untyped-def]
 ) -> None:
     """POST one message, consume SSE, assert text_delta + done, no errors."""
@@ -32,7 +32,7 @@ async def test_cubepi_path_round_trip_one_turn(
     # 1. Create a conversation
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations",
-        params={"title": "cubepi-m1-smoke"},
+        params={"title": "cubeloop-m1-smoke"},
     )
     assert resp.status_code == 201, f"conversation creation failed: {resp.text}"
     conv_id = resp.json()["id"]

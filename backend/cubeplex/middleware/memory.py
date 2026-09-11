@@ -10,7 +10,7 @@ Pinned tier (preference + correction):
 Relevance tier (project_fact + procedure + decision + org_policy):
     Snapshots are computed **once per turn** by ``compute_relevance_snapshot``
     at message-append time (before the agent loop starts), then frozen on
-    ``cubepi.UserMessage.metadata["memory_snapshot"]``.  The middleware never
+    ``cubeloop.UserMessage.metadata["memory_snapshot"]``.  The middleware never
     re-derives them from the live MemoryItem table on replay — the snapshot
     is the single source of truth, ensuring byte-identical historical prefix.
 
@@ -37,9 +37,9 @@ from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Any
 
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import Message, TextContent, UserMessage
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import Message, TextContent, UserMessage
 
 from cubeplex.models.memory import (
     MemoryItem,
@@ -108,13 +108,13 @@ _EXTRA_PINNED_KEY = "memory_pinned_snapshot"
 
 
 class MemoryMiddleware(Middleware):
-    """cubepi port of MemoryMiddleware.
+    """cubeloop port of MemoryMiddleware.
 
     Args:
         repo_factory: Async context manager factory yielding a
             ``MemoryRepository`` scoped to the current request.
         extra_ref: Callable returning the agent's ``_extra`` dict, which is
-            persisted by the cubepi checkpointer across runs. Used to cache
+            persisted by the cubeloop checkpointer across runs. Used to cache
             the pinned-memory block once per conversation so that
             ``transform_system_prompt`` is byte-identical across all LLM
             calls in the same conversation — keeping the Anthropic/OpenAI
@@ -157,7 +157,7 @@ class MemoryMiddleware(Middleware):
         self._include_personal = include_personal
 
     # ------------------------------------------------------------------
-    # cubepi Middleware hooks
+    # cubeloop Middleware hooks
 
     async def transform_system_prompt(
         self,

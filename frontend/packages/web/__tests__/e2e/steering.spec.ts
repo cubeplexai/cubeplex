@@ -37,7 +37,7 @@ test(
     await expect(chip).toBeVisible({ timeout: 5_000 })
     await expect(chip).toContainText('Actually, also say hello at the end.')
 
-    // Once cubepi drains the steer, the chip disappears and the steer becomes a
+    // Once cubeloop drains the steer, the chip disappears and the steer becomes a
     // real user message in the transcript.
     await expect(chip).toBeHidden({ timeout: 150_000 })
     const steerInTranscript = page

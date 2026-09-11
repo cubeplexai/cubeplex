@@ -1,8 +1,8 @@
 """ArtifactMiddleware.
 
-Implements the cubepi Middleware protocol with two hooks:
+Implements the cubeloop Middleware protocol with two hooks:
 
-- ``tools``: exposes ``save_artifact`` and ``present_file`` as cubepi tools
+- ``tools``: exposes ``save_artifact`` and ``present_file`` as cubeloop tools
   so the graph factory can include them in the agent tool list.
 - ``transform_system_prompt``: appends the static artifact instructions to the
   system prompt. Dynamic artifact state is available through agent tools so it
@@ -17,10 +17,10 @@ import shlex
 from collections.abc import Callable
 from typing import Any
 
-from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import TextContent
-from cubepi.types import StructuredValue
+from cubeloop.agent.types import AgentContext, AgentTool, AgentToolResult
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import TextContent
+from cubeloop.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -63,7 +63,7 @@ def _make_save_artifact_tool(
     org_id: str,
     workspace_id: str,
 ) -> AgentTool[_SaveArtifactArgs]:
-    """Build the save_artifact cubepi.AgentTool backed by sandbox + DB."""
+    """Build the save_artifact cubeloop.AgentTool backed by sandbox + DB."""
 
     async def _execute(
         tool_call_id: str,
@@ -155,7 +155,7 @@ def _make_present_file_tool(
     workspace_id: str,
     run_id: str | None = None,
 ) -> AgentTool[_PresentFileArgs]:
-    """Build the present_file cubepi.AgentTool."""
+    """Build the present_file cubeloop.AgentTool."""
 
     async def _execute(
         tool_call_id: str,
@@ -279,7 +279,7 @@ class ArtifactMiddleware(Middleware):
 
     @property
     def tools(self) -> list[AgentTool[Any]]:
-        """Return the cubepi.AgentTool list for this middleware."""
+        """Return the cubeloop.AgentTool list for this middleware."""
         return [self._save_artifact_tool, self._present_file_tool]
 
     async def transform_system_prompt(

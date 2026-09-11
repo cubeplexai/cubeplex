@@ -1,7 +1,7 @@
 """HTTP transport that records outbound requests to JSON files for diff analysis.
 
 Used by Phase 2 diagnostic tests to capture the exact request body that each
-runtime (langgraph / cubepi) sends to the provider.  Kept in the repo permanently
+runtime (langgraph / cubeloop) sends to the provider.  Kept in the repo permanently
 as part of the diagnostic scaffold.
 """
 

@@ -239,7 +239,7 @@ interface HistoryProps {
   // Whether to render the per-turn action row (token chip, fork button,
   // memory chip if last run) for this bubble. Set by MessageList for the
   // *last* assistant message of each completed run, so the row anchors
-  // 1:1 to cubepi's run-granular ``cp.fork(after_run_id=...)`` —
+  // 1:1 to cubeloop's run-granular ``cp.fork(after_run_id=...)`` —
   // intermediate tool-use bubbles in a multi-step turn would all collapse
   // to the same fork point.
   showForkAction?: boolean
@@ -319,7 +319,7 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 /** True when a tool_call invokes the platform-skills "find" operation.
  *
  * History: `find_skills` → `skills(operation='find', ...)` → `platform_skills_find`.
- * The capability was migrated to per-operation deferred tools in the cubepi
+ * The capability was migrated to per-operation deferred tools in the cubeloop
  * dispatch upgrade, so the tool name now carries the operation directly and
  * the umbrella `operation` argument is gone. We still match the legacy
  * shape so streamed messages persisted from older runs keep rendering the

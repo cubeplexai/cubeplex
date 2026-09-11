@@ -2,7 +2,7 @@
 
 Pure data: no IO, no platform SDK imports. Platform renderers turn one of these
 into a platform-specific payload; the tailer mutates one of these as
-cubepi events arrive.
+cubeloop events arrive.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class ArtifactItem:
 
 @dataclass(slots=True)
 class AskFormField:
-    """One cubepi ``ask_user`` question projected for platform form renderers.
+    """One cubeloop ``ask_user`` question projected for platform form renderers.
 
     Feishu CardKit can collect every field in one form submit; other IM
     platforms still only handle the simple single-select button path and
@@ -74,14 +74,14 @@ class PendingInput:
     choices: list[tuple[str, str, str]] = field(default_factory=list)
     """Tuples of ``(label, value, button_type)``.
 
-    - ``label`` is the human-visible button text (the cubepi option's
+    - ``label`` is the human-visible button text (the cubeloop option's
       ``label`` field). What the user actually reads on the card.
-    - ``value`` is the schema key cubepi expects back in the answer dict
+    - ``value`` is the schema key cubeloop expects back in the answer dict
       (the option's ``value`` / ``key`` field). What the resume call sends.
     - ``button_type`` ∈ {"primary","default","danger"} — rendering
       hint (the option's ``type`` field).
 
-    Keeping label and value separate matters: cubepi schemas commonly use
+    Keeping label and value separate matters: cubeloop schemas commonly use
     machine values like ``yes`` / ``no`` with human-readable labels like
     ``Yes`` / ``No``. Rendering the value as button text would force the
     user to choose between machine tokens.
@@ -93,10 +93,10 @@ class PendingInput:
     fields: list[AskFormField] = field(default_factory=list)
     """Full ask_user question list for form-capable platforms (Feishu)."""
     question_id: str | None = None
-    """cubepi-side identifier for matching the resume call."""
+    """cubeloop-side identifier for matching the resume call."""
     answer_key: str | None = None
-    """cubepi form schema key (questions[0].key for ask_user). The resume call
-    builds the answer dict as {answer_key: choice} — without this, cubepi
+    """cubeloop form schema key (questions[0].key for ask_user). The resume call
+    builds the answer dict as {answer_key: choice} — without this, cubeloop
     rejects the answer because our key won't match its schema. Unused when
     the form path submits a full answers dict."""
     resolved_choice: str | None = None
@@ -146,7 +146,7 @@ class CardState:
     epoch: int = 0
     """Bumped on run abort; in-flight responses for a stale epoch are dropped."""
     run_start_monotonic: float = 0.0
-    """Stashed on first event; used to compute elapsed_ms on done (cubepi done.data is empty)."""
+    """Stashed on first event; used to compute elapsed_ms on done (cubeloop done.data is empty)."""
 
     def advance_seq(self) -> int:
         seq = self.next_seq

@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import json
 
-from cubepi import AgentToolResult
-from cubepi.agent.types import ToolExecutionEndEvent
-from cubepi.providers.base import TextContent
+from cubeloop import AgentToolResult
+from cubeloop.agent.types import ToolExecutionEndEvent
+from cubeloop.providers.base import TextContent
 
 from cubeplex.agents.schemas import ArtifactEvent
 from cubeplex.agents.stream import convert_agent_event_to_sse
-from cubeplex.streams.run_manager import _dicts_to_sse_events, cubepi_dict_to_agent_event
+from cubeplex.streams.run_manager import _dicts_to_sse_events, cubeloop_dict_to_agent_event
 
 TS = "2026-05-27T00:00:00+00:00"
 
@@ -47,7 +47,7 @@ def test_save_artifact_event_survives_produce_translate_persist_replay() -> None
     assert len(artifact_dicts) == 1
 
     # 2. Translate: live dict → typed event published on the stream.
-    live_event = cubepi_dict_to_agent_event(artifact_dicts[0], TS)
+    live_event = cubeloop_dict_to_agent_event(artifact_dicts[0], TS)
     assert isinstance(live_event, ArtifactEvent)
     assert live_event.data == {"action": "created", "artifact": artifact}
 

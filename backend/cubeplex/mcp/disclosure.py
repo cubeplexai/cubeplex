@@ -6,12 +6,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from cubepi.agent.types import AgentTool
-from cubepi.deferred import DeferredToolGroup
+from cubeloop.agent.types import AgentTool
+from cubeloop.deferred import DeferredToolGroup
 
 from cubeplex.config import config
 from cubeplex.mcp._constants import slugify_for_namespace
-from cubeplex.mcp.cubepi_runtime import (
+from cubeplex.mcp.cubeloop_runtime import (
     _NS_LENGTH_DEFENCE,
     _build_namespaced_name_with_prefix,
     _load_tools_for_specs_deferred,
@@ -108,7 +108,7 @@ def build_deferred_groups(
     all_specs: list[MCPRuntimeConnectorSpec],
     loader_kwargs: dict[str, Any],
 ) -> tuple[list[DeferredToolGroup], dict[str, CitationConfig]]:
-    """Convert MCP runtime specs into cubepi DeferredToolGroup objects.
+    """Convert MCP runtime specs into cubeloop DeferredToolGroup objects.
 
     Returns (groups, citation_configs). citation_configs is populated when
     loader callbacks run (i.e., when the model calls load_tools).

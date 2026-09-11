@@ -1,6 +1,6 @@
 ---
 name: debug-cubeplex
-description: Use when hitting a bug, test failure, or unexpected behavior in cubeplex — BEFORE proposing or writing a fix. Enforces reproduce-first, then routes to the right cubeplex diagnostic: agent-run traces (cubepi-trace), alembic head conflicts, sandbox/reaper issues, SSE streaming, scope/RBAC 404-vs-403, and check-ci failures. Triggers on phrases like "这个 bug", "测试挂了", "为什么会这样", "报错了", "先别急着改", "run 不对", "迁移冲突", "sandbox 起不来".
+description: Use when hitting a bug, test failure, or unexpected behavior in cubeplex — BEFORE proposing or writing a fix. Enforces reproduce-first, then routes to the right cubeplex diagnostic: agent-run traces (cubeloop-trace), alembic head conflicts, sandbox/reaper issues, SSE streaming, scope/RBAC 404-vs-403, and check-ci failures. Triggers on phrases like "这个 bug", "测试挂了", "为什么会这样", "报错了", "先别急着改", "run 不对", "迁移冲突", "sandbox 起不来".
 ---
 
 # Debug cubeplex
@@ -20,8 +20,8 @@ recorded run. If you can't reproduce it, you can't confirm you fixed it.
 
 **Agent run misbehaved** — missing final reply, a tool did the wrong thing, a
 4xx from the model, wrong token/cache numbers, "why did the agent do that?":
-→ use **`/cubepi-trace`**. It reads the per-run JSONL span tree
-(`cubepi trace ls / view / follow / stats`): errors, tool inputs/outputs,
+→ use **`/cubeloop-trace`**. It reads the per-run JSONL span tree
+(`cubeloop trace ls / view / follow / stats`): errors, tool inputs/outputs,
 token usage.
 
 **Migration head conflict after rebase** — a second alembic head appears:

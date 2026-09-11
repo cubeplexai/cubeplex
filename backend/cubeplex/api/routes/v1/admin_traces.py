@@ -41,9 +41,9 @@ router = APIRouter(prefix="/admin/traces", tags=["admin-traces"])
 
 _ALLOWED_TAGS = frozenset(
     {
-        "cubepi.metadata.workspace_id",
-        "cubepi.metadata.user_id",
-        "cubepi.metadata.conversation_id",
+        "cubeloop.metadata.workspace_id",
+        "cubeloop.metadata.user_id",
+        "cubeloop.metadata.conversation_id",
         "gen_ai.request.model",
     }
 )
@@ -228,7 +228,7 @@ async def get_filter_options(
 
 
 def _has_foreign_org_span(node: SpanNode, expected_org_id: str) -> bool:
-    span_org = node.raw_attributes.get("cubepi.metadata.org_id")
+    span_org = node.raw_attributes.get("cubeloop.metadata.org_id")
     if span_org is not None and str(span_org) != expected_org_id:
         return True
     return any(_has_foreign_org_span(c, expected_org_id) for c in node.children)

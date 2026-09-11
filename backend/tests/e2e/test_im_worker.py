@@ -152,7 +152,7 @@ async def test_worker_processes_one_item_and_completes_receipt(
     assert rm.calls[0]["workspace_id"] == account.workspace_id
     assert rm.calls[0]["trigger"] == "im"
     # Sender identity is derived from the effective user (here the acting user,
-    # seeded with no display_name → falls back to email) so cubepi attribution
+    # seeded with no display_name → falls back to email) so cubeloop attribution
     # and the group-chat SenderBadge fire for IM messages.
     assert rm.calls[0]["sender_display_name"] == f"{account.acting_user_id}@example.com"
 

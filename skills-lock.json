@@ -1,17 +1,17 @@
 {
   "version": 1,
   "skills": {
-    "cubepi": {
-      "source": "cubeplexai/cubepi",
+    "cubeloop": {
+      "source": "cubeplexai/cubeloop",
       "sourceType": "github",
-      "skillPath": "skills/cubepi/SKILL.md",
-      "computedHash": "c995efb2aebd959260803cffa174de58a43b7bdc82d3be92a93a34d5491ad695"
+      "skillPath": "skills/cubeloop/SKILL.md",
+      "computedHash": "75fc681ae30a04a9c3a2e97303149253c31bb7132087984b9aaa9570c7552a8c"
     },
-    "cubepi-trace": {
-      "source": "cubeplexai/cubepi",
+    "cubeloop-trace": {
+      "source": "cubeplexai/cubeloop",
       "sourceType": "github",
-      "skillPath": "skills/cubepi-trace/SKILL.md",
-      "computedHash": "05eee5834c9c54e34998baa7edcea2ee3230e0a443d8831ebe0a1bc2c4fff27b"
+      "skillPath": "skills/cubeloop-trace/SKILL.md",
+      "computedHash": "8fc0627df462d1b7b26319fe316804fcce943292c497ce857074dae8bc95d722"
     },
     "playwright-cli": {
       "source": "microsoft/playwright-cli",

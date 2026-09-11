@@ -1,6 +1,6 @@
 """Out-of-band memory reflection — runs after AgentEndEvent.
 
-Spawns a detached cubepi Agent (cheap model, memory tools only) seeded with
+Spawns a detached cubeloop Agent (cheap model, memory tools only) seeded with
 the last conversation turn plus the current memory snapshot. Captures any
 memory_save / memory_update tool executions and publishes a UserEvent so
 the frontend can surface the change.
@@ -18,8 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from cubepi import Agent
-from cubepi.agent.types import AgentEvent
+from cubeloop import Agent
+from cubeloop.agent.types import AgentEvent
 
 from cubeplex.models.user_event import UserEventType
 from cubeplex.services.reflection_context import set_reflection_source
@@ -96,7 +96,7 @@ class ReflectionRunner:
 
         items: list[dict[str, Any]] = []
 
-        # cubepi calls listeners with (event, signal) — accept both positionally.
+        # cubeloop calls listeners with (event, signal) — accept both positionally.
         def listener(event: AgentEvent, signal: Any = None) -> None:
             if event.type != "tool_execution_end":
                 return
@@ -114,7 +114,7 @@ class ReflectionRunner:
 
         unsub = agent.subscribe(listener)
         try:
-            # Keep the ContextVar active across wait_for_idle: cubepi can
+            # Keep the ContextVar active across wait_for_idle: cubeloop can
             # execute memory tool calls after prompt() returns (they finish
             # during the idle drain), and tool callbacks must see
             # reflection_source_active() == True to tag writes correctly.

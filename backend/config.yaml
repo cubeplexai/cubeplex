@@ -352,9 +352,9 @@ default:
     stale_run_threshold_seconds: 180
 
   # Conversation context compaction (default on; threshold = model.context_window * ratio)
-  # cubepi 0.x+: ``keep_tail_tokens`` (token budget) replaces the older
+  # cubeloop 0.x+: ``keep_tail_tokens`` (token budget) replaces the older
   # ``keep_recent_messages`` (message count). ``max_summary_tokens: null``
-  # uses cubepi's dynamic budget — clamp(content*0.15, 1024, 4096); set
+  # uses cubeloop's dynamic budget — clamp(content*0.15, 1024, 4096); set
   # an int to pin the budget instead.
   compaction:
     enabled: true
@@ -376,13 +376,13 @@ default:
     api_key: null
     base_url: null
 
-  # cubepi agent tracing (OTLP/JSON spans on disk; default off; opt-in per env)
+  # cubeloop agent tracing (OTLP/JSON spans on disk; default off; opt-in per env)
   # When enabled, each run writes <directory>/<YYYY-MM-DD>/<run_id>.jsonl.
   # Optionally also ship spans to an OTLP HTTP collector (e.g. Grafana Tempo)
   # by setting `otlp.endpoint` to the full /v1/traces URL.
   tracing:
     enabled: false
-    directory: "./cubepi-traces"
+    directory: "./cubeloop-traces"
     # record_content=true captures full prompts / responses / tool args+results
     # in the trace — useful for debugging, larger files, may contain sensitive data.
     record_content: false

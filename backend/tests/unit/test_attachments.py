@@ -1,7 +1,7 @@
 """Unit tests for AttachmentHintMiddleware (M3.a.1)."""
 
 import pytest
-from cubepi.providers.base import AssistantMessage, TextContent, Usage, UserMessage
+from cubeloop.providers.base import AssistantMessage, TextContent, Usage, UserMessage
 
 from cubeplex.middleware.attachments import AttachmentHintMiddleware
 
@@ -175,7 +175,7 @@ async def test_metadata_preserved_on_augmented_message() -> None:
 @pytest.mark.asyncio
 async def test_no_text_content_appends_new_block() -> None:
     """When there is no existing TextContent, a new one is appended."""
-    from cubepi.providers.base import ImageContent
+    from cubeloop.providers.base import ImageContent
 
     mw = AttachmentHintMiddleware()
     msg = UserMessage(

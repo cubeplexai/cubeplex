@@ -1,8 +1,8 @@
 """graph_pi tests — create_cubeplex_agent (M1.4)."""
 
 import pytest
-from cubepi import Agent
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop import Agent
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 from cubeplex.agents.graph import create_cubeplex_agent
 
@@ -12,7 +12,7 @@ def _faux_bound_model() -> object:
     return FauxProvider().model("test-model")
 
 
-def test_returns_cubepi_agent_instance() -> None:
+def test_returns_cubeloop_agent_instance() -> None:
     agent = create_cubeplex_agent(
         bound_model=_faux_bound_model(),
         system_prompt="You are helpful.",
@@ -29,7 +29,7 @@ def test_agent_carries_system_prompt() -> None:
 
 
 def test_agent_accepts_checkpointer_and_thread_id() -> None:
-    from cubepi.checkpointer import MemoryCheckpointer
+    from cubeloop.checkpointer import MemoryCheckpointer
 
     cp = MemoryCheckpointer()
     agent = create_cubeplex_agent(
@@ -53,7 +53,7 @@ def test_agent_accepts_empty_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_bare_agent_runs_a_turn() -> None:
-    """Smoke: bare cubepi agent runs an LLM call against FauxProvider."""
+    """Smoke: bare cubeloop agent runs an LLM call against FauxProvider."""
     provider = FauxProvider()
     provider.set_responses([faux_assistant_message("hello back")])
     agent = create_cubeplex_agent(

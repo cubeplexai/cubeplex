@@ -1,6 +1,6 @@
-"""create_trigger tool — cubepi.AgentTool with auto IM-origin detection.
+"""create_trigger tool — cubeloop.AgentTool with auto IM-origin detection.
 
-Factory: ``make_create_trigger_tool(...)`` returns one ``cubepi.AgentTool``.
+Factory: ``make_create_trigger_tool(...)`` returns one ``cubeloop.AgentTool``.
 Mirrors ``create_scheduled_task`` but for webhook triggers. The trigger has
 no "fixed conversation" mode — when the trigger fires, by default it spins
 up a fresh conversation each time (``new_each_time``); inside an IM
@@ -18,8 +18,8 @@ import json
 import secrets
 from typing import Any, Literal
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.credentials.encryption import EncryptionBackend
@@ -95,7 +95,7 @@ def make_create_trigger_tool(
     conversation_id: str,
     encryption_backend: EncryptionBackend,
 ) -> AgentTool[CreateTriggerArgs]:
-    """Build the create_trigger cubepi.AgentTool bound to a run.
+    """Build the create_trigger cubeloop.AgentTool bound to a run.
 
     A fresh DB session is opened per call. org_id / workspace_id /
     user_id / conversation_id / encryption_backend are bound at construction

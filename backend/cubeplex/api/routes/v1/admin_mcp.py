@@ -20,7 +20,7 @@ from contextvars import ContextVar
 from typing import Annotated, Any, cast
 
 import httpx
-from cubepi.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -795,8 +795,8 @@ async def admin_invoke_tool(
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> ToolInvokeOut:
     """Admin Try It: invoke a tool on any install in the admin's org."""
-    from cubeplex.api.routes.v1.ws_mcp import _invoke_tool_via_cubepi
-    from cubeplex.mcp.cubepi_runtime import _resolve_auth_from_spec
+    from cubeplex.api.routes.v1.ws_mcp import _invoke_tool_via_cubeloop
+    from cubeplex.mcp.cubeloop_runtime import _resolve_auth_from_spec
     from cubeplex.mcp.effective import MCPEffectiveConnectorService
     from cubeplex.services.mcp_discovery import _build_runtime_spec_for_discovery
 
@@ -889,7 +889,7 @@ async def admin_invoke_tool(
         )
     try:
         result = await asyncio.wait_for(
-            _invoke_tool_via_cubepi(
+            _invoke_tool_via_cubeloop(
                 server_url,
                 tool_name,
                 body.arguments,

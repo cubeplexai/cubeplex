@@ -141,7 +141,7 @@ hits Debian, PyPI, npm, or GitHub slowly, override at build time:
 | `PIP_TRUSTED_HOST` | `pypi.tuna.tsinghua.edu.cn` | Trusts an HTTP/private PyPI host. |
 | `UV_INDEX_URL` | same as PIP | Passed through to uv. |
 | `NPM_REGISTRY` | `https://registry.npmmirror.com` | Sets `pnpm config registry` in the frontend build. |
-| `GITHUB_MIRROR` | `https://githubfast.com/` | Substitutes `https://github.com/` in the generated `requirements-frozen.txt` (only affects the cubepi git+url dependency). |
+| `GITHUB_MIRROR` | `https://githubfast.com/` | Substitutes `https://github.com/` in the generated `requirements-frozen.txt` (only affects the cubeloop git+url dependency). |
 
 Empty / unset → upstream.
 

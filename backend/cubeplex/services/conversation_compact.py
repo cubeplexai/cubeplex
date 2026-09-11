@@ -1,6 +1,6 @@
 """Manual force-compact for a conversation (slash ``/compact``).
 
-Reuses cubepi compaction helpers (boundary + fallback summariser). On success
+Reuses cubeloop compaction helpers (boundary + fallback summariser). On success
 also appends a durable **timeline marker** (synthetic user message) so the UI
 history shows where context was compacted — without storing the literal
 ``/compact`` user command.
@@ -14,10 +14,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from cubepi.middleware.compaction.boundary import safe_boundary, tail_start_by_tokens
-from cubepi.middleware.compaction.state import CompactionState, message_refs
-from cubepi.middleware.compaction.summarizer import build_fallback_summary
-from cubepi.providers.base import Message, synthetic_user_message
+from cubeloop.middleware.compaction.boundary import safe_boundary, tail_start_by_tokens
+from cubeloop.middleware.compaction.state import CompactionState, message_refs
+from cubeloop.middleware.compaction.summarizer import build_fallback_summary
+from cubeloop.providers.base import Message, synthetic_user_message
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.config import config as _config

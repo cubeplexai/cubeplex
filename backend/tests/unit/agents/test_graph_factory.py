@@ -1,8 +1,8 @@
-"""create_cubeplex_agent — bound-model wiring smoke test (cubepi 0.7)."""
+"""create_cubeplex_agent — bound-model wiring smoke test (cubeloop 0.7)."""
 
 from __future__ import annotations
 
-from cubepi.providers.faux import FauxProvider
+from cubeloop.providers.faux import FauxProvider
 
 from cubeplex.agents.graph import create_cubeplex_agent
 
