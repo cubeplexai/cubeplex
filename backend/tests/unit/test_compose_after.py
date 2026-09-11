@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentToolResult,
 )
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, Usage
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall, Usage
 
 from cubeplex.middleware._compose import compose_after_tool_call
 

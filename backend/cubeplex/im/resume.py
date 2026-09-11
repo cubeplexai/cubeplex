@@ -4,7 +4,7 @@ Wraps cubeplex's existing ``run_manager.resume_run_with_answer`` with the
 extra plumbing IM needs: resolve conversation/org/workspace from a bare
 ``run_id`` (the SSE / web path always has these in the request context;
 IM only has the click payload), build the right answer shape per
-``input_kind``, and translate cubepi resume exceptions into a True/False
+``input_kind``, and translate cubeloop resume exceptions into a True/False
 outcome so the ingress can pick a user-visible toast.
 """
 
@@ -137,7 +137,7 @@ async def resume_paused_run(
     if input_kind == "sandbox_confirm":
         from typing import Literal, cast
 
-        from cubepi.hitl.types import ApproveAnswer
+        from cubeloop.hitl.types import ApproveAnswer
 
         decision: Literal["approve", "deny"] = "approve" if choice == "approve" else "deny"
         answer = ApproveAnswer(
@@ -152,13 +152,13 @@ async def resume_paused_run(
         if answers is not None:
             answer = answers
         else:
-            # cubepi ask_user expects a dict keyed by the question's `key`
+            # cubeloop ask_user expects a dict keyed by the question's `key`
             # (the form schema). The renderer plumbs questions[0].key through
             # the button payload → ActionPayload → ResumeAction → here. If
             # the question carried no key (defensive fallback for malformed
-            # payloads or single-key prompts), drop in "choice" so cubepi
+            # payloads or single-key prompts), drop in "choice" so cubeloop
             # gets a syntactically valid dict; a schema mismatch is then
-            # cubepi's to report, not ours.
+            # cubeloop's to report, not ours.
             key = answer_key or "choice"
             answer = {key: choice}
     else:

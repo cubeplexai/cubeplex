@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from cubepi.middleware.compaction.pruner import prune_tool_results
-from cubepi.providers.base import TextContent, ToolResultMessage
+from cubeloop.middleware.compaction.pruner import prune_tool_results
+from cubeloop.providers.base import TextContent, ToolResultMessage
 
 from cubeplex.middleware.compaction import preserve_tool_result_for_compaction
 

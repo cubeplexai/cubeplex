@@ -30,9 +30,9 @@ def _snap_with_model() -> LLMSnapshot:
     )
 
 
-def test_build_bound_model_returns_cubepi_boundmodel():
+def test_build_bound_model_returns_cubeloop_boundmodel():
     bm = build_bound_model(_snap_with_model(), "acme/m1")
-    from cubepi.providers.base import BoundModel
+    from cubeloop.providers.base import BoundModel
 
     assert isinstance(bm, BoundModel)
     assert bm.spec.id == "m1"

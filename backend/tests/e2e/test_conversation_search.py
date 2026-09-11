@@ -24,7 +24,7 @@ from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 # Skip the entire module unless a real embedding endpoint is available.
 # Use module-level skip rather than per-test so collection costs (importing
-# heavy cubepi modules) stay low when the suite runs without the secret.
+# heavy cubeloop modules) stay low when the suite runs without the secret.
 _EMBED_KEY = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("CUBEPLEX_TEST_LOCAL_EMBED")
 pytestmark = pytest.mark.skipif(
     not _EMBED_KEY,
@@ -33,8 +33,8 @@ pytestmark = pytest.mark.skipif(
 
 
 async def _seed_conv(client: TestClient, title: str, user_text: str) -> str:
-    """Create a conversation via API and append cubepi messages directly."""
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    """Create a conversation via API and append cubeloop messages directly."""
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     resp = client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",

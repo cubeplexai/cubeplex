@@ -111,14 +111,14 @@ class EmbeddingWorker:
             return job
 
     async def _process(self, job: EmbeddingJob) -> None:
-        # 1. Load all messages for the conversation (cubepi load is per-thread).
+        # 1. Load all messages for the conversation (cubeloop load is per-thread).
         async with shared_checkpointer() as cp:
             data = await cp.load(job.conversation_id)
         if data is None:
             return
         # 2–4. Filter seq window, extract text, soft-chunk off the event loop.
         # 1-based load-order seq matches the frontend `#msg-N` anchors (both
-        # walk cubepi's `data.messages` in order). Navigation hint only.
+        # walk cubeloop's `data.messages` in order). Navigation hint only.
         chunks = await asyncio.to_thread(
             build_chunks_for_messages,
             data.messages,

@@ -243,7 +243,7 @@ compaction:
   enabled: true
   threshold_ratio: 0.7           # compact at context_window * ratio
   keep_tail_tokens: 8000         # recent tokens kept verbatim
-  max_summary_tokens: null       # null = cubepi dynamic budget
+  max_summary_tokens: null       # null = cubeloop dynamic budget
   fallback_context_window: 128000
 ```
 
@@ -388,7 +388,7 @@ supply an `api_key`.
 ```yaml
 tracing:
   enabled: false
-  directory: "./cubepi-traces"
+  directory: "./cubeloop-traces"
   record_content: false  # true captures full prompts/responses/tool I/O (larger, sensitive)
   otlp:
     endpoint: null       # e.g. http://localhost:4318/v1/traces to ship spans
@@ -397,7 +397,7 @@ tracing:
     query_endpoint: null # enables the admin trace viewer when set
 ```
 
-Writes per-run cubepi spans to disk when enabled, and optionally ships them to
+Writes per-run cubeloop spans to disk when enabled, and optionally ships them to
 an OTLP collector (Grafana Tempo, etc.). `record_content: true` is powerful for
 debugging but captures potentially sensitive prompt/tool data.
 

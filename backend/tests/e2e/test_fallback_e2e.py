@@ -1,11 +1,11 @@
-"""End-to-end fallback test using cubepi.FauxProvider chains.
+"""End-to-end fallback test using cubeloop.FauxProvider chains.
 
 The primary FauxProvider raises ``RateLimited`` on every stream so
 ``FallbackBoundModel`` retries then falls over to chain[1]; the backup
 FauxProvider returns a normal AssistantMessage. We verify the full pipeline:
 
 * ``model_retry`` SSE events fire for each same-model RateLimited retry
-  before the hop (cubepi 0.13.5);
+  before the hop (cubeloop 0.13.5);
 * a ``model_failover`` SSE event is emitted with the expected
   ``failed_ref`` / ``next_ref`` / ``reason``;
 * the final reply text comes from the backup chain leg.
@@ -20,8 +20,8 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from cubepi.errors import RateLimited
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_text
+from cubeloop.errors import RateLimited
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -168,12 +168,12 @@ async def fallback_client(
     primary = FauxProvider(provider_id="primary")
 
     def _raise_rate_limited(*args: Any, **kwargs: Any) -> Any:
-        # Wording must match cubepi's rate-limit classifier: FauxProvider
+        # Wording must match cubeloop's rate-limit classifier: FauxProvider
         # raises inside the producer, so FallbackBoundModel sees a first-
         # event error string rather than a live RateLimited exception.
         raise RateLimited("rate limited", provider="primary", model="m1")
 
-    # cubepi 0.13.5 retries the active model up to max_retries_per_model=3
+    # cubeloop 0.13.5 retries the active model up to max_retries_per_model=3
     # (4 attempts) on RateLimited. FauxProvider pops the queue each call,
     # so queue enough 429s that every same-model retry still raises.
     primary.set_responses([_raise_rate_limited] * 8)

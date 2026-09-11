@@ -42,7 +42,7 @@ def upgrade() -> None:
     # EXPECTED_SCHEMA_VERSION is now 5; PostgresCheckpointer refuses to
     # enter context until cubepi_schema_version matches, so the version
     # row bump via write_schema_version_op() is mandatory.
-    from cubepi.checkpointer.postgres.alembic_helpers import (
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         upgrade_v4_to_v5_op,
         write_schema_version_op,
     )

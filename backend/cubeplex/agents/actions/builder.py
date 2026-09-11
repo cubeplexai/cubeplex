@@ -1,4 +1,4 @@
-"""Build per-operation cubepi AgentTools from an AgentCapability declaration.
+"""Build per-operation cubeloop AgentTools from an AgentCapability declaration.
 
 Each capability operation becomes its own AgentTool named ``<cap_name>_<op_name>``
 (e.g. ``scheduled_tasks_create``). Tools from the same capability are then
@@ -15,9 +15,9 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
-from cubepi.types import StructuredValue
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
+from cubeloop.types import StructuredValue
 from pydantic import BaseModel
 
 from cubeplex.agents.actions.context import ScopeContext

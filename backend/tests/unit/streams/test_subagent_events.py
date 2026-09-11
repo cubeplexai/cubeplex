@@ -1,4 +1,4 @@
-"""Subagent event bridge between cubepi middleware and cubeplex SSE queues."""
+"""Subagent event bridge between cubeloop middleware and cubeplex SSE queues."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import asyncio
 from typing import Any
 
 import pytest
-from cubepi.agent.types import MessageUpdateEvent
-from cubepi.providers.base import AssistantMessage, StreamEvent, TextContent
+from cubeloop.agent.types import MessageUpdateEvent
+from cubeloop.providers.base import AssistantMessage, StreamEvent, TextContent
 
 from cubeplex.streams.subagent_events import (
     forward_subagent_event,

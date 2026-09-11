@@ -132,7 +132,7 @@ GitHub 较慢，可以在构建时覆盖：
 | `PIP_TRUSTED_HOST` | `pypi.tuna.tsinghua.edu.cn` | 信任一个 HTTP / 私有 PyPI 源。 |
 | `UV_INDEX_URL` | 同 PIP | 透传给 uv。 |
 | `NPM_REGISTRY` | `https://registry.npmmirror.com` | 在 frontend 构建中设置 `pnpm config registry`。 |
-| `GITHUB_MIRROR` | `https://githubfast.com/` | 替换生成的 `requirements-frozen.txt` 中的 `https://github.com/`（只影响 cubepi 的 git+url 依赖）。 |
+| `GITHUB_MIRROR` | `https://githubfast.com/` | 替换生成的 `requirements-frozen.txt` 中的 `https://github.com/`（只影响 cubeloop 的 git+url 依赖）。 |
 
 留空 / 不设置 → 使用上游源。
 

@@ -181,7 +181,7 @@
   }
 
   /* ============================================================
-     OPERATOR — alt theme family inspired by cubepi docs + e2b.
+     OPERATOR — alt theme family inspired by cubeloop docs + e2b.
      Two variants: .operator-light and .operator-dark. The product UI
      ships the default family; Operator stays registered as an alt
      family (next-themes names + these classes). Light/dark is
@@ -207,7 +207,7 @@
     --color-raised: #f4f4f5; /* input bar, user bubble, hover fills */
     --color-sunken: #f4f4f5;
 
-    --color-primary: #0a0a0b; /* high-contrast neutral CTA — cubepi voice */
+    --color-primary: #0a0a0b; /* high-contrast neutral CTA — cubeloop voice */
     --color-primary-foreground: #fafafa;
 
     --color-secondary: #f4f4f5;
@@ -222,7 +222,7 @@
     --color-border: #e4e4e7; /* zinc-200 */
     --color-border-strong: #d4d4d8; /* zinc-300 */
     --color-input: #e4e4e7;
-    --color-ring: #3b5bd9; /* cubepi indigo */
+    --color-ring: #3b5bd9; /* cubeloop indigo */
 
     --color-success-surface: rgba(22, 163, 74, 0.08);
     --color-success-border: rgba(22, 163, 74, 0.3);
@@ -257,7 +257,7 @@
     --color-sunken: #050506; /* code blocks, terminal */
 
     /* CTA = high-contrast NEUTRAL (zinc-100), not a colored fill.
-       'pip install cubepi' style — the action IS the page voice. */
+       'pip install cubeloop' style — the action IS the page voice. */
     --color-primary: #fafafa;
     --color-primary-foreground: #18181b;
 
@@ -302,7 +302,7 @@
   }
 
   /* Operator-only chrome tweaks: tighter radius for that 5px feel; all
-     `.uppercase` labels are auto-mono with cubepi-style letterspacing.
+     `.uppercase` labels are auto-mono with cubeloop-style letterspacing.
      Applies to both light + dark variants of the Operator family. */
   :where(.operator-light, .operator-dark) *,
   :where(.operator-light, .operator-dark) *::before,
@@ -316,7 +316,7 @@
     letter-spacing: 0.12em;
     font-weight: 500;
   }
-  /* Numerals in mono contexts use tabular figures (cubepi rule) */
+  /* Numerals in mono contexts use tabular figures (cubeloop rule) */
   :where(.operator-light, .operator-dark) :where(code, pre, .font-mono, .tabular-nums) {
     font-variant-numeric: tabular-nums;
   }

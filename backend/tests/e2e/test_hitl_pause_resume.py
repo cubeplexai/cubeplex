@@ -31,7 +31,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from cubepi.hitl.types import (
+from cubeloop.hitl.types import (
     ApproveRequest,
     AskRequest,
     HitlRequest,
@@ -127,7 +127,7 @@ async def _seed_paused_conversation(
         await cp.save_pending_request(conv_id, pending, run_id=run_id)
 
     # Seed Redis active-run row with status=paused_hitl (mirrors what the
-    # terminal block of _run_cubepi_path would write after auto-detach).
+    # terminal block of _run_cubeloop_path would write after auto-detach).
     app = client._transport.app  # type: ignore[attr-defined]
     redis = app.state.redis
     prefix = app.state.redis_key_prefix
@@ -218,7 +218,7 @@ async def test_long_pause_recovers_via_db_pending(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:
     """Long pause: Redis active-run + meta age out, but DB pending +
-    cubepi v3 run_id column let bootstrap still surface pending_hitl."""
+    cubeloop v3 run_id column let bootstrap still surface pending_hitl."""
     client, ws_id = member_client
     conv_id, run_id = await _seed_paused_conversation(client, ws_id, _ask_pending("q-long"))
 

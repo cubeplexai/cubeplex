@@ -5,21 +5,21 @@ Usage:
 
     uv run python tests/diagnostic/compare_runtimes.py <dir_a> <dir_b>
 
-    # Example: compare langgraph vs cubepi for deepseek/anthropic
+    # Example: compare langgraph vs cubeloop for deepseek/anthropic
     uv run python tests/diagnostic/compare_runtimes.py \\
-        /tmp/cubepi_runtime_capture/langgraph/deepseek_anthropic \\
-        /tmp/cubepi_runtime_capture/cubepi/deepseek_anthropic
+        /tmp/cubeloop_runtime_capture/langgraph/deepseek_anthropic \\
+        /tmp/cubeloop_runtime_capture/cubeloop/deepseek_anthropic
 
-    # Example: compare langgraph vs cubepi for arkcode/openai
+    # Example: compare langgraph vs cubeloop for arkcode/openai
     uv run python tests/diagnostic/compare_runtimes.py \\
-        /tmp/cubepi_runtime_capture/langgraph/arkcode_openai \\
-        /tmp/cubepi_runtime_capture/cubepi/arkcode_openai
+        /tmp/cubeloop_runtime_capture/langgraph/arkcode_openai \\
+        /tmp/cubeloop_runtime_capture/cubeloop/arkcode_openai
 
-    # Example: compare cubepi turn 1 vs turn 2 (prefix stability)
+    # Example: compare cubeloop turn 1 vs turn 2 (prefix stability)
     uv run python tests/diagnostic/compare_runtimes.py \\
         --files anthropic_001.json anthropic_002.json \\
-        /tmp/cubepi_runtime_capture/cubepi/deepseek_anthropic \\
-        /tmp/cubepi_runtime_capture/cubepi/deepseek_anthropic
+        /tmp/cubeloop_runtime_capture/cubeloop/deepseek_anthropic \\
+        /tmp/cubeloop_runtime_capture/cubeloop/deepseek_anthropic
 
 Output: colored field-level diff highlighting all JSON body differences between
 corresponding request files.
@@ -269,16 +269,16 @@ def main() -> None:
     parser.add_argument(
         "--summary",
         action="store_true",
-        help="Print a summary of all captures under /tmp/cubepi_runtime_capture",
+        help="Print a summary of all captures under /tmp/cubeloop_runtime_capture",
     )
     args = parser.parse_args()
 
     if args.summary:
-        capture_root = pathlib.Path("/tmp/cubepi_runtime_capture")
+        capture_root = pathlib.Path("/tmp/cubeloop_runtime_capture")
         if capture_root.exists():
             _summarise_captures(capture_root)
         else:
-            print(_yellow("No captures found at /tmp/cubepi_runtime_capture"))
+            print(_yellow("No captures found at /tmp/cubeloop_runtime_capture"))
         return
 
     dir_a: pathlib.Path = args.dir_a

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,

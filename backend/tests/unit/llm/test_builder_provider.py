@@ -16,7 +16,7 @@ def _snap(**provider_kwargs: object) -> LLMSnapshot:
 
 
 def test_build_provider_openai_completions() -> None:
-    from cubepi.providers.openai import OpenAIProvider
+    from cubeloop.providers.openai import OpenAIProvider
 
     p = build_provider(_snap(base_url="https://x", api_key="k"), "acme")
     assert isinstance(p, OpenAIProvider)
@@ -24,7 +24,7 @@ def test_build_provider_openai_completions() -> None:
 
 
 def test_build_provider_anthropic_messages_with_cache_policy() -> None:
-    from cubepi.providers.anthropic import AnthropicProvider
+    from cubeloop.providers.anthropic import AnthropicProvider
 
     from cubeplex.llm.cache_markers import CubeplexCacheMarkerPolicy
 

@@ -1,6 +1,6 @@
 # CubePlex - Agent System Backend
 
-AI Agent System Backend built on cubepi, a Python-native agent runtime.
+AI Agent System Backend built on cubeloop, a Python-native agent runtime.
 
 ## Project Structure
 
@@ -87,15 +87,15 @@ export CUBEPLEX_LLM__PROVIDER=anthropic
 
 ### Core Components
 
-1. **Agent Graph Factory** - `create_cubeplex_agent()` wires the cubepi Provider, tools, and
-   middleware stack into a `cubepi.Agent`
+1. **Agent Graph Factory** - `create_cubeplex_agent()` wires the cubeloop Provider, tools, and
+   middleware stack into a `cubeloop.Agent`
 2. **Middleware Stack** - SandboxMiddleware, SubAgentMiddleware, memory, and compaction
 3. **LLM Integration** - Multi-provider LLM support (OpenAI, OpenAI-compatible)
 4. **Tool Registry** - Built-in and MCP tools management
 5. **Memory System** - Short-term and long-term memory
 6. **Sandbox** - Isolated code execution (OpenSandbox + LocalSandbox for dev)
 7. **MCP Client** - Model Context Protocol integration
-8. **Message History** - persisted by cubepi's `PostgresCheckpointer` (HASH-partitioned 64 ways
+8. **Message History** - persisted by cubeloop's `PostgresCheckpointer` (HASH-partitioned 64 ways
    on `thread_id`); no separate messages table
 
 ### Key Features
@@ -122,7 +122,7 @@ make check         # format + lint + type-check + test
 Key dependencies:
 
 - **FastAPI** - Web framework
-- **cubepi** - In-house Python-native agent runtime (provider, middleware, checkpointer)
+- **cubeloop** - In-house Python-native agent runtime (provider, middleware, checkpointer)
 - **Pydantic** - Data validation
 - **Dynaconf** - Configuration management
 - **Loguru** - Logging

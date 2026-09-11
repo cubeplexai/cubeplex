@@ -1,7 +1,7 @@
-"""create_scheduled_task tool — cubepi.AgentTool with auto IM-origin detection.
+"""create_scheduled_task tool — cubeloop.AgentTool with auto IM-origin detection.
 
 Factory: ``make_create_scheduled_task_tool(...)`` returns one
-``cubepi.AgentTool``. Destination derivation is shared with the
+``cubeloop.AgentTool``. Destination derivation is shared with the
 ``scheduled_tasks_create`` capability via
 ``cubeplex.services.schedule_destination`` so both paths agree:
 
@@ -21,8 +21,8 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.agents.actions.context import ScopeContext
@@ -124,7 +124,7 @@ def make_create_scheduled_task_tool(
     user_id: str,
     conversation_id: str,
 ) -> AgentTool[CreateScheduledTaskArgs]:
-    """Build the create_scheduled_task cubepi.AgentTool bound to a run.
+    """Build the create_scheduled_task cubeloop.AgentTool bound to a run.
 
     A fresh DB session is opened per call. org_id / workspace_id /
     user_id / conversation_id are bound at construction (run-scoped).

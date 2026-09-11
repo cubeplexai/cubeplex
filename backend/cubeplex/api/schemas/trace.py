@@ -1,8 +1,8 @@
 """Pydantic models for /api/v1/admin/traces responses.
 
-This module is the single source of truth for the cubepi-Tempo → frontend
+This module is the single source of truth for the cubeloop-Tempo → frontend
 view model mapping. The TempoClient parser writes into these types; the
-frontend reads from them. Update both in lockstep when cubepi span
+frontend reads from them. Update both in lockstep when cubeloop span
 attributes change.
 """
 
@@ -15,8 +15,8 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 
 class SpanKind(StrEnum):
-    AGENT = "agent"  # cubepi invoke_agent span
-    TURN = "turn"  # cubepi.turn span
+    AGENT = "agent"  # cubeloop invoke_agent span
+    TURN = "turn"  # cubeloop.turn span
     CHAT = "chat"  # gen_ai chat span (LLM call)
     TOOL = "tool"  # execute_tool span
     OTHER = "other"  # anything else
@@ -56,8 +56,8 @@ class LlmCallPayload(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     output_messages: list[ChatMessage] = Field(default_factory=list)
     tools: list[ToolDefinition] = Field(default_factory=list)
-    raw_request: str | None = None  # cubepi.llm.raw_request
-    raw_response: str | None = None  # cubepi.llm.raw_response
+    raw_request: str | None = None  # cubeloop.llm.raw_request
+    raw_response: str | None = None  # cubeloop.llm.raw_response
 
 
 class ToolCallPayload(BaseModel):

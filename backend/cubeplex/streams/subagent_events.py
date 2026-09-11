@@ -1,4 +1,4 @@
-"""Bridge cubepi subagent events into cubeplex's shared SSE queue."""
+"""Bridge cubeloop subagent events into cubeplex's shared SSE queue."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
 
 
 def map_subagent_event(event: Any) -> list[dict[str, Any]]:
-    """Map a cubepi AgentEvent into cubeplex SSE payload dicts."""
+    """Map a cubeloop AgentEvent into cubeplex SSE payload dicts."""
     return convert_agent_event_to_sse(event)
 
 

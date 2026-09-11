@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from cubepi.providers.base import ReasoningControl
+from cubeloop.providers.base import ReasoningControl
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -551,7 +551,7 @@ async def fork_conversation(
             detail={"code": "run_not_completed"},
         ) from exc
     except ForkSourceMissingError as exc:
-        # Source conversation exists in cubeplex but has no cubepi thread —
+        # Source conversation exists in cubeplex but has no cubeloop thread —
         # nothing to fork. Treat as a client error against the fork-point
         # contract (you can't fork a conversation that has no messages).
         raise HTTPException(
@@ -1118,7 +1118,7 @@ def _build_run_streaming_response(
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
-    """Convert cubepi namespace tuple to agent_id string."""
+    """Convert cubeloop namespace tuple to agent_id string."""
     if not ns:
         return None
     return ":".join(str(part) for part in ns)
@@ -1348,7 +1348,7 @@ async def send_message(
                 )
             # _INSTALL_RE matched above, so the parser always returns a note here.
             if install_note is not None:
-                from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+                from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
                 await _update_conversation_timestamp(
                     conversation_id,
@@ -1591,7 +1591,7 @@ def _history_tail_limit() -> int:
 async def _load_pending_hitl(
     conversation_id: str,
 ) -> tuple[Any, str | None]:
-    """Read cubepi-persisted pending_request + persisted run_id in one checkpointer open."""
+    """Read cubeloop-persisted pending_request + persisted run_id in one checkpointer open."""
     from cubeplex.agents.checkpointer import shared_checkpointer
 
     async with shared_checkpointer() as cp:
@@ -1673,7 +1673,7 @@ async def get_conversation_bootstrap(
         )
 
     # Stage A: the session-bound history read runs concurrently with the
-    # Redis + cubepi-pool work — those do not touch ``session``, so there is
+    # Redis + cubeloop-pool work — those do not touch ``session``, so there is
     # no SQLAlchemy concurrency conflict.
     history, active_run, pending_pair, last_run_error_raw = await asyncio.gather(
         load_history_window(session, conversation_id, limit=_history_tail_limit()),
@@ -1739,7 +1739,7 @@ async def get_conversation_bootstrap(
             else:
                 run_id_for_pending = persisted_run_id
         if run_id_for_pending is None:
-            # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
+            # Legacy row (pre-cubeloop-v3) — log + degrade to null so the user
             # can at least see other conversation state.
             logger.warning(
                 "pending_request for %s has no recoverable run_id; pending_hitl set to null",
@@ -1954,7 +1954,7 @@ async def compact_conversation(
     """Force context compaction for the conversation (slash ``/compact``).
 
     Rejects with 409 when a run is active or another compact is in flight.
-    Reuses cubepi compaction state in the checkpointer; does not rewrite the
+    Reuses cubeloop compaction state in the checkpointer; does not rewrite the
     UI transcript. Active-run is re-checked around the write (see service).
     """
     from cubeplex.services.conversation_compact import force_compact_conversation
@@ -2398,7 +2398,7 @@ async def submit_sandbox_confirm(
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
-    from cubepi.hitl.types import ApproveAnswer
+    from cubeloop.hitl.types import ApproveAnswer
 
     from cubeplex.agents.checkpointer import shared_checkpointer
 

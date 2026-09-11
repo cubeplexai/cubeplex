@@ -1,10 +1,10 @@
-"""DateTime tool, declared via ``@cubepi.tool``."""
+"""DateTime tool, declared via ``@cubeloop.tool``."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from cubepi import tool
+from cubeloop import tool
 from pydantic import Field
 
 

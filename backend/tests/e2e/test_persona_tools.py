@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 import pytest
-from cubepi.hitl import ScriptedChannel
+from cubeloop.hitl import ScriptedChannel
 from fastapi.testclient import TestClient
 from sqlmodel import select
 

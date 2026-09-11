@@ -1,4 +1,4 @@
-"""Integration test: cubeplex uses cubepi.PostgresCheckpointer against
+"""Integration test: cubeplex uses cubeloop.PostgresCheckpointer against
 the alembic-created schema in the test database.
 
 Requires alembic upgrade head to have run on the test DB. Fresh dev
@@ -6,7 +6,7 @@ worktree should have this from M0.3.
 """
 
 import pytest
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,
@@ -68,8 +68,8 @@ async def test_repair_dangling_tool_calls_backfills_and_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cubepi_checkpointer_round_trip_against_real_schema() -> None:
-    """Connecting cubepi.PostgresCheckpointer to the cubeplex dev DB
+async def test_cubeloop_checkpointer_round_trip_against_real_schema() -> None:
+    """Connecting cubeloop.PostgresCheckpointer to the cubeplex dev DB
     must succeed (schema version check passes) and round-trip messages."""
     async with init_checkpointer() as cp:
         msg = UserMessage(

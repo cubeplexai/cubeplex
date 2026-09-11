@@ -31,8 +31,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from cubepi.agent.types import AfterToolCallContext, AgentContext, AgentToolResult
-from cubepi.middleware.todo import (
+from cubeloop.agent.types import AfterToolCallContext, AgentContext, AgentToolResult
+from cubeloop.middleware.todo import (
     STALE_REMINDER_THRESHOLD,
     Todo,
     TodoListMiddleware,
@@ -44,7 +44,7 @@ from cubepi.middleware.todo import (
     _submitted_write_todos_calls,
     _todo_validation_errors_local,
 )
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,

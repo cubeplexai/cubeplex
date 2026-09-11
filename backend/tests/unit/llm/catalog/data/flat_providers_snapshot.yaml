@@ -1,5 +1,5 @@
 # Provider preset catalog. Spec: docs/dev/specs/2026-05-19-llm-provider-platform-design.md §3.7
-# Each entry parses into cubepi.providers.catalog.types.ProviderPreset.
+# Each entry parses into cubeloop.providers.catalog.types.ProviderPreset.
 
 - slug: anthropic
   display_name: Anthropic
@@ -16,7 +16,7 @@
     reasoning_level:
       path: thinking.budget_tokens
       kind: int_budget
-      # Aligned with cubepi.providers.base.ThinkingBudgets so AnthropicProvider's
+      # Aligned with cubeloop.providers.base.ThinkingBudgets so AnthropicProvider's
       # capability=None default-capability reproduces today's wire bytes.
       level_budgets: { "off": 0, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
     temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }

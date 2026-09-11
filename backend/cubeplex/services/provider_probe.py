@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Literal, cast
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     ReasoningControl,
     StreamOptions,
     TextContent,
@@ -19,14 +19,14 @@ from cubepi.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubepi.providers.capability import CapabilityDescriptor
+from cubeloop.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
 ProbeStepName = Literal["liveness", "reasoning", "temperature", "tools", "streaming", "usage"]
 ProbeStepStatus = Literal["pass", "fail", "skip", "warn"]
 
 # Cap stored error text so a verbose upstream body can't bloat last_test_summary,
-# while leaving enough room for the human message the UI extracts (the cubepi
+# while leaving enough room for the human message the UI extracts (the cubeloop
 # "[probe/<model> @ <url>] ..." prefix alone eats ~80 chars).
 _MAX_DETAIL_CHARS = 500
 
@@ -143,15 +143,15 @@ async def _drain_stream(
 
 
 def _first_error_event(events: list[Any]) -> Any | None:
-    """cubepi surfaces upstream API errors (e.g. 401) as an ``error`` stream event
+    """cubeloop surfaces upstream API errors (e.g. 401) as an ``error`` stream event
     rather than raising, so callers must inspect events — a lone error event must
     NOT be mistaken for a successful chunk."""
     return next((e for e in events if getattr(e, "type", None) == "error"), None)
 
 
 def _error_event_detail(evt: Any) -> str:
-    # cubepi's StreamEvent carries the upstream failure in `error_message` (see
-    # cubepi.providers.base.StreamEvent); the others are defensive fallbacks for
+    # cubeloop's StreamEvent carries the upstream failure in `error_message` (see
+    # cubeloop.providers.base.StreamEvent); the others are defensive fallbacks for
     # differently-shaped event objects. Without error_message a 401/403 would be
     # masked by the generic string below, making a wrong key look like a bug.
     for attr in ("error_message", "error", "message", "detail"):
@@ -161,7 +161,7 @@ def _error_event_detail(evt: Any) -> str:
     return "stream returned an error event"
 
 
-# Pull an HTTP status out of a cubepi error string. cubepi formats upstream
+# Pull an HTTP status out of a cubeloop error string. cubeloop formats upstream
 # failures as "... Error code: 404 - {...}", so the status isn't a structured
 # field on the error event — we have to read it back out of the message.
 _ERROR_CODE_RE = re.compile(r"error code:\s*(\d{3})", re.IGNORECASE)
@@ -262,8 +262,8 @@ async def probe_reasoning_toggle(
     return ProbeStep(name="reasoning", status="pass", detail="off + on reasoning accepted")
 
 
-# Stream event types that signal the endpoint emitted a tool call. cubepi's
-# StreamEvent.type uses the "toolcall_*" family (see cubepi.providers.base);
+# Stream event types that signal the endpoint emitted a tool call. cubeloop's
+# StreamEvent.type uses the "toolcall_*" family (see cubeloop.providers.base);
 # seeing any of these proves the endpoint can drive tool use.
 _TOOLCALL_EVENT_TYPES = {"toolcall_start", "toolcall_delta", "toolcall_end"}
 

@@ -6,13 +6,13 @@ import pytest
 
 from cubeplex.errors import ErrorCode
 from cubeplex.streams.run_manager import (
-    CubepiAgentRunError,
+    CubeloopAgentRunError,
     _message_for_run_exception,
-    _raise_if_cubepi_agent_failed,
+    _raise_if_cubeloop_agent_failed,
 )
 
 
-def test_cubepi_agent_error_message_raises_terminal_run_error() -> None:
+def test_cubeloop_agent_error_message_raises_terminal_run_error() -> None:
     agent = SimpleNamespace(
         state=SimpleNamespace(
             error_message=(
@@ -23,14 +23,14 @@ def test_cubepi_agent_error_message_raises_terminal_run_error() -> None:
         )
     )
 
-    with pytest.raises(CubepiAgentRunError) as exc_info:
-        _raise_if_cubepi_agent_failed(agent)
+    with pytest.raises(CubeloopAgentRunError) as exc_info:
+        _raise_if_cubeloop_agent_failed(agent)
 
     assert "unexpected keyword argument 'reasoning_effort'" in str(exc_info.value)
 
 
-def test_cubepi_agent_error_message_is_user_visible() -> None:
-    exc = CubepiAgentRunError("provider rejected reasoning")
+def test_cubeloop_agent_error_message_is_user_visible() -> None:
+    exc = CubeloopAgentRunError("provider rejected reasoning")
 
     message = _message_for_run_exception(
         exc,
@@ -41,7 +41,7 @@ def test_cubepi_agent_error_message_is_user_visible() -> None:
     assert message == "provider rejected reasoning"
 
 
-def test_missing_cubepi_agent_error_message_does_not_raise() -> None:
+def test_missing_cubeloop_agent_error_message_does_not_raise() -> None:
     agent = SimpleNamespace(state=SimpleNamespace(error_message=None))
 
-    _raise_if_cubepi_agent_failed(agent)
+    _raise_if_cubeloop_agent_failed(agent)

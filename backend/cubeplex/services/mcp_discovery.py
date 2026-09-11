@@ -1,8 +1,8 @@
 """MCP tool discovery for the restore-lost-UI Refresh tools flow.
 
-Replaces the legacy ``cubepi_admin_refresh.py`` that was deleted in
+Replaces the legacy ``cubeloop_admin_refresh.py`` that was deleted in
 commit 243e6396. Reuses the runtime path's ``load_mcp_tools_http``
-cubepi helper and writes the result into the install row's
+cubeloop helper and writes the result into the install row's
 ``tools_cache`` / ``discovery_status`` / ``last_error`` fields.
 
 Per spec §3.2:
@@ -10,7 +10,7 @@ Per spec §3.2:
 * Caller-grant policy: use the effective grant resolved by the
   install's policy (org / workspace / user). Mirrors agent runtime;
   no cross-scope fallback.
-* 30-second cubepi timeout.
+* 30-second cubeloop timeout.
 * On exception: catch and persist ``discovery_status='error' +
   last_error=str(exc)``; do NOT raise — return the result with
   status='error' so the route layer can decide.
@@ -34,12 +34,12 @@ from typing import Any, cast
 
 import anyio
 import httpx
-from cubepi.mcp.http_loader import _open_session
+from cubeloop.mcp.http_loader import _open_session
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.mcp._constants import slugify_for_namespace
-from cubeplex.mcp.cubepi_runtime import MCPTransport
+from cubeplex.mcp.cubeloop_runtime import MCPTransport
 from cubeplex.mcp.effective import MCPEffectiveConnectorService
 from cubeplex.mcp.exceptions import (
     MCPDiscoveryFailed,
@@ -157,7 +157,7 @@ class _DiscoveredRaw:
     """Raw output of one discovery handshake.
 
     ``tools`` are ``mcp.types.Tool`` descriptors preserving the full
-    schema fields (notably ``outputSchema`` which cubepi's AgentTool
+    schema fields (notably ``outputSchema`` which cubeloop's AgentTool
     wrapper drops). ``init_result`` is the ``InitializeResult`` carrying
     ``serverInfo`` (name + icons + websiteUrl).
     """
@@ -176,10 +176,10 @@ async def _list_raw_mcp_tools(
     """Open an MCP session, call ``initialize`` + ``list_tools``, and
     return both the raw tool descriptors and the initialize result.
 
-    We bypass ``cubepi.mcp.load_mcp_tools_http`` because its
+    We bypass ``cubeloop.mcp.load_mcp_tools_http`` because its
     ``AgentTool`` wrapper drops the optional ``outputSchema`` field —
     citation editing needs it to suggest output field names. Tool
-    invocation still goes through cubepi (Try It path); only discovery
+    invocation still goes through cubeloop (Try It path); only discovery
     talks to MCP directly here.
 
     The initialize result is captured here (rather than in a separate
@@ -221,7 +221,7 @@ async def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any
     backend could reach the vendor CDN. Failures leave the original ``src``
     and never fail discovery.
     """
-    from cubepi.mcp.types import icons_from_raw, server_info_from_init_result
+    from cubeloop.mcp.types import icons_from_raw, server_info_from_init_result
 
     from cubeplex.mcp.icons import enrich_server_icons
 
@@ -423,7 +423,7 @@ async def discover_tools_for_install(
     if not usable:
         raise MCPDiscoveryFailed(f"connector_not_usable:{reason}")
 
-    from cubeplex.mcp.cubepi_runtime import _resolve_auth_from_spec
+    from cubeplex.mcp.cubeloop_runtime import _resolve_auth_from_spec
 
     spec = _build_runtime_spec_for_discovery(
         install=install, grant=grant, workspace_id=workspace_id or ""

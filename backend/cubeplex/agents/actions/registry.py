@@ -16,8 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from cubepi.agent.types import AgentTool
-from cubepi.deferred import DeferredToolGroup
+from cubeloop.agent.types import AgentTool
+from cubeloop.deferred import DeferredToolGroup
 
 from cubeplex.agents.actions.builder import ContextFactory, build_capability_tools
 from cubeplex.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY

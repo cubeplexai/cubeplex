@@ -2,7 +2,7 @@
 
 The test drives a conversation through the full cubeplex agent stack:
   - FauxProvider returns a scripted generate_image tool_call on turn 1.
-  - FauxImagesProvider (from cubepi) returns a 1x1 PNG without hitting OpenAI.
+  - FauxImagesProvider (from cubeloop) returns a 1x1 PNG without hitting OpenAI.
   - LocalSandbox writes the PNG to a temp directory.
   - register_artifact_from_sandbox creates an Artifact row in the test DB.
   - Assertions verify the Artifact row exists with artifact_type == "image"
@@ -170,13 +170,13 @@ async def generate_image_client(
     Injection strategy (config-driven path):
     1. Monkeypatch get_image_generation_config() to return enabled=True + a dummy
        api_key so run_manager decides to include the generate_image tool.
-    2. Monkeypatch cubepi.providers.images.OpenAIImagesProvider to return a
+    2. Monkeypatch cubeloop.providers.images.OpenAIImagesProvider to return a
        FauxImagesProvider instance — no network hit, real tool/sandbox/artifact path.
     """
     await _ensure_default_user_and_membership()
 
     # --- 1. Enable image_generation config via monkeypatch ---
-    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubeloop.providers.images.faux import FauxImagesProvider
 
     from cubeplex.llm.config import ImageGenerationConfig
 
@@ -193,7 +193,7 @@ async def generate_image_client(
     )
 
     # --- 2. Monkeypatch OpenAIImagesProvider in run_manager's namespace ---
-    # This intercepts the lazy import inside _run_cubepi_path so the faux
+    # This intercepts the lazy import inside _run_cubeloop_path so the faux
     # provider is used without any network call.
     def _fake_openai_images_provider(
         *,
@@ -206,12 +206,12 @@ async def generate_image_client(
         return _faux_images_instance
 
     monkeypatch.setattr(
-        "cubepi.providers.images.OpenAIImagesProvider",
+        "cubeloop.providers.images.OpenAIImagesProvider",
         _fake_openai_images_provider,
     )
 
     # --- 4. Set up FauxProvider scripted responses ---
-    from cubepi.providers.faux import (
+    from cubeloop.providers.faux import (
         FauxProvider,
         faux_assistant_message,
         faux_text,

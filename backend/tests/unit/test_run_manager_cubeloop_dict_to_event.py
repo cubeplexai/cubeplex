@@ -1,8 +1,8 @@
-"""Unit tests for ``cubepi_dict_to_agent_event`` in run_manager.
+"""Unit tests for ``cubeloop_dict_to_agent_event`` in run_manager.
 
 Regression gate for the bug discovered during M5.3 diagnosis: error
 dicts emitted by ``convert_agent_event_to_sse`` were silently
-dropped by the cubepi dispatch loop, masking real failures (e.g. an
+dropped by the cubeloop dispatch loop, masking real failures (e.g. an
 auth failure that surfaced only as "no usage event observed" instead
 of a normal SSE error event).
 """
@@ -20,7 +20,7 @@ from cubeplex.agents.schemas import (
     ToolResultEvent,
     UsageEvent,
 )
-from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
+from cubeplex.streams.run_manager import cubeloop_dict_to_agent_event
 
 TS = "2026-05-14T00:00:00+00:00"
 
@@ -32,7 +32,7 @@ def test_artifact_dict_maps_to_artifact_event() -> None:
     never populated during a live run.
     """
     artifact = {"id": "art_1", "conversation_id": "conv_1", "name": "x", "version": 1}
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {"type": "artifact", "action": "created", "artifact": artifact}, TS
     )
     assert isinstance(evt, ArtifactEvent)
@@ -42,30 +42,30 @@ def test_artifact_dict_maps_to_artifact_event() -> None:
 def test_presented_file_dict_maps_to_event() -> None:
     """Live presented_file dict must persist; unknown types are dropped."""
     presented = {"id": "pfile_1", "filename": "qr.png", "kind": "image"}
-    evt = cubepi_dict_to_agent_event({"type": "presented_file", "presented_file": presented}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "presented_file", "presented_file": presented}, TS)
     assert isinstance(evt, PresentedFileEvent)
     assert evt.data == {"presented_file": presented}
 
 
 def test_presented_file_dict_without_id_is_dropped() -> None:
-    evt = cubepi_dict_to_agent_event({"type": "presented_file", "presented_file": {}}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "presented_file", "presented_file": {}}, TS)
     assert evt is None
 
 
 def test_text_delta_dict_maps_to_text_delta_event() -> None:
-    evt = cubepi_dict_to_agent_event({"type": "text_delta", "delta": "hi"}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "text_delta", "delta": "hi"}, TS)
     assert isinstance(evt, TextDeltaEvent)
     assert evt.data == {"content": "hi", "usage": {}}
 
 
 def test_reasoning_dict_maps_to_reasoning_event() -> None:
-    evt = cubepi_dict_to_agent_event({"type": "reasoning", "delta": "think"}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "reasoning", "delta": "think"}, TS)
     assert isinstance(evt, ReasoningEvent)
     assert evt.data == {"content": "think"}
 
 
 def test_tool_call_dict_maps_to_tool_call_event() -> None:
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {"type": "tool_call", "id": "t1", "name": "calc", "arguments": "{}"}, TS
     )
     assert isinstance(evt, ToolCallEvent)
@@ -73,7 +73,7 @@ def test_tool_call_dict_maps_to_tool_call_event() -> None:
 
 
 def test_tool_result_dict_maps_to_tool_result_event() -> None:
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "tool_result",
             "tool_call_id": "t1",
@@ -97,7 +97,7 @@ def test_tool_result_dict_propagates_details() -> None:
     """Details (e.g. subagent_events from the subagent tool result)
     must survive to the typed event so the frontend gets the live shape that
     matches the post-reload one."""
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "tool_result",
             "tool_call_id": "tc-sub",
@@ -113,7 +113,7 @@ def test_tool_result_dict_propagates_details() -> None:
 
 
 def test_usage_dict_maps_to_usage_event() -> None:
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "usage",
             "input_tokens": 100,
@@ -135,7 +135,7 @@ def test_usage_dict_maps_to_usage_event() -> None:
 def test_error_dict_maps_to_error_event_with_message() -> None:
     """Regression: error dicts must surface as ErrorEvent so SSE consumers
     see a real failure instead of an empty stream. See M5.3 diagnosis."""
-    evt = cubepi_dict_to_agent_event({"type": "error", "error": "401 Unauthorized"}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "error", "error": "401 Unauthorized"}, TS)
     assert isinstance(evt, ErrorEvent)
     assert evt.data == {
         "error_code": "run_error",
@@ -145,15 +145,15 @@ def test_error_dict_maps_to_error_event_with_message() -> None:
 
 
 def test_error_dict_with_missing_message_has_fallback() -> None:
-    evt = cubepi_dict_to_agent_event({"type": "error"}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "error"}, TS)
     assert isinstance(evt, ErrorEvent)
     assert evt.data["message"] == "unknown agent error"
 
 
 def test_done_dict_returns_none() -> None:
-    """``done`` is emitted by the caller with usage data; the cubepi dict
+    """``done`` is emitted by the caller with usage data; the cubeloop dict
     form is dropped at translation time."""
-    assert cubepi_dict_to_agent_event({"type": "done"}, TS) is None
+    assert cubeloop_dict_to_agent_event({"type": "done"}, TS) is None
 
 
 def test_tool_call_delta_dict_maps_to_tool_call_delta_event() -> None:
@@ -161,7 +161,7 @@ def test_tool_call_delta_dict_maps_to_tool_call_delta_event() -> None:
     (index/id/name) the frontend needs to route it to the right card so the
     file_write / subagent preview streams live instead of appearing only at
     toolcall_end."""
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "tool_call_delta",
             "delta": '{"path": "a.txt"',
@@ -183,7 +183,7 @@ def test_tool_call_delta_dict_maps_to_tool_call_delta_event() -> None:
 def test_tool_call_delta_dict_without_identity_is_tolerated() -> None:
     """Mid-stream chunks may omit id/name (only the first chunk carries them);
     the event still maps, with nulls the frontend backfills by index."""
-    evt = cubepi_dict_to_agent_event({"type": "tool_call_delta", "delta": ": 1}", "index": 2}, TS)
+    evt = cubeloop_dict_to_agent_event({"type": "tool_call_delta", "delta": ": 1}", "index": 2}, TS)
     assert isinstance(evt, ToolCallDeltaEvent)
     assert evt.data == {
         "tool_call_id": None,
@@ -194,12 +194,12 @@ def test_tool_call_delta_dict_without_identity_is_tolerated() -> None:
 
 
 def test_unknown_type_returns_none() -> None:
-    assert cubepi_dict_to_agent_event({"type": "totally_unknown"}, TS) is None
+    assert cubeloop_dict_to_agent_event({"type": "totally_unknown"}, TS) is None
 
 
 def test_sandbox_confirm_request_dict_maps_to_event() -> None:
     # Input shape matches convert_agent_event_to_sse output: args/details are nested dicts.
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "sandbox_confirm_request",
             "question_id": "qid-1",
@@ -222,7 +222,7 @@ def test_sandbox_confirm_request_dict_maps_to_event() -> None:
 
 
 def test_sandbox_confirm_resolved_dict_maps_to_event() -> None:
-    evt = cubepi_dict_to_agent_event(
+    evt = cubeloop_dict_to_agent_event(
         {
             "type": "sandbox_confirm_resolved",
             "question_id": "qid-1",

@@ -66,7 +66,7 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import current_active_user, require_admin, require_member
 from cubeplex.credentials.dependencies import get_credential_service
 from cubeplex.db.session import get_session
-from cubeplex.mcp.cubepi_runtime import _resolve_auth_from_spec
+from cubeplex.mcp.cubeloop_runtime import _resolve_auth_from_spec
 from cubeplex.mcp.dependencies import (
     get_audit_sink,
     get_oauth_start_service,
@@ -586,13 +586,13 @@ async def list_workspace_active_tools(
     keys lookups by ``namespaced_name`` to swap raw ``WebTools__web_search``
     style labels in tool-call cards for a server icon + bare name.
 
-    Namespacing matches ``cubepi_runtime._build_namespaced_name_with_prefix``
+    Namespacing matches ``cubeloop_runtime._build_namespaced_name_with_prefix``
     exactly — same slug, same collision/length suffix rules — so the
     name the LLM sees and the key the frontend uses agree.
     """
     from collections import Counter
 
-    from cubeplex.mcp.cubepi_runtime import (
+    from cubeplex.mcp.cubeloop_runtime import (
         _NS_LENGTH_DEFENCE,
         _build_namespaced_name_with_prefix,
         _slugify_for_namespace,
@@ -1015,7 +1015,7 @@ def _invoke_rate_key(_req: Request | None = None) -> str:
     return _INVOKE_USER_ID.get() or "anonymous"
 
 
-async def _invoke_tool_via_cubepi(
+async def _invoke_tool_via_cubeloop(
     server_url: str,
     tool_name: str,
     arguments: dict[str, Any],
@@ -1152,7 +1152,7 @@ async def ws_invoke_tool(
         )
     try:
         result = await asyncio.wait_for(
-            _invoke_tool_via_cubepi(
+            _invoke_tool_via_cubeloop(
                 server_url,
                 tool_name,
                 body.arguments,

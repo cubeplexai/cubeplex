@@ -2,7 +2,7 @@
 
 Exercises ``conversation_title._generate_title`` by monkeypatching
 ``load_llm_snapshot`` + ``build_chain_model`` to return a ``BoundModel``
-wrapping a ``FauxProvider``, verifying the cubepi one-shot
+wrapping a ``FauxProvider``, verifying the cubeloop one-shot
 title-generation path (prompt shape, message ordering, output trimming,
 and error handling).
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cubepi.providers.base import BoundModel, Model
-from cubepi.providers.faux import FauxProvider, faux_assistant_message
+from cubeloop.providers.base import BoundModel, Model
+from cubeloop.providers.faux import FauxProvider, faux_assistant_message
 
 from cubeplex.llm.config import ModelConfig, ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset

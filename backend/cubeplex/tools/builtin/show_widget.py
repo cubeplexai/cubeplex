@@ -6,8 +6,8 @@ streamed widget_code from tool_call_delta events. The ack just closes the
 tool call in message history.
 """
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.prompts.widget import WIDGET_TOOL_DESCRIPTION

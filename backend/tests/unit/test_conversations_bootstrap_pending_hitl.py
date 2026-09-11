@@ -2,7 +2,7 @@
 
 Three branches: ask_user, sandbox_confirm, and null. Cold-start fallback
 is the load-bearing path — when Redis active-run has aged out, the
-serialized pending_hitl must still carry a run_id (from the cubepi v3
+serialized pending_hitl must still carry a run_id (from the cubeloop v3
 load_pending_run_id companion)."""
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from cubeplex.streams.hitl_resume import serialize_pending_hitl
 
 
 def _fake_ask_pending(qid: str = "q1") -> MagicMock:
-    from cubepi.hitl.types import Option, Question
+    from cubeloop.hitl.types import Option, Question
 
     pending = MagicMock()
     pending.question_id = qid
@@ -73,7 +73,7 @@ def test_serialize_sandbox_confirm_pending() -> None:
 
 
 def test_serialize_handles_missing_details() -> None:
-    """Defensive: ApproveRequest.details defaults to None in cubepi."""
+    """Defensive: ApproveRequest.details defaults to None in cubeloop."""
     p = _fake_approve_pending()
     p.payload.details = None
     p.payload.args = None

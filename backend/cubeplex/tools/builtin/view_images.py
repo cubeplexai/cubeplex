@@ -1,9 +1,9 @@
-"""view_images tool ported to cubepi.AgentTool (M2.1).
+"""view_images tool ported to cubeloop.AgentTool (M2.1).
 
 Uses a factory pattern because the tool requires per-request DI:
 org_id, workspace_id, ObjectStoreClient, and LLMCapabilities.
 Call make_view_images_tool(...) at agent-construction time to obtain the
-cubepi.AgentTool instance.
+cubeloop.AgentTool instance.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from __future__ import annotations
 import base64
 from typing import Any, Literal
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import ImageContent, TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import ImageContent, TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.llm.capabilities import LLMCapabilities
@@ -21,7 +21,7 @@ from cubeplex.services.attachments import resize_to_long_edge
 
 
 class ViewImagesInput(BaseModel):
-    """Input schema for view_images (cubepi variant)."""
+    """Input schema for view_images (cubeloop variant)."""
 
     paths: list[str] = Field(
         ...,
@@ -59,7 +59,7 @@ def make_view_images_tool(
     max_long_edge: int = 1568,
     jpeg_quality: int = 85,
 ) -> AgentTool[ViewImagesInput]:
-    """Build the view_images cubepi.AgentTool with bound dependencies.
+    """Build the view_images cubeloop.AgentTool with bound dependencies.
 
     Resolution is sandbox-first: a path is read straight from the run's sandbox
     filesystem when a sandbox is bound (``sandbox`` is the run's SandboxBackend),

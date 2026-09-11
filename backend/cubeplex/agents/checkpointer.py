@@ -1,6 +1,6 @@
-"""cubepi-backed Postgres checkpointer for cubeplex.
+"""cubeloop-backed Postgres checkpointer for cubeplex.
 
-Thin wrapper around ``cubepi.PostgresCheckpointer``. Two access modes:
+Thin wrapper around ``cubeloop.PostgresCheckpointer``. Two access modes:
 
 - ``shared_checkpointer()`` — the process-wide instance backed by one
   asyncpg pool, opened lazily and closed by the app lifespan. All
@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus
 
-from cubepi.checkpointer.postgres import PostgresCheckpointer
+from cubeloop.checkpointer.postgres import PostgresCheckpointer
 
 from cubeplex.config import config as _config
 
@@ -41,7 +41,7 @@ async def init_checkpointer(
     min_pool_size: int = 1,
     max_pool_size: int = 10,
 ) -> AsyncIterator[PostgresCheckpointer]:
-    """Open a cubepi.PostgresCheckpointer for cubeplex's DB.
+    """Open a cubeloop.PostgresCheckpointer for cubeplex's DB.
 
     Usage:
         async with init_checkpointer() as cp:
@@ -92,8 +92,8 @@ async def get_shared_checkpointer() -> PostgresCheckpointer:
         if cp is None:
             cp = PostgresCheckpointer(
                 dsn=_build_dsn(),
-                min_pool_size=int(_config.get("database.cubepi_pool_min", 1)),
-                max_pool_size=int(_config.get("database.cubepi_pool_max", 10)),
+                min_pool_size=int(_config.get("database.cubeloop_pool_min", 1)),
+                max_pool_size=int(_config.get("database.cubeloop_pool_max", 10)),
             )
             await cp.__aenter__()
             _shared_by_loop[loop_id] = cp

@@ -1,4 +1,4 @@
-"""Unit tests for the generate_image tool (cubepi.AgentTool).
+"""Unit tests for the generate_image tool (cubeloop.AgentTool).
 
 Hermetic: no DB, no Pillow, no real image provider.
 - Provider instances are passed directly to make_generate_image_tool (DI).
@@ -12,8 +12,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from cubepi.providers.base import ImageContent
-from cubepi.providers.images import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
+from cubeloop.providers.base import ImageContent
+from cubeloop.providers.images import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 
 from cubeplex.sandbox.base import ExecuteResult
 from cubeplex.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
@@ -86,7 +86,7 @@ def _make_artifact(*, art_id: str = "art_1", version: int = 1) -> SimpleNamespac
 
 def _make_faux_provider(png_b64: str = _FAKE_PNG_B64) -> Any:
     """Return a FauxImagesProvider instance (no global registry side-effects)."""
-    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubeloop.providers.images.faux import FauxImagesProvider
 
     return FauxImagesProvider(provider_id="faux", png_b64=png_b64)
 
@@ -173,7 +173,7 @@ async def test_generate_image_provider_error_no_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the provider raises ProviderError, result is is_error=True, no artifact."""
-    from cubepi.errors import ProviderError
+    from cubeloop.errors import ProviderError
 
     class _ErrorProvider:
         async def generate_images(

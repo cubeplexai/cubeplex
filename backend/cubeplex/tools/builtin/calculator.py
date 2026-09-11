@@ -1,11 +1,11 @@
-"""Calculator tool, declared via ``@cubepi.tool``."""
+"""Calculator tool, declared via ``@cubeloop.tool``."""
 
 from __future__ import annotations
 
 import math
 from typing import Any
 
-from cubepi import tool
+from cubeloop import tool
 from pydantic import Field
 
 

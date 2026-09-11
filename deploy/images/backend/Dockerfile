@@ -105,10 +105,10 @@ RUN set -eux; \
 COPY --from=builder --chown=cubeplex:cubeplex /app /app
 
 # Pre-create writable dirs for non-root container — loguru file sink,
-# cubepi traces, skill artefact cache. K8s could mount an emptyDir, but
+# cubeloop traces, skill artefact cache. K8s could mount an emptyDir, but
 # this is simpler and survives `--read-only-root-filesystem` callers.
-RUN mkdir -p /app/logs /app/cubepi-traces /app/skills_cache \
-    && chown -R cubeplex:cubeplex /app/logs /app/cubepi-traces /app/skills_cache
+RUN mkdir -p /app/logs /app/cubeloop-traces /app/skills_cache \
+    && chown -R cubeplex:cubeplex /app/logs /app/cubeloop-traces /app/skills_cache
 
 USER cubeplex
 

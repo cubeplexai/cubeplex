@@ -1,6 +1,6 @@
 """Unit tests for the search text extractor."""
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,

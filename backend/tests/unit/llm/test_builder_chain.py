@@ -31,7 +31,7 @@ def _snap() -> LLMSnapshot:
 def test_chain_length_1_returns_boundmodel():
     snap = _snap()
     preset = snap.model_presets[0]
-    from cubepi.providers.base import BoundModel
+    from cubeloop.providers.base import BoundModel
 
     bm = build_chain_model(snap, preset)
     assert isinstance(bm, BoundModel)
@@ -62,7 +62,7 @@ def test_chain_length_2_returns_fallback_bound_model():
         task_routing={},
     )
     preset = snap.model_presets[0]
-    from cubepi.providers.fallback import FallbackBoundModel
+    from cubeloop.providers.fallback import FallbackBoundModel
 
     bm = build_chain_model(snap, preset)
     assert isinstance(bm, FallbackBoundModel)

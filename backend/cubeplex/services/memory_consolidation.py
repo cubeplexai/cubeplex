@@ -272,10 +272,10 @@ async def run_consolidation(
 
     When ``tracer`` is provided, the consolidation LLM call is wrapped in
     ``tracer.oneshot(operation="consolidate_memory", metadata={...})`` so the
-    run appears in ``cubepi trace ls`` alongside agent runs, with
+    run appears in ``cubeloop trace ls`` alongside agent runs, with
     ``conversation_id`` / ``user_id`` metadata searchable via ``--meta``.
     """
-    from cubepi.providers.base import Message, TextContent, UserMessage
+    from cubeloop.providers.base import Message, TextContent, UserMessage
 
     from cubeplex.agents.checkpointer import shared_checkpointer
     from cubeplex.repositories.memory import MemoryRepository

@@ -1,6 +1,6 @@
-"""E2E: cubepi path writes via POST then reads via GET (M4.1).
+"""E2E: cubeloop path writes via POST then reads via GET (M4.1).
 
-Validates the round-trip after Codex#84 review #2: the cubepi path's
+Validates the round-trip after Codex#84 review #2: the cubeloop path's
 PostgresCheckpointer writes must be visible to GET /messages."""
 
 import pytest
@@ -11,17 +11,17 @@ pytestmark = pytest.mark.real_llm
 
 
 @pytest.mark.asyncio
-async def test_cubepi_history_round_trip(member_client) -> None:
+async def test_cubeloop_history_round_trip(member_client) -> None:
     client, ws_id = member_client
 
     # 1. Create conversation
     resp = await client.post(
-        f"/api/v1/ws/{ws_id}/conversations", params={"title": "cubepi-history-round-trip"}
+        f"/api/v1/ws/{ws_id}/conversations", params={"title": "cubeloop-history-round-trip"}
     )
     resp.raise_for_status()
     conv_id = resp.json()["id"]
 
-    # 2. POST a message and consume the full SSE stream (cubepi writes via
+    # 2. POST a message and consume the full SSE stream (cubeloop writes via
     # PostgresCheckpointer; receiving the "done" event guarantees the write
     # to cubepi_messages is complete before we issue the GET).
     events = await collect_sse_events(
@@ -44,7 +44,7 @@ async def test_cubepi_history_round_trip(member_client) -> None:
     assert "user" in roles, f"no user message in history: {roles}"
     assert "assistant" in roles, f"no assistant message in history: {roles}"
 
-    # 4. Wire-shape contract: every message uses cubepi's native pydantic dump.
+    # 4. Wire-shape contract: every message uses cubeloop's native pydantic dump.
     # `content` is a list of typed blocks, not a flat string; assistant carries
     # `usage` and `stop_reason` at the top level.
     for msg in messages:

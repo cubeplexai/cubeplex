@@ -1,6 +1,6 @@
 # Provider catalog — nested vendor → region×protocol×plan endpoints → model pool.
 # Spec docs/dev/specs/2026-05-22-preset-catalog-redesign-design.md §4.
-# Ported from the flat cubepi providers.yaml (frozen at
+# Ported from the flat cubeloop providers.yaml (frozen at
 # tests/unit/llm/catalog/data/flat_providers_snapshot.yaml). Pricing defaults to
 # zero for ported presets (the flat catalog had none); real cost is supplied per
 # deployment via config `cost:` override or added here when known.

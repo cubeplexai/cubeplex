@@ -1,6 +1,6 @@
 """Smoke test for ``RunManager._build_agent_for_conversation``.
 
-T7 extracted the inline agent-build code from ``_run_cubepi_path`` into a
+T7 extracted the inline agent-build code from ``_run_cubeloop_path`` into a
 named factory so the prompt path (T8 respond, T10 cancel-paused) can reuse
 it. The load-bearing invariant other tasks rely on is that the returned
 HITL channel is a ``CheckpointedChannel`` wired with the same ``run_id``
@@ -19,7 +19,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubepi.hitl import CheckpointedChannel
+from cubeloop.hitl import CheckpointedChannel
 
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
@@ -67,7 +67,7 @@ async def _build(
 
     # load_llm_snapshot returns a deterministic snapshot whose default preset
     # resolves to anthropic/claude-stub. build_chain_model is patched so we
-    # don't need a real cubepi provider — the agent factory is stubbed and
+    # don't need a real cubeloop provider — the agent factory is stubbed and
     # never inspects the bound model.
     snap = LLMSnapshot(
         providers={
@@ -179,7 +179,7 @@ async def test_build_with_no_sandbox_still_binds_hitl_channel(
 ) -> None:
     """When sandbox is None the factory MUST still build an agent (cancel
     path needs this) AND it must still bind a CheckpointedChannel — without
-    one, cubepi's ``agent.abort_pending`` short-circuits with HitlError
+    one, cubeloop's ``agent.abort_pending`` short-circuits with HitlError
     before the DB pending row gets cleared, so cancel_paused_run leaves
     the pending row behind. The channel is needed by the ask_user tool
     binding and by abort_pending regardless of whether SandboxMiddleware

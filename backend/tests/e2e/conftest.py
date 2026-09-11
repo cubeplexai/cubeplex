@@ -1701,8 +1701,8 @@ async def search_test_user_ctx(_clean_search_tables: None) -> tuple[str, str, st
 async def seeded_conversation(
     search_test_user_ctx: tuple[str, str, str],
 ) -> tuple[str, str, str, str]:
-    """Create a conversation and seed three small cubepi messages."""
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    """Create a conversation and seed three small cubeloop messages."""
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     from cubeplex.agents.checkpointer import init_checkpointer
     from cubeplex.db.engine import async_session_maker as _asm
@@ -1742,7 +1742,7 @@ async def seed_conversations_with_content(
     callers can drive embedding + assert which conversation they expect to
     find for each search query.
     """
-    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
     from cubeplex.agents.checkpointer import init_checkpointer
     from cubeplex.db.engine import async_session_maker as _asm

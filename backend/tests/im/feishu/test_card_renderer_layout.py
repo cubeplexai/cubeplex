@@ -40,7 +40,7 @@ def test_streaming_content_uses_optimized_markdown() -> None:
 def test_tool_panel_renders_before_streaming_content() -> None:
     """Reading order matches the chat flow: 'what was done → answer'.
 
-    cubepi folds every text delta (intro + post-tool answer) into one
+    cubeloop folds every text delta (intro + post-tool answer) into one
     streaming_content buffer, so placing tool_panel below the markdown
     would surface the model's final answer above the tools it ran to
     produce it. v1 fixes the visual oddity by emitting tool_panel first."""
@@ -140,7 +140,7 @@ def test_pending_input_renders_buttons_with_payload() -> None:
     s = str(container)
     assert "yes" in s and "no" in s
     assert "run_1" in s
-    # button.value carries question_id so the resume call matches cubepi's
+    # button.value carries question_id so the resume call matches cubeloop's
     # pending side, and answer_key so the answer dict has the right shape.
     assert "q_1" in s
     assert "approve_deploy" in s
@@ -187,7 +187,7 @@ def test_pending_input_form_renders_select_input_and_multi() -> None:
     assert submit.get("form_action_type") == "submit"
     assert submit["behaviors"][0]["value"]["run_id"] == "run_form"
     assert submit["behaviors"][0]["value"]["question_id"] == "q_form"
-    # Field names are cubepi keys so form_value maps 1:1 to the answer dict.
+    # Field names are cubeloop keys so form_value maps 1:1 to the answer dict.
     names = {el.get("name") for el in form["elements"] if el.get("name")}
     assert {"pick", "tags", "name", "ask_user_submit"} <= names
 

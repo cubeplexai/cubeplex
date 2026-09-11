@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import fakeredis.aioredis
 import pytest
 import pytest_asyncio
-from cubepi.providers.base import UserMessage
+from cubeloop.providers.base import UserMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

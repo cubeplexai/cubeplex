@@ -1,12 +1,12 @@
-"""Unit tests for ``_drain_cubepi_sse_queue`` (PR #84 review).
+"""Unit tests for ``_drain_cubeloop_sse_queue`` (PR #84 review).
 
-Regression guard for the cubepi streaming fix: SSE dicts must flow through
+Regression guard for the cubeloop streaming fix: SSE dicts must flow through
 ``publish_stream_event`` as the agent emits them, not in a single batch after
 ``agent.prompt()`` returns.
 
 The previous implementation collected dicts into a list and flushed them all
 at the end; long model responses appeared as one batched dump to the client.
-The fix bridges the synchronous cubepi listener to the async world via an
+The fix bridges the synchronous cubeloop listener to the async world via an
 ``asyncio.Queue`` plus a parallel drain task.  These tests cover the drainer
 contract directly:
 
@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from cubeplex.streams.run_manager import _drain_cubepi_sse_queue
+from cubeplex.streams.run_manager import _drain_cubeloop_sse_queue
 
 
 @pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_drainer_publishes_events_as_they_arrive() -> None:
     async def fake_publish(sse_event: Any, _agent_key: Any) -> None:
         publish_times.append(time.monotonic())
 
-    drainer = asyncio.create_task(_drain_cubepi_sse_queue(queue, fake_publish))
+    drainer = asyncio.create_task(_drain_cubeloop_sse_queue(queue, fake_publish))
 
     async def producer() -> None:
         for i in range(3):
@@ -73,7 +73,7 @@ async def test_drainer_exits_on_none_sentinel() -> None:
     async def fake_publish(sse_event: Any, _agent_key: Any) -> None:
         published.append(sse_event)
 
-    drainer = asyncio.create_task(_drain_cubepi_sse_queue(queue, fake_publish))
+    drainer = asyncio.create_task(_drain_cubeloop_sse_queue(queue, fake_publish))
     queue.put_nowait(None)
     await asyncio.wait_for(drainer, timeout=1.0)
     assert published == []
@@ -81,14 +81,14 @@ async def test_drainer_exits_on_none_sentinel() -> None:
 
 @pytest.mark.asyncio
 async def test_drainer_skips_unmappable_dicts() -> None:
-    """Dicts ``cubepi_dict_to_agent_event`` can't translate are silently dropped."""
+    """Dicts ``cubeloop_dict_to_agent_event`` can't translate are silently dropped."""
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     published: list[Any] = []
 
     async def fake_publish(sse_event: Any, _agent_key: Any) -> None:
         published.append(sse_event)
 
-    drainer = asyncio.create_task(_drain_cubepi_sse_queue(queue, fake_publish))
+    drainer = asyncio.create_task(_drain_cubeloop_sse_queue(queue, fake_publish))
     queue.put_nowait({"type": "definitely_unknown_event_kind"})
     queue.put_nowait({"type": "text_delta", "data": {"content": "hi"}})
     queue.put_nowait(None)
@@ -108,7 +108,7 @@ async def test_drainer_uses_fresh_timestamp_per_event() -> None:
     async def fake_publish(sse_event: Any, _agent_key: Any) -> None:
         timestamps.append(sse_event.timestamp)
 
-    drainer = asyncio.create_task(_drain_cubepi_sse_queue(queue, fake_publish))
+    drainer = asyncio.create_task(_drain_cubeloop_sse_queue(queue, fake_publish))
     queue.put_nowait({"type": "text_delta", "data": {"content": "a"}})
     await asyncio.sleep(0.02)
     queue.put_nowait({"type": "text_delta", "data": {"content": "b"}})

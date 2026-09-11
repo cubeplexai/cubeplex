@@ -1,4 +1,4 @@
-// cubepi formats upstream probe failures as a dense, often-truncated blob:
+// cubeloop formats upstream probe failures as a dense, often-truncated blob:
 //   "[probe/<model> @ <url>] APIStatusError: Error code: 402 - {'error': {'message': '...'}} <- HTTPStatusError ..."
 // Rendered verbatim that is unreadable. This collapses it to a concise
 // "HTTP <status> · <message>" while leaving already-clean step details
@@ -14,7 +14,7 @@ export function formatProbeDetail(raw: string | null | undefined): string {
 
   const status = s.match(/error code:\s*(\d{3})/i)?.[1]
   // Upstream APIs nest the human message under a "message" key, single- or
-  // double-quoted depending on whether cubepi repr'd a dict or kept raw JSON.
+  // double-quoted depending on whether cubeloop repr'd a dict or kept raw JSON.
   const message = s.match(/["']message["']\s*:\s*["']([^"']+)["']/)?.[1]
 
   if (status && message) return `HTTP ${status} · ${message}`

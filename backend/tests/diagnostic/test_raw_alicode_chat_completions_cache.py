@@ -1,6 +1,6 @@
 """Phase 1b — Raw HTTP cache validation for alicode (DashScope coding, OpenAI-spec).
 
-This test bypasses cubeplex / cubepi / langchain entirely. It sends two identical
+This test bypasses cubeplex / cubeloop / langchain entirely. It sends two identical
 prompts directly to `https://coding.dashscope.aliyuncs.com/v1` using the official
 `openai` SDK, then verifies that the second request reports cached_tokens > 0 in
 the usage object.
@@ -10,7 +10,7 @@ The cache activates when the byte-prefix is identical across calls (≥ 1024 tok
 
 Interpretation:
     PASS  → alicode supports prompt cache for this request shape at raw API level.
-            Cache misses inside cubepi-runtime are a request-shape / adapter issue.
+            Cache misses inside cubeloop-runtime are a request-shape / adapter issue.
     FAIL  → alicode does NOT cache even at raw API level → provider limitation.
     SKIP  → alicode credentials not available locally (safe in CI).
 """

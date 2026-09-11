@@ -25,7 +25,7 @@ from cubeplex.streams.run_events import read_run_events_after
 # pending_input op we bind the inbound sender's open_id to a Redis key so
 # the webhook ingress can reject clicks from anyone else. The default
 # (10 minutes) matches the spec §6.5 pending-input window; per-event
-# overrides come from the cubepi event's ``timeout_seconds`` field, capped
+# overrides come from the cubeloop event's ``timeout_seconds`` field, capped
 # at 24h so a malformed event can't pin a Redis key forever.
 _AWAITING_TTL_DEFAULT_SECONDS = 600
 _AWAITING_TTL_MAX_SECONDS = 24 * 60 * 60
@@ -71,7 +71,7 @@ def _label_for_option(pending: Any, answer_key: str, value: str) -> str:
 
 
 def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> OutboundOp | None:
-    """Fold one cubepi run event into ``state.card_state``.
+    """Fold one cubeloop run event into ``state.card_state``.
 
     Task 8 covers text_delta only. Tasks 9-11 add tool_call, tool_result,
     artifact, citation, ask_user_request, sandbox_confirm_request,
@@ -433,7 +433,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
 
     if etype == "done":
         # A sub-agent terminal event must never finalize the PARENT card.
-        # cubepi_dict_to_agent_event drops a sub-agent ``done`` at translation
+        # cubeloop_dict_to_agent_event drops a sub-agent ``done`` at translation
         # time, so this guard is defensive against a stray sub-agent terminal
         # that would otherwise mark the main card finalized and exit the
         # tailer early. Fixes #508.

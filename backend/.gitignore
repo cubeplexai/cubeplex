@@ -5,7 +5,9 @@ coverage.xml
 coverage-e2e.xml
 scripts/dev
 skills_cache/
-# cubepi tracing output (default tracing.directory); may contain prompt/tool payloads
+# cubeloop tracing output (default tracing.directory); may contain prompt/tool payloads
+cubeloop-traces/
+# leftover local dirs from the pre-0.14 cubepi default
 cubepi-traces/
 certs/
 /requirements-frozen.txt

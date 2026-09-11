@@ -10,8 +10,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from cubepi.providers.base import ReasoningControl
-from cubepi.providers.fallback import FallbackBoundModel
+from cubeloop.providers.base import ReasoningControl
+from cubeloop.providers.fallback import FallbackBoundModel
 from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
@@ -76,11 +76,11 @@ def _registration_was_replaced(*, current_agent: Any, originating_agent: Any) ->
     )
 
 
-class CubepiAgentRunError(RuntimeError):
-    """Raised when cubepi returns a terminal assistant error without raising."""
+class CubeloopAgentRunError(RuntimeError):
+    """Raised when cubeloop returns a terminal assistant error without raising."""
 
 
-def _cubepi_agent_error_message(agent: Any) -> str | None:
+def _cubeloop_agent_error_message(agent: Any) -> str | None:
     state = getattr(agent, "state", None)
     error_message = getattr(state, "error_message", None)
     if isinstance(error_message, str) and error_message.strip():
@@ -88,10 +88,10 @@ def _cubepi_agent_error_message(agent: Any) -> str | None:
     return None
 
 
-def _raise_if_cubepi_agent_failed(agent: Any) -> None:
-    error_message = _cubepi_agent_error_message(agent)
+def _raise_if_cubeloop_agent_failed(agent: Any) -> None:
+    error_message = _cubeloop_agent_error_message(agent)
     if error_message is not None:
-        raise CubepiAgentRunError(error_message)
+        raise CubeloopAgentRunError(error_message)
 
 
 def _message_for_run_exception(
@@ -99,7 +99,7 @@ def _message_for_run_exception(
     code: ErrorCode,
     params: dict[str, Any],
 ) -> str:
-    if isinstance(exc, CubepiAgentRunError):
+    if isinstance(exc, CubeloopAgentRunError):
         return str(exc)
     return english_fallback(code, params)
 
@@ -123,7 +123,7 @@ def _preview_tool_args(args: object, *, limit: int = _TOOL_ARGS_PREVIEW_LIMIT) -
 
 def _log_tool_start(run_id: str, evt: object) -> None:
     """Debug-log every tool body start so a hung execute is greppable."""
-    from cubepi.agent.types import ToolExecutionStartEvent
+    from cubeloop.agent.types import ToolExecutionStartEvent
 
     if not isinstance(evt, ToolExecutionStartEvent):
         return
@@ -166,7 +166,7 @@ class _InFlightToolHeartbeat:
         self._task: asyncio.Task[None] | None = None
 
     def observe(self, evt: object) -> None:
-        from cubepi.agent.types import ToolExecutionEndEvent, ToolExecutionStartEvent
+        from cubeloop.agent.types import ToolExecutionEndEvent, ToolExecutionStartEvent
 
         if isinstance(evt, ToolExecutionStartEvent):
             self._in_flight += 1
@@ -240,7 +240,7 @@ def _make_retry_publisher(
 ) -> Callable[[Any, BaseException, int, float], Awaitable[None]]:
     """Build an on_retry callback that publishes a model_retry SSE event.
 
-    cubepi calls this before sleeping on a same-model retry
+    cubeloop calls this before sleeping on a same-model retry
     (RateLimited / ProviderUnavailable). The publish callable receives
     (run_id, data_payload) — the data dict that will populate RetryEvent.data.
     """
@@ -420,7 +420,7 @@ def _dicts_to_sse_events(
     return events
 
 
-async def _drain_cubepi_sse_queue(
+async def _drain_cubeloop_sse_queue(
     queue: asyncio.Queue[dict[str, Any] | None],
     publish: Any,
 ) -> None:
@@ -434,7 +434,7 @@ async def _drain_cubepi_sse_queue(
         d = await queue.get()
         if d is None:
             return
-        sse_event = cubepi_dict_to_agent_event(d, datetime.now(UTC).isoformat())
+        sse_event = cubeloop_dict_to_agent_event(d, datetime.now(UTC).isoformat())
         if sse_event is None:
             continue
         await publish(sse_event, None)
@@ -446,12 +446,12 @@ async def _drain_subagent_citation_queue(
 ) -> None:
     """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
 
-    Counterpart to :func:`_drain_cubepi_sse_queue` for the shared queue that
+    Counterpart to :func:`_drain_cubeloop_sse_queue` for the shared queue that
     subagent and citation middleware push onto:
 
-    - ``("subagent", agent_id, sse_dict)`` — already-translated cubepi SSE
+    - ``("subagent", agent_id, sse_dict)`` — already-translated cubeloop SSE
       dict produced by ``convert_agent_event_to_sse``. We retranslate via
-      :func:`cubepi_dict_to_agent_event` and stamp the originating subagent
+      :func:`cubeloop_dict_to_agent_event` and stamp the originating subagent
       ``agent_id`` so the frontend's per-agent stream buckets work.
     - ``("citation", agent_id, citation_payload)`` — wrapped into a
       :class:`CitationEvent`.
@@ -478,7 +478,7 @@ async def _drain_subagent_citation_queue(
         timestamp = datetime.now(UTC).isoformat()
         sse_event: AgentEvent | None = None
         if kind == "subagent":
-            sse_event = cubepi_dict_to_agent_event(payload, timestamp)
+            sse_event = cubeloop_dict_to_agent_event(payload, timestamp)
             if sse_event is not None and agent_id is not None:
                 sse_event.agent_id = agent_id
         elif kind == "citation":
@@ -493,7 +493,7 @@ async def _drain_subagent_citation_queue(
         await publish(sse_event, agent_id)
 
 
-def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
+def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
     """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
     into a typed cubeplex ``AgentEvent``.
 
@@ -557,7 +557,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
             },
         )
     if t == "tool_result":
-        # ``convert_agent_event_to_sse`` extracts a string from cubepi's
+        # ``convert_agent_event_to_sse`` extracts a string from cubeloop's
         # ``AgentToolResult`` before the dict reaches this translator; the
         # ``str()`` here is defensive against unexpected producers and is
         # a no-op for the expected string case. ``details`` carries
@@ -768,12 +768,12 @@ async def _build_attachment_content_blocks(
 async def _repair_dangling_tool_calls(conversation_id: str) -> None:
     """Backfill synthetic tool_results for tool_calls a cancel left unanswered.
 
-    Mirrors cubepi's own cancel cleanup as a fallback. Loads the checkpointed
+    Mirrors cubeloop's own cancel cleanup as a fallback. Loads the checkpointed
     thread, finds tool_calls in the last assistant message that have no
     ToolResultMessage, and appends a synthetic error result for each so the
     next provider call sees a structurally valid history.
     """
-    from cubepi.providers.base import (
+    from cubeloop.providers.base import (
         AssistantMessage,
         TextContent,
         ToolCall,
@@ -883,7 +883,7 @@ async def _emit_synthetic_resolved(
 class _AutoDetachListener:
     """Schedules ``agent.detach()`` exactly once on ``HitlRequestEvent``.
 
-    Exposes ``.detached`` so the terminal block in ``_run_cubepi_path`` can
+    Exposes ``.detached`` so the terminal block in ``_run_cubeloop_path`` can
     read whether this turn entered HITL — distinguishing a real new pending
     request from a stale pending leftover from a prior session.
     """
@@ -899,7 +899,7 @@ class _AutoDetachListener:
         self.detached: bool = False
 
     def _mark_detached(self, evt: Any) -> bool:
-        from cubepi.agent.types import HitlRequestEvent
+        from cubeloop.agent.types import HitlRequestEvent
 
         if self.detached or not isinstance(evt, HitlRequestEvent):
             return False
@@ -946,9 +946,9 @@ class ResumeConflict(Exception):
 
 def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
     """Synthesise an answer payload for ``cancel_paused_run`` to feed
-    through cubepi's respond path.
+    through cubeloop's respond path.
 
-    The shape matches what cubepi's ask_user / confirm tools format
+    The shape matches what cubeloop's ask_user / confirm tools format
     into the synthetic tool_result body. The ``_cancelled`` and
     ``_reason`` markers are unambiguous signals to the model that the
     user did not actually answer — typical models react with "OK, I'll
@@ -987,7 +987,7 @@ def _extract_tool_summaries(
     all tool calls after that index are captured, including those that precede
     mid-run steer UserMessages. Falls back to last-UserMessage scan when None.
     """
-    from cubepi.providers.base import (
+    from cubeloop.providers.base import (
         AssistantMessage,
         TextContent,
         ToolCall,
@@ -1269,7 +1269,7 @@ class RunManager:
         if agent is None:
             return False
 
-        from cubepi.providers.base import TextContent, UserMessage
+        from cubeloop.providers.base import TextContent, UserMessage
 
         agent.steer(UserMessage(content=[TextContent(text=content)]))
         return True
@@ -1307,7 +1307,7 @@ class RunManager:
     ) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
-            from cubepi.providers.base import TextContent, UserMessage
+            from cubeloop.providers.base import TextContent, UserMessage
 
             msg_metadata: dict[str, Any] = {"steer_id": steer_id}
             if metadata:
@@ -1356,7 +1356,7 @@ class RunManager:
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         # 1. Authoritative: DB pending. load_pending_request shape unchanged
-        #    per cubepi v3 prereq — returns HitlRequest | None.
+        #    per cubeloop v3 prereq — returns HitlRequest | None.
         async with shared_checkpointer() as cp:
             pending = await cp.load_pending_request(conversation_id)
         if pending is None:
@@ -1414,7 +1414,7 @@ class RunManager:
         terminal write left a cold dead-end: the user clicked Cancel
         and the conversation just stopped. The new flow synthesises a
         cancel-flavoured *answer* and feeds it through the normal
-        respond path — cubepi's ask_user / confirm tool writes a
+        respond path — cubeloop's ask_user / confirm tool writes a
         tool_result containing the cancel marker, then the agent loop
         runs and the model gets to respond (typically: "OK, was the
         question off-base? What did you have in mind?"). Run finalises
@@ -1446,7 +1446,7 @@ class RunManager:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
 
-        # 3. Synthesise a cancel-flavoured answer. cubepi's ask_user /
+        # 3. Synthesise a cancel-flavoured answer. cubeloop's ask_user /
         #    confirm tool stringifies whatever we pass as the answer
         #    into the tool_result body, so the model sees the marker
         #    keys and can respond contextually.
@@ -1566,7 +1566,7 @@ class RunManager:
         elif type_ == "steer":
             agent = self._agents.get(run_id)
             if agent is not None:
-                from cubepi.providers.base import TextContent, UserMessage
+                from cubeloop.providers.base import TextContent, UserMessage
 
                 msg_metadata: dict[str, Any] = {"steer_id": data.get("steer_id") or ""}
                 extra_metadata = data.get("metadata")
@@ -1730,7 +1730,7 @@ class RunManager:
     async def _record_user_cancel(self, *, run_id: str, conversation_id: str) -> None:
         """Mark a user-stopped run cancelled. Do not publish an ErrorEvent.
 
-        Cancel is a status (cubepi persists ``stop_reason=aborted``). An
+        Cancel is a status (cubeloop persists ``stop_reason=aborted``). An
         ``internal_error`` here is what the chat UI used to render as
         "Reply failed / Run cancelled".
         """
@@ -1806,7 +1806,7 @@ class RunManager:
         )
         await self._append_event(run_id, conversation_id, error_event)
 
-    async def _run_cubepi_path(
+    async def _run_cubeloop_path(
         self,
         *,
         ctx: RunContext,
@@ -1826,9 +1826,9 @@ class RunManager:
         model_key: str | None = None,
         reasoning: ReasoningControl | None = None,
     ) -> str:
-        """Execute a single user turn through the cubepi runtime.
+        """Execute a single user turn through the cubeloop runtime.
 
-        Builds a cubepi.Provider + cubepi.Agent, subscribes an event listener, then
+        Builds a cubeloop.Provider + cubeloop.Agent, subscribes an event listener, then
         awaits agent.prompt(). Each AgentEvent is translated into a cubeplex AgentEvent
         schema object and forwarded to ``publish_stream_event``; the rest of
         _execute_run (DoneEvent, update_run_meta, etc.) consumes the resulting
@@ -1853,7 +1853,7 @@ class RunManager:
             extra_ref_holder = {}
         extra_ref_holder.setdefault("extra", None)
 
-        # Bridge the synchronous cubepi listener to the async world via a queue.
+        # Bridge the synchronous cubeloop listener to the async world via a queue.
         # agent.prompt() is async and invokes synchronous listeners on each
         # AgentEvent as they arrive.  Previously we buffered translated dicts
         # and flushed them after prompt() returned, which made long responses
@@ -1924,8 +1924,8 @@ class RunManager:
             # this is the post-build assignment those closures resolve to.
             extra_ref_holder["extra"] = agent._extra
 
-            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
-            from cubepi.providers.base import UserMessage as _UserMsg
+            from cubeloop.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubeloop.providers.base import UserMessage as _UserMsg
 
             _user_msg_seen = 0
             auto_detach = _build_auto_detach_listener(agent)
@@ -1942,7 +1942,7 @@ class RunManager:
             )
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
-                # Runs on the same event loop as _run_cubepi_path, so
+                # Runs on the same event loop as _run_cubeloop_path, so
                 # put_nowait is safe.  If we ever invoke the agent from a
                 # background thread, swap to loop.call_soon_threadsafe.
                 # auto_detach must run FIRST so HitlRequestEvent triggers
@@ -1963,7 +1963,9 @@ class RunManager:
             self._agents[run_id] = agent
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
-            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+            drainer = asyncio.create_task(
+                _drain_cubeloop_sse_queue(sse_queue, publish_stream_event)
+            )
 
             # Compute relevance-memory snapshot before the agent loop starts
             # and bake it into the UserMessage metadata so MemoryMiddleware
@@ -1973,8 +1975,8 @@ class RunManager:
             # prompt caching — see backend/docs/prompt-cache-discipline.md.
             import time as _time
 
-            from cubepi.providers.base import TextContent as _TextContent
-            from cubepi.providers.base import UserMessage as _UserMessage
+            from cubeloop.providers.base import TextContent as _TextContent
+            from cubeloop.providers.base import UserMessage as _UserMessage
 
             from cubeplex.middleware.memory import compute_relevance_snapshot as _compute_snap
 
@@ -2011,7 +2013,9 @@ class RunManager:
                     if _att_blocks:
                         _user_msg_metadata["attachments"] = _att_blocks
                 except Exception as _att_exc:
-                    logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
+                    logger.warning(
+                        "Failed to build attachment blocks for cubeloop run: {}", _att_exc
+                    )
 
             # Stamp on every message (1:1 included) so a later 1:1→group
             # conversion attributes past messages; UI gates display on group.
@@ -2026,11 +2030,11 @@ class RunManager:
             )
 
             await self._bump_topic_activity(ctx)
-            # Attach the process-level Tracer to this run via cubepi's
+            # Attach the process-level Tracer to this run via cubeloop's
             # best-effort scope: it swallows every tracing fault (attach,
             # detach, flush) so tracing can never break the run, and is a
             # no-op when tracing is disabled (tracer is None).
-            from cubepi.tracing import trace, tracing_context
+            from cubeloop.tracing import trace, tracing_context
 
             from cubeplex.llm.runtime_writeback import (
                 schedule_runtime_status_writeback as _schedule_writeback,
@@ -2043,7 +2047,7 @@ class RunManager:
             provider_name: str = extra_ref_holder["provider_name"]
             model_id: str = extra_ref_holder["model_id"]
             # Stamp the run's identity onto the trace spans (recorder writes
-            # these as cubepi.metadata.* on the invoke_agent span). Skip None
+            # these as cubeloop.metadata.* on the invoke_agent span). Skip None
             # and stringify so OTel attribute typing is always satisfied.
             _trace_meta = {
                 k: str(v)
@@ -2072,12 +2076,12 @@ class RunManager:
                     # a slow OTLP collector); lifespan's tracer.shutdown()
                     # settles pending flushes.
                     async with trace(tracer, agent, flush="background"):
-                        # Pass cubeplex's run_id so cubepi stamps it onto
+                        # Pass cubeplex's run_id so cubeloop stamps it onto
                         # cubepi_messages.run_id (instead of generating its own).
-                        # Aligns the cubepi message ledger with cubeplex's redis
+                        # Aligns the cubeloop message ledger with cubeplex's redis
                         # run-meta, SSE streams, and billing_llm_events.
                         await agent.prompt(_user_msg, run_id=run_id)
-                        _raise_if_cubepi_agent_failed(agent)
+                        _raise_if_cubeloop_agent_failed(agent)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
@@ -2107,7 +2111,7 @@ class RunManager:
                 # via extra_ref_holder (T7); reuse them rather than
                 # re-resolving.
                 def _last_assistant_text(messages: list[Any]) -> str | None:
-                    from cubepi.providers.base import AssistantMessage, TextContent
+                    from cubeloop.providers.base import AssistantMessage, TextContent
 
                     for msg in reversed(messages):
                         if isinstance(msg, AssistantMessage):
@@ -2121,7 +2125,7 @@ class RunManager:
                 def _stringify_user_msg(msg: Any) -> str:
                     if isinstance(msg, str):
                         return msg
-                    from cubepi.providers.base import TextContent
+                    from cubeloop.providers.base import TextContent
 
                     content = getattr(msg, "content", None)
                     if isinstance(content, str):
@@ -2160,7 +2164,7 @@ class RunManager:
                     elif _bus is not None:
 
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
-                            from cubepi import Agent
+                            from cubeloop import Agent
 
                             from cubeplex.llm.config import ModelCost
                             from cubeplex.middleware.cost import (
@@ -2340,7 +2344,7 @@ class RunManager:
             await flush_citation_buffer(agent_key, agent_key)
         return final_status
 
-    async def _run_cubepi_respond_path(
+    async def _run_cubeloop_respond_path(
         self,
         *,
         ctx: RunContext,
@@ -2359,11 +2363,11 @@ class RunManager:
         extra_ref_holder: dict[str, Any] | None = None,
     ) -> str:
         """Resume a paused HITL conversation by delivering ``answer`` to a
-        cubepi agent via ``agent.respond``.
+        cubeloop agent via ``agent.respond``.
 
-        Mirrors :meth:`_run_cubepi_path` but:
+        Mirrors :meth:`_run_cubeloop_path` but:
 
-        * calls :meth:`cubepi.Agent.respond` instead of ``agent.prompt`` — no
+        * calls :meth:`cubeloop.Agent.respond` instead of ``agent.prompt`` — no
           new user message, no memory snapshot, no attachments;
         * reuses the existing ``run_id`` so events stream into the same Redis
           key the SSE consumer is still tailing;
@@ -2449,8 +2453,8 @@ class RunManager:
                 ttl_seconds=self._run_event_ttl_seconds,
             )
 
-            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
-            from cubepi.providers.base import UserMessage as _UserMsg
+            from cubeloop.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubeloop.providers.base import UserMessage as _UserMsg
 
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
@@ -2469,7 +2473,9 @@ class RunManager:
             self._agents[run_id] = agent
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
-            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+            drainer = asyncio.create_task(
+                _drain_cubeloop_sse_queue(sse_queue, publish_stream_event)
+            )
             from cubeplex.streams.steering_delivery import SteeringRunScope
 
             await self._steering_delivery.register_and_drain(
@@ -2482,7 +2488,7 @@ class RunManager:
                 agent=agent,
             )
 
-            from cubepi.tracing import trace, tracing_context
+            from cubeloop.tracing import trace, tracing_context
 
             from cubeplex.llm.runtime_writeback import (
                 schedule_runtime_status_writeback as _schedule_writeback,
@@ -2518,7 +2524,7 @@ class RunManager:
                     with tracing_context(metadata=_trace_meta):
                         async with trace(tracer, agent, flush="background"):
                             await agent.respond(question_id=question_id, answer=answer)
-                            _raise_if_cubepi_agent_failed(agent)
+                            _raise_if_cubeloop_agent_failed(agent)
                 except BaseException as _run_exc:
                     _schedule_writeback(
                         org_id=ctx.org_id,
@@ -2591,11 +2597,11 @@ class RunManager:
     ) -> tuple[Any, list[Any], Any]:
         """Build provider + middleware + tools + channel + agent for a conversation.
 
-        Shared by the prompt path (:meth:`_run_cubepi_path`), the future respond
+        Shared by the prompt path (:meth:`_run_cubeloop_path`), the future respond
         path (T8), and the cancel-paused-run path (T10). Returns
         ``(agent, all_tools, sandbox_hitl_channel)``.
 
-        The HITL channel is a :class:`cubepi.hitl.CheckpointedChannel` wired
+        The HITL channel is a :class:`cubeloop.hitl.CheckpointedChannel` wired
         with ``run_id`` so every pause writes ``pending_request`` and
         ``pending_run_id`` to the cubepi_threads row in a single atomic
         statement — which is what lets a different worker pick up the answer
@@ -2741,7 +2747,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("memory tools unavailable for cubepi run: {}", _exc)
+            logger.warning("memory tools unavailable for cubeloop run: {}", _exc)
 
         # load_skill — requires a non-None catalog (may be absent if DB is down)
         if skill_catalog is not None:
@@ -2756,7 +2762,7 @@ class RunManager:
                     )
                 )
             except Exception as _exc:
-                logger.warning("load_skill unavailable for cubepi run: {}", _exc)
+                logger.warning("load_skill unavailable for cubeloop run: {}", _exc)
 
         # view_images — per-request DI: objectstore + LLM capabilities.
         # Must come after memory tools and load_skill to preserve the
@@ -2792,7 +2798,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("view_images unavailable for cubepi run: {}", _exc)
+            logger.warning("view_images unavailable for cubeloop run: {}", _exc)
 
         # show_widget — UI-only tool; no DI. Fixed position in the builtin tool
         # order to keep the prompt-cache prefix stable.
@@ -2801,7 +2807,7 @@ class RunManager:
 
             _builtin_tools.append(make_show_widget_tool())
         except Exception as _exc:
-            logger.warning("show_widget unavailable for cubepi run: {}", _exc)
+            logger.warning("show_widget unavailable for cubeloop run: {}", _exc)
 
         # create_scheduled_task — per-run DI: org/workspace/user/conversation.
         # Detect IM origin via IMThreadLink on the current conversation so
@@ -2825,7 +2831,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("create_scheduled_task unavailable for cubepi run: {}", _exc)
+            logger.warning("create_scheduled_task unavailable for cubeloop run: {}", _exc)
 
         # create_trigger — still gated to interactive. Triggers expose a
         # public webhook URL with a secret; a prompt-injected scheduled fire
@@ -2844,12 +2850,12 @@ class RunManager:
                     )
                 )
             except Exception as _exc:
-                logger.warning("create_trigger unavailable for cubepi run: {}", _exc)
+                logger.warning("create_trigger unavailable for cubeloop run: {}", _exc)
 
         # generate_image — sandbox-gated; enabled only when image_generation config is active.
         if sandbox is not None:
             try:
-                from cubepi.providers.images import OpenAIImagesProvider
+                from cubeloop.providers.images import OpenAIImagesProvider
 
                 from cubeplex.llm.config import get_image_generation_config
                 from cubeplex.llm.images import build_image_capability
@@ -2883,7 +2889,7 @@ class RunManager:
                         )
                     )
             except Exception as _exc:
-                logger.warning("generate_image unavailable for cubepi run: {}", _exc)
+                logger.warning("generate_image unavailable for cubeloop run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP connectors. Reads from
         # ``mcp_connectors`` / ``mcp_workspace_connector_states`` /
@@ -2893,7 +2899,7 @@ class RunManager:
 
         try:
             from cubeplex.credentials.dependencies import build_credential_service
-            from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
+            from cubeplex.mcp.cubeloop_runtime import _load_tools_for_specs
             from cubeplex.mcp.disclosure import (
                 build_deferred_groups,
                 disclosure_active,
@@ -2960,7 +2966,7 @@ class RunManager:
                 # Detached TTL re-discovery for stale tools_cache entries so
                 # the cache-first loader below never serves a permanently
                 # stale schema. Fire-and-forget; never blocks the send.
-                from cubeplex.mcp.cubepi_runtime import schedule_tools_cache_refresh
+                from cubeplex.mcp.cubeloop_runtime import schedule_tools_cache_refresh
 
                 schedule_tools_cache_refresh(
                     specs=_mcp_specs,
@@ -3021,7 +3027,7 @@ class RunManager:
                     _builtin_tools.extend(_new_tools)
                     mcp_citation_configs.update(_new_citations)
         except Exception as _exc:
-            logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
+            logger.warning("MCP tools unavailable for cubeloop run: {}", _exc)
 
         # Platform action tools (scheduled_tasks, skills, etc.) — via the
         # capability registry. Automated runs get read-only tools (mutation gate).
@@ -3101,7 +3107,7 @@ class RunManager:
                             )
                     except Exception as _skill_exc:  # noqa: BLE001
                         logger.warning(
-                            "skills capability unavailable for cubepi run: {}",
+                            "skills capability unavailable for cubeloop run: {}",
                             _skill_exc,
                         )
 
@@ -3127,11 +3133,11 @@ class RunManager:
                 _action_flat_tools.extend(_action_toolset.flat_tools)
         except Exception as _exc:
             logger.warning(
-                "platform action tools unavailable for cubepi run: {}",
+                "platform action tools unavailable for cubeloop run: {}",
                 _exc,
             )
 
-        # --- Build the 11 cubepi middleware (M3.f) ---
+        # --- Build the 11 cubeloop middleware (M3.f) ---
         # The caller owns ``extra_ref_holder`` and populates ``["extra"]`` from
         # ``agent._extra`` after this factory returns; this closure reads the
         # holder at request time, well after the agent build.
@@ -3141,13 +3147,13 @@ class RunManager:
                 return {}
             return ref
 
-        cubepi_middleware: list[Any] = []
+        cubeloop_middleware: list[Any] = []
 
         # 1. AttachmentHintMiddleware — no deps
         try:
             from cubeplex.middleware.attachments import AttachmentHintMiddleware
 
-            cubepi_middleware.append(AttachmentHintMiddleware())
+            cubeloop_middleware.append(AttachmentHintMiddleware())
         except Exception as _exc:
             logger.warning("AttachmentHintMiddleware unavailable: {}", _exc)
 
@@ -3163,7 +3169,7 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     run_id=run_id,
                 )
-                cubepi_middleware.append(artifact_mw)
+                cubeloop_middleware.append(artifact_mw)
                 # Middleware tools (save_artifact) collected for ordered merge below
                 _artifact_tools.extend(artifact_mw.tools)
             except Exception as _exc:
@@ -3174,7 +3180,7 @@ class RunManager:
             from cubeplex.middleware.citation import CitationMiddleware
             from cubeplex.middleware.citations.counter import citation_event_queue
 
-            cubepi_middleware.append(
+            cubeloop_middleware.append(
                 CitationMiddleware(
                     citation_configs=mcp_citation_configs,
                     event_queue=citation_event_queue.get(None),
@@ -3211,7 +3217,7 @@ class RunManager:
             # Group chat: skip personal pinned injection (shared conversation
             # must not see the sender's private preferences). Relevance
             # snapshot is already gated earlier via ``not ctx.is_group_chat``.
-            cubepi_middleware.append(
+            cubeloop_middleware.append(
                 MemoryMiddleware(
                     repo_factory=_mem_repo_factory,
                     extra_ref=_extra_ref,
@@ -3221,9 +3227,9 @@ class RunManager:
         except Exception as _exc:
             logger.warning("MemoryMiddleware unavailable: {}", _exc)
 
-        # 5. CompactionMiddleware — cubepi built-in; state persists in ctx.extra.
+        # 5. CompactionMiddleware — cubeloop built-in; state persists in ctx.extra.
         try:
-            from cubepi.middleware.compaction import CompactionMiddleware
+            from cubeloop.middleware.compaction import CompactionMiddleware
 
             from cubeplex.config import config as _comp_cfg
             from cubeplex.middleware.compaction import preserve_tool_result_for_compaction
@@ -3248,11 +3254,11 @@ class RunManager:
                 _usable_window = max(0, _model_window - _model_max_out) if _model_window else 0
                 _ctx_window: int = _usable_window or _fallback_window
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
-                # cubepi 0.x+ replaced ``keep_recent_messages`` (a message
+                # cubeloop 0.x+ replaced ``keep_recent_messages`` (a message
                 # count) with ``keep_tail_tokens`` (a token budget). The new
                 # default 8 000 tokens ≈ the old 8 messages for short text,
                 # but adapts when recent turns contain large tool outputs.
-                # ``max_summary_tokens`` now accepts None → cubepi computes
+                # ``max_summary_tokens`` now accepts None → cubeloop computes
                 # a dynamic budget (clamp(content*0.15, 1024, 4096)). We
                 # pass through the configured value if set, otherwise None
                 # so long conversations get more headroom than the old 1024.
@@ -3260,7 +3266,7 @@ class RunManager:
                 _max_summary_tokens = (
                     int(_max_summary_cfg) if _max_summary_cfg is not None else None
                 )
-                cubepi_middleware.append(
+                cubeloop_middleware.append(
                     CompactionMiddleware(
                         summary_model=_summary_bound_model,
                         max_tokens_before_compact=int(_ctx_window * _ratio),
@@ -3292,7 +3298,7 @@ class RunManager:
         # bound, which would skip the final ``save_pending_request(None)``
         # and leave the DB pending row behind. Building it unconditionally
         # keeps every code path that touches HITL on the same Channel.
-        from cubepi.hitl import CheckpointedChannel, ask_user_tool
+        from cubeloop.hitl import CheckpointedChannel, ask_user_tool
 
         sandbox_hitl_channel: Any = CheckpointedChannel(
             checkpointer=cp,
@@ -3317,7 +3323,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("persona tools unavailable for cubepi run: {}", _exc)
+            logger.warning("persona tools unavailable for cubeloop run: {}", _exc)
 
         # 6b. SandboxMiddleware — needs sandbox. Shares the channel built above
         # so the confirm-gate writes to the same pending row the agent sees.
@@ -3371,16 +3377,16 @@ class RunManager:
                     channel=sandbox_hitl_channel,
                     config_loader=_sb_config_loader,
                 )
-                cubepi_middleware.append(sandbox_mw)
+                cubeloop_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write, edit, read) collected for
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
             except Exception as _exc:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
-        # 7. SubagentMiddleware — cubepi built-in; cubeplex only maps events to SSE.
+        # 7. SubagentMiddleware — cubeloop built-in; cubeplex only maps events to SSE.
         try:
-            from cubepi.middleware.subagents import SubagentMiddleware
+            from cubeloop.middleware.subagents import SubagentMiddleware
 
             from cubeplex.streams.subagent_events import (
                 forward_subagent_event,
@@ -3424,7 +3430,7 @@ class RunManager:
                 event_handler=forward_subagent_event,
                 tracer=getattr(self._app.state, "tracer", None),
             )
-            cubepi_middleware.append(subagent_mw)
+            cubeloop_middleware.append(subagent_mw)
             _subagent_tools.extend(subagent_mw.tools)
         except Exception as _exc:
             logger.warning("SubagentMiddleware unavailable: {}", _exc)
@@ -3446,7 +3452,7 @@ class RunManager:
                         return m.cost
                 return None
 
-            cubepi_middleware.append(
+            cubeloop_middleware.append(
                 CostMiddleware(
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
@@ -3462,16 +3468,16 @@ class RunManager:
         try:
             from cubeplex.middleware.timestamps import TimestampMiddleware
 
-            cubepi_middleware.append(TimestampMiddleware())
+            cubeloop_middleware.append(TimestampMiddleware())
         except Exception as _exc:
             logger.warning("TimestampMiddleware unavailable: {}", _exc)
 
         # 10. TodoListMiddleware — needs extra_ref
         try:
-            from cubepi.middleware.todo import TodoListMiddleware
+            from cubeloop.middleware.todo import TodoListMiddleware
 
             todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
-            cubepi_middleware.append(todo_mw)
+            cubeloop_middleware.append(todo_mw)
             _todo_tools.extend(todo_mw.tools)
         except Exception as _exc:
             logger.warning("TodoListMiddleware unavailable: {}", _exc)
@@ -3485,12 +3491,12 @@ class RunManager:
         )
 
         logger.info(
-            "cubepi middleware stack: {} layers, {} total tools",
-            len(cubepi_middleware),
+            "cubeloop middleware stack: {} layers, {} total tools",
+            len(cubeloop_middleware),
             len(all_tools),
         )
-        # cubepi.Agent.__init__ auto-appends each middleware's own `.tools`
-        # to the caller-provided list (cubepi/agent/agent.py:165-169). cubeplex
+        # cubeloop.Agent.__init__ auto-appends each middleware's own `.tools`
+        # to the caller-provided list (cubeloop/agent/agent.py:165-169). cubeplex
         # also extracts middleware-contributed tools into the matching
         # `_sandbox_tools` / `_artifact_tools` / `_todo_tools` /
         # `_subagent_tools` lists so they sit at a specific position relative
@@ -3498,11 +3504,11 @@ class RunManager:
         # those tools land on the wire twice and shape-compatible providers
         # reject the request with "Tool names must be unique."
         # (deepseek-anthropic-shape). Drop them from the caller list so the
-        # only copy reaching the wire is the one cubepi appends from the
+        # only copy reaching the wire is the one cubeloop appends from the
         # middleware itself — order becomes "all_tools (sans middleware
         # contributions) then middleware tools in middleware order".
         _mw_tool_names: set[str] = set()
-        for _mw in cubepi_middleware:
+        for _mw in cubeloop_middleware:
             for _t in getattr(_mw, "tools", []) or []:
                 _mw_tool_names.add(getattr(_t, "name", repr(_t)))
         if _mw_tool_names:
@@ -3519,7 +3525,7 @@ class RunManager:
             tools=all_tools,
             checkpointer=cp,
             thread_id=conversation_id,
-            middleware=cubepi_middleware,
+            middleware=cubeloop_middleware,
             reasoning=reasoning or ReasoningControl(),
             channel=sandbox_hitl_channel,
             deferred_tool_groups=_deferred_groups or None,
@@ -3533,7 +3539,7 @@ class RunManager:
         extra_ref_holder["provider_name"] = provider_name
         extra_ref_holder["model_id"] = model_id
         extra_ref_holder["mem_repo_factory"] = _mem_repo_factory
-        # Reflection trigger in _run_cubepi_path needs these to build its
+        # Reflection trigger in _run_cubeloop_path needs these to build its
         # own short-lived agent for end-of-turn memory self-review.
         extra_ref_holder["memory_service_factory"] = _memory_service_factory
         extra_ref_holder["provider"] = provider
@@ -3596,7 +3602,7 @@ class RunManager:
             bound_model = build_chain_model(snap, preset)
             # Tracer is optional — pass None to run_consolidation when tracing
             # is disabled, otherwise the background LLM call is wrapped in
-            # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
+            # tracer.oneshot() so it shows up in `cubeloop trace ls` filterable
             # by conversation_id / user_id / oneshot_operation.
             tracer = getattr(self._app.state, "tracer", None)
 
@@ -3751,7 +3757,7 @@ class RunManager:
         }
         last_context_tokens: int = 0
         # Re-enqueue the search index in `finally` on cancel/exception when
-        # cubepi may have written partial history before the failure. The
+        # cubeloop may have written partial history before the failure. The
         # enqueue is idempotent (replace_for_conversation), so the flag is
         # only to skip a redundant enqueue on the happy path.
         search_index_enqueued = False
@@ -3837,12 +3843,12 @@ class RunManager:
 
         # Outer-scope default so `finally` can branch on terminal status.
         # The success path inside `try` overwrites this with the real
-        # status returned by `_run_cubepi_path`; on exception the default
+        # status returned by `_run_cubeloop_path`; on exception the default
         # "errored" applies, which keeps the existing teardown semantics.
         final_status: str = "errored"
 
         # Declared here so the except block can read model/provider/context_window
-        # even when the exception is raised inside _run_cubepi_path (a separate
+        # even when the exception is raised inside _run_cubeloop_path (a separate
         # call frame — locals().get() would never see it).
         extra_ref_holder: dict[str, Any] = {}
 
@@ -3906,7 +3912,7 @@ class RunManager:
                         await emit_status("sandbox_failed", detail=str(exc))
 
             # Resolve effective model + context_window for the DoneEvent. The
-            # actual cubepi.Provider construction happens inside _run_cubepi_path.
+            # actual cubeloop.Provider construction happens inside _run_cubeloop_path.
             # Stash the snapshot in extra_ref_holder so the subsequent
             # _build_agent_for_conversation call reuses it instead of loading
             # the same providers/credentials again (Fix-8). The route already
@@ -3996,7 +4002,7 @@ class RunManager:
             effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
-            final_status = await self._run_cubepi_path(
+            final_status = await self._run_cubeloop_path(
                 ctx=ctx,
                 run_id=run_id,
                 conversation_id=conversation_id,
@@ -4099,7 +4105,7 @@ class RunManager:
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             # Post-done bookkeeping: the stream is closed, so failures here
             # must not surface as SSE error events — log and move on. The
-            # search-index enqueue still runs after cubepi finished writing
+            # search-index enqueue still runs after cubeloop finished writing
             # history (that happened inside agent.prompt()); `done` never
             # depended on it.
             try:
@@ -4128,17 +4134,17 @@ class RunManager:
                 cached_snapshot=extra_ref_holder.get("llm_snapshot"),
             )
         except asyncio.CancelledError:
-            # Defense in depth: cubepi backfills tool_results for tool_calls
+            # Defense in depth: cubeloop backfills tool_results for tool_calls
             # left dangling by a cancel, but if that cleanup was itself cut
             # short the persisted thread would still have orphan tool_calls
             # and every later turn would 400. Repair here too — idempotent, so
-            # it's a no-op when cubepi already handled it.
+            # it's a no-op when cubeloop already handled it.
             await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except Exception as exc:
             logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
-            # Model/provider/context_window are fallbacks for non-cubepi
-            # exceptions. Cubepi typed errors already carry tokens_in etc.
+            # Model/provider/context_window are fallbacks for non-cubeloop
+            # exceptions. Cubeloop typed errors already carry tokens_in etc.
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
@@ -4179,7 +4185,7 @@ class RunManager:
                 )
         finally:
             # If we got here via cancel/exception, the success path's
-            # enqueue was skipped. Cubepi may still have written partial
+            # enqueue was skipped. Cubeloop may still have written partial
             # history (user message + any completed assistant/tool turns)
             # before the failure, so enqueue best-effort here. The job is
             # idempotent; the worker re-chunks whatever history exists.
@@ -4312,7 +4318,7 @@ class RunManager:
         claim_token: str,
         ctx: RunContext,
     ) -> None:
-        """Spawn-wrapper around :meth:`_run_cubepi_respond_path`.
+        """Spawn-wrapper around :meth:`_run_cubeloop_respond_path`.
 
         Mirrors :meth:`_execute_run` for the resume path. Reuses the
         original ``run_id`` (events stream into the same Redis key the SSE
@@ -4369,7 +4375,7 @@ class RunManager:
         }
         last_context_tokens: int = 0
         # Re-enqueue the search index in `finally` on cancel/exception when
-        # cubepi may have written partial history before the failure. The
+        # cubeloop may have written partial history before the failure. The
         # enqueue is idempotent (replace_for_conversation), so the flag is
         # only to skip a redundant enqueue on the happy path.
         search_index_enqueued = False
@@ -4441,7 +4447,7 @@ class RunManager:
         )
 
         # Declared here so the except block can read model/provider/context_window
-        # even when the exception is raised inside _run_cubepi_respond_path (a
+        # even when the exception is raised inside _run_cubeloop_respond_path (a
         # separate call frame — locals().get() would never see it).
         extra_ref_holder: dict[str, Any] = {}
         durable_final_status = "errored"
@@ -4502,7 +4508,7 @@ class RunManager:
                         await emit_status("sandbox_failed", detail=str(exc))
 
             # Stash snapshot in extra_ref_holder so _build_agent_for_conversation
-            # reuses it via _run_cubepi_respond_path (Fix-8).
+            # reuses it via _run_cubeloop_respond_path (Fix-8).
             from cubeplex.db.engine import async_session_maker
             from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset
             from cubeplex.llm.snapshot import load_llm_snapshot
@@ -4575,7 +4581,7 @@ class RunManager:
             effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
-            await self._run_cubepi_respond_path(
+            await self._run_cubeloop_respond_path(
                 ctx=ctx,
                 run_id=run_id,
                 conversation_id=conversation_id,
@@ -4601,7 +4607,7 @@ class RunManager:
             # Indexing is enqueued AFTER the resumed run finishes writing
             # history to the checkpointer — see _enqueue_search_index
             # docstring. The finally block re-enqueues on cancel/exception
-            # paths where cubepi may have written partial history before
+            # paths where cubeloop may have written partial history before
             # the failure.
             await _enqueue_search_index(
                 conversation_id,
@@ -4648,7 +4654,7 @@ class RunManager:
             # as completed and wipes pendingAsk / pendingConfirmMap, so the
             # follow-up HITL card disappears until a reload. See spec §6.
             #
-            # _run_cubepi_respond_path's CAS-guarded finalize already wrote
+            # _run_cubeloop_respond_path's CAS-guarded finalize already wrote
             # the terminal status; read it back rather than re-compute.
             final_meta = await get_run_meta(
                 self._redis,
@@ -4677,7 +4683,7 @@ class RunManager:
                     data=done_data,
                 ),
             )
-            # NOTE: no update_run_meta here — _run_cubepi_respond_path
+            # NOTE: no update_run_meta here — _run_cubeloop_respond_path
             # already wrote the terminal status via
             # finalize_run_meta_if_claim_matches (CAS-guarded). A naive
             # update_run_meta would race with whatever flow stole the slot
@@ -4702,8 +4708,8 @@ class RunManager:
             # applies; if we crashed before that, the stale-run sweeper
             # picks the row up. But do persist the error fields so the
             # run list and replay can show the reason.
-            # Model/provider/context_window are fallbacks for non-cubepi
-            # exceptions. Cubepi typed errors already carry tokens_in etc.
+            # Model/provider/context_window are fallbacks for non-cubeloop
+            # exceptions. Cubeloop typed errors already carry tokens_in etc.
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
@@ -4743,7 +4749,7 @@ class RunManager:
                 )
         finally:
             # Mirror the prompt-path safety net: cancel/exception bypassed
-            # the success-path enqueue, but cubepi may have written partial
+            # the success-path enqueue, but cubeloop may have written partial
             # history before the failure. Idempotent enqueue.
             if not search_index_enqueued:
                 with suppress(Exception):

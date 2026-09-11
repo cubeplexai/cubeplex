@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from cubepi.providers.base import TextContent, ToolResultMessage
+from cubeloop.providers.base import TextContent, ToolResultMessage
 
 
 def _result_payload(message: ToolResultMessage) -> dict[str, object] | None:

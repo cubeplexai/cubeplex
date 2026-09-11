@@ -17,7 +17,7 @@ _SNAPSHOT = Path(__file__).parent / "llm" / "catalog" / "data" / "flat_providers
 # here is an intentional drop, not a silent one.
 DELIBERATE_CUSTOM = {
     "vllm": "self-hosted OSS framework; model is deployment-specific (not catalog data), "
-    "openai-compatible so cubepi defaults suffice",
+    "openai-compatible so cubeloop defaults suffice",
 }
 
 

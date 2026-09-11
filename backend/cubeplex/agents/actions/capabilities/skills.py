@@ -64,7 +64,7 @@ def _env_vars(content: str) -> list[str]:
 class SkillDeps:
     """Run-scoped dependencies for the skills capability.
 
-    Constructed once at the start of a cubepi run when the catalog is
+    Constructed once at the start of a cubeloop run when the catalog is
     reachable; captured in the handler closures returned by
     build_skills_capability.
     """

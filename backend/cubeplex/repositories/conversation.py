@@ -9,7 +9,7 @@ columns are still persisted via ``OrgScopedMixin``.
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from cubepi.checkpointer.exceptions import (
+from cubeloop.checkpointer.exceptions import (
     RunNotCompletedError,
     ThreadAlreadyExistsError,
     ThreadNotFoundError,
@@ -36,11 +36,11 @@ class ForkRunNotCompletedError(Exception):
 
 
 class ForkNewThreadExistsError(Exception):
-    """The freshly-allocated destination id already exists in cubepi."""
+    """The freshly-allocated destination id already exists in cubeloop."""
 
 
 class ForkSourceMissingError(Exception):
-    """Source thread is absent from cubepi (drafted but never sent)."""
+    """Source thread is absent from cubeloop (drafted but never sent)."""
 
 
 class ConversationRepository(ScopedRepository[Conversation]):
@@ -297,16 +297,16 @@ class ConversationRepository(ScopedRepository[Conversation]):
     ) -> Conversation:
         """Fork a conversation after a completed run.
 
-        Delegates the message-history copy to cubepi's checkpointer
+        Delegates the message-history copy to cubeloop's checkpointer
         (``cp.fork`` handles the advisory lock, parent linkage, and the
         bulk INSERT … SELECT). Then inserts a fresh ``conversations`` row
         owned by ``self.user_id``, carrying over ``topic_id``, ``model_key``,
         and ``reasoning`` from the source.
 
-        Order matters: cubepi.fork() runs first so the destination
+        Order matters: cubeloop.fork() runs first so the destination
         ``cubepi_threads`` row (and its messages) exists before we publish
         a conversations row that points at it. If the row insert then
-        fails the orphan cubepi thread is bounded by request failure rate
+        fails the orphan cubeloop thread is bounded by request failure rate
         and reapable by a future GC job — far better than the inverse
         (a visible conversation pointing at zero messages).
         """

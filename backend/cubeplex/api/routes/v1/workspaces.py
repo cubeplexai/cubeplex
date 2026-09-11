@@ -51,7 +51,7 @@ async def list_my_workspaces(
         pairs.append((m.role, ws))
 
     # Aggregate max(Conversation.updated_at) per workspace — cubeplex has no
-    # Message table (history lives in cubepi PostgresCheckpointer), but
+    # Message table (history lives in cubeloop PostgresCheckpointer), but
     # ConversationRepository.update_timestamp() bumps updated_at on every
     # message round-trip, so this is an accurate "last activity" signal.
     activity_map: dict[str, datetime] = {}
@@ -355,7 +355,7 @@ async def delete_workspace(
         )
     )
     # cubepi_threads / cubepi_messages: thread_id == conversation_id.
-    # cubepi_messages cascades from cubepi_threads (ON DELETE CASCADE).
+    # cubepi_messages CASCADE-deletes with cubepi_threads (ON DELETE CASCADE).
     from sqlalchemy import text
 
     await session.execute(

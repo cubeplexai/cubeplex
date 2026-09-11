@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from cubepi.providers.capability import CapabilityDescriptor
+from cubeloop.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
-# The protocols cubeplex offers in its catalog. Mirrors cubepi's WireApi but
-# declared locally so the catalog does not import cubepi's (to-be-deleted)
+# The protocols cubeplex offers in its catalog. Mirrors cubeloop's WireApi but
+# declared locally so the catalog does not import cubeloop's (to-be-deleted)
 # catalog package. See spec §3 "WireApi decoupling".
 WireApi = Literal["anthropic-messages", "openai-completions", "openai-responses"]
 

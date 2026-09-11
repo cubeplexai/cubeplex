@@ -29,7 +29,7 @@ def upgrade() -> None:
     # schema change, so autogenerate cannot emit it. Required — the cubepi pin
     # bump raised EXPECTED_SCHEMA_VERSION to 2 and PostgresCheckpointer refuses
     # to start on a v1 database.
-    from cubepi.checkpointer.postgres.alembic_helpers import write_schema_version_op
+    from cubeloop.checkpointer.postgres.alembic_helpers import write_schema_version_op
 
     op.execute(write_schema_version_op())
 

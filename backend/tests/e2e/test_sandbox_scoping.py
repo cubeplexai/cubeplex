@@ -303,7 +303,7 @@ async def test_command_confirm_routes_through_hitl_channel(
             description="Push to origin",
         )
 
-    from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
+    from cubeloop.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
     class _Channel:
         def __init__(self, *, answer: Any = None, raises: Exception | None = None) -> None:

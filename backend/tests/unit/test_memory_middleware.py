@@ -5,7 +5,7 @@ Covers:
   are deterministic across calls.
 - transform_system_prompt: appends pinned memory; pass-through when empty.
 - transform_context: prepends rendered snapshot; pass-through without snapshot.
-- wire_input_to_cubepi_user_message: memory_snapshot kwarg stored in metadata.
+- wire_input_to_cubeloop_user_message: memory_snapshot kwarg stored in metadata.
 - Multi-turn: snapshots on different user messages render independently.
 """
 
@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
-from cubeplex.agents.convert import wire_input_to_cubepi_user_message
+from cubeplex.agents.convert import wire_input_to_cubeloop_user_message
 from cubeplex.middleware.memory import (
     MemoryMiddleware,
     _prepend_snapshot_to_user_msg,
@@ -94,7 +94,7 @@ def _user_msg(text: str, snapshot: dict[str, Any] | None = None) -> UserMessage:
 
 
 def _assistant_msg(text: str = "ok") -> AssistantMessage:
-    from cubepi.providers.base import Usage
+    from cubeloop.providers.base import Usage
 
     return AssistantMessage(
         content=[TextContent(text=text)],
@@ -584,7 +584,7 @@ async def test_compute_relevance_snapshot_rendered_text_is_stable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# wire_input_to_cubepi_user_message: memory_snapshot kwarg
+# wire_input_to_cubeloop_user_message: memory_snapshot kwarg
 # ---------------------------------------------------------------------------
 
 
@@ -594,18 +594,18 @@ def test_wire_input_stores_memory_snapshot_in_metadata() -> None:
         "memory_ids": ["mem-1"],
         "rendered_text": "<personal_memory>fact</personal_memory>",
     }
-    msg = wire_input_to_cubepi_user_message("hello", memory_snapshot=snap)
+    msg = wire_input_to_cubeloop_user_message("hello", memory_snapshot=snap)
     assert msg.metadata.get("memory_snapshot") == snap
 
 
 def test_wire_input_no_snapshot_key_when_none() -> None:
-    msg = wire_input_to_cubepi_user_message("hello")
+    msg = wire_input_to_cubeloop_user_message("hello")
     assert "memory_snapshot" not in msg.metadata
 
 
 def test_wire_input_snapshot_and_attachments_coexist() -> None:
     snap = {"captured_at": "t", "memory_ids": [], "rendered_text": "x"}
-    msg = wire_input_to_cubepi_user_message(
+    msg = wire_input_to_cubeloop_user_message(
         "hello",
         attachments=[{"path": "/tmp/a.txt", "kind": "text"}],
         memory_snapshot=snap,

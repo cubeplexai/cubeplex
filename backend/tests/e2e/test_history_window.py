@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
     ToolCall,

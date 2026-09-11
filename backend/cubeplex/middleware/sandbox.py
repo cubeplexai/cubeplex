@@ -1,10 +1,10 @@
 """SandboxMiddleware.
 
-Implements the cubepi ``Middleware`` protocol with two hooks:
+Implements the cubeloop ``Middleware`` protocol with two hooks:
 
 - ``tools``: exposes ``execute``, ``write``, ``edit``,
   ``read``, and (when a config loader is provided) ``sandbox_config``
-  as ``cubepi.AgentTool`` instances.
+  as ``cubeloop.AgentTool`` instances.
 - ``transform_system_prompt``: appends the sandbox capability section
   (SANDBOX_PROMPT_TEMPLATE) to the system prompt.
 
@@ -25,17 +25,17 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AgentContext,
     AgentTool,
     AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
 )
-from cubepi.hitl import HitlCancelled, HitlChannel, HitlTimedOut
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import TextContent
-from cubepi.types import StructuredValue
+from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
+from cubeloop.middleware.base import Middleware
+from cubeloop.providers.base import TextContent
+from cubeloop.types import StructuredValue
 from pydantic import BaseModel, Field, model_validator
 
 from cubeplex.parsers import ParseOptions
@@ -232,7 +232,7 @@ def _make_execute_tool(
     workspace_id: str | None = None,
     conversation_id: str | None = None,
 ) -> AgentTool[_ExecuteArgs]:
-    """Build the execute cubepi.AgentTool backed by a sandbox instance.
+    """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
     Command-policy rules (deny / confirm) are enforced one layer up, in
     ``SandboxMiddleware.before_tool_call`` — the tool body itself is a pure
@@ -296,7 +296,7 @@ def _make_execute_tool(
 
 
 def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
-    """Build the write_file cubepi.AgentTool backed by a sandbox instance."""
+    """Build the write_file cubeloop.AgentTool backed by a sandbox instance."""
 
     async def _write_file(
         tool_call_id: str,
@@ -461,7 +461,7 @@ def _first_changed_line(current: str, updated: str) -> int | None:
 
 
 def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
-    """Build the edit_file cubepi.AgentTool backed by a sandbox instance."""
+    """Build the edit_file cubeloop.AgentTool backed by a sandbox instance."""
 
     async def _edit_file(
         tool_call_id: str,
@@ -692,7 +692,7 @@ def _make_file_read_tool(
     sandbox: Sandbox,
     conversation_id: str | None,
 ) -> AgentTool[_FileReadArgs]:
-    """Build the file_read cubepi.AgentTool backed by a sandbox + (optional) conversation."""
+    """Build the file_read cubeloop.AgentTool backed by a sandbox + (optional) conversation."""
 
     async def _file_read(
         tool_call_id: str,
@@ -709,7 +709,7 @@ def _make_file_read_tool(
         del tool_call_id, signal, on_update
 
         # Surface FileNotFoundError / SandboxError as a structured ErrorOutput
-        # instead of letting them bubble into cubepi's generic tool-error
+        # instead of letting them bubble into cubeloop's generic tool-error
         # wrapper — that wrapper writes ``str(exc)`` into the tool result, and
         # ``str(FileNotFoundError(path))`` is literally the path, which the
         # model reads as "the file content is its own path".
@@ -735,7 +735,7 @@ def _make_file_read_tool(
             # Catch-all for transport errors (httpx.TransportError, timeouts)
             # and anything else the download / sniff / dedup layers can raise
             # outside the parser-registry's own try/except. Without this,
-            # cubepi's generic tool-error wrapper writes str(exc) into the
+            # cubeloop's generic tool-error wrapper writes str(exc) into the
             # ToolResult content — the same trap that FileNotFoundError fell
             # into. asyncio.CancelledError is BaseException, not Exception,
             # so user-cancel still propagates.
@@ -809,7 +809,7 @@ class SandboxMiddleware(Middleware):
 
     @property
     def tools(self) -> list[AgentTool[Any]]:
-        """Return the cubepi.AgentTool list for this middleware."""
+        """Return the cubeloop.AgentTool list for this middleware."""
         return list(self._tools)
 
     async def before_tool_call(

@@ -1,14 +1,14 @@
-"""CostMiddleware — cubepi port of CostMiddleware (M3.d.1).
+"""CostMiddleware — cubeloop port of CostMiddleware (M3.d.1).
 
 Records per-LLM-call billing events after each model response.
 
 Hook (per Spec B): ``after_model_response`` only.
 No request wrapping — the response is already available when the hook fires.
 
-Usage fields are read from ``response.usage`` (a ``cubepi.providers.base.Usage``
+Usage fields are read from ``response.usage`` (a ``cubeloop.providers.base.Usage``
 object with ``input_tokens``, ``output_tokens``, ``cache_read_tokens``,
 ``cache_write_tokens``).  Provider and model are read from ``response.provider_id``
-and ``response.model_id`` (populated by the cubepi LLM adapter).
+and ``response.model_id`` (populated by the cubeloop LLM adapter).
 
 Attribution fields:
     ``_org_id``, ``_workspace_id``, ``_user_id``, ``_conversation_id`` — billing scope
@@ -17,7 +17,7 @@ Attribution fields:
     ``_last_billing_id`` — updated after each write so child subagents can chain
 
 Subagent runs receive their own ``CostMiddleware`` instance from run_manager's
-cubepi SubagentMiddleware configuration.
+cubeloop SubagentMiddleware configuration.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from cubepi.agent.types import AgentContext
-from cubepi.middleware.base import Middleware, TurnAction
-from cubepi.providers.base import AssistantMessage
+from cubeloop.agent.types import AgentContext
+from cubeloop.middleware.base import Middleware, TurnAction
+from cubeloop.providers.base import AssistantMessage
 from loguru import logger
 
 from cubeplex.db.engine import async_session_maker
@@ -45,7 +45,7 @@ class CostMiddleware(Middleware):
     """Records one billing_events + billing_llm_events row per LLM call.
 
     Hooks:
-    - ``after_model_response``: fires after the cubepi Agent receives the
+    - ``after_model_response``: fires after the cubeloop Agent receives the
       AssistantMessage; reads usage fields and writes billing rows
       asynchronously (fire-and-forget task).  Returns ``None`` so the
       agent continues normally.
@@ -178,7 +178,7 @@ def _compute_cost_micro(
 
 
 def _extract_usage(response: AssistantMessage) -> dict[str, int]:
-    """Extract token counts from a cubepi AssistantMessage."""
+    """Extract token counts from a cubeloop AssistantMessage."""
     usage = response.usage
     if usage is None:
         return {

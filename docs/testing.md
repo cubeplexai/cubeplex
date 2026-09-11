@@ -35,7 +35,7 @@ A presence check is fine *as a step inside a real flow* (you click X, expect a c
 
 ## Backend e2e — disciplines
 
-- **Real services, not mocks, at internal boundaries.** Postgres, Redis, rustfs, the running FastAPI app are all real. Mock only at the OUTERMOST external boundary the test isn't about — opensandbox SDK, lark_oapi token endpoint, Tempo HTTP client, cubepi LLM provider when not testing the LLM path itself.
+- **Real services, not mocks, at internal boundaries.** Postgres, Redis, rustfs, the running FastAPI app are all real. Mock only at the OUTERMOST external boundary the test isn't about — opensandbox SDK, lark_oapi token endpoint, Tempo HTTP client, cubeloop LLM provider when not testing the LLM path itself.
 - **No fake-server E2E.** If the system genuinely can't be simulated (third-party SaaS, no test mode), drop down to a **unit test of the seam**, don't build a fake server.
 - **Skip honestly.** When external infra (e.g. opensandbox lacking pause API on a given backend) can't satisfy the test, `pytest.skip(reason="...")` with a *named* reason — never `xfail`, never silent. See `tests/e2e/test_sandbox_pause_resume.py` "G11" pattern.
 - **Real-LLM tests are tagged and stay off the PR path.**

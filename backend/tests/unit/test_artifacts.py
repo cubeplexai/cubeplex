@@ -6,8 +6,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.providers.base import TextContent
 
 from cubeplex.middleware.artifacts import ArtifactMiddleware, _SaveArtifactArgs
 

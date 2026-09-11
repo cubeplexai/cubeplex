@@ -17,7 +17,7 @@ _SPLIT_THRESHOLD = 2800
 def _active_stream_text(card_state: Any) -> str:
     """Text currently being streamed to Slack.
 
-    After HITL resolves, cubepi continues into ``post_hitl_content`` while
+    After HITL resolves, cubeloop continues into ``post_hitl_content`` while
     the pre-HITL answer stays in ``streaming_content``. Slack posts the
     follow-up as a *new* message under the buttons, so we stream only the
     post-HITL buffer (DingTalk concatenates; Slack/Discord reset the message).

@@ -1,13 +1,13 @@
 """Tests for the cubeplex error code mapper.
 
 Detection (regex patterns, status-code routing, the Volcano-opaque
-InvalidParameter heuristic) is tested upstream in cubepi. This file just
-tests that cubepi typed exceptions map onto the correct ``ErrorCode``.
+InvalidParameter heuristic) is tested upstream in cubeloop. This file just
+tests that cubeloop typed exceptions map onto the correct ``ErrorCode``.
 """
 
 from __future__ import annotations
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ContentFiltered,
     ContextLengthExceeded,
     ModelNotFound,
@@ -95,7 +95,7 @@ def test_unknown_provider_error_subclass_falls_back_to_bad_request() -> None:
     assert code is ErrorCode.provider_bad_request
 
 
-def test_non_cubepi_exception_falls_back_to_internal_error() -> None:
+def test_non_cubeloop_exception_falls_back_to_internal_error() -> None:
     code, params = classify_exception(RuntimeError("boom"), model="gpt-4o", provider="openai")
     assert code is ErrorCode.internal_error
     assert params == {"model": "gpt-4o", "provider": "openai"}

@@ -43,7 +43,7 @@ _VALID_IMAGE_KEY_RE = re.compile(r"^img_[A-Za-z0-9_-]+$")
 
 # Citation markers: ASCII [N], [N-M] and full-width 【N-M】. The ASCII
 # variant uses a negative lookahead so `[1](https://...)` markdown links
-# in cubepi output don't get treated as citation markers and rewritten
+# in cubeloop output don't get treated as citation markers and rewritten
 # into broken `[1](resolved_url)(https://...)` double-parens.
 _ASCII_CITATION_RE = re.compile(r"\[(\d+(?:-\d+)?)\](?!\()")
 _CN_CITATION_RE = re.compile(r"【(\d+(?:-\d+)?)】")
@@ -107,7 +107,7 @@ def optimize_markdown_style(
     *,
     citation_index: dict[str, tuple[str, str]] | None = None,
 ) -> str:
-    """Sanitize cubepi markdown for Feishu CardKit's markdown element.
+    """Sanitize cubeloop markdown for Feishu CardKit's markdown element.
 
     Demotes headings, spaces tables, strips invalid image refs, rewrites
     citation markers to inline links, and normalizes blockquotes so
@@ -220,7 +220,7 @@ def _summary_bash(args: dict[str, Any]) -> str:
 
 
 def _summary_execute(args: dict[str, Any]) -> str:
-    # cubepi's sandbox.execute tool takes `command` (shell) or `script` (script body).
+    # cubeloop's sandbox.execute tool takes `command` (shell) or `script` (script body).
     return _truncate(str(args.get("command") or args.get("script") or args.get("cmd", "")))
 
 
@@ -478,8 +478,8 @@ def _render_form_field(field: Any, *, index: int) -> list[dict[str, Any]]:
 def _render_ask_form(pending: PendingInput) -> dict[str, Any]:
     """CardKit form: collect every ask_user field, submit once.
 
-    form_value keys are the cubepi question keys, so the resume path can
-    pass the dict straight through as the cubepi answer.
+    form_value keys are the cubeloop question keys, so the resume path can
+    pass the dict straight through as the cubeloop answer.
     """
     form_elements: list[dict[str, Any]] = []
     for i, field in enumerate(pending.fields):
@@ -546,7 +546,7 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
         for label, value, btn_type in pending.choices:
             # The button TEXT carries the human-readable label so the user picks
             # by what the option means. The button VALUE carries the machine
-            # value (what cubepi expects in the answer dict). If we used the
+            # value (what cubeloop expects in the answer dict). If we used the
             # value for both, prompts where label/value diverge (e.g.
             # "Yes" / "yes") would render opaque tokens like "yes" / "no".
             value_payload: dict[str, Any] = {
@@ -593,7 +593,7 @@ def render(state: CardState) -> dict[str, Any]:
     not render an empty `tool_panel` slot.
 
     Order matches the chat reading flow ("what was done → final answer"):
-    tool_panel → streaming_content → artifacts → pending_input. cubepi
+    tool_panel → streaming_content → artifacts → pending_input. cubeloop
     folds ALL text deltas (intro + post-tool answer) into one
     streaming_content buffer, so placing the tool_panel ABOVE the markdown
     avoids the visual oddity of the model's final answer appearing before

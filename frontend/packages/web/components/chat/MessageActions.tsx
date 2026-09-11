@@ -29,7 +29,7 @@ interface MessageActionsProps {
  * "Fork conversation" — copies the message history through the end of this
  * message's run into a fresh conversation. Disabled (with a tooltip
  * explanation) when the action can't be performed:
- *  - no run_id on this message (synthetic / pre-cubepi-v3 row)
+ *  - no run_id on this message (synthetic / pre-cubeloop-v3 row)
  *  - the conversation is a group chat (server-side reject too)
  *
  * Parent positions this component (typically absolute, opacity-0 with

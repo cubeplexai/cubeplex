@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubepi.hitl import ScriptedChannel
+from cubeloop.hitl import ScriptedChannel
 
 from cubeplex.services.agent_config import (
     PERSONA_MAX_LENGTH,

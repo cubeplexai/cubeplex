@@ -1,6 +1,6 @@
-"""Paginated read access to a cubepi conversation's checkpoint history.
+"""Paginated read access to a cubeloop conversation's checkpoint history.
 
-cubepi's ``PostgresCheckpointer.load()`` returns the entire history with no
+cubeloop's ``PostgresCheckpointer.load()`` returns the entire history with no
 LIMIT — for long conversations the wire payload, msgpack/Pydantic decode,
 and JSON re-serialization are the dominant bootstrap cost.
 

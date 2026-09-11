@@ -584,7 +584,7 @@ async def delete_account(
     user_artifact_ids = select(art_tbl.c.id).where(art_tbl.c.conversation_id.in_(user_conv_ids))
 
     # Delete ConversationShare rows referencing the user's conversations, and
-    # delete cubepi checkpointer threads (thread_id == conversation_id) so chat
+    # delete cubeloop checkpointer threads (thread_id == conversation_id) so chat
     # history is removed with the account.
     from cubeplex.models.conversation_share import ConversationShare
 
@@ -599,7 +599,7 @@ async def delete_account(
         )
     )
     # cubepi_threads / cubepi_messages live outside SQLModel ORM — use raw SQL.
-    # cubepi_messages cascades from cubepi_threads (ON DELETE CASCADE).
+    # cubepi_messages CASCADE-deletes with cubepi_threads (ON DELETE CASCADE).
     await session.execute(
         text(
             "DELETE FROM cubepi_threads WHERE thread_id IN (SELECT id FROM conversations WHERE creator_user_id = :uid)"

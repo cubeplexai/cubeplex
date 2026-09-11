@@ -165,7 +165,7 @@ async def test_start_run_succeeds_when_no_pending(
     """Clean state → ``start_run`` returns a run_id and spawns a task.
 
     We stub ``_execute_run`` to a no-op so the test doesn't try to spin
-    up an actual cubepi agent, and cancel the resulting task before
+    up an actual cubeloop agent, and cancel the resulting task before
     exiting to avoid event-loop warnings.
     """
     cp = MagicMock()

@@ -1,11 +1,11 @@
 // frontend/packages/core/src/types/message.ts
 //
-// Messages mirror cubepi's wire shape (cubepi/providers/base.py:Message). The
+// Messages mirror cubeloop's wire shape (cubeloop/providers/base.py:Message). The
 // backend returns `m.model_dump(mode="json")` directly; no cubeplex-specific
 // conversion layer.
 //
 // cubeplex-specific data (attachments, memory snapshots, citations, subagent
-// payloads) lives inside `metadata` — cubepi treats metadata as opaque and
+// payloads) lives inside `metadata` — cubeloop treats metadata as opaque and
 // round-trips it through the checkpointer unchanged.
 import type { CitationData } from './citation'
 import type { ContentBlock } from './events'
@@ -34,7 +34,7 @@ export interface SubagentSummary {
 }
 
 export interface MessageAttachment {
-  // Persisted as `file_id` in cubepi UserMessage.metadata.attachments.
+  // Persisted as `file_id` in cubeloop UserMessage.metadata.attachments.
   file_id: string
   filename: string
   kind: 'image' | 'document' | 'other'
@@ -45,7 +45,7 @@ export interface MessageAttachment {
   download_url?: string | null
 }
 
-// Usage matches cubepi.providers.base.Usage.
+// Usage matches cubeloop.providers.base.Usage.
 export interface MessageUsage {
   input_tokens: number
   output_tokens: number
@@ -62,10 +62,10 @@ interface MessageBase {
   // have not yet been persisted (e.g. the optimistic user bubble before the
   // run claims it).
   seq?: number
-  timestamp?: number | null // epoch seconds (cubepi convention)
+  timestamp?: number | null // epoch seconds (cubeloop convention)
   // Identifies the agent run this message belongs to. User + assistant
   // messages produced within the same turn share a run_id. Null on
-  // very-old rows (pre-cubepi v3) and on framework-injected synthetic
+  // very-old rows (pre-cubeloop v3) and on framework-injected synthetic
   // messages that never enter a run. The forkConversation API uses this
   // as ``after_run_id``.
   run_id?: string | null
@@ -76,7 +76,7 @@ interface MessageBase {
     subagent_events?: SubagentSummary
     // Set on a steer user message committed mid-run; used for replay idempotency.
     steer_id?: string
-    // Framework-injected user-role message (cubepi synthetic_user_message):
+    // Framework-injected user-role message (cubeloop synthetic_user_message):
     // model-facing scaffolding like todo-guard nudges or goal continuations.
     // Never rendered as a user bubble. ``synthetic_source === 'compaction'``
     // is rendered as a timeline CompactionMarker (not a chat bubble).
@@ -113,13 +113,13 @@ export interface AssistantMessage extends MessageBase {
 }
 
 export interface ToolResultMessage extends MessageBase {
-  // Mirrors cubepi.ToolResultMessage.role (= "tool_result"). Not "tool".
+  // Mirrors cubeloop.ToolResultMessage.role (= "tool_result"). Not "tool".
   role: 'tool_result'
   tool_call_id: string
   tool_name: string
   content: ContentBlock[]
   is_error?: boolean
-  // cubepi.ToolResultMessage.details: middleware-attached payload (e.g. the
+  // cubeloop.ToolResultMessage.details: middleware-attached payload (e.g. the
   // raw SSE event array a subagent tool result carries). Shape is per-tool.
   details?: unknown
 }
@@ -191,7 +191,7 @@ export function getToolCalls(
  *
  *   - in-memory after live finalization: `metadata.subagent_events` already
  *     holds a normalized `SubagentSummary`
- *   - reloaded from cubepi: `details.subagent_events` holds the raw SSE event
+ *   - reloaded from cubeloop: `details.subagent_events` holds the raw SSE event
  *     list collected by `SubAgentMiddleware` — we replay it into a summary
  *
  * Returns null when neither shape is present.

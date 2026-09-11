@@ -116,7 +116,7 @@ async def process_one_queue_item(
             if link is not None:
                 effective_user_id = link.user_id
         # Resolve the sender's display name from the run's effective user so the
-        # group-chat SenderBadge + cubepi sender attribution fire for IM
+        # group-chat SenderBadge + cubeloop sender attribution fire for IM
         # messages, mirroring the in-app send path (display_name or email).
         from cubeplex.models.user import User
 

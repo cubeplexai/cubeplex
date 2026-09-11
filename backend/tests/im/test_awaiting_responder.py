@@ -201,7 +201,7 @@ async def test_tailer_registers_for_sandbox_confirm_request() -> None:
 
 @pytest.mark.asyncio
 async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
-    """When the cubepi event carries ``timeout_seconds``, the responder
+    """When the cubeloop event carries ``timeout_seconds``, the responder
     binding TTL must use it — otherwise a 30-minute HITL pause expires the
     binding after 10 minutes and a still-valid click surfaces "这不是发给你的".
     """

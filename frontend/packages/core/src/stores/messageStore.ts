@@ -1,6 +1,6 @@
 // frontend/packages/core/src/stores/messageStore.ts
 //
-// All persisted Message values mirror cubepi's pydantic dump shape — content is
+// All persisted Message values mirror cubeloop's pydantic dump shape — content is
 // always a list of typed blocks (text / thinking / tool_call), and cubeplex-
 // specific extras (attachments, memory snapshots, citations, subagent_events)
 // ride inside `metadata`. The store builds the same shape on the streaming
@@ -542,7 +542,7 @@ function nextMessageId(prefix: string): string {
 }
 
 /**
- * cubepi stores thinking timing as `started_at` in epoch seconds + `duration_ms`.
+ * cubeloop stores thinking timing as `started_at` in epoch seconds + `duration_ms`.
  * In-memory we normalize started_at to milliseconds so the renderer's
  * Date.now() math works without unit gymnastics. Idempotent: already-ms values
  * (anything > 1e12) pass through.
@@ -696,10 +696,10 @@ function buildPendingUserMessage(runId: string, content: string): UserMessageTyp
 
 /**
  * History returned by `/bootstrap` may not yet contain the active run's
- * user message if cubepi's checkpointer is briefly behind the Redis
+ * user message if cubeloop's checkpointer is briefly behind the Redis
  * stream — append a placeholder so the user's prompt renders without
  * waiting for the next poll. Anything else in `messages` reflects
- * cubepi's committed log; the SSE reattach is cursor'd past
+ * cubeloop's committed log; the SSE reattach is cursor'd past
  * `active_run.last_event_id` so the stream will not replay history,
  * which means there is nothing to trim from the tail.
  *
@@ -821,7 +821,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   }
 
   // SSE event name stays `reasoning` for backend protocol compatibility; we map
-  // it into a `thinking` block to match cubepi's ThinkingContent.
+  // it into a `thinking` block to match cubeloop's ThinkingContent.
   if (event.type === 'reasoning') {
     const e = event as ReasoningEvent
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
@@ -1325,7 +1325,7 @@ async function finalizeCompletedStream(
       // Reset the in-flight stream now that the content lives in messages.
       // Leaving streamAgents populated forces MessageList's lastAssistantId
       // skip to fire — which can hide a DIFFERENT history assistant if the
-      // resume turn's mainStream content arrives before cubepi commits the
+      // resume turn's mainStream content arrives before cubeloop commits the
       // resume assistant to the message log.
       streamAgents: {},
       toolStartedMap: {},
@@ -2542,7 +2542,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (!canSteer) return false
 
     // A sent-but-not-yet-injected steer is held in pendingSteers (rendered as a
-    // chip above the input box), NOT in the transcript. cubepi injects it into
+    // chip above the input box), NOT in the transcript. cubeloop injects it into
     // history at its next safe point and emits an injected_message SSE event,
     // at which point it gets committed into messages (handled elsewhere).
     // Streaming state is left untouched — the run keeps going. If the endpoint
@@ -2667,7 +2667,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   },
 
-  // Commit the in-flight assistant turn into history at the point cubepi
+  // Commit the in-flight assistant turn into history at the point cubeloop
   // injected the steer, then append the steer user message right after, reset
   // the streaming buckets so subsequent deltas form a fresh bubble, and drop the
   // matching pending entry. This keeps the live transcript ordering identical to

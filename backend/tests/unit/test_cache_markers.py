@@ -1,6 +1,6 @@
 """CubeplexCacheMarkerPolicy tests (M1.1)."""
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     Message,
     TextContent,

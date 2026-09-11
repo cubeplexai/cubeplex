@@ -1,11 +1,11 @@
-"""Streaming unwrap of cubepi's `deferred_tool_call` dispatcher.
+"""Streaming unwrap of cubeloop's `deferred_tool_call` dispatcher.
 
 The dispatcher carries the real tool call inside its `arguments` envelope:
 
     name=deferred_tool_call
     arguments={"tool_name": "<real>", "arguments": {...}}
 
-cubepi rewrites the call via `resolve_tool_call` before execution, so the
+cubeloop rewrites the call via `resolve_tool_call` before execution, so the
 `tool_result` event uses the real tool name. Without unwrap here, the
 streamed `tool_call_delta` / `tool_call` events would carry
 `deferred_tool_call` plus a wrapper-JSON delta — the frontend would render
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     StreamEvent,
     ToolCall,
@@ -391,8 +391,8 @@ def test_streaming_handles_escaped_quote_in_string_value() -> None:
 # ---------------------------------------------------------------------------
 # Persisted-message unwrap — /messages, /bootstrap, /shares display path
 #
-# cubepi's resolve_tool_call rewrites the ToolCall at execute time, but the
-# checkpointed AssistantMessage keeps the dispatcher block (cubepi never
+# cubeloop's resolve_tool_call rewrites the ToolCall at execute time, but the
+# checkpointed AssistantMessage keeps the dispatcher block (cubeloop never
 # mutates the persisted assistant message for prompt-cache reasons). Without
 # unwrap_deferred_in_message_dicts, reloads of completed conversations would
 # show `deferred_tool_call` cards while the live stream showed real names.
@@ -458,7 +458,7 @@ def test_unwrap_passes_through_user_and_tool_result_messages() -> None:
 
 def test_unwrap_preserves_malformed_wrapper_so_error_chain_stays() -> None:
     """A wrapper whose inner `tool_name` is missing or non-string passes
-    through unchanged. cubepi's resolver falls through to the dispatcher's
+    through unchanged. cubeloop's resolver falls through to the dispatcher's
     `_execute`, which yields an is_error AgentToolResult ("Unknown deferred
     tool: ..."); rewriting the assistant block here would hide that and
     leave the user with an inscrutable error against an invented name."""
@@ -480,7 +480,7 @@ def test_unwrap_preserves_malformed_wrapper_so_error_chain_stays() -> None:
 
 
 def test_unwrap_coerces_none_arguments_to_empty_dict() -> None:
-    """`"arguments": null` is cubepi's explicit no-arg path — resolver
+    """`"arguments": null` is cubeloop's explicit no-arg path — resolver
     coerces None to {} and dispatches normally. The display unwrap must
     mirror that or live and history will diverge from execution."""
     msg = {
@@ -501,7 +501,7 @@ def test_unwrap_coerces_none_arguments_to_empty_dict() -> None:
 
 def test_unwrap_coerces_missing_arguments_key_to_empty_dict() -> None:
     """When the wrapper omits the `arguments` key entirely, treat it as the
-    same no-arg case cubepi handles via `wrapper.get('arguments')` → None →
+    same no-arg case cubeloop handles via `wrapper.get('arguments')` → None →
     {}."""
     msg = {
         "role": "assistant",
@@ -520,7 +520,7 @@ def test_unwrap_coerces_missing_arguments_key_to_empty_dict() -> None:
 
 
 def test_unwrap_preserves_dispatcher_block_when_inner_args_is_list() -> None:
-    """Non-dict non-None inner arguments makes cubepi's resolver return None,
+    """Non-dict non-None inner arguments makes cubeloop's resolver return None,
     so the dispatcher's _execute runs and yields an error. The UI must show
     the dispatcher block (name + raw wrapper) — coercing to {} would surface
     a real-name card with empty args, hiding what actually broke."""
@@ -536,7 +536,7 @@ def test_unwrap_preserves_dispatcher_block_when_inner_args_is_list() -> None:
 
 def test_unwrap_preserves_dispatcher_block_when_inner_args_is_scalar() -> None:
     """Same as the list case but for a scalar (number / string) — anything
-    non-dict-non-None must keep the dispatcher form so cubepi's error
+    non-dict-non-None must keep the dispatcher form so cubeloop's error
     fallback chain stays visible."""
     block = {
         "type": "tool_call",
@@ -554,7 +554,7 @@ def test_unwrap_preserves_dispatcher_block_when_inner_args_is_scalar() -> None:
 
 def test_toolcall_end_with_none_inner_arguments_emits_real_name_empty_dict() -> None:
     """Same coercion semantics as the history dict path: inner arguments None
-    means real-name call with {} args, matching cubepi's resolver."""
+    means real-name call with {} args, matching cubeloop's resolver."""
     partial = _mk_assistant(
         tool_calls=[
             ToolCall(
@@ -571,7 +571,7 @@ def test_toolcall_end_with_none_inner_arguments_emits_real_name_empty_dict() -> 
 
 
 def test_toolcall_end_with_list_inner_arguments_keeps_dispatcher_form() -> None:
-    """If the model produced non-dict non-None inner args, cubepi will run
+    """If the model produced non-dict non-None inner args, cubeloop will run
     the dispatcher's _execute and emit an error result — keep the dispatcher
     block in the live SSE so the user sees the call name match the result."""
     wrapper = {"tool_name": "file_write", "arguments": ["bad"]}

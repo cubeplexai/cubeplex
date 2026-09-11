@@ -2,11 +2,11 @@
 
 Conversations created on or before 2026-05-14 stored their history in the
 LangGraph checkpointer (``checkpoints`` / ``checkpoint_blobs``). The cutover to
-cubepi's own ``cubepi_messages`` table did not migrate them, so those threads
+cubeloop's own ``cubepi_messages`` table did not migrate them, so those threads
 render as empty in the UI even though ``conversations.has_messages`` is true.
 
 This reads the newest ``messages`` blob per thread (the LangGraph reducer keeps
-the full list there), converts each LangChain message to its cubepi equivalent,
+the full list there), converts each LangChain message to its cubeloop equivalent,
 and writes ``cubepi_messages`` rows with ``seq`` starting at 1.
 
 Idempotent: a thread that already has ``cubepi_messages`` rows is skipped, so a
@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import msgpack
-from cubepi.providers.base import (
+from cubeloop.providers.base import (
     AssistantMessage,
     ImageContent,
     Message,
@@ -72,7 +72,7 @@ def _epoch(created_at: Any) -> float | None:
 
 
 def _text_blocks(content: Any) -> list[TextContent | ImageContent]:
-    """Normalize LangChain content (str or block list) to cubepi content."""
+    """Normalize LangChain content (str or block list) to cubeloop content."""
     if isinstance(content, str):
         return [TextContent(text=content)] if content else []
     if not isinstance(content, list):
@@ -105,8 +105,8 @@ def _usage(usage_metadata: Any) -> Usage | None:
     details = usage_metadata.get("input_token_details") or {}
     cache_read = int(details.get("cache_read") or 0)
     cache_write = int(details.get("cache_creation") or 0)
-    # LangChain reports input_tokens inclusive of cached tokens; cubepi keeps
-    # them disjoint (see cubepi providers/openai.py — it subtracts on the way in).
+    # LangChain reports input_tokens inclusive of cached tokens; cubeloop keeps
+    # them disjoint (see cubeloop providers/openai.py — it subtracts on the way in).
     total_input = int(usage_metadata.get("input_tokens") or 0)
     return Usage(
         input_tokens=max(total_input - cache_read - cache_write, 0),
@@ -165,7 +165,7 @@ def _assistant(kwargs: dict[str, Any]) -> AssistantMessage | None:
 
 
 def _convert(cls_name: str, kwargs: dict[str, Any]) -> Message | None:
-    """Map one LangChain message to its cubepi equivalent (None = drop)."""
+    """Map one LangChain message to its cubeloop equivalent (None = drop)."""
     meta = kwargs.get("response_metadata") or {}
     if cls_name == "HumanMessage":
         content = _text_blocks(kwargs.get("content"))
@@ -183,7 +183,7 @@ def _convert(cls_name: str, kwargs: dict[str, Any]) -> Message | None:
             is_error=kwargs.get("status") == "error",
             timestamp=_epoch(meta.get("created_at")),
         )
-    # SystemMessage has no cubepi history equivalent — the system prompt is
+    # SystemMessage has no cubeloop history equivalent — the system prompt is
     # rebuilt per run and never replayed from storage.
     return None
 

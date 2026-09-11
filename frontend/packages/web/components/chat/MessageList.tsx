@@ -261,7 +261,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   // Active run guard for the per-message Fork action — MessageActions
   // greys the button when the clicked message is part of the still-running
-  // turn (cubepi rejects ``cp.fork`` with run_not_completed until the
+  // turn (cubeloop rejects ``cp.fork`` with run_not_completed until the
   // run's ``completion_seq`` is stamped).
   const activeRunId = useMessageStore((s) => s.currentRunId)
   // `failoverEvents` is populated by the message store's SSE consumer
@@ -436,7 +436,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   }, [messages])
   const bannersBeforeHistoryId = mainStream ? null : lastHistoryAssistantId
 
-  // Per-run action row anchors: per cubepi semantics fork is run-granular
+  // Per-run action row anchors: per cubeloop semantics fork is run-granular
   // (``cp.fork`` takes ``after_run_id``, copies the whole run). A run may
   // produce multiple assistant bubbles (thinking → tool_use → final text)
   // all sharing one ``run_id`` — clicking fork on any of them would

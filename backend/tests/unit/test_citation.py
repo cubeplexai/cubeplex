@@ -7,13 +7,13 @@ import json
 from typing import Any
 
 import pytest
-from cubepi.agent.types import (
+from cubeloop.agent.types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentToolResult,
 )
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, Usage
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall, Usage
 
 from cubeplex.middleware.citation import CitationMiddleware, _extract_text_content
 from cubeplex.middleware.citations.config import CitationConfig
@@ -550,7 +550,7 @@ async def test_marker_header_excludes_source_type_and_chains_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_seed_from_messages_advances_past_existing_markers() -> None:
-    from cubepi.providers.base import ToolResultMessage
+    from cubeloop.providers.base import ToolResultMessage
 
     counter = CitationCounter(start=1)
     msgs = [
@@ -571,7 +571,7 @@ async def test_seed_from_messages_advances_past_existing_markers() -> None:
 
 @pytest.mark.asyncio
 async def test_seed_from_messages_noop_when_no_markers() -> None:
-    from cubepi.providers.base import ToolResultMessage
+    from cubeloop.providers.base import ToolResultMessage
 
     counter = CitationCounter(start=1)
     await counter.seed_from_messages(
@@ -589,7 +589,7 @@ async def test_seed_from_messages_noop_when_no_markers() -> None:
 @pytest.mark.asyncio
 async def test_seed_from_messages_does_not_regress_counter() -> None:
     """If counter is already ahead of historical max, leave it alone."""
-    from cubepi.providers.base import ToolResultMessage
+    from cubeloop.providers.base import ToolResultMessage
 
     counter = CitationCounter(start=20)
     await counter.seed_from_messages(
@@ -606,7 +606,7 @@ async def test_seed_from_messages_does_not_regress_counter() -> None:
 
 @pytest.mark.asyncio
 async def test_seed_from_messages_ignores_non_tool_result_messages() -> None:
-    from cubepi.providers.base import AssistantMessage, Usage
+    from cubeloop.providers.base import AssistantMessage, Usage
 
     counter = CitationCounter(start=1)
     # Assistant message with 【N-M】 in its own text must NOT advance the

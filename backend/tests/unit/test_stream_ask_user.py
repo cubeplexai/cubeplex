@@ -36,7 +36,7 @@ def _make_hitl_request(kind: str, question_id: str = "qid-1") -> MagicMock:
 
 
 def _make_hitl_event(req: MagicMock) -> MagicMock:
-    from cubepi.agent.types import HitlRequestEvent  # type: ignore[import-untyped]
+    from cubeloop.agent.types import HitlRequestEvent  # type: ignore[import-untyped]
 
     evt = MagicMock(spec=HitlRequestEvent)
     evt.__class__ = HitlRequestEvent
@@ -45,7 +45,7 @@ def _make_hitl_event(req: MagicMock) -> MagicMock:
 
 
 def _make_answer_event(answer: object, *, cancelled: bool = False) -> MagicMock:
-    from cubepi.agent.types import HitlAnswerEvent  # type: ignore[import-untyped]
+    from cubeloop.agent.types import HitlAnswerEvent  # type: ignore[import-untyped]
 
     evt = MagicMock(spec=HitlAnswerEvent)
     evt.__class__ = HitlAnswerEvent
@@ -89,7 +89,7 @@ def test_answer_dict_emits_ask_user_resolved() -> None:
 
 
 def test_approve_answer_emits_sandbox_confirm_resolved() -> None:
-    from cubepi.hitl import ApproveAnswer
+    from cubeloop.hitl import ApproveAnswer
 
     evt = _make_answer_event(ApproveAnswer(decision="approve", reason=None))
     out = convert_agent_event_to_sse(evt)

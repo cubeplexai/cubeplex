@@ -17,7 +17,7 @@ with the first user message. This service:
 
 The LLM call is dispatched as a single-turn request. When tracing is enabled,
 ``Tracer.oneshot`` records the provider call without introducing an agent loop;
-the untraced path uses ``cubepi.Provider.stream`` directly.
+the untraced path uses ``cubeloop.Provider.stream`` directly.
 """
 
 import logging
@@ -143,11 +143,11 @@ async def _generate_title(
     tracer: Any | None = None,
     trace_metadata: dict[str, str] | None = None,
 ) -> str:
-    """One-shot title generation via cubepi.Provider direct call.
+    """One-shot title generation via cubeloop.Provider direct call.
 
     No agent loop needed — title generation is a single-turn request.
     """
-    from cubepi.providers.base import ReasoningControl, StreamOptions, TextContent, UserMessage
+    from cubeloop.providers.base import ReasoningControl, StreamOptions, TextContent, UserMessage
 
     from cubeplex.llm.runtime_writeback import (
         schedule_runtime_status_writeback as _schedule_writeback,
@@ -155,7 +155,7 @@ async def _generate_title(
 
     snap = await load_llm_snapshot(session, org_id, encryption_backend)
     preset = resolve_task_preset(snap, "title")
-    # cache_policy_factory=None → cubepi's DefaultCacheMarkerPolicy. Title
+    # cache_policy_factory=None → cubeloop's DefaultCacheMarkerPolicy. Title
     # generation is a one-shot call with no prior conversation context, so
     # no cache breakpoints will be inserted regardless of the policy used.
     bound = build_chain_model(snap, preset)

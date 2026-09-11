@@ -4,7 +4,7 @@ The grant is already committed by the time discovery runs, so any
 exception escaping the wrapper would turn a successful save into a
 client-visible 500. ``MCPDiscoveryFailed`` and ``ValueError`` were
 already handled; this test guards the broader-Exception branch added
-after a cubepi error surfaced as ``save_failed`` while the row sat in
+after a cubeloop error surfaced as ``save_failed`` while the row sat in
 the DB, blocking retries on ``uq_mcp_credential_grant_org``.
 """
 
@@ -78,7 +78,7 @@ async def test_run_post_grant_discovery_swallows_unexpected_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _boom(**_kwargs: Any) -> None:
-        raise RuntimeError("cubepi exploded in an unexpected way")
+        raise RuntimeError("cubeloop exploded in an unexpected way")
 
     monkeypatch.setattr(mcp_discovery, "discover_tools_for_install", _boom)
 

@@ -28,7 +28,7 @@ is language-aware without shipping a vocab file.
 
 Not a substitute for provider ``usage`` fields (billing / compaction trigger).
 
-cubepi still owns ``approx_tokens(messages)`` for compaction relative sizing;
+cubeloop still owns ``approx_tokens(messages)`` for compaction relative sizing;
 call sites that only have a ``str`` / JSON blob should import from here.
 """
 

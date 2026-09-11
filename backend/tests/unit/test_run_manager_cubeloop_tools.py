@@ -8,7 +8,7 @@ import pytest
 _FAKE_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii")
 
 
-def test_run_manager_imports_with_cubepi_tools() -> None:
+def test_run_manager_imports_with_cubeloop_tools() -> None:
     """RunManager still imports after wiring."""
     from cubeplex.streams.run_manager import RunManager
 
@@ -31,7 +31,7 @@ def test_log_tool_start_ignores_other_events() -> None:
 
 
 def test_log_tool_start_accepts_start_event() -> None:
-    from cubepi.agent.types import ToolExecutionStartEvent
+    from cubeloop.agent.types import ToolExecutionStartEvent
 
     from cubeplex.streams.run_manager import _log_tool_start
 
@@ -43,17 +43,17 @@ def test_log_tool_start_accepts_start_event() -> None:
     _log_tool_start("run-1", evt)
 
 
-def test_run_cubepi_path_method_exists() -> None:
-    """The cubepi dispatch method is still on RunManager."""
+def test_run_cubeloop_path_method_exists() -> None:
+    """The cubeloop dispatch method is still on RunManager."""
     from cubeplex.streams.run_manager import RunManager
 
-    assert hasattr(RunManager, "_run_cubepi_path")
+    assert hasattr(RunManager, "_run_cubeloop_path")
 
 
 # ---------------------------------------------------------------------------
 # generate_image config-driven gating tests
 #
-# _run_cubepi_path is too integrated to call in isolation (requires DB
+# _run_cubeloop_path is too integrated to call in isolation (requires DB
 # sessions, factory, sandbox manager, etc.).  We test the config-driven
 # gating logic by:
 #   - Verifying make_generate_image_tool produces a valid AgentTool when
@@ -66,8 +66,8 @@ def test_run_cubepi_path_method_exists() -> None:
 
 def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> None:
     """make_generate_image_tool returns an AgentTool when sandbox + provider instance given."""
-    from cubepi.agent.types import AgentTool
-    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubeloop.agent.types import AgentTool
+    from cubeloop.providers.images.faux import FauxImagesProvider
 
     from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
@@ -90,7 +90,7 @@ def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> Non
 
 def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     """The if-sandbox-is-not-None guard prevents adding generate_image to _builtin_tools."""
-    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubeloop.providers.images.faux import FauxImagesProvider
 
     from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
@@ -133,7 +133,7 @@ def test_generate_image_tool_not_added_when_config_disabled(
     collected: list[object] = []
     fake_sandbox = MagicMock()
     if cfg.enabled and cfg.api_key:
-        from cubepi.providers.images.faux import FauxImagesProvider
+        from cubeloop.providers.images.faux import FauxImagesProvider
 
         from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
@@ -171,7 +171,7 @@ def test_generate_image_tool_not_added_when_api_key_absent(
     collected: list[object] = []
     fake_sandbox = MagicMock()
     if cfg.enabled and cfg.api_key:
-        from cubepi.providers.images.faux import FauxImagesProvider
+        from cubeloop.providers.images.faux import FauxImagesProvider
 
         from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
@@ -196,8 +196,8 @@ def test_generate_image_tool_added_when_config_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When image_generation.enabled=True + api_key set, tool is produced via config path."""
-    from cubepi.agent.types import AgentTool
-    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubeloop.agent.types import AgentTool
+    from cubeloop.providers.images.faux import FauxImagesProvider
 
     from cubeplex.llm.config import ImageGenerationConfig
     from cubeplex.tools.builtin.generate_image import make_generate_image_tool
@@ -212,7 +212,7 @@ def test_generate_image_tool_added_when_config_enabled(
     assert cfg.api_key
 
     # Monkeypatch OpenAIImagesProvider at its source module so the lazy import
-    # inside _run_cubepi_path picks up the fake (run_manager imports it lazily).
+    # inside _run_cubeloop_path picks up the fake (run_manager imports it lazily).
     faux_provider = FauxImagesProvider(provider_id="openai", png_b64=_FAKE_PNG)
 
     def _fake_openai_images_provider(
@@ -226,7 +226,7 @@ def test_generate_image_tool_added_when_config_enabled(
         return faux_provider
 
     monkeypatch.setattr(
-        "cubepi.providers.images.OpenAIImagesProvider",
+        "cubeloop.providers.images.OpenAIImagesProvider",
         _fake_openai_images_provider,
     )
 
@@ -259,7 +259,7 @@ def test_generate_image_tool_added_when_config_enabled(
 def test_create_scheduled_task_available_on_every_trigger() -> None:
     """Per user request: schedule creation works in IM threads and from
     inside scheduled fires (e.g. a daily task that reschedules itself)."""
-    from cubepi.agent.types import AgentTool
+    from cubeloop.agent.types import AgentTool
 
     from cubeplex.tools.builtin.create_scheduled_task import (
         make_create_scheduled_task_tool,
@@ -305,7 +305,7 @@ def test_create_trigger_included_when_interactive() -> None:
     """Interactive runs keep create_trigger available."""
     from unittest.mock import MagicMock
 
-    from cubepi.agent.types import AgentTool
+    from cubeloop.agent.types import AgentTool
 
     from cubeplex.tools.builtin.create_trigger import make_create_trigger_tool
 

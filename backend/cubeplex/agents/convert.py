@@ -1,8 +1,8 @@
-"""cubeplex request DTO → cubepi.UserMessage builder.
+"""cubeplex request DTO → cubeloop.UserMessage builder.
 
-The API response side returns cubepi's native message shape directly
+The API response side returns cubeloop's native message shape directly
 (``Message.model_dump(mode="json")``) — there is no cubeplex-specific wire
-format. This module only handles the request-body → cubepi conversion,
+format. This module only handles the request-body → cubeloop conversion,
 which has a meaningfully different shape (text + attachment ids) from
 the persisted message.
 """
@@ -11,19 +11,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from cubepi.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import TextContent, UserMessage
 
 
-def wire_input_to_cubepi_user_message(
+def wire_input_to_cubeloop_user_message(
     text: str,
     *,
     attachments: list[dict[str, Any]] | None = None,
     memory_snapshot: dict[str, Any] | None = None,
 ) -> UserMessage:
-    """Build a cubepi.UserMessage from an API-shaped user input.
+    """Build a cubeloop.UserMessage from an API-shaped user input.
 
     Attachments are stored in metadata for M3's AttachmentMiddleware port
-    to render later. M1 doesn't render them — the bare cubepi path sends
+    to render later. M1 doesn't render them — the bare cubeloop path sends
     only text.
 
     memory_snapshot (M3.b.1): when provided, the pre-computed relevance-

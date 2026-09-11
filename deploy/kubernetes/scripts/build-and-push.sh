@@ -29,7 +29,7 @@
 #   NPM_REGISTRY        npm registry, e.g.
 #                       https://registry.npmmirror.com
 #   GITHUB_MIRROR       prefix to substitute for https://github.com/
-#                       in cubepi's git+url. e.g.
+#                       in cubeloop's git+url. e.g.
 #                       https://githubfast.com/
 set -euo pipefail
 

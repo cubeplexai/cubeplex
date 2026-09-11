@@ -886,9 +886,9 @@ wheels = [
 ]
 
 [[package]]
-name = "cubepi"
-version = "0.13.5"
-source = { git = "https://github.com/cubeplexai/cubepi.git?rev=af38ff772a1c5f7c2129727a103d11624613b248#af38ff772a1c5f7c2129727a103d11624613b248" }
+name = "cubeloop"
+version = "0.14.1"
+source = { git = "https://github.com/cubeplexai/cubeloop.git?rev=v0.14.1#bdf88a08855b1bf3626eaaccc371f965d8b62906" }
 dependencies = [
     { name = "anthropic" },
     { name = "openai" },
@@ -927,7 +927,7 @@ dependencies = [
     { name = "click" },
     { name = "croniter" },
     { name = "cryptography" },
-    { name = "cubepi", extra = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"] },
+    { name = "cubeloop", extra = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"] },
     { name = "dingtalk-stream" },
     { name = "discord-py" },
     { name = "dynaconf" },
@@ -999,7 +999,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "cubepi", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubepi.git?rev=af38ff772a1c5f7c2129727a103d11624613b248" },
+    { name = "cubeloop", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubeloop.git?rev=v0.14.1" },
     { name = "dingtalk-stream", specifier = ">=0.24.3" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "dynaconf", specifier = ">=3.2.11" },

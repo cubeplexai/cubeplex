@@ -1,7 +1,7 @@
 """``RunManager.cancel_paused_run`` — the cancel-on-paused branch.
 
 Covers the three exceptional outcomes from the claim/load steps plus the
-happy path. The transient agent build and the cubepi ``trace`` /
+happy path. The transient agent build and the cubeloop ``trace`` /
 ``tracing_context`` calls are stubbed so we focus on:
 
 1. ``ResumeNoPending`` when the DB pending is missing.

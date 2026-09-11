@@ -1,8 +1,8 @@
-"""Error taxonomy + cubepi-typed-error mapper for the cubeplex SSE/UI layer.
+"""Error taxonomy + cubeloop-typed-error mapper for the cubeplex SSE/UI layer.
 
 Classification (regex patterns, status-code routing, the Volcano-opaque
-InvalidParameter heuristic) lives upstream in ``cubepi.errors``. This
-module just maps cubepi's typed exceptions onto the user-facing
+InvalidParameter heuristic) lives upstream in ``cubeloop.errors``. This
+module just maps cubeloop's typed exceptions onto the user-facing
 ``ErrorCode`` taxonomy and supplies an English fallback string for
 non-Web clients.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from cubepi.errors import (
+from cubeloop.errors import (
     ContentFiltered,
     ContextLengthExceeded,
     ModelNotFound,
@@ -70,8 +70,8 @@ def classify_exception(
 ) -> tuple[ErrorCode, dict[str, Any]]:
     """Map an exception to ``(ErrorCode, params)``.
 
-    Detection lives upstream in ``cubepi.errors``; this is a flat isinstance
-    dispatch over the typed subclasses. Non-cubepi exceptions classify as
+    Detection lives upstream in ``cubeloop.errors``; this is a flat isinstance
+    dispatch over the typed subclasses. Non-cubeloop exceptions classify as
     ``internal_error``. keyword args are used only as fallback when the
     exception doesn't carry them.
     """

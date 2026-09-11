@@ -53,7 +53,7 @@ def upgrade() -> None:
     # ### end Alembic commands ###
 
     # Create child partitions and write schema version row
-    from cubepi.checkpointer.postgres.alembic_helpers import (
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         create_message_partitions_op,
         write_schema_version_op,
     )

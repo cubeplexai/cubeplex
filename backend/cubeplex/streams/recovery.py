@@ -45,7 +45,7 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
     if not recovered:
         return 0
 
-    await _stamp_cubepi_runs(recovered)
+    await _stamp_cubeloop_runs(recovered)
     await _fail_stranded_scheduled_runs([rid for _, rid in recovered])
     await _repair_stranded_threads([cid for cid, _ in recovered])
 
@@ -53,7 +53,7 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
     return len(recovered)
 
 
-async def _stamp_cubepi_runs(pairs: list[tuple[str, str]]) -> None:
+async def _stamp_cubeloop_runs(pairs: list[tuple[str, str]]) -> None:
     """Mark stranded cubepi_runs rows as completed so history is consistent."""
     from cubeplex.agents.checkpointer import shared_checkpointer
 

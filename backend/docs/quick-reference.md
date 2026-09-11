@@ -225,12 +225,12 @@ To add a new business table: define a `PREFIX_<NAME>` constant in
 ## Runtime Flow
 
 `POST /api/v1/ws/{workspace_id}/conversations/{id}/messages`
-→ `RunManager._run_cubepi_path` builds a `cubepi.Agent` via
+→ `RunManager._run_cubeloop_path` builds a `cubeloop.Agent` via
 `create_cubeplex_agent`
 → subscribes to the agent's `AgentEvent` listener channel
 → translates each event via
 `cubeplex/agents/stream.py::convert_agent_event_to_sse`
-→ `run_manager.cubepi_dict_to_agent_event` emits typed SSE events:
+→ `run_manager.cubeloop_dict_to_agent_event` emits typed SSE events:
 `text_delta`, `reasoning`, `tool_call`, `tool_result`, `usage`, `error`,
 `done`.
 

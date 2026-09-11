@@ -64,8 +64,10 @@ async def test_list_returns_503_when_tempo_unset(admin_client, monkeypatch) -> N
 
 async def test_tag_values_whitelist(admin_client, fake_tempo) -> None:
     client, _ws = admin_client
-    ok = await client.get("/api/v1/admin/traces/tag-values?tag=cubepi.metadata.workspace_id")
+    ok = await client.get("/api/v1/admin/traces/tag-values?tag=cubeloop.metadata.workspace_id")
     assert ok.status_code == 200
+    dropped = await client.get("/api/v1/admin/traces/tag-values?tag=cubepi.metadata.workspace_id")
+    assert dropped.status_code == 400
     bad = await client.get("/api/v1/admin/traces/tag-values?tag=secret.bearer")
     assert bad.status_code == 400
 
@@ -173,7 +175,7 @@ async def test_detail_rejects_foreign_org_in_child_span(
             kind=SpanKind.AGENT,
             start_time=datetime(2026, 6, 11, tzinfo=UTC),
             duration_ms=1000,
-            raw_attributes={"cubepi.metadata.org_id": "org-MATCH"},
+            raw_attributes={"cubeloop.metadata.org_id": "org-MATCH"},
             children=[
                 SpanNode(
                     span_id="s2",
@@ -182,7 +184,7 @@ async def test_detail_rejects_foreign_org_in_child_span(
                     kind=SpanKind.CHAT,
                     start_time=datetime(2026, 6, 11, tzinfo=UTC),
                     duration_ms=500,
-                    raw_attributes={"cubepi.metadata.org_id": "org-EVIL"},  # foreign
+                    raw_attributes={"cubeloop.metadata.org_id": "org-EVIL"},  # foreign
                     children=[],
                 ),
             ],

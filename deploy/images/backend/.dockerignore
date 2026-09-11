@@ -11,6 +11,7 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/tests/
+backend/cubeloop-traces/
 backend/cubepi-traces/
 backend/logs/
 backend/skills_cache/

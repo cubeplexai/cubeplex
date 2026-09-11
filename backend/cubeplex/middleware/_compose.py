@@ -1,6 +1,6 @@
 """Chained ``after_tool_call`` composer.
 
-Cubepi's :func:`cubepi.middleware.base.compose_middleware` runs every
+Cubeloop's :func:`cubeloop.middleware.base.compose_middleware` runs every
 middleware's ``after_tool_call`` against the same untouched ``ctx`` and
 returns only the **last** non-``None`` :class:`AfterToolCallResult`.
 That means a middleware that rewrites ``content`` is silently discarded
@@ -10,8 +10,8 @@ the moment a later middleware (e.g. ``TimestampMiddleware`` returning
 This composer threads each middleware's return through to the next one
 via a derived ``ctx``: ``content`` takes the most recent non-``None``
 override, ``details`` dicts merge (later wins on key conflicts).  Pass
-the result into :class:`cubepi.Agent` via the ``after_tool_call=``
-override so it replaces the buggy cubepi default for this stack.
+the result into :class:`cubeloop.Agent` via the ``after_tool_call=``
+override so it replaces the buggy cubeloop default for this stack.
 """
 
 from __future__ import annotations
@@ -21,14 +21,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentToolResult
-from cubepi.middleware.base import Middleware
+from cubeloop.agent.types import AfterToolCallContext, AfterToolCallResult, AgentToolResult
+from cubeloop.middleware.base import Middleware
 
 
 def _merge_details(existing: Any, incoming: Any) -> Any:
     """Merge two ``details`` payloads — later dict wins per-key.
 
-    Non-dict ``incoming`` simply replaces ``existing`` (mirrors cubepi's
+    Non-dict ``incoming`` simply replaces ``existing`` (mirrors cubeloop's
     ``_finalize`` semantics).  ``incoming is None`` leaves ``existing``
     in place so middlewares that contribute nothing don't blank out
     earlier contributions.

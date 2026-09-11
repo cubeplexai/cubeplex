@@ -174,7 +174,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
     db_session_maker: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Discovery service should fetch tools via cubepi and persist
+    """Discovery service should fetch tools via cubeloop and persist
     the result into install.tools_cache / .discovery_status."""
     client, _ws_id = admin_client
     suffix = secrets.token_hex(4)
@@ -190,7 +190,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
     assert ws_resp.status_code == 200, ws_resp.text
     org_id = ws_resp.json()[0]["org_id"]
 
-    # Stub the cubepi helper used inside discover_tools_for_install.
+    # Stub the cubeloop helper used inside discover_tools_for_install.
     async def fake_load(*args: object, **kwargs: object) -> object:
         return SimpleNamespace(
             tools=[

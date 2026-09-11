@@ -20,7 +20,7 @@ TOOL_CALCULATOR = "calculator"
 TOOL_TODO = "write_todos"
 # MemoryMiddleware itself is prompt-injection only (transform_system_prompt /
 # transform_context). The memory *tools* live separately in
-# cubeplex/tools/builtin/memory.py and are registered into every cubepi run's
+# cubeplex/tools/builtin/memory.py and are registered into every cubeloop run's
 # tool list via run_manager.py (lines 594-600). Three tools are exposed:
 TOOL_MEMORY_SAVE = "memory_save"
 TOOL_MEMORY_SEARCH = "memory_search"
@@ -80,7 +80,7 @@ def _flatten_content(evt: dict[str, Any]) -> str:
 
     The SSE envelope nests content under 'data.content' (or 'data.result'
     for tool_result). Handles structured list-of-blocks shapes returned by
-    some providers. Mirrors the helper in test_cubepi_path_tools.py.
+    some providers. Mirrors the helper in test_cubeloop_path_tools.py.
     """
 
     def _from_value(c: object) -> str | None:
@@ -124,14 +124,14 @@ def assistant_text(events: list[dict[str, Any]]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HTTP helpers — mirror test_cubepi_path_tools.py exactly
+# HTTP helpers — mirror test_cubeloop_path_tools.py exactly
 # ---------------------------------------------------------------------------
 
 
 async def create_conversation(client: httpx.AsyncClient, ws_id: str, title: str) -> str:
     """Create a conversation and return its id.
 
-    Body shape mirrors test_cubepi_path_tools.py: title is a query param,
+    Body shape mirrors test_cubeloop_path_tools.py: title is a query param,
     not a JSON body field (matches POST /api/v1/ws/{ws_id}/conversations).
     """
     resp = await client.post(
@@ -150,7 +150,7 @@ async def post_turn(
 ) -> list[dict[str, Any]]:
     """POST a user message and collect all SSE events.
 
-    Mirrors the streaming pattern in test_cubepi_path_tools.py:
+    Mirrors the streaming pattern in test_cubeloop_path_tools.py:
       collect_sse_events(client, url, json_data={"content": ...})
     which opens client.stream("POST", url, json=...) and parses
     each "data: ..." line as JSON.

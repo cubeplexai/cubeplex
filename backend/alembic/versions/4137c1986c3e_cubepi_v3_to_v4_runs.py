@@ -41,7 +41,7 @@ def upgrade() -> None:
     #   * ix_cubepi_runs_thread_seq on (thread_id, completion_seq) (IF NOT EXISTS)
     #   * 64 child partitions cubepi_runs_p00..p63 (no IF NOT EXISTS on
     #     partitions; partial-failure re-runs require manual cleanup)
-    from cubepi.checkpointer.postgres.alembic_helpers import (
+    from cubeloop.checkpointer.postgres.alembic_helpers import (
         upgrade_v3_to_v4_op,
         write_schema_version_op,
     )

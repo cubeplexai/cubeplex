@@ -47,7 +47,7 @@ that skill remains relevant, resolving the currently enabled version.
 
 Relevance memory is captured per turn as an immutable `MemorySnapshot` and
 stored in the `UserMessage.metadata["memory_snapshot"]` slot of the
-persisted message. (cubepi's checkpointer treats message metadata as
+persisted message. (cubeloop's checkpointer treats message metadata as
 immutable per row.)
 
 On replay, `MemoryMiddleware` reads each historical user message's
@@ -70,20 +70,20 @@ exactly across subsequent requests.
 
 ## Provider Adapters Own Cache Markers
 
-cubepi's provider adapters know about provider-specific cache mechanics;
+cubeloop's provider adapters know about provider-specific cache mechanics;
 CubePlex supplies a `CacheMarkerPolicy` via
 `cubeplex/llm/cache_markers.py::CubePlexCacheMarkerPolicy`.
 
-- **Anthropic adapter** (`cubepi.providers.anthropic`): insert
+- **Anthropic adapter** (`cubeloop.providers.anthropic`): insert
   `cache_control: ephemeral` on the system-prompt boundary and on the
   last completed assistant message (max 4 breakpoints; see Anthropic
   docs). The policy is forwarded via
-  `LLMFactory.build_cubepi_provider(..., cache_policy=...)`.
-- **OpenAI / OpenAI-compatible** (`cubepi.providers.openai`): no markers
+  `LLMFactory.build_cubeloop_provider(..., cache_policy=...)`.
+- **OpenAI / OpenAI-compatible** (`cubeloop.providers.openai`): no markers
   — auto-cache hits whenever the byte prefix is stable.
 
 Middleware produces a provider-neutral logical request structure;
-**inserting `cache_control` anywhere upstream of the cubepi adapter is a
+**inserting `cache_control` anywhere upstream of the cubeloop adapter is a
 layering violation.**
 
 ---

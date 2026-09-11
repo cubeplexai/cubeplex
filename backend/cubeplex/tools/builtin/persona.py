@@ -1,4 +1,4 @@
-"""Workspace persona tools as cubepi.AgentTool instances.
+"""Workspace persona tools as cubeloop.AgentTool instances.
 
 ``persona_get`` / ``persona_update`` read and write ``AgentConfig.system_prompt``
 — the same field Settings → Agent Persona edits. Overwriting a non-empty
@@ -11,12 +11,12 @@ import asyncio
 import json
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.hitl.binding import HitlBinding
-from cubepi.hitl.channel import CheckpointedChannel, HitlChannel
-from cubepi.hitl.exceptions import HitlCancelled, HitlTimedOut
-from cubepi.hitl.types import Option, Question
-from cubepi.providers.base import TextContent
+from cubeloop.agent.types import AgentTool, AgentToolResult
+from cubeloop.hitl.binding import HitlBinding
+from cubeloop.hitl.channel import CheckpointedChannel, HitlChannel
+from cubeloop.hitl.exceptions import HitlCancelled, HitlTimedOut
+from cubeloop.hitl.types import Option, Question
+from cubeloop.providers.base import TextContent
 from pydantic import BaseModel, Field
 
 from cubeplex.db.engine import async_session_maker

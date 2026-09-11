@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from cubepi.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
+from cubeloop.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
 from cubeplex.middleware.sandbox import SandboxMiddleware
 

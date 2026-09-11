@@ -1,4 +1,4 @@
-"""Pure builders — emit cubepi Provider / BoundModel objects from a snapshot.
+"""Pure builders — emit cubeloop Provider / BoundModel objects from a snapshot.
 
 No DB. No cubeplex.config. The chain wrapper in build_chain_model() is
 added in Task A7 (chain length 1 only for PR 1) and Task B1 (length >1).
@@ -11,7 +11,7 @@ from cubeplex.llm.resolver import parse_model_ref
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 
 if TYPE_CHECKING:
-    from cubepi.providers.anthropic import CacheMarkerPolicy
+    from cubeloop.providers.anthropic import CacheMarkerPolicy
 
 
 OnFailoverCb = Callable[[Any, Any, BaseException | str], Awaitable[None] | None]
@@ -24,12 +24,12 @@ def build_provider(
     *,
     cache_policy: "CacheMarkerPolicy | None" = None,
 ) -> Any:
-    """Build a cubepi Provider for snap.providers[slug] based on its api type."""
+    """Build a cubeloop Provider for snap.providers[slug] based on its api type."""
     cfg = snap.providers.get(slug)
     if cfg is None:
         raise ValueError(f"provider slug {slug!r} not in snapshot")
 
-    from cubepi.providers.capability import CapabilityDescriptor
+    from cubeloop.providers.capability import CapabilityDescriptor
 
     cap_dict = cfg.capability or {}
     capability = CapabilityDescriptor.model_validate(cap_dict) if cap_dict else None
@@ -41,7 +41,7 @@ def build_provider(
 
     api = cfg.api
     if api == "anthropic-messages":
-        from cubepi.providers.anthropic import AnthropicProvider
+        from cubeloop.providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(
             provider_id=slug,
@@ -52,7 +52,7 @@ def build_provider(
             model_capability_overrides=overrides,
         )
     if api == "openai-completions":
-        from cubepi.providers.openai import OpenAIProvider
+        from cubeloop.providers.openai import OpenAIProvider
 
         return OpenAIProvider(
             provider_id=slug,
@@ -64,7 +64,7 @@ def build_provider(
             model_capability_overrides=overrides,
         )
     if api == "openai-responses":
-        from cubepi.providers.openai_responses import OpenAIResponsesProvider
+        from cubeloop.providers.openai_responses import OpenAIResponsesProvider
 
         return OpenAIResponsesProvider(
             provider_id=slug,
@@ -74,7 +74,7 @@ def build_provider(
             model_capability_overrides=overrides,
         )
 
-    raise ValueError(f"unsupported api for cubepi provider: {api!r}")
+    raise ValueError(f"unsupported api for cubeloop provider: {api!r}")
 
 
 def build_bound_model(
@@ -83,7 +83,7 @@ def build_bound_model(
     *,
     cache_policy: "CacheMarkerPolicy | None" = None,
 ) -> Any:
-    """Build a cubepi BoundModel for `ref`, binding model metadata."""
+    """Build a cubeloop BoundModel for `ref`, binding model metadata."""
     slug, model_id = parse_model_ref(ref)
     cfg = snap.providers.get(slug)
     if cfg is None:
@@ -118,7 +118,7 @@ def build_chain_model(
         policy = cache_policy_factory(slug) if cache_policy_factory else None
         return build_bound_model(snap, ref, cache_policy=policy)
 
-    from cubepi.providers.fallback import FallbackBoundModel
+    from cubeloop.providers.fallback import FallbackBoundModel
 
     bounds = []
     for ref in preset.chain:

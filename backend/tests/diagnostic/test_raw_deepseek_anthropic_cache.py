@@ -1,16 +1,16 @@
 """Phase 1a — Raw HTTP cache validation for DeepSeek (Anthropic-compatible API).
 
-This test bypasses cubeplex / cubepi / langchain entirely. It sends two identical
+This test bypasses cubeplex / cubeloop / langchain entirely. It sends two identical
 prompts directly to the DeepSeek Anthropic-compatible endpoint using the official
 `anthropic` SDK, then verifies that the second request reports
 `cache_read_input_tokens > 0`.
 
 Interpretation:
     PASS  → DeepSeek supports prompt cache for this request shape at raw API level.
-            Cache misses inside cubepi-runtime are a request-shape / adapter issue
+            Cache misses inside cubeloop-runtime are a request-shape / adapter issue
             — fixable at the cubeplex adapter layer.
     FAIL  → DeepSeek does NOT cache even at raw API level → provider limitation,
-            unrelated to cubepi migration.
+            unrelated to cubeloop migration.
     SKIP  → CUBEPLEX_LLM__PROVIDERS__DEEPSEEK__API_KEY env var not set (safe in CI).
 """
 
