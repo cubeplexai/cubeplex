@@ -74,7 +74,7 @@
     "jsdom": "^30.0.1",
     "react": "19.2.8",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "peerDependencies": {
     "react": "19.2.8"
