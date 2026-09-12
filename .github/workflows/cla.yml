@@ -1,0 +1,150 @@
+name: Contributor License Agreement
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  checks: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  cla:
+    name: CLA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check contributor agreements
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const signingPhrase =
+              'I have read and agree to the CubePlex Contributor License Agreement';
+            const marker = '<!-- cubeplex-cla -->';
+            const event = context.eventName;
+
+            if (event === 'issue_comment') {
+              if (!context.payload.issue.pull_request) {
+                core.info('Issue comment is not on a pull request.');
+                return;
+              }
+              if (context.payload.comment.body.trim() !== signingPhrase) {
+                core.info('Comment is not a CLA acceptance comment.');
+                return;
+              }
+            }
+
+            const pullRequestNumber =
+              context.payload.pull_request?.number ?? context.payload.issue.number;
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullRequestNumber,
+            });
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullRequestNumber,
+                per_page: 100,
+              },
+            );
+            const commits = await github.paginate(
+              github.rest.pulls.listCommits,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullRequestNumber,
+                per_page: 100,
+              },
+            );
+
+            const authors = new Map();
+            for (const commit of commits) {
+              const login = commit.author?.login ?? commit.committer?.login;
+              const isBot = login?.endsWith('[bot]') || login === 'github-actions';
+              if (login && !isBot) {
+                authors.set(login, login);
+              }
+            }
+            if (authors.size === 0) {
+              authors.set(pullRequest.user.login, pullRequest.user.login);
+            }
+
+            const signedBy = new Set(
+              comments
+                .filter((comment) => comment.body.trim() === signingPhrase)
+                .map((comment) => comment.user.login),
+            );
+            const unsigned = [...authors.keys()].filter((login) => !signedBy.has(login));
+            const botLogin = 'github-actions[bot]';
+            const existing = comments.find(
+              (comment) => comment.user.login === botLogin && comment.body.includes(marker),
+            );
+
+            const publishCheck = async (conclusion, summary) => {
+              await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'CLA',
+                head_sha: pullRequest.head.sha,
+                status: 'completed',
+                conclusion,
+                details_url: pullRequest.html_url,
+                output: {
+                  title: summary,
+                  summary,
+                },
+              });
+            };
+
+            let body;
+            if (unsigned.length > 0) {
+              body = `${marker}\nThank you for contributing to CubePlex. The following commit author(s) must read [CLA.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${pullRequest.base.ref}/CLA.md) and post this exact comment on the pull request:\n\n\`\`\`text\n${signingPhrase}\n\`\`\`\n\nStill needed: ${unsigned.map((login) => `@${login}`).join(', ')}`;
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullRequestNumber,
+                  body,
+                });
+              }
+              await publishCheck(
+                'failure',
+                'Not all human commit authors have signed the CLA.',
+              );
+              core.setFailed('Not all human commit authors have signed the CLA.');
+              return;
+            }
+
+            body = `${marker}\n✅ All human commit authors have signed the CubePlex Contributor License Agreement.`;
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullRequestNumber,
+                body,
+              });
+            }
+            await publishCheck(
+              'success',
+              'All human commit authors have signed the CubePlex Contributor License Agreement.',
+            );

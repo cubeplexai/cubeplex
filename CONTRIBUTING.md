@@ -2,6 +2,27 @@
 
 Thanks for your interest! This doc covers how to set up your local environment so commits and pushes pass CI on the first try.
 
+## Contributor License Agreement
+
+Before a pull request can be merged, every human author of a commit in the
+pull request must accept the [CubePlex Individual Contributor License
+Agreement](CLA.md). The CLA check will explain which authors still need to
+sign. To sign, post this exact comment on the pull request:
+
+```text
+I have read and agree to the CubePlex Contributor License Agreement
+```
+
+The check runs again when the comment is posted. Contributions made on behalf
+of an employer or another legal entity require a Corporate CLA; contact the
+maintainers before submitting that contribution. Bots and automated commits
+are allowlisted by the check.
+
+The agreement keeps copyright ownership with the contributor while granting
+CubePlex the rights needed to distribute community code under the CubePlex
+Community License and code under the applicable Enterprise terms in
+`backend/ee/`.
+
 ## Prerequisites
 
 - Python 3.12+
