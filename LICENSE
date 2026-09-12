@@ -1,3 +1,78 @@
+CubePlex Community License
+
+Copyright (c) 2026 CubePlex Inc.
+
+This software is licensed subject to the following terms:
+
+1. Community Components and Commercial Use
+
+Except for the Enterprise components described in Section 3 and third-party
+materials separately licensed, the software is governed by the Base Terms below,
+subject to the additional conditions in this document.
+
+You may self-host, use, modify, and distribute the community software for personal
+or commercial purposes, including providing paid deployment, customization,
+maintenance, support, and hosting services, provided you comply with this license.
+
+2. Branding
+
+Unless expressly authorized in writing by CubePlex Inc., you must not remove,
+replace, modify, hide, or obscure the CubePlex logos or copyright notices in the
+frontend.
+
+CubePlex logos must remain in their original branding locations and must not be
+displayed smaller than the default dimensions supplied with the applicable
+release. In particular, the main interface logo must remain in the upper-left
+branding area and remain visible during normal use. The mobile and
+collapsed-navigation presentations supplied with that release are permitted.
+
+Displaying a logo or attribution only on an About, Settings, Legal, or
+documentation page does not satisfy these requirements.
+
+These conditions apply to interfaces using or derived from code in
+frontend/packages/web/, including modified, compiled, and embedded versions.
+Moving or renaming that code does not remove these obligations.
+
+CubePlex Inc. permits use of the supplied CubePlex marks solely as necessary to
+comply with these requirements. This permission does not imply endorsement of
+your modifications, products, or services.
+
+3. Enterprise Components
+
+Except for third-party materials separately licensed, all code and resources
+located within any directory named exactly ee anywhere in this repository,
+including its subdirectories, are Enterprise components. These components are
+excluded from the community license and governed by the Enterprise license
+supplied in the applicable ee directory.
+
+Copies, modifications, and compiled forms of Enterprise components remain subject
+to that Enterprise license, regardless of whether they are moved, renamed, or
+distributed outside an ee directory.
+
+Public availability of their source code does not grant unrestricted usage
+rights. Production use requires a valid commercial authorization as specified in
+the applicable Enterprise license. Any development or evaluation permissions are
+governed by that license.
+
+4. Redistribution and Precedence
+
+Redistributions must include this complete license and all applicable copyright
+and third-party license notices. You must not remove these conditions or
+represent the covered software as available without them.
+
+The conditions above form an integral part of this license and prevail over any
+conflicting provisions in the Apache License, Version 2.0, reproduced below. The
+Apache License provisions do not constitute a separate or alternative license
+grant.
+
+Third-party materials remain governed by their respective licenses. This license
+does not revoke rights previously granted under other valid licenses.
+
+Base Terms
+
+Except as otherwise provided above, the terms and conditions of the Apache
+License, Version 2.0, reproduced below are incorporated into and apply as part of
+this license.
 
                                  Apache License
                            Version 2.0, January 2004
@@ -200,4 +275,3 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-
