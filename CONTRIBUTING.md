@@ -21,7 +21,9 @@ are allowlisted by the check.
 The agreement keeps copyright ownership with the contributor while granting
 CubePlex the rights needed to distribute community code under the CubePlex
 Community License and code under the applicable Enterprise terms in
-`backend/ee/`.
+any directory named exactly `ee`. Copies, modifications, and compiled forms of
+those Enterprise components remain covered even if they are moved outside an
+`ee` directory.
 
 ## Prerequisites
 

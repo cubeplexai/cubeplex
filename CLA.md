@@ -24,7 +24,9 @@ This license includes the right to distribute a Contribution under the
 license applicable to the part of the Project where it is incorporated. This
 includes the CubePlex Community License for community components and the
 CubePlex Enterprise license or another commercial license for code in
-`backend/ee/`, subject to the terms of those licenses.
+any directory named exactly `ee`, subject to the terms of the applicable
+license. Copies, modifications, and compiled forms of those Enterprise
+components remain covered even if they are moved outside an `ee` directory.
 
 You retain ownership of your Contributions and may use them elsewhere, subject
 to any rights of third parties and any obligations you have to your employer.
