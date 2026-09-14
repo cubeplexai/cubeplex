@@ -38,8 +38,10 @@ Execution continues to use a plain async loop. This design adds no graph executo
 - Run: One logical user request, potentially spanning multiple HITL pauses and resumes with the same run_id.
 - Execution attempt: One worker invocation of prompt or respond for a run. Each invocation gets a new attempt_id for correlation. It does not replace Redis claim_token or confer authorization.
 - Turn: The existing CubeLoop boundary around a model response and its associated tool processing. Existing TurnStart/TurnEnd semantics remain unchanged.
-- Step: The resolved view of a logical model request. Same-model transport retries reuse step_id; model fallback creates a new step_id.
+- TurnExecutionContext: The resolved request and tool-execution bindings used within a Turn. It is context data, not a separate execution entity or lifecycle.
 - ExecutionSession: An Agent-owned execution lifecycle object that can drive sequential attempts. It is not a persistent cross-worker session.
+
+A Run contains Turns; an execution attempt identifies a worker invocation, not another sampling boundary. A Turn may include transport retries or model fallback before producing its response. These do not create a separate Step entity, step_id, or additional TurnStart/TurnEnd events.
 
 CubeLoop owns in-memory execution state, checkpoint writes, and tool-result pairing. CubePlex owns distributed admission, claim fencing, authorization, Redis projections, and business completion callbacks. Session does not repeat the host's distributed claim operation.
 
@@ -72,7 +74,7 @@ No checkpoint tables are added. Existing completed_at retains its run-history co
 | Current attempt state | Input or event | Result |
 |---|---|---|
 | idle | execute | running; overlapping execute returns busy rather than silently queuing another execution |
-| running | request_cancel | cancelling; prevent new model/tool steps from starting |
+| running | request_cancel | cancelling; prevent new model requests or tool calls from starting |
 | running | Durable HITL and detach | Commit pending state and existing results, then suspend |
 | running | Model finishes with no pending input | Check tool pairing and persistence, then complete |
 | running/cancelling | Fatal provider/tool error | failed; ordinary tool business errors can still be returned to the model |
@@ -88,7 +90,7 @@ If checkpointing succeeds but Redis publication fails, retain durable facts and 
 
 ## 6. Event and input ordering
 
-Reuse existing CubeLoop AgentEvent payloads within an execution envelope containing run_id, attempt_id, monotonically increasing attempt-local seq, and optional turn_id/step_id/tool_call_id. Correlation fields do not enter model messages or the cache prefix. Existing text, tool, and HITL payloads remain intact.
+Reuse existing CubeLoop AgentEvent payloads within an execution envelope containing run_id, attempt_id, monotonically increasing attempt-local seq, and optional turn_id/tool_call_id. Provider retries and fallback are distinguished by tracing spans, not a new execution identity in this envelope. Correlation fields do not enter model messages or the cache prefix. Existing text, tool, and HITL payloads remain intact.
 
 Add two public lifecycle notifications: InputCommitted and ExecutionFinished. InputCommitted is emitted only after the corresponding UserMessage checkpoint append succeeds. Sessions without a checkpointer report an in-memory commit with durability=memory. ExecutionFinished has one producer in the shared lifecycle; hosts must not interpret ordinary AgentEndEvent as durable success.
 
@@ -98,17 +100,19 @@ Resume ordering remains: completed sibling tool results → resumed HITL tool re
 
 Separate required persistence/control consumers from best-effort observers. Required-consumer failure makes the attempt report failure; observer failure must not change the execution result. A single sequencer assigns event seq for parallel tool completions. Use a bounded queue with backpressure instead of dropping results or input receipts. Default capacity is 256 events; text deltas may be coalesced while preserving order. The host must attach the consumer before execute.
 
-## 7. Request-level StepContext
+## 7. TurnExecutionContext
 
-Preserve middleware order. After transform_context, transform_system_prompt, and convert_to_llm finish, capture a read-only StepContext for the logical request. Provider-specific encoding and cache markers remain provider-adapter responsibilities.
+Preserve middleware order. After transform_context, transform_system_prompt, and convert_to_llm finish, capture a TurnExecutionContext with read-only request views and retained tool-execution bindings. Provider-specific encoding and cache markers remain provider-adapter responsibilities.
 
-Fields include step_id, run_id, attempt_id, model identity and reasoning configuration, system prompt, message views, ordered tool descriptions, and step-local routing bindings. An optional host policy_revision is for auditing only. Freeze content and schemas without deep-copying sockets, model clients, or tool executors.
+Fields include turn_id, run_id, attempt_id, model identity and reasoning configuration, system prompt, message views, ordered tool descriptions, and routing bindings. An optional host policy_revision is for auditing only. Freeze content and schemas without deep-copying sockets, model clients, or tool executors.
 
-Deferred tool discovery within a step uses controlled registry extension to append bindings. Resolved calls retain their concrete binding; the next step captures the expanded catalog. Reject same-name replacement. Freezing must preserve existing expand/dispatch behavior.
+Same-model transport retries reuse the captured context. Model fallback captures a new context with the fallback model's resolved configuration under the same turn_id and attempt_id; it does not mutate the previous context. Each tool call retains the concrete context and binding that produced it, rather than looking up the latest context by turn_id. Context replacement does not start or end a Turn; existing loop boundaries remain authoritative.
 
-The snapshot keeps advertised and invoked tool bindings consistent; it does not freeze authorization. CubePlex still checks current authorization and sandbox policy before executing side effects. Revoked permissions cannot be bypassed through an old snapshot, and new permissions do not automatically expand an existing step's tools.
+Deferred tool discovery within a Turn uses controlled context-local registry extension to append bindings. Resolved calls retain their concrete binding; the next Turn captures the expanded catalog. Reject same-name replacement. Freezing must preserve existing expand/dispatch behavior.
 
-Read-only views should share immutable messages rather than copy the entire history at each step. Nested schemas and metadata require defensive freezing. Traces record identifiers and summaries by default, without adding credentials or full prompts. This phase does not persist full StepContext or promise byte-identical restoration of every configuration after restart. Existing historical memory_snapshot reconstruction guarantees remain required.
+The context keeps advertised and invoked tool bindings consistent; it does not freeze authorization. CubePlex still checks current authorization and sandbox policy before executing side effects. Revoked permissions cannot be bypassed through an old context, and new permissions do not automatically expand its tools.
+
+Read-only views should share immutable messages rather than copy the entire history on each capture. Nested schemas and metadata require defensive freezing. Traces record identifiers and summaries by default, without adding credentials or full prompts. This phase does not persist full TurnExecutionContext or promise byte-identical restoration of every configuration after restart. Existing historical memory_snapshot reconstruction guarantees remain required.
 
 ## 8. CubePlex migration
 
@@ -122,7 +126,7 @@ Upgrade sequence: publish the single CubeLoop implementation → pin the new Cub
 
 ## 9. Deferred work and exclusions
 
-Child execution identity, cancellation, and result delivery form a separate follow-up phase in Plan 06. Existing subagent live events, tool-sharing restrictions, and model selection must remain intact. Cross-process durable mailboxes, arbitrary workflow replay, a new ThreadStore, persisted full StepContext, capability-based tool scheduler replacement, and a generic permission engine are outside the core migration.
+Child execution identity, cancellation, and result delivery form a separate follow-up phase in Plan 06. Existing subagent live events, tool-sharing restrictions, and model selection must remain intact. Cross-process durable mailboxes, arbitrary workflow replay, a new ThreadStore, persisted full TurnExecutionContext, capability-based tool scheduler replacement, and a generic permission engine are outside the core migration.
 
 The default Session must not import Redis, FastAPI, or CubePlex. Lightweight callers can keep using Agent. CubeLoop's existing optional Postgres checkpointer remains available.
 
@@ -146,6 +150,6 @@ Each plan names files, interfaces, tests, and exit criteria. Implementation uses
 - [Plan 01: Contracts and regression baseline](../plans/2026-09-13-runtime-session-01-contracts.md)
 - [Plan 02: Execution lifecycle](../plans/2026-09-13-runtime-session-02-lifecycle.md)
 - [Plan 03: Input, HITL, and event commit ordering](../plans/2026-09-13-runtime-session-03-input-events.md)
-- [Plan 04: Request snapshots](../plans/2026-09-13-runtime-session-04-step-context.md)
+- [Plan 04: Turn execution context](../plans/2026-09-13-runtime-session-04-turn-execution-context.md)
 - [Plan 05: CubePlex integration and cutover](../plans/2026-09-13-runtime-session-05-cubeplex-adapter.md)
 - [Plan 06: Subagent lifecycle](../plans/2026-09-13-runtime-session-06-subagents.md)

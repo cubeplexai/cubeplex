@@ -11,7 +11,7 @@
 
 Files: Inspect CubeLoop `cubeloop/agent/_outcome.py`, `agent/agent.py`, `agent/loop.py`, and `agent/types.py`; add `tests/agent/test_execution_contract.py`. Update the layering description in CubePlex `backend/docs/agent-system-design.md`.
 
-Interfaces: Define Thread/Run/attempt/Turn/Step. Record Agent.prompt/respond/resume/abort_pending return values, exceptions, and checkpoint ordering, and map them to ExecutionResult. Private outcomes are not business statuses.
+Interfaces: Define Thread/Run/attempt/Turn and distinguish TurnExecutionContext from execution identities. A Run contains Turns; retries and fallback remain within the current Turn, with no separate Step lifecycle or step_id. Record Agent.prompt/respond/resume/abort_pending return values, exceptions, and checkpoint ordering, and map them to ExecutionResult. Private outcomes are not business statuses.
 
 Core logic: Distinguish AgentEnd, attempt completion, logical run completion, and SSE Done. Preserve the distinction between cancel-as-answer and hard cancellation. Establish how completion markers interact with failures; do not infer success from the final text.
 
