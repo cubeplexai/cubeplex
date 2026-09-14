@@ -357,7 +357,7 @@ mcp:
 | `mcp.icons.fetch_remote` | `true` | Set **both** icon flags `false` on air-gapped deploys; catalog brand icons still render from bundled assets. |
 | `mcp.outbound_policy` | `public_and_allowlist` | Controls backend requests made for MCP connectors. `public_and_allowlist` permits public targets and targets in the explicit allowlists; `public_only`, `allowlist_only`, `disabled`, and `unrestricted` are also available. |
 | `mcp.allowed_schemes` | `[https]` | Allowed URL schemes for MCP connector requests. Keep the default unless a trusted deployment needs plain HTTP. |
-| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | Explicit internal MCP destinations permitted by `public_and_allowlist` or `allowlist_only`. |
+| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | Explicit internal MCP destinations permitted by `public_and_allowlist` or `allowlist_only`. `allowed_cidrs` accepts IPv4 and IPv6 CIDR notation, such as `10.20.0.0/16`, `10.20.1.4/32`, or `fd00:1234::/64`; use `allowed_hosts` for DNS names. |
 
 Connectors themselves are managed in the DB-backed catalog, not here.
 

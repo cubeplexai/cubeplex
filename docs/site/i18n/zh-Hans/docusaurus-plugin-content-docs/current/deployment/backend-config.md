@@ -339,7 +339,7 @@ mcp:
 | `mcp.icons.fetch_remote` | `true` | 离线部署把两个图标开关都设 `false`；目录品牌图标仍可从内置资源渲染。 |
 | `mcp.outbound_policy` | `public_and_allowlist` | 控制 MCP 连接器触发的后端出站请求。该默认值允许公网目标及显式 allowlist 中的目标；还可选 `public_only`、`allowlist_only`、`disabled`、`unrestricted`。 |
 | `mcp.allowed_schemes` | `[https]` | MCP 连接器请求允许的 URL scheme。除非可信部署确有明文 HTTP 需求，否则保持默认值。 |
-| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | `public_and_allowlist` 或 `allowlist_only` 下可显式放行的内部 MCP 目标。 |
+| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | `public_and_allowlist` 或 `allowlist_only` 下可显式放行的内部 MCP 目标。`allowed_cidrs` 接受 IPv4 和 IPv6 CIDR 格式，例如 `10.20.0.0/16`、`10.20.1.4/32`、`fd00:1234::/64`；DNS 名称使用 `allowed_hosts`。 |
 
 连接器本身在 DB 目录里管理，不在这里。
 
