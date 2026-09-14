@@ -2,18 +2,18 @@
 
 Spec: [docs/dev/specs/2026-09-13-tempo-deploy-design.md](../specs/2026-09-13-tempo-deploy-design.md)
 
-**Goal:** Default Helm and Compose installs run Grafana Tempo 2.8.3 and
-auto-wire the existing cubeloop OTLP write path and admin trace viewer
-query path.
+**Goal:** Default Helm and Compose installs run Grafana Tempo 3.0.3
+(monolithic `-target=all`, no Kafka) and auto-wire the existing cubeloop
+OTLP write path and admin trace viewer query path.
 
-**Architecture:** One single-binary Tempo with a local filesystem backend.
+**Architecture:** One Tempo process with a local filesystem backend.
 The backend talks OTLP HTTP to `:4318` and TraceQL to `:3200`. The chart
 injects those URLs into the backend ConfigMap when `tempo.enabled` (default
 true); Compose sets the same via `CUBEPLEX_TRACING__*` env. Tempo stays
-ClusterIP / unpublished — no Ingress, no Grafana, no collector.
+ClusterIP / unpublished — no Ingress, no Grafana, no collector, no Kafka.
 
 **Tech stack:** Helm templates (same `infra-*.yaml` pattern as Redis /
-Docling), Docker Compose, Grafana Tempo 2.8.3 distroless image, existing
+Docling), Docker Compose, Grafana Tempo 3.0.3 distroless image, existing
 backend tracing config (no Python/TS changes).
 
 ---
@@ -23,7 +23,7 @@ backend tracing config (no Python/TS changes).
 **Files:**
 
 - `deploy/kubernetes/charts/cubeplex/values.yaml` — new `tempo:` block
-  (enabled true, image `grafana/tempo:2.8.3`, retention `168h`,
+  (enabled true, image `grafana/tempo:3.0.3`, retention `168h`,
   `recordContent: false`, 10Gi PVC, resources as spec).
 - `deploy/kubernetes/charts/cubeplex/templates/_helpers.tpl` —
   `cubeplex.tempo.host` → `{{ .Release.Name }}-tempo`.
@@ -57,9 +57,12 @@ backend tracing config (no Python/TS changes).
   the chart-owned block. When Tempo is off, do not emit a chart `tracing:`
   key at all.
 - Distroless image: no `command` shell, no exec probes. Args are
-  `["-config.file=/etc/tempo.yaml"]` (ENTRYPOINT is `/tempo`).
+  `["-target=all", "-config.file=/etc/tempo.yaml"]` (ENTRYPOINT is
+  `/tempo`). A 2.x-shaped config with `ingester:` / `compactor:` will
+  crash-loop (`field compactor not found`); the ConfigMap must match the
+  spec's 3.0 monolithic YAML.
 - PVC permissions: Tempo runs as uid 10001; without `fsGroup` the WAL
-  directory is not writable and the pod crash-loops.
+  and live-store directories are not writable and the pod crash-loops.
 
 **Tests:**
 
@@ -93,9 +96,9 @@ not in that path today. Run as `pytest deploy/kubernetes/charts/cubeplex/tests/t
 - `deploy/docker-compose/config/tempo.yaml` — same single-binary config as
   the Helm ConfigMap (retention 168h, local WAL/blocks).
 - `deploy/docker-compose/compose.yaml` — `tempo` service (image
-  `grafana/tempo:2.8.3`, volume `tempo-data`, mount config at
-  `/etc/tempo.yaml`, command `-config.file=/etc/tempo.yaml`). No
-  healthcheck (distroless). Do not publish 3200/4318 unless
+  `grafana/tempo:3.0.3`, volume `tempo-data`, mount config at
+  `/etc/tempo.yaml`, command `-target=all -config.file=/etc/tempo.yaml`).
+  No healthcheck (distroless). Do not publish 3200/4318 unless
   `TEMPO_HTTP_PORT` is set. Backend `environment` gains the four
   `CUBEPLEX_TRACING__*` vars from the spec. Backend does not
   `depends_on: tempo` as a readiness gate.
@@ -170,7 +173,7 @@ stay stubs.
 | Auto-wire backend tracing URLs when enabled | 1 |
 | BYO when `tempo.enabled: false` | 1 |
 | No Ingress path | 1 |
-| Pin Tempo 2.8.3, local backend, 168h retention | 1, 2 |
+| Pin Tempo 3.0.3, local backend, 168h retention, no Kafka | 1, 2 |
 | Compose service + env auto-wire | 2 |
 | Unpublished query port by default | 2 |
 | Operator docs (en + zh) | 3 |
@@ -179,4 +182,4 @@ stay stubs.
 ## Not in this plan
 
 Prometheus `/metrics` (next spec). Changing cubeloop tracer construction.
-Tempo 2.10 / Kafka. Live cluster e2e in CI.
+Tempo microservices / Kafka. Live cluster e2e in CI.

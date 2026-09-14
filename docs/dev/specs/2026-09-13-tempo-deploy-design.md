@@ -53,34 +53,57 @@ Rejected: heavy, duplicates the admin trace viewer, and pulls metrics/logs
 into this change. Grafana is useful later; it is not required to close the
 existing hole.
 
-### 3. Bundle Tempo only, OTLP straight to Tempo, auto-wire backend
+### 3. Bundle Tempo 2.8 / 2.10
+
+2.8.x is EOL (patch window ended 2026-03-10). 2.10.x is the last 2.x
+line and is still maintained, but 2.x → 3.x is a one-way architecture
+cutover (ingesters/compactor gone, no downgrade). CubePlex has no
+bundled Tempo in production yet, so shipping 2.x means every install
+pays that migration later.
+
+Rejected.
+
+### 4. Bundle Tempo 3.x monolithic, OTLP straight to Tempo, auto-wire backend
 **(selected)**
 
-Ship a single-binary Tempo with a local filesystem backend. Backend writes
-OTLP HTTP to Tempo `:4318` and queries `:3200`. No otel-collector (Tempo
-already receives OTLP). No Grafana. Helm `tempo.enabled` and Compose
-include the service the same way Docling is optional infra — except Tempo
-defaults on because it is small and the admin viewer needs it.
+Ship Grafana Tempo **3.0.3** as a single process (`-target=all`) with a
+local filesystem backend. Backend writes OTLP HTTP to Tempo `:4318` and
+queries `:3200`. No otel-collector. No Grafana. No Kafka.
+
+Tempo 3.0 Kafka is **microservices-only**. Monolithic mode pushes spans
+in-process to the live-store; Grafana's own single-binary compose example
+runs `grafana/tempo:3.0.0` with `-target=all` and a local backend.
+
+Helm `tempo.enabled` and Compose include the service the same way Docling
+is optional infra — except Tempo defaults on because it is small and the
+admin viewer needs it.
 
 ## Design
 
 ### What gets deployed
 
-One Tempo process, Grafana's official `grafana/tempo` image, **pinned to
-2.8.3**.
+One Tempo process, official `grafana/tempo:3.0.3`. Command:
 
-Do not use Tempo 2.10+. Upstream 2.10 single-binary requires a
-Kafka-compatible write path (Redpanda in their example). That is not
-acceptable for the Compose/single-node Helm default.
+```
+-target=all -config.file=/etc/tempo.yaml
+```
 
 Storage is Tempo's `local` backend on a PVC (Helm) / named volume
-(Compose): WAL + compacted blocks under `/var/tempo`. Retention is 7 days
-(`compactor.compaction.block_retention: 168h`), matching the 168h search
-window the admin viewer already assumes.
+(Compose) under `/var/tempo` (WAL, blocks, and the 3.x live-store).
+Retention is 7 days via the 3.x per-tenant override
+(`overrides.defaults.compaction.block_retention: 168h`), matching the
+168h search window the admin viewer already assumes. Do **not** ship a
+top-level `compactor:` or `ingester:` block — 3.0 refuses to start with
+them (`field compactor not found`).
 
-No memcached, no metrics-generator, no Tempo multitenancy. CubePlex
-already isolates orgs in TraceQL (`span.cubeloop.metadata.org_id`); Tempo
-stays a single tenant.
+No memcached, no metrics-generator, no Kafka, no Tempo multitenancy.
+CubePlex already isolates orgs in TraceQL
+(`span.cubeloop.metadata.org_id`); Tempo stays a single tenant.
+
+3.0 defaults `query_frontend.query_end_cutoff` to 30s so search skips
+the very newest traces (avoids incomplete live-store results). Admin
+traces are used on a run that just finished, so we set
+`query_end_cutoff: 0s` and `live_store.fail_on_high_lag: false`.
 
 ### Network and security
 
@@ -105,7 +128,7 @@ New `tempo:` block in `values.yaml`, same shape as `docling:`:
 ```yaml
 tempo:
   enabled: true
-  image: grafana/tempo:2.8.3
+  image: grafana/tempo:3.0.3
   retention: 168h
   recordContent: false          # tracing.record_content injected into backend
   persistence:
@@ -177,6 +200,7 @@ debugging. Default is unpublished.
 Helm ConfigMap and Compose file carry the same single-binary config:
 
 ```yaml
+stream_over_http_enabled: true
 server:
   http_listen_port: 3200
 distributor:
@@ -187,11 +211,10 @@ distributor:
           endpoint: 0.0.0.0:4318
         grpc:
           endpoint: 0.0.0.0:4317
-ingester:
-  max_block_duration: 5m
-compactor:
-  compaction:
-    block_retention: 168h
+query_frontend:
+  query_end_cutoff: 0s
+live_store:
+  fail_on_high_lag: false
 storage:
   trace:
     backend: local
@@ -199,9 +222,18 @@ storage:
       path: /var/tempo/wal
     local:
       path: /var/tempo/blocks
+overrides:
+  defaults:
+    compaction:
+      block_retention: 168h
+usage_report:
+  reporting_enabled: false
 ```
 
-Command: `/tempo -config.file=/etc/tempo.yaml`.
+Command: `/tempo -target=all -config.file=/etc/tempo.yaml`.
+
+Do not copy `ingest`, `block_builder`, or Kafka settings from
+microservices examples — they do not apply to `-target=all`.
 
 ### Application code
 
@@ -235,7 +267,7 @@ retention is 7 days; admin traces 503 means Tempo is disabled or
 - Prometheus `/metrics`, Grafana, Loki, otel-collector.
 - FastAPI request spans.
 - Changing cubeloop tracer construction (JSONL-on-disk stays).
-- Tempo 2.10+ / Kafka WAL.
+- Tempo microservices mode / Kafka / object-store backends.
 - Auth on Tempo itself (network isolation is the control).
 - Cross-org / system-admin Tempo views.
 - EE/OSS split of the viewer (already decided elsewhere).
