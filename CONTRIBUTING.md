@@ -5,18 +5,20 @@ Thanks for your interest! This doc covers how to set up your local environment s
 ## Contributor License Agreement
 
 Before a pull request can be merged, every human author of a commit in the
-pull request must accept the [CubePlex Individual Contributor License
-Agreement](CLA.md). The CLA check will explain which authors still need to
-sign. To sign, post this exact comment on the pull request:
+pull request must have accepted the [CubePlex Individual Contributor License
+Agreement](CLA.md). The first time you contribute, the CLA check will explain
+what is needed. To sign, post this exact comment on the pull request:
 
 ```text
 I have read and agree to the CubePlex Contributor License Agreement
 ```
 
-The check runs again when the comment is posted. Contributions made on behalf
-of an employer or another legal entity require a Corporate CLA; contact the
-maintainers before submitting that contribution. Bots and automated commits
-are allowlisted by the check.
+The signature is recorded in the private [`cubeplex-cla`](https://github.com/cubeplexai/cubeplex-cla)
+repository and reused for later CubePlex pull requests. You only need to sign
+again when the CLA version changes. Contributions made on behalf of an employer
+or another legal entity require a Corporate CLA; contact the maintainers before
+submitting that contribution. Bots and automated commits are allowlisted by
+the check.
 
 The agreement keeps copyright ownership with the contributor while granting
 CubePlex the rights needed to distribute community code under the CubePlex
@@ -24,6 +26,10 @@ Community License and code under the applicable Enterprise terms in
 any directory named exactly `ee`. Copies, modifications, and compiled forms of
 those Enterprise components remain covered even if they are moved outside an
 `ee` directory.
+
+Maintainers: the CLA workflow requires the `CUBEPLEX_CLA_TOKEN` repository
+secret with write access to `cubeplexai/cubeplex-cla`. Do not commit that token
+or put it in the public repository.
 
 ## Prerequisites
 
