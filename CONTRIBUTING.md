@@ -27,7 +27,7 @@ any directory named exactly `ee`. Copies, modifications, and compiled forms of
 those Enterprise components remain covered even if they are moved outside an
 `ee` directory.
 
-Maintainers: the CLA workflow requires the `PERSONAL_ACCESS_TOKEN` repository
+Maintainers: the CLA workflow requires the `CUBEPLEX_CLA_TOKEN` repository
 secret with write access to `cubeplexai/cubeplex-cla`. Do not commit that token
 or put it in the public repository.
 

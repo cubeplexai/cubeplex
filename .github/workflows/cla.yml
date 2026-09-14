@@ -27,7 +27,7 @@ jobs:
         uses: ribtoks/cla-github-action@f22feedd1f3f46f23fab3bc100081d349f9108af # v2.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.CUBEPLEX_CLA_TOKEN }}
         with:
           path-to-document: https://github.com/cubeplexai/cubeplex/blob/main/CLA.md
           remote-organization-name: cubeplexai
