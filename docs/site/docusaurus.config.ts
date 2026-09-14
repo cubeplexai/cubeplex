@@ -99,6 +99,10 @@ const config: Config = {
             name: 'CubePlex',
             url: 'https://cubeplex.ai',
             logo: 'https://cubeplex.ai/docs/img/cubeplex-favicon.svg',
+            sameAs: [
+              'https://github.com/cubeplexai/cubeplex',
+              'https://cubeloop.dev',
+            ],
           },
           {
             '@type': 'WebSite',
@@ -113,7 +117,7 @@ const config: Config = {
             '@id': 'https://cubeplex.ai/docs#docs',
             headline: 'CubePlex Documentation',
             description:
-              'Guides for CubePlex — self-hosted AI agent workspace: setup, conversations, skills, MCP, memory, and admin.',
+              'Guides for CubePlex — self-hosted AI agent workspace: setup, conversations, skills, MCP, memory, and admin. Agent runtime is CubeLoop.',
             url: 'https://cubeplex.ai/docs',
             // Reuse the marketing OG image (same brand card; avoids shipping a large binary in docs).
             image: 'https://cubeplex.ai/og.png',
