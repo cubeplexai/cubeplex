@@ -188,7 +188,7 @@ async def _list_raw_mcp_tools(
     ``Implementation.icons`` + ``websiteUrl`` from MCP spec rev
     2025-11-25 — to the frontend's tool registry without an extra RTT.
     """
-    validate_mcp_outbound_url(server_url)
+    await validate_mcp_outbound_url(server_url)
     async with _open_session(server_url, headers=headers, timeout=timeout, transport=transport) as (
         session,
         _get_session_id,

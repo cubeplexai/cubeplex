@@ -413,7 +413,7 @@ async def _load_live_tools_with_401_retry(
     """Live discovery with the same single 401-recovery as tool calls."""
 
     async def _load_once() -> list[AgentTool[Any]]:
-        validate_mcp_outbound_url(server_url)
+        await validate_mcp_outbound_url(server_url)
         discovery = await load_mcp_tools_http(
             server_url,
             headers=headers or None,

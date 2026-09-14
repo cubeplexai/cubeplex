@@ -326,7 +326,7 @@ class OAuthTokenManager:
             basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
             headers["Authorization"] = f"Basic {basic}"
 
-        validate_mcp_outbound_url(as_meta.token_endpoint)
+        await validate_mcp_outbound_url(as_meta.token_endpoint)
         response = await self._http.post(
             as_meta.token_endpoint,
             data=data,

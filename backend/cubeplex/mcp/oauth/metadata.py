@@ -153,7 +153,7 @@ class OAuthMetadataDiscovery:
         return as_meta
 
     async def _get_json(self, url: str) -> dict[str, Any]:
-        validate_mcp_outbound_url(url)
+        await validate_mcp_outbound_url(url)
         response = await self._http.get(url)
         if response.status_code == 404:
             raise OAuthMetadataNotFound(f"Metadata not found at {url}")

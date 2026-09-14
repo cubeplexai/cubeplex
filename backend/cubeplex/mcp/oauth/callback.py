@@ -277,7 +277,7 @@ class OAuthCallbackHandler:
             )
             basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode("ascii")
             headers["Authorization"] = f"Basic {basic}"
-        validate_mcp_outbound_url(as_meta.token_endpoint)
+        await validate_mcp_outbound_url(as_meta.token_endpoint)
         resp = await self._http.post(as_meta.token_endpoint, content=body, headers=headers)
         resp.raise_for_status()
         result = resp.json()

@@ -7,6 +7,8 @@ import socket
 from collections.abc import Iterable
 from urllib.parse import urlparse
 
+import anyio
+
 from cubeplex.config import config
 
 
@@ -19,7 +21,7 @@ _VALID_POLICIES = frozenset(
 )
 
 
-def validate_mcp_outbound_url(url: str) -> None:
+async def validate_mcp_outbound_url(url: str) -> None:
     """Reject MCP targets outside the deployment's outbound policy."""
     policy = _string_setting("mcp.outbound_policy", "public_and_allowlist")
     if policy not in _VALID_POLICIES:
@@ -41,7 +43,7 @@ def validate_mcp_outbound_url(url: str) -> None:
     allowed_cidrs = _networks(_string_settings("mcp.allowed_cidrs", ()))
     host_allowed = host in allowed_hosts
     try:
-        infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+        infos = await anyio.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
     except (OSError, ValueError) as exc:
         raise MCPOutboundRefused("dns_lookup_failed") from exc
 

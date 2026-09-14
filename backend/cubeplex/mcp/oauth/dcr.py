@@ -67,7 +67,7 @@ class DCRClient:
         registration_endpoint: str,
         request: DCRRequest,
     ) -> DCRResponse:
-        validate_mcp_outbound_url(registration_endpoint)
+        await validate_mcp_outbound_url(registration_endpoint)
         response = await self._http.post(
             registration_endpoint,
             json=request.to_json(),

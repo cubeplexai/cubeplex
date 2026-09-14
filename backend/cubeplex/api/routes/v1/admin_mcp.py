@@ -1225,7 +1225,7 @@ async def admin_test_connection(
         return await _probe_oauth_metadata(body.server_url)
 
     try:
-        validate_mcp_outbound_url(body.server_url)
+        await validate_mcp_outbound_url(body.server_url)
     except Exception as exc:  # noqa: BLE001
         return TestConnectionOut(
             ok=False,

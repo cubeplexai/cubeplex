@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -29,32 +30,39 @@ def _resolver(*addresses: str):
     ]
 
 
-def test_public_and_allowlist_allows_public_https(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_public_and_allowlist_allows_public_https(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "cubeplex.mcp.outbound.config.get",
         _settings({"mcp.outbound_policy": "public_and_allowlist"}),
     )
     monkeypatch.setattr(
-        "cubeplex.mcp.outbound.socket.getaddrinfo", lambda *args, **kwargs: _resolver("8.8.8.8")
+        "cubeplex.mcp.outbound.anyio.getaddrinfo", AsyncMock(return_value=_resolver("8.8.8.8"))
     )
 
-    validate_mcp_outbound_url("https://mcp.example.com/tools")
+    await validate_mcp_outbound_url("https://mcp.example.com/tools")
 
 
-def test_public_and_allowlist_rejects_private_destination(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_public_and_allowlist_rejects_private_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "cubeplex.mcp.outbound.config.get",
         _settings({"mcp.outbound_policy": "public_and_allowlist"}),
     )
     monkeypatch.setattr(
-        "cubeplex.mcp.outbound.socket.getaddrinfo", lambda *args, **kwargs: _resolver("10.0.0.8")
+        "cubeplex.mcp.outbound.anyio.getaddrinfo", AsyncMock(return_value=_resolver("10.0.0.8"))
     )
 
     with pytest.raises(MCPOutboundRefused, match="destination_not_allowed"):
-        validate_mcp_outbound_url("https://mcp.internal/tools")
+        await validate_mcp_outbound_url("https://mcp.internal/tools")
 
 
-def test_allowlisted_cidr_permits_private_destination(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_allowlisted_cidr_permits_private_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "cubeplex.mcp.outbound.config.get",
         _settings(
@@ -65,13 +73,16 @@ def test_allowlisted_cidr_permits_private_destination(monkeypatch: pytest.Monkey
         ),
     )
     monkeypatch.setattr(
-        "cubeplex.mcp.outbound.socket.getaddrinfo", lambda *args, **kwargs: _resolver("10.20.1.4")
+        "cubeplex.mcp.outbound.anyio.getaddrinfo", AsyncMock(return_value=_resolver("10.20.1.4"))
     )
 
-    validate_mcp_outbound_url("https://mcp.internal/tools")
+    await validate_mcp_outbound_url("https://mcp.internal/tools")
 
 
-def test_allowlisted_host_permits_private_destination(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_allowlisted_host_permits_private_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "cubeplex.mcp.outbound.config.get",
         _settings(
@@ -82,23 +93,25 @@ def test_allowlisted_host_permits_private_destination(monkeypatch: pytest.Monkey
         ),
     )
     monkeypatch.setattr(
-        "cubeplex.mcp.outbound.socket.getaddrinfo", lambda *args, **kwargs: _resolver("127.0.0.1")
+        "cubeplex.mcp.outbound.anyio.getaddrinfo", AsyncMock(return_value=_resolver("127.0.0.1"))
     )
 
-    validate_mcp_outbound_url("https://mcp.internal/tools")
+    await validate_mcp_outbound_url("https://mcp.internal/tools")
 
 
-def test_default_scheme_rejects_plain_http(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_default_scheme_rejects_plain_http(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "cubeplex.mcp.outbound.config.get",
         _settings({"mcp.outbound_policy": "public_and_allowlist"}),
     )
 
     with pytest.raises(MCPOutboundRefused, match="scheme_not_allowed"):
-        validate_mcp_outbound_url("http://mcp.example.com/tools")
+        await validate_mcp_outbound_url("http://mcp.example.com/tools")
 
 
-def test_allowlist_only_rejects_public_destination_outside_allowlist(
+@pytest.mark.asyncio
+async def test_allowlist_only_rejects_public_destination_outside_allowlist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -106,9 +119,9 @@ def test_allowlist_only_rejects_public_destination_outside_allowlist(
         _settings({"mcp.outbound_policy": "allowlist_only"}),
     )
     monkeypatch.setattr(
-        "cubeplex.mcp.outbound.socket.getaddrinfo",
-        lambda *args, **kwargs: _resolver("8.8.8.8"),
+        "cubeplex.mcp.outbound.anyio.getaddrinfo",
+        AsyncMock(return_value=_resolver("8.8.8.8")),
     )
 
     with pytest.raises(MCPOutboundRefused, match="destination_not_allowed"):
-        validate_mcp_outbound_url("https://mcp.example.com/tools")
+        await validate_mcp_outbound_url("https://mcp.example.com/tools")
