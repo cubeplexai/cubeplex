@@ -17,6 +17,8 @@ Core logic: Distinguish AgentEnd, attempt completion, logical run completion, an
 
 Tests: Use the real Agent, in-memory components, and a deterministic external provider boundary. Cover ordinary completion, continuation after a tool business error, provider failure, incomplete tool pairing, cancellation, and repeated cancellation. Reuse existing coverage where sufficient.
 
+Record current prompt/resume overlap rejection versus respond lock waiting. Plan 02 intentionally replaces the latter with ExecutionBusy; keep proposed-contract tests separate from baseline characterization. Cover provider failure followed by cancellation, cancellation-induced exceptions, unexplained abandoned exits, and checkpoint/pairing failure during cancellation. Record the original cause separately from the final validated outcome. Characterize steering and follow-up drain points and independent queue policies.
+
 ## Unit B: Persistence and host boundaries
 
 Files: Extend CubePlex `backend/tests/e2e/test_hitl_pause_resume.py`, `test_steering_message_repository.py`, and `test_stranded_run_recovery.py`; inspect `streams/hitl_resume.py` and `run_events.py`.
@@ -26,6 +28,8 @@ Interfaces: Preserve run_id on resume, one successful answer versus one resume_i
 Core logic: Some existing HITL route tests stub execution and do not cover the full runtime. Add coverage using real RunManager, Agent, Postgres, and Redis; substitute only the external model boundary. Preserve the non-durable ordinary live-steering path.
 
 Tests: Destroy the Agent after HITL suspension and answer with a new instance; tool results must precede steering. Cover cancellation after queue delivery but before checkpointing, and reconciliation after checkpointing but before acknowledgment. Do not automatically replay executed tools. Answers and steering must remain isolated across workspaces.
+
+Include stale pending without a new HITL event, pending equal to the answered question, and a genuine follow-up question; only the last remains paused. Verify pinned-memory/todo extra restoration and stable live extra references. Capture prompt Done-before-terminal-update and respond claim-fenced-update-before-Done ordering, with last-turn citations/subagent text and paused preserved. These are host contracts, not a direct ExecutionFinished-to-SSE mapping.
 
 ## Exit criteria
 

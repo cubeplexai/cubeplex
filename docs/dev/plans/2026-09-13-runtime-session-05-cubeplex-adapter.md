@@ -17,15 +17,21 @@ Core logic: Share prompt/respond configuration and finalization while preserving
 
 Tests: Real RunManager, Agent, Redis, and Postgres. Cover competing answers, TTL expiry, old-claim completion, follow-up HITL, ordinary completion, provider failure, and forced task.cancel. Preserve DoneEvent semantics, same-run_id streaming, and identical prompt/respond cache prefixes.
 
+Restore messages and extra together through load_checkpoint; late-bind extra_ref_holder to live state_context, never the checkpoint copy. Test resume retains pinned-memory, todo, compaction, and deferred-tool extra and persists subsequent middleware writes without cache-prefix drift. Preserve leftover-pending repair for no new HITL event and pending equal to the answered question. Verify a genuine follow-up pending survives, a superseded owner cannot clear it, and repair failures do not become completed.
+
 ## Unit 5B: Input and event projection
 
 Files: Update `streams/steering_delivery.py`, `streams/hitl_resume.py`, `agents/stream.py`, and `streams/run_manager.py`. Preserve `streams/run_events.py` key/CAS contracts. Extend `test_steering_message_repository.py` and `test_stranded_run_recovery.py`.
 
-Interfaces: InputCommitted.input_id maps to client_steer_id. Only durability=checkpoint permits a durable row to become injected. Map ExecutionFinished using specification section 8; ordinary AgentEnd must not emit another Done. Add no required HTTP/SSE fields.
+Interfaces: InputCommitted.input_id maps to client_steer_id. Only durability=checkpoint permits a durable row to become injected. ExecutionFinished is internal; AgentEnd remains unmapped to Done. The host alone emits Done after execute returns, event drain, usage aggregation, and paused stamping. Preserve prompt Done-before-terminal-update and respond claim-fenced-update-before-Done ordering from specification section 8. Add no required HTTP/SSE fields.
 
 Core logic: Retain ownership, leases, and reconciliation. Repair missed notifications from persisted history; ordinary live steering does not create durable rows. Remove only classification/private wiring covered by the new interface and tests. Retain dangling-call repair needed after crashes. Cancellation, drainers, and callbacks must not clean up a newly registered Agent accidentally.
 
 Tests: Failure between checkpoint and acknowledgment, cancellation racing commitment, requeue before pause, and restart reconstruction. Existing frontend steering.spec.ts verifies stable transcript positions after refresh. Answered HITL cards must not reappear. IM and scheduled-task completion callbacks retain run_id and behavior through existing host tests.
+
+Verify final-turn citations/subagent text precede exactly one Done and follow-up HITL sets data.paused. Neither internal lifecycle notification closes SSE. Test projection failure and bounded drain timeout without claiming complete delivery or rerunning tools.
+
+Attach the adapter consumer before execute and keep Redis publication host-owned. Specify and document event/byte budgets, oversized-event handling, and finite enqueue/publish/drain deadlines across the adapter queues; forwarding to an unbounded queue is not a backpressure fix. Keep ownership-fenced heartbeat and cancellation runnable during stalls, stop new work on publication failure, and stop heartbeat renewal after bounded teardown. Validate against stale-run thresholds and provider timeouts using slow/failed Redis, a stopped drainer, sustained text, and non-coalescible tool events. Assert bounded buffering, timely cancellation, no false stale classification during the permitted stall window, and eventual ownership expiry after teardown. Existing unbounded product queues must not be presented as satisfying these new limits without implementation and tests.
 
 ## Data, documentation, and rollout
 
