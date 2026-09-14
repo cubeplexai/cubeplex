@@ -39,7 +39,7 @@
     "react-dom": "19.2.8",
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
-    "react-pdf": "^10.5.0",
+    "react-pdf": "^11.0.0",
     "react-resizable-panels": "^4.12.3",
     "recharts": "^3.10.1",
     "rehype-external-links": "^3.0.0",
