@@ -107,11 +107,29 @@ traces are used on a run that just finished, so we set
 
 ### Network and security
 
-Tempo is ClusterIP-only (Helm) and is not published on the host (Compose)
-unless the operator opts in with an extra port mapping. It is **never**
-added to the Ingress. Tempo's query API has no auth; exposing `:3200`
-would leak every span, including `record_content` payloads if someone
-turns that on.
+Tempo's query API has no auth. Org isolation lives only in
+`admin_traces` / `TempoClient` (TraceQL `org_id` predicate). ClusterIP
+and "unpublished ports" stop *the internet*, not other processes on the
+same Docker network or in the same Kubernetes namespace. A sandbox,
+frontend, or debug pod that can reach `:3200` bypasses `require_org_admin`.
+
+Controls, all required:
+
+1. **Never on Ingress.** No Tempo path in `ingress.yaml`.
+2. **Helm NetworkPolicy** (default on): Ingress to Tempo ports 3200 / 4318
+   / 4317 only from pods labeled `app.kubernetes.io/component: backend`.
+   `tempo.networkPolicy.enabled: false` is the escape hatch for CNIs that
+   also drop kubelet `/ready` probes (those come from the node IP, not a
+   pod). If probes fail after install, turn the policy off rather than
+   opening Tempo to the namespace.
+3. **Compose internal network** named `tracing` (`internal: true`). Only
+   `backend` and `tempo` join it. Tempo is not on the default compose
+   network, so frontend / postgres / opensandbox cannot dial `:3200`.
+4. **No host ports in the default Compose file.** A debug-only overlay
+   `compose.tempo.publish.yaml` may publish `127.0.0.1:3200:3200`. Do not
+   use `${TEMPO_HTTP_PORT}` interpolation on a `ports:` list in the base
+   file — Compose cannot omit a list item, and an empty expansion publishes
+   a random host port.
 
 Ports on the Tempo service:
 
@@ -131,6 +149,8 @@ tempo:
   image: grafana/tempo:3.0.3
   retention: 168h
   recordContent: false          # tracing.record_content injected into backend
+  networkPolicy:
+    enabled: true               # backend-only Ingress; off if kubelet probes die
   persistence:
     storageClass: cubeplex-work-hostpath
     size: 10Gi
@@ -142,8 +162,9 @@ tempo:
 When `tempo.enabled` is true the chart:
 
 1. Renders `templates/infra-tempo.yaml`: ConfigMap (Tempo's own config),
-   Service (ClusterIP), StatefulSet (PVC via `volumeClaimTemplates`).
-   `fsGroup: 10001` so the distroless Tempo user can write the PVC.
+   Service (ClusterIP), StatefulSet (PVC via `volumeClaimTemplates`),
+   and the NetworkPolicy above. `fsGroup: 10001` so the distroless Tempo
+   user can write the PVC.
 2. Injects into the backend ConfigMap, **replacing** any
    `backend.configOverrides.tracing` so the file cannot contain duplicate
    YAML keys:
@@ -152,6 +173,8 @@ When `tempo.enabled` is true the chart:
 tracing:
   enabled: true
   record_content: <tempo.recordContent>
+  jsonl:
+    enabled: false
   otlp:
     endpoint: "http://<release>-tempo:4318/v1/traces"
   tempo:
@@ -171,29 +194,41 @@ block. Operator points at an external Tempo with
 
 ### Compose
 
-Tempo is a first-class service in `compose.yaml`, not a Docling-style
-overlay. It is one small container; hiding it behind a second compose file
-is how the current gap happened.
+Default install uses two files, matching how `up.sh` already wraps compose:
 
-- Service name `tempo`, volume `tempo-data` at `/var/tempo`.
-- Config file bind-mounted from `deploy/docker-compose/config/tempo.yaml`
-  (checked in, not an operator secret).
-- No healthcheck: the image is distroless and has no `wget`/`curl`.
-- Backend env (dynaconf prefix wins over the mounted YAML):
+```
+docker compose -f compose.yaml -f compose.tempo.yaml up -d
+```
+
+`compose.tempo.yaml` is the overlay that adds:
+
+- service `tempo` (image `grafana/tempo:3.0.3`, volume `tempo-data` at
+  `/var/tempo`, config bind-mounted from `config/tempo.yaml`)
+- network `tracing` (`internal: true`); `tempo` is **only** on `tracing`;
+  `backend` joins `default` + `tracing`
+- backend env (dynaconf prefix wins over the mounted YAML):
 
 ```
 CUBEPLEX_TRACING__ENABLED=true
 CUBEPLEX_TRACING__RECORD_CONTENT=false
+CUBEPLEX_TRACING__JSONL__ENABLED=false
 CUBEPLEX_TRACING__OTLP__ENDPOINT=http://tempo:4318/v1/traces
 CUBEPLEX_TRACING__TEMPO__QUERY_ENDPOINT=http://tempo:3200
 ```
 
-To disable: remove/comment the `tempo` service **and** those four env
-vars, then either leave tracing off or set BYO endpoints in
-`config.production.local.yaml`.
+`scripts/up.sh` includes `-f compose.tempo.yaml` unless `.env` has
+`TEMPO_ENABLED=false`. Docs show the two-file command as the default
+`docker compose up`. Disable is one switch: omit the overlay (or set
+`TEMPO_ENABLED=false`). That drops both the Tempo container and the
+`CUBEPLEX_TRACING__*` env, so an operator's `tracing.enabled: false` in
+local yaml is not overridden.
 
-Optional `TEMPO_HTTP_PORT` in `.env` publishes `:3200` on the host for
-debugging. Default is unpublished.
+No healthcheck (distroless, no `wget`/`curl`). No `ports:` on Tempo in
+`compose.yaml` or `compose.tempo.yaml`.
+
+Optional `compose.tempo.publish.yaml` publishes
+`127.0.0.1:3200:3200` for local debugging. Never interpolate an optional
+host port onto a `ports:` list in the default files.
 
 ### Tempo config (shared content, two mounts)
 
@@ -237,13 +272,22 @@ microservices examples — they do not apply to `-target=all`.
 
 ### Application code
 
-No backend/frontend code changes. The write path, query client, and admin
-pages already exist. This spec only feeds them endpoints.
+One small backend change. `build_tracer()` today always constructs a
+`JsonlSpanExporter` writing `./cubeloop-traces`. Turning tracing on in
+Helm/Compose without a mounted, rotated volume fills the backend
+container's writable layer (and Kubernetes node ephemeral disk). Tempo's
+7-day retention does not delete those files.
+
+Add `tracing.jsonl.enabled` (default **true**, so local-dev JSONL stays).
+When false, skip the JSONL exporter. If tracing is enabled but neither
+JSONL nor OTLP is configured, `build_tracer()` returns `None`.
+
+Helm/Compose set `jsonl.enabled: false` and OTLP on. Frontend unchanged.
+Admin routes unchanged.
 
 `tracing.enabled` stays `false` in `config.yaml` / `config.production.yaml`.
-Deploy wiring turns it on. Local-dev keeps its gitignored
-`config.development.local.yaml` pointer at whatever Tempo the developer
-already runs.
+Deploy wiring turns it on. Local-dev keeps JSONL (and its gitignored
+OTLP pointer) as today.
 
 ### Docs (implementation PR, not this spec PR)
 
@@ -279,10 +323,14 @@ retention is 7 days; admin traces 503 means Tempo is disabled or
   and `tracing.tempo.query_endpoint` point at that Service.
 - `helm template` with `tempo.enabled: false` emits neither Tempo resources
   nor an injected `tracing:` block.
-- `docker compose config` includes service `tempo` and the four
-  `CUBEPLEX_TRACING__*` env vars on `backend`.
+- `docker compose -f compose.yaml -f compose.tempo.yaml config` includes
+  service `tempo` on the internal `tracing` network only, no host `ports:`,
+  and `CUBEPLEX_TRACING__*` (including `JSONL__ENABLED=false`) on `backend`.
+- `docker compose -f compose.yaml config` has no `tempo` service and no
+  `CUBEPLEX_TRACING__*` env.
 - After a real Helm or Compose boot: Tempo `/ready` is 200, backend log
   contains `Tracing OTLP exporter enabled`, and `GET /api/v1/admin/traces`
   as an org-admin is not 503-for-unconfigured (auth 401 without a session
   is fine).
-- Tempo is unreachable from the Ingress host.
+- Tempo is unreachable from the Ingress host. Helm template emits a
+  NetworkPolicy that does not allow the frontend component to `:3200`.
