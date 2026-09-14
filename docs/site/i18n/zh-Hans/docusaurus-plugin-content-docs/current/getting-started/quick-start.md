@@ -1,6 +1,7 @@
 ---
 sidebar_position: 1
 title: 快速开始
+description: 只需几分钟，即可从零开始进行第一次 CubePlex AI 对话。
 ---
 
 import Tabs from '@theme/Tabs';
