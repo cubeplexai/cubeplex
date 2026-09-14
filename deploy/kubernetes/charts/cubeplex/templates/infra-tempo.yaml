@@ -1,0 +1,168 @@
+{{- if .Values.tempo.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cubeplex.tempo.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tempo
+data:
+  tempo.yaml: |
+    stream_over_http_enabled: true
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            http:
+              endpoint: 0.0.0.0:4318
+            grpc:
+              endpoint: 0.0.0.0:4317
+    query_frontend:
+      query_end_cutoff: 0s
+    live_store:
+      fail_on_high_lag: false
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+    overrides:
+      defaults:
+        compaction:
+          block_retention: {{ .Values.tempo.retention }}
+    usage_report:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeplex.tempo.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tempo
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3200
+      targetPort: http
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tempo
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cubeplex.tempo.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tempo
+spec:
+  replicas: 1
+  serviceName: {{ include "cubeplex.tempo.host" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: tempo
+  template:
+    metadata:
+      labels:
+        {{- include "cubeplex.labels" . | nindent 8 }}
+        app.kubernetes.io/component: tempo
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: tempo
+          image: {{ .Values.tempo.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -target=all
+            - -config.file=/etc/tempo.yaml
+          ports:
+            - name: http
+              containerPort: 3200
+            - name: otlp-http
+              containerPort: 4318
+            - name: otlp-grpc
+              containerPort: 4317
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.tempo.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo.yaml
+              subPath: tempo.yaml
+            - name: data
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "cubeplex.tempo.host" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.tempo.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.tempo.persistence.size }}
+{{- if .Values.tempo.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cubeplex.tempo.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tempo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: tempo
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backend
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 3200
+        - protocol: TCP
+          port: 4318
+        - protocol: TCP
+          port: 4317
+{{- end }}
+{{- end }}

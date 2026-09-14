@@ -1,0 +1,30 @@
+# Grafana Tempo 3.0 monolithic (-target=all). Keep in sync with the Helm
+# ConfigMap in deploy/kubernetes/charts/cubeplex/templates/infra-tempo.yaml.
+stream_over_http_enabled: true
+server:
+  http_listen_port: 3200
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
+query_frontend:
+  query_end_cutoff: 0s
+live_store:
+  fail_on_high_lag: false
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+overrides:
+  defaults:
+    compaction:
+      block_retention: 168h
+usage_report:
+  reporting_enabled: false

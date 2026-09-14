@@ -11,7 +11,8 @@
 #   cp config/config.production.secrets.yaml.example config/config.production.secrets.yaml
 #   cp config/opensandbox.toml.example config/opensandbox.toml
 #   $EDITOR .env config/config.production.{local,secrets}.yaml config/opensandbox.toml
-#   docker compose up -d
+#   docker compose -f compose.yaml -f compose.tempo.yaml up -d
+#   # or: scripts/up.sh  (includes Tempo unless TEMPO_ENABLED=false)
 #
 # All services share the default network. Backend is reachable as
 # `backend:8000` from frontend; frontend serves the user on host port

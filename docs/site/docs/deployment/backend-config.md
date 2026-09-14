@@ -390,6 +390,8 @@ tracing:
   enabled: false
   directory: "./cubeloop-traces"
   record_content: false  # true captures full prompts/responses/tool I/O (larger, sensitive)
+  jsonl:
+    enabled: true        # local-dev JSONL; Helm/Compose set false
   otlp:
     endpoint: null       # e.g. http://localhost:4318/v1/traces to ship spans
     headers: null
@@ -397,9 +399,12 @@ tracing:
     query_endpoint: null # enables the admin trace viewer when set
 ```
 
-Writes per-run cubeloop spans to disk when enabled, and optionally ships them to
-an OTLP collector (Grafana Tempo, etc.). `record_content: true` is powerful for
-debugging but captures potentially sensitive prompt/tool data.
+Writes per-run cubeloop spans to disk when JSONL is on, and optionally ships
+them to an OTLP collector (Grafana Tempo, etc.). Helm and Compose fill
+`otlp.endpoint` and `tempo.query_endpoint` when bundled Tempo is on, and set
+`jsonl.enabled: false` so the backend writable layer is not filled.
+`query_endpoint` null still means admin traces 503. `record_content: true` is
+powerful for debugging but captures potentially sensitive prompt/tool data.
 
 ## Logging
 

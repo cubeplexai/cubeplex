@@ -1,8 +1,9 @@
 # CubePlex on Kubernetes — Install Guide
 
 A single `helm upgrade --install` deploys CubePlex (backend + frontend +
-Postgres + Redis + rustfs + the alibaba OpenSandbox umbrella) to
-an existing Kubernetes cluster.
+Postgres + Redis + rustfs + Tempo + the alibaba OpenSandbox umbrella) to
+an existing Kubernetes cluster. Tempo is ClusterIP-only and not on Ingress;
+see the Kubernetes install guide §4.12.
 
 **The full, maintained install guide lives on the docs site:**
 [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes)

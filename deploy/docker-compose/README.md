@@ -1,11 +1,12 @@
 # CubePlex on docker-compose
 
 Single-host deployment of CubePlex (backend, frontend, Postgres, Redis,
-rustfs object store, and OpenSandbox) with `docker compose up -d`.
+rustfs object store, OpenSandbox, and Tempo) with
+`docker compose -f compose.yaml -f compose.tempo.yaml up -d`.
 
 - **Install guide:** [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
-  — covers the required OpenSandbox runtime and the optional docling document
-  parsing overlay.
+  — covers the required OpenSandbox runtime, default-on Tempo overlay, and
+  the optional docling document parsing overlay.
 - Uses the **same backend / frontend images** as the kubernetes mode;
   build them once with `deploy/kubernetes/scripts/build-and-push.sh`.
 
@@ -16,7 +17,9 @@ deploy/docker-compose/
 ├── README.md
 ├── INSTALL.md
 ├── compose.yaml
-├── compose.docling.yaml       # optional: document parsing overlay
+├── compose.tempo.yaml             # default-on Tempo overlay
+├── compose.tempo.publish.yaml     # debug-only: 127.0.0.1:3200
+├── compose.docling.yaml           # optional: document parsing overlay
 ├── .env.example
 ├── config/
 │   ├── config.production.local.yaml.example

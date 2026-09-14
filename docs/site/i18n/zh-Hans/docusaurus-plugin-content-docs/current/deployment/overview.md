@@ -14,7 +14,7 @@ backend / frontend 容器镜像**——只是编排方式不同。
 |---|---|---|
 | 适用场景 | 单机部署——快速自托管、小团队、内部演示 | 多节点集群、生产规模、自动扩缩容 |
 | 编排方式 | `docker compose up -d` | `helm upgrade --install` |
-| 内置基础设施 | Postgres、Redis、rustfs（S3 兼容对象存储）、OpenSandbox | Postgres、Redis、rustfs、alibaba OpenSandbox 全家桶 |
+| 内置基础设施 | Postgres、Redis、rustfs（S3 兼容对象存储）、OpenSandbox、Tempo | Postgres、Redis、rustfs、Tempo、alibaba OpenSandbox 全家桶 |
 | 指南 | [Docker Compose 安装指南](./docker-compose.md) | [Kubernetes 安装指南](./kubernetes.md) |
 
 如果不确定选哪个，从 Docker Compose 开始——它更简单，除了跨多机的水平扩展外，

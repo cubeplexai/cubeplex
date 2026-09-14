@@ -63,3 +63,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "cubeplex.docling.host" -}}
 {{- printf "%s-docling" .Release.Name -}}
 {{- end -}}
+
+{{- define "cubeplex.tempo.host" -}}
+{{- printf "%s-tempo" .Release.Name -}}
+{{- end -}}

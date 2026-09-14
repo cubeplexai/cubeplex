@@ -190,6 +190,29 @@ docling:
       cpu: "4"
       memory: "8Gi"
 
+# ── Tempo tracing (default on) ──────────────────────────────────────────
+# Ships cubeloop spans over OTLP HTTP and serves the admin trace viewer.
+# ClusterIP only — never on Ingress. NetworkPolicy restricts :3200 / :4318
+# / :4317 to backend pods. Set enabled: false to skip Tempo and BYO via
+# backend.configOverrides.tracing.
+tempo:
+  enabled: true
+  image: grafana/tempo:3.0.3
+  retention: 168h
+  recordContent: false
+  networkPolicy:
+    enabled: true               # off if kubelet /ready probes die under the CNI
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
 # ── Egress secret-injection (MITM webhook + backend mTLS exchange) ───────
 # Default off. Turning on:
 #   - deploys the mutating admission webhook in this (cubeplex) namespace

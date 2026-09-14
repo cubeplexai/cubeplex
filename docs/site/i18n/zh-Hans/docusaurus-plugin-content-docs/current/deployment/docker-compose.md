@@ -5,9 +5,11 @@ title: Docker Compose
 
 # 用 Docker Compose 部署 CubePlex
 
-`docker compose up -d` 在单台主机上部署 CubePlex（backend + frontend +
-Postgres + Redis + rustfs S3 存储 + OpenSandbox）。它使用和 Kubernetes 部署模式完全相同
-的容器镜像，只是编排方式不同。
+`docker compose -f compose.yaml -f compose.tempo.yaml up -d` 在单台主机上
+部署 CubePlex（backend + frontend + Postgres + Redis + rustfs S3 存储 +
+OpenSandbox + Tempo）。它使用和 Kubernetes 部署模式完全相同的容器镜像，只是
+编排方式不同。`scripts/up.sh` 会带上这两个文件，除非 `.env` 里
+`TEMPO_ENABLED=false`。
 
 ## 1. 前置依赖
 
@@ -29,7 +31,8 @@ Host
   └─ port :8000 → backend  (FastAPI / uvicorn) ◄────────────┘
                     ├─ 依赖 → postgres   (named volume)
                     ├─ 依赖 → redis      (named volume)
-                    └─ 依赖 → rustfs     (S3 存储, named volume)
+                    ├─ 依赖 → rustfs     (S3 存储, named volume)
+                    └─ tempo 在内部 `tracing` 网络（无 host 端口）
 
 启动引导服务（跑完即结束）：
   backend-migrate  alembic upgrade head（backend 启动前置条件）
@@ -38,7 +41,8 @@ Host
 
 所有服务间通信都走 Docker DNS（例如 backend 通过 `postgres:5432` 访问
 Postgres）。主机只暴露 frontend 端口（以及可选的 backend 端口，用于直接
-访问 API）。
+访问 API）。Tempo 不发布到主机；只有 backend 能在内部 `tracing` 网络访问
+`:3200` / `:4318`。
 
 ## 3. 选择镜像
 
@@ -172,20 +176,25 @@ production:
 ## 5. 启动 / 停止 / 日志
 
 ```bash
-# 启动（同时会拉取最新的 tag）
+# 启动（同时会拉取最新的 tag；除非 TEMPO_ENABLED=false，否则包含 Tempo）
 deploy/docker-compose/scripts/up.sh
 
+# 等价的原始 compose（默认安装始终传两个文件）
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml up -d
+
 # 查看日志
-docker compose -f deploy/docker-compose/compose.yaml logs -f backend
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml logs -f backend
 
 # 停止并移除容器（保留数据卷）
-docker compose -f deploy/docker-compose/compose.yaml down
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml down
 ```
 
 :::warning
-`docker compose -f deploy/docker-compose/compose.yaml down -v` 会停止并
-**删除数据卷**（Postgres 数据、rustfs 数据、Redis 数据）——这是破坏性操作，
-只在确实要清空部署时使用。
+`docker compose … down -v` 会停止并**删除数据卷**（Postgres 数据、rustfs
+数据、Redis 数据、Tempo 数据）——这是破坏性操作，只在确实要清空部署时使用。
 :::
 
 如果缺少 `.env`、任一 YAML 配置文件或 `config/opensandbox.toml`，`up.sh` 会拒绝启动。
@@ -397,6 +406,43 @@ docker compose -f compose.yaml down
 
 MITM CA 以及 server 拉起的沙箱容器会保留在主机 Docker 引擎上——它们不属于
 本项目的 compose 网络。可以用 `docker ps --filter "name=sandbox-"` 查看。
+
+## Tempo tracing（默认开启）
+
+`scripts/up.sh` 会启动 Grafana Tempo 3.0.3，除非 `.env` 里
+`TEMPO_ENABLED=false`。直接跑 `docker compose` 时必须带上两个文件：
+
+```bash
+docker compose -f compose.yaml -f compose.tempo.yaml up -d
+```
+
+Tempo 只加入内部 `tracing` 网络（backend 也加入；frontend、postgres、
+OpenSandbox 不加入）。默认文件没有 host 端口。Tempo 的查询 API 没有鉴权——
+这张内部网络就是控制面，不是租户隔离。保留 7 天。`record_content` 为
+false。磁盘 JSONL 关闭（`CUBEPLEX_TRACING__JSONL__ENABLED=false`）。
+
+admin `/admin/traces` 在 Tempo 被关掉或 `query_endpoint` 仍为 null 时返回
+503。
+
+关闭：不带 `compose.tempo.yaml`，或给 `up.sh` 设 `TEMPO_ENABLED=false`。
+这样 Tempo 容器和 `CUBEPLEX_TRACING__*` 环境变量一起消失，本地 yaml 里的
+`tracing.enabled: false` 不会被覆盖。
+
+自带 Tempo：关掉 overlay，然后在 `config.production.local.yaml` 里设置
+`tracing.otlp.endpoint` 和 `tracing.tempo.query_endpoint`。
+
+仅调试用的本机端口——不要当作默认安装：
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.tempo.yaml \
+  -f compose.tempo.publish.yaml \
+  up -d
+```
+
+这会绑定 `127.0.0.1:3200`。不要在默认 compose 文件的 `ports:` 列表上做可选
+端口插值。
 
 ## 可选：文档解析（docling-serve）
 

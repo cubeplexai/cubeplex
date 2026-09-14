@@ -8,8 +8,8 @@ Full install guides live on the docs site:
 
 | Mode | Status | Guide |
 |---|---|---|
-| **Kubernetes (Helm)** | available | [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes) (English) / [中文](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes) |
-| **docker-compose** | available | [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose) |
+| **Kubernetes (Helm)** | available | [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes) (English) / [中文](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes) — Tempo is bundled, default on, not on Ingress |
+| **docker-compose** | available | [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose) — Tempo overlay is default on (`compose.tempo.yaml`) |
 
 Both modes share the same backend/frontend container images. Pull request and
 `main` image builds are handled by `.github/workflows/images.yml`; formal
@@ -46,7 +46,9 @@ deploy/
     ├── README.md
     ├── INSTALL.md
     ├── compose.yaml
-    ├── compose.docling.yaml       # optional: document parsing overlay
+    ├── compose.tempo.yaml             # default-on Tempo overlay (internal network)
+    ├── compose.tempo.publish.yaml     # debug-only: 127.0.0.1:3200
+    ├── compose.docling.yaml           # optional: document parsing overlay
     ├── config/
     └── scripts/
 ```

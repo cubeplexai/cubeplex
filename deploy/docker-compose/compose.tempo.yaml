@@ -1,0 +1,40 @@
+# Overlay: bundled Grafana Tempo 3.0.3 (monolithic, local filesystem backend).
+#
+# Default install (also what scripts/up.sh runs unless TEMPO_ENABLED=false):
+#   docker compose -f compose.yaml -f compose.tempo.yaml up -d
+#
+# Tempo is only on the internal `tracing` network and has no host ports.
+# Backend joins that network and gets CUBEPLEX_TRACING__* env (dynaconf
+# prefix wins over the mounted YAML). Omit this overlay to disable Tempo
+# and leave tracing off unless you BYO in local yaml.
+
+services:
+  tempo:
+    image: grafana/tempo:3.0.3
+    restart: unless-stopped
+    command:
+      - -target=all
+      - -config.file=/etc/tempo.yaml
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - tracing
+
+  backend:
+    environment:
+      CUBEPLEX_TRACING__ENABLED: "true"
+      CUBEPLEX_TRACING__RECORD_CONTENT: "false"
+      CUBEPLEX_TRACING__JSONL__ENABLED: "false"
+      CUBEPLEX_TRACING__OTLP__ENDPOINT: "http://tempo:4318/v1/traces"
+      CUBEPLEX_TRACING__TEMPO__QUERY_ENDPOINT: "http://tempo:3200"
+    networks:
+      - default
+      - tracing
+
+networks:
+  tracing:
+    internal: true
+
+volumes:
+  tempo-data:

@@ -49,3 +49,7 @@ production:
     # needs `host.docker.internal` resolvable (the overlay's extra_hosts
     # entry handles that).
     use_server_proxy: false
+
+  # Tracing endpoints are injected by compose.tempo.yaml
+  # (CUBEPLEX_TRACING__* env). Do not set tracing here unless you omit that
+  # overlay and bring your own Tempo.
