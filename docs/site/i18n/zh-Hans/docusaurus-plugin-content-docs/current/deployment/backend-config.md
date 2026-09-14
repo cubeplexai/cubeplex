@@ -317,6 +317,10 @@ memory:
 
 ```yaml
 mcp:
+  outbound_policy: "public_and_allowlist"
+  allowed_schemes: ["https"]
+  allowed_hosts: []
+  allowed_cidrs: []
   progressive_disclosure:
     enabled: "auto"        # auto | on | off
     threshold_pct: 10.0    # 可延迟 schema ≥ 上下文的此百分比时折叠
@@ -333,6 +337,9 @@ mcp:
 | `mcp.progressive_disclosure.enabled` | `auto` | 当可延迟的工具 schema 挤占上下文时折叠它们；`auto` 按下面的阈值判断。 |
 | `mcp.progressive_disclosure.threshold_pct` | `10.0` | 可延迟 schema 超过上下文窗口的此比例时折叠。 |
 | `mcp.icons.fetch_remote` | `true` | 离线部署把两个图标开关都设 `false`；目录品牌图标仍可从内置资源渲染。 |
+| `mcp.outbound_policy` | `public_and_allowlist` | 控制 MCP 连接器触发的后端出站请求。该默认值允许公网目标及显式 allowlist 中的目标；还可选 `public_only`、`allowlist_only`、`disabled`、`unrestricted`。 |
+| `mcp.allowed_schemes` | `[https]` | MCP 连接器请求允许的 URL scheme。除非可信部署确有明文 HTTP 需求，否则保持默认值。 |
+| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | `public_and_allowlist` 或 `allowlist_only` 下可显式放行的内部 MCP 目标。 |
 
 连接器本身在 DB 目录里管理，不在这里。
 

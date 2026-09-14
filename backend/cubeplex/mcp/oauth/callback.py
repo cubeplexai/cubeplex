@@ -39,6 +39,7 @@ from cubeplex.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
 from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubeplex.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
+from cubeplex.mcp.outbound import validate_mcp_outbound_url
 from cubeplex.mcp.user_token import MCPUserTokenSigner
 from cubeplex.models.mcp import MCPConnector, MCPCredentialGrant
 from cubeplex.repositories.credential import CredentialRepository
@@ -276,6 +277,7 @@ class OAuthCallbackHandler:
             )
             basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode("ascii")
             headers["Authorization"] = f"Basic {basic}"
+        validate_mcp_outbound_url(as_meta.token_endpoint)
         resp = await self._http.post(as_meta.token_endpoint, content=body, headers=headers)
         resp.raise_for_status()
         result = resp.json()

@@ -85,6 +85,8 @@ test:
   # MCP: CI 无 webtools server
   mcp:
     enabled: false
+    # Fixtures intentionally use non-resolvable example hosts.
+    outbound_policy: "unrestricted"
 
   # ObjectStore: RustFS service container
   objectstore:

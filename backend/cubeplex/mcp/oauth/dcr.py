@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from cubeplex.mcp.exceptions import DCRError
+from cubeplex.mcp.outbound import validate_mcp_outbound_url
 
 DEFAULT_GRANT_TYPES: list[str] = ["authorization_code", "refresh_token"]
 DEFAULT_RESPONSE_TYPES: list[str] = ["code"]
@@ -66,6 +67,7 @@ class DCRClient:
         registration_endpoint: str,
         request: DCRRequest,
     ) -> DCRResponse:
+        validate_mcp_outbound_url(registration_endpoint)
         response = await self._http.post(
             registration_endpoint,
             json=request.to_json(),

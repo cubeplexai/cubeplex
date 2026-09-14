@@ -69,6 +69,7 @@ from cubeplex.mcp.exceptions import MCPDiscoveryFailed
 from cubeplex.mcp.oauth import OAuthStartError, OAuthStartService
 from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
+from cubeplex.mcp.outbound import validate_mcp_outbound_url
 from cubeplex.mcp.user_token import MCPUserTokenSigner
 from cubeplex.models import MCPConnector, User
 from cubeplex.repositories.mcp import (
@@ -1222,6 +1223,16 @@ async def admin_test_connection(
     """
     if body.auth_method == "oauth":
         return await _probe_oauth_metadata(body.server_url)
+
+    try:
+        validate_mcp_outbound_url(body.server_url)
+    except Exception as exc:  # noqa: BLE001
+        return TestConnectionOut(
+            ok=False,
+            tool_count=0,
+            error_code=type(exc).__name__,
+            error_message=str(exc)[:256],
+        )
 
     headers = dict(body.headers or {})
     if body.auth_method == "static" and body.credential_plaintext:

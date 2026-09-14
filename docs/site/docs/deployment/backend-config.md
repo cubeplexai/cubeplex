@@ -335,6 +335,10 @@ default; long-term (cross-conversation recall) is off until you turn it on.
 
 ```yaml
 mcp:
+  outbound_policy: "public_and_allowlist"
+  allowed_schemes: ["https"]
+  allowed_hosts: []
+  allowed_cidrs: []
   progressive_disclosure:
     enabled: "auto"        # auto | on | off
     threshold_pct: 10.0    # collapse when deferrable schemas ≥ this % of context
@@ -351,6 +355,9 @@ mcp:
 | `mcp.progressive_disclosure.enabled` | `auto` | Collapses deferrable tool schemas when they crowd the context; `auto` decides per the threshold below. |
 | `mcp.progressive_disclosure.threshold_pct` | `10.0` | Collapse once deferrable schemas exceed this share of the context window. |
 | `mcp.icons.fetch_remote` | `true` | Set **both** icon flags `false` on air-gapped deploys; catalog brand icons still render from bundled assets. |
+| `mcp.outbound_policy` | `public_and_allowlist` | Controls backend requests made for MCP connectors. `public_and_allowlist` permits public targets and targets in the explicit allowlists; `public_only`, `allowlist_only`, `disabled`, and `unrestricted` are also available. |
+| `mcp.allowed_schemes` | `[https]` | Allowed URL schemes for MCP connector requests. Keep the default unless a trusted deployment needs plain HTTP. |
+| `mcp.allowed_hosts` / `mcp.allowed_cidrs` | `[]` | Explicit internal MCP destinations permitted by `public_and_allowlist` or `allowlist_only`. |
 
 Connectors themselves are managed in the DB-backed catalog, not here.
 

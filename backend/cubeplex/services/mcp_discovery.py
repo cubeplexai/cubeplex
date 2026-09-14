@@ -47,6 +47,7 @@ from cubeplex.mcp.exceptions import (
     is_unauthorized_error,
 )
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
+from cubeplex.mcp.outbound import validate_mcp_outbound_url
 from cubeplex.mcp.user_token import MCPUserTokenSigner
 from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
@@ -187,6 +188,7 @@ async def _list_raw_mcp_tools(
     ``Implementation.icons`` + ``websiteUrl`` from MCP spec rev
     2025-11-25 — to the frontend's tool registry without an extra RTT.
     """
+    validate_mcp_outbound_url(server_url)
     async with _open_session(server_url, headers=headers, timeout=timeout, transport=transport) as (
         session,
         _get_session_id,
