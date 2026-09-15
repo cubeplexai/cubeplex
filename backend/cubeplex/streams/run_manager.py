@@ -2325,6 +2325,7 @@ class RunManager:
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
         extra_ref_holder: dict[str, Any] | None = None,
+        before_terminal_commit: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         """Resume a paused HITL conversation by delivering ``answer`` to a
         cubeloop agent via a public Session respond request.
@@ -2467,51 +2468,61 @@ class RunManager:
             finalized_with_claim = False
             stale_pending = None
             try:
-                try:
-                    with tracing_context(metadata=_trace_meta):
-                        async with trace(tracer, agent, flush="background"):
-                            from cubeloop.session.types import RespondExecutionRequest
+                with tracing_context(metadata=_trace_meta):
+                    async with trace(tracer, agent, flush="background"):
+                        from cubeloop.session.types import RespondExecutionRequest
 
-                            from cubeplex.streams.execution_adapter import (
-                                execute_session,
-                                require_host_success,
-                            )
+                        from cubeplex.streams.execution_adapter import (
+                            execute_session,
+                            require_host_success,
+                        )
 
-                            self._agents[run_id] = agent
-                            result = await execute_session(
-                                session=agent.session,
-                                request=RespondExecutionRequest(
-                                    run_id=run_id,
-                                    attempt_id=str(uuid7()),
-                                    question_id=question_id,
-                                    answer=answer,
-                                ),
-                                on_agent_event=_on_event,
-                                on_checkpoint_input=_on_checkpoint_input,
-                            )
-                            final_status = require_host_success(
-                                result,
-                                answered_question_id=question_id,
-                            )
-                except BaseException as _run_exc:
-                    _schedule_writeback(
-                        org_id=ctx.org_id,
-                        provider_slug=provider_name,
-                        model_id=model_id,
-                        exc=_run_exc,
+                        self._agents[run_id] = agent
+                        result = await execute_session(
+                            session=agent.session,
+                            request=RespondExecutionRequest(
+                                run_id=run_id,
+                                attempt_id=str(uuid7()),
+                                question_id=question_id,
+                                answer=answer,
+                            ),
+                            on_agent_event=_on_event,
+                            on_checkpoint_input=_on_checkpoint_input,
+                        )
+                        final_status = require_host_success(
+                            result,
+                            answered_question_id=question_id,
+                        )
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=None,
+                )
+                if final_status == "completed":
+                    loaded_pending = await cp.load_pending(conversation_id)
+                    if loaded_pending is not None:
+                        stale_pending = loaded_pending[0]
+                if stale_pending is not None:
+                    await cp.save_pending_request(conversation_id, None)
+                    await _emit_synthetic_resolved(
+                        publish_stream_event,
+                        stale_pending,
+                        question_id,
                     )
-                    raise
-                else:
-                    _schedule_writeback(
-                        org_id=ctx.org_id,
-                        provider_slug=provider_name,
-                        model_id=model_id,
-                        exc=None,
-                    )
-                    if final_status == "completed":
-                        loaded_pending = await cp.load_pending(conversation_id)
-                        if loaded_pending is not None:
-                            stale_pending = loaded_pending[0]
+                for agent_key in list(citation_buffers):
+                    await flush_citation_buffer(agent_key, agent_key)
+                if before_terminal_commit is not None:
+                    await before_terminal_commit()
+            except BaseException as _run_exc:
+                final_status = "errored"
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=_run_exc,
+                )
+                raise
             finally:
                 # Heartbeat / registration teardown must not depend on Redis
                 # finalize succeeding — a timeout there would leave the
@@ -2528,21 +2539,9 @@ class RunManager:
                     tool_heartbeat.stop()
                     self._agents.pop(run_id, None)
                     self._hitl_channels.pop(run_id, None)
+                if not finalized_with_claim:
+                    raise ResumeConflict("resume claim was replaced before finalization")
 
-            if not finalized_with_claim:
-                raise ResumeConflict("resume claim was replaced before finalization")
-            if stale_pending is not None:
-                await cp.save_pending_request(conversation_id, None)
-                # Emit a synthetic *_resolved so the frontend can drop the
-                # stale pending UI only after the matching claim finalized.
-                await _emit_synthetic_resolved(
-                    publish_stream_event,
-                    stale_pending,
-                    question_id,
-                )
-
-        for agent_key in list(citation_buffers):
-            await flush_citation_buffer(agent_key, agent_key)
         return final_status
 
     async def _build_agent_for_conversation(
@@ -4541,6 +4540,13 @@ class RunManager:
             effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
+            async def drain_projection_before_terminal_commit() -> None:
+                nonlocal event_q_drainer
+                if event_q_drainer is None:
+                    return
+                await _finish_subagent_citation_queue(event_q, event_q_drainer)
+                event_q_drainer = None
+
             await self._run_cubeloop_respond_path(
                 ctx=ctx,
                 run_id=run_id,
@@ -4556,6 +4562,7 @@ class RunManager:
                 skill_catalog=skill_catalog,
                 catalog_session=catalog_session,
                 extra_ref_holder=extra_ref_holder,
+                before_terminal_commit=drain_projection_before_terminal_commit,
             )
             await _update_conversation_timestamp(
                 conversation_id,
@@ -4576,12 +4583,6 @@ class RunManager:
                 user_id=ctx.user_id,
             )
             search_index_enqueued = True
-
-            # Drain shared subagent/citation queue BEFORE DoneEvent — same
-            # rationale as _execute_run.
-            if event_q_drainer is not None:
-                await _finish_subagent_citation_queue(event_q, event_q_drainer)
-                event_q_drainer = None
 
             from cubeplex.services.usage import SessionUsage, get_session_usage
 
