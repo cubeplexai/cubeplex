@@ -5,9 +5,11 @@ title: Docker Compose
 
 # CubePlex on Docker Compose
 
-`docker compose up -d` deploys CubePlex (backend + frontend + Postgres +
-Redis + rustfs S3 store + OpenSandbox) on a single host. It uses the same container
-images as the Kubernetes deployment mode — only the orchestration differs.
+`docker compose -f compose.yaml -f compose.tempo.yaml up -d` deploys CubePlex
+(backend + frontend + Postgres + Redis + rustfs S3 store + OpenSandbox +
+Tempo) on a single host. It uses the same container images as the Kubernetes
+deployment mode — only the orchestration differs. `scripts/up.sh` passes both
+files unless `.env` has `TEMPO_ENABLED=false`.
 
 ## 1. Prerequisites
 
@@ -29,7 +31,8 @@ Host
   └─ port :8000 → backend  (FastAPI / uvicorn) ◄─────────────────────┘
                     ├─ depends on → postgres   (named volume)
                     ├─ depends on → redis      (named volume)
-                    └─ depends on → rustfs     (S3 store, named volume)
+                    ├─ depends on → rustfs     (S3 store, named volume)
+                    └─ tempo on internal `tracing` network (no host port)
 
 Bootstrap services (run-to-completion):
   backend-migrate  alembic upgrade head (gates backend boot)
@@ -38,7 +41,9 @@ Bootstrap services (run-to-completion):
 
 All inter-service communication uses Docker DNS (for example, the backend
 reaches Postgres at `postgres:5432`). The host only sees the frontend port
-(and optionally the backend port, for direct API access).
+(and optionally the backend port, for direct API access). Tempo is not
+published; only backend can reach `:3200` / `:4318` on the internal
+`tracing` network.
 
 ## 3. Choose images
 
@@ -179,20 +184,26 @@ the full field reference and examples.
 ## 5. Up / down / logs
 
 ```bash
-# bring up (also pulls the latest tags)
+# bring up (also pulls the latest tags; includes Tempo unless TEMPO_ENABLED=false)
 deploy/docker-compose/scripts/up.sh
 
+# equivalent raw compose (always pass both files for the default install)
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml up -d
+
 # tail logs
-docker compose -f deploy/docker-compose/compose.yaml logs -f backend
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml logs -f backend
 
 # stop and remove containers (volumes preserved)
-docker compose -f deploy/docker-compose/compose.yaml down
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml down
 ```
 
 :::warning
-`docker compose -f deploy/docker-compose/compose.yaml down -v` stops and
-**deletes volumes** (Postgres data, rustfs data, Redis data) — destructive,
-use only when you intend to wipe the deployment.
+`docker compose … down -v` stops and **deletes volumes** (Postgres data,
+rustfs data, Redis data, Tempo data) — destructive, use only when you intend
+to wipe the deployment.
 :::
 
 `up.sh` refuses to start if `.env`, either YAML config file, or
@@ -413,6 +424,44 @@ docker compose -f compose.yaml down
 The MITM CA and any sandbox containers spawned by the server stay on the
 host Docker engine — they aren't part of this project's compose network.
 Inspect with `docker ps --filter "name=sandbox-"`.
+
+## Tempo tracing (default on)
+
+`scripts/up.sh` starts Grafana Tempo 3.0.3 unless `.env` has
+`TEMPO_ENABLED=false`. A raw `docker compose` command must pass both files:
+
+```bash
+docker compose -f compose.yaml -f compose.tempo.yaml up -d
+```
+
+Tempo is only on the internal `tracing` network (backend joins it; frontend,
+postgres, and OpenSandbox do not). There is no host port in the default
+files. Tempo's query API has no authentication — that network is the control,
+not tenant isolation. Retention is 7 days. `record_content` is false. JSONL
+on-disk export is off (`CUBEPLEX_TRACING__JSONL__ENABLED=false`).
+
+Admin traces at `/admin/traces` return 503 when Tempo is disabled or
+`query_endpoint` is still null.
+
+Disable: omit `compose.tempo.yaml`, or set `TEMPO_ENABLED=false` for `up.sh`.
+That drops both the Tempo container and the `CUBEPLEX_TRACING__*` env, so a
+`tracing.enabled: false` in local yaml is not overridden.
+
+BYO: disable the overlay, then set `tracing.otlp.endpoint` and
+`tracing.tempo.query_endpoint` in `config.production.local.yaml`.
+
+Debug-only localhost publish — never the default install:
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.tempo.yaml \
+  -f compose.tempo.publish.yaml \
+  up -d
+```
+
+That binds `127.0.0.1:3200`. Do not interpolate an optional host port onto a
+`ports:` list in the default compose files.
 
 ## Optional: document parsing (docling-serve)
 

@@ -21,11 +21,31 @@ if [[ "$missing" -eq 1 ]]; then
   exit 1
 fi
 
+# Bundled Tempo is on by default. TEMPO_ENABLED=false omits the overlay so
+# tracing env is not forced on and the Tempo container is not started.
+TEMPO_ENABLED=true
+if [[ -f .env ]]; then
+  val="$(grep -E '^[[:space:]]*TEMPO_ENABLED=' .env | tail -1 | cut -d= -f2- || true)"
+  val="${val%$'\r'}"
+  val="${val#\"}"
+  val="${val%\"}"
+  val="${val#\'}"
+  val="${val%\'}"
+  if [[ -n "$val" ]]; then
+    TEMPO_ENABLED="$val"
+  fi
+fi
+
+compose_files=(-f compose.yaml)
+if [[ "$TEMPO_ENABLED" != "false" ]]; then
+  compose_files+=(-f compose.tempo.yaml)
+fi
+
 echo "==> Pulling images"
-docker compose pull
+docker compose "${compose_files[@]}" pull
 
 echo "==> Bringing up services"
-docker compose up -d --remove-orphans
+docker compose "${compose_files[@]}" up -d --remove-orphans
 
 echo
 echo "==> Status"

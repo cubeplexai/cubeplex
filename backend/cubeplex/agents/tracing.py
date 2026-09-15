@@ -9,10 +9,12 @@ The Tracer is built once at app startup and reused across runs (each run
 attaches/detaches via :func:`cubeloop.tracing.trace`); it is shut down once at
 app shutdown.
 
-Two exporters can run in parallel: the JSONL file exporter (always on when
-tracing is enabled) and an optional OTLP HTTP exporter that ships spans to an
-external collector / Tempo. Set ``tracing.otlp.endpoint`` to the full traces
-URL — e.g. ``http://localhost:4318/v1/traces`` — to enable the OTLP path.
+Two exporters can run in parallel: the JSONL file exporter (on by default
+when tracing is enabled; ``tracing.jsonl.enabled``) and an optional OTLP HTTP
+exporter that ships spans to an external collector / Tempo. Set
+``tracing.otlp.endpoint`` to the full traces URL — e.g.
+``http://localhost:4318/v1/traces`` — to enable the OTLP path. If tracing is
+enabled but neither exporter is configured, this returns ``None``.
 """
 
 from __future__ import annotations
@@ -56,9 +58,9 @@ def _build_otlp_exporter() -> SpanExporter | None:
 def build_tracer() -> Tracer | None:
     """Return a configured cubeloop Tracer, or ``None`` when tracing is disabled.
 
-    Reads ``tracing.enabled`` / ``tracing.directory`` / ``tracing.record_content``
-    and (optionally) ``tracing.otlp.*`` from config. Import or construction
-    failures are logged and swallowed.
+    Reads ``tracing.enabled`` / ``tracing.directory`` / ``tracing.jsonl.enabled``
+    / ``tracing.record_content`` and (optionally) ``tracing.otlp.*`` from
+    config. Import or construction failures are logged and swallowed.
     """
     try:
         if not config.get("tracing.enabled", False):
@@ -69,7 +71,9 @@ def build_tracer() -> Tracer | None:
         directory = config.get("tracing.directory", "./cubeloop-traces")
         record_content = bool(config.get("tracing.record_content", False))
 
-        exporters: list[Any] = [JsonlSpanExporter(directory=directory)]
+        exporters: list[Any] = []
+        if config.get("tracing.jsonl.enabled", True):
+            exporters.append(JsonlSpanExporter(directory=directory))
         otlp = _build_otlp_exporter()
         if otlp is not None:
             exporters.append(otlp)
@@ -77,6 +81,8 @@ def build_tracer() -> Tracer | None:
                 "Tracing OTLP exporter enabled (endpoint={})",
                 config.get("tracing.otlp.endpoint"),
             )
+        if not exporters:
+            return None
 
         return Tracer(
             service_name="cubeplex",

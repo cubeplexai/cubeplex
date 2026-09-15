@@ -377,6 +377,8 @@ tracing:
   enabled: false
   directory: "./cubeloop-traces"
   record_content: false  # true 会捕获完整 prompt/响应/工具 I/O（更大、敏感）
+  jsonl:
+    enabled: true        # 本地开发 JSONL；Helm/Compose 会设为 false
   otlp:
     endpoint: null       # 如 http://localhost:4318/v1/traces 以外发 span
     headers: null
@@ -384,9 +386,12 @@ tracing:
     query_endpoint: null # 设置后启用 admin trace 查看器
 ```
 
-开启后把每次 run 的 cubeloop span 写到磁盘，并可选外发到 OTLP collector（Grafana
-Tempo 等）。`record_content: true` 对调试很有用，但会捕获可能敏感的 prompt/工具
-数据。
+JSONL 开启时把每次 run 的 cubeloop span 写到磁盘，并可选外发到 OTLP
+collector（Grafana Tempo 等）。Helm / Compose 在内置 Tempo 开启时会填好
+`otlp.endpoint` 和 `tempo.query_endpoint`，并把 `jsonl.enabled` 设为
+`false`，避免撑满 backend 可写层。`query_endpoint` 为 null 时 admin traces
+仍返回 503。`record_content: true` 对调试很有用，但会捕获可能敏感的
+prompt/工具数据。
 
 ## 日志
 

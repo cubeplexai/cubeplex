@@ -1,0 +1,13 @@
+# Debug-only overlay: publish Tempo's query port on localhost.
+# Never use this as the default install path.
+#
+#   docker compose \
+#     -f compose.yaml \
+#     -f compose.tempo.yaml \
+#     -f compose.tempo.publish.yaml \
+#     up -d
+
+services:
+  tempo:
+    ports:
+      - "127.0.0.1:3200:3200"

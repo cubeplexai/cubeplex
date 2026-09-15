@@ -391,6 +391,11 @@ default:
     # record_content=true captures full prompts / responses / tool args+results
     # in the trace — useful for debugging, larger files, may contain sensitive data.
     record_content: false
+    # JSONL on-disk export. Default on so local-dev traces still land under
+    # `directory`. Helm/Compose turn this off so OTLP-only deploys do not
+    # fill the backend container's writable layer.
+    jsonl:
+      enabled: true
     otlp:
       # Full OTLP HTTP traces URL, e.g. "http://localhost:4318/v1/traces".
       # Leave null to keep tracing JSONL-only.

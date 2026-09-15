@@ -52,6 +52,10 @@ async def test_build_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
     await tracer.shutdown()
 
 
+def _exporter_types(tracer) -> list[str]:
+    return [type(proc.span_exporter).__name__ for proc in tracer._processors]
+
+
 @pytest.mark.asyncio
 async def test_build_tracer_attaches_otlp_when_endpoint_set(monkeypatch, tmp_path):
     from cubeloop.tracing import Tracer
@@ -74,7 +78,47 @@ async def test_build_tracer_attaches_otlp_when_endpoint_set(monkeypatch, tmp_pat
     assert isinstance(tracer, Tracer)
     # JSONL + OTLP → two BatchSpanProcessors.
     assert len(tracer._processors) == 2
+    assert "JsonlSpanExporter" in _exporter_types(tracer)
+    assert "OTLPSpanExporter" in _exporter_types(tracer)
     await tracer.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_build_tracer_otlp_only_skips_jsonl(monkeypatch, tmp_path):
+    from cubeloop.tracing import Tracer
+
+    monkeypatch.setattr(
+        tracing_mod,
+        "config",
+        _fake_config(
+            {
+                "tracing.enabled": True,
+                "tracing.jsonl.enabled": False,
+                "tracing.directory": str(tmp_path),
+                "tracing.otlp.endpoint": "http://tempo:4318/v1/traces",
+                "env": "production",
+            }
+        ),
+    )
+    tracer = tracing_mod.build_tracer()
+    assert isinstance(tracer, Tracer)
+    assert _exporter_types(tracer) == ["OTLPSpanExporter"]
+    await tracer.shutdown()
+
+
+def test_build_tracer_neither_exporter_returns_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        tracing_mod,
+        "config",
+        _fake_config(
+            {
+                "tracing.enabled": True,
+                "tracing.jsonl.enabled": False,
+                "tracing.directory": str(tmp_path),
+            }
+        ),
+    )
+    assert tracing_mod.build_tracer() is None
 
 
 def test_build_otlp_exporter_none_when_endpoint_unset(monkeypatch):

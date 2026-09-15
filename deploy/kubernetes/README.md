@@ -1,8 +1,9 @@
 # CubePlex on Kubernetes (Helm)
 
 One `helm upgrade --install` deploys the CubePlex backend, frontend, and
-the infrastructure they need (Postgres, Redis, rustfs, and the alibaba
-OpenSandbox umbrella) into a single namespace.
+the infrastructure they need (Postgres, Redis, rustfs, Tempo, and the
+alibaba OpenSandbox umbrella) into a single namespace. Tempo is ClusterIP-only
+and not on Ingress.
 
 - **English install guide:** [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes)
 - **中文安装指南:** [cubeplex.ai/docs/zh-Hans/deployment/kubernetes](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes)

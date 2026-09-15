@@ -100,3 +100,18 @@ rustfs:
 #     # MUST match opensandbox-server's configured egress.image exactly:
 #     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.1.4
 #     egressImage: "opensandbox/egress:v1.1.4"
+
+# Bundled Tempo is on by default (admin /traces + cubeloop OTLP). To disable
+# and point at an external Tempo instead:
+# tempo:
+#   enabled: false
+# backend:
+#   configOverrides:
+#     tracing:
+#       enabled: true
+#       jsonl:
+#         enabled: false
+#       otlp:
+#         endpoint: "http://tempo.observability.svc:4318/v1/traces"
+#       tempo:
+#         query_endpoint: "http://tempo.observability.svc:3200"

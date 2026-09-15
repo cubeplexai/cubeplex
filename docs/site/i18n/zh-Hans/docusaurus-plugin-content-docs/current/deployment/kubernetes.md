@@ -6,7 +6,7 @@ title: Kubernetes（Helm）
 # 用 Kubernetes 部署 CubePlex
 
 一条 `helm upgrade --install` 命令即可将 CubePlex（backend + frontend +
-Postgres + Redis + rustfs + alibaba OpenSandbox 全家桶）部署到已有的
+Postgres + Redis + rustfs + Tempo + alibaba OpenSandbox 全家桶）部署到已有的
 Kubernetes 集群中。
 
 backend Deployment 需要两个标准 Kubernetes Pod 特性：**init container**
@@ -54,10 +54,12 @@ Namespace: cubeplex
 │  frontend Deployment (1 replica)                               │
 │    Next.js standalone runtime (node server.js)                 │
 ├──────────────┬─────────────┬───────────────┬──────────────────┤
-│ postgres SS  │ redis SS    │ rustfs SS     │ opensandbox      │
-│  + PVC       │  + PVC      │  + PVC + Job  │（内置 subchart） │
-│              │             │  (bucket init)│                  │
-└──────────────┴─────────────┴───────────────┴──────────────────┘
+│ postgres SS  │ redis SS    │ rustfs SS     │ tempo SS         │
+│  + PVC       │  + PVC      │  + PVC + Job  │  + PVC           │
+│              │             │  (bucket init)│  仅 ClusterIP    │
+├──────────────┴─────────────┴───────────────┴──────────────────┤
+│  opensandbox（内置 subchart）                                  │
+└───────────────────────────────────────────────────────────────┘
                                             │
                                             └── LLM providers（外部）
 ```
@@ -66,10 +68,11 @@ Namespace: cubeplex
 通过 `storageClass.basePath` 改成其他节点路径，或设置
 `storageClass.create: false` 让每个 StatefulSet 指向已有的 StorageClass。
 
-还有两个可选的命名空间内服务：egress 密钥注入 webhook
-（[§4.10](#410-egress-密钥注入可选)）和 docling-serve 文档解析服务
-（[§4.11](#411-docling-文档解析可选)，一个 Deployment + models PVC）。两者
-默认都是关闭的。
+Tempo（[§4.12](#412-tempo-tracing默认开启)）默认开启，仅 ClusterIP、不上
+Ingress，backend ConfigMap 会自动指向它。还有两个可选的命名空间内服务：
+egress 密钥注入 webhook（[§4.10](#410-egress-密钥注入可选)）和
+docling-serve 文档解析服务（[§4.11](#411-docling-文档解析可选)，一个
+Deployment + models PVC）。后两者默认关闭。
 
 ## 3. 镜像
 
@@ -593,6 +596,59 @@ backend:
         base_url: "http://docling.example.internal:5001"
 ```
 
+### 4.12 Tempo tracing（默认开启）
+
+chart 会部署 Grafana Tempo 3.0.3 单进程（`-target=all`），本地文件系统后端，
+保留 7 天。backend ConfigMap 自动写入：
+
+- 写入：`tracing.otlp.endpoint` → `http://<release>-tempo:4318/v1/traces`
+- 查询：`tracing.tempo.query_endpoint` → `http://<release>-tempo:3200`
+
+admin 的 `/admin/traces` 读这个查询地址。返回 503 表示 Tempo 被关掉，或
+`query_endpoint` 仍是 null。
+
+Tempo 的查询 API 没有鉴权。组织隔离只在 CubePlex 里
+（`require_org_admin` + TraceQL `org_id` 条件）。ClusterIP 不是租户隔离。
+控制手段：
+
+- 不上 Ingress。
+- NetworkPolicy（默认开启）只允许带
+  `app.kubernetes.io/component: backend` 标签的 Pod 访问 3200 / 4318 /
+  4317。如果 kubelet 的 `/ready` 探针失败（探针来自节点 IP，不是 Pod），把
+  `tempo.networkPolicy.enabled` 设为 `false`。
+- `record_content` 默认 false，除非你主动打开。
+- 关闭磁盘 JSONL（`tracing.jsonl.enabled: false`），避免撑满 backend 可写层。
+
+```yaml
+tempo:
+  enabled: true
+  image: grafana/tempo:3.0.3
+  retention: 168h
+  recordContent: false
+  networkPolicy:
+    enabled: true
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 10Gi
+```
+
+关掉内置 Tempo、改用外部实例：
+
+```yaml
+tempo:
+  enabled: false
+backend:
+  configOverrides:
+    tracing:
+      enabled: true
+      jsonl:
+        enabled: false
+      otlp:
+        endpoint: "http://tempo.observability.svc:4318/v1/traces"
+      tempo:
+        query_endpoint: "http://tempo.observability.svc:3200"
+```
+
 ## 5. 安装
 
 ### 推荐：使用已发布的 chart
@@ -848,6 +904,15 @@ docling:                            # 可选，见 §4.11
   service: { port: 5001 }
   persistence: { storageClass, size }
   env: { }                          # 例如 HF_ENDPOINT、HF_TOKEN
+  resources: { ... }
+
+tempo:                              # 默认开启，见 §4.12
+  enabled: true
+  image: "grafana/tempo:3.0.3"
+  retention: 168h
+  recordContent: false
+  networkPolicy: { enabled: true }
+  persistence: { storageClass, size }
   resources: { ... }
 
 opensandbox:

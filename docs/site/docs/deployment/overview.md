@@ -15,7 +15,7 @@ the orchestration differs.
 |---|---|---|
 | Best for | A single host — quick self-hosted setup, small teams, internal demos | Multi-node clusters, production-scale, autoscaling |
 | Orchestration | `docker compose up -d` | `helm upgrade --install` |
-| Infra included | Postgres, Redis, rustfs, OpenSandbox | Postgres, Redis, rustfs, and the alibaba OpenSandbox umbrella |
+| Infra included | Postgres, Redis, rustfs, OpenSandbox, Tempo | Postgres, Redis, rustfs, Tempo, and the alibaba OpenSandbox umbrella |
 | Guide | [Docker Compose install guide](./docker-compose.md) | [Kubernetes install guide](./kubernetes.md) |
 
 If you're not sure, start with Docker Compose — it's the simpler setup and

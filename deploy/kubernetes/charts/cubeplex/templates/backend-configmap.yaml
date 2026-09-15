@@ -2,6 +2,11 @@
 {{- $redisHost := include "cubeplex.redis.host" . -}}
 {{- $rustfsHost := include "cubeplex.rustfs.host" . -}}
 {{- $doclingHost := include "cubeplex.docling.host" . -}}
+{{- $tempoHost := include "cubeplex.tempo.host" . -}}
+{{- $overrides := .Values.backend.configOverrides | default dict -}}
+{{- if .Values.tempo.enabled -}}
+{{- $overrides = omit $overrides "tracing" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,7 +17,7 @@ data:
   config.production.local.yaml: |
     dynaconf_merge: true
     production:
-      {{- with .Values.backend.configOverrides }}
+      {{- with $overrides }}
       {{- toYaml . | nindent 6 }}
       {{- end }}
       database:
@@ -44,6 +49,17 @@ data:
       parsers:
         docling_serve:
           base_url: {{ printf "http://%s:%v" $doclingHost .Values.docling.service.port | quote }}
+      {{- end }}
+      {{- if .Values.tempo.enabled }}
+      tracing:
+        enabled: true
+        record_content: {{ .Values.tempo.recordContent }}
+        jsonl:
+          enabled: false
+        otlp:
+          endpoint: {{ printf "http://%s:4318/v1/traces" $tempoHost | quote }}
+        tempo:
+          query_endpoint: {{ printf "http://%s:3200" $tempoHost | quote }}
       {{- end }}
       {{- if .Values.egress.enabled }}
       egress_exchange:

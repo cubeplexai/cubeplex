@@ -6,7 +6,7 @@ title: Kubernetes (Helm)
 # CubePlex on Kubernetes
 
 A single `helm upgrade --install` deploys CubePlex (backend + frontend +
-Postgres + Redis + rustfs + the alibaba OpenSandbox umbrella) to
+Postgres + Redis + rustfs + Tempo + the alibaba OpenSandbox umbrella) to
 an existing Kubernetes cluster.
 
 The backend Deployment requires two standard Kubernetes Pod features: **init
@@ -56,10 +56,12 @@ Namespace: cubeplex
 │  frontend Deployment (1 replica)                              │
 │    Next.js standalone runtime (node server.js)                │
 ├──────────────┬─────────────┬───────────────┬──────────────────┤
-│ postgres SS  │ redis SS    │ rustfs SS     │ opensandbox      │
-│  + PVC       │  + PVC      │  + PVC + Job  │ (bundled         │
-│              │             │  (bucket init)│  subchart)       │
-└──────────────┴─────────────┴───────────────┴──────────────────┘
+│ postgres SS  │ redis SS    │ rustfs SS     │ tempo SS         │
+│  + PVC       │  + PVC      │  + PVC + Job  │  + PVC           │
+│              │             │  (bucket init)│  ClusterIP only  │
+├──────────────┴─────────────┴───────────────┴──────────────────┤
+│  opensandbox (bundled subchart)                               │
+└───────────────────────────────────────────────────────────────┘
                                             │
                                             └── LLM providers (external)
 ```
@@ -69,11 +71,13 @@ chart creates. Override `storageClass.basePath` for a different node path,
 or set `storageClass.create: false` and point each StatefulSet at an
 existing class.
 
-Two more optional in-namespace services can be turned on: the egress
+Tempo ([§4.12](#412-tempo-tracing-default-on)) is on by default. It is
+ClusterIP-only and never on Ingress; the backend ConfigMap is auto-wired to
+it. Two more optional in-namespace services can be turned on: the egress
 secret-injection webhook ([§4.10](#410-egress-secret-injection-optional))
 and a docling-serve document parser
 ([§4.11](#411-docling-document-parsing-optional), Deployment + models PVC).
-Both are off by default.
+Both of those are off by default.
 
 ## 3. Images
 
@@ -626,6 +630,61 @@ backend:
         base_url: "http://docling.example.internal:5001"
 ```
 
+### 4.12 Tempo tracing (default on)
+
+The chart deploys Grafana Tempo 3.0.3 as a single process (`-target=all`)
+with a local filesystem backend and 7-day retention. The backend ConfigMap
+is auto-wired:
+
+- write: `tracing.otlp.endpoint` → `http://<release>-tempo:4318/v1/traces`
+- query: `tracing.tempo.query_endpoint` → `http://<release>-tempo:3200`
+
+The admin trace viewer at `/admin/traces` reads that query endpoint. A 503
+there means Tempo is disabled or `query_endpoint` is still null.
+
+Tempo's query API has no authentication. Org isolation lives only in
+CubePlex (`require_org_admin` plus a TraceQL `org_id` predicate). ClusterIP
+is not tenant isolation. Controls:
+
+- Never on Ingress.
+- NetworkPolicy (default on) allows ports 3200 / 4318 / 4317 only from pods
+  labeled `app.kubernetes.io/component: backend`. Set
+  `tempo.networkPolicy.enabled: false` if kubelet `/ready` probes fail —
+  those come from the node IP, not a pod.
+- `record_content` is false unless you turn it on.
+- JSONL on-disk export is off (`tracing.jsonl.enabled: false`) so spans do
+  not fill the backend writable layer.
+
+```yaml
+tempo:
+  enabled: true
+  image: grafana/tempo:3.0.3
+  retention: 168h
+  recordContent: false
+  networkPolicy:
+    enabled: true
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 10Gi
+```
+
+To disable bundled Tempo and point at an external one:
+
+```yaml
+tempo:
+  enabled: false
+backend:
+  configOverrides:
+    tracing:
+      enabled: true
+      jsonl:
+        enabled: false
+      otlp:
+        endpoint: "http://tempo.observability.svc:4318/v1/traces"
+      tempo:
+        query_endpoint: "http://tempo.observability.svc:3200"
+```
+
 ## 5. Install
 
 ### Recommended: from the published chart
@@ -884,6 +943,15 @@ docling:                            # optional, see §4.11
   service: { port: 5001 }
   persistence: { storageClass, size }
   env: { }                          # e.g. HF_ENDPOINT, HF_TOKEN
+  resources: { ... }
+
+tempo:                              # default on, see §4.12
+  enabled: true
+  image: "grafana/tempo:3.0.3"
+  retention: 168h
+  recordContent: false
+  networkPolicy: { enabled: true }
+  persistence: { storageClass, size }
   resources: { ... }
 
 opensandbox:
