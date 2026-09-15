@@ -8,12 +8,23 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from cubeloop.session.types import ExecutionResult
 
-from cubeplex.streams.run_manager import RunContext, RunManager
+from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("claim_matches", "finalize_matches", "expected_conflict"),
+    [
+        (True, True, None),
+        (False, True, "resume claim was replaced before cleanup"),
+        (True, False, "resume claim was replaced before finalization"),
+    ],
+)
 async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     monkeypatch: pytest.MonkeyPatch,
+    claim_matches: bool,
+    finalize_matches: bool,
+    expected_conflict: str | None,
 ) -> None:
     order: list[str] = []
     pending = SimpleNamespace(question_id="q-answered")
@@ -109,11 +120,11 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
 
     async def _claim_matches(*_args: Any, **_kwargs: Any) -> bool:
         order.append("claim-check")
-        return True
+        return claim_matches
 
     async def _finalize(*_args: Any, **_kwargs: Any) -> bool:
         order.append("finalize")
-        return True
+        return finalize_matches
 
     monkeypatch.setattr("cubeplex.streams.hitl_resume.resume_claim_matches", _claim_matches)
     monkeypatch.setattr(
@@ -132,31 +143,36 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     async def _drain() -> None:
         order.append("drain")
 
-    result = await manager._run_cubeloop_respond_path(
-        ctx=RunContext(
-            user_id="user-1",
-            org_id="org-1",
-            workspace_id="workspace-1",
+    async def _run() -> str:
+        return await manager._run_cubeloop_respond_path(
+            ctx=RunContext(
+                user_id="user-1",
+                org_id="org-1",
+                workspace_id="workspace-1",
+                conversation_id="conversation-1",
+            ),
+            run_id="run-1",
             conversation_id="conversation-1",
-        ),
-        run_id="run-1",
-        conversation_id="conversation-1",
-        question_id="q-answered",
-        answer="yes",
-        claim_token="claim-1",
-        effective_system_prompt="system",
-        publish_stream_event=AsyncMock(),
-        flush_citation_buffer=_flush,
-        citation_buffers={"agent-1": "citation"},
-        extra_ref_holder={"provider_name": "provider", "model_id": "model"},
-        before_terminal_commit=_drain,
-    )
+            question_id="q-answered",
+            answer="yes",
+            claim_token="claim-1",
+            effective_system_prompt="system",
+            publish_stream_event=AsyncMock(),
+            flush_citation_buffer=_flush,
+            citation_buffers={"agent-1": "citation"},
+            extra_ref_holder={"provider_name": "provider", "model_id": "model"},
+            before_terminal_commit=_drain,
+        )
 
-    assert result == "completed"
-    assert order.index("claim-check") < order.index("clear-pending")
-    assert order.index("clear-pending") < order.index("resolved")
-    assert order.index("resolved") < order.index("flush")
-    assert order.index("flush") < order.index("drain")
-    assert order.index("drain") < order.index("finalize")
+    if expected_conflict is None:
+        assert await _run() == "completed"
+        assert order.index("claim-check") < order.index("clear-pending")
+        assert order.index("clear-pending") < order.index("resolved")
+        assert order.index("resolved") < order.index("flush")
+        assert order.index("flush") < order.index("drain")
+        assert order.index("drain") < order.index("finalize")
+    else:
+        with pytest.raises(ResumeConflict, match=expected_conflict):
+            await _run()
     manager._steering_delivery.acknowledge_injected.assert_awaited_once_with("run-1", "steer-1")
     assert manager._agents == {}
