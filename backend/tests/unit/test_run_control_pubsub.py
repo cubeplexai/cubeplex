@@ -3,6 +3,7 @@ import json
 
 import fakeredis.aioredis
 import pytest
+from cubeloop.session.input import InputReceipt
 
 from cubeplex.streams.run_manager import RunManager
 
@@ -13,6 +14,12 @@ def _mgr(redis) -> RunManager:
     m._key_prefix = "t"
     m._tasks = {}
     m._agents = {}
+    m._agent_claim_tokens = {}
+    m._resume_claim_tokens = {}
+    m._preparing_runs = set()
+    m._preparing_claim_tokens = {}
+    m._pending_session_inputs = {}
+    m._cancelled_pre_execution_inputs = {}
     m._ack_waiters = {}
     m._control_channel = "t:control"
     m._ack_channel = "t:control:ack"
@@ -21,12 +28,18 @@ def _mgr(redis) -> RunManager:
     return m
 
 
+class _FakeSession:
+    def __init__(self) -> None:
+        self.inputs: list = []
+
+    def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
+        self.inputs.append(envelope)
+        return InputReceipt(input_id=envelope.input_id, status="queued")
+
+
 class _FakeAgent:
     def __init__(self) -> None:
-        self.steered: list = []
-
-    def steer(self, message) -> None:  # noqa: ANN001
-        self.steered.append(message)
+        self.session = _FakeSession()
 
 
 @pytest.fixture
@@ -40,8 +53,9 @@ async def test_dispatch_steer_local_calls_agent(redis):
     agent = _FakeAgent()
     m._agents["r1"] = agent
     assert await m.dispatch_steer("r1", "go left", steer_id="s1") == "steered"
-    assert agent.steered[0].content[0].text == "go left"
-    assert agent.steered[0].metadata["steer_id"] == "s1"
+    assert agent.session.inputs[0].message.content[0].text == "go left"
+    assert agent.session.inputs[0].input_id == "s1"
+    assert agent.session.inputs[0].message.metadata["steer_id"] == "s1"
 
 
 @pytest.mark.asyncio
@@ -50,7 +64,7 @@ async def test_dispatch_steer_remote_publishes(redis):
     pubsub = redis.pubsub()
     await pubsub.subscribe("t:control")
     await asyncio.sleep(0)
-    assert await m.dispatch_steer("r-remote", "hello", steer_id="s1") == "published"
+    assert await m.dispatch_steer("r-remote", "hello", steer_id="s1", ack_timeout=0) == "published"
     got = None
     for _ in range(20):
         msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
@@ -62,6 +76,7 @@ async def test_dispatch_steer_remote_publishes(redis):
         "type": "steer",
         "content": "hello",
         "steer_id": "s1",
+        "ack_id": "r-remote:steer:s1",
     }
 
 
@@ -71,7 +86,7 @@ async def test_handle_control_steer_dispatches_locally(redis):
     agent = _FakeAgent()
     m._agents["r1"] = agent
     await m._handle_control({"run_id": "r1", "type": "steer", "content": "x"})
-    assert agent.steered[0].content[0].text == "x"
+    assert agent.session.inputs[0].message.content[0].text == "x"
 
 
 @pytest.mark.asyncio
@@ -88,6 +103,15 @@ async def test_ack_resolves_waiter(redis):
     m._ack_waiters["r1"] = [fut]
     await m._handle_ack({"run_id": "r1"})
     assert fut.done() and fut.result() is True
+
+
+@pytest.mark.asyncio
+async def test_rejected_ack_resolves_correlated_waiter(redis):
+    m = _mgr(redis)
+    fut = asyncio.get_running_loop().create_future()
+    m._ack_waiters["r1:steer:s1"] = [fut]
+    await m._handle_ack({"run_id": "r1", "ack_id": "r1:steer:s1", "accepted": False})
+    assert fut.done() and fut.result() is False
 
 
 @pytest.mark.asyncio

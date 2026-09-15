@@ -5,7 +5,7 @@ async function startRun(page: Page, prompt: string): Promise<void> {
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill(prompt)
   await input.press('Enter')
-  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
+  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 20_000 })
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 20_000 })
 }
 
