@@ -57,6 +57,9 @@ if current and current ~= ARGV[1] then
 end
 local meta_exists = redis.call('EXISTS', KEYS[2]) == 1
 if meta_exists then
+  if redis.call('HEXISTS', KEYS[2], 'resume_finalizing_token') == 1 then
+    return 'already_running'
+  end
   local status = redis.call('HGET', KEYS[2], 'status')
   if status == 'running' then
     return 'already_running'
@@ -162,6 +165,50 @@ def classify_terminal_status(
     return TerminalClassification(status="paused_hitl", clear_pending=False)
 
 
+# KEYS[1] = meta_key, KEYS[2] = active_key
+# ARGV[1] = expected_claim_token, ARGV[2] = expected_run_id,
+# ARGV[3] = ttl_seconds
+# Returns 1 after reserving finalization, 0 if the caller no longer owns
+# the resume claim. The marker prevents stale recovery from handing the same
+# question to another resume attempt while durable cleanup is in flight.
+_BEGIN_FINALIZATION_IF_CLAIM_MATCHES_LUA = """
+if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then
+  return 0
+end
+if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
+  return 0
+end
+redis.call('HSET', KEYS[1], 'resume_finalizing_token', ARGV[1])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+if redis.call('GET', KEYS[2]) == ARGV[2] then
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[3]))
+end
+return 1
+"""
+
+
+async def begin_resume_finalization(
+    redis: Redis,
+    *,
+    prefix: str,
+    conversation_id: str,
+    run_id: str,
+    claim_token: str,
+    ttl_seconds: int,
+) -> bool:
+    """Reserve the resume claim across durable cleanup and event projection."""
+    result = await redis.eval(  # type: ignore[misc]
+        _BEGIN_FINALIZATION_IF_CLAIM_MATCHES_LUA,
+        2,
+        _run_meta_key(prefix, run_id),
+        _active_run_key(prefix, conversation_id),
+        claim_token,
+        run_id,
+        str(ttl_seconds),
+    )
+    return int(result) == 1
+
+
 # KEYS[1] = meta_key
 # ARGV[1] = expected_claim_token, ARGV[2] = new_status
 # Returns 1 if status was set, 0 if token mismatch (caller's claim was
@@ -170,7 +217,12 @@ _FINALIZE_IF_CLAIM_MATCHES_LUA = """
 if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then
   return 0
 end
+local finalizing = redis.call('HGET', KEYS[1], 'resume_finalizing_token')
+if finalizing and finalizing ~= ARGV[1] then
+  return 0
+end
 redis.call('HSET', KEYS[1], 'status', ARGV[2])
+redis.call('HDEL', KEYS[1], 'resume_finalizing_token')
 return 1
 """
 

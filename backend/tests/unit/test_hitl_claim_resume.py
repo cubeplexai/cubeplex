@@ -22,6 +22,7 @@ import pytest
 
 from cubeplex.streams.hitl_resume import (
     ClaimResumeOutcome,
+    begin_resume_finalization,
     claim_resume,
     resume_claim_matches,
     stale_answered_pending,
@@ -30,6 +31,7 @@ from cubeplex.streams.run_events import (
     create_run,
     get_active_run,
     get_run_meta,
+    mark_run_stale,
     update_run_meta,
 )
 
@@ -237,6 +239,81 @@ async def test_resume_claim_matches_only_current_owner(redis):
         run_id="r1",
         claim_token="replaced-token",
     )
+
+
+async def test_begin_finalization_reserves_claim_against_stale_recovery(redis):
+    prefix = "test_begin_finalizing"
+    created = await create_run(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        conversation_id="c1",
+        status="running",
+        started_at="2026-06-02T00:00:00+00:00",
+        user_message="hi",
+        ttl_seconds=60,
+    )
+    assert created is not None
+    meta_key = f"{prefix}:run_meta:v2:r1"
+    await redis.hset(meta_key, "claim_token", "current-token")
+
+    reserved = await begin_resume_finalization(
+        redis,
+        prefix=prefix,
+        conversation_id="c1",
+        run_id="r1",
+        claim_token="current-token",
+        ttl_seconds=60,
+    )
+
+    assert reserved is True
+    assert (await redis.hgetall(meta_key))["resume_finalizing_token"] == "current-token"
+    marked = await mark_run_stale(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        conversation_id="c1",
+        observed_last_event_at="2026-06-02T00:00:00+00:00",
+    )
+    assert marked is False
+
+
+async def test_claim_rejects_stale_run_while_resume_finalization_is_reserved(redis):
+    """A stale detector cannot reopen a resume while its DB cleanup is in flight."""
+    prefix = "test_claim_finalizing"
+    created = await create_run(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        conversation_id="c1",
+        status="running",
+        started_at="2026-06-02T00:00:00+00:00",
+        user_message="hi",
+        ttl_seconds=60,
+    )
+    assert created is not None
+    meta_key = f"{prefix}:run_meta:v2:r1"
+    await redis.hset(
+        meta_key,
+        mapping={
+            "claim_token": "current-token",
+            "resume_finalizing_token": "current-token",
+            "status": "stale",
+        },
+    )
+
+    result = await claim_resume(
+        redis,
+        prefix=prefix,
+        conversation_id="c1",
+        expected_run_id="r1",
+        started_at="2026-06-02T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+
+    assert result.outcome == ClaimResumeOutcome.ALREADY_RUNNING
+    assert result.claim_token is None
+    assert (await redis.hgetall(meta_key))["claim_token"] == "current-token"
 
 
 def test_stale_answered_pending_rejects_replacement_follow_up() -> None:

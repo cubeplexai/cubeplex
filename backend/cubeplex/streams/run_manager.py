@@ -2346,7 +2346,10 @@ class RunManager:
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.agents.stream import StreamConverter
         from cubeplex.middleware.citations.counter import citation_counter_var
-        from cubeplex.streams.hitl_resume import finalize_run_meta_if_claim_matches
+        from cubeplex.streams.hitl_resume import (
+            begin_resume_finalization,
+            finalize_run_meta_if_claim_matches,
+        )
 
         # Late-binding holder for middleware closures (provider_name,
         # model_id, mem_repo_factory, extra). Passed in from
@@ -2466,6 +2469,7 @@ class RunManager:
             # matches the existing crash story.
             final_status: str = "errored"
             finalized_with_claim = False
+            claim_conflict_reason: str | None = None
             stale_pending = None
             try:
                 with tracing_context(metadata=_trace_meta):
@@ -2493,6 +2497,16 @@ class RunManager:
                             result,
                             answered_question_id=question_id,
                         )
+                if not await begin_resume_finalization(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                ):
+                    claim_conflict_reason = "resume claim was replaced before cleanup"
+                    raise ResumeConflict(claim_conflict_reason)
                 _schedule_writeback(
                     org_id=ctx.org_id,
                     provider_slug=provider_name,
@@ -2500,18 +2514,8 @@ class RunManager:
                     exc=None,
                 )
                 if final_status == "completed":
-                    from cubeplex.streams.hitl_resume import (
-                        resume_claim_matches,
-                        stale_answered_pending,
-                    )
+                    from cubeplex.streams.hitl_resume import stale_answered_pending
 
-                    if not await resume_claim_matches(
-                        self._redis,
-                        prefix=self._key_prefix,
-                        run_id=run_id,
-                        claim_token=claim_token,
-                    ):
-                        raise ResumeConflict("resume claim was replaced before cleanup")
                     loaded_pending = await cp.load_pending(conversation_id)
                     stale_pending = stale_answered_pending(
                         final_status=final_status,
@@ -2561,7 +2565,9 @@ class RunManager:
                     self._agents.pop(run_id, None)
                     self._hitl_channels.pop(run_id, None)
                 if not finalized_with_claim:
-                    raise ResumeConflict("resume claim was replaced before finalization")
+                    raise ResumeConflict(
+                        claim_conflict_reason or "resume claim was replaced before finalization"
+                    )
 
         return final_status
 

@@ -122,6 +122,9 @@ if current ~= ARGV[1] then
   return 0
 end
 if redis.call('EXISTS', KEYS[3]) == 1 then
+  if redis.call('HEXISTS', KEYS[3], 'resume_finalizing_token') == 1 then
+    return 0
+  end
   local status = redis.call('HGET', KEYS[3], 'status')
   if status == 'running' or status == 'paused_hitl' then
     return 0
@@ -189,6 +192,9 @@ return 1
 # ARGV[2] = observed last_event_at/started_at used for the stale decision
 #           (empty = no timestamp CAS; used by startup recovery)
 _MARK_STALE_LUA = """
+if redis.call('HEXISTS', KEYS[1], 'resume_finalizing_token') == 1 then
+  return 0
+end
 if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
   return 0
 end

@@ -41,7 +41,10 @@ async def test_finalize_writes_status_when_token_matches(redis):
     )
     assert created is not None
     # Stamp a claim_token on the meta row (mirrors what claim_resume does).
-    await redis.hset(f"{prefix}:run_meta:v2:r1", "claim_token", "tok1")
+    await redis.hset(
+        f"{prefix}:run_meta:v2:r1",
+        mapping={"claim_token": "tok1", "resume_finalizing_token": "tok1"},
+    )
 
     ok = await finalize_run_meta_if_claim_matches(
         redis,
@@ -55,6 +58,7 @@ async def test_finalize_writes_status_when_token_matches(redis):
     meta = await get_run_meta(redis, prefix=prefix, run_id="r1")
     assert meta is not None
     assert meta.status == "completed"
+    assert not await redis.hexists(f"{prefix}:run_meta:v2:r1", "resume_finalizing_token")
 
 
 async def test_finalize_no_op_when_token_mismatches(redis):

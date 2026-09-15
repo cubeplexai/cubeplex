@@ -12,7 +12,7 @@ CubePlex runs agents with [CubeLoop](https://github.com/cubeplexai/cubeloop). Th
 4. `execution_adapter.execute_session` attaches the required event consumer before calling the public CubeLoop `ExecutionSession.execute` API. `RunManager` maps agent events to CubePlex events and writes them to the Redis run stream consumed by SSE clients.
 5. CubeLoop returns an explicit `ExecutionResult`; the host maps its outcome and durable checkpoint facts to completed, cancelled, failed, or paused run state.
 6. On the prompt path, CubePlex drains projected events and emits the sole public `DoneEvent` before marking Redis run metadata terminal, so the SSE consumer cannot exit before the terminal event is stored.
-7. On the respond path, CubePlex performs claim-fenced pending cleanup, drains projected events, and commits terminal metadata while it still owns the resume claim; it then emits `DoneEvent`. CubeLoop's internal `ExecutionFinished` event is never projected to SSE.
+7. On the respond path, CubePlex atomically reserves the resume claim before durable pending cleanup, so stale recovery cannot hand the same answer to another worker while PostgreSQL and Redis are being reconciled. It then drains projected events, commits terminal metadata under that reservation, and emits `DoneEvent`. CubeLoop's internal `ExecutionFinished` event is never projected to SSE.
 
 `RunManager` owns background execution and Redis persistence. Redis holds active-run coordination, control signals, event streams, and their expiry; it is not a replacement for the durable conversation state in Postgres.
 

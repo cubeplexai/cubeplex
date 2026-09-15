@@ -118,15 +118,18 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
 
     monkeypatch.setattr("cubeplex.streams.execution_adapter.execute_session", _execute_session)
 
-    async def _claim_matches(*_args: Any, **_kwargs: Any) -> bool:
-        order.append("claim-check")
+    async def _begin_finalization(*_args: Any, **_kwargs: Any) -> bool:
+        order.append("reserve-finalization")
         return claim_matches
 
     async def _finalize(*_args: Any, **_kwargs: Any) -> bool:
         order.append("finalize")
         return finalize_matches
 
-    monkeypatch.setattr("cubeplex.streams.hitl_resume.resume_claim_matches", _claim_matches)
+    monkeypatch.setattr(
+        "cubeplex.streams.hitl_resume.begin_resume_finalization",
+        _begin_finalization,
+    )
     monkeypatch.setattr(
         "cubeplex.streams.hitl_resume.finalize_run_meta_if_claim_matches",
         _finalize,
@@ -166,7 +169,7 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
 
     if expected_conflict is None:
         assert await _run() == "completed"
-        assert order.index("claim-check") < order.index("clear-pending")
+        assert order.index("reserve-finalization") < order.index("clear-pending")
         assert order.index("clear-pending") < order.index("resolved")
         assert order.index("resolved") < order.index("flush")
         assert order.index("flush") < order.index("drain")
