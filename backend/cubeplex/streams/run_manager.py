@@ -1083,10 +1083,10 @@ class RunManager:
     def _on_task_done(
         self,
         run_id: str,
-        completed_task: asyncio.Task[None] | None = None,
+        completed_task: asyncio.Task[None],
     ) -> None:
         """Done-callback that removes the run task and signals drain when empty."""
-        if completed_task is not None and self._tasks.get(run_id) is not completed_task:
+        if self._tasks.get(run_id) is not completed_task:
             return
         self._tasks.pop(run_id, None)
         getattr(self, "_preparing_runs", set()).discard(run_id)
@@ -1373,10 +1373,19 @@ class RunManager:
             payload.update(extra)
         await self._redis.publish(self._control_channel, json.dumps(payload))
 
-    async def _publish_ack(self, run_id: str) -> None:
+    async def _publish_ack(
+        self,
+        run_id: str,
+        *,
+        ack_id: str | None = None,
+        accepted: bool = True,
+    ) -> None:
         import json
 
-        await self._redis.publish(self._ack_channel, json.dumps({"run_id": run_id}))
+        payload: dict[str, Any] = {"run_id": run_id, "accepted": accepted}
+        if ack_id is not None:
+            payload["ack_id"] = ack_id
+        await self._redis.publish(self._ack_channel, json.dumps(payload))
 
     async def dispatch_steer(
         self,
@@ -1384,6 +1393,7 @@ class RunManager:
         content: str,
         steer_id: str,
         metadata: dict[str, Any] | None = None,
+        ack_timeout: float = 1.0,
     ) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
@@ -1421,11 +1431,30 @@ class RunManager:
             metadata=metadata,
         ):
             return "steered"
-        extra: dict[str, Any] | None = None
+        ack_id = f"{run_id}:steer:{steer_id}"
+        extra: dict[str, Any] = {"ack_id": ack_id}
         if metadata:
-            extra = {"metadata": metadata}
-        await self._publish_control(run_id, "steer", content, steer_id=steer_id, extra=extra)
-        return "published"
+            extra["metadata"] = metadata
+        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._ack_waiters.setdefault(ack_id, []).append(fut)
+        try:
+            await self._publish_control(
+                run_id,
+                "steer",
+                content,
+                steer_id=steer_id,
+                extra=extra,
+            )
+            accepted = await asyncio.wait_for(fut, timeout=ack_timeout)
+            return "published" if accepted else "no_active_run"
+        except TimeoutError:
+            return "published"
+        finally:
+            waiters = self._ack_waiters.get(ack_id)
+            if waiters and fut in waiters:
+                waiters.remove(fut)
+                if not waiters:
+                    self._ack_waiters.pop(ack_id, None)
 
     async def notify_durable_steer(self, run_id: str, queue_item_id: str) -> None:
         """Wake the run owner without putting user-authored content on Redis."""
@@ -1498,7 +1527,7 @@ class RunManager:
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
-        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
     async def cancel_paused_run(
@@ -1572,7 +1601,7 @@ class RunManager:
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
-        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
     async def _force_cancel_hitl(
@@ -1674,6 +1703,13 @@ class RunManager:
                 await self._publish_ack(run_id)
         elif type_ == "steer":
             agent = self._agents.get(run_id)
+            owns_run = (
+                agent is not None
+                or run_id in self._tasks
+                or run_id in getattr(self, "_preparing_runs", set())
+            )
+            if not owns_run:
+                return
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
             msg_metadata = extra_metadata if isinstance(extra_metadata, dict) else None
@@ -1693,14 +1729,19 @@ class RunManager:
                         mode="steer",
                     )
                 )
-                if receipt.status in ("queued", "committed"):
-                    return
-            self._buffer_pre_execution_input(
-                run_id,
-                content=data.get("content") or "",
-                steer_id=input_id,
-                metadata=msg_metadata,
-            )
+                accepted = receipt.status in ("queued", "committed")
+            else:
+                accepted = False
+            if not accepted:
+                accepted = self._buffer_pre_execution_input(
+                    run_id,
+                    content=data.get("content") or "",
+                    steer_id=input_id,
+                    metadata=msg_metadata,
+                )
+            ack_id = data.get("ack_id")
+            if isinstance(ack_id, str):
+                await self._publish_ack(run_id, ack_id=ack_id, accepted=accepted)
         elif type_ == "cancel_steer":
             agent = self._agents.get(run_id)
             if agent is not None:
@@ -1720,9 +1761,12 @@ class RunManager:
         run_id = data.get("run_id")
         if not isinstance(run_id, str):
             return
-        for fut in self._ack_waiters.get(run_id, []):
+        ack_id = data.get("ack_id")
+        waiter_key = ack_id if isinstance(ack_id, str) else run_id
+        accepted = data.get("accepted") is not False
+        for fut in self._ack_waiters.get(waiter_key, []):
             if not fut.done():
-                fut.set_result(True)
+                fut.set_result(accepted)
 
     async def _subscribe_loop(self, channel: str, handler: Any, ready: asyncio.Event) -> None:
         import json

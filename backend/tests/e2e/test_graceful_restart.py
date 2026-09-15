@@ -103,7 +103,7 @@ async def test_drain_waits_for_in_flight_task(redis_client: Redis) -> None:
     task = asyncio.create_task(slow(), name="run:slow-1")
     rm._tasks["slow-1"] = task
     rm._tasks_empty.clear()
-    task.add_done_callback(lambda _: rm._on_task_done("slow-1"))
+    task.add_done_callback(lambda completed: rm._on_task_done("slow-1", completed))
 
     start = time.monotonic()
     await rm.drain(timeout_seconds=5.0)
@@ -122,7 +122,7 @@ async def test_drain_timeout_cancels_residual(redis_client: Redis) -> None:
     task = asyncio.create_task(forever(), name="run:forever")
     rm._tasks["forever"] = task
     rm._tasks_empty.clear()
-    task.add_done_callback(lambda _: rm._on_task_done("forever"))
+    task.add_done_callback(lambda completed: rm._on_task_done("forever", completed))
 
     await rm.drain(timeout_seconds=0.2)
     # cancel_all path completed: task is done (cancelled) and removed.
@@ -633,7 +633,7 @@ async def test_drain_waits_for_in_flight_run_then_returns(
     task = asyncio.create_task(slow_run(), name="run:integration-slow")
     rm._tasks["integration-slow"] = task
     rm._tasks_empty.clear()
-    task.add_done_callback(lambda _: rm._on_task_done("integration-slow"))
+    task.add_done_callback(lambda completed: rm._on_task_done("integration-slow", completed))
 
     start = time.monotonic()
     await rm.drain(timeout_seconds=5.0)
@@ -660,7 +660,7 @@ async def test_drain_timeout_force_cancels(memory_client: httpx.AsyncClient) -> 
     task = asyncio.create_task(long_run(), name="run:integration-long")
     rm._tasks["integration-long"] = task
     rm._tasks_empty.clear()
-    task.add_done_callback(lambda _: rm._on_task_done("integration-long"))
+    task.add_done_callback(lambda completed: rm._on_task_done("integration-long", completed))
 
     await rm.drain(timeout_seconds=0.2)
     assert cancelled_seen.is_set()
@@ -687,7 +687,7 @@ async def test_cancel_all_does_not_wait_forever_for_stubborn_task(
     task = asyncio.create_task(stubborn_run(), name="run:integration-stubborn")
     rm._tasks["integration-stubborn"] = task
     rm._tasks_empty.clear()
-    task.add_done_callback(lambda _: rm._on_task_done("integration-stubborn"))
+    task.add_done_callback(lambda completed: rm._on_task_done("integration-stubborn", completed))
     await started.wait()
 
     start = time.monotonic()

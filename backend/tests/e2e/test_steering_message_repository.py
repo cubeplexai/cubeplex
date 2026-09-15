@@ -273,6 +273,11 @@ class _AlreadyCommittedSession(_QueueingSession):
         )
 
 
+class _MemoryCommittedOnCancelSession(_QueueingSession):
+    def cancel_input(self, steer_id: str) -> InputReceipt:
+        return InputReceipt(input_id=steer_id, status="committed", durability="memory")
+
+
 @pytest.mark.asyncio
 async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_event(
     db_session: AsyncSession,
@@ -646,6 +651,52 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
     assert [message.metadata["steer_id"] for message in replacement.messages] == [
         "steer-unregister-race"
     ]
+
+
+@pytest.mark.asyncio
+async def test_pause_unregister_keeps_memory_committed_claim_out_of_retry_queue(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    agent = _MemoryCommittedOnCancelSession()
+    scope = SteeringRunScope(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=conversation.id,
+    )
+    await coordinator.register_and_drain(
+        run_id="run-memory-commit",
+        scope=scope,
+        session=agent,
+    )
+    row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="run-memory-commit",
+        client_steer_id="steer-memory-commit",
+        content="checkpoint me once",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-memory-commit",
+    )
+    await db_session.commit()
+    await coordinator.drain("run-memory-commit")
+
+    await coordinator.unregister(
+        "run-memory-commit",
+        session=agent,
+        requeue_owned=True,
+    )
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.dispatched
+    assert row.delivery_owner == coordinator._owner
 
 
 @pytest.mark.asyncio

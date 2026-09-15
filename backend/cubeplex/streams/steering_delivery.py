@@ -177,6 +177,12 @@ class DurableSteeringCoordinator:
                             state=SteeringMessageState.injected,
                         )
                         continue
+                    if receipt.status == "committed":
+                        # Session memory has consumed the input, but its
+                        # suspension checkpoint has not committed yet. Keep
+                        # ownership until that checkpoint or later history
+                        # reconciliation proves the durable outcome.
+                        continue
                     if history_ids is None:
                         history_ids = await self._history_loader(scope.conversation_id)
                     await repo.reconcile_terminal(
@@ -193,6 +199,10 @@ class DurableSteeringCoordinator:
                         row_id=row.id,
                         state=SteeringMessageState.injected,
                     )
+                    continue
+                if receipt.status == "committed":
+                    # Requeueing a memory-committed input would submit it a
+                    # second time after the upcoming suspension checkpoint.
                     continue
                 if receipt.status != "cancelled":
                     if history_ids is None:
