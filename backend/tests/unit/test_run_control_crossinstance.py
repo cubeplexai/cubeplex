@@ -25,10 +25,15 @@ def _mgr(redis: fakeredis.aioredis.FakeRedis) -> RunManager:
 class _FakeSession:
     def __init__(self) -> None:
         self.inputs: list = []
+        self.cancelled: list[str] = []
 
     def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
         self.inputs.append(envelope)
         return InputReceipt(input_id=envelope.input_id, status="queued")
+
+    def cancel_input(self, input_id: str) -> InputReceipt:
+        self.cancelled.append(input_id)
+        return InputReceipt(input_id=input_id, status="cancelled")
 
 
 class _FakeAgent:
@@ -39,6 +44,9 @@ class _FakeAgent:
 class _ClosedSession(_FakeSession):
     def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
         return InputReceipt(input_id=envelope.input_id, status="closed")
+
+    def cancel_input(self, input_id: str) -> InputReceipt:
+        return InputReceipt(input_id=input_id, status="closed")
 
 
 @pytest.mark.asyncio
@@ -115,6 +123,30 @@ async def test_local_stale_session_forwards_steer_to_replacement() -> None:
         )
         assert status == "published"
         assert replacement_agent.session.inputs[0].input_id == "s1"
+    finally:
+        await old_owner.stop_control_listeners()
+        await replacement.stop_control_listeners()
+
+
+@pytest.mark.asyncio
+async def test_local_stale_session_forwards_cancel_to_replacement() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    old_owner, replacement = _mgr(redis), _mgr(redis)
+    old_agent = _FakeAgent()
+    old_agent.session = _ClosedSession()
+    old_owner._agents["r1"] = old_agent
+    replacement_agent = _FakeAgent()
+    replacement._agents["r1"] = replacement_agent
+    await old_owner.start_control_listeners()
+    await replacement.start_control_listeners()
+    try:
+        status = await old_owner.dispatch_cancel_steer("r1", "s1")
+        assert status == "published"
+        for _ in range(50):
+            if replacement_agent.session.cancelled:
+                break
+            await asyncio.sleep(0.01)
+        assert replacement_agent.session.cancelled == ["s1"]
     finally:
         await old_owner.stop_control_listeners()
         await replacement.stop_control_listeners()
