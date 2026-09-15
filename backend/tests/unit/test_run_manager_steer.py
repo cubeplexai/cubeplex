@@ -1,5 +1,7 @@
 """Unit tests for RunManager's live-agent registry + steer_run."""
 
+import asyncio
+
 import pytest
 from cubeloop.session.input import InputReceipt
 
@@ -151,6 +153,42 @@ async def test_dispatch_steer_buffers_until_session_starts_accepting_input() -> 
     await mgr._drain_pre_execution_inputs("run-1", agent.session)
     assert agent.session.inputs[0].input_id == "s-setup"
     assert agent.session.inputs[0].message.metadata["steer_id"] == "s-setup"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_steer_maps_closed_session_to_no_active_run() -> None:
+    mgr = _make_manager()
+    mgr._agents = {"run-1": _PreparingAgent()}
+    mgr._preparing_runs = set()
+    mgr._pending_session_inputs = {}
+
+    status = await mgr.dispatch_steer("run-1", "too late", steer_id="s-closed")
+
+    assert status == "no_active_run"
+
+
+@pytest.mark.asyncio
+async def test_old_task_callback_preserves_replacement_registration() -> None:
+    mgr = _make_manager()
+
+    async def _wait() -> None:
+        await asyncio.Event().wait()
+
+    old_task = asyncio.create_task(_wait())
+    replacement_task = asyncio.create_task(_wait())
+    mgr._tasks = {"run-1": replacement_task}
+    mgr._tasks_empty = asyncio.Event()
+    mgr._preparing_runs = {"run-1"}
+    mgr._pending_session_inputs = {"run-1": {"s1": ("keep", {})}}
+
+    mgr._on_task_done("run-1", old_task)
+
+    assert mgr._tasks["run-1"] is replacement_task
+    assert "run-1" in mgr._preparing_runs
+    assert "run-1" in mgr._pending_session_inputs
+    old_task.cancel()
+    replacement_task.cancel()
+    await asyncio.gather(old_task, replacement_task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

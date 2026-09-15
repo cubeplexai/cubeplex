@@ -1080,8 +1080,14 @@ class RunManager:
             redis_key_prefix=key_prefix,
         )
 
-    def _on_task_done(self, run_id: str) -> None:
+    def _on_task_done(
+        self,
+        run_id: str,
+        completed_task: asyncio.Task[None] | None = None,
+    ) -> None:
         """Done-callback that removes the run task and signals drain when empty."""
+        if completed_task is not None and self._tasks.get(run_id) is not completed_task:
+            return
         self._tasks.pop(run_id, None)
         getattr(self, "_preparing_runs", set()).discard(run_id)
         getattr(self, "_pending_session_inputs", {}).pop(run_id, None)
@@ -1195,6 +1201,10 @@ class RunManager:
                     raise RuntimeError(f"Conversation {conversation_id} already has an active run")
                 raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
 
+        # Admission is externally visible as soon as create_run succeeds, so
+        # buffer steers before any later await can yield to a control handler.
+        self._preparing_runs.add(run_id)
+
         # Clear the per-conversation last-error pointer so subsequent reloads
         # after a successful new run don't keep showing the previous failure.
         with suppress(Exception):
@@ -1203,8 +1213,6 @@ class RunManager:
                 prefix=self._key_prefix,
                 conversation_id=conversation_id,
             )
-
-        self._preparing_runs.add(run_id)
         task = asyncio.create_task(
             self._execute_run(
                 run_id=run_id,
@@ -1220,7 +1228,7 @@ class RunManager:
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
-        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
     async def cancel_all(self) -> None:
@@ -1405,7 +1413,7 @@ class RunManager:
                 metadata=metadata,
             ):
                 return "steered"
-            return "not_found"
+            return "no_active_run"
         if self._buffer_pre_execution_input(
             run_id,
             content=content,
