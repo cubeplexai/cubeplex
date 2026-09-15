@@ -1,21 +1,28 @@
 """Unit tests for RunManager's live-agent registry + steer_run."""
 
 import pytest
+from cubeloop.session.input import InputReceipt
 
 from cubeplex.streams.run_manager import RunManager, _registration_was_replaced
 
 
-class _FakeAgent:
+class _FakeSession:
     def __init__(self) -> None:
-        self.steered: list = []
+        self.inputs: list = []
         self.cancelled: list[str] = []
 
-    def steer(self, message) -> None:  # noqa: ANN001 - cubeloop Message
-        self.steered.append(message)
+    def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
+        self.inputs.append(envelope)
+        return InputReceipt(input_id=envelope.input_id, status="queued")
 
-    def cancel_steer(self, steer_id: str) -> bool:  # noqa: ANN001
+    def cancel_input(self, steer_id: str) -> InputReceipt:
         self.cancelled.append(steer_id)
-        return True
+        return InputReceipt(input_id=steer_id, status="cancelled")
+
+
+class _FakeAgent:
+    def __init__(self) -> None:
+        self.session = _FakeSession()
 
 
 class _FakeRedis:
@@ -66,7 +73,7 @@ async def test_steer_run_calls_agent_steer_for_registered_run() -> None:
     steered = await mgr.steer_run("run-1", "go left instead")
 
     assert steered is True
-    assert agent.steered[0].content[0].text == "go left instead"
+    assert agent.session.inputs[0].message.content[0].text == "go left instead"
 
 
 @pytest.mark.asyncio
@@ -87,7 +94,7 @@ async def test_dispatch_steer_threads_steer_id_into_metadata() -> None:
     mgr._agents["run-1"] = agent
     status = await mgr.dispatch_steer("run-1", "do X", steer_id="s1")
     assert status == "steered"
-    assert agent.steered[0].metadata["steer_id"] == "s1"
+    assert agent.session.inputs[0].input_id == "s1"
 
 
 @pytest.mark.asyncio
@@ -98,7 +105,7 @@ async def test_dispatch_cancel_steer_calls_agent() -> None:
     mgr._agents["run-1"] = agent
     status = await mgr.dispatch_cancel_steer("run-1", "s1")
     assert status == "cancelled"
-    assert agent.cancelled == ["s1"]
+    assert agent.session.cancelled == ["s1"]
 
 
 @pytest.mark.asyncio

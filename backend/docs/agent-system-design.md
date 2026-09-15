@@ -24,6 +24,14 @@ The run manager uses CubeLoop's `CheckpointedChannel` for `ask_user` and sandbox
 
 Before an attempt, the host restores messages and middleware extra state together with `ExecutionSession.load_checkpoint`. Middleware receives the live `ExecutionSession.state_context`; do not read or write private `Agent._state` or `Agent._extra` fields. Prompt and respond remain separate admission paths, and a respond worker must hold the matching Redis claim token before it can finalize the run.
 
+Live steering enters through `ExecutionSession.submit_input`. Durable steering is acknowledged only from an `InputCommitted` event whose durability is `checkpoint`; an in-memory admission receipt alone does not make a database row injected. Cancellation uses `cancel_input`, while hard run cancellation remains task cancellation.
+
+## Event projection limits
+
+The Session consumer is required, is attached before execution, and has a 256-event capacity. Every projected event is limited to 1 MiB. Host publication has a 5-second deadline and the enclosing CubeLoop delivery deadline is 6 seconds. A timeout, oversized event, or Redis publication error fails the required consumer, stops new agent work, and prevents a successful `DoneEvent`.
+
+Subagent and citation events use a separate 64-event queue. The same 1 MiB per-event limit makes its maximum queued payload budget 64 MiB, excluding small Python container overhead. Producers wait at most 5 seconds to enqueue; teardown waits at most 5 seconds to enqueue the sentinel and 5 seconds to drain. The success path does not suppress a drain failure. Text deltas are not coalesced and tool events are not dropped to make room.
+
 ## Middleware and tools
 
 The middleware stack is assembled per run in `RunManager._build_cubeloop_agent`. Depending on enabled features, it includes CubePlex middleware for attachments, artifacts, citations, memory, sandboxing, costs, and timestamps, plus CubeLoop middleware for compaction, subagents, and todo lists. The stack supplies or transforms tools as well as requests and responses.

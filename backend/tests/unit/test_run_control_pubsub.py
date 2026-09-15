@@ -3,6 +3,7 @@ import json
 
 import fakeredis.aioredis
 import pytest
+from cubeloop.session.input import InputReceipt
 
 from cubeplex.streams.run_manager import RunManager
 
@@ -21,12 +22,18 @@ def _mgr(redis) -> RunManager:
     return m
 
 
+class _FakeSession:
+    def __init__(self) -> None:
+        self.inputs: list = []
+
+    def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
+        self.inputs.append(envelope)
+        return InputReceipt(input_id=envelope.input_id, status="queued")
+
+
 class _FakeAgent:
     def __init__(self) -> None:
-        self.steered: list = []
-
-    def steer(self, message) -> None:  # noqa: ANN001
-        self.steered.append(message)
+        self.session = _FakeSession()
 
 
 @pytest.fixture
@@ -40,8 +47,8 @@ async def test_dispatch_steer_local_calls_agent(redis):
     agent = _FakeAgent()
     m._agents["r1"] = agent
     assert await m.dispatch_steer("r1", "go left", steer_id="s1") == "steered"
-    assert agent.steered[0].content[0].text == "go left"
-    assert agent.steered[0].metadata["steer_id"] == "s1"
+    assert agent.session.inputs[0].message.content[0].text == "go left"
+    assert agent.session.inputs[0].input_id == "s1"
 
 
 @pytest.mark.asyncio
@@ -71,7 +78,7 @@ async def test_handle_control_steer_dispatches_locally(redis):
     agent = _FakeAgent()
     m._agents["r1"] = agent
     await m._handle_control({"run_id": "r1", "type": "steer", "content": "x"})
-    assert agent.steered[0].content[0].text == "x"
+    assert agent.session.inputs[0].message.content[0].text == "x"
 
 
 @pytest.mark.asyncio

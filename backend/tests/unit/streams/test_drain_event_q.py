@@ -166,8 +166,8 @@ async def test_drainer_skips_unknown_kinds() -> None:
 @pytest.mark.asyncio
 async def test_drainer_skips_subagent_dicts_with_unmappable_type() -> None:
     """Subagent SSE dicts that the cubeloop→AgentEvent translator can't map
-    (e.g. tool_call_delta, done) are silently dropped, mirroring
-    _drain_cubeloop_sse_queue's behavior for the main agent stream."""
+    (e.g. tool_call_delta, done) are silently dropped, matching the main
+    Session consumer's conversion behavior."""
     queue: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
     published: list[Any] = []
 

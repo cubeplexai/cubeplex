@@ -2,6 +2,7 @@ import asyncio
 
 import fakeredis.aioredis
 import pytest
+from cubeloop.session.input import InputReceipt
 
 from cubeplex.streams.run_manager import RunManager
 
@@ -20,12 +21,18 @@ def _mgr(redis: fakeredis.aioredis.FakeRedis) -> RunManager:
     return m
 
 
+class _FakeSession:
+    def __init__(self) -> None:
+        self.inputs: list = []
+
+    def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
+        self.inputs.append(envelope)
+        return InputReceipt(input_id=envelope.input_id, status="queued")
+
+
 class _FakeAgent:
     def __init__(self) -> None:
-        self.steered: list = []
-
-    def steer(self, message) -> None:  # noqa: ANN001
-        self.steered.append(message)
+        self.session = _FakeSession()
 
 
 @pytest.mark.asyncio
@@ -41,11 +48,11 @@ async def test_cross_instance_steer() -> None:
     try:
         assert await b.dispatch_steer("r1", "redirect", steer_id="s1") == "published"
         for _ in range(50):
-            if agent.steered:
+            if agent.session.inputs:
                 break
             await asyncio.sleep(0.05)
-        assert agent.steered[0].content[0].text == "redirect"
-        assert agent.steered[0].metadata["steer_id"] == "s1"
+        assert agent.session.inputs[0].message.content[0].text == "redirect"
+        assert agent.session.inputs[0].input_id == "s1"
     finally:
         await a.stop_control_listeners()
 
