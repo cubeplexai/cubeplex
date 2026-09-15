@@ -1056,8 +1056,10 @@ class RunManager:
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._agents: dict[str, Any] = {}
+        self._agent_claim_tokens: dict[str, tuple[Any, str | None]] = {}
         self._resume_claim_tokens: dict[str, str] = {}
         self._preparing_runs: set[str] = set()
+        self._preparing_claim_tokens: dict[str, str | None] = {}
         self._pending_session_inputs: dict[
             str,
             dict[str, tuple[str, dict[str, Any]]],
@@ -1093,6 +1095,7 @@ class RunManager:
         self._tasks.pop(run_id, None)
         getattr(self, "_resume_claim_tokens", {}).pop(run_id, None)
         getattr(self, "_preparing_runs", set()).discard(run_id)
+        getattr(self, "_preparing_claim_tokens", {}).pop(run_id, None)
         getattr(self, "_pending_session_inputs", {}).pop(run_id, None)
         getattr(self, "_cancelled_pre_execution_inputs", {}).pop(run_id, None)
         if not self._tasks:
@@ -1208,6 +1211,7 @@ class RunManager:
         # Admission is externally visible as soon as create_run succeeds, so
         # buffer steers before any later await can yield to a control handler.
         self._preparing_runs.add(run_id)
+        self._set_preparing_claim(run_id, None)
 
         # Clear the per-conversation last-error pointer so subsequent reloads
         # after a successful new run don't keep showing the previous failure.
@@ -1283,7 +1287,7 @@ class RunManager:
         next safe point; we do not block on delivery.
         """
         agent = self._agents.get(run_id)
-        if agent is None:
+        if agent is None or not await self._agent_owns_current_resume_claim(run_id, agent):
             return False
 
         from cubeloop.providers.base import TextContent, UserMessage
@@ -1360,7 +1364,13 @@ class RunManager:
         from cubeloop.providers.base import TextContent, UserMessage
         from cubeloop.session.input import InputEnvelope
 
+        agent = self._agents.get(run_id)
+        if agent is None or agent.session is not session:
+            return
+        if not await self._agent_owns_current_resume_claim(run_id, agent):
+            return
         self._preparing_runs.discard(run_id)
+        getattr(self, "_preparing_claim_tokens", {}).pop(run_id, None)
         pending = self._pending_session_inputs.pop(run_id, {})
         for steer_id, (content, metadata) in pending.items():
             msg_metadata = dict(metadata)
@@ -1421,10 +1431,14 @@ class RunManager:
         metadata: dict[str, Any] | None = None,
         ack_timeout: float = 1.0,
     ) -> str:
-        if self._consume_pre_execution_cancellation(run_id, steer_id):
-            return "steered"
         agent = self._agents.get(run_id)
-        if agent is not None:
+        agent_owns_claim = agent is not None and await self._agent_owns_current_resume_claim(
+            run_id, agent
+        )
+        if agent_owns_claim:
+            if self._consume_pre_execution_cancellation(run_id, steer_id):
+                return "steered"
+            assert agent is not None
             from cubeloop.providers.base import TextContent, UserMessage
             from cubeloop.session.input import InputEnvelope
 
@@ -1444,6 +1458,10 @@ class RunManager:
             )
             if receipt.status in ("queued", "committed"):
                 return "steered"
+            # Admission may have moved to a replacement worker that owns the
+            # same resumed run_id. Fall through to correlated pub/sub so the
+            # distributed claim owner can accept or reject authoritatively.
+        if await self._preparation_owns_current_resume_claim(run_id):
             if self._buffer_pre_execution_input(
                 run_id,
                 content=content,
@@ -1451,16 +1469,6 @@ class RunManager:
                 metadata=metadata,
             ):
                 return "steered"
-            # Admission may have moved to a replacement worker that owns the
-            # same resumed run_id. Fall through to correlated pub/sub so the
-            # distributed claim owner can accept or reject authoritatively.
-        if self._buffer_pre_execution_input(
-            run_id,
-            content=content,
-            steer_id=steer_id,
-            metadata=metadata,
-        ):
-            return "steered"
         ack_id = f"{run_id}:steer:{steer_id}"
         extra: dict[str, Any] = {"ack_id": ack_id}
         if metadata:
@@ -1545,6 +1553,7 @@ class RunManager:
         # 3. Spawn the respond task. Reuse the original run_id.
         self._resume_claim_tokens[run_id] = claim.claim_token
         self._preparing_runs.add(run_id)
+        self._set_preparing_claim(run_id, claim.claim_token)
         task = asyncio.create_task(
             self._execute_respond_run(
                 run_id=run_id,
@@ -1620,6 +1629,7 @@ class RunManager:
         #    cleanup. Same shape as ``resume_run_with_answer``.
         self._resume_claim_tokens[run_id] = claim.claim_token
         self._preparing_runs.add(run_id)
+        self._set_preparing_claim(run_id, claim.claim_token)
         task = asyncio.create_task(
             self._execute_respond_run(
                 run_id=run_id,
@@ -1693,7 +1703,11 @@ class RunManager:
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
-        if agent is not None:
+        agent_owns_claim = agent is not None and await self._agent_owns_current_resume_claim(
+            run_id, agent
+        )
+        if agent_owns_claim:
+            assert agent is not None
             receipt = agent.session.cancel_input(steer_id)
             buffered_cancelled = self._cancel_pre_execution_input(run_id, steer_id)
             if receipt.status == "cancelled" or buffered_cancelled:
@@ -1702,7 +1716,9 @@ class RunManager:
                 return "not_found"
             # A replacement worker may own this resumed run_id. Forward the
             # cancellation instead of trusting a stale local Session.
-        elif self._cancel_pre_execution_input(run_id, steer_id):
+        elif await self._preparation_owns_current_resume_claim(
+            run_id
+        ) and self._cancel_pre_execution_input(run_id, steer_id):
             return "cancelled"
         await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
         return "published"
@@ -1738,22 +1754,26 @@ class RunManager:
                 await self._publish_ack(run_id)
         elif type_ == "steer":
             agent = self._agents.get(run_id)
-            preparing = run_id in getattr(self, "_preparing_runs", set())
-            if agent is None and not preparing:
+            agent_owns_claim = agent is not None and await self._agent_owns_current_resume_claim(
+                run_id, agent
+            )
+            preparation_owns_claim = await self._preparation_owns_current_resume_claim(run_id)
+            if not agent_owns_claim and not preparation_owns_claim:
                 if run_id not in self._tasks or not await self._owns_current_resume_claim(run_id):
                     return
                 ack_id = data.get("ack_id")
                 if isinstance(ack_id, str):
                     await self._publish_ack(run_id, ack_id=ack_id, accepted=False)
                 return
-            if not await self._owns_current_resume_claim(run_id):
-                return
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
             msg_metadata = extra_metadata if isinstance(extra_metadata, dict) else None
-            if self._consume_pre_execution_cancellation(run_id, input_id):
+            if (
+                agent_owns_claim or preparation_owns_claim
+            ) and self._consume_pre_execution_cancellation(run_id, input_id):
                 accepted = True
-            elif agent is not None:
+            elif agent_owns_claim:
+                assert agent is not None
                 from cubeloop.providers.base import TextContent, UserMessage
                 from cubeloop.session.input import InputEnvelope
 
@@ -1772,7 +1792,7 @@ class RunManager:
                 accepted = receipt.status in ("queued", "committed")
             else:
                 accepted = False
-            if not accepted:
+            if not accepted and preparation_owns_claim:
                 accepted = self._buffer_pre_execution_input(
                     run_id,
                     content=data.get("content") or "",
@@ -1784,11 +1804,12 @@ class RunManager:
                 await self._publish_ack(run_id, ack_id=ack_id, accepted=accepted)
         elif type_ == "cancel_steer":
             agent = self._agents.get(run_id)
-            if agent is not None:
+            if agent is not None and await self._agent_owns_current_resume_claim(run_id, agent):
                 receipt = agent.session.cancel_input(data.get("steer_id") or "")
                 if receipt.status == "cancelled":
                     return
-            self._cancel_pre_execution_input(run_id, data.get("steer_id") or "")
+            if await self._preparation_owns_current_resume_claim(run_id):
+                self._cancel_pre_execution_input(run_id, data.get("steer_id") or "")
         elif type_ == "steer_available":
             await self._steering_delivery.drain(run_id)
         elif type_ == "cancel_durable_steer":
@@ -1798,6 +1819,59 @@ class RunManager:
             )
 
     async def _owns_current_resume_claim(self, run_id: str) -> bool:
+        local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
+        return await self._claim_token_is_current(run_id, local_claim)
+
+    def _register_agent_for_attempt(
+        self,
+        run_id: str,
+        agent: Any,
+        claim_token: str | None,
+    ) -> None:
+        self._agents[run_id] = agent
+        registrations = getattr(self, "_agent_claim_tokens", None)
+        if registrations is None:
+            registrations = {}
+            self._agent_claim_tokens = registrations
+        registrations[run_id] = (agent, claim_token)
+
+    def _set_preparing_claim(self, run_id: str, claim_token: str | None) -> None:
+        preparing_claims = getattr(self, "_preparing_claim_tokens", None)
+        if preparing_claims is None:
+            preparing_claims = {}
+            self._preparing_claim_tokens = preparing_claims
+        preparing_claims[run_id] = claim_token
+
+    def _remove_agent_for_attempt(self, run_id: str, agent: Any) -> None:
+        if self._agents.get(run_id) is not agent:
+            return
+        self._agents.pop(run_id, None)
+        getattr(self, "_agent_claim_tokens", {}).pop(run_id, None)
+        getattr(self, "_hitl_channels", {}).pop(run_id, None)
+
+    async def _agent_owns_current_resume_claim(self, run_id: str, agent: Any) -> bool:
+        registration = getattr(self, "_agent_claim_tokens", {}).get(run_id)
+        if registration is None:
+            if run_id in getattr(self, "_resume_claim_tokens", {}):
+                return False
+            local_claim = None
+        else:
+            registered_agent, local_claim = registration
+            if registered_agent is not agent:
+                return False
+        return await self._claim_token_is_current(run_id, local_claim)
+
+    async def _preparation_owns_current_resume_claim(self, run_id: str) -> bool:
+        if run_id not in getattr(self, "_preparing_runs", set()):
+            return False
+        preparing_claims = getattr(self, "_preparing_claim_tokens", {})
+        if run_id in preparing_claims:
+            local_claim = preparing_claims[run_id]
+        else:
+            local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
+        return await self._claim_token_is_current(run_id, local_claim)
+
+    async def _claim_token_is_current(self, run_id: str, local_claim: str | None) -> bool:
         from cubeplex.streams.hitl_resume import get_resume_claim_token
 
         distributed_claim = await get_resume_claim_token(
@@ -1805,7 +1879,6 @@ class RunManager:
             prefix=self._key_prefix,
             run_id=run_id,
         )
-        local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
         return distributed_claim == local_claim
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
@@ -2108,7 +2181,7 @@ class RunManager:
             # Register as soon as the Agent exists so steers received during
             # checkpoint, memory, or attachment preparation enter its pending
             # input queue instead of being dropped by the control listener.
-            self._agents[run_id] = agent
+            self._register_agent_for_attempt(run_id, agent, None)
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
             checkpoint = await agent.session.load_checkpoint()
@@ -2538,8 +2611,7 @@ class RunManager:
             finally:
                 # Stop accepting steers for this run before tearing down.
                 tool_heartbeat.stop()
-                self._agents.pop(run_id, None)
-                self._hitl_channels.pop(run_id, None)
+                self._remove_agent_for_attempt(run_id, agent)
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
@@ -2703,6 +2775,7 @@ class RunManager:
                 run_id=run_id,
                 scope=steering_scope,
                 session=agent.session,
+                claim_token=claim_token,
             )
 
             from cubeloop.tracing import trace, tracing_context
@@ -2751,7 +2824,7 @@ class RunManager:
                             require_host_success,
                         )
 
-                        self._agents[run_id] = agent
+                        self._register_agent_for_attempt(run_id, agent, claim_token)
                         result = await execute_session(
                             session=agent.session,
                             request=RespondExecutionRequest(
@@ -2848,8 +2921,7 @@ class RunManager:
                     )
                 finally:
                     tool_heartbeat.stop()
-                    self._agents.pop(run_id, None)
-                    self._hitl_channels.pop(run_id, None)
+                    self._remove_agent_for_attempt(run_id, agent)
                 if not finalized_with_claim:
                     raise ResumeConflict(
                         claim_conflict_reason or "resume claim was replaced before finalization"
@@ -4530,7 +4602,7 @@ class RunManager:
                     )
                     current_agent = self._agents.get(run_id)
                     if current_agent is steering_agent:
-                        self._agents.pop(run_id, None)
+                        self._remove_agent_for_attempt(run_id, steering_agent)
                     elif current_agent is not None:
                         registration_replaced = True
             # Release the turn lock BEFORE the sandbox/session teardown below:
@@ -5105,7 +5177,7 @@ class RunManager:
                     )
                     current_agent = self._agents.get(run_id)
                     if current_agent is steering_agent:
-                        self._agents.pop(run_id, None)
+                        self._remove_agent_for_attempt(run_id, steering_agent)
                     elif current_agent is not None:
                         registration_replaced = True
             # Clear the active-run pointer — claim_resume handles the case
