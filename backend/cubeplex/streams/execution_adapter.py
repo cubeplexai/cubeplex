@@ -15,6 +15,7 @@ from cubeloop.session.events import (
     InputCommitted,
 )
 from cubeloop.session.types import ExecutionRequest, ExecutionResult
+from loguru import logger
 
 SESSION_EVENT_CAPACITY = 256
 HOST_EVENT_QUEUE_CAPACITY = 64
@@ -34,6 +35,15 @@ class CubeloopAgentRunError(RuntimeError):
 
 class EventProjectionError(RuntimeError):
     """A host event could not be forwarded within the projection contract."""
+
+
+def _host_projection_error(result: ExecutionResult) -> EventProjectionError | None:
+    for error in result.delivery_errors:
+        if error.consumer == "cubeplex-runtime":
+            return EventProjectionError(
+                f"{error.consumer} delivery {error.reason} at sequence {error.seq}: {error.message}"
+            )
+    return None
 
 
 def _json_size(value: Any) -> int:
@@ -112,14 +122,7 @@ async def execute_session(
         delivery_timeout=SESSION_EVENT_DELIVERY_TIMEOUT_SECONDS,
     )
     try:
-        result = await session.execute(request)
-        for error in result.delivery_errors:
-            if error.consumer == "cubeplex-runtime":
-                raise EventProjectionError(
-                    f"{error.consumer} delivery {error.reason} at sequence {error.seq}: "
-                    f"{error.message}"
-                )
-        return result
+        return await session.execute(request)
     finally:
         unsubscribe()
 
@@ -130,7 +133,10 @@ def require_host_success(
     answered_question_id: str | None = None,
 ) -> HostTerminalStatus:
     """Map explicit Session facts to CubePlex's successful terminal states."""
+    projection_error = _host_projection_error(result)
     if result.outcome == "completed":
+        if projection_error is not None:
+            raise projection_error
         if not result.checkpoint_committed:
             raise CubeloopAgentRunError("completed execution was not durably checkpointed")
         return "completed"
@@ -141,8 +147,17 @@ def require_host_success(
             answered_question_id is not None
             and result.pending_request.question_id == answered_question_id
         ):
+            if projection_error is not None:
+                raise projection_error
             return "completed"
+        if projection_error is not None:
+            logger.warning(
+                "preserving durable suspension after host projection failure: {}",
+                projection_error,
+            )
         return "paused_hitl"
+    if projection_error is not None:
+        raise projection_error
     if result.outcome == "cancelled":
         raise asyncio.CancelledError("execution cancelled")
     if result.error is not None and result.error.cause is not None:

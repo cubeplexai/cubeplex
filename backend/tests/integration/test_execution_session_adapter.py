@@ -162,7 +162,7 @@ async def test_adapter_does_not_apply_host_limit_to_raw_events(
 
 
 @pytest.mark.asyncio
-async def test_adapter_rejects_required_consumer_delivery_error() -> None:
+async def test_result_mapping_rejects_required_consumer_delivery_error() -> None:
     result = ExecutionResult(
         run_id="run-1",
         attempt_id="attempt-1",
@@ -179,16 +179,51 @@ async def test_adapter_rejects_required_consumer_delivery_error() -> None:
     )
     session = _FakeSession([_envelope(1, ExecutionFinished(result=result))], result)
 
+    returned = await execute_session(
+        session=session,
+        request=PromptExecutionRequest(
+            run_id="run-1",
+            attempt_id="attempt-1",
+            message="hello",
+        ),
+        on_agent_event=lambda event: None,
+    )
+
     with pytest.raises(EventProjectionError, match="cubeplex-runtime.*timeout"):
-        await execute_session(
-            session=session,
-            request=PromptExecutionRequest(
-                run_id="run-1",
-                attempt_id="attempt-1",
-                message="hello",
+        require_host_success(returned)
+
+
+@pytest.mark.asyncio
+async def test_durable_suspension_survives_projection_delivery_error() -> None:
+    result = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-1",
+        outcome="suspended",
+        pending_request=object(),  # type: ignore[arg-type]
+        checkpoint_committed=True,
+        delivery_errors=(
+            DeliveryError(
+                consumer="cubeplex-runtime",
+                seq=7,
+                reason="timeout",
+                message="HITL notification timed out",
             ),
-            on_agent_event=lambda event: None,
-        )
+        ),
+    )
+    session = _FakeSession([_envelope(1, ExecutionFinished(result=result))], result)
+
+    returned = await execute_session(
+        session=session,
+        request=PromptExecutionRequest(
+            run_id="run-1",
+            attempt_id="attempt-1",
+            message="hello",
+        ),
+        on_agent_event=lambda event: None,
+    )
+
+    assert returned.delivery_errors == result.delivery_errors
+    assert require_host_success(returned) == "paused_hitl"
 
 
 @pytest.mark.asyncio
