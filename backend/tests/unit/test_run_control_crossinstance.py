@@ -74,6 +74,30 @@ async def test_closed_agent_does_not_reject_steer_owned_by_replacement() -> None
 
 
 @pytest.mark.asyncio
+async def test_open_stale_agent_does_not_accept_steer_owned_by_replacement() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    old_owner = _mgr(redis)
+    old_agent = _FakeAgent()
+    old_owner._agents["r1"] = old_agent
+    old_owner._resume_claim_tokens = {"r1": "old-token"}
+    old_owner._publish_ack = AsyncMock()  # type: ignore[method-assign]
+    await redis.hset("t:run_meta:v2:r1", "claim_token", "replacement-token")
+
+    await old_owner._handle_control(
+        {
+            "run_id": "r1",
+            "type": "steer",
+            "content": "replacement owns this",
+            "steer_id": "s1",
+            "ack_id": "r1:steer:s1",
+        }
+    )
+
+    assert old_agent.session.inputs == []
+    old_owner._publish_ack.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_closed_current_owner_rejects_steer() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
     owner = _mgr(redis)
