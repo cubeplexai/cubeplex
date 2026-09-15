@@ -219,6 +219,8 @@ async def begin_resume_finalization(
         str(lease_seconds),
     )
     return int(result) == 1
+
+
 # KEYS[1] = meta_key
 # ARGV[1] = expected_claim_token, ARGV[2] = new_status
 # Returns 1 if status was set, 0 if token mismatch (caller's claim was

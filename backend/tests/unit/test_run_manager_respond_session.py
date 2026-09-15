@@ -10,6 +10,7 @@ from cubeloop.session.types import DeliveryError, ExecutionResult
 
 from cubeplex.streams.execution_adapter import EventProjectionError
 from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
+from cubeplex.streams.steering_delivery import SteeringRunScope
 
 
 @pytest.mark.asyncio
@@ -213,5 +214,13 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     if checkpoint_error:
         manager._steering_delivery.acknowledge_injected.assert_not_awaited()
     else:
-        manager._steering_delivery.acknowledge_injected.assert_awaited_once_with("run-1", "steer-1")
+        manager._steering_delivery.acknowledge_injected.assert_awaited_once_with(
+            "run-1",
+            "steer-1",
+            scope=SteeringRunScope(
+                org_id="org-1",
+                workspace_id="workspace-1",
+                conversation_id="conversation-1",
+            ),
+        )
     assert manager._agents == {}
