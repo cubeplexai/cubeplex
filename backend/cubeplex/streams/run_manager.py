@@ -1317,12 +1317,7 @@ class RunManager:
         """Bound one steer while the owned Session has not opened admission yet."""
         if run_id not in getattr(self, "_preparing_runs", set()):
             return False
-        cancelled_by_run = getattr(self, "_cancelled_pre_execution_inputs", {})
-        cancelled = cancelled_by_run.get(run_id)
-        if cancelled is not None and steer_id in cancelled:
-            cancelled.discard(steer_id)
-            if not cancelled:
-                cancelled_by_run.pop(run_id, None)
+        if self._consume_pre_execution_cancellation(run_id, steer_id):
             return True
         pending_by_run = getattr(self, "_pending_session_inputs", None)
         if pending_by_run is None:
@@ -1350,13 +1345,22 @@ class RunManager:
         cancelled.add(steer_id)
         return True
 
+    def _consume_pre_execution_cancellation(self, run_id: str, steer_id: str) -> bool:
+        cancelled_by_run = getattr(self, "_cancelled_pre_execution_inputs", {})
+        cancelled = cancelled_by_run.get(run_id)
+        if cancelled is None or steer_id not in cancelled:
+            return False
+        cancelled.discard(steer_id)
+        if not cancelled:
+            cancelled_by_run.pop(run_id, None)
+        return True
+
     async def _drain_pre_execution_inputs(self, run_id: str, session: Any) -> None:
         """Submit buffered steers once AgentStart proves Session admission is open."""
         from cubeloop.providers.base import TextContent, UserMessage
         from cubeloop.session.input import InputEnvelope
 
         self._preparing_runs.discard(run_id)
-        getattr(self, "_cancelled_pre_execution_inputs", {}).pop(run_id, None)
         pending = self._pending_session_inputs.pop(run_id, {})
         for steer_id, (content, metadata) in pending.items():
             msg_metadata = dict(metadata)
@@ -1417,6 +1421,8 @@ class RunManager:
         metadata: dict[str, Any] | None = None,
         ack_timeout: float = 1.0,
     ) -> str:
+        if self._consume_pre_execution_cancellation(run_id, steer_id):
+            return "steered"
         agent = self._agents.get(run_id)
         if agent is not None:
             from cubeloop.providers.base import TextContent, UserMessage
@@ -1743,7 +1749,9 @@ class RunManager:
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
             msg_metadata = extra_metadata if isinstance(extra_metadata, dict) else None
-            if agent is not None:
+            if self._consume_pre_execution_cancellation(run_id, input_id):
+                accepted = True
+            elif agent is not None:
                 from cubeloop.providers.base import TextContent, UserMessage
                 from cubeloop.session.input import InputEnvelope
 

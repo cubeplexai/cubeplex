@@ -227,6 +227,9 @@ async def test_cancel_before_buffered_steer_leaves_tombstone() -> None:
     status = await mgr.dispatch_cancel_steer("run-1", "s-cancelled")
     assert status == "cancelled"
 
+    agent.session.accepting = True
+    await mgr._drain_pre_execution_inputs("run-1", agent.session)
+
     steer_status = await mgr.dispatch_steer(
         "run-1",
         "must not run",
@@ -234,7 +237,4 @@ async def test_cancel_before_buffered_steer_leaves_tombstone() -> None:
     )
     assert steer_status == "steered"
     assert mgr._pending_session_inputs.get("run-1", {}) == {}
-
-    agent.session.accepting = True
-    await mgr._drain_pre_execution_inputs("run-1", agent.session)
     assert agent.session.inputs == []
