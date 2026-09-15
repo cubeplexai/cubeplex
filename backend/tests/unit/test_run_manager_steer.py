@@ -44,6 +44,11 @@ class _PreparingAgent:
         self.session = _PreparingSession()
 
 
+class _UnknownCancelSession(_PreparingSession):
+    def cancel_input(self, steer_id: str) -> InputReceipt:
+        return InputReceipt(input_id=steer_id, status="closed")
+
+
 class _FakeRedis:
     def __init__(self) -> None:
         self.published: list[str] = []
@@ -267,3 +272,26 @@ async def test_cancel_before_buffered_steer_leaves_tombstone() -> None:
     assert steer_status == "steered"
     assert mgr._pending_session_inputs.get("run-1", {}) == {}
     assert agent.session.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_admission_retains_tombstone_for_late_steer() -> None:
+    mgr = _make_manager()
+    agent = _PreparingAgent()
+    agent.session = _UnknownCancelSession()
+    agent.session.accepting = True
+    mgr._agents = {"run-1": agent}
+    mgr._pending_session_inputs = {}
+    mgr._cancelled_pre_execution_inputs = {}
+
+    status = await mgr.dispatch_cancel_steer("run-1", "s-delayed")
+    assert status == "cancelled"
+
+    steer_status = await mgr.dispatch_steer(
+        "run-1",
+        "must remain cancelled",
+        steer_id="s-delayed",
+    )
+    assert steer_status == "steered"
+    assert agent.session.inputs == []
+    assert mgr._cancelled_pre_execution_inputs == {}

@@ -159,6 +159,13 @@ class DurableSteeringCoordinator:
             for row in rows:
                 if row.client_steer_id in history_ids:
                     await repo.mark_owned_injected(row_id=row.id, owner=self._owner)
+                elif row.state == SteeringMessageState.cancel_requested:
+                    await repo.reconcile_terminal(
+                        row_id=row.id,
+                        state=SteeringMessageState.cancelled,
+                    )
+                else:
+                    await repo.return_claim_to_queue(row_id=row.id, owner=self._owner)
             await session.commit()
 
     async def unregister(

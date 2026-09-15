@@ -1333,11 +1333,17 @@ class RunManager:
         pending.setdefault(steer_id, (content, dict(metadata or {})))
         return True
 
-    def _cancel_pre_execution_input(self, run_id: str, steer_id: str) -> bool:
+    def _cancel_pre_execution_input(
+        self,
+        run_id: str,
+        steer_id: str,
+        *,
+        retain_unmatched: bool = False,
+    ) -> bool:
         pending = getattr(self, "_pending_session_inputs", {}).get(run_id)
         if pending is not None and pending.pop(steer_id, None) is not None:
             return True
-        if run_id not in getattr(self, "_preparing_runs", set()):
+        if not retain_unmatched and run_id not in getattr(self, "_preparing_runs", set()):
             return False
         cancelled_by_run = getattr(self, "_cancelled_pre_execution_inputs", None)
         if cancelled_by_run is None:
@@ -1709,13 +1715,15 @@ class RunManager:
         if agent_owns_claim:
             assert agent is not None
             receipt = agent.session.cancel_input(steer_id)
-            buffered_cancelled = self._cancel_pre_execution_input(run_id, steer_id)
+            buffered_cancelled = self._cancel_pre_execution_input(
+                run_id,
+                steer_id,
+                retain_unmatched=receipt.status == "closed",
+            )
             if receipt.status == "cancelled" or buffered_cancelled:
                 return "cancelled"
             if receipt.status != "closed":
                 return "not_found"
-            # A replacement worker may own this resumed run_id. Forward the
-            # cancellation instead of trusting a stale local Session.
         elif await self._preparation_owns_current_resume_claim(
             run_id
         ) and self._cancel_pre_execution_input(run_id, steer_id):
@@ -1805,8 +1813,14 @@ class RunManager:
         elif type_ == "cancel_steer":
             agent = self._agents.get(run_id)
             if agent is not None and await self._agent_owns_current_resume_claim(run_id, agent):
-                receipt = agent.session.cancel_input(data.get("steer_id") or "")
-                if receipt.status == "cancelled":
+                steer_id = data.get("steer_id") or ""
+                receipt = agent.session.cancel_input(steer_id)
+                buffered_cancelled = self._cancel_pre_execution_input(
+                    run_id,
+                    steer_id,
+                    retain_unmatched=receipt.status == "closed",
+                )
+                if receipt.status == "cancelled" or buffered_cancelled:
                     return
             if await self._preparation_owns_current_resume_claim(run_id):
                 self._cancel_pre_execution_input(run_id, data.get("steer_id") or "")
