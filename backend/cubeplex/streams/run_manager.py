@@ -1056,6 +1056,7 @@ class RunManager:
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._agents: dict[str, Any] = {}
+        self._resume_claim_tokens: dict[str, str] = {}
         self._preparing_runs: set[str] = set()
         self._pending_session_inputs: dict[
             str,
@@ -1089,6 +1090,7 @@ class RunManager:
         if self._tasks.get(run_id) is not completed_task:
             return
         self._tasks.pop(run_id, None)
+        getattr(self, "_resume_claim_tokens", {}).pop(run_id, None)
         getattr(self, "_preparing_runs", set()).discard(run_id)
         getattr(self, "_pending_session_inputs", {}).pop(run_id, None)
         if not self._tasks:
@@ -1513,6 +1515,7 @@ class RunManager:
         assert claim.claim_token is not None  # OK outcome guarantees a token
 
         # 3. Spawn the respond task. Reuse the original run_id.
+        self._resume_claim_tokens[run_id] = claim.claim_token
         self._preparing_runs.add(run_id)
         task = asyncio.create_task(
             self._execute_respond_run(
@@ -1587,6 +1590,7 @@ class RunManager:
         # 4. Spawn the respond task — reuses the existing resume pipeline
         #    that handles the agent loop, terminal CAS write, and Redis
         #    cleanup. Same shape as ``resume_run_with_answer``.
+        self._resume_claim_tokens[run_id] = claim.claim_token
         self._preparing_runs.add(run_id)
         task = asyncio.create_task(
             self._execute_respond_run(
@@ -1736,10 +1740,19 @@ class RunManager:
                     metadata=msg_metadata,
                 )
             if not accepted and not preparing:
-                # A closed Agent may remain registered briefly while its old
-                # worker tears down. It no longer owns admission, so it must
-                # not race the replacement worker with a negative ACK.
-                return
+                from cubeplex.streams.hitl_resume import get_resume_claim_token
+
+                distributed_claim = await get_resume_claim_token(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                )
+                local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
+                if distributed_claim != local_claim:
+                    # A closed Agent may remain registered briefly while a
+                    # replacement resume owns admission in another worker.
+                    # Only the matching owner may reject the steer.
+                    return
             ack_id = data.get("ack_id")
             if isinstance(ack_id, str):
                 await self._publish_ack(run_id, ack_id=ack_id, accepted=accepted)
