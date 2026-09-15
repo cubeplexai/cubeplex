@@ -137,7 +137,6 @@ async def _build(
         catalog_session=None,
         effective_system_prompt="you are a test",
         extra_ref_holder=extra_ref_holder,
-        sse_queue=MagicMock(),
         publish_stream_event=MagicMock(),
     )
     # The factory stashes provider_name / model_id / mem_repo_factory on
@@ -292,7 +291,6 @@ async def test_build_keeps_persona_update_schema_for_non_interactive(
         catalog_session=None,
         effective_system_prompt="you are a test",
         extra_ref_holder=extra_ref_holder,
-        sse_queue=MagicMock(),
         publish_stream_event=MagicMock(),
         trigger="schedule",
     )

@@ -122,6 +122,15 @@ if current ~= ARGV[1] then
   return 0
 end
 if redis.call('EXISTS', KEYS[3]) == 1 then
+  local finalizing = redis.call('HGET', KEYS[3], 'resume_finalizing_token')
+  if finalizing then
+    local lease_until = tonumber(redis.call('HGET', KEYS[3], 'resume_finalizing_until'))
+    local now = tonumber(redis.call('TIME')[1])
+    if lease_until and now < lease_until then
+      return 0
+    end
+    redis.call('HDEL', KEYS[3], 'resume_finalizing_token', 'resume_finalizing_until')
+  end
   local status = redis.call('HGET', KEYS[3], 'status')
   if status == 'running' or status == 'paused_hitl' then
     return 0
@@ -189,6 +198,14 @@ return 1
 # ARGV[2] = observed last_event_at/started_at used for the stale decision
 #           (empty = no timestamp CAS; used by startup recovery)
 _MARK_STALE_LUA = """
+local finalizing = redis.call('HGET', KEYS[1], 'resume_finalizing_token')
+if finalizing then
+  local lease_until = tonumber(redis.call('HGET', KEYS[1], 'resume_finalizing_until'))
+  local now = tonumber(redis.call('TIME')[1])
+  if lease_until and now < lease_until then
+    return 0
+  end
+end
 if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
   return 0
 end
@@ -202,6 +219,10 @@ if ARGV[2] ~= '' then
   end
 end
 redis.call('HSET', KEYS[1], 'status', 'stale')
+redis.call(
+  'HDEL', KEYS[1],
+  'claim_token', 'resume_finalizing_token', 'resume_finalizing_until'
+)
 if redis.call('GET', KEYS[2]) == ARGV[1] then
   redis.call('DEL', KEYS[2])
 end

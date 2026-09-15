@@ -178,11 +178,12 @@ class MemoryMiddleware(Middleware):
         memory_save, even before any pinned memory exists.
 
         Cache discipline: when ``extra_ref`` is wired, the rendered block is
-        stored in ``agent._extra`` on first call and reused for all subsequent
-        calls within the same conversation. This keeps the prefix byte-stable
-        and preserves Anthropic/OpenAI prompt cache across turns even when
-        reflection writes new preference items mid-conversation. New items are
-        visible from the next conversation onward.
+        stored in the Session's persistent state context on first call and
+        reused for all subsequent calls within the same conversation. This
+        keeps the prefix byte-stable and preserves Anthropic/OpenAI prompt cache
+        across turns even when reflection writes new preference items
+        mid-conversation. New items are visible from the next conversation
+        onward.
         """
         del ctx, signal  # not used
         from cubeplex.prompts.memory import MEMORY_AUTHORING_BLOCK

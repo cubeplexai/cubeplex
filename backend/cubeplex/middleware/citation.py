@@ -34,6 +34,7 @@ from cubeplex.middleware.citations.chunker import chunk_text
 from cubeplex.middleware.citations.config import CitationConfig
 from cubeplex.middleware.citations.counter import citation_counter_var, citation_event_queue
 from cubeplex.prompts.citations import CITATION_PROMPT
+from cubeplex.streams.execution_adapter import enqueue_host_event
 
 
 def _extract_text_content(content: list[Any]) -> str:
@@ -180,7 +181,7 @@ class CitationMiddleware(Middleware):
             }
 
             if queue is not None:
-                await queue.put(("citation", None, citation_data))
+                await enqueue_host_event(queue, ("citation", None, citation_data))
             else:
                 logger.warning(
                     "CitationMiddleware: no event queue available for citation_id={}",

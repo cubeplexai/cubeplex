@@ -27,6 +27,12 @@ from cubeplex.agents.schemas import (
 )
 from cubeplex.errors import ErrorCode, classify_exception, english_fallback
 from cubeplex.services.usage import apply_last_llm_usage
+from cubeplex.streams.execution_adapter import (
+    HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+    HOST_EVENT_QUEUE_CAPACITY,
+    CubeloopAgentRunError,
+    ensure_event_fits,
+)
 from cubeplex.streams.run_events import (
     RunMeta,
     append_run_event,
@@ -68,30 +74,19 @@ class RunContext:
     conversation_creator_user_id: str | None = None
 
 
-def _registration_was_replaced(*, current_agent: Any, originating_agent: Any) -> bool:
+def _registration_was_replaced(
+    *,
+    current_agent: Any,
+    originating_agent: Any,
+    ownership_lost: bool = False,
+) -> bool:
+    if ownership_lost:
+        return True
     return (
         originating_agent is not None
         and current_agent is not None
         and current_agent is not originating_agent
     )
-
-
-class CubeloopAgentRunError(RuntimeError):
-    """Raised when cubeloop returns a terminal assistant error without raising."""
-
-
-def _cubeloop_agent_error_message(agent: Any) -> str | None:
-    state = getattr(agent, "state", None)
-    error_message = getattr(state, "error_message", None)
-    if isinstance(error_message, str) and error_message.strip():
-        return error_message
-    return None
-
-
-def _raise_if_cubeloop_agent_failed(agent: Any) -> None:
-    error_message = _cubeloop_agent_error_message(agent)
-    if error_message is not None:
-        raise CubeloopAgentRunError(error_message)
 
 
 def _message_for_run_exception(
@@ -420,34 +415,13 @@ def _dicts_to_sse_events(
     return events
 
 
-async def _drain_cubeloop_sse_queue(
-    queue: asyncio.Queue[dict[str, Any] | None],
-    publish: Any,
-) -> None:
-    """Drain SSE dicts from a queue and forward them as typed AgentEvents.
-
-    Each event is published with a fresh ``datetime.now(UTC)`` timestamp so the
-    SSE consumer sees the time the event was actually streamed, not a fixed
-    value computed once at run start.  Exits when it pops a sentinel ``None``.
-    """
-    while True:
-        d = await queue.get()
-        if d is None:
-            return
-        sse_event = cubeloop_dict_to_agent_event(d, datetime.now(UTC).isoformat())
-        if sse_event is None:
-            continue
-        await publish(sse_event, None)
-
-
 async def _drain_subagent_citation_queue(
     queue: asyncio.Queue[tuple[str, Any, Any] | None],
     publish: Any,
 ) -> None:
     """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
 
-    Counterpart to :func:`_drain_cubeloop_sse_queue` for the shared queue that
-    subagent and citation middleware push onto:
+    This is the host-owned queue used by subagent and citation middleware:
 
     - ``("subagent", agent_id, sse_dict)`` — already-translated cubeloop SSE
       dict produced by ``convert_agent_event_to_sse``. We retranslate via
@@ -491,6 +465,28 @@ async def _drain_subagent_citation_queue(
         if sse_event is None:
             continue
         await publish(sse_event, agent_id)
+
+
+async def _finish_subagent_citation_queue(
+    queue: asyncio.Queue[tuple[str, Any, Any] | None],
+    drainer: asyncio.Task[None],
+) -> None:
+    """Close and drain the bounded auxiliary event queue within finite deadlines."""
+    try:
+        await asyncio.wait_for(
+            queue.put(None),
+            timeout=HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+        )
+        await asyncio.wait_for(
+            drainer,
+            timeout=HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+        )
+    except BaseException:
+        if not drainer.done():
+            drainer.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await drainer
+        raise
 
 
 def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
@@ -1748,6 +1744,7 @@ class RunManager:
 
     async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
         payload = event.model_dump()
+        ensure_event_fits(payload)
         return await append_run_event(
             self._redis,
             prefix=self._key_prefix,
@@ -1828,11 +1825,12 @@ class RunManager:
     ) -> str:
         """Execute a single user turn through the cubeloop runtime.
 
-        Builds a cubeloop.Provider + cubeloop.Agent, subscribes an event listener, then
-        awaits agent.prompt(). Each AgentEvent is translated into a cubeplex AgentEvent
-        schema object and forwarded to ``publish_stream_event``; the rest of
-        _execute_run (DoneEvent, update_run_meta, etc.) consumes the resulting
-        turn_usage and citation buffers.
+        Builds a cubeloop.Provider + cubeloop.Agent, attaches the host Session
+        consumer, then executes a prompt request. Each AgentEvent is translated
+        into a cubeplex AgentEvent schema object and forwarded to
+        ``publish_stream_event``; the rest of _execute_run (DoneEvent,
+        update_run_meta, etc.) consumes the resulting turn_usage and citation
+        buffers.
 
         Tools wired (M2.5):
           - no-DI builtin tools (calculator, datetime)
@@ -1845,39 +1843,15 @@ class RunManager:
         from cubeplex.agents.stream import StreamConverter
         from cubeplex.middleware.citations.counter import citation_counter_var
 
-        # extra_ref late-binding: compaction and todo both need access
-        # to agent._extra, which is only available after the agent is built.
+        # extra_ref late-binding: compaction and todo both need access to the
+        # Session's state context, which is only available after agent build.
         # The holder is passed in from _execute_run so the outer except block
         # can read model/provider/context_window when we raise from here.
         if extra_ref_holder is None:
             extra_ref_holder = {}
         extra_ref_holder.setdefault("extra", None)
 
-        # Bridge the synchronous cubeloop listener to the async world via a queue.
-        # agent.prompt() is async and invokes synchronous listeners on each
-        # AgentEvent as they arrive.  Previously we buffered translated dicts
-        # and flushed them after prompt() returned, which made long responses
-        # appear as a single batch dump.  Instead, push each translated dict
-        # onto an asyncio.Queue and have a parallel drain task forward them
-        # through publish_stream_event in real time.  The sentinel ``None``
-        # signals the drainer to exit so we can finish citation flushing.
-        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
         async with shared_checkpointer() as cp:
-            # Seed the citation counter past any 【N-M】 markers already
-            # persisted in this conversation's tool-result history so
-            # cross-turn ids don't collide in the frontend store (which is
-            # keyed by citation_id alone). No-op on the first turn.
-            try:
-                _hist = await cp.load(conversation_id)
-            except Exception as _seed_exc:
-                logger.warning("Citation seed: failed to load history: {}", _seed_exc)
-                _hist = None
-            if _hist is not None and _hist.messages:
-                _counter = citation_counter_var.get()
-                if _counter is not None:
-                    await _counter.seed_from_messages(_hist.messages)
-
             with suppress(Exception):
                 await self._append_event(
                     run_id,
@@ -1900,29 +1874,27 @@ class RunManager:
                 catalog_session=catalog_session,
                 effective_system_prompt=effective_system_prompt,
                 extra_ref_holder=extra_ref_holder,
-                sse_queue=sse_queue,
                 publish_stream_event=publish_stream_event,
                 trigger=trigger,
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
             )
             extra_ref_holder["steering_agent"] = agent
-            # Hand the history already loaded for the citation seed to the
-            # agent (mirrors prompt()'s own restore: messages + extra).
-            # prompt() skips its checkpointer load when messages are already
-            # present, so each send reads the full thread once, not twice.
-            # In-place extra mutation keeps the dict identity that the
-            # extra_ref closures below capture.
-            if _hist is not None and _hist.messages:
-                agent._state.messages = list(_hist.messages)
-                agent._extra.clear()
-                agent._extra.update(_hist.extra)
+            # Register as soon as the Agent exists so steers received during
+            # checkpoint, memory, or attachment preparation enter its pending
+            # input queue instead of being dropped by the control listener.
+            self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
+            checkpoint = await agent.session.load_checkpoint()
+            if checkpoint is not None and checkpoint.messages:
+                _counter = citation_counter_var.get()
+                if _counter is not None:
+                    await _counter.seed_from_messages(checkpoint.messages)
 
-            # Late-bind extra_ref to the live agent._extra dict so compaction
-            # and todo middleware can read and write persistent state.
-            # The factory already populated the closure via extra_ref_holder;
-            # this is the post-build assignment those closures resolve to.
-            extra_ref_holder["extra"] = agent._extra
+            # Middleware keeps one stable reference while Session restores
+            # messages and extra together through its public checkpoint API.
+            extra_ref_holder["extra"] = agent.session.state_context
 
             from cubeloop.agent.types import MessageEndEvent as _MsgEndEvent
             from cubeloop.providers.base import UserMessage as _UserMsg
@@ -1941,13 +1913,9 @@ class RunManager:
                 ttl_seconds=self._run_event_ttl_seconds,
             )
 
-            def _on_event(evt: Any, _signal: Any = None) -> None:
-                # Runs on the same event loop as _run_cubeloop_path, so
-                # put_nowait is safe.  If we ever invoke the agent from a
-                # background thread, swap to loop.call_soon_threadsafe.
+            async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # auto_detach must run FIRST so HitlRequestEvent triggers
-                # detach before the SSE conversion below; T6 reads
-                # `auto_detach.detached` in the terminal block.
+                # detach before the SSE conversion below.
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 auto_detach(evt, _signal)
@@ -1957,15 +1925,12 @@ class RunManager:
                     if _user_msg_seen == 1:
                         return  # seed prompt — already shown optimistically
                 for d in stream_converter.convert_agent_event(evt):
-                    sse_queue.put_nowait(d)
-
-            agent.subscribe(_on_event)
-            self._agents[run_id] = agent
-            if sandbox_hitl_channel is not None:
-                self._hitl_channels[run_id] = sandbox_hitl_channel
-            drainer = asyncio.create_task(
-                _drain_cubeloop_sse_queue(sse_queue, publish_stream_event)
-            )
+                    sse_event = cubeloop_dict_to_agent_event(
+                        d,
+                        datetime.now(UTC).isoformat(),
+                    )
+                    if sse_event is not None:
+                        await publish_stream_event(sse_event, None)
 
             # Compute relevance-memory snapshot before the agent loop starts
             # and bake it into the UserMessage metadata so MemoryMiddleware
@@ -2060,6 +2025,7 @@ class RunManager:
                 if v is not None
             }
             final_status: str = "completed"
+            projection_error: BaseException | None = None
             with suppress(Exception):
                 await self._append_event(
                     run_id,
@@ -2080,8 +2046,31 @@ class RunManager:
                         # cubepi_messages.run_id (instead of generating its own).
                         # Aligns the cubeloop message ledger with cubeplex's redis
                         # run-meta, SSE streams, and billing_llm_events.
-                        await agent.prompt(_user_msg, run_id=run_id)
-                        _raise_if_cubeloop_agent_failed(agent)
+                        from cubeloop.session.types import PromptExecutionRequest
+
+                        from cubeplex.streams.execution_adapter import (
+                            execute_session,
+                            host_projection_error,
+                            require_host_success,
+                        )
+
+                        result = await execute_session(
+                            session=agent.session,
+                            request=PromptExecutionRequest(
+                                run_id=run_id,
+                                attempt_id=str(uuid7()),
+                                message=_user_msg,
+                            ),
+                            on_agent_event=_on_event,
+                        )
+                        projection_error = host_projection_error(result)
+                        if projection_error is not None:
+                            logger.warning(
+                                "host event projection failed for run {}: {}",
+                                run_id,
+                                projection_error,
+                            )
+                        final_status = require_host_success(result)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
@@ -2313,35 +2302,21 @@ class RunManager:
                         "failed to schedule reflection for run_id={}", run_id
                     )
 
-                # T6: classify the terminal state. Three success outcomes:
-                #   - no DB pending → completed
-                #   - DB pending but no HitlRequestEvent this turn → stale
-                #     leftover; clear it and treat as completed
-                #   - DB pending and HitlRequestEvent fired → genuine new
-                #     pause (auto-detach hook already detached the agent)
-                from cubeplex.streams.hitl_resume import classify_terminal_status
-
-                final_pending = await agent.load_pending_hitl_request()
-                classification = classify_terminal_status(
-                    final_pending=final_pending,
-                    answered_question_id=None,  # prompt path
-                    saw_hitl_request_event=auto_detach.detached,
-                )
-                if classification.clear_pending:
+                # A completed Session result makes any remaining DB pending
+                # request a stale host record. A suspended result already
+                # proved its pending request was durably checkpointed.
+                if final_status == "completed" and await cp.load_pending(conversation_id):
                     await cp.save_pending_request(conversation_id, None)
-                final_status = classification.status
             finally:
                 # Stop accepting steers for this run before tearing down.
                 tool_heartbeat.stop()
                 self._agents.pop(run_id, None)
                 self._hitl_channels.pop(run_id, None)
-                # Signal drainer and wait for it to flush remaining events so
-                # all SSE dicts are published before citation buffers flush.
-                await sse_queue.put(None)
-                await drainer
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
+        if projection_error is not None and final_status != "paused_hitl":
+            raise projection_error
         return final_status
 
     async def _run_cubeloop_respond_path(
@@ -2361,14 +2336,15 @@ class RunManager:
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
         extra_ref_holder: dict[str, Any] | None = None,
+        before_terminal_commit: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         """Resume a paused HITL conversation by delivering ``answer`` to a
-        cubeloop agent via ``agent.respond``.
+        cubeloop agent via a public Session respond request.
 
         Mirrors :meth:`_run_cubeloop_path` but:
 
-        * calls :meth:`cubeloop.Agent.respond` instead of ``agent.prompt`` — no
-          new user message, no memory snapshot, no attachments;
+        * executes a respond request instead of a prompt request — no new user
+          message, no memory snapshot, no attachments;
         * reuses the existing ``run_id`` so events stream into the same Redis
           key the SSE consumer is still tailing;
         * classifies the terminal state with ``answered_question_id`` set so
@@ -2380,9 +2356,10 @@ class RunManager:
         """
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.agents.stream import StreamConverter
+        from cubeplex.config import config as runtime_config
         from cubeplex.middleware.citations.counter import citation_counter_var
         from cubeplex.streams.hitl_resume import (
-            classify_terminal_status,
+            begin_resume_finalization,
             finalize_run_meta_if_claim_matches,
         )
 
@@ -2394,23 +2371,7 @@ class RunManager:
             extra_ref_holder = {}
         extra_ref_holder.setdefault("extra", None)
 
-        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
         async with shared_checkpointer() as cp:
-            # Seed the citation counter past markers already persisted in
-            # this conversation. The respond turn appends new tool results,
-            # so without seeding we'd collide with citations the original
-            # prompt turn already emitted.
-            try:
-                _hist = await cp.load(conversation_id)
-            except Exception as _seed_exc:
-                logger.warning("Citation seed (respond): failed to load history: {}", _seed_exc)
-                _hist = None
-            if _hist is not None and _hist.messages:
-                _counter = citation_counter_var.get()
-                if _counter is not None:
-                    await _counter.seed_from_messages(_hist.messages)
-
             agent, _all_tools, sandbox_hitl_channel = await self._build_agent_for_conversation(
                 ctx=ctx,
                 conversation_id=conversation_id,
@@ -2421,14 +2382,32 @@ class RunManager:
                 catalog_session=catalog_session,
                 effective_system_prompt=effective_system_prompt,
                 extra_ref_holder=extra_ref_holder,
-                sse_queue=sse_queue,
                 publish_stream_event=publish_stream_event,
                 # Preserve original run trigger so resume does not re-enable
                 # interactive-only writes (e.g. persona_update) for schedule/IM.
                 trigger=ctx.trigger,
             )
             extra_ref_holder["steering_agent"] = agent
-            extra_ref_holder["extra"] = agent._extra
+            try:
+                checkpoint = await agent.session.load_checkpoint()
+                if checkpoint is not None and checkpoint.messages:
+                    _counter = citation_counter_var.get()
+                    if _counter is not None:
+                        await _counter.seed_from_messages(checkpoint.messages)
+            except Exception as checkpoint_exc:
+                finalized = await finalize_run_meta_if_claim_matches(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    status="errored",
+                )
+                if not finalized:
+                    raise ResumeConflict(
+                        "resume claim was replaced during checkpoint restoration"
+                    ) from checkpoint_exc
+                raise
+            extra_ref_holder["extra"] = agent.session.state_context
 
             async def _quiesce_steering_before_detach() -> None:
                 await self._steering_delivery.unregister(
@@ -2453,29 +2432,25 @@ class RunManager:
                 ttl_seconds=self._run_event_ttl_seconds,
             )
 
-            from cubeloop.agent.types import MessageEndEvent as _MsgEndEvent
-            from cubeloop.providers.base import UserMessage as _UserMsg
-
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 await auto_detach.quiesce_then_schedule(evt)
-                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
-                    steer_id = evt.message.metadata.get("steer_id")
-                    if isinstance(steer_id, str) and steer_id:
-                        await self._steering_delivery.acknowledge_injected(run_id, steer_id)
                 for d in stream_converter.convert_agent_event(evt):
-                    sse_queue.put_nowait(d)
+                    sse_event = cubeloop_dict_to_agent_event(
+                        d,
+                        datetime.now(UTC).isoformat(),
+                    )
+                    if sse_event is not None:
+                        await publish_stream_event(sse_event, None)
 
-            agent.subscribe(_on_event)
-            self._agents[run_id] = agent
+            async def _on_checkpoint_input(input_id: str) -> None:
+                await self._steering_delivery.acknowledge_injected(run_id, input_id)
+
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
-            drainer = asyncio.create_task(
-                _drain_cubeloop_sse_queue(sse_queue, publish_stream_event)
-            )
             from cubeplex.streams.steering_delivery import SteeringRunScope
 
             await self._steering_delivery.register_and_drain(
@@ -2519,47 +2494,110 @@ class RunManager:
             # cleanly (we'd need a separate recovery path to retry), which
             # matches the existing crash story.
             final_status: str = "errored"
+            finalized_with_claim = False
+            claim_conflict_reason: str | None = None
+            stale_pending = None
+            projection_error: BaseException | None = None
             try:
-                try:
-                    with tracing_context(metadata=_trace_meta):
-                        async with trace(tracer, agent, flush="background"):
-                            await agent.respond(question_id=question_id, answer=answer)
-                            _raise_if_cubeloop_agent_failed(agent)
-                except BaseException as _run_exc:
-                    _schedule_writeback(
-                        org_id=ctx.org_id,
-                        provider_slug=provider_name,
-                        model_id=model_id,
-                        exc=_run_exc,
-                    )
-                    raise
-                else:
-                    _schedule_writeback(
-                        org_id=ctx.org_id,
-                        provider_slug=provider_name,
-                        model_id=model_id,
-                        exc=None,
-                    )
-                    final_pending = await agent.load_pending_hitl_request()
-                    classification = classify_terminal_status(
-                        final_pending=final_pending,
-                        answered_question_id=question_id,
-                        saw_hitl_request_event=auto_detach.detached,
-                    )
-                    if classification.clear_pending:
-                        await cp.save_pending_request(conversation_id, None)
-                        # T12: emit a synthetic *_resolved so the frontend
-                        # can drop the stale "pending" UI.
-                        await _emit_synthetic_resolved(
-                            publish_stream_event, final_pending, question_id
+                with tracing_context(metadata=_trace_meta):
+                    async with trace(tracer, agent, flush="background"):
+                        from cubeloop.session.types import RespondExecutionRequest
+
+                        from cubeplex.streams.execution_adapter import (
+                            execute_session,
+                            host_projection_error,
+                            require_host_success,
                         )
-                    final_status = classification.status
+
+                        self._agents[run_id] = agent
+                        result = await execute_session(
+                            session=agent.session,
+                            request=RespondExecutionRequest(
+                                run_id=run_id,
+                                attempt_id=str(uuid7()),
+                                question_id=question_id,
+                                answer=answer,
+                            ),
+                            on_agent_event=_on_event,
+                            on_checkpoint_input=_on_checkpoint_input,
+                        )
+                        projection_error = host_projection_error(result)
+                        if projection_error is not None:
+                            logger.warning(
+                                "host event projection failed for run {}: {}",
+                                run_id,
+                                projection_error,
+                            )
+                        final_status = require_host_success(
+                            result,
+                            answered_question_id=question_id,
+                        )
+                if not await begin_resume_finalization(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                    lease_seconds=max(
+                        1,
+                        int(
+                            runtime_config.get(
+                                "lifecycle.stale_run_threshold_seconds",
+                                180,
+                            )
+                        ),
+                    ),
+                ):
+                    claim_conflict_reason = "resume claim was replaced before cleanup"
+                    raise ResumeConflict(claim_conflict_reason)
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=None,
+                )
+                if final_status == "completed":
+                    from cubeplex.streams.hitl_resume import stale_answered_pending
+
+                    loaded_pending = await cp.load_pending(conversation_id)
+                    stale_pending = stale_answered_pending(
+                        final_status=final_status,
+                        loaded_pending=loaded_pending,
+                        answered_question_id=question_id,
+                        answered_run_id=run_id,
+                    )
+                if stale_pending is not None:
+                    cleared = await cp.clear_pending_request_if_matches(
+                        conversation_id,
+                        question_id=question_id,
+                        run_id=run_id,
+                    )
+                    if cleared:
+                        await _emit_synthetic_resolved(
+                            publish_stream_event,
+                            stale_pending,
+                            question_id,
+                        )
+                for agent_key in list(citation_buffers):
+                    await flush_citation_buffer(agent_key, agent_key)
+                if before_terminal_commit is not None:
+                    await before_terminal_commit()
+            except BaseException as _run_exc:
+                final_status = "errored"
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=_run_exc,
+                )
+                raise
             finally:
                 # Heartbeat / registration teardown must not depend on Redis
                 # finalize succeeding — a timeout there would leave the
                 # in-flight loop refreshing a dead resume.
                 try:
-                    await finalize_run_meta_if_claim_matches(
+                    finalized_with_claim = await finalize_run_meta_if_claim_matches(
                         self._redis,
                         prefix=self._key_prefix,
                         run_id=run_id,
@@ -2570,11 +2608,13 @@ class RunManager:
                     tool_heartbeat.stop()
                     self._agents.pop(run_id, None)
                     self._hitl_channels.pop(run_id, None)
-                    await sse_queue.put(None)
-                    await drainer
+                if not finalized_with_claim:
+                    raise ResumeConflict(
+                        claim_conflict_reason or "resume claim was replaced before finalization"
+                    )
 
-        for agent_key in list(citation_buffers):
-            await flush_citation_buffer(agent_key, agent_key)
+        if projection_error is not None and final_status != "paused_hitl":
+            raise projection_error
         return final_status
 
     async def _build_agent_for_conversation(
@@ -2589,7 +2629,6 @@ class RunManager:
         catalog_session: Any | None,
         effective_system_prompt: str,
         extra_ref_holder: dict[str, Any],
-        sse_queue: asyncio.Queue[dict[str, Any] | None],
         publish_stream_event: Any,
         trigger: str = "interactive",
         model_key: str | None = None,
@@ -2614,9 +2653,8 @@ class RunManager:
         opens the agent only to drive a final SSE emission).
 
         ``extra_ref_holder`` is the late-binding dict that middleware closures
-        read at request time. The caller MUST populate
-        ``extra_ref_holder["extra"] = agent._extra`` after this factory
-        returns, before the first prompt invocation.
+        read at request time. The caller populates it from the Session's stable
+        public ``state_context`` before the first execution attempt.
         """
         from collections.abc import AsyncIterator as _AsyncIterator
         from contextlib import asynccontextmanager as _asynccontextmanager
@@ -3139,8 +3177,8 @@ class RunManager:
 
         # --- Build the 11 cubeloop middleware (M3.f) ---
         # The caller owns ``extra_ref_holder`` and populates ``["extra"]`` from
-        # ``agent._extra`` after this factory returns; this closure reads the
-        # holder at request time, well after the agent build.
+        # Session state_context after this factory returns; this closure reads
+        # the holder at request time, well after the agent build.
         def _extra_ref() -> dict[str, Any]:
             ref: dict[str, Any] | None = extra_ref_holder["extra"]
             if ref is None:
@@ -3741,7 +3779,9 @@ class RunManager:
         catalog_session_ctx: Any | None = None
         catalog_session: Any | None = None
         skill_catalog: Any | None = None
-        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue(
+            maxsize=HOST_EVENT_QUEUE_CAPACITY
+        )
         cv_token = subagent_event_queue.set(event_q)
 
         citation_counter = CitationCounter(start=1)
@@ -3800,6 +3840,8 @@ class RunManager:
             )
 
         async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if event_q_drainer is not None and event_q_drainer.done():
+                event_q_drainer.result()
             if sse_event.type == "text_delta":
                 buffered = citation_buffers.get(agent_key, "") + str(
                     sse_event.data.get("content", "")
@@ -4044,15 +4086,7 @@ class RunManager:
             # consumer can't block run teardown forever (mirrors the
             # safety pattern in the `finally` block).
             if event_q_drainer is not None:
-                with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                await _finish_subagent_citation_queue(event_q, event_q_drainer)
                 event_q_drainer = None
             # --- Aggregate session-level token totals (kicked pre-drain) ---
             session_usage: SessionUsage = {
@@ -4216,14 +4250,7 @@ class RunManager:
             # its own drain, so this block is a no-op then.
             if event_q_drainer is not None:
                 with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                    await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()
@@ -4359,7 +4386,9 @@ class RunManager:
         catalog_session_ctx: Any | None = None
         catalog_session: Any | None = None
         skill_catalog: Any | None = None
-        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue(
+            maxsize=HOST_EVENT_QUEUE_CAPACITY
+        )
         cv_token = subagent_event_queue.set(event_q)
 
         citation_counter = CitationCounter(start=1)
@@ -4418,6 +4447,8 @@ class RunManager:
             )
 
         async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if event_q_drainer is not None and event_q_drainer.done():
+                event_q_drainer.result()
             if sse_event.type == "text_delta":
                 buffered = citation_buffers.get(agent_key, "") + str(
                     sse_event.data.get("content", "")
@@ -4451,6 +4482,7 @@ class RunManager:
         # separate call frame — locals().get() would never see it).
         extra_ref_holder: dict[str, Any] = {}
         durable_final_status = "errored"
+        resume_ownership_lost = False
 
         try:
             try:
@@ -4581,6 +4613,13 @@ class RunManager:
             effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
+            async def drain_projection_before_terminal_commit() -> None:
+                nonlocal event_q_drainer
+                if event_q_drainer is None:
+                    return
+                await _finish_subagent_citation_queue(event_q, event_q_drainer)
+                event_q_drainer = None
+
             await self._run_cubeloop_respond_path(
                 ctx=ctx,
                 run_id=run_id,
@@ -4596,6 +4635,7 @@ class RunManager:
                 skill_catalog=skill_catalog,
                 catalog_session=catalog_session,
                 extra_ref_holder=extra_ref_holder,
+                before_terminal_commit=drain_projection_before_terminal_commit,
             )
             await _update_conversation_timestamp(
                 conversation_id,
@@ -4616,20 +4656,6 @@ class RunManager:
                 user_id=ctx.user_id,
             )
             search_index_enqueued = True
-
-            # Drain shared subagent/citation queue BEFORE DoneEvent — same
-            # rationale as _execute_run.
-            if event_q_drainer is not None:
-                with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
-                event_q_drainer = None
 
             from cubeplex.services.usage import SessionUsage, get_session_usage
 
@@ -4700,6 +4726,12 @@ class RunManager:
             # cancel route already set the meta state appropriately.
             await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
+        except ResumeConflict:
+            # A newer claim owns this run. The old attempt must not append an
+            # error, terminal metadata, or DoneEvent into the new owner's
+            # stream after its claim-fenced finalization was rejected.
+            resume_ownership_lost = True
+            logger.warning("Respond run {} lost its claim before finalization", run_id)
         except Exception as exc:
             logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
             # Don't clear DB pending — leaving it allows the user to retry
@@ -4767,14 +4799,7 @@ class RunManager:
 
             if event_q_drainer is not None:
                 with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                    await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()
@@ -4821,6 +4846,7 @@ class RunManager:
             registration_replaced = _registration_was_replaced(
                 current_agent=current_agent,
                 originating_agent=steering_agent,
+                ownership_lost=resume_ownership_lost,
             )
             if not registration_replaced:
                 if durable_final_status != "paused_hitl":
