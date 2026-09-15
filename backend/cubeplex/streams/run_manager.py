@@ -1672,8 +1672,11 @@ class RunManager:
             buffered_cancelled = self._cancel_pre_execution_input(run_id, steer_id)
             if receipt.status == "cancelled" or buffered_cancelled:
                 return "cancelled"
-            return "not_found"
-        if self._cancel_pre_execution_input(run_id, steer_id):
+            if receipt.status != "closed":
+                return "not_found"
+            # A replacement worker may own this resumed run_id. Forward the
+            # cancellation instead of trusting a stale local Session.
+        elif self._cancel_pre_execution_input(run_id, steer_id):
             return "cancelled"
         await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
         return "published"
