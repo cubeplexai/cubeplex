@@ -281,6 +281,21 @@ async def resume_claim_matches(
     return current == claim_token
 
 
+async def get_resume_claim_token(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+) -> str | None:
+    """Return the current distributed resume owner token, if one exists."""
+    current_raw = await redis.hget(  # type: ignore[misc]
+        _run_meta_key(prefix, run_id), "claim_token"
+    )
+    if current_raw is None:
+        return None
+    return current_raw.decode() if isinstance(current_raw, bytes) else str(current_raw)
+
+
 def stale_answered_pending(
     *,
     final_status: str,
