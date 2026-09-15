@@ -1,6 +1,7 @@
 """Unit tests for RunManager's live-agent registry + steer_run."""
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 from cubeloop.session.input import InputReceipt
@@ -156,15 +157,23 @@ async def test_dispatch_steer_buffers_until_session_starts_accepting_input() -> 
 
 
 @pytest.mark.asyncio
-async def test_dispatch_steer_maps_closed_session_to_no_active_run() -> None:
+async def test_dispatch_steer_forwards_closed_session_to_remote_owner() -> None:
     mgr = _make_manager()
     mgr._agents = {"run-1": _PreparingAgent()}
     mgr._preparing_runs = set()
     mgr._pending_session_inputs = {}
+    mgr._ack_waiters = {}
+    mgr._publish_control = AsyncMock()  # type: ignore[method-assign]
 
-    status = await mgr.dispatch_steer("run-1", "too late", steer_id="s-closed")
+    status = await mgr.dispatch_steer(
+        "run-1",
+        "too late",
+        steer_id="s-closed",
+        ack_timeout=0,
+    )
 
-    assert status == "no_active_run"
+    assert status == "published"
+    mgr._publish_control.assert_awaited_once()
 
 
 @pytest.mark.asyncio

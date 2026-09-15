@@ -1425,7 +1425,9 @@ class RunManager:
                 metadata=metadata,
             ):
                 return "steered"
-            return "no_active_run"
+            # Admission may have moved to a replacement worker that owns the
+            # same resumed run_id. Fall through to correlated pub/sub so the
+            # distributed claim owner can accept or reject authoritatively.
         if self._buffer_pre_execution_input(
             run_id,
             content=content,
