@@ -213,3 +213,28 @@ async def test_cancel_removes_a_buffered_pre_execution_steer() -> None:
 
     assert status == "cancelled"
     assert mgr._pending_session_inputs["run-1"] == {}
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_buffered_steer_leaves_tombstone() -> None:
+    mgr = _make_manager()
+    agent = _PreparingAgent()
+    mgr._agents = {"run-1": agent}
+    mgr._preparing_runs = {"run-1"}
+    mgr._pending_session_inputs = {}
+    mgr._cancelled_pre_execution_inputs = {}
+
+    status = await mgr.dispatch_cancel_steer("run-1", "s-cancelled")
+    assert status == "cancelled"
+
+    steer_status = await mgr.dispatch_steer(
+        "run-1",
+        "must not run",
+        steer_id="s-cancelled",
+    )
+    assert steer_status == "steered"
+    assert mgr._pending_session_inputs.get("run-1", {}) == {}
+
+    agent.session.accepting = True
+    await mgr._drain_pre_execution_inputs("run-1", agent.session)
+    assert agent.session.inputs == []

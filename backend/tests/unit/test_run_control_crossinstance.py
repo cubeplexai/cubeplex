@@ -102,6 +102,32 @@ async def test_closed_current_owner_rejects_steer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_current_owner_rejects_steer_during_no_agent_teardown() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    owner = _mgr(redis)
+    owner._tasks["r1"] = object()  # type: ignore[assignment]
+    owner._resume_claim_tokens = {"r1": "current-token"}
+    owner._publish_ack = AsyncMock()  # type: ignore[method-assign]
+    await redis.hset("t:run_meta:v2:r1", "claim_token", "current-token")
+
+    await owner._handle_control(
+        {
+            "run_id": "r1",
+            "type": "steer",
+            "content": "too late",
+            "steer_id": "s1",
+            "ack_id": "r1:steer:s1",
+        }
+    )
+
+    owner._publish_ack.assert_awaited_once_with(
+        "r1",
+        ack_id="r1:steer:s1",
+        accepted=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_local_stale_session_forwards_steer_to_replacement() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
     old_owner, replacement = _mgr(redis), _mgr(redis)
@@ -161,9 +187,12 @@ async def test_cross_instance_steer() -> None:
     a, b = _mgr(redis), _mgr(redis)
     agent = _FakeAgent()
     a._agents["r1"] = agent  # owner is A
+    a._resume_claim_tokens = {"r1": "replacement-token"}
     # B still has a finishing task for an older attempt with the same run id;
     # that task alone must not publish a competing negative acknowledgement.
     b._tasks["r1"] = object()  # type: ignore[assignment]
+    b._resume_claim_tokens = {"r1": "old-token"}
+    await redis.hset("t:run_meta:v2:r1", "claim_token", "replacement-token")
     await a.start_control_listeners()
     await b.start_control_listeners()
     try:
