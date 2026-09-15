@@ -25,6 +25,8 @@ from cubeplex.repositories.steering_message import (
 
 HistorySteerLoader = Callable[[str], Awaitable[set[str]]]
 MAINTENANCE_BATCH_SIZE = 100
+ACKNOWLEDGEMENT_ATTEMPTS = 3
+ACKNOWLEDGEMENT_RETRY_SECONDS = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,20 +348,23 @@ class DurableSteeringCoordinator:
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         try:
             async with lock:
-                async with self._session_maker() as session:
-                    repo = self._repo(session, resolved_scope)
-                    row = await repo.get_by_client_id(
-                        conversation_id=resolved_scope.conversation_id,
-                        client_steer_id=client_steer_id,
-                    )
-                    if row is not None and row.run_id == run_id:
-                        await repo.mark_owned_injected(row_id=row.id, owner=self._owner)
-                    await session.commit()
-        except Exception:
-            logger.opt(exception=True).warning(
-                "durable steering acknowledgement failed for run {}",
-                run_id,
-            )
+                for attempt in range(ACKNOWLEDGEMENT_ATTEMPTS):
+                    try:
+                        await self._acknowledge_injected_once(
+                            run_id=run_id,
+                            client_steer_id=client_steer_id,
+                            scope=resolved_scope,
+                        )
+                        break
+                    except Exception:
+                        if attempt + 1 == ACKNOWLEDGEMENT_ATTEMPTS:
+                            raise
+                        logger.opt(exception=True).warning(
+                            "durable steering acknowledgement retry {} for run {}",
+                            attempt + 1,
+                            run_id,
+                        )
+                        await asyncio.sleep(ACKNOWLEDGEMENT_RETRY_SECONDS)
         finally:
             if (
                 registered_scope is None
@@ -367,6 +372,23 @@ class DurableSteeringCoordinator:
                 and self._locks.get(run_id) is lock
             ):
                 self._locks.pop(run_id, None)
+
+    async def _acknowledge_injected_once(
+        self,
+        *,
+        run_id: str,
+        client_steer_id: str,
+        scope: SteeringRunScope,
+    ) -> None:
+        async with self._session_maker() as session:
+            repo = self._repo(session, scope)
+            row = await repo.get_by_client_id(
+                conversation_id=scope.conversation_id,
+                client_steer_id=client_steer_id,
+            )
+            if row is not None and row.run_id == run_id:
+                await repo.mark_owned_injected(row_id=row.id, owner=self._owner)
+            await session.commit()
 
     async def cancel_dispatched(self, run_id: str, client_steer_id: str) -> None:
         scope = self._scopes.get(run_id)
