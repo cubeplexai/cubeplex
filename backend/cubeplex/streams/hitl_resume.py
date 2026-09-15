@@ -200,6 +200,36 @@ async def finalize_run_meta_if_claim_matches(
     return int(result) == 1
 
 
+async def resume_claim_matches(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+    claim_token: str,
+) -> bool:
+    """Return whether ``claim_token`` still owns this resume attempt."""
+    current_raw = await redis.hget(  # type: ignore[misc]
+        _run_meta_key(prefix, run_id), "claim_token"
+    )
+    if current_raw is None:
+        return False
+    current = current_raw.decode() if isinstance(current_raw, bytes) else str(current_raw)
+    return current == claim_token
+
+
+def stale_answered_pending(
+    *,
+    final_status: str,
+    loaded_pending: tuple[Any, Any] | None,
+    answered_question_id: str,
+) -> Any | None:
+    """Select only the stale pending row belonging to this completed answer."""
+    if final_status != "completed" or loaded_pending is None:
+        return None
+    pending = loaded_pending[0]
+    return pending if pending.question_id == answered_question_id else None
+
+
 def _as_dict(obj: Any) -> dict[str, Any]:
     """Pydantic ``.model_dump()`` if available, else assume already a dict.
 

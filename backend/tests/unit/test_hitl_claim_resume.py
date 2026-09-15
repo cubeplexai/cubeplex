@@ -23,6 +23,8 @@ import pytest
 from cubeplex.streams.hitl_resume import (
     ClaimResumeOutcome,
     claim_resume,
+    resume_claim_matches,
+    stale_answered_pending,
 )
 from cubeplex.streams.run_events import (
     create_run,
@@ -206,3 +208,54 @@ async def test_claim_conflict_on_terminal_status(redis):
     raw = await redis.hgetall(f"{prefix}:run_meta:v2:r1")
     assert raw["status"] == "completed"
     assert "claim_token" not in raw
+
+
+async def test_resume_claim_matches_only_current_owner(redis):
+    prefix = "test_claim_owner"
+    created = await create_run(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        conversation_id="c1",
+        status="running",
+        started_at="2026-06-02T00:00:00+00:00",
+        user_message="hi",
+        ttl_seconds=60,
+    )
+    assert created is not None
+    await redis.hset(f"{prefix}:run_meta:v2:r1", "claim_token", "current-token")
+
+    assert await resume_claim_matches(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        claim_token="current-token",
+    )
+    assert not await resume_claim_matches(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        claim_token="replaced-token",
+    )
+
+
+def test_stale_answered_pending_rejects_replacement_follow_up() -> None:
+    answered = type("Pending", (), {"question_id": "q-answered"})()
+    follow_up = type("Pending", (), {"question_id": "q-follow-up"})()
+
+    assert (
+        stale_answered_pending(
+            final_status="completed",
+            loaded_pending=(answered, "run-1"),
+            answered_question_id="q-answered",
+        )
+        is answered
+    )
+    assert (
+        stale_answered_pending(
+            final_status="completed",
+            loaded_pending=(follow_up, "run-1"),
+            answered_question_id="q-answered",
+        )
+        is None
+    )

@@ -2500,9 +2500,24 @@ class RunManager:
                     exc=None,
                 )
                 if final_status == "completed":
+                    from cubeplex.streams.hitl_resume import (
+                        resume_claim_matches,
+                        stale_answered_pending,
+                    )
+
+                    if not await resume_claim_matches(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        claim_token=claim_token,
+                    ):
+                        raise ResumeConflict("resume claim was replaced before cleanup")
                     loaded_pending = await cp.load_pending(conversation_id)
-                    if loaded_pending is not None:
-                        stale_pending = loaded_pending[0]
+                    stale_pending = stale_answered_pending(
+                        final_status=final_status,
+                        loaded_pending=loaded_pending,
+                        answered_question_id=question_id,
+                    )
                 if stale_pending is not None:
                     await cp.save_pending_request(conversation_id, None)
                     await _emit_synthetic_resolved(
