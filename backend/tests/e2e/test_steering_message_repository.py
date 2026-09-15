@@ -333,6 +333,64 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
 
 
 @pytest.mark.asyncio
+async def test_registration_repairs_checkpointed_owned_claim_after_ack_failure(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    checkpointed_ids: set[str] = set()
+
+    async def checkpoint_history(_conversation_id: str) -> set[str]:
+        return checkpointed_ids
+
+    coordinator = DurableSteeringCoordinator(
+        session_factory,
+        history_loader=checkpoint_history,
+    )
+    scope = SteeringRunScope(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=conversation.id,
+    )
+    first_session = _QueueingSession()
+    await coordinator.register_and_drain(
+        run_id="run-repair-owned",
+        scope=scope,
+        session=first_session,
+    )
+    row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="run-repair-owned",
+        client_steer_id="steer-repair-owned",
+        content="already checkpointed",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-repair-owned",
+    )
+    await db_session.commit()
+    await coordinator.drain("run-repair-owned")
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.dispatched
+    assert row.delivery_owner == coordinator._owner
+
+    await coordinator.unregister("run-repair-owned", session=first_session)
+    checkpointed_ids.add("steer-repair-owned")
+    replacement_session = _QueueingSession()
+    await coordinator.register_and_drain(
+        run_id="run-repair-owned",
+        scope=scope,
+        session=replacement_session,
+    )
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.injected
+    assert row.delivery_owner is None
+    assert replacement_session.messages == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("durability", "expected_state"),
     [

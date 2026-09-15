@@ -120,10 +120,28 @@ class DurableSteeringCoordinator:
         scope: SteeringRunScope,
         session: SteeringSessionProtocol,
     ) -> None:
+        await self._repair_checkpointed_owned_claims(run_id=run_id, scope=scope)
         self._sessions[run_id] = session
         self._scopes[run_id] = scope
         self._locks.setdefault(run_id, asyncio.Lock())
         await self.drain(run_id)
+
+    async def _repair_checkpointed_owned_claims(
+        self,
+        *,
+        run_id: str,
+        scope: SteeringRunScope,
+    ) -> None:
+        async with self._session_maker() as session:
+            repo = self._repo(session, scope)
+            rows = await repo.list_owned_claims(run_id=run_id, owner=self._owner)
+            if not rows:
+                return
+            history_ids = await self._history_loader(scope.conversation_id)
+            for row in rows:
+                if row.client_steer_id in history_ids:
+                    await repo.mark_owned_injected(row_id=row.id, owner=self._owner)
+            await session.commit()
 
     async def unregister(
         self,

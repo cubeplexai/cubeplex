@@ -1746,6 +1746,8 @@ class RunManager:
                 if isinstance(ack_id, str):
                     await self._publish_ack(run_id, ack_id=ack_id, accepted=False)
                 return
+            if not await self._owns_current_resume_claim(run_id):
+                return
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
             msg_metadata = extra_metadata if isinstance(extra_metadata, dict) else None
@@ -1777,12 +1779,6 @@ class RunManager:
                     steer_id=input_id,
                     metadata=msg_metadata,
                 )
-            if not accepted and not preparing:
-                if not await self._owns_current_resume_claim(run_id):
-                    # A closed Agent may remain registered briefly while a
-                    # replacement resume owns admission in another worker.
-                    # Only the matching owner may reject the steer.
-                    return
             ack_id = data.get("ack_id")
             if isinstance(ack_id, str):
                 await self._publish_ack(run_id, ack_id=ack_id, accepted=accepted)

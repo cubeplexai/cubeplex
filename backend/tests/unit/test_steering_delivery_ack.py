@@ -46,3 +46,27 @@ async def test_checkpoint_ack_propagates_after_retry_budget(monkeypatch) -> None
         await coordinator.acknowledge_injected("run-1", "steer-1")
 
     assert write_ack.await_count == 3
+
+
+async def test_registration_repairs_checkpointed_owned_claims_before_drain(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    coordinator = DurableSteeringCoordinator(MagicMock())
+    scope = SteeringRunScope(
+        org_id="org-1",
+        workspace_id="workspace-1",
+        conversation_id="conversation-1",
+    )
+    order: list[str] = []
+    repair = AsyncMock(side_effect=lambda **_kwargs: order.append("repair"))
+    drain = AsyncMock(side_effect=lambda _run_id: order.append("drain"))
+    monkeypatch.setattr(coordinator, "_repair_checkpointed_owned_claims", repair)
+    monkeypatch.setattr(coordinator, "drain", drain)
+
+    await coordinator.register_and_drain(
+        run_id="run-1",
+        scope=scope,
+        session=MagicMock(),
+    )
+
+    assert order == ["repair", "drain"]
