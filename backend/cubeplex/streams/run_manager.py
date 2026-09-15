@@ -2376,11 +2376,25 @@ class RunManager:
                 trigger=ctx.trigger,
             )
             extra_ref_holder["steering_agent"] = agent
-            checkpoint = await agent.session.load_checkpoint()
-            if checkpoint is not None and checkpoint.messages:
-                _counter = citation_counter_var.get()
-                if _counter is not None:
-                    await _counter.seed_from_messages(checkpoint.messages)
+            try:
+                checkpoint = await agent.session.load_checkpoint()
+                if checkpoint is not None and checkpoint.messages:
+                    _counter = citation_counter_var.get()
+                    if _counter is not None:
+                        await _counter.seed_from_messages(checkpoint.messages)
+            except Exception as checkpoint_exc:
+                finalized = await finalize_run_meta_if_claim_matches(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    status="errored",
+                )
+                if not finalized:
+                    raise ResumeConflict(
+                        "resume claim was replaced during checkpoint restoration"
+                    ) from checkpoint_exc
+                raise
             extra_ref_holder["extra"] = agent.session.state_context
 
             async def _quiesce_steering_before_detach() -> None:

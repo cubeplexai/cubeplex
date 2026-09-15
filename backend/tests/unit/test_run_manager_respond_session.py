@@ -13,17 +13,19 @@ from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("claim_matches", "finalize_matches", "expected_conflict"),
+    ("claim_matches", "finalize_matches", "checkpoint_error", "expected_conflict"),
     [
-        (True, True, None),
-        (False, True, "resume claim was replaced before cleanup"),
-        (True, False, "resume claim was replaced before finalization"),
+        (True, True, False, None),
+        (False, True, False, "resume claim was replaced before cleanup"),
+        (True, False, False, "resume claim was replaced before finalization"),
+        (True, True, True, None),
     ],
 )
 async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     monkeypatch: pytest.MonkeyPatch,
     claim_matches: bool,
     finalize_matches: bool,
+    checkpoint_error: bool,
     expected_conflict: str | None,
 ) -> None:
     order: list[str] = []
@@ -54,7 +56,10 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     )
 
     session = SimpleNamespace(
-        load_checkpoint=AsyncMock(return_value=None),
+        load_checkpoint=AsyncMock(
+            side_effect=RuntimeError("checkpoint restore failed") if checkpoint_error else None,
+            return_value=None,
+        ),
         state_context=object(),
     )
     agent = SimpleNamespace(session=session)
@@ -167,7 +172,11 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
             before_terminal_commit=_drain,
         )
 
-    if expected_conflict is None:
+    if checkpoint_error:
+        with pytest.raises(RuntimeError, match="checkpoint restore failed"):
+            await _run()
+        assert order == ["finalize"]
+    elif expected_conflict is None:
         assert await _run() == "completed"
         assert order.index("reserve-finalization") < order.index("clear-pending")
         assert order.index("clear-pending") < order.index("resolved")
@@ -177,5 +186,8 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     else:
         with pytest.raises(ResumeConflict, match=expected_conflict):
             await _run()
-    manager._steering_delivery.acknowledge_injected.assert_awaited_once_with("run-1", "steer-1")
+    if checkpoint_error:
+        manager._steering_delivery.acknowledge_injected.assert_not_awaited()
+    else:
+        manager._steering_delivery.acknowledge_injected.assert_awaited_once_with("run-1", "steer-1")
     assert manager._agents == {}
