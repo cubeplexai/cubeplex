@@ -235,8 +235,16 @@ async def test_local_stale_session_forwards_cancel_to_replacement() -> None:
     old_agent = _FakeAgent()
     old_agent.session = _ClosedSession()
     old_owner._agents["r1"] = old_agent
+    old_owner._agent_claim_tokens["r1"] = (old_agent, "old-token")
+    old_owner._resume_claim_tokens["r1"] = "old-token"
     replacement_agent = _FakeAgent()
     replacement._agents["r1"] = replacement_agent
+    replacement._agent_claim_tokens["r1"] = (
+        replacement_agent,
+        "replacement-token",
+    )
+    replacement._resume_claim_tokens["r1"] = "replacement-token"
+    await redis.hset("t:run_meta:v2:r1", "claim_token", "replacement-token")
     await old_owner.start_control_listeners()
     await replacement.start_control_listeners()
     try:

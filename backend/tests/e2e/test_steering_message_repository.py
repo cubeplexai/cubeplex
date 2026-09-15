@@ -369,12 +369,24 @@ async def test_registration_repairs_checkpointed_owned_claim_after_ack_failure(
         sender_display_name=None,
         hitl_question_id="question-repair-owned",
     )
+    retry_row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="run-repair-owned",
+        client_steer_id="steer-retry-owned",
+        content="retry after pause",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-repair-owned",
+    )
     await db_session.commit()
     await coordinator.drain("run-repair-owned")
 
     await db_session.refresh(row)
     assert row.state == SteeringMessageState.dispatched
     assert row.delivery_owner == coordinator._owner
+    await db_session.refresh(retry_row)
+    assert retry_row.state == SteeringMessageState.dispatched
+    assert retry_row.delivery_owner == coordinator._owner
 
     await coordinator.unregister("run-repair-owned", session=first_session)
     checkpointed_ids.add("steer-repair-owned")
@@ -388,7 +400,12 @@ async def test_registration_repairs_checkpointed_owned_claim_after_ack_failure(
     await db_session.refresh(row)
     assert row.state == SteeringMessageState.injected
     assert row.delivery_owner is None
-    assert replacement_session.messages == []
+    await db_session.refresh(retry_row)
+    assert retry_row.state == SteeringMessageState.dispatched
+    assert retry_row.delivery_owner == coordinator._owner
+    assert [message.metadata["steer_id"] for message in replacement_session.messages] == [
+        "steer-retry-owned"
+    ]
 
 
 @pytest.mark.asyncio
