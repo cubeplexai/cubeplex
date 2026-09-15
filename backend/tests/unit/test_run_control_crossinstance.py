@@ -94,6 +94,33 @@ async def test_closed_current_owner_rejects_steer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_stale_session_forwards_steer_to_replacement() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    old_owner, replacement = _mgr(redis), _mgr(redis)
+    old_agent = _FakeAgent()
+    old_agent.session = _ClosedSession()
+    old_owner._agents["r1"] = old_agent
+    old_owner._resume_claim_tokens = {"r1": "old-token"}
+    replacement_agent = _FakeAgent()
+    replacement._agents["r1"] = replacement_agent
+    replacement._resume_claim_tokens = {"r1": "replacement-token"}
+    await redis.hset("t:run_meta:v2:r1", "claim_token", "replacement-token")
+    await old_owner.start_control_listeners()
+    await replacement.start_control_listeners()
+    try:
+        status = await old_owner.dispatch_steer(
+            "r1",
+            "replacement owns this",
+            steer_id="s1",
+        )
+        assert status == "published"
+        assert replacement_agent.session.inputs[0].input_id == "s1"
+    finally:
+        await old_owner.stop_control_listeners()
+        await replacement.stop_control_listeners()
+
+
+@pytest.mark.asyncio
 async def test_cross_instance_steer() -> None:
     # Both managers share one FakeRedis instance — fakeredis routes pub/sub
     # across all pubsub handles created from the same client, so A's listener
