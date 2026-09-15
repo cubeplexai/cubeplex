@@ -2345,6 +2345,7 @@ class RunManager:
         """
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.agents.stream import StreamConverter
+        from cubeplex.config import config as runtime_config
         from cubeplex.middleware.citations.counter import citation_counter_var
         from cubeplex.streams.hitl_resume import (
             begin_resume_finalization,
@@ -2518,6 +2519,15 @@ class RunManager:
                     run_id=run_id,
                     claim_token=claim_token,
                     ttl_seconds=self._run_event_ttl_seconds,
+                    lease_seconds=max(
+                        1,
+                        int(
+                            runtime_config.get(
+                                "lifecycle.stale_run_threshold_seconds",
+                                180,
+                            )
+                        ),
+                    ),
                 ):
                     claim_conflict_reason = "resume claim was replaced before cleanup"
                     raise ResumeConflict(claim_conflict_reason)
