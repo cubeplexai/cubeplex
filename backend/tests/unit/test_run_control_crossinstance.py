@@ -53,6 +53,7 @@ async def test_cross_instance_steer() -> None:
             await asyncio.sleep(0.05)
         assert agent.session.inputs[0].message.content[0].text == "redirect"
         assert agent.session.inputs[0].input_id == "s1"
+        assert agent.session.inputs[0].message.metadata["steer_id"] == "s1"
     finally:
         await a.stop_control_listeners()
 

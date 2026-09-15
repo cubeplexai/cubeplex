@@ -49,6 +49,7 @@ async def test_dispatch_steer_local_calls_agent(redis):
     assert await m.dispatch_steer("r1", "go left", steer_id="s1") == "steered"
     assert agent.session.inputs[0].message.content[0].text == "go left"
     assert agent.session.inputs[0].input_id == "s1"
+    assert agent.session.inputs[0].message.metadata["steer_id"] == "s1"
 
 
 @pytest.mark.asyncio

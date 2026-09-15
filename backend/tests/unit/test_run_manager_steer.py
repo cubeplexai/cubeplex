@@ -95,6 +95,7 @@ async def test_dispatch_steer_threads_steer_id_into_metadata() -> None:
     status = await mgr.dispatch_steer("run-1", "do X", steer_id="s1")
     assert status == "steered"
     assert agent.session.inputs[0].input_id == "s1"
+    assert agent.session.inputs[0].message.metadata["steer_id"] == "s1"
 
 
 @pytest.mark.asyncio
