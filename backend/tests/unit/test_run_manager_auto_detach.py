@@ -67,10 +67,9 @@ async def test_auto_detach_does_not_fire_on_other_events() -> None:
 async def test_detached_flag_set_synchronously() -> None:
     """``.detached`` must flip before the scheduled ``detach()`` runs.
 
-    T6's terminal block reads this flag after ``agent.prompt()`` returns
-    to distinguish "real new pending this turn" from "stale leftover".
-    The flip therefore has to be synchronous with the listener call —
-    not deferred to the create_task await.
+    The flag prevents duplicate detach tasks when a listener observes the
+    same request more than once. The flip therefore has to be synchronous
+    with the listener call, not deferred to the create_task await.
     """
     agent = MagicMock()
     agent.detach = AsyncMock()

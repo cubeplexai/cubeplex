@@ -1,9 +1,7 @@
-"""Smoke test for the T8 respond-path scaffolding.
+"""Smoke test for the respond-path host surface.
 
-Full behavioural coverage of ``_run_cubeloop_respond_path`` /
-``_execute_respond_run`` will come via T9's ``resume_run_with_answer`` test
-and T16's E2E. This file just locks in the public surface T9 / T10 will
-build against:
+Behavioural coverage lives in the resume and HITL E2E suites. This file
+locks in the internal surface those entry points use:
 
 * ``_run_cubeloop_respond_path`` exists on ``RunManager`` and accepts the
   documented keyword-only parameters (``question_id``, ``answer``,

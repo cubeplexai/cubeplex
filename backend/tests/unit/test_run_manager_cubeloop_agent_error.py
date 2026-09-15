@@ -1,32 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import pytest
-
 from cubeplex.errors import ErrorCode
-from cubeplex.streams.run_manager import (
-    CubeloopAgentRunError,
-    _message_for_run_exception,
-    _raise_if_cubeloop_agent_failed,
-)
-
-
-def test_cubeloop_agent_error_message_raises_terminal_run_error() -> None:
-    agent = SimpleNamespace(
-        state=SimpleNamespace(
-            error_message=(
-                "[litellm/glm-5.2 @ http://192.168.1.215:4000/v1/] "
-                "TypeError: AsyncCompletions.create() got an unexpected keyword "
-                "argument 'reasoning_effort'"
-            )
-        )
-    )
-
-    with pytest.raises(CubeloopAgentRunError) as exc_info:
-        _raise_if_cubeloop_agent_failed(agent)
-
-    assert "unexpected keyword argument 'reasoning_effort'" in str(exc_info.value)
+from cubeplex.streams.execution_adapter import CubeloopAgentRunError
+from cubeplex.streams.run_manager import _message_for_run_exception
 
 
 def test_cubeloop_agent_error_message_is_user_visible() -> None:
@@ -39,9 +15,3 @@ def test_cubeloop_agent_error_message_is_user_visible() -> None:
     )
 
     assert message == "provider rejected reasoning"
-
-
-def test_missing_cubeloop_agent_error_message_does_not_raise() -> None:
-    agent = SimpleNamespace(state=SimpleNamespace(error_message=None))
-
-    _raise_if_cubeloop_agent_failed(agent)
