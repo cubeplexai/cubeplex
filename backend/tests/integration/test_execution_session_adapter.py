@@ -13,7 +13,12 @@ from cubeloop.session.events import (
     ExecutionFinished,
     InputCommitted,
 )
-from cubeloop.session.types import ExecutionError, ExecutionResult, PromptExecutionRequest
+from cubeloop.session.types import (
+    DeliveryError,
+    ExecutionError,
+    ExecutionResult,
+    PromptExecutionRequest,
+)
 
 from cubeplex.agents.graph import create_cubeplex_agent
 from cubeplex.streams.execution_adapter import (
@@ -129,7 +134,9 @@ async def test_adapter_uses_required_bounded_consumer_and_returns_result() -> No
 
 
 @pytest.mark.asyncio
-async def test_adapter_rejects_oversized_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_adapter_does_not_apply_host_limit_to_raw_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from cubeplex.streams import execution_adapter
 
     result = ExecutionResult(
@@ -141,7 +148,38 @@ async def test_adapter_rejects_oversized_event(monkeypatch: pytest.MonkeyPatch) 
     session = _FakeSession([_envelope(1, AgentStartEvent())], result)
     monkeypatch.setattr(execution_adapter, "MAX_EVENT_BYTES", 1)
 
-    with pytest.raises(EventProjectionError, match="maximum projected event size"):
+    returned = await execute_session(
+        session=session,
+        request=PromptExecutionRequest(
+            run_id="run-1",
+            attempt_id="attempt-1",
+            message="hello",
+        ),
+        on_agent_event=lambda event: None,
+    )
+
+    assert returned is result
+
+
+@pytest.mark.asyncio
+async def test_adapter_rejects_required_consumer_delivery_error() -> None:
+    result = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-1",
+        outcome="completed",
+        checkpoint_committed=True,
+        delivery_errors=(
+            DeliveryError(
+                consumer="cubeplex-runtime",
+                seq=7,
+                reason="timeout",
+                message="final notification timed out",
+            ),
+        ),
+    )
+    session = _FakeSession([_envelope(1, ExecutionFinished(result=result))], result)
+
+    with pytest.raises(EventProjectionError, match="cubeplex-runtime.*timeout"):
         await execute_session(
             session=session,
             request=PromptExecutionRequest(
@@ -268,3 +306,23 @@ def test_result_mapping_rejects_non_durable_suspension() -> None:
 
     with pytest.raises(CubeloopAgentRunError, match="not durably checkpointed"):
         require_host_success(result)
+
+
+def test_respond_dangling_suspension_completes_but_follow_up_pauses() -> None:
+    dangling = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-1",
+        outcome="suspended",
+        pending_request=type("Pending", (), {"question_id": "q-original"})(),
+        checkpoint_committed=True,
+    )
+    follow_up = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-2",
+        outcome="suspended",
+        pending_request=type("Pending", (), {"question_id": "q-next"})(),
+        checkpoint_committed=True,
+    )
+
+    assert require_host_success(dangling, answered_question_id="q-original") == "completed"
+    assert require_host_success(follow_up, answered_question_id="q-original") == "paused_hitl"

@@ -6,9 +6,8 @@ import asyncio
 from contextvars import ContextVar
 from typing import Any
 
-from loguru import logger
-
 from cubeplex.agents.stream import convert_agent_event_to_sse
+from cubeplex.streams.execution_adapter import enqueue_host_event
 
 subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
     "subagent_event_queue", default=None
@@ -30,9 +29,4 @@ async def forward_subagent_event(agent_id: str, payload: Any) -> None:
     queue = subagent_event_queue.get(None)
     if queue is None:
         return
-    try:
-        queue.put_nowait(("subagent", agent_id, tagged))
-    except asyncio.QueueFull:
-        logger.warning("subagent_event_queue full - dropping event for {}", agent_id)
-    except Exception as exc:
-        logger.debug("subagent_event_queue put failed for {}: {}", agent_id, exc)
+    await enqueue_host_event(queue, ("subagent", agent_id, tagged))

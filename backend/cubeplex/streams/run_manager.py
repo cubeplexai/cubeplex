@@ -27,7 +27,12 @@ from cubeplex.agents.schemas import (
 )
 from cubeplex.errors import ErrorCode, classify_exception, english_fallback
 from cubeplex.services.usage import apply_last_llm_usage
-from cubeplex.streams.execution_adapter import CubeloopAgentRunError
+from cubeplex.streams.execution_adapter import (
+    HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+    HOST_EVENT_QUEUE_CAPACITY,
+    CubeloopAgentRunError,
+    ensure_event_fits,
+)
 from cubeplex.streams.run_events import (
     RunMeta,
     append_run_event,
@@ -69,7 +74,14 @@ class RunContext:
     conversation_creator_user_id: str | None = None
 
 
-def _registration_was_replaced(*, current_agent: Any, originating_agent: Any) -> bool:
+def _registration_was_replaced(
+    *,
+    current_agent: Any,
+    originating_agent: Any,
+    ownership_lost: bool = False,
+) -> bool:
+    if ownership_lost:
+        return True
     return (
         originating_agent is not None
         and current_agent is not None
@@ -453,6 +465,28 @@ async def _drain_subagent_citation_queue(
         if sse_event is None:
             continue
         await publish(sse_event, agent_id)
+
+
+async def _finish_subagent_citation_queue(
+    queue: asyncio.Queue[tuple[str, Any, Any] | None],
+    drainer: asyncio.Task[None],
+) -> None:
+    """Close and drain the bounded auxiliary event queue within finite deadlines."""
+    try:
+        await asyncio.wait_for(
+            queue.put(None),
+            timeout=HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+        )
+        await asyncio.wait_for(
+            drainer,
+            timeout=HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
+        )
+    except BaseException:
+        if not drainer.done():
+            drainer.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await drainer
+        raise
 
 
 def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
@@ -1710,6 +1744,7 @@ class RunManager:
 
     async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
         payload = event.model_dump()
+        ensure_event_fits(payload)
         return await append_run_event(
             self._redis,
             prefix=self._key_prefix,
@@ -1845,6 +1880,12 @@ class RunManager:
                 reasoning=reasoning or ReasoningControl(),
             )
             extra_ref_holder["steering_agent"] = agent
+            # Register as soon as the Agent exists so steers received during
+            # checkpoint, memory, or attachment preparation enter its pending
+            # input queue instead of being dropped by the control listener.
+            self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
             checkpoint = await agent.session.load_checkpoint()
             if checkpoint is not None and checkpoint.messages:
                 _counter = citation_counter_var.get()
@@ -2011,13 +2052,6 @@ class RunManager:
                             require_host_success,
                         )
 
-                        # Publish the live Session only immediately before
-                        # execute makes it accept input. This avoids exposing a
-                        # registered Session that would return `closed` during
-                        # the longer preparation phase above.
-                        self._agents[run_id] = agent
-                        if sandbox_hitl_channel is not None:
-                            self._hitl_channels[run_id] = sandbox_hitl_channel
                         result = await execute_session(
                             session=agent.session,
                             request=PromptExecutionRequest(
@@ -2368,19 +2402,12 @@ class RunManager:
                 ttl_seconds=self._run_event_ttl_seconds,
             )
 
-            from cubeloop.agent.types import MessageEndEvent as _MsgEndEvent
-            from cubeloop.providers.base import UserMessage as _UserMsg
-
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 await auto_detach.quiesce_then_schedule(evt)
-                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
-                    steer_id = evt.message.metadata.get("steer_id")
-                    if isinstance(steer_id, str) and steer_id:
-                        await self._steering_delivery.acknowledge_injected(run_id, steer_id)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
                         d,
@@ -2462,7 +2489,10 @@ class RunManager:
                                 on_agent_event=_on_event,
                                 on_checkpoint_input=_on_checkpoint_input,
                             )
-                            final_status = require_host_success(result)
+                            final_status = require_host_success(
+                                result,
+                                answered_question_id=question_id,
+                            )
                 except BaseException as _run_exc:
                     _schedule_writeback(
                         org_id=ctx.org_id,
@@ -3677,7 +3707,9 @@ class RunManager:
         catalog_session_ctx: Any | None = None
         catalog_session: Any | None = None
         skill_catalog: Any | None = None
-        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue(
+            maxsize=HOST_EVENT_QUEUE_CAPACITY
+        )
         cv_token = subagent_event_queue.set(event_q)
 
         citation_counter = CitationCounter(start=1)
@@ -3736,6 +3768,8 @@ class RunManager:
             )
 
         async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if event_q_drainer is not None and event_q_drainer.done():
+                event_q_drainer.result()
             if sse_event.type == "text_delta":
                 buffered = citation_buffers.get(agent_key, "") + str(
                     sse_event.data.get("content", "")
@@ -3980,15 +4014,7 @@ class RunManager:
             # consumer can't block run teardown forever (mirrors the
             # safety pattern in the `finally` block).
             if event_q_drainer is not None:
-                with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                await _finish_subagent_citation_queue(event_q, event_q_drainer)
                 event_q_drainer = None
             # --- Aggregate session-level token totals (kicked pre-drain) ---
             session_usage: SessionUsage = {
@@ -4152,14 +4178,7 @@ class RunManager:
             # its own drain, so this block is a no-op then.
             if event_q_drainer is not None:
                 with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                    await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()
@@ -4295,7 +4314,9 @@ class RunManager:
         catalog_session_ctx: Any | None = None
         catalog_session: Any | None = None
         skill_catalog: Any | None = None
-        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue(
+            maxsize=HOST_EVENT_QUEUE_CAPACITY
+        )
         cv_token = subagent_event_queue.set(event_q)
 
         citation_counter = CitationCounter(start=1)
@@ -4354,6 +4375,8 @@ class RunManager:
             )
 
         async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if event_q_drainer is not None and event_q_drainer.done():
+                event_q_drainer.result()
             if sse_event.type == "text_delta":
                 buffered = citation_buffers.get(agent_key, "") + str(
                     sse_event.data.get("content", "")
@@ -4387,6 +4410,7 @@ class RunManager:
         # separate call frame — locals().get() would never see it).
         extra_ref_holder: dict[str, Any] = {}
         durable_final_status = "errored"
+        resume_ownership_lost = False
 
         try:
             try:
@@ -4556,15 +4580,7 @@ class RunManager:
             # Drain shared subagent/citation queue BEFORE DoneEvent — same
             # rationale as _execute_run.
             if event_q_drainer is not None:
-                with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                await _finish_subagent_citation_queue(event_q, event_q_drainer)
                 event_q_drainer = None
 
             from cubeplex.services.usage import SessionUsage, get_session_usage
@@ -4640,6 +4656,7 @@ class RunManager:
             # A newer claim owns this run. The old attempt must not append an
             # error, terminal metadata, or DoneEvent into the new owner's
             # stream after its claim-fenced finalization was rejected.
+            resume_ownership_lost = True
             logger.warning("Respond run {} lost its claim before finalization", run_id)
         except Exception as exc:
             logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
@@ -4708,14 +4725,7 @@ class RunManager:
 
             if event_q_drainer is not None:
                 with suppress(Exception):
-                    event_q.put_nowait(None)
-                try:
-                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
-                except (TimeoutError, Exception):
-                    if not event_q_drainer.done():
-                        event_q_drainer.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await event_q_drainer
+                    await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()
@@ -4762,6 +4772,7 @@ class RunManager:
             registration_replaced = _registration_was_replaced(
                 current_agent=current_agent,
                 originating_agent=steering_agent,
+                ownership_lost=resume_ownership_lost,
             )
             if not registration_replaced:
                 if durable_final_status != "paused_hitl":

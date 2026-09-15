@@ -45,6 +45,17 @@ def test_different_registered_agent_is_a_replacement() -> None:
     )
 
 
+def test_lost_resume_ownership_is_a_replacement_without_a_registered_agent() -> None:
+    assert (
+        _registration_was_replaced(
+            current_agent=None,
+            originating_agent=object(),
+            ownership_lost=True,
+        )
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_steer_run_calls_agent_steer_for_registered_run() -> None:
     mgr = _make_manager()

@@ -97,7 +97,6 @@ async def execute_session(
                 return
             value = on_checkpoint_input(event.input_id)
         else:
-            ensure_event_fits(event)
             value = on_agent_event(event)
         if inspect.isawaitable(value):
             try:
@@ -113,12 +112,23 @@ async def execute_session(
         delivery_timeout=SESSION_EVENT_DELIVERY_TIMEOUT_SECONDS,
     )
     try:
-        return await session.execute(request)
+        result = await session.execute(request)
+        for error in result.delivery_errors:
+            if error.consumer == "cubeplex-runtime":
+                raise EventProjectionError(
+                    f"{error.consumer} delivery {error.reason} at sequence {error.seq}: "
+                    f"{error.message}"
+                )
+        return result
     finally:
         unsubscribe()
 
 
-def require_host_success(result: ExecutionResult) -> HostTerminalStatus:
+def require_host_success(
+    result: ExecutionResult,
+    *,
+    answered_question_id: str | None = None,
+) -> HostTerminalStatus:
     """Map explicit Session facts to CubePlex's successful terminal states."""
     if result.outcome == "completed":
         if not result.checkpoint_committed:
@@ -127,6 +137,11 @@ def require_host_success(result: ExecutionResult) -> HostTerminalStatus:
     if result.outcome == "suspended":
         if not result.checkpoint_committed or result.pending_request is None:
             raise CubeloopAgentRunError("suspended execution was not durably checkpointed")
+        if (
+            answered_question_id is not None
+            and result.pending_request.question_id == answered_question_id
+        ):
+            return "completed"
         return "paused_hitl"
     if result.outcome == "cancelled":
         raise asyncio.CancelledError("execution cancelled")
