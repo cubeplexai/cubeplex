@@ -11,6 +11,7 @@ import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 from cubeloop.providers.base import UserMessage
+from cubeloop.session.input import InputDurability, InputEnvelope, InputReceipt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -227,35 +228,49 @@ async def test_soft_delete_removes_queued_text(
     assert await steering_repo.count_for_conversation(conversation.id) == 0
 
 
-class _QueueingAgent:
+class _QueueingSession:
     def __init__(self) -> None:
         self.messages: list[UserMessage] = []
 
-    def steer(self, message: UserMessage) -> None:
-        self.messages.append(message)
+    def submit_input(self, envelope: InputEnvelope) -> InputReceipt:
+        self.messages.append(envelope.message)
+        return InputReceipt(input_id=envelope.input_id, status="queued")
 
-    def cancel_steer(self, steer_id: str) -> bool:
+    def cancel_input(self, steer_id: str) -> InputReceipt:
         for index, message in enumerate(self.messages):
             metadata = getattr(message, "metadata", {})
             if metadata.get("steer_id") == steer_id:
                 self.messages.pop(index)
-                return True
-        return False
+                return InputReceipt(input_id=steer_id, status="cancelled")
+        return InputReceipt(input_id=steer_id, status="closed")
 
 
-class _FailsFirstDeliveryAgent(_QueueingAgent):
+class _FailsFirstDeliverySession(_QueueingSession):
     def __init__(self) -> None:
         super().__init__()
         self.attempted_steer_ids: list[str] = []
         self._failed = False
 
-    def steer(self, message: UserMessage) -> None:
-        steer_id = message.metadata["steer_id"]
+    def submit_input(self, envelope: InputEnvelope) -> InputReceipt:
+        steer_id = envelope.input_id
         self.attempted_steer_ids.append(steer_id)
         if not self._failed:
             self._failed = True
             raise RuntimeError("synchronous delivery failed")
-        super().steer(message)
+        return super().submit_input(envelope)
+
+
+class _AlreadyCommittedSession(_QueueingSession):
+    def __init__(self, durability: InputDurability) -> None:
+        super().__init__()
+        self._durability = durability
+
+    def submit_input(self, envelope: InputEnvelope) -> InputReceipt:
+        return InputReceipt(
+            input_id=envelope.input_id,
+            status="committed",
+            durability=self._durability,
+        )
 
 
 @pytest.mark.asyncio
@@ -284,7 +299,7 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
         session_factory,
         history_loader=empty_history,
     )
-    agent = _QueueingAgent()
+    agent = _QueueingSession()
     await coordinator.register_and_drain(
         run_id="run-delivery",
         scope=SteeringRunScope(
@@ -292,7 +307,7 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
             workspace_id=DEFAULT_WS_ID,
             conversation_id=conversation.id,
         ),
-        agent=agent,
+        session=agent,
     )
     await coordinator.drain("run-delivery")
 
@@ -310,6 +325,52 @@ async def test_coordinator_delivers_once_then_acknowledges_after_checkpoint_even
     await coordinator.acknowledge_injected("run-delivery", "steer-delivery")
     await db_session.refresh(row)
     assert row.state == SteeringMessageState.injected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("durability", "expected_state"),
+    [
+        ("memory", SteeringMessageState.dispatched),
+        ("checkpoint", SteeringMessageState.injected),
+    ],
+)
+async def test_only_checkpoint_committed_receipt_marks_durable_row_injected(
+    durability: InputDurability,
+    expected_state: SteeringMessageState,
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    repo = _repo(db_session)
+    row, _ = await repo.enqueue(
+        conversation_id=conversation.id,
+        run_id=f"run-{durability}",
+        client_steer_id=f"steer-{durability}",
+        content="deliver once",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-receipt",
+    )
+    await db_session.commit()
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
+    await coordinator.register_and_drain(
+        run_id=f"run-{durability}",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        session=_AlreadyCommittedSession(durability),
+    )
+
+    await db_session.refresh(row)
+    assert row.state == expected_state
 
 
 @pytest.mark.asyncio
@@ -423,7 +484,7 @@ async def test_synchronous_delivery_failure_requeues_the_remaining_batch_in_orde
         return set()
 
     coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
-    agent = _FailsFirstDeliveryAgent()
+    agent = _FailsFirstDeliverySession()
     await coordinator.register_and_drain(
         run_id="run-batch-order",
         scope=SteeringRunScope(
@@ -431,7 +492,7 @@ async def test_synchronous_delivery_failure_requeues_the_remaining_batch_in_orde
             workspace_id=DEFAULT_WS_ID,
             conversation_id=conversation.id,
         ),
-        agent=agent,
+        session=agent,
     )
 
     assert agent.messages == []
@@ -468,22 +529,22 @@ async def test_unregister_does_not_remove_a_replacement_agent(
         workspace_id=DEFAULT_WS_ID,
         conversation_id=conversation.id,
     )
-    old_agent = _QueueingAgent()
-    replacement_agent = _QueueingAgent()
+    old_agent = _QueueingSession()
+    replacement_agent = _QueueingSession()
     await coordinator.register_and_drain(
         run_id="run-replacement",
         scope=scope,
-        agent=old_agent,
+        session=old_agent,
     )
     await coordinator.register_and_drain(
         run_id="run-replacement",
         scope=scope,
-        agent=replacement_agent,
+        session=replacement_agent,
     )
 
-    await coordinator.unregister("run-replacement", agent=old_agent)
+    await coordinator.unregister("run-replacement", session=old_agent)
 
-    assert coordinator._agents["run-replacement"] is replacement_agent
+    assert coordinator._sessions["run-replacement"] is replacement_agent
 
 
 @pytest.mark.asyncio
@@ -499,15 +560,15 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
         return set()
 
     coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
-    agent = _QueueingAgent()
+    agent = _QueueingSession()
     delivered_ids: list[str] = []
-    original_steer = agent.steer
+    original_submit = agent.submit_input
 
-    def record_steer(message: UserMessage) -> None:
-        delivered_ids.append(str(message.metadata["steer_id"]))
-        original_steer(message)
+    def record_submit(envelope: InputEnvelope) -> InputReceipt:
+        delivered_ids.append(envelope.input_id)
+        return original_submit(envelope)
 
-    monkeypatch.setattr(agent, "steer", record_steer)
+    monkeypatch.setattr(agent, "submit_input", record_submit)
     await coordinator.register_and_drain(
         run_id="run-unregister-race",
         scope=SteeringRunScope(
@@ -515,7 +576,7 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
             workspace_id=DEFAULT_WS_ID,
             conversation_id=conversation.id,
         ),
-        agent=agent,
+        session=agent,
     )
 
     row, _ = await _repo(db_session).enqueue(
@@ -552,7 +613,7 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
     async def detach_after_unregister() -> None:
         await coordinator.unregister(
             "run-unregister-race",
-            agent=agent,
+            session=agent,
             requeue_owned=True,
         )
         detached.set()
@@ -572,7 +633,7 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
     assert row.state == SteeringMessageState.queued
     assert agent.messages == []
 
-    replacement = _QueueingAgent()
+    replacement = _QueueingSession()
     await coordinator.register_and_drain(
         run_id="run-unregister-race",
         scope=SteeringRunScope(
@@ -580,7 +641,7 @@ async def test_pause_unregister_requeues_an_in_flight_claim_before_detach(
             workspace_id=DEFAULT_WS_ID,
             conversation_id=conversation.id,
         ),
-        agent=replacement,
+        session=replacement,
     )
     assert [message.metadata["steer_id"] for message in replacement.messages] == [
         "steer-unregister-race"
@@ -610,7 +671,7 @@ async def test_owner_poll_processes_committed_cancel_without_redis_wakeup(
         return set()
 
     coordinator = DurableSteeringCoordinator(session_factory, history_loader=empty_history)
-    agent = _QueueingAgent()
+    agent = _QueueingSession()
     await coordinator.register_and_drain(
         run_id="run-cancel-poll",
         scope=SteeringRunScope(
@@ -618,7 +679,7 @@ async def test_owner_poll_processes_committed_cancel_without_redis_wakeup(
             workspace_id=DEFAULT_WS_ID,
             conversation_id=conversation.id,
         ),
-        agent=agent,
+        session=agent,
     )
     assert len(agent.messages) == 1
 

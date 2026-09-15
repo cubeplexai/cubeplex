@@ -1266,9 +1266,17 @@ class RunManager:
             return False
 
         from cubeloop.providers.base import TextContent, UserMessage
+        from cubeloop.session.input import InputEnvelope
 
-        agent.steer(UserMessage(content=[TextContent(text=content)]))
-        return True
+        input_id = str(uuid7())
+        receipt = agent.session.submit_input(
+            InputEnvelope(
+                input_id=input_id,
+                message=UserMessage(content=[TextContent(text=content)]),
+                mode="steer",
+            )
+        )
+        return receipt.status in ("queued", "committed")
 
     async def _publish_control(
         self,
@@ -1304,17 +1312,24 @@ class RunManager:
         agent = self._agents.get(run_id)
         if agent is not None:
             from cubeloop.providers.base import TextContent, UserMessage
+            from cubeloop.session.input import InputEnvelope
 
-            msg_metadata: dict[str, Any] = {"steer_id": steer_id}
+            msg_metadata: dict[str, Any] = {}
             if metadata:
                 msg_metadata.update(metadata)
-            agent.steer(
-                UserMessage(
-                    content=[TextContent(text=content)],
-                    metadata=msg_metadata,
+            receipt = agent.session.submit_input(
+                InputEnvelope(
+                    input_id=steer_id,
+                    message=UserMessage(
+                        content=[TextContent(text=content)],
+                        metadata=msg_metadata,
+                    ),
+                    mode="steer",
                 )
             )
-            return "steered"
+            if receipt.status in ("queued", "committed"):
+                return "steered"
+            return "not_found"
         extra: dict[str, Any] | None = None
         if metadata:
             extra = {"metadata": metadata}
@@ -1525,8 +1540,8 @@ class RunManager:
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
-            removed = agent.cancel_steer(steer_id)
-            return "cancelled" if removed else "not_found"
+            receipt = agent.session.cancel_input(steer_id)
+            return "cancelled" if receipt.status == "cancelled" else "not_found"
         await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
         return "published"
 
@@ -1563,21 +1578,27 @@ class RunManager:
             agent = self._agents.get(run_id)
             if agent is not None:
                 from cubeloop.providers.base import TextContent, UserMessage
+                from cubeloop.session.input import InputEnvelope
 
-                msg_metadata: dict[str, Any] = {"steer_id": data.get("steer_id") or ""}
+                input_id = data.get("steer_id") or str(uuid7())
+                msg_metadata: dict[str, Any] = {}
                 extra_metadata = data.get("metadata")
                 if isinstance(extra_metadata, dict):
                     msg_metadata.update(extra_metadata)
-                agent.steer(
-                    UserMessage(
-                        content=[TextContent(text=data.get("content") or "")],
-                        metadata=msg_metadata,
+                agent.session.submit_input(
+                    InputEnvelope(
+                        input_id=input_id,
+                        message=UserMessage(
+                            content=[TextContent(text=data.get("content") or "")],
+                            metadata=msg_metadata,
+                        ),
+                        mode="steer",
                     )
                 )
         elif type_ == "cancel_steer":
             agent = self._agents.get(run_id)
             if agent is not None:
-                agent.cancel_steer(data.get("steer_id") or "")
+                agent.session.cancel_input(data.get("steer_id") or "")
         elif type_ == "steer_available":
             await self._steering_delivery.drain(run_id)
         elif type_ == "cancel_durable_steer":
@@ -2412,7 +2433,7 @@ class RunManager:
             async def _quiesce_steering_before_detach() -> None:
                 await self._steering_delivery.unregister(
                     run_id,
-                    agent=agent,
+                    session=agent.session,
                     requeue_owned=True,
                 )
 
@@ -2424,6 +2445,8 @@ class RunManager:
             # variant above; the deferred-call unwrap needs persistent state
             # across deltas inside a single run.
             stream_converter = StreamConverter()
+            from cubeloop.agent.types import AgentStartEvent as _AgentStartEvent
+
             tool_heartbeat = _InFlightToolHeartbeat(
                 self._redis,
                 prefix=self._key_prefix,
@@ -2437,6 +2460,11 @@ class RunManager:
                 # land in an Agent after its state has been persisted.
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
+                if isinstance(evt, _AgentStartEvent):
+                    # register_and_drain runs while Session is still idle and
+                    # therefore only claims/requeues. AgentStart is the first
+                    # point at which public input admission is open.
+                    await self._steering_delivery.drain(run_id)
                 await auto_detach.quiesce_then_schedule(evt)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
@@ -2460,7 +2488,7 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     conversation_id=conversation_id,
                 ),
-                agent=agent,
+                session=agent.session,
             )
 
             from cubeloop.tracing import trace, tracing_context
@@ -3841,6 +3869,8 @@ class RunManager:
 
         async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
             if event_q_drainer is not None and event_q_drainer.done():
+                # Surface auxiliary Redis publication failures through the
+                # required Session consumer before the agent starts new work.
                 event_q_drainer.result()
             if sse_event.type == "text_delta":
                 buffered = citation_buffers.get(agent_key, "") + str(
@@ -4280,7 +4310,10 @@ class RunManager:
                 if final_status != "paused_hitl":
                     await self._steering_delivery.finalize_run(run_id)
                 if steering_agent is not None:
-                    await self._steering_delivery.unregister(run_id, agent=steering_agent)
+                    await self._steering_delivery.unregister(
+                        run_id,
+                        session=steering_agent.session,
+                    )
                     current_agent = self._agents.get(run_id)
                     if current_agent is steering_agent:
                         self._agents.pop(run_id, None)
@@ -4852,7 +4885,10 @@ class RunManager:
                 if durable_final_status != "paused_hitl":
                     await self._steering_delivery.finalize_run(run_id)
                 if steering_agent is not None:
-                    await self._steering_delivery.unregister(run_id, agent=steering_agent)
+                    await self._steering_delivery.unregister(
+                        run_id,
+                        session=steering_agent.session,
+                    )
                     current_agent = self._agents.get(run_id)
                     if current_agent is steering_agent:
                         self._agents.pop(run_id, None)
