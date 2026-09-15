@@ -1317,6 +1317,7 @@ class RunManager:
             msg_metadata: dict[str, Any] = {}
             if metadata:
                 msg_metadata.update(metadata)
+            msg_metadata["steer_id"] = steer_id
             receipt = agent.session.submit_input(
                 InputEnvelope(
                     input_id=steer_id,
@@ -1585,6 +1586,7 @@ class RunManager:
                 extra_metadata = data.get("metadata")
                 if isinstance(extra_metadata, dict):
                     msg_metadata.update(extra_metadata)
+                msg_metadata["steer_id"] = input_id
                 agent.session.submit_input(
                     InputEnvelope(
                         input_id=input_id,
