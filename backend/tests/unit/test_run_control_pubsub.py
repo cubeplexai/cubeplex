@@ -58,7 +58,7 @@ async def test_dispatch_steer_remote_publishes(redis):
     pubsub = redis.pubsub()
     await pubsub.subscribe("t:control")
     await asyncio.sleep(0)
-    assert await m.dispatch_steer("r-remote", "hello", steer_id="s1") == "published"
+    assert await m.dispatch_steer("r-remote", "hello", steer_id="s1", ack_timeout=0) == "published"
     got = None
     for _ in range(20):
         msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
@@ -70,6 +70,7 @@ async def test_dispatch_steer_remote_publishes(redis):
         "type": "steer",
         "content": "hello",
         "steer_id": "s1",
+        "ack_id": "r-remote:steer:s1",
     }
 
 
@@ -96,6 +97,15 @@ async def test_ack_resolves_waiter(redis):
     m._ack_waiters["r1"] = [fut]
     await m._handle_ack({"run_id": "r1"})
     assert fut.done() and fut.result() is True
+
+
+@pytest.mark.asyncio
+async def test_rejected_ack_resolves_correlated_waiter(redis):
+    m = _mgr(redis)
+    fut = asyncio.get_running_loop().create_future()
+    m._ack_waiters["r1:steer:s1"] = [fut]
+    await m._handle_ack({"run_id": "r1", "ack_id": "r1:steer:s1", "accepted": False})
+    assert fut.done() and fut.result() is False
 
 
 @pytest.mark.asyncio
