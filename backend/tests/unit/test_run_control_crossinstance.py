@@ -49,6 +49,9 @@ async def test_cross_instance_steer() -> None:
     a, b = _mgr(redis), _mgr(redis)
     agent = _FakeAgent()
     a._agents["r1"] = agent  # owner is A
+    # B still has a finishing task for an older attempt with the same run id;
+    # that task alone must not publish a competing negative acknowledgement.
+    b._tasks["r1"] = object()  # type: ignore[assignment]
     await a.start_control_listeners()
     await b.start_control_listeners()
     try:

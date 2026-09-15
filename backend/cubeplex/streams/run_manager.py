@@ -1703,11 +1703,7 @@ class RunManager:
                 await self._publish_ack(run_id)
         elif type_ == "steer":
             agent = self._agents.get(run_id)
-            owns_run = (
-                agent is not None
-                or run_id in self._tasks
-                or run_id in getattr(self, "_preparing_runs", set())
-            )
+            owns_run = agent is not None or run_id in getattr(self, "_preparing_runs", set())
             if not owns_run:
                 return
             input_id = data.get("steer_id") or str(uuid7())
