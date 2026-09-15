@@ -51,10 +51,20 @@ class _FakeRedis:
     async def publish(self, channel: str, payload: str) -> None:
         self.published.append(payload)
 
+    async def hget(self, _key: str, _field: str) -> None:
+        return None
+
 
 def _make_manager() -> RunManager:
     # Construct without touching Redis/app: registry + steer_run don't need them.
-    return RunManager.__new__(RunManager)  # type: ignore[call-arg]
+    manager = RunManager.__new__(RunManager)  # type: ignore[call-arg]
+    manager._redis = _FakeRedis()  # type: ignore[assignment]
+    manager._key_prefix = "t"
+    manager._agent_claim_tokens = {}
+    manager._resume_claim_tokens = {}
+    manager._preparing_claim_tokens = {}
+    manager._cancelled_pre_execution_inputs = {}
+    return manager
 
 
 def test_missing_originating_agent_does_not_imply_a_replacement() -> None:
@@ -80,6 +90,25 @@ def test_lost_resume_ownership_is_a_replacement_without_a_registered_agent() -> 
         )
         is True
     )
+
+
+def test_old_attempt_cleanup_preserves_replacement_agent_registration() -> None:
+    mgr = _make_manager()
+    mgr._agents = {}
+    mgr._hitl_channels = {"run-1": object()}
+    old_agent = _FakeAgent()
+    replacement_agent = _FakeAgent()
+    mgr._register_agent_for_attempt("run-1", old_agent, "old-token")
+    mgr._register_agent_for_attempt("run-1", replacement_agent, "replacement-token")
+
+    mgr._remove_agent_for_attempt("run-1", old_agent)
+
+    assert mgr._agents["run-1"] is replacement_agent
+    assert mgr._agent_claim_tokens["run-1"] == (
+        replacement_agent,
+        "replacement-token",
+    )
+    assert "run-1" in mgr._hitl_channels
 
 
 @pytest.mark.asyncio

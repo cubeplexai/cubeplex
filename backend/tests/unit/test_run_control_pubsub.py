@@ -14,6 +14,12 @@ def _mgr(redis) -> RunManager:
     m._key_prefix = "t"
     m._tasks = {}
     m._agents = {}
+    m._agent_claim_tokens = {}
+    m._resume_claim_tokens = {}
+    m._preparing_runs = set()
+    m._preparing_claim_tokens = {}
+    m._pending_session_inputs = {}
+    m._cancelled_pre_execution_inputs = {}
     m._ack_waiters = {}
     m._control_channel = "t:control"
     m._ack_channel = "t:control:ack"

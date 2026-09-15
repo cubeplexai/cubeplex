@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from cubeloop.providers.base import UserMessage
 from cubeloop.session.input import InputDurability, InputEnvelope, InputReceipt
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -388,6 +389,59 @@ async def test_registration_repairs_checkpointed_owned_claim_after_ack_failure(
     assert row.state == SteeringMessageState.injected
     assert row.delivery_owner is None
     assert replacement_session.messages == []
+
+
+@pytest.mark.asyncio
+async def test_durable_drain_does_not_claim_for_a_superseded_session(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    steering_conversation: tuple[Conversation, User],
+    redis_client: Redis,
+) -> None:
+    conversation, user = steering_conversation
+    prefix = f"steering-fence:{conversation.id}"
+    meta_key = f"{prefix}:run_meta:v2:run-fenced-drain"
+    await redis_client.hset(meta_key, "claim_token", "old-token")  # type: ignore[misc]
+
+    async def empty_history(_conversation_id: str) -> set[str]:
+        return set()
+
+    coordinator = DurableSteeringCoordinator(
+        session_factory,
+        history_loader=empty_history,
+        redis=redis_client,
+        redis_key_prefix=prefix,
+    )
+    registered_session = _QueueingSession()
+    await coordinator.register_and_drain(
+        run_id="run-fenced-drain",
+        scope=SteeringRunScope(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation.id,
+        ),
+        session=registered_session,
+        claim_token="old-token",
+    )
+    row, _ = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="run-fenced-drain",
+        client_steer_id="steer-fenced-drain",
+        content="replacement only",
+        sender_user_id=user.id,
+        sender_display_name=None,
+        hitl_question_id="question-fenced-drain",
+    )
+    await db_session.commit()
+
+    await redis_client.hset(meta_key, "claim_token", "replacement-token")  # type: ignore[misc]
+    await coordinator.drain("run-fenced-drain")
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.queued
+    assert row.delivery_owner is None
+    assert registered_session.messages == []
+    await redis_client.delete(meta_key)
 
 
 @pytest.mark.asyncio
