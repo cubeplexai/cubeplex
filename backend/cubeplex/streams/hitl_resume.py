@@ -222,12 +222,16 @@ def stale_answered_pending(
     final_status: str,
     loaded_pending: tuple[Any, Any] | None,
     answered_question_id: str,
+    answered_run_id: str,
 ) -> Any | None:
     """Select only the stale pending row belonging to this completed answer."""
     if final_status != "completed" or loaded_pending is None:
         return None
     pending = loaded_pending[0]
-    return pending if pending.question_id == answered_question_id else None
+    pending_run_id = loaded_pending[1]
+    if pending.question_id != answered_question_id or pending_run_id != answered_run_id:
+        return None
+    return pending
 
 
 def _as_dict(obj: Any) -> dict[str, Any]:

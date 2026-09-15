@@ -2517,14 +2517,20 @@ class RunManager:
                         final_status=final_status,
                         loaded_pending=loaded_pending,
                         answered_question_id=question_id,
+                        answered_run_id=run_id,
                     )
                 if stale_pending is not None:
-                    await cp.save_pending_request(conversation_id, None)
-                    await _emit_synthetic_resolved(
-                        publish_stream_event,
-                        stale_pending,
-                        question_id,
+                    cleared = await cp.clear_pending_request_if_matches(
+                        conversation_id,
+                        question_id=question_id,
+                        run_id=run_id,
                     )
+                    if cleared:
+                        await _emit_synthetic_resolved(
+                            publish_stream_event,
+                            stale_pending,
+                            question_id,
+                        )
                 for agent_key in list(citation_buffers):
                     await flush_citation_buffer(agent_key, agent_key)
                 if before_terminal_commit is not None:

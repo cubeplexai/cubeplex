@@ -248,6 +248,7 @@ def test_stale_answered_pending_rejects_replacement_follow_up() -> None:
             final_status="completed",
             loaded_pending=(answered, "run-1"),
             answered_question_id="q-answered",
+            answered_run_id="run-1",
         )
         is answered
     )
@@ -256,6 +257,16 @@ def test_stale_answered_pending_rejects_replacement_follow_up() -> None:
             final_status="completed",
             loaded_pending=(follow_up, "run-1"),
             answered_question_id="q-answered",
+            answered_run_id="run-1",
+        )
+        is None
+    )
+    assert (
+        stale_answered_pending(
+            final_status="completed",
+            loaded_pending=(answered, "run-replacement"),
+            answered_question_id="q-answered",
+            answered_run_id="run-1",
         )
         is None
     )

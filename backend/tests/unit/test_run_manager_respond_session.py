@@ -20,11 +20,18 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     checkpointer = MagicMock()
     checkpointer.load_pending = AsyncMock(return_value=(pending, "run-1"))
 
-    async def _save_pending(_conversation_id: str, value: Any) -> None:
-        assert value is None
+    async def _clear_pending(
+        _conversation_id: str,
+        *,
+        question_id: str,
+        run_id: str,
+    ) -> bool:
+        assert question_id == "q-answered"
+        assert run_id == "run-1"
         order.append("clear-pending")
+        return True
 
-    checkpointer.save_pending_request = _save_pending
+    checkpointer.clear_pending_request_if_matches = _clear_pending
 
     @asynccontextmanager
     async def _checkpointer_context() -> Any:
