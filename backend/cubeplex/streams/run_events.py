@@ -205,7 +205,6 @@ if finalizing then
   if lease_until and now < lease_until then
     return 0
   end
-  redis.call('HDEL', KEYS[1], 'resume_finalizing_token', 'resume_finalizing_until')
 end
 if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
   return 0
@@ -220,6 +219,10 @@ if ARGV[2] ~= '' then
   end
 end
 redis.call('HSET', KEYS[1], 'status', 'stale')
+redis.call(
+  'HDEL', KEYS[1],
+  'claim_token', 'resume_finalizing_token', 'resume_finalizing_until'
+)
 if redis.call('GET', KEYS[2]) == ARGV[1] then
   redis.call('DEL', KEYS[2])
 end

@@ -26,6 +26,7 @@ from cubeplex.streams.hitl_resume import (
     ClaimResumeOutcome,
     begin_resume_finalization,
     claim_resume,
+    finalize_run_meta_if_claim_matches,
     resume_claim_matches,
     stale_answered_pending,
 )
@@ -351,6 +352,17 @@ async def test_expired_finalization_reservation_allows_stale_recovery(redis):
         observed_last_event_at="2026-06-02T00:00:00+00:00",
     )
     assert marked is True
+    assert not await redis.hexists(meta_key, "claim_token")
+
+    finalized = await finalize_run_meta_if_claim_matches(
+        redis,
+        prefix=prefix,
+        run_id="r1",
+        claim_token="abandoned-token",
+        status="completed",
+    )
+    assert finalized is False
+    assert (await redis.hgetall(meta_key))["status"] == "stale"
 
     result = await claim_resume(
         redis,
