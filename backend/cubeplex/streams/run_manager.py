@@ -1062,6 +1062,7 @@ class RunManager:
             str,
             dict[str, tuple[str, dict[str, Any]]],
         ] = {}
+        self._cancelled_pre_execution_inputs: dict[str, set[str]] = {}
         self._hitl_channels: dict[str, Any] = {}
         self._consolidation_tasks: set[asyncio.Task[None]] = set()
         self._reflection_tasks: set[asyncio.Task[None]] = set()
@@ -1093,6 +1094,7 @@ class RunManager:
         getattr(self, "_resume_claim_tokens", {}).pop(run_id, None)
         getattr(self, "_preparing_runs", set()).discard(run_id)
         getattr(self, "_pending_session_inputs", {}).pop(run_id, None)
+        getattr(self, "_cancelled_pre_execution_inputs", {}).pop(run_id, None)
         if not self._tasks:
             self._tasks_empty.set()
 
@@ -1315,6 +1317,13 @@ class RunManager:
         """Bound one steer while the owned Session has not opened admission yet."""
         if run_id not in getattr(self, "_preparing_runs", set()):
             return False
+        cancelled_by_run = getattr(self, "_cancelled_pre_execution_inputs", {})
+        cancelled = cancelled_by_run.get(run_id)
+        if cancelled is not None and steer_id in cancelled:
+            cancelled.discard(steer_id)
+            if not cancelled:
+                cancelled_by_run.pop(run_id, None)
+            return True
         pending_by_run = getattr(self, "_pending_session_inputs", None)
         if pending_by_run is None:
             pending_by_run = {}
@@ -1327,9 +1336,19 @@ class RunManager:
 
     def _cancel_pre_execution_input(self, run_id: str, steer_id: str) -> bool:
         pending = getattr(self, "_pending_session_inputs", {}).get(run_id)
-        if pending is None:
+        if pending is not None and pending.pop(steer_id, None) is not None:
+            return True
+        if run_id not in getattr(self, "_preparing_runs", set()):
             return False
-        return pending.pop(steer_id, None) is not None
+        cancelled_by_run = getattr(self, "_cancelled_pre_execution_inputs", None)
+        if cancelled_by_run is None:
+            cancelled_by_run = {}
+            self._cancelled_pre_execution_inputs = cancelled_by_run
+        cancelled = cancelled_by_run.setdefault(run_id, set())
+        if steer_id not in cancelled and len(cancelled) >= SESSION_EVENT_CAPACITY:
+            return False
+        cancelled.add(steer_id)
+        return True
 
     async def _drain_pre_execution_inputs(self, run_id: str, session: Any) -> None:
         """Submit buffered steers once AgentStart proves Session admission is open."""
@@ -1337,6 +1356,7 @@ class RunManager:
         from cubeloop.session.input import InputEnvelope
 
         self._preparing_runs.discard(run_id)
+        getattr(self, "_cancelled_pre_execution_inputs", {}).pop(run_id, None)
         pending = self._pending_session_inputs.pop(run_id, {})
         for steer_id, (content, metadata) in pending.items():
             msg_metadata = dict(metadata)
@@ -1714,6 +1734,11 @@ class RunManager:
             agent = self._agents.get(run_id)
             preparing = run_id in getattr(self, "_preparing_runs", set())
             if agent is None and not preparing:
+                if run_id not in self._tasks or not await self._owns_current_resume_claim(run_id):
+                    return
+                ack_id = data.get("ack_id")
+                if isinstance(ack_id, str):
+                    await self._publish_ack(run_id, ack_id=ack_id, accepted=False)
                 return
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
@@ -1745,15 +1770,7 @@ class RunManager:
                     metadata=msg_metadata,
                 )
             if not accepted and not preparing:
-                from cubeplex.streams.hitl_resume import get_resume_claim_token
-
-                distributed_claim = await get_resume_claim_token(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                )
-                local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
-                if distributed_claim != local_claim:
+                if not await self._owns_current_resume_claim(run_id):
                     # A closed Agent may remain registered briefly while a
                     # replacement resume owns admission in another worker.
                     # Only the matching owner may reject the steer.
@@ -1775,6 +1792,17 @@ class RunManager:
                 run_id,
                 data.get("steer_id") or "",
             )
+
+    async def _owns_current_resume_claim(self, run_id: str) -> bool:
+        from cubeplex.streams.hitl_resume import get_resume_claim_token
+
+        distributed_claim = await get_resume_claim_token(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+        )
+        local_claim = getattr(self, "_resume_claim_tokens", {}).get(run_id)
+        return distributed_claim == local_claim
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
         run_id = data.get("run_id")
