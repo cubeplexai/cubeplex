@@ -18,6 +18,7 @@ background task and return a run_id.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -202,6 +203,54 @@ async def test_start_run_succeeds_when_no_pending(
     task = rm._tasks.get(run_id)
     assert task is not None
     await task
+
+
+async def test_start_run_buffers_before_post_admission_await(
+    redis: fakeredis.aioredis.FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cp = MagicMock()
+    cp.load_pending = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def _fake_cm() -> Any:
+        yield cp
+
+    monkeypatch.setattr("cubeplex.agents.checkpointer.shared_checkpointer", _fake_cm)
+    clear_entered = asyncio.Event()
+    release_clear = asyncio.Event()
+
+    async def _blocking_clear(*_: Any, **__: Any) -> None:
+        clear_entered.set()
+        await release_clear.wait()
+
+    monkeypatch.setattr(
+        "cubeplex.streams.run_manager.clear_conversation_last_error",
+        _blocking_clear,
+    )
+
+    async def _noop_execute(**_: Any) -> None:
+        return None
+
+    rm = _make_rm(redis)
+    monkeypatch.setattr(rm, "_execute_run", _noop_execute)
+    start_task = asyncio.create_task(
+        rm.start_run(
+            conversation_id="c_preparing",
+            content="hello",
+            ctx=_ctx(),
+            run_id="r-preparing",
+        )
+    )
+    await clear_entered.wait()
+
+    assert "r-preparing" in rm._preparing_runs
+
+    release_clear.set()
+    run_id = await start_task
+    run_task = rm._tasks.get(run_id)
+    assert run_task is not None
+    await run_task
 
 
 async def test_force_cancel_hitl_finalizes_durable_steering_with_explicit_scope(
