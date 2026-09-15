@@ -332,27 +332,41 @@ class DurableSteeringCoordinator:
                         await repo.mark_owned_injected(row_id=row_id, owner=self._owner)
                     await session.commit()
 
-    async def acknowledge_injected(self, run_id: str, client_steer_id: str) -> None:
-        scope = self._scopes.get(run_id)
-        if scope is None:
+    async def acknowledge_injected(
+        self,
+        run_id: str,
+        client_steer_id: str,
+        *,
+        scope: SteeringRunScope | None = None,
+    ) -> None:
+        registered_scope = self._scopes.get(run_id)
+        resolved_scope = registered_scope or scope
+        if resolved_scope is None:
             return
         lock = self._locks.setdefault(run_id, asyncio.Lock())
-        async with lock:
-            try:
+        try:
+            async with lock:
                 async with self._session_maker() as session:
-                    repo = self._repo(session, scope)
+                    repo = self._repo(session, resolved_scope)
                     row = await repo.get_by_client_id(
-                        conversation_id=scope.conversation_id,
+                        conversation_id=resolved_scope.conversation_id,
                         client_steer_id=client_steer_id,
                     )
                     if row is not None and row.run_id == run_id:
                         await repo.mark_owned_injected(row_id=row.id, owner=self._owner)
                     await session.commit()
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "durable steering acknowledgement failed for run {}",
-                    run_id,
-                )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "durable steering acknowledgement failed for run {}",
+                run_id,
+            )
+        finally:
+            if (
+                registered_scope is None
+                and self._scopes.get(run_id) is None
+                and self._locks.get(run_id) is lock
+            ):
+                self._locks.pop(run_id, None)
 
     async def cancel_dispatched(self, run_id: str, client_steer_id: str) -> None:
         scope = self._scopes.get(run_id)

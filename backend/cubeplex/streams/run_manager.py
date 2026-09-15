@@ -1703,8 +1703,8 @@ class RunManager:
                 await self._publish_ack(run_id)
         elif type_ == "steer":
             agent = self._agents.get(run_id)
-            owns_run = agent is not None or run_id in getattr(self, "_preparing_runs", set())
-            if not owns_run:
+            preparing = run_id in getattr(self, "_preparing_runs", set())
+            if agent is None and not preparing:
                 return
             input_id = data.get("steer_id") or str(uuid7())
             extra_metadata = data.get("metadata")
@@ -1735,6 +1735,11 @@ class RunManager:
                     steer_id=input_id,
                     metadata=msg_metadata,
                 )
+            if not accepted and not preparing:
+                # A closed Agent may remain registered briefly while its old
+                # worker tears down. It no longer owns admission, so it must
+                # not race the replacement worker with a negative ACK.
+                return
             ack_id = data.get("ack_id")
             if isinstance(ack_id, str):
                 await self._publish_ack(run_id, ack_id=ack_id, accepted=accepted)
@@ -2627,20 +2632,26 @@ class RunManager:
                     if sse_event is not None:
                         await publish_stream_event(sse_event, None)
 
-            async def _on_checkpoint_input(input_id: str) -> None:
-                await self._steering_delivery.acknowledge_injected(run_id, input_id)
-
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
             from cubeplex.streams.steering_delivery import SteeringRunScope
 
+            steering_scope = SteeringRunScope(
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=conversation_id,
+            )
+
+            async def _on_checkpoint_input(input_id: str) -> None:
+                await self._steering_delivery.acknowledge_injected(
+                    run_id,
+                    input_id,
+                    scope=steering_scope,
+                )
+
             await self._steering_delivery.register_and_drain(
                 run_id=run_id,
-                scope=SteeringRunScope(
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    conversation_id=conversation_id,
-                ),
+                scope=steering_scope,
                 session=agent.session,
             )
 

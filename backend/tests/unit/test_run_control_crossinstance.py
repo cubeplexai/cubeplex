@@ -1,10 +1,11 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
 import pytest
 from cubeloop.session.input import InputReceipt
 
-from cubeplex.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import SESSION_EVENT_CAPACITY, RunManager
 
 
 def _mgr(redis: fakeredis.aioredis.FakeRedis) -> RunManager:
@@ -41,6 +42,28 @@ class _ClosedSession(_FakeSession):
 
 
 @pytest.mark.asyncio
+async def test_closed_agent_does_not_reject_steer_owned_by_replacement() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    old_owner = _mgr(redis)
+    old_agent = _FakeAgent()
+    old_agent.session = _ClosedSession()
+    old_owner._agents["r1"] = old_agent
+    old_owner._publish_ack = AsyncMock()  # type: ignore[method-assign]
+
+    await old_owner._handle_control(
+        {
+            "run_id": "r1",
+            "type": "steer",
+            "content": "replacement owns this",
+            "steer_id": "s1",
+            "ack_id": "r1:steer:s1",
+        }
+    )
+
+    old_owner._publish_ack.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_cross_instance_steer() -> None:
     # Both managers share one FakeRedis instance — fakeredis routes pub/sub
     # across all pubsub handles created from the same client, so A's listener
@@ -74,6 +97,10 @@ async def test_cross_instance_steer_rejection_is_acknowledged() -> None:
     owner, sender = _mgr(redis), _mgr(redis)
     owner._agents["r1"] = _FakeAgent()
     owner._agents["r1"].session = _ClosedSession()
+    owner._preparing_runs = {"r1"}
+    owner._pending_session_inputs = {
+        "r1": {f"full-{index}": ("queued", {}) for index in range(SESSION_EVENT_CAPACITY)}
+    }
     owner._tasks["r1"] = object()  # type: ignore[assignment]
     await owner.start_control_listeners()
     await sender.start_control_listeners()

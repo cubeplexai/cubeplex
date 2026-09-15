@@ -698,6 +698,16 @@ async def test_pause_unregister_keeps_memory_committed_claim_out_of_retry_queue(
     assert row.state == SteeringMessageState.dispatched
     assert row.delivery_owner == coordinator._owner
 
+    await coordinator.acknowledge_injected(
+        "run-memory-commit",
+        "steer-memory-commit",
+        scope=scope,
+    )
+
+    await db_session.refresh(row)
+    assert row.state == SteeringMessageState.injected
+    assert row.delivery_owner is None
+
 
 @pytest.mark.asyncio
 async def test_owner_poll_processes_committed_cancel_without_redis_wakeup(
