@@ -29,12 +29,14 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
         if meta is None or meta.status != "running":
             continue
         conversation_id = key[prefix_len:]
-        await mark_run_stale(
+        marked = await mark_run_stale(
             redis,
             prefix=prefix,
             run_id=run_id,
             conversation_id=conversation_id,
         )
+        if not marked:
+            continue
         recovered.append((conversation_id, run_id))
         logger.info(
             "Recovered stranded run {} on conversation {}",

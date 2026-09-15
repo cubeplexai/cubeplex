@@ -6,19 +6,27 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from cubeloop.session.types import ExecutionResult
+from cubeloop.session.types import DeliveryError, ExecutionResult
 
+from cubeplex.streams.execution_adapter import EventProjectionError
 from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("claim_matches", "finalize_matches", "checkpoint_error", "expected_conflict"),
+    (
+        "claim_matches",
+        "finalize_matches",
+        "checkpoint_error",
+        "projection_failure",
+        "expected_conflict",
+    ),
     [
-        (True, True, False, None),
-        (False, True, False, "resume claim was replaced before cleanup"),
-        (True, False, False, "resume claim was replaced before finalization"),
-        (True, True, True, None),
+        (True, True, False, False, None),
+        (False, True, False, False, "resume claim was replaced before cleanup"),
+        (True, False, False, False, "resume claim was replaced before finalization"),
+        (True, True, True, False, None),
+        (True, True, False, True, None),
     ],
 )
 async def test_respond_projects_and_clears_answered_pending_before_finalizing(
@@ -26,6 +34,7 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     claim_matches: bool,
     finalize_matches: bool,
     checkpoint_error: bool,
+    projection_failure: bool,
     expected_conflict: str | None,
 ) -> None:
     order: list[str] = []
@@ -117,8 +126,19 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
         return ExecutionResult(
             run_id="run-1",
             attempt_id="attempt-1",
-            outcome="completed",
+            outcome="suspended" if projection_failure else "completed",
+            pending_request=pending if projection_failure else None,
             checkpoint_committed=True,
+            delivery_errors=(
+                DeliveryError(
+                    consumer="cubeplex-runtime",
+                    seq=7,
+                    reason="timeout",
+                    message="final notification timed out",
+                ),
+            )
+            if projection_failure
+            else (),
         )
 
     monkeypatch.setattr("cubeplex.streams.execution_adapter.execute_session", _execute_session)
@@ -176,6 +196,10 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
         with pytest.raises(RuntimeError, match="checkpoint restore failed"):
             await _run()
         assert order == ["finalize"]
+    elif projection_failure:
+        with pytest.raises(EventProjectionError, match="cubeplex-runtime.*timeout"):
+            await _run()
+        assert order.index("clear-pending") < order.index("finalize")
     elif expected_conflict is None:
         assert await _run() == "completed"
         assert order.index("reserve-finalization") < order.index("clear-pending")

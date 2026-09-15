@@ -25,6 +25,7 @@ from cubeplex.streams.execution_adapter import (
     CubeloopAgentRunError,
     EventProjectionError,
     execute_session,
+    host_projection_error,
     require_host_success,
 )
 
@@ -189,8 +190,10 @@ async def test_result_mapping_rejects_required_consumer_delivery_error() -> None
         on_agent_event=lambda event: None,
     )
 
-    with pytest.raises(EventProjectionError, match="cubeplex-runtime.*timeout"):
-        require_host_success(returned)
+    projection_error = host_projection_error(returned)
+    assert isinstance(projection_error, EventProjectionError)
+    assert "cubeplex-runtime delivery timeout" in str(projection_error)
+    assert require_host_success(returned) == "completed"
 
 
 @pytest.mark.asyncio
@@ -224,6 +227,44 @@ async def test_durable_suspension_survives_projection_delivery_error() -> None:
 
     assert returned.delivery_errors == result.delivery_errors
     assert require_host_success(returned) == "paused_hitl"
+
+
+def test_non_success_outcome_preserves_cause_and_projection_diagnostic() -> None:
+    provider_error = RuntimeError("provider failed")
+    delivery_errors = (
+        DeliveryError(
+            consumer="cubeplex-runtime",
+            seq=7,
+            reason="timeout",
+            message="final notification timed out",
+        ),
+    )
+    failed = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-1",
+        outcome="failed",
+        error=ExecutionError(
+            kind="execution",
+            message="provider failed",
+            cause=provider_error,
+        ),
+        delivery_errors=delivery_errors,
+    )
+    cancelled = ExecutionResult(
+        run_id="run-1",
+        attempt_id="attempt-2",
+        outcome="cancelled",
+        delivery_errors=delivery_errors,
+    )
+
+    assert isinstance(host_projection_error(failed), EventProjectionError)
+    with pytest.raises(RuntimeError, match="provider failed") as exc_info:
+        require_host_success(failed)
+    assert exc_info.value is provider_error
+
+    assert isinstance(host_projection_error(cancelled), EventProjectionError)
+    with pytest.raises(asyncio.CancelledError):
+        require_host_success(cancelled)
 
 
 @pytest.mark.asyncio

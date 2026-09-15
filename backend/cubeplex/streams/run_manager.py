@@ -2025,6 +2025,7 @@ class RunManager:
                 if v is not None
             }
             final_status: str = "completed"
+            projection_error: BaseException | None = None
             with suppress(Exception):
                 await self._append_event(
                     run_id,
@@ -2049,6 +2050,7 @@ class RunManager:
 
                         from cubeplex.streams.execution_adapter import (
                             execute_session,
+                            host_projection_error,
                             require_host_success,
                         )
 
@@ -2061,6 +2063,13 @@ class RunManager:
                             ),
                             on_agent_event=_on_event,
                         )
+                        projection_error = host_projection_error(result)
+                        if projection_error is not None:
+                            logger.warning(
+                                "host event projection failed for run {}: {}",
+                                run_id,
+                                projection_error,
+                            )
                         final_status = require_host_success(result)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
@@ -2306,6 +2315,8 @@ class RunManager:
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
+        if projection_error is not None and final_status != "paused_hitl":
+            raise projection_error
         return final_status
 
     async def _run_cubeloop_respond_path(
@@ -2486,6 +2497,7 @@ class RunManager:
             finalized_with_claim = False
             claim_conflict_reason: str | None = None
             stale_pending = None
+            projection_error: BaseException | None = None
             try:
                 with tracing_context(metadata=_trace_meta):
                     async with trace(tracer, agent, flush="background"):
@@ -2493,6 +2505,7 @@ class RunManager:
 
                         from cubeplex.streams.execution_adapter import (
                             execute_session,
+                            host_projection_error,
                             require_host_success,
                         )
 
@@ -2508,6 +2521,13 @@ class RunManager:
                             on_agent_event=_on_event,
                             on_checkpoint_input=_on_checkpoint_input,
                         )
+                        projection_error = host_projection_error(result)
+                        if projection_error is not None:
+                            logger.warning(
+                                "host event projection failed for run {}: {}",
+                                run_id,
+                                projection_error,
+                            )
                         final_status = require_host_success(
                             result,
                             answered_question_id=question_id,
@@ -2593,6 +2613,8 @@ class RunManager:
                         claim_conflict_reason or "resume claim was replaced before finalization"
                     )
 
+        if projection_error is not None and final_status != "paused_hitl":
+            raise projection_error
         return final_status
 
     async def _build_agent_for_conversation(
