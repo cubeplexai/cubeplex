@@ -25,6 +25,22 @@ class _FakeAgent:
         self.session = _FakeSession()
 
 
+class _PreparingSession(_FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.accepting = False
+
+    def submit_input(self, envelope) -> InputReceipt:  # noqa: ANN001
+        if not self.accepting:
+            return InputReceipt(input_id=envelope.input_id, status="closed")
+        return super().submit_input(envelope)
+
+
+class _PreparingAgent:
+    def __init__(self) -> None:
+        self.session = _PreparingSession()
+
+
 class _FakeRedis:
     def __init__(self) -> None:
         self.published: list[str] = []
@@ -117,3 +133,36 @@ async def test_dispatch_cancel_steer_no_local_agent_publishes() -> None:
     mgr._control_channel = "ctrl"
     status = await mgr.dispatch_cancel_steer("missing-run", "s1")
     assert status == "published"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_steer_buffers_until_session_starts_accepting_input() -> None:
+    mgr = _make_manager()
+    agent = _PreparingAgent()
+    mgr._agents = {"run-1": agent}
+    mgr._preparing_runs = {"run-1"}
+    mgr._pending_session_inputs = {}
+
+    status = await mgr.dispatch_steer("run-1", "during setup", steer_id="s-setup")
+
+    assert status == "steered"
+    assert agent.session.inputs == []
+    agent.session.accepting = True
+    await mgr._drain_pre_execution_inputs("run-1", agent.session)
+    assert agent.session.inputs[0].input_id == "s-setup"
+    assert agent.session.inputs[0].message.metadata["steer_id"] == "s-setup"
+
+
+@pytest.mark.asyncio
+async def test_cancel_removes_a_buffered_pre_execution_steer() -> None:
+    mgr = _make_manager()
+    agent = _PreparingAgent()
+    mgr._agents = {"run-1": agent}
+    mgr._preparing_runs = {"run-1"}
+    mgr._pending_session_inputs = {}
+    await mgr.dispatch_steer("run-1", "during setup", steer_id="s-setup")
+
+    status = await mgr.dispatch_cancel_steer("run-1", "s-setup")
+
+    assert status == "cancelled"
+    assert mgr._pending_session_inputs["run-1"] == {}
