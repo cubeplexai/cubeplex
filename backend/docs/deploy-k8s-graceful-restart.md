@@ -1,8 +1,8 @@
 # K8s Deployment — Graceful Restart
 
-The CubePlex backend drains in-flight LangGraph runs on `SIGTERM` before
-exiting. To get zero-downtime rolling restarts, pair this with a long
-termination grace period and the split health probes.
+The CubePlex backend closes HTTP and SSE transports, then drains in-flight
+CubeLoop runs on `SIGTERM` before exiting. Transport shutdown has a short,
+separate deadline so an idle permanent stream cannot block agent draining.
 
 ## Probes
 
@@ -13,7 +13,8 @@ termination grace period and the split health probes.
 
 ```yaml
 spec:
-  terminationGracePeriodSeconds: 3600   # match lifecycle.graceful_drain_timeout_seconds
+  # Agent drain (3600s) + transport shutdown and final cleanup headroom.
+  terminationGracePeriodSeconds: 3660
   containers:
     - name: cubeplex
       readinessProbe:
@@ -30,9 +31,12 @@ spec:
 
 | Key | Default | Notes |
 |---|---|---|
+| `api.transport_shutdown_timeout_seconds` | 10 | Hard cap for active HTTP and SSE connections before lifespan shutdown starts. |
 | `lifecycle.graceful_drain_timeout_seconds` | 3600 | Hard cap on drain wait before forced cancel. Match `terminationGracePeriodSeconds`. |
 | `lifecycle.stale_run_threshold_seconds` | 180 | Seconds without an event before bootstrap declares a `running` run stale and clears its active-run lock. Above the 120s execute-tool cap so a still-running command is not declared dead on refresh. |
-| `lifecycle.dev_double_signal_force_exit` | true | Second `Ctrl-C` forces immediate exit. Set false in prod if you want to require an external SIGKILL. |
+
+Allow extra orchestrator headroom beyond the configured run drain so transport
+shutdown and database, Redis, connector, and tracing cleanup can finish.
 
 ## Force-killing a slow drain
 

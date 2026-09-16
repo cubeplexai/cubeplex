@@ -2016,9 +2016,10 @@ class RunManager:
             await asyncio.wait_for(self._tasks_empty.wait(), timeout=timeout_seconds)
         except TimeoutError:
             logger.warning(
-                "Drain timeout after {}s, cancelling {} residual run(s)",
+                "Drain timeout after {}s, cancelling {} residual run(s): {}",
                 timeout_seconds,
                 len(self._tasks),
+                sorted(self._tasks),
             )
             await self.cancel_all()
         finally:

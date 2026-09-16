@@ -46,5 +46,6 @@ if __name__ == "__main__":
         port=config.api.port,
         reload=config.api.reload,
         factory=True,
+        timeout_graceful_shutdown=config.api.transport_shutdown_timeout_seconds,
         **reload_kwargs,
     )

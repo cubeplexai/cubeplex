@@ -27,6 +27,9 @@ default:
     port: 8000
     reload: false          # dev enables autoreload in config.development.yaml
     public_url: ""
+    # Bound Uvicorn's wait for active HTTP requests. Permanent SSE streams
+    # must release before the separate agent drain begins.
+    transport_shutdown_timeout_seconds: 10
 
   # Egress secret-injection exchange endpoint.
   #   auth.mode "mtls"  → production: identity is the CN of the per-sandbox

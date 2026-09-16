@@ -464,7 +464,15 @@ async def lifespan(_app: FastAPI):  # type: ignore
     yield
 
     # ==================== Shutdown ====================
-    logger.info("Application shutting down")
+    active_runs = len(run_manager._tasks) if run_manager is not None else 0
+    logger.info(
+        "Shutdown phase 1/5: entering drain mode (active_runs={})",
+        active_runs,
+    )
+    if run_manager is not None:
+        _app.state.drain_state.enter_draining()
+
+    logger.info("Shutdown phase 2/5: stopping background services and connectors")
     from cubeplex.services.conversation_search.startup import stop_search_subsystem
 
     await stop_search_subsystem(_app)
@@ -489,18 +497,21 @@ async def lifespan(_app: FastAPI):  # type: ignore
         from cubeplex.im import runtime as _im_runtime_shutdown
 
         await _im_runtime_shutdown.stop(_app)
-        _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
         logger.info(
-            "Starting run drain (timeout={}s, active_runs={})",
+            "Shutdown phase 3/5: draining agent runs (timeout={}s, active_runs={})",
             drain_timeout,
             len(run_manager._tasks),
         )
         await run_manager.drain(timeout_seconds=float(drain_timeout))
-        logger.info("Run drain completed")
+        logger.info(
+            "Shutdown phase 3/5 complete: agent run drain finished (active_runs={})",
+            len(run_manager._tasks),
+        )
         # Stop control listeners AFTER draining so in-flight runs can still be
         # cancelled/steered during graceful shutdown.
         await run_manager.stop_control_listeners()
+    logger.info("Shutdown phase 4/5: closing tracing and data connections")
     tracer = getattr(_app.state, "tracer", None)
     if tracer is not None:
         try:
@@ -525,6 +536,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
         except asyncio.CancelledError:
             pass
         logger.info("Sandbox cleanup loop stopped")
+    logger.info("Shutdown phase 5/5: application shutdown complete")
     log.shutdown()
 
 

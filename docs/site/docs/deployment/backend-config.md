@@ -100,6 +100,7 @@ api:
   host: "0.0.0.0"
   port: 8000
   public_url: "https://cubeplex.example.com"
+  transport_shutdown_timeout_seconds: 10
 public_base_url: "https://cubeplex.example.com"
 frontend_base_url: "https://cubeplex.example.com"
 ```
@@ -109,6 +110,7 @@ frontend_base_url: "https://cubeplex.example.com"
 | `deployment.mode` | `single_tenant` | `single_tenant` auto-creates one org on first registration (OSS). `multi_tenant` mints a per-user org (cloud). |
 | `api.host` / `api.port` | `0.0.0.0` / `8000` | Bind address inside the container. |
 | `api.public_url` | `""` | The URL clients reach the backend at. Behind a reverse proxy, use the **proxy's** URL. |
+| `api.transport_shutdown_timeout_seconds` | `10` | Maximum wait for HTTP requests and SSE streams to close before agent draining begins. |
 | `public_base_url` | `http://localhost:8000` | Used to mint absolute URLs (OAuth redirects, etc.). |
 | `frontend_base_url` | `http://localhost:3000` | Where the backend redirects browsers. |
 
@@ -430,7 +432,8 @@ lifecycle:
 
 `graceful_drain_timeout_seconds` bounds how long the backend waits for active
 agent runs to finish before shutting down — align it with your longest expected
-run and the orchestrator's termination grace period.
+run. The orchestrator's termination grace period must also include the shorter
+HTTP transport timeout and final resource cleanup.
 
 ## Egress secret-injection listener
 

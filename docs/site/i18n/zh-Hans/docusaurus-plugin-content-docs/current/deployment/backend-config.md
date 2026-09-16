@@ -94,6 +94,7 @@ api:
   host: "0.0.0.0"
   port: 8000
   public_url: "https://cubeplex.example.com"
+  transport_shutdown_timeout_seconds: 10
 public_base_url: "https://cubeplex.example.com"
 frontend_base_url: "https://cubeplex.example.com"
 ```
@@ -103,6 +104,7 @@ frontend_base_url: "https://cubeplex.example.com"
 | `deployment.mode` | `single_tenant` | `single_tenant` 首次注册时自动建一个 org（OSS）。`multi_tenant` 每个用户一个 org（云端）。 |
 | `api.host` / `api.port` | `0.0.0.0` / `8000` | 容器内绑定地址。 |
 | `api.public_url` | `""` | 客户端访问后端的 URL。有反代时用**反代**的 URL。 |
+| `api.transport_shutdown_timeout_seconds` | `10` | 进入 Agent drain 前，等待 HTTP 请求和 SSE 流关闭的最长时间。 |
 | `public_base_url` | `http://localhost:8000` | 用于生成绝对 URL（OAuth 重定向等）。 |
 | `frontend_base_url` | `http://localhost:3000` | 后端重定向浏览器的目标。 |
 
@@ -409,7 +411,8 @@ lifecycle:
 ```
 
 `graceful_drain_timeout_seconds` 限定后端关机前等待活动 agent run 完成的时长——
-与你预期的最长 run 及编排器的终止宽限期对齐。
+请根据最长预期 run 设置。编排器的终止宽限期还必须包含较短的 HTTP 传输关闭时间
+和最终资源清理时间。
 
 ## Egress 密钥注入监听器
 
