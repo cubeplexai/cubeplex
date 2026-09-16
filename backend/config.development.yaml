@@ -46,6 +46,11 @@ development:
     docling_serve:
       base_url: "http://localhost:5001"
 
+  # Permit private and plain-HTTP MCP endpoints used by local development services.
+  mcp:
+    outbound_policy: "unrestricted"
+    allowed_schemes: ["http"]  # merged with the base HTTPS scheme
+
   # Tracing on by default in dev so local runs emit trace files.
   # To also ship spans to Grafana Tempo, set `tracing.otlp.endpoint` in
   # config.development.local.yaml (per-machine, not checked in).

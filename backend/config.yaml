@@ -176,9 +176,13 @@ default:
   # `mcp.servers` config block was removed in M2.
   mcp:
     # Backend egress initiated by tenant-configured MCP connectors.
+    # Modes: disabled, public_only, allowlist_only, public_and_allowlist, unrestricted.
     outbound_policy: "public_and_allowlist"
+    # Keep HTTPS-only by default; development also permits HTTP for local services.
     allowed_schemes: ["https"]
+    # Explicit DNS hostnames; omit the scheme and path (for example, "mcp.internal").
     allowed_hosts: []
+    # Explicit IPv4/IPv6 CIDRs (for example, "10.20.0.0/16" or "fd00:1234::/64").
     allowed_cidrs: []
     progressive_disclosure:
       enabled: "auto"        # "auto" | "on" | "off"
