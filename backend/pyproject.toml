@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cubeplex"
-version = "0.7.2"
+version = "0.8.0"
 description = "CubePlex - AI Agent System Backend"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -188,7 +188,7 @@ exclude_lines = [
 [tool.uv.sources]
 # Path-linked sibling project; never resolved from an index.
 cubeplex-ee = { path = "ee", editable = true }
-cubeloop = { git = "https://github.com/cubeplexai/cubeloop.git", rev = "6b8f58ff1bc455c93f11bc39bb01050645971861" }
+cubeloop = { git = "https://github.com/cubeplexai/cubeloop.git", rev = "82a8672451d12f1e778a96dc185bcc89931ba63f" }
 
 [dependency-groups]
 # Deliberately a group and not an extra: `uv sync --all-extras` (what

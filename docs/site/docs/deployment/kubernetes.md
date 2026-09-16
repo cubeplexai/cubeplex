@@ -188,8 +188,8 @@ Set `image` only to override:
 ```yaml
 image:
   # Pin a different image version than the chart's appVersion:
-  backend:  { tag: "v0.7.2" }
-  frontend: { tag: "v0.7.2" }
+  backend:  { tag: "v0.8.0" }
+  frontend: { tag: "v0.8.0" }
 ```
 
 For a self-built / private-registry image, also set the location:
@@ -513,7 +513,7 @@ egress:
   sandboxNamespace: "opensandbox"
   webhook:
     image:
-      tag: "v0.7.2"             # same release version as backend/frontend
+      tag: "v0.8.0"             # same release version as backend/frontend
     # MUST exactly match opensandbox-server's configured egress.image.
     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
     egressImage: "opensandbox/egress:v1.0.12"
@@ -694,7 +694,7 @@ needed, just your `values.local.yaml`:
 
 ```bash
 helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
-  --version 0.7.2 \
+  --version 0.8.0 \
   --namespace cubeplex --create-namespace \
   --values values.local.yaml \
   --wait --timeout 10m
@@ -873,8 +873,8 @@ image:
   registry: "ghcr.io"
   repository: "cubeplexai"
   pullPolicy: "IfNotPresent"
-  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required (e.g. v0.7.2)
-  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required (e.g. v0.7.2)
+  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required (e.g. v0.8.0)
+  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required (e.g. v0.8.0)
 
 backend:
   replicaCount: 1
@@ -964,8 +964,8 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "v0.7.2" }
-  frontend: { tag: "v0.7.2" }
+  backend:  { tag: "v0.8.0" }
+  frontend: { tag: "v0.8.0" }
 
 backend:
   configOverrides:

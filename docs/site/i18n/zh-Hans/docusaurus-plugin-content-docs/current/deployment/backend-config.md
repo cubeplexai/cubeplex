@@ -193,7 +193,7 @@ objectstore:
 sandbox:
   enabled: true
   domain: "…"             # OpenSandbox API 地址（不带 schema）
-  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.7.2"
+  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.8.0"
   api_key: "…"
   use_server_proxy: false # 后端无法直连 sandbox pod/端口时设为 true
   secure_access: false    # docker-runtime OpenSandbox 下必须为 false
