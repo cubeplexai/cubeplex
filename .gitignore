@@ -65,3 +65,7 @@ local/
 
 # benchmark local state (creds, judge env, run artifacts) - never commit
 benchmarks/wildclawbench/.state/
+
+# Local workstation files
+.DS_Store
+.workbuddy/
