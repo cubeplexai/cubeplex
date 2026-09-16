@@ -51,6 +51,7 @@ One application semver (example: `0.6.0`) across these committed fields.
 **Operator template (copy-paste, so a stale value deploys the old images):**
 
 - `deploy/docker-compose/.env.example` → `BACKEND_TAG` / `FRONTEND_TAG`
+- `deploy/docker-compose/config/config.production.secrets.yaml.example` → sandbox image tag
 
 **User-facing deploy docs (English and Chinese).** Operators copy these
 snippets; a stale example installs the previous release even though the page
