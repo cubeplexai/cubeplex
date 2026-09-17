@@ -3504,7 +3504,7 @@ class RunManager:
                 _exc,
             )
 
-        # --- Build the 11 cubeloop middleware (M3.f) ---
+        # --- Build the cubeloop middleware (M3.f) ---
         # The caller owns ``extra_ref_holder`` and populates ``["extra"]`` from
         # Session state_context after this factory returns; this closure reads
         # the holder at request time, well after the agent build.
@@ -3515,6 +3515,15 @@ class RunManager:
             return ref
 
         cubeloop_middleware: list[Any] = []
+
+        # Cap tool-result text before ToolExecutionEndEvent so a runaway
+        # execute/fetch/MCP payload cannot blow the 1 MiB projection budget.
+        # load_skill is excluded: the full SKILL.md is load-bearing history.
+        from cubeloop.middleware import ToolResultLimitMiddleware
+
+        tool_result_limit_mw = ToolResultLimitMiddleware(
+            exclude_tool_names={"load_skill"},
+        )
 
         # 1. AttachmentHintMiddleware — no deps
         try:
@@ -3791,7 +3800,7 @@ class RunManager:
                 shared_tools=_subagent_shared_tools(
                     _sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
                 ),
-                inherited_middleware=_cost_mw_for_inherit,
+                inherited_middleware=[*_cost_mw_for_inherit, tool_result_limit_mw],
                 excluded_tool_names={"subagent", "load_skill"},
                 event_mapper=map_subagent_event,
                 event_handler=forward_subagent_event,
@@ -3848,6 +3857,10 @@ class RunManager:
             _todo_tools.extend(todo_mw.tools)
         except Exception as _exc:
             logger.warning("TodoListMiddleware unavailable: {}", _exc)
+
+        # Last after_tool_call rewriter so truncated content is what
+        # ToolExecutionEndEvent (and the model) see.
+        cubeloop_middleware.append(tool_result_limit_mw)
 
         # --- Final tool merge ---
         # Stable composition order — changes invalidate the prompt cache prefix:

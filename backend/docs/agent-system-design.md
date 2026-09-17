@@ -28,13 +28,13 @@ Live steering enters through `ExecutionSession.submit_input`. Steers received wh
 
 ## Event projection limits
 
-The Session consumer is required, is attached before execution, and has a 256-event capacity. Every projected event is limited to 1 MiB. Host publication has a 5-second deadline and the enclosing CubeLoop delivery deadline is 6 seconds. A timeout, oversized event, or Redis publication error fails the required consumer, stops new agent work, and prevents a successful `DoneEvent`.
+The Session consumer is required, is attached before execution, and has a 256-event capacity. Every projected event is limited to 1 MiB. Host publication has a 5-second deadline and the enclosing CubeLoop delivery deadline is 6 seconds. A timeout, oversized event, or Redis publication error fails the required consumer, stops new agent work, and prevents a successful `DoneEvent`. `ToolResultLimitMiddleware` truncates tool-result text to 20,000 characters (except `load_skill`) in `after_tool_call`, before that event is published, so a runaway `execute` / fetch / MCP payload does not hit the 1 MiB ceiling.
 
 Subagent and citation events use a separate 64-event queue. The same 1 MiB per-event limit makes its maximum queued payload budget 64 MiB, excluding small Python container overhead. Producers wait at most 5 seconds to enqueue; teardown waits at most 5 seconds to enqueue the sentinel and 5 seconds to drain. The success path does not suppress a drain failure. Text deltas are not coalesced and tool events are not dropped to make room.
 
 ## Middleware and tools
 
-The middleware stack is assembled per run in `RunManager._build_cubeloop_agent`. Depending on enabled features, it includes CubePlex middleware for attachments, artifacts, citations, memory, sandboxing, costs, and timestamps, plus CubeLoop middleware for compaction, subagents, and todo lists. The stack supplies or transforms tools as well as requests and responses.
+The middleware stack is assembled per run in `RunManager._build_cubeloop_agent`. Depending on enabled features, it includes CubePlex middleware for attachments, artifacts, citations, memory, sandboxing, costs, and timestamps, plus CubeLoop middleware for compaction, subagents, todo lists, and the tool-result size cap. The stack supplies or transforms tools as well as requests and responses.
 
 Tool and middleware order is intentional: it affects the stable prompt prefix and provider prompt caching. Add or reorder a tool only after reading [prompt-cache-discipline.md](prompt-cache-discipline.md). Middleware-provided tools are removed from the explicit tool list before `cubeloop.Agent` receives it, because CubeLoop adds them itself; passing both copies produces duplicate tool names.
 
