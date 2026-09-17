@@ -73,6 +73,7 @@ RUN if [ -n "$APT_MIRROR_HOST" ]; then \
         wget \
         file \
         git \
+        openssh-client \
         ripgrep \
         unzip \
         zip \
