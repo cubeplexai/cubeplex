@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useState } from 'react'
+import { memo, useState, type CSSProperties } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -31,6 +31,20 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Cap so screenshots still fill the bubble, but QR/icons stay native-sized. */
+const PRESENTED_IMAGE_MAX_PX = 480
+
+function presentedImageSize(
+  width?: number | null,
+  height?: number | null,
+): { card: CSSProperties; frame?: CSSProperties } | undefined {
+  if (!width || width <= 0) return undefined
+  const displayWidth = Math.min(width, PRESENTED_IMAGE_MAX_PX)
+  const card: CSSProperties = { width: displayWidth, maxWidth: '100%' }
+  if (!height || height <= 0) return { card }
+  return { card, frame: { aspectRatio: `${width} / ${height}` } }
 }
 
 function presentedUrl(
@@ -93,17 +107,22 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   const isImage = file.kind === 'image' || file.mime_type.startsWith('image/')
 
   if (isImage && !imgFailed) {
+    const size = presentedImageSize(file.width, file.height)
     return (
       <a
         href={fullUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="my-2 block w-full overflow-hidden rounded border border-border bg-card
-          transition-colors hover:border-primary/30"
+        className={cn(
+          'my-2 overflow-hidden rounded border border-border bg-card',
+          'transition-colors hover:border-primary/30',
+          size ? 'block w-fit max-w-full' : 'block w-full',
+        )}
+        style={size?.card}
       >
-        <div className="relative bg-muted/30">
+        <div className="relative bg-muted/30" style={size?.frame}>
           {!imgLoaded && (
-            <div className="aspect-[4/3]">
+            <div className={size?.frame ? 'h-full min-h-[8rem]' : 'aspect-[4/3]'}>
               <Shimmer />
             </div>
           )}
@@ -111,8 +130,10 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
           <img
             src={displayUrl}
             alt={caption}
+            width={file.width ?? undefined}
+            height={file.height ?? undefined}
             className={cn(
-              'w-full h-auto transition-opacity duration-300',
+              'h-auto w-full max-w-full transition-opacity duration-300',
               imgLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
             )}
             onLoad={() => setImgLoaded(true)}
