@@ -32,7 +32,7 @@ import { ToolCallItem } from './ToolCallItem'
 import { MessageActions } from './MessageActions'
 import { CopyButton, TimeChip } from './MessageMeta'
 import { RunInfoChip } from './RunInfoChip'
-import { deriveRunChipStatus } from '@/lib/runChipStatus'
+import { conversationErrorApplies, deriveRunChipStatus, isLiveRunChip } from '@/lib/runChipStatus'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
@@ -59,6 +59,7 @@ function useTurnRunChip(opts: {
   stopReason?: string | null
   isLive: boolean
   isLastRun?: boolean
+  isRunAnchor?: boolean
 }) {
   const streamConnection = useMessageStore((s) => s.streamConnection)
   const currentRunId = useMessageStore((s) => s.currentRunId)
@@ -69,20 +70,24 @@ function useTurnRunChip(opts: {
   const errorEntry = useMessageStore((s) =>
     opts.conversationId ? (s.errors[opts.conversationId] ?? null) : null,
   )
-  const live =
-    opts.isLive ||
-    (opts.runId != null &&
-      opts.runId === currentRunId &&
-      streamConnection != null &&
-      streamConnection !== 'connected')
+  const isRunAnchor = opts.isRunAnchor === true
+  const live = isLiveRunChip({
+    isLiveStreaming: opts.isLive,
+    isRunAnchor,
+    messageRunId: opts.runId,
+    currentRunId,
+    streamConnection,
+  })
   const status = deriveRunChipStatus({
     isLive: live,
     cancelling,
     streamConnection,
     stopReason: opts.stopReason,
-    hasError: Boolean(
-      errorEntry && (opts.runId == null || !errorEntry.runId || errorEntry.runId === opts.runId),
-    ),
+    hasError: conversationErrorApplies(errorEntry, {
+      messageRunId: opts.runId,
+      isLive: opts.isLive,
+      isRunAnchor,
+    }),
     isStaleLastRun: Boolean(opts.isLastRun && lastRunStatus === 'stale'),
   })
   const onRetry =
@@ -250,6 +255,10 @@ interface HistoryProps {
   // its run_id (thinking + tool_call blocks filtered out). Powers the
   // copy button so a multi-step turn copies as one block.
   turnCopyText?: string
+  // True when this bubble is the last assistant of its run. Run-level
+  // status (Reply failed, Reconnecting, …) belongs here — not on every
+  // intermediate tool-use bubble that shares the same run_id.
+  isRunAnchor?: boolean
   // True when this anchor is the latest completed run in the conversation.
   // Gates the session/context view inside TokenUsageBar and the
   // MemoryUpdateChip — both are conversation-level signals that only make
@@ -279,6 +288,7 @@ interface StreamingProps {
   showForkAction?: never
   turnUsage?: never
   turnCopyText?: never
+  isRunAnchor?: never
   isLastRun?: never
   sessionUsage?: never
   contextWindow?: never
@@ -697,6 +707,7 @@ export function AssistantMessage({
   showForkAction,
   turnUsage,
   turnCopyText,
+  isRunAnchor,
   isLastRun,
   sessionUsage,
   contextWindow,
@@ -725,6 +736,7 @@ export function AssistantMessage({
     stopReason: message?.stop_reason,
     isLive: isStreaming === true,
     isLastRun,
+    isRunAnchor,
   })
   const runChipError =
     runChip.error ??

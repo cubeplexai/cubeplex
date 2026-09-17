@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
+import { useMessageStore } from '@cubeplex/core'
 import en from '../../messages/en.json'
 import { AssistantMessage, HistoryAssistantMessage } from '@/components/chat/AssistantMessage'
 import type { AssistantMessage as AssistantMessageType } from '@cubeplex/core'
@@ -26,6 +27,16 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe('HistoryAssistantMessage', () => {
+  beforeEach(() => {
+    useMessageStore.setState({
+      errors: {},
+      currentRunId: null,
+      streamConnection: null,
+      lastRunStatus: null,
+      cancellingConversationIds: {},
+    })
+  })
+
   it('is a memoized re-export of AssistantMessage', () => {
     const marker = HistoryAssistantMessage as unknown as {
       $$typeof?: symbol
@@ -70,5 +81,54 @@ describe('HistoryAssistantMessage', () => {
     expect(chip).toHaveTextContent('Reply failed')
     chip.click()
     expect(await screen.findByText(/messages\.347/)).toBeInTheDocument()
+  })
+
+  it('paints last_run_error only on the last assistant of that run', () => {
+    useMessageStore.setState({
+      errors: {
+        'conv-1': {
+          runId: 'run-1',
+          data: { error_code: 'internal_error', message: 'event too large' },
+        },
+      },
+    })
+    const midTurn = {
+      id: 'msg-mid',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'looking around' }],
+      stop_reason: 'tool_use',
+      run_id: 'run-1',
+      timestamp: 1_700_000_000,
+    } as unknown as AssistantMessageType
+    const lastTurn = {
+      ...midTurn,
+      id: 'msg-last',
+      content: [{ type: 'text', text: 'almost done' }],
+    } as unknown as AssistantMessageType
+
+    const { rerender } = render(
+      <HistoryAssistantMessage
+        message={midTurn}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+        isRunAnchor={false}
+      />,
+      { wrapper },
+    )
+    expect(screen.queryByRole('button', { name: 'This run failed' })).not.toBeInTheDocument()
+
+    rerender(
+      <HistoryAssistantMessage
+        message={lastTurn}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+        isRunAnchor
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'This run failed' })).toHaveTextContent(
+      'Reply failed',
+    )
   })
 })

@@ -705,6 +705,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                         showForkAction={isAnchor}
                         turnUsage={anchor?.turnUsage ?? null}
                         turnCopyText={anchor?.copyText ?? ''}
+                        isRunAnchor={isAnchor}
                         isLastRun={isLastRun}
                         sessionUsage={isLastRun ? sessionUsage : null}
                         contextWindow={isLastRun ? contextWindow : null}
