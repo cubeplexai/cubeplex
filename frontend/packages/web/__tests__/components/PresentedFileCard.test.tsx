@@ -50,9 +50,7 @@ describe('PresentedFileCard', () => {
 
   it('caps oversized images at 480px while preserving aspect ratio', () => {
     render(
-      <PresentedFileCard
-        file={{ ...qrFile, caption: 'Screenshot', width: 1600, height: 900 }}
-      />,
+      <PresentedFileCard file={{ ...qrFile, caption: 'Screenshot', width: 1600, height: 900 }} />,
     )
     const img = screen.getByRole('img', { name: 'Screenshot' })
     expect(img.closest('a')).toHaveStyle({ width: '480px' })
