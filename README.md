@@ -40,7 +40,7 @@
 CubePlex is a cloud-native platform for **long-lived, team-owned Agents**. A Workspace gives a team one Agent with a stable role, shared knowledge, approved tools, and a persistent work environment—available from the web and the channels where the team already works.
 
 <p align="center">
-  <a href="https://cubeplex.ai">Try CubePlex</a> ·
+  <a href="https://cubeplex.ai">Visit CubePlex</a> ·
   <a href="https://docs.cubeplex.ai">Read the docs</a> ·
   <a href="https://cubeplex.ai/docs/deployment/overview">Self-host</a>
 </p>

@@ -43,7 +43,7 @@
 CubePlex 是一个面向**长期运行、由团队共同拥有的 Agent** 的云原生平台。每个工作空间都拥有一个角色稳定、共享知识、使用经批准工具并具备持久化工作环境的 Agent；团队可从 Web 以及日常使用的各类沟通渠道访问它。
 
 <p align="center">
-  <a href="https://cubeplex.ai">体验 CubePlex</a> ·
+  <a href="https://cubeplex.ai">访问 CubePlex 官网</a> ·
   <a href="https://docs.cubeplex.ai">阅读文档</a> ·
   <a href="https://cubeplex.ai/docs/deployment/overview">自托管部署</a>
 </p>
