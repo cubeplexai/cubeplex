@@ -302,6 +302,11 @@ async def lifespan(_app: FastAPI):  # type: ignore
     cleanup_interval = config.get("sandbox.cleanup_interval", 60)
     cleanup_task = asyncio.create_task(sandbox_cleanup_loop(manager, interval=cleanup_interval))
     logger.info("Sandbox cleanup loop started")
+    command_coord_task = None
+    from cubeplex.sandbox.command_coordinator import command_coordinator_loop
+
+    command_coord_task = asyncio.create_task(command_coordinator_loop(async_session_maker))
+    logger.info("Sandbox command coordinator started")
 
     # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).
     try:
@@ -536,6 +541,13 @@ async def lifespan(_app: FastAPI):  # type: ignore
         except asyncio.CancelledError:
             pass
         logger.info("Sandbox cleanup loop stopped")
+    if command_coord_task:
+        command_coord_task.cancel()
+        try:
+            await command_coord_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Sandbox command coordinator stopped")
     logger.info("Shutdown phase 5/5: application shutdown complete")
     log.shutdown()
 

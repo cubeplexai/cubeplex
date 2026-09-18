@@ -3745,6 +3745,16 @@ class RunManager:
                     user_id=ctx.user_id,
                     default_image=_sb_default_image,
                 )
+
+                async def _sandbox_heartbeat() -> None:
+                    await touch_run_heartbeat(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        conversation_id=conversation_id,
+                        ttl_seconds=self._run_event_ttl_seconds,
+                    )
+
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
@@ -3752,6 +3762,11 @@ class RunManager:
                     command_rules=_command_rules,
                     channel=sandbox_hitl_channel,
                     config_loader=_sb_config_loader,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    run_id=run_id,
+                    session_factory=async_session_maker,
+                    heartbeat=_sandbox_heartbeat,
                 )
                 cubeloop_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write, edit, read) collected for

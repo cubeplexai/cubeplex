@@ -102,6 +102,16 @@ async def test_kill_marks_process_killed() -> None:
     await sandbox.kill(handle)
     snap = await sandbox.poll(handle)
     assert snap.status == "killed"
+    assert handle.provider_ref not in sandbox._bg
+
+
+@pytest.mark.asyncio
+async def test_kill_after_natural_exit_does_not_raise() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start("true")
+    await asyncio.sleep(0.05)
+    await sandbox.kill(handle)
+    assert handle.provider_ref not in sandbox._bg
 
 
 @pytest.mark.asyncio

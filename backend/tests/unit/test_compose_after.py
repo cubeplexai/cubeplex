@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -12,9 +13,9 @@ from cubeloop.agent.types import (
     AgentToolResult,
 )
 from cubeloop.middleware.base import Middleware
-from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall, Usage
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall, Usage, UserMessage
 
-from cubeplex.middleware._compose import compose_after_tool_call
+from cubeplex.middleware._compose import compose_after_tool_call, compose_on_run_end
 
 
 def _ctx(content_text: str = "raw") -> AfterToolCallContext:
@@ -141,3 +142,35 @@ async def test_compose_terminate_and_is_error_propagation() -> None:
     assert out.is_error is True
     # Content rewrite survives even though _Terminator returned no content.
     assert out.content[0].text == "rewritten"
+
+
+@pytest.mark.asyncio
+async def test_compose_on_run_end_runs_sandbox_before_others() -> None:
+    order: list[str] = []
+
+    class _Waiter(Middleware):
+        async def on_run_end(self, ctx, *, signal=None):
+            del ctx, signal
+            order.append("sandbox")
+            await asyncio.sleep(0.02)
+            order.append("sandbox-done")
+            return [UserMessage(content=[TextContent(text="done")])]
+
+    _Waiter.__name__ = "SandboxMiddleware"
+
+    class _Later(Middleware):
+        async def on_run_end(self, ctx, *, signal=None):
+            del ctx, signal
+            order.append("other")
+            return None
+
+    composed = compose_on_run_end([_Later(), _Waiter()])
+    assert composed is not None
+    ctx = AgentContext(system_prompt="", messages=[])
+    out = await composed(ctx)
+    assert out is not None
+    assert order == ["sandbox", "sandbox-done", "other"]
+
+
+def test_compose_on_run_end_none_when_empty() -> None:
+    assert compose_on_run_end([]) is None

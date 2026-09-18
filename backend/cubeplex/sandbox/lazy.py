@@ -250,6 +250,14 @@ class LazySandbox(Sandbox):
         """Whether the underlying sandbox has been created."""
         return self._sandbox is not None
 
+    @property
+    def user_sandbox_id(self) -> str | None:
+        return self._user_sandbox_id
+
+    async def ensure_created(self) -> None:
+        """Create/connect the underlying sandbox so ``user_sandbox_id`` is set."""
+        await self._ensure_with_retry()
+
     # ------------------------------------------------------------------
     # Internal: ensure a live sandbox exists
     # ------------------------------------------------------------------
