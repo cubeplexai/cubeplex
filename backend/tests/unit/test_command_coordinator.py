@@ -114,3 +114,28 @@ async def test_reconcile_kills_abandoned_running_command(session: AsyncSession) 
     assert row.id in finished
     await session.refresh(row)
     assert row.status == SandboxCommandStatus.killed.value
+
+
+@pytest.mark.asyncio
+async def test_reconcile_does_not_terminalize_if_interrupt_fails(
+    session: AsyncSession,
+) -> None:
+    sandbox = LocalSandbox()
+    row = await _row(session, sandbox=sandbox, command="sleep 30")
+
+    class _Boom:
+        async def kill(self, handle: ProcessHandle) -> None:
+            del handle
+            raise RuntimeError("interrupt failed")
+
+        async def poll(self, handle: ProcessHandle) -> object:
+            return await sandbox.poll(handle)
+
+    async def _get(_row: SandboxCommand) -> object:
+        del _row
+        return _Boom()
+
+    finished = await reconcile_once(session, get_sandbox=_get)  # type: ignore[arg-type]
+    assert finished == []
+    await session.refresh(row)
+    assert row.status == SandboxCommandStatus.running.value

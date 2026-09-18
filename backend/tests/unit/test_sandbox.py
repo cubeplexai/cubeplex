@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -503,6 +504,59 @@ async def test_kill_execute_keeps_handle_if_kill_fails() -> None:
     killed = await killer.execute("tc-kill", _KillExecuteArgs(command_id=str(cid)))
     assert killed.is_error is True
     assert cid in live
+
+
+@pytest.mark.asyncio
+async def test_mark_running_cas_miss_kills_started_process() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.workdir = "/workspace"
+    sandbox.kill = AsyncMock()
+
+    async def _start(
+        command: str,
+        *,
+        on_started: Any = None,
+        **kwargs: Any,
+    ) -> ProcessHandle:
+        del command, kwargs
+        if on_started is not None:
+            maybe = on_started("p-cas")
+            if inspect.isawaitable(maybe):
+                await maybe
+        return ProcessHandle("", "p-cas")
+
+    sandbox.start = _start
+    live: dict[str, tuple[Any, bool]] = {}
+
+    async def _reserve(**kwargs: Any) -> bool:
+        del kwargs
+        return True
+
+    async def _running(command_id: str, ref: str) -> None:
+        del command_id, ref
+        raise RuntimeError("cas missed")
+
+    async def _killed(command_id: str) -> None:
+        del command_id
+        return None
+
+    tool = _make_execute_tool(
+        sandbox,
+        live=live,
+        persist_reserve=_reserve,
+        persist_running=_running,
+        persist_killed=_killed,
+    )
+    result = await tool.execute(
+        "tc-cas",
+        _ExecuteArgs(command="sleep 1", description="bg", background=True),
+    )
+    assert result.is_error is True
+    sandbox.kill.assert_awaited_once()
+    assert live == {}
 
 
 @pytest.mark.asyncio

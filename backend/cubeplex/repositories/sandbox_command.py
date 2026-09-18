@@ -211,3 +211,21 @@ async def claim_expired_inflight(
         )
     )
     return list(result.scalars().all())
+
+
+async def mark_notice_delivered(session: AsyncSession, command_id: str) -> bool:
+    """Checkpoint path: notice_id is in history, so mark delivered."""
+    from cubeplex.models.sandbox_command import SandboxCommandNoticeState
+
+    stmt = (
+        update(SandboxCommand)
+        .where(
+            col(SandboxCommand.id) == command_id,
+            col(SandboxCommand.notice_state) == SandboxCommandNoticeState.pending.value,
+        )
+        .values(notice_state=SandboxCommandNoticeState.delivered.value)
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]

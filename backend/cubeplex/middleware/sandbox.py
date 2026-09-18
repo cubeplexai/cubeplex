@@ -324,6 +324,7 @@ def _make_execute_tool(
     persist_reserve: Callable[..., Awaitable[bool]] | None = None,
     persist_running: Callable[[str, str], Awaitable[None]] | None = None,
     persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    on_live: Callable[[], None] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
@@ -428,6 +429,8 @@ def _make_execute_tool(
                         is_error=True,
                     )
                 live_commands[command_id] = (handle, args.notify_on_complete)
+            if on_live is not None:
+                on_live()
             await _write_sandbox_log(sandbox, log_path, b"")
             notice = (
                 f"Command running in background as {command_id}."
@@ -1143,6 +1146,7 @@ class SandboxMiddleware(Middleware):
                 persist_reserve=self._persist_reserve,
                 persist_running=self._persist_running,
                 persist_killed=self._persist_killed,
+                on_live=self._ensure_lease_task,
             ),
             _make_kill_execute_tool(
                 sandbox,
@@ -1207,7 +1211,6 @@ class SandboxMiddleware(Middleware):
                     status=snap.status,
                     exit_code=snap.exit_code,
                     notify=True,
-                    delivered=True,
                 )
                 notices.append(
                     UserMessage(
@@ -1275,14 +1278,17 @@ class SandboxMiddleware(Middleware):
                 log_path=log_path,
                 command_id=command_id,
             )
-        self._ensure_lease_task()
         return True
 
     async def _persist_running(self, command_id: str, provider_ref: str) -> None:
         async with self._command_repo_ctx() as repo:
             if repo is None:
                 return
-            await repo.mark_running(command_id, provider_ref=provider_ref, owner_id=self._owner_id)
+            ok = await repo.mark_running(
+                command_id, provider_ref=provider_ref, owner_id=self._owner_id
+            )
+            if not ok:
+                raise RuntimeError(f"mark_running cas missed for {command_id}")
 
     async def _persist_killed(self, command_id: str) -> None:
         await self._persist_terminal(
