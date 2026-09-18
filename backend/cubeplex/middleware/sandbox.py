@@ -119,6 +119,15 @@ EXECUTE_RESULT_SPILL_CHARS = 20_000
 _EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
 
 
+def _bounded_execute_excerpt(text: str) -> str:
+    """Keep live and final truncated views on the same head+tail excerpt."""
+    if len(text) <= EXECUTE_RESULT_SPILL_CHARS:
+        return text
+    keep = EXECUTE_RESULT_SPILL_CHARS // 2
+    omitted = len(text) - 2 * keep
+    return f"{text[:keep]}\n\n[... {omitted} chars omitted ...]\n\n{text[-keep:]}"
+
+
 class _ExecuteArgs(BaseModel):
     description: str = Field(
         description=(
@@ -262,6 +271,7 @@ def _make_execute_tool(
         pieces: list[str] = []
         pending: list[asyncio.Task[None]] = []
         last_emit = 0.0
+        trail_task: asyncio.Task[None] | None = None
 
         def _schedule_update(text: str) -> None:
             if on_update is None:
@@ -282,21 +292,39 @@ def _make_execute_tool(
 
                 pending.append(asyncio.create_task(_await_update()))
 
+        def _emit_snapshot() -> None:
+            _schedule_update(_bounded_execute_excerpt("".join(pieces)))
+
+        def _cancel_trail() -> None:
+            nonlocal trail_task
+            if trail_task is not None and not trail_task.done():
+                trail_task.cancel()
+            trail_task = None
+
         def _on_chunk(text: str) -> None:
-            nonlocal last_emit
+            nonlocal last_emit, trail_task
             if not text:
                 return
             pieces.append(text)
             now = time.monotonic()
-            if now - last_emit < _EXECUTE_UPDATE_INTERVAL_SECONDS:
+            remaining = _EXECUTE_UPDATE_INTERVAL_SECONDS - (now - last_emit)
+            if remaining > 0:
+
+                async def _trail() -> None:
+                    nonlocal last_emit
+                    await asyncio.sleep(remaining)
+                    last_emit = time.monotonic()
+                    _emit_snapshot()
+
+                if trail_task is None or trail_task.done():
+                    trail_task = asyncio.create_task(_trail())
                 return
+            _cancel_trail()
             last_emit = now
-            snapshot = "".join(pieces)
-            if len(snapshot) > EXECUTE_RESULT_SPILL_CHARS:
-                snapshot = snapshot[-EXECUTE_RESULT_SPILL_CHARS:]
-            _schedule_update(snapshot)
+            _emit_snapshot()
 
         async def _drain_updates() -> None:
+            _cancel_trail()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
                 pending.clear()
@@ -330,15 +358,13 @@ def _make_execute_tool(
             if len(output) > EXECUTE_RESULT_SPILL_CHARS:
                 safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", tool_call_id)[:80] or "tool"
                 spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{safe_id}.log"
+                excerpt = _bounded_execute_excerpt(output)
                 try:
                     await sandbox.upload([(spill_path, output.encode())])
-                    output = (
-                        output[:EXECUTE_RESULT_SPILL_CHARS]
-                        + f"\n\n[truncated] full output written to {spill_path}"
-                    )
+                    output = excerpt + f"\n\n[truncated] full output written to {spill_path}"
                 except Exception:
                     logger.exception("execute spill upload failed")
-                    output = output[:EXECUTE_RESULT_SPILL_CHARS] + "\n\n[truncated]"
+                    output = excerpt + "\n\n[truncated]"
             return AgentToolResult(
                 content=[TextContent(text=output)],
                 details={"status": "exited"},

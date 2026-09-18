@@ -385,6 +385,38 @@ async def test_execute_tool_awaits_async_on_update() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_tool_trailing_update_after_throttle() -> None:
+    sandbox = _make_sandbox()
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk("one")
+            on_chunk("two")
+            await asyncio.sleep(0.15)
+        result = MagicMock()
+        result.output = "onetwo"
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    updates: list[AgentToolResult] = []
+    tool = _make_execute_tool(sandbox)
+    await tool.execute(
+        "tc-trail",
+        _ExecuteArgs(command="echo onetwo", description="Echo two chunks"),
+        on_update=updates.append,
+    )
+    assert any("two" in _text(u) for u in updates)
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_live_update_is_capped() -> None:
     sandbox = _make_sandbox()
     huge = "x" * 30_000
@@ -414,8 +446,11 @@ async def test_execute_tool_live_update_is_capped() -> None:
         on_update=updates.append,
     )
     assert updates
-    assert all(len(_text(u)) <= 20_000 for u in updates)
-    assert "[truncated]" in _text(result)
+    assert all(len(_text(u)) <= 21_000 for u in updates)
+    text = _text(result)
+    assert text.startswith("x")
+    assert "omitted" in text
+    assert "[truncated]" in text
 
 
 @pytest.mark.asyncio
