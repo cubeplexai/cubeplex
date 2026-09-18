@@ -408,7 +408,7 @@ async def test_kill_execute_stops_live_handle() -> None:
     sandbox.workdir = "/workspace"
     sandbox.start = AsyncMock(return_value=ProcessHandle("", "p1"))
     sandbox.kill = AsyncMock()
-    live: dict[str, ProcessHandle] = {}
+    live: dict[str, tuple[ProcessHandle, bool]] = {}
     execute = _make_execute_tool(sandbox, live=live)
     started = await execute.execute(
         "tc-k",

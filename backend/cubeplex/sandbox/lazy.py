@@ -491,7 +491,12 @@ class LazySandbox(Sandbox):
             )
 
     def supports_background(self) -> bool:
-        return self._sandbox.supports_background() if self._sandbox is not None else False
+        # Concrete drivers used in production implement start/poll/kill.
+        # Do not return False before _ensure — the first background execute
+        # would be rejected on a fresh LazySandbox.
+        if self._sandbox is not None:
+            return self._sandbox.supports_background()
+        return True
 
     async def start(
         self,
