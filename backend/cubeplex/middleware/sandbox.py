@@ -36,7 +36,12 @@ from cubeloop.agent.types import (
 )
 from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
-from cubeloop.providers.base import TextContent, UserMessage
+from cubeloop.providers.base import (
+    AssistantMessage,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+)
 from cubeloop.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
@@ -1023,7 +1028,7 @@ class SandboxMiddleware(Middleware):
         ctx: AgentContext,
         *,
         signal: asyncio.Event | None = None,
-    ) -> list[UserMessage] | None:
+    ) -> list[UserMessage | AssistantMessage | ToolResultMessage] | None:
         """Wait for in-run background commands, then inject one completion notice."""
         del ctx, signal
         if not self._live_commands:
@@ -1031,7 +1036,7 @@ class SandboxMiddleware(Middleware):
         deadline = time.monotonic() + 3600
         while self._live_commands and time.monotonic() < deadline:
             finished: list[str] = []
-            notices: list[UserMessage] = []
+            notices: list[UserMessage | AssistantMessage | ToolResultMessage] = []
             for command_id, handle in list(self._live_commands.items()):
                 snap = await self.sandbox.poll(handle)
                 if snap.status == "running":

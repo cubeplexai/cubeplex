@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import func, select
+from sqlmodel import col
 
 from cubeplex.models.sandbox_command import (
     SandboxCommand,
@@ -38,16 +39,16 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
         provider: str = "opensandbox",
     ) -> SandboxCommand:
         await self.session.execute(
-            select(SandboxCommand.user_sandbox_id)
-            .where(SandboxCommand.user_sandbox_id == user_sandbox_id)
+            select(SandboxCommand)
+            .where(col(SandboxCommand.user_sandbox_id) == user_sandbox_id)
             .with_for_update()
         )
         count_stmt = (
             select(func.count())
             .select_from(SandboxCommand)
             .where(
-                SandboxCommand.user_sandbox_id == user_sandbox_id,
-                SandboxCommand.status.in_(
+                col(SandboxCommand.user_sandbox_id) == user_sandbox_id,
+                col(SandboxCommand.status).in_(
                     (
                         SandboxCommandStatus.starting.value,
                         SandboxCommandStatus.running.value,
@@ -80,8 +81,8 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
 
     async def list_inflight_for_run(self, run_id: str) -> list[SandboxCommand]:
         stmt = self._scoped_select().where(
-            SandboxCommand.run_id == run_id,
-            SandboxCommand.status.in_(
+            col(SandboxCommand.run_id) == run_id,
+            col(SandboxCommand.status).in_(
                 (
                     SandboxCommandStatus.starting.value,
                     SandboxCommandStatus.running.value,
