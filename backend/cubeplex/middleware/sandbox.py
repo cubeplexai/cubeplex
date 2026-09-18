@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import inspect
 import re
 import shlex
+import time
 import unicodedata
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -114,6 +116,7 @@ DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
 MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 # Match ToolResultLimitMiddleware so we spill before that rewrite.
 EXECUTE_RESULT_SPILL_CHARS = 20_000
+_EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
 
 
 class _ExecuteArgs(BaseModel):
@@ -257,59 +260,91 @@ def _make_execute_tool(
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
         pieces: list[str] = []
+        pending: list[asyncio.Task[None]] = []
+        last_emit = 0.0
+
+        def _schedule_update(text: str) -> None:
+            if on_update is None:
+                return
+            payload = AgentToolResult(
+                content=[TextContent(text=text)],
+                details={"status": "running"},
+            )
+            try:
+                maybe = on_update(payload)
+            except Exception:
+                logger.exception("execute on_update failed")
+                return
+            if inspect.isawaitable(maybe):
+
+                async def _await_update(aw: Awaitable[object] = maybe) -> None:
+                    await asyncio.shield(aw)
+
+                pending.append(asyncio.create_task(_await_update()))
 
         def _on_chunk(text: str) -> None:
+            nonlocal last_emit
             if not text:
                 return
             pieces.append(text)
-            if on_update is None:
+            now = time.monotonic()
+            if now - last_emit < _EXECUTE_UPDATE_INTERVAL_SECONDS:
                 return
-            try:
-                on_update(
-                    AgentToolResult(
-                        content=[TextContent(text="".join(pieces))],
-                        details={"status": "running"},
-                    )
-                )
-            except Exception:
-                logger.exception("execute on_update failed")
+            last_emit = now
+            snapshot = "".join(pieces)
+            if len(snapshot) > EXECUTE_RESULT_SPILL_CHARS:
+                snapshot = snapshot[-EXECUTE_RESULT_SPILL_CHARS:]
+            _schedule_update(snapshot)
+
+        async def _drain_updates() -> None:
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+                pending.clear()
 
         try:
-            result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
-        except TimeoutError:
-            return AgentToolResult(
-                content=[TextContent(text=_timeout_tool_message(timeout))],
-                is_error=True,
-            )
-        except Exception as exc:
-            if _is_timeout_error(exc):
+            try:
+                result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
+            except TimeoutError:
                 return AgentToolResult(
                     content=[TextContent(text=_timeout_tool_message(timeout))],
                     is_error=True,
                 )
-            raise
+            except Exception as exc:
+                if _is_timeout_error(exc):
+                    return AgentToolResult(
+                        content=[TextContent(text=_timeout_tool_message(timeout))],
+                        is_error=True,
+                    )
+                raise
 
-        if _is_timeout_result(result.output, result.exit_code):
+            if _is_timeout_result(result.output, result.exit_code):
+                return AgentToolResult(
+                    content=[TextContent(text=_timeout_tool_message(timeout))],
+                    is_error=True,
+                )
+            if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
+                _record_executed(workspace_id, conversation_id, args.command)
+            output = result.output
+            if result.exit_code is not None and result.exit_code != 0:
+                output += f"\n[exit code: {result.exit_code}]"
+            if len(output) > EXECUTE_RESULT_SPILL_CHARS:
+                safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", tool_call_id)[:80] or "tool"
+                spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{safe_id}.log"
+                try:
+                    await sandbox.upload([(spill_path, output.encode())])
+                    output = (
+                        output[:EXECUTE_RESULT_SPILL_CHARS]
+                        + f"\n\n[truncated] full output written to {spill_path}"
+                    )
+                except Exception:
+                    logger.exception("execute spill upload failed")
+                    output = output[:EXECUTE_RESULT_SPILL_CHARS] + "\n\n[truncated]"
             return AgentToolResult(
-                content=[TextContent(text=_timeout_tool_message(timeout))],
-                is_error=True,
+                content=[TextContent(text=output)],
+                details={"status": "exited"},
             )
-        if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
-            _record_executed(workspace_id, conversation_id, args.command)
-        output = result.output
-        if result.exit_code is not None and result.exit_code != 0:
-            output += f"\n[exit code: {result.exit_code}]"
-        if len(output) > EXECUTE_RESULT_SPILL_CHARS:
-            spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{tool_call_id}.log"
-            await sandbox.upload([(spill_path, output.encode())])
-            output = (
-                output[:EXECUTE_RESULT_SPILL_CHARS]
-                + f"\n\n[truncated] full output written to {spill_path}"
-            )
-        return AgentToolResult(
-            content=[TextContent(text=output)],
-            details={"status": "exited"},
-        )
+        finally:
+            await _drain_updates()
 
     return AgentTool(
         name="execute",

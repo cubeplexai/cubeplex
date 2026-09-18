@@ -339,13 +339,83 @@ async def test_execute_tool_streams_on_update_while_running() -> None:
         _ExecuteArgs(command="echo hello world", description="Echo greeting"),
         on_update=updates.append,
     )
-    assert len(updates) >= 2
+    assert updates
     assert all(
         isinstance(u.details, dict) and u.details.get("status") == "running" for u in updates
     )
     assert isinstance(result.details, dict)
     assert result.details.get("status") == "exited"
     assert "hello world" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_awaits_async_on_update() -> None:
+    """CubeLoop's on_update wraps async emit_event; dropping the coro hides live output."""
+    sandbox = _make_sandbox()
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk("hello")
+        result = MagicMock()
+        result.output = "hello"
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    seen: list[str] = []
+
+    async def _on_update(payload: AgentToolResult) -> None:
+        await asyncio.sleep(0)
+        seen.append(_text(payload))
+
+    tool = _make_execute_tool(sandbox)
+    await tool.execute(
+        "tc-async",
+        _ExecuteArgs(command="echo hello", description="Echo greeting"),
+        on_update=_on_update,
+    )
+    assert seen == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_live_update_is_capped() -> None:
+    sandbox = _make_sandbox()
+    huge = "x" * 30_000
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk(huge)
+        result = MagicMock()
+        result.output = huge
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    sandbox.upload = AsyncMock()
+    updates: list[AgentToolResult] = []
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-cap",
+        _ExecuteArgs(command="cat big.log", description="Dump a large log"),
+        on_update=updates.append,
+    )
+    assert updates
+    assert all(len(_text(u)) <= 20_000 for u in updates)
+    assert "[truncated]" in _text(result)
 
 
 @pytest.mark.asyncio
