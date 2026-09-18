@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
@@ -11,14 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.models.sandbox_command import (
     SandboxCommand,
-    SandboxCommandNoticeState,
     SandboxCommandStatus,
 )
 from cubeplex.repositories.sandbox_command import claim_expired_inflight
 from cubeplex.sandbox.base import ProcessHandle, Sandbox
 
 COMMAND_LEASE_SECONDS = 15
-COORDINATOR_OWNER_ID = "command-coordinator"
+COORDINATOR_OWNER_ID = f"command-coordinator:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 GetSandbox = Callable[[SandboxCommand], Awaitable[Sandbox | None]]
 
 
@@ -173,7 +174,18 @@ async def _reconcile_row(
     handle = ProcessHandle(command_id=row.id, provider_ref=row.provider_ref)
     snap = await sandbox.poll(handle)
     if snap.status == "running":
-        return False
+        # Expired lease means the owning worker is gone. Plan 2 commands are
+        # run-scoped: interrupt instead of leaving the process running.
+        return await _terminalize(
+            session,
+            row,
+            status=SandboxCommandStatus.killed.value,
+            exit_code=None,
+            now=now,
+            sandbox=sandbox,
+            interrupt=True,
+            output=snap.new_output,
+        )
     status = (
         SandboxCommandStatus.killed.value
         if snap.status == "killed"
@@ -209,13 +221,8 @@ async def _terminalize(
             logger.exception("interrupt failed for sandbox command {}", row.id)
     if output and sandbox is not None and row.log_path:
         await _append_log(sandbox, row.log_path, output)
+    # Live on_run_end injects notices. Crash recovery has no run to inject into.
     notice = row.notice_state
-    if (
-        row.notify_on_complete
-        and status in (SandboxCommandStatus.exited.value, SandboxCommandStatus.killed.value)
-        and notice == SandboxCommandNoticeState.none.value
-    ):
-        notice = SandboxCommandNoticeState.pending.value
     row.status = status
     row.exit_code = exit_code
     row.finished_at = now

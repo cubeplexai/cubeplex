@@ -391,25 +391,44 @@ def _make_execute_tool(
                                 is_error=True,
                             )
                         logger.exception("sandbox command reserve failed")
+                        return AgentToolResult(
+                            content=[TextContent(text="failed to reserve background command")],
+                            is_error=True,
+                        )
                 if not reserved and len(live_commands) >= MAX_LIVE_BACKGROUND_COMMANDS:
                     return AgentToolResult(
                         content=[TextContent(text="at most 8 running commands per sandbox")],
                         is_error=True,
                     )
+                persist_error: BaseException | None = None
+
+                async def _on_started(ref: str) -> None:
+                    nonlocal persist_error
+                    if persist_running is None:
+                        return
+                    try:
+                        await persist_running(command_id, ref)
+                    except Exception as exc:
+                        persist_error = exc
+                        logger.exception("sandbox command mark_running failed")
+
                 try:
-                    handle = await sandbox.start(args.command)
+                    handle = await sandbox.start(args.command, on_started=_on_started)
                 except Exception:
                     if reserved and persist_killed is not None:
                         await persist_killed(command_id)
                     raise
                 handle.command_id = command_id
+                if persist_error is not None:
+                    await sandbox.kill(handle)
+                    if persist_killed is not None:
+                        await persist_killed(command_id)
+                    return AgentToolResult(
+                        content=[TextContent(text="failed to persist background command")],
+                        is_error=True,
+                    )
                 live_commands[command_id] = (handle, args.notify_on_complete)
             await _write_sandbox_log(sandbox, log_path, b"")
-            if persist_running is not None:
-                try:
-                    await persist_running(command_id, handle.provider_ref)
-                except Exception:
-                    logger.exception("sandbox command mark_running failed")
             notice = (
                 f"Command running in background as {command_id}."
                 if args.notify_on_complete
@@ -564,14 +583,23 @@ def _make_kill_execute_tool(
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
         async with lock:
-            entry = live.pop(args.command_id, None)
+            entry = live.get(args.command_id)
         if entry is None:
             return AgentToolResult(
                 content=[TextContent(text=f"command not found: {args.command_id}")],
                 is_error=True,
             )
         handle, _notify = entry
-        await sandbox.kill(handle)
+        try:
+            await sandbox.kill(handle)
+        except Exception:
+            logger.exception("kill_execute failed for {}", args.command_id)
+            return AgentToolResult(
+                content=[TextContent(text=f"failed to kill {args.command_id}")],
+                is_error=True,
+            )
+        async with lock:
+            live.pop(args.command_id, None)
         if persist_killed is not None:
             try:
                 await persist_killed(args.command_id)
@@ -1179,6 +1207,7 @@ class SandboxMiddleware(Middleware):
                     status=snap.status,
                     exit_code=snap.exit_code,
                     notify=True,
+                    delivered=True,
                 )
                 notices.append(
                     UserMessage(
@@ -1270,14 +1299,16 @@ class SandboxMiddleware(Middleware):
         status: str,
         exit_code: int | None,
         notify: bool,
+        delivered: bool = False,
     ) -> None:
         from cubeplex.models.sandbox_command import SandboxCommandNoticeState
 
-        notice = (
-            SandboxCommandNoticeState.pending.value
-            if notify
-            else SandboxCommandNoticeState.none.value
-        )
+        if delivered:
+            notice = SandboxCommandNoticeState.delivered.value
+        elif notify:
+            notice = SandboxCommandNoticeState.pending.value
+        else:
+            notice = SandboxCommandNoticeState.none.value
         async with self._command_repo_ctx() as repo:
             if repo is None:
                 return

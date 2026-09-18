@@ -463,6 +463,49 @@ async def test_execute_background_cap_is_atomic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_background_reserve_failure_does_not_start() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock()
+
+    async def _boom(**kwargs: Any) -> bool:
+        del kwargs
+        raise RuntimeError("db down")
+
+    tool = _make_execute_tool(sandbox, persist_reserve=_boom)
+    result = await tool.execute(
+        "tc-fail",
+        _ExecuteArgs(command="sleep 1", description="bg", background=True),
+    )
+    assert result.is_error is True
+    sandbox.start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_kill_execute_keeps_handle_if_kill_fails() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.workdir = "/workspace"
+    sandbox.start = AsyncMock(return_value=ProcessHandle("", "p1"))
+    sandbox.kill = AsyncMock(side_effect=RuntimeError("interrupt failed"))
+    live: dict[str, tuple[Any, bool]] = {}
+    execute = _make_execute_tool(sandbox, live=live)
+    started = await execute.execute(
+        "tc-kf",
+        _ExecuteArgs(command="sleep 9", description="Sleep", background=True),
+    )
+    cid = started.details["command_id"]  # type: ignore[index]
+    from cubeplex.middleware.sandbox import _KillExecuteArgs, _make_kill_execute_tool
+
+    killer = _make_kill_execute_tool(sandbox, live)
+    killed = await killer.execute("tc-kill", _KillExecuteArgs(command_id=str(cid)))
+    assert killed.is_error is True
+    assert cid in live
+
+
+@pytest.mark.asyncio
 async def test_background_log_path_is_written(tmp_path: Any) -> None:
     from cubeplex.sandbox.local import LocalSandbox
 
