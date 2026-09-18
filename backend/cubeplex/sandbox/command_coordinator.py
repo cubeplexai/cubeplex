@@ -215,10 +215,16 @@ async def _terminalize(
     output: str = "",
 ) -> bool:
     if interrupt and sandbox is not None and row.provider_ref:
+        handle = ProcessHandle(command_id=row.id, provider_ref=row.provider_ref)
         try:
-            await sandbox.kill(ProcessHandle(command_id=row.id, provider_ref=row.provider_ref))
+            await sandbox.kill(handle)
+            snap = await sandbox.poll(handle)
         except Exception:
             logger.exception("interrupt failed for sandbox command {}", row.id)
+            return False
+        if snap.status == "running":
+            logger.warning("interrupt did not stop sandbox command {}", row.id)
+            return False
     if output and sandbox is not None and row.log_path:
         await _append_log(sandbox, row.log_path, output)
     # Live on_run_end injects notices. Crash recovery has no run to inject into.
