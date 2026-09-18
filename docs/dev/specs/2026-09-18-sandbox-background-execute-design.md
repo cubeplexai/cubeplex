@@ -82,11 +82,14 @@ does not need a new SQL join.
 Prompt-cache: new parameters and tools change the stable prefix once per
 phase that adds them, not per command. Do not toggle tools mid-conversation.
 
-Cap concurrent `starting`+`running` rows per sandbox at 8. Insert the
-row **before** provider `start()`. Over the cap, the tool errors and no
-process is spawned. A reservation whose `start()` never returns is
-reaped by the coordinator (kill if `provider_ref` is set, else mark
-`killed`).
+Cap concurrent `starting`+`running` rows per sandbox at 8. In **one
+transaction**, lock the `user_sandboxes` row, count those statuses, and
+insert the reservation (or fail). A count-then-insert without that lock
+is not the cap. Persist `provider_ref` from OpenSandbox `on_init` as
+soon as the execution id exists, under the reservation fence — do not
+wait for `start()` to return. If `start()` is interrupted with no id,
+the coordinator cannot target-kill; do not release the slot until the
+sandbox itself is restarted/killed (Unit: lifecycle reconcile).
 
 ### Driver contract
 
@@ -142,7 +145,7 @@ adds columns but does not replace the table.
 | `provider`, `provider_ref` | 2 | Driver-private handle; null until `start()` returns |
 | `status` | 2 | `starting` / `running` / `exited` / `killed` |
 | `notify_on_complete` | 2 | Wake the agent on exit |
-| `notice_state` | 2 | `none` / `pending` / `delivered` (completion claim) |
+| `notice_state` | 2 | `none` / `pending` / `delivered`. Coordinator sets `pending` on exit. Delivered is **not** written from `on_run_end`. |
 | `log_path` | 2 | Sandbox file with full output |
 | `log_cursor` | 2 | Driver-private poll cursor; not in tool/SSE schema |
 | `exit_code`, `finished_at` | 2 | Set when not `running`/`starting` |
@@ -256,14 +259,20 @@ existing `on_run_end` (inject messages and continue, before
    notify jobs or `notice_state=pending` completions, skip other
    `on_run_end` hooks (Goal must not see a finished run) and wait on
    the coordinator.
-3. Coordinator exit sets `notice_state=pending`. The hook CAS-claims
-   one pending notice, injects a user message, marks `delivered` only
-   after checkpoint, and verifies Redis still owns the `run_id` before
-   inject. A command that already exited before the first hook still
-   delivers (do not require `status=running`).
-4. When nothing remains, run the rest of the `on_run_end` chain.
-   CubeLoop emits `AgentEndEvent`. **Then** the host kills leftover
-   `lifetime=run` commands for this `run_id` and emits `DoneEvent`.
+3. Coordinator exit sets `notice_state=pending` (process-owner CAS).
+   `on_run_end` injects a user message tagged
+   `metadata.notice_id = command_id` if pending and that id is not
+   already in the checkpoint. It does **not** mark `delivered` — the
+   hook returns before CubeLoop emits/checkpoints the message.
+   `run_manager` marks `delivered` on the durable MessageEnd /
+   checkpoint path for that `notice_id` (same idea as steering
+   `steer_id`). Crash before ack: if history already has `notice_id`,
+   mark delivered; else leave pending and inject once more. Notice
+   delivery writes do not use the process `owner_id`.
+4. When no `running` notify jobs and no `pending` notices remain, run
+   the rest of the `on_run_end` chain. CubeLoop emits `AgentEndEvent`.
+   **Then** the host kills leftover `lifetime=run` `starting`+`running`
+   commands for this `run_id` and emits `DoneEvent`.
 
 While `on_run_end` is waiting, `_InFlightToolHeartbeat` is at zero
 (background `execute` already emitted `ToolExecutionEndEvent`). The host

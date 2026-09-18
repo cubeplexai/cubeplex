@@ -111,9 +111,12 @@ in tool/SSE), `exit_code`, `finished_at`, `owner_id`, `owner_until`.
 
 Indexes: `(user_sandbox_id, status)`, `(run_id, status)`.
 Do not store stdout. Cap: 8 `starting`+`running` rows per
-`user_sandbox_id`. Insert/reserve **before** provider `start`; the
-insert is the cap. Crash: coordinator reaps `starting` with expired
-lease (kill if `provider_ref` set).
+`user_sandbox_id`. **One transaction:** `SELECT … FOR UPDATE` the
+`user_sandboxes` row, count, insert reservation (or fail). Persist
+`provider_ref` in `on_init` as soon as the execution id exists, CAS
+on the tool’s `owner_id`. Crash with `provider_ref` null: do not
+treat the slot as free if the sandbox is still live — only
+sandbox restart/kill clears it.
 
 Lookups for kill: `(org_id, workspace_id, conversation_id, id)` plus
 current sandbox id; miss → 404 semantics at the tool (error result,
@@ -126,6 +129,8 @@ now()` when taking over; set a new `owner_id`.
 - Insert / list running by `run_id`.
 - CAS claim: expired/unowned row takes a new `owner_id`; stale holder
   cannot update after takeover.
+- Concurrent reservations at the cap: two parallel inserts against 7
+  live rows → one succeeds, one errors; never 9.
 
 ---
 
@@ -149,18 +154,26 @@ now()` when taking over; set a new `owner_id`.
   exit set status, exit_code, finished_at, `notice_state=pending` if
   `notify_on_complete`; append log file; renew `in_use_until` while
   `running`. Writes CAS on `owner_id`.
-- `kill_run(run_id)` — kill provider process + mark `killed` for every
-  `running` row with that `run_id`.
+- `kill_run(run_id)` — claim and mark `killed` every `starting` **and**
+  `running` row for that `run_id`; interrupt if `provider_ref` is set.
+  A late `start()` must CAS `starting → running`; on CAS failure,
+  interrupt the returned handle immediately.
 
 **Core logic**
 
-The run worker is not the only poller. After worker death, the
-coordinator still polls. Stale recovery CAS-claims `owner_id` +
-`owner_until` so a ghost worker cannot inject. Every poll/status/
-cursor/notice write is conditional on the same `owner_id`. Pause
-reaper stays on `in_use_until` only; coordinator keeps that lease
-fresh. Lease duration must be several coordinator ticks (e.g. 15s
-lease, 1s poll).
+Foreground wait: the **tool** is the fenced owner (`owner_id` =
+run-worker token). It renews `owner_until` for the whole wait and
+CAS-es cursor/status writes. The coordinator **skips** unexpired
+leases it does not own. On foreground completion the tool
+terminalizes/deletes the reservation with that token. On
+auto-background (plan 3) the tool hands `owner_id` to the
+coordinator (or clears it for the next claim). After worker death,
+coordinator takeovers expired leases only.
+
+Stale recovery CAS-claims `owner_id` + `owner_until` so a ghost
+worker cannot inject. Pause reaper stays on `in_use_until` only.
+Lease duration must be several coordinator ticks (e.g. 15s lease,
+1s poll).
 
 **Tests**
 
@@ -239,20 +252,18 @@ param + tool. Do not toggle `kill_execute` per turn.
 - CubePlex wraps `on_run_end` compose (same idea as
   `compose_after_tool_call`): if this run has `running` notify jobs or
   `notice_state=pending` completions, **do not** call other
-  `on_run_end` hooks yet (Goal middleware must not treat the run as
-  finished). Wait on coordinator row updates (host heartbeat). CAS
-  `notice_state` `none`/`pending` → claimed, inject one user message,
-  mark `delivered` only after that message is checkpointed. Verify
-  Redis still owns this `run_id` immediately before inject.
-- If a notify command already `exited`/`killed` with
-  `notice_state=pending` when the hook first runs, inject that notice
-  (do not skip just because status is not `running`).
-- If none remain, run the rest of the `on_run_end` chain and return
-  empty from sandbox so CubeLoop emits `AgentEndEvent`.
-- HITL suspend: do not wait; return empty and let the existing pause
-  path run. Leave `notice_state=pending`; deliver on HITL resume
-  (steer into the resumed session). Do not steer into a finished
-  session.
+  `on_run_end` hooks yet. Wait on coordinator row updates (host
+  heartbeat). Verify Redis still owns this `run_id`, then inject a
+  user message with `metadata.notice_id = command_id` for each
+  pending notice not already in the checkpoint. The hook **must not**
+  write `delivered` — CubeLoop checkpoints the inject only after the
+  hook returns.
+- `run_manager` (MessageEnd / checkpoint path, like `steer_id`) sets
+  `notice_state=delivered` when that `notice_id` is durably committed.
+  Crash: pending + notice already in history → mark delivered, do not
+  re-inject.
+- HITL suspend: do not wait; return empty; leave `pending`; deliver
+  on resume. Do not steer into a finished session.
 
 Heartbeat: bump `last_event_at` / active-run TTL on an interval while
 waiting, even though `_InFlightToolHeartbeat` is zero. Stop when the
@@ -264,6 +275,7 @@ Never “hold CubePlex DoneEvent after `prompt()` returns” to fake another
 turn. Completion during HITL pause is `notice_state=pending` on the
 row, not injected into a dead loop. Do not block inside cubeloop’s
 default concatenated compose, or Goal’s `on_run_end` waits 10 minutes.
+Do not mark `delivered` inside the hook.
 
 **Tests**
 

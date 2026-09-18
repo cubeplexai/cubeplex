@@ -30,10 +30,11 @@ Depends on plan 2.
 
 - `backend/cubeplex/middleware/sandbox.py` — foreground wait cap 15s
   unless first token is `sleep`. The cap slot is reserved (`starting`)
-  **before** `start()`, same as plan 2. Still-running at 15s →
-  `running` + return `background=true` details. Exit inside 15s →
-  normal foreground result; delete or finalize the reservation so it
-  does not count toward the cap.
+  **before** `start()`, same as plan 2. The tool keeps the fenced
+  lease during the 15s wait (plan 2). Still-running at 15s →
+  `running`, hand `owner_id` to the coordinator, return
+  `background=true` details. Exit inside 15s → normal foreground
+  result; the tool CAS-deletes/finalizes the reservation.
 - `backend/cubeplex/prompts/sandbox.py` — long commands may omit
   `background=true`; do not `sleep` to wait.
 
@@ -166,8 +167,14 @@ into the live run).
 
 **Core logic**
 
-Atomic claim of the outbox row before steer/`start_run`. HITL pause
-blocks a new run. Do not bypass membership with a system actor.
+Outbox claim has `owner_id` + expiry (same fencing as commands).
+Pre-generate the intended `run_id` / steer id, persist it on the
+outbox row **before** `start_run`/steer, and pass that stable id into
+admission. Expired `claimed` rows reconcile against Redis run meta,
+steering rows, and checkpoint history before retry — do not blindly
+reset to `pending` (that double-fires after a successful
+`start_run`). HITL pause blocks a new run. Do not bypass membership
+with a system actor.
 
 **Tests** (`tests/e2e/`)
 
@@ -214,8 +221,9 @@ POST .../conversations/{id}/sandbox-commands/{command_id}/kill
 
 - `backend/cubeplex/sandbox/manager.py` — `_kill_record`,
   `pause_idle` (pause ≡ kill for processes), user restart/delete:
-  mark associated `running` rows `killed`, clear `provider_ref`,
-  enqueue an exit wake if one is still due.
+  mark associated `starting` **and** `running` rows `killed`, clear
+  `provider_ref`, enqueue an exit wake if one is still due. Late
+  `start()` must CAS `starting → running` and interrupt on failure.
 
 **Core logic**
 
