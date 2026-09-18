@@ -98,10 +98,13 @@ On `Sandbox` (`backend/cubeplex/sandbox/base.py`), next to
 
 - `supports_background() -> bool` — default `False`. Phase 1 may stream
   without this. Phase 2 requires it for `background=true`.
-- `start(command, *, timeout=None, envs=None, as_root=False, on_chunk=None) -> ProcessHandle`
-  — returns without waiting for exit. `ProcessHandle` has a CubePlex
-  `command_id` (assigned by CubePlex, not the driver) and a driver-private
-  `provider_ref`.
+- `start(command, *, timeout=None, envs=None, as_root=False, on_chunk=None, on_started=None) -> ProcessHandle`
+  — returns without waiting for exit. `on_started(provider_ref)` is
+  awaited as soon as the driver knows the provider id (OpenSandbox
+  `on_init`; LocalSandbox after spawn), **before** `start()` returns.
+  The tool’s callback CAS-persists `provider_ref` under the reservation
+  fence. Once `on_started` has been entered, that persist must finish
+  even if the tool call is cancelled. Drivers have no repository.
 - `poll(handle) -> ProcessSnapshot` — `running` or `exited` / `killed`,
   optional `exit_code`, and any new output since the last poll
   (OpenSandbox: `get_background_command_logs` + stored `log_cursor`).
@@ -154,6 +157,11 @@ adds columns but does not replace the table.
 | `kind` | 3 | `execute` \| `monitor` |
 | `lifetime` | 3 | `run` \| `conversation` |
 | `notify_run_id` | 3 | Follow-up run started on exit, if any |
+| `wake_count` | 3 | Delivered line-wakes (monitor) |
+| `wake_drops` | 3 | Consecutive dropped line-wakes |
+| `line_wakes_disabled` | 3 | Promoted to exit-only |
+| `flood_started_at` | 3 | Start of continuous 15s-floor violations |
+| `monitor_deadline_at` | 3 | Non-persistent monitor kill time |
 
 Do not store stdout in Postgres. Indexes: `(user_sandbox_id, status)`,
 `(run_id, status)`, and in phase 3 `(conversation_id, status)`.
@@ -261,8 +269,10 @@ existing `on_run_end` (inject messages and continue, before
    the coordinator.
 3. Coordinator exit sets `notice_state=pending` (process-owner CAS).
    `on_run_end` injects a user message tagged
-   `metadata.notice_id = command_id` if pending and that id is not
-   already in the checkpoint. It does **not** mark `delivered` — the
+   `metadata.notice_id` = a unique delivery id (command completion:
+   `command_id` is unique enough; monitor line/exit: the outbox wake
+   id). `command_id` may be a separate metadata field for display.
+   Inject only if that `notice_id` is not already in the checkpoint. It does **not** mark `delivered` — the
    hook returns before CubeLoop emits/checkpoints the message.
    `run_manager` marks `delivered` on the durable MessageEnd /
    checkpoint path for that `notice_id` (same idea as steering

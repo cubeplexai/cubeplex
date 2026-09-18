@@ -56,14 +56,19 @@ class ProcessSnapshot:
     new_output: str          # since last poll
 
 supports_background() -> bool  # default False
-async start(command, *, timeout=None, envs=None, as_root=False, on_chunk=None) -> ProcessHandle
+async start(command, *, timeout=None, envs=None, as_root=False,
+            on_chunk=None, on_started=None) -> ProcessHandle
 async poll(handle) -> ProcessSnapshot
 async kill(handle) -> None
 ```
 
 `start().command_id` may be blank; the tool writes the `scmd-` id on the
 handle after insert. Drivers must not put `provider_ref` in `on_chunk`
-text.
+text. `on_started(provider_ref)` is awaited inside `start()` as soon as
+the provider id exists (OpenSandbox `on_init`, LocalSandbox after
+`create_subprocess`). The tool callback CAS-writes `provider_ref`.
+Once invoked, that write completes even if the outer tool is
+cancelled. Drivers do not import the repository.
 
 Foreground wait lives in the tool (poll until exit / CubePlex kill
 deadline), not in the driver. Agent-facing `start()` does **not** pass a
@@ -254,8 +259,10 @@ param + tool. Do not toggle `kill_execute` per turn.
   `notice_state=pending` completions, **do not** call other
   `on_run_end` hooks yet. Wait on coordinator row updates (host
   heartbeat). Verify Redis still owns this `run_id`, then inject a
-  user message with `metadata.notice_id = command_id` for each
-  pending notice not already in the checkpoint. The hook **must not**
+  user message with `metadata.notice_id` = unique delivery id
+  (`command_id` for a single completion; outbox wake id for monitor
+  lines in plan 3) and `metadata.command_id` for display. Skip if
+  that `notice_id` is already in the checkpoint. The hook **must not**
   write `delivered` — CubeLoop checkpoints the inject only after the
   hook returns.
 - `run_manager` (MessageEnd / checkpoint path, like `steer_id`) sets

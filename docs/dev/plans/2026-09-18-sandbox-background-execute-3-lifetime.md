@@ -71,8 +71,11 @@ First token `sleep` → no auto-bg; wait as today until kill timeout.
 **Files**
 
 - Model + Alembic autogenerate: `kind` (`execute` | `monitor`),
-  `lifetime` (`run` | `conversation`), `notify_run_id`.
-- Index `(conversation_id, status)`.
+  `lifetime` (`run` | `conversation`), `notify_run_id`, plus monitor
+  counters: `wake_count`, `wake_drops`, `line_wakes_disabled`,
+  `flood_started_at`, `monitor_deadline_at`.
+- Index `(conversation_id, status)`. Update counters in the same CAS
+  as `log_cursor` / outbox insert. Takeover continues those values.
 - `on_run_end` / run-end kill: only `lifetime=run`.
 - Stale recovery: same. Conversation rows stay; coordinator keeps
   the lease.
@@ -135,6 +138,8 @@ not a second CubeLoop tool result.
 - One line per second for 20s → not 20 wakes; after promotion, only
   exit remains (or kill if flood 30s — use a faster fake clock in unit
   tests).
+- Coordinator takeover mid-monitor continues `wake_count` /
+  `wake_drops` / deadline; does not reset the 8-wake cap.
 
 ---
 
@@ -161,9 +166,10 @@ not a second CubeLoop tool result.
 
 **Interfaces**
 
-Wake payload: command id, description, reason (`line` | `exit`),
-text tail. Injected as the follow-up run’s user message (or a steer
-into the live run).
+Wake payload: unique `wake_id`, command id, description, reason
+(`line` | `exit`), text tail. Injected message metadata uses
+`notice_id = wake_id` (not `command_id` — a monitor has many wakes).
+Reconcile that exact outbox row.
 
 **Core logic**
 
