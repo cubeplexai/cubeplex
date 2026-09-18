@@ -76,8 +76,11 @@ call. Prefer this over `sed`/`awk`.
 - Pipes: `cat file.txt | grep pattern | wc -l`
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
-- Do not background with `&`. Output streams to the chat while the command \
-runs. For installs, downloads, or builds, pass `timeout_seconds` (max 1800).
+- Do not background with `&`, nohup, or disown. For long jobs pass \
+`background=true`; you will be told when they finish. Do not sleep or poll. \
+Set `notify_on_complete=false` only for servers (they still die when the \
+run ends). Use `kill_execute` to stop a background command. Output streams \
+to the chat while a foreground command runs.
 
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`

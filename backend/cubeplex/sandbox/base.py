@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
@@ -34,6 +34,23 @@ class ExecuteResult:
 
     output: str
     exit_code: int | None = None
+
+
+@dataclass
+class ProcessHandle:
+    """CubePlex-owned command id plus a driver-private provider handle."""
+
+    command_id: str
+    provider_ref: str
+
+
+@dataclass
+class ProcessSnapshot:
+    """Incremental status from ``Sandbox.poll``."""
+
+    status: Literal["running", "exited", "killed"]
+    exit_code: int | None = None
+    new_output: str = ""
 
 
 @dataclass
@@ -107,6 +124,31 @@ class Sandbox(ABC):
         support it (OpenSandbox) override this.
         """
         return  # no-op default; OpenSandbox overrides
+
+    def supports_background(self) -> bool:
+        """Whether ``start`` / ``poll`` / ``kill`` are implemented."""
+        return False
+
+    async def start(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_started: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> ProcessHandle:
+        del command, timeout, envs, as_root, on_chunk, on_started
+        raise SandboxError("this sandbox driver does not support background commands")
+
+    async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        del handle
+        raise SandboxError("this sandbox driver does not support background commands")
+
+    async def kill(self, handle: ProcessHandle) -> None:
+        del handle
+        raise SandboxError("this sandbox driver does not support background commands")
 
     @abstractmethod
     async def upload(self, files: list[tuple[str, bytes]]) -> None:

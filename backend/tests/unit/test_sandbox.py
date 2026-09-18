@@ -34,7 +34,7 @@ from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 # Helpers
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TOOL_NAMES = {"execute", "write", "edit", "read"}
+_EXPECTED_TOOL_NAMES = {"execute", "kill_execute", "write", "edit", "read"}
 
 
 def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
@@ -349,6 +349,79 @@ async def test_execute_tool_streams_on_update_while_running() -> None:
     assert isinstance(result.details, dict)
     assert result.details.get("status") == "exited"
     assert "hello world" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_background_rejects_shell_ampersand() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-amp",
+        _ExecuteArgs(command="sleep 5 &", description="Bad background", background=True),
+    )
+    assert result.is_error is True
+    assert "background=true" in _text(result)
+    sandbox.start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_background_errors_when_driver_cannot() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=False)
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-nobg",
+        _ExecuteArgs(command="sleep 5", description="Sleep", background=True),
+    )
+    assert result.is_error is True
+    sandbox.start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_background_returns_command_id_before_exit() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.workdir = "/workspace"
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-bg",
+        _ExecuteArgs(command="sleep 30", description="Sleep in background", background=True),
+    )
+    assert result.is_error is not True
+    assert isinstance(result.details, dict)
+    cid = result.details.get("command_id")
+    assert isinstance(cid, str) and cid.startswith("scmd-")
+    assert result.details.get("status") == "running"
+    sandbox.start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kill_execute_stops_live_handle() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.workdir = "/workspace"
+    sandbox.start = AsyncMock(return_value=ProcessHandle("", "p1"))
+    sandbox.kill = AsyncMock()
+    live: dict[str, ProcessHandle] = {}
+    execute = _make_execute_tool(sandbox, live=live)
+    started = await execute.execute(
+        "tc-k",
+        _ExecuteArgs(command="sleep 9", description="Sleep", background=True),
+    )
+    cid = started.details["command_id"]  # type: ignore[index]
+    from cubeplex.middleware.sandbox import _KillExecuteArgs, _make_kill_execute_tool
+
+    killer = _make_kill_execute_tool(sandbox, live)
+    killed = await killer.execute("tc-kill", _KillExecuteArgs(command_id=str(cid)))
+    sandbox.kill.assert_awaited_once()
+    assert "killed" in _text(killed)
+    assert cid not in live
 
 
 @pytest.mark.asyncio
@@ -1003,6 +1076,6 @@ def test_constructor_without_optional_ids() -> None:
     """SandboxMiddleware with only sandbox= should work fine."""
     sandbox = _make_sandbox()
     mw = SandboxMiddleware(sandbox=sandbox)
-    assert len(mw.tools) == 4
+    assert len(mw.tools) == 5
     names = {t.name for t in mw.tools}
     assert names == _EXPECTED_TOOL_NAMES
