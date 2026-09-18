@@ -221,7 +221,7 @@ class OpenSandbox(Sandbox):
         with _as_sandbox_error():
             status = await self._sandbox.commands.get_command_status(ref)
             logs = await self._sandbox.commands.get_background_command_logs(ref, cursor=cursor)
-        new_output = "\n".join([*(m.text for m in logs.stdout), *(m.text for m in logs.stderr)])
+        new_output = getattr(logs, "content", "") or ""
         next_cursor = getattr(logs, "cursor", None)
         if next_cursor is not None:
             self._log_cursors[ref] = next_cursor
