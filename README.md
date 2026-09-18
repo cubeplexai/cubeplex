@@ -115,9 +115,9 @@ CubePlex's Agent runtime is built on [CubeLoop](https://github.com/cubeplexai/cu
 
 ## How CubePlex compares
 
-- [**CubePlex vs DeerFlow**](https://cubeplex.ai/blog/cubeplex-vs-deerflow-workspace-and-harness) — personal Agent environments versus team-owned Workspace Agents.
+- [**CubePlex vs DeerFlow**](https://cubeplex.ai/blog/cubeplex-vs-deerflow-workspace-and-harness) — team-owned Workspace Agents versus personal Agent environments.
 - [**CubePlex vs Dify**](https://cubeplex.ai/blog/cubeplex-vs-dify-team-agent-workspace) — long-lived Agents versus scenario-specific Apps.
-- [**QM and CubePlex**](https://cubeplex.ai/blog/qm-cubeplex-team-agent-collaboration) — Agent-computer scopes versus a long-lived team Agent with entry-point-specific execution contexts.
+- [**CubePlex vs QM**](https://cubeplex.ai/blog/qm-cubeplex-team-agent-collaboration) — a long-lived team Agent with entry-point-specific execution contexts versus Agent-computer scopes.
 
 
 ## Get started

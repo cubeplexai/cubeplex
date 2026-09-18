@@ -118,9 +118,9 @@ CubePlex 的 Agent 运行时基于 [CubeLoop](https://github.com/cubeplexai/cube
 
 ## CubePlex 与其他产品的区别
 
-- [**CubePlex vs DeerFlow**](https://cubeplex.ai/blog/cubeplex-vs-deerflow-workspace-and-harness) — 个人 Agent 环境与团队共同拥有的工作空间 Agent 的区别。
+- [**CubePlex vs DeerFlow**](https://cubeplex.ai/blog/cubeplex-vs-deerflow-workspace-and-harness) — 团队共同拥有的工作空间 Agent 与个人 Agent 环境的区别。
 - [**CubePlex vs Dify**](https://cubeplex.ai/blog/cubeplex-vs-dify-team-agent-workspace) — 长期运行的 Agent 与面向特定场景的应用之间的区别。
-- [**QM 与 CubePlex**](https://cubeplex.ai/blog/qm-cubeplex-team-agent-collaboration) — 以 Agent Computer / Scope 为边界，与长期团队 Agent 按入口隔离执行上下文的区别。
+- [**CubePlex vs QM**](https://cubeplex.ai/blog/qm-cubeplex-team-agent-collaboration) — 长期团队 Agent 按入口隔离执行上下文，与以 Agent Computer / Scope 为边界的区别。
 
 
 ## 快速开始
