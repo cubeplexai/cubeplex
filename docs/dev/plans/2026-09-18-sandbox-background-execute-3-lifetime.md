@@ -29,18 +29,22 @@ Depends on plan 2.
 **Files**
 
 - `backend/cubeplex/middleware/sandbox.py` — foreground wait cap 15s
-  unless first token is `sleep`. Still-running → insert/update row,
-  return the same `details` as `background=true`. Exit inside 15s →
-  normal foreground result, no leftover row.
+  unless first token is `sleep`. The cap slot is reserved (`starting`)
+  **before** `start()`, same as plan 2. Still-running at 15s →
+  `running` + return `background=true` details. Exit inside 15s →
+  normal foreground result; delete or finalize the reservation so it
+  does not count toward the cap.
 - `backend/cubeplex/prompts/sandbox.py` — long commands may omit
   `background=true`; do not `sleep` to wait.
 
 **Interfaces**
 
 Fixed 15s block budget, not model-settable. `timeout_seconds` remains
-the **kill** deadline only while the wait is still foreground. After
-auto-background, kill deadline no longer applies; lifetime is `run`
-(notify true) per the spec mapping.
+the **CubePlex** kill deadline only while the wait is still foreground
+(`poll` + `kill`). `start()` still has no provider timeout (plan 2),
+so auto-bg does not inherit a 120s OpenSandbox deadline. After
+auto-background, that CubePlex kill deadline no longer applies;
+lifetime is `run` (notify true) per the spec mapping.
 
 Explicit `background=true` + `notify_on_complete=false` still wins
 (conversation lifetime, Unit 2).
@@ -139,10 +143,14 @@ not a second CubeLoop tool result.
 
 - New table or columns for wakes: unique id (command_id + seq or
   `exit`), `state` `pending` | `claimed` | `delivered`.
-- Coordinator delivery:
-  - active run not `paused_hitl` → durable steer (existing
-    `steering_delivery`);
-  - `paused_hitl` → leave `pending`;
+- Coordinator delivery (Redis `running` is not enough to mark
+  delivered):
+  - Steer only after durable steering returns a queued/committed
+    receipt; keep the outbox `pending` until that checkpoint ack.
+    While CubeLoop is blocked in `on_run_end`, `submit_input` may
+    fail — leave the wake `pending`, or let the sandbox `on_run_end`
+    hook consume eligible wakes for this `run_id` directly.
+  - `paused_hitl` → leave `pending`; do not `start_run`.
   - else `start_run` with `started_by_user_id`, same conversation
     (scheduled-task fixed destination). Re-check membership; gone →
     404 / drop. One-active-run conflict → retry, never a second run.
@@ -165,7 +173,8 @@ blocks a new run. Do not bypass membership with a system actor.
 
 - Wake with no active run → one new run, `notify_run_id` set,
   outbox `delivered`.
-- Wake while `running` → steer, no second run.
+- Wake while a run is `running` and steering accepts the claim →
+  steer, no second run; rejected submit leaves outbox `pending`.
 - Wake while `paused_hitl` → outbox stays `pending`.
 - Two coordinators cannot double-deliver the same wake id.
 

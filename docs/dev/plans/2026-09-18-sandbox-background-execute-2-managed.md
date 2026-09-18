@@ -65,16 +65,20 @@ async kill(handle) -> None
 handle after insert. Drivers must not put `provider_ref` in `on_chunk`
 text.
 
-Foreground wait lives in the tool (poll or wait until exit / timeout),
-not in the driver. `timeout` on `start` is the provider kill deadline
-for that process if the driver supports one; the tool still enforces
-120 / 1800 for foreground.
+Foreground wait lives in the tool (poll until exit / CubePlex kill
+deadline), not in the driver. Agent-facing `start()` does **not** pass a
+provider timeout (OpenSandbox would keep it after phase-3 auto-bg).
+Bare `sleep` may pass a provider timeout because it is never
+auto-promoted. The tool still enforces 120 / 1800 by `poll` + `kill`.
 
 **Core logic**
 
-OpenSandbox: `background=True`, stream chunks via handlers during wait.
-There is no promote-foreground API. `supports_background() == False`
-must not spawn `cmd &`.
+OpenSandbox: `background=True`. After `run()` returns, the start SSE is
+done. Further output is `get_background_command_logs` via `poll()`;
+the wait loop forwards `new_output` to `on_chunk` (plan 1 contract
+unchanged). Persist `log_cursor` on the row. There is no
+promote-foreground API. `supports_background() == False` must not
+spawn `cmd &`.
 
 **Tests** (`backend/tests/unit/` against LocalSandbox)
 
@@ -99,22 +103,29 @@ must not spawn `cmd &`.
 `id`, `org_id`, `workspace_id`, `user_sandbox_id`, `conversation_id`,
 `run_id`, `tool_call_id`, `started_by_user_id`, `agent_id` (nullable;
 null = main agent), `command`, `description`, `provider`,
-`provider_ref`, `status` (`running` / `exited` / `killed`),
-`notify_on_complete`, `log_path`, `exit_code`, `finished_at`,
-`owner_until`.
+`provider_ref` (null until `start()` returns), `status`
+(`starting` / `running` / `exited` / `killed`),
+`notify_on_complete`, `notice_state` (`none` / `pending` /
+`delivered`), `log_path`, `log_cursor` (driver-private int/text, not
+in tool/SSE), `exit_code`, `finished_at`, `owner_id`, `owner_until`.
 
 Indexes: `(user_sandbox_id, status)`, `(run_id, status)`.
-Do not store stdout. Cap: 8 `running` rows per `user_sandbox_id`;
-insert fails with a clear error naming the cap.
+Do not store stdout. Cap: 8 `starting`+`running` rows per
+`user_sandbox_id`. Insert/reserve **before** provider `start`; the
+insert is the cap. Crash: coordinator reaps `starting` with expired
+lease (kill if `provider_ref` set).
 
 Lookups for kill: `(org_id, workspace_id, conversation_id, id)` plus
 current sandbox id; miss → 404 semantics at the tool (error result,
-not 403).
+not 403). Claim: `UPDATE … WHERE id=? AND owner_id IS NOT DISTINCT FROM
+? AND owner_until > now()` or `owner_until IS NULL OR owner_until <
+now()` when taking over; set a new `owner_id`.
 
 **Tests** (`tests/e2e/` — opens a session)
 
 - Insert / list running by `run_id`.
-- CAS on `owner_until` (claim only if expired or held by self).
+- CAS claim: expired/unowned row takes a new `owner_id`; stale holder
+  cannot update after takeover.
 
 ---
 
@@ -124,8 +135,8 @@ not 403).
 
 - New `backend/cubeplex/sandbox/command_coordinator.py` (or next to
   `sandbox/cleanup.py`).
-- `backend/cubeplex/sandbox/cleanup.py` / app lifespan — tick the
-  coordinator on the same loop as pause/reap.
+- App lifespan — a **dedicated** command-coordinator loop (default ~1s
+  tick). Do **not** hang it on `sandbox_cleanup_loop` (60s pause/reap).
 - `backend/cubeplex/streams/recovery.py` and stale-run path in
   `run_manager.py` — on stale claim, also claim+kill `lifetime=run`
   rows (phase 2: all rows are run-scoped).
@@ -134,17 +145,22 @@ not 403).
 
 - `claim_due_rows(now) -> list[SandboxCommand]` — `owner_until < now`
   or never owned.
-- `poll_and_update(row)` — driver `poll`; on exit set status, exit_code,
-  finished_at, append log file; renew `in_use_until` while `running`.
+- `poll_and_update(row)` — driver `poll` with stored `log_cursor`; on
+  exit set status, exit_code, finished_at, `notice_state=pending` if
+  `notify_on_complete`; append log file; renew `in_use_until` while
+  `running`. Writes CAS on `owner_id`.
 - `kill_run(run_id)` — kill provider process + mark `killed` for every
   `running` row with that `run_id`.
 
 **Core logic**
 
 The run worker is not the only poller. After worker death, the
-coordinator still polls. Stale recovery CAS-claims `owner_until` so a
-ghost worker cannot inject. Pause reaper stays on `in_use_until` only;
-coordinator is what keeps that lease fresh.
+coordinator still polls. Stale recovery CAS-claims `owner_id` +
+`owner_until` so a ghost worker cannot inject. Every poll/status/
+cursor/notice write is conditional on the same `owner_id`. Pause
+reaper stays on `in_use_until` only; coordinator keeps that lease
+fresh. Lease duration must be several coordinator ticks (e.g. 15s
+lease, 1s poll).
 
 **Tests**
 
@@ -170,13 +186,19 @@ coordinator is what keeps that lease fresh.
 `execute`: existing fields + `background: bool = false` +
 `notify_on_complete: bool = true` (ignored unless background).
 
-Foreground: `start`, wait until exit or `timeout_seconds` (default 120,
-max 1800), stream `on_chunk` → `on_update`, kill on timeout.
+Foreground: reserve row (`starting`, counts toward cap), `start`
+(no provider timeout), wait until exit or `timeout_seconds` (default
+120, max 1800) by polling, forward `new_output` to `on_update`, `kill`
+on CubePlex timeout. If it exits in-wait, mark `exited` and do not
+leave a running row.
 
 Background: if `not supports_background()`, tool error (no `cmd &`).
-Else insert row, `start`, return immediately. `details`:
-`{status: "running", command_id, log_path}`. Text names the id and
-whether a notice will arrive.
+Else reserve row, `start`, set `provider_ref` / `running`, return
+immediately. `details`: `{status: "running", command_id, log_path}`.
+Text names the id and whether a notice will arrive.
+
+If `start()` fails after reserve, mark the row `killed` so the cap
+slot is released.
 
 `kill_execute(command_id: str)` → scoped lookup, `kill`, status
 `killed`.
@@ -214,14 +236,23 @@ param + tool. Do not toggle `kill_execute` per turn.
 
 `on_run_end(ctx) -> list[Message] | None`:
 
-- If any `notify_on_complete` row for this `run_id` is `running`, wait
-  on coordinator updates (with host heartbeat). On exit, return one
-  user message (command id, exit code, tail, log path).
-- If none remain, return empty so CubeLoop emits `AgentEndEvent`.
+- CubePlex wraps `on_run_end` compose (same idea as
+  `compose_after_tool_call`): if this run has `running` notify jobs or
+  `notice_state=pending` completions, **do not** call other
+  `on_run_end` hooks yet (Goal middleware must not treat the run as
+  finished). Wait on coordinator row updates (host heartbeat). CAS
+  `notice_state` `none`/`pending` → claimed, inject one user message,
+  mark `delivered` only after that message is checkpointed. Verify
+  Redis still owns this `run_id` immediately before inject.
+- If a notify command already `exited`/`killed` with
+  `notice_state=pending` when the hook first runs, inject that notice
+  (do not skip just because status is not `running`).
+- If none remain, run the rest of the `on_run_end` chain and return
+  empty from sandbox so CubeLoop emits `AgentEndEvent`.
 - HITL suspend: do not wait; return empty and let the existing pause
-  path run. Persist “pending notice” on the row; deliver on HITL
-  resume (steer into the resumed session). Do not steer into a
-  finished session.
+  path run. Leave `notice_state=pending`; deliver on HITL resume
+  (steer into the resumed session). Do not steer into a finished
+  session.
 
 Heartbeat: bump `last_event_at` / active-run TTL on an interval while
 waiting, even though `_InFlightToolHeartbeat` is zero. Stop when the
@@ -230,8 +261,9 @@ run is no longer owned.
 **Core logic**
 
 Never “hold CubePlex DoneEvent after `prompt()` returns” to fake another
-turn. Completion during HITL pause is stored on the row, not injected
-into a dead loop.
+turn. Completion during HITL pause is `notice_state=pending` on the
+row, not injected into a dead loop. Do not block inside cubeloop’s
+default concatenated compose, or Goal’s `on_run_end` waits 10 minutes.
 
 **Tests**
 

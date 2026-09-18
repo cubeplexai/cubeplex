@@ -82,8 +82,11 @@ does not need a new SQL join.
 Prompt-cache: new parameters and tools change the stable prefix once per
 phase that adds them, not per command. Do not toggle tools mid-conversation.
 
-Cap concurrent `running` commands per sandbox at 8. Over the cap, `start`
-fails with an error that names the cap.
+Cap concurrent `starting`+`running` rows per sandbox at 8. Insert the
+row **before** provider `start()`. Over the cap, the tool errors and no
+process is spawned. A reservation whose `start()` never returns is
+reaped by the coordinator (kill if `provider_ref` is set, else mark
+`killed`).
 
 ### Driver contract
 
@@ -97,11 +100,17 @@ On `Sandbox` (`backend/cubeplex/sandbox/base.py`), next to
   `command_id` (assigned by CubePlex, not the driver) and a driver-private
   `provider_ref`.
 - `poll(handle) -> ProcessSnapshot` — `running` or `exited` / `killed`,
-  optional `exit_code`, and any new output since the last poll.
+  optional `exit_code`, and any new output since the last poll
+  (OpenSandbox: `get_background_command_logs` + stored `log_cursor`).
 - `kill(handle) -> None` — best-effort terminate.
 
-`on_chunk` is CubePlex-owned. OpenSandbox `ExecutionHandlers` stay inside
-that driver.
+Agent-facing `start()` does **not** pass a provider kill timeout for
+commands that may auto-background (phase 3). CubePlex enforces the
+foreground deadline by polling and calling `kill`. Bare `sleep` may
+still use a provider timeout because it is never auto-promoted.
+`on_chunk` is CubePlex-owned. After `start()` returns, OpenSandbox
+detached SSE is over; live output comes from `poll().new_output`,
+forwarded to `on_chunk` by the wait loop.
 
 OpenSandbox implements this with its detached command API.
 `LocalSandbox` implements it with an asyncio subprocess so tests do not
@@ -130,12 +139,15 @@ adds columns but does not replace the table.
 | `started_by_user_id` | 2 | Actor for later follow-up `RunContext` |
 | `agent_id` | 2 | Main vs subagent, so chip overlay can bind |
 | `command`, `description` | 2 | What the model asked |
-| `provider`, `provider_ref` | 2 | Driver-private handle |
-| `status` | 2 | `running` / `exited` / `killed` |
+| `provider`, `provider_ref` | 2 | Driver-private handle; null until `start()` returns |
+| `status` | 2 | `starting` / `running` / `exited` / `killed` |
 | `notify_on_complete` | 2 | Wake the agent on exit |
+| `notice_state` | 2 | `none` / `pending` / `delivered` (completion claim) |
 | `log_path` | 2 | Sandbox file with full output |
-| `exit_code`, `finished_at` | 2 | Set when not `running` |
-| `owner_until` | 2 | Coordinator lease; expired → another worker claims |
+| `log_cursor` | 2 | Driver-private poll cursor; not in tool/SSE schema |
+| `exit_code`, `finished_at` | 2 | Set when not `running`/`starting` |
+| `owner_id` | 2 | Coordinator claim token |
+| `owner_until` | 2 | Lease expiry; CAS with `owner_id` |
 | `kind` | 3 | `execute` \| `monitor` |
 | `lifetime` | 3 | `run` \| `conversation` |
 | `notify_run_id` | 3 | Follow-up run started on exit, if any |
@@ -240,13 +252,18 @@ existing `on_run_end` (inject messages and continue, before
 `AgentEndEvent`):
 
 1. The model produces a turn with no further tool calls.
-2. `on_run_end` sees `notify_on_complete` rows still `running` for this
-   `run_id`. It waits (polls the coordinator) instead of returning empty.
-3. On exit, it injects a short user notice (command id, exit code, output
-   tail, log path). CubeLoop runs another model turn.
-4. If no notify rows remain, `on_run_end` returns empty. CubeLoop emits
-   `AgentEndEvent`. **Then** the host kills leftover `lifetime=run`
-   commands for this `run_id` and emits `DoneEvent` as today.
+2. CubePlex wraps `on_run_end` compose: if this run still has `running`
+   notify jobs or `notice_state=pending` completions, skip other
+   `on_run_end` hooks (Goal must not see a finished run) and wait on
+   the coordinator.
+3. Coordinator exit sets `notice_state=pending`. The hook CAS-claims
+   one pending notice, injects a user message, marks `delivered` only
+   after checkpoint, and verifies Redis still owns the `run_id` before
+   inject. A command that already exited before the first hook still
+   delivers (do not require `status=running`).
+4. When nothing remains, run the rest of the `on_run_end` chain.
+   CubeLoop emits `AgentEndEvent`. **Then** the host kills leftover
+   `lifetime=run` commands for this `run_id` and emits `DoneEvent`.
 
 While `on_run_end` is waiting, `_InFlightToolHeartbeat` is at zero
 (background `execute` already emitted `ToolExecutionEndEvent`). The host
@@ -260,14 +277,16 @@ job does not hold that path. Persist the completion notice on the row;
 deliver it on HITL resume (or, in phase 3, as a follow-up run if the
 user never resumes). Do not steer into a dead session.
 
-**Coordinator, not “the run worker”. ** A process in the API/reaper
-claims `sandbox_commands` rows with `owner_until`. It polls provider
-state, renews `in_use_until`, and records exit. The run’s `on_run_end`
-waits on those row updates; it is not the only poller. If the run
-worker dies:
+**Coordinator, not “the run worker”. ** A dedicated short-interval
+loop (not the 60s pause/reap loop) claims rows with `owner_id` +
+`owner_until` (conditional update). It polls provider state via
+`poll()` (`new_output` + durable `log_cursor`), renews `in_use_until`,
+and records exit. Every status/cursor/notice write CAS-matches
+`owner_id`. The run’s `on_run_end` waits on those row updates; it is
+not the only poller. If the run worker dies:
 
 - stale recovery claims the run **and** the command rows for that
-  `run_id` (compare-and-set on `owner_until`) so a ghost worker cannot
+  `run_id` (CAS on `owner_id` + `owner_until`) so a ghost worker cannot
   still notify;
 - phase 2: kill those `lifetime=run` rows (process + status);
 - phase 3 `lifetime=conversation` rows stay, claimed by the coordinator.
