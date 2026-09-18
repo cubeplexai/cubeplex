@@ -69,8 +69,8 @@ def test_sandbox_prompt_mentions_execute():
 def test_sandbox_prompt_does_not_recommend_ampersand_background():
     rendered = SANDBOX_PROMPT_TEMPLATE.format(workdir="/root")
     assert "cmd &" not in rendered
-    assert "timeout_seconds" in rendered
-    assert "streams" in rendered.lower()
+    assert "background=true" in rendered
+    assert "kill_execute" in rendered
 
 
 def test_sandbox_prompt_includes_workdir():

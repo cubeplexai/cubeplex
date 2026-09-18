@@ -36,14 +36,15 @@ from cubeloop.agent.types import (
 )
 from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
-from cubeloop.providers.base import TextContent
+from cubeloop.providers.base import TextContent, UserMessage
 from cubeloop.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
+from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import Sandbox
+from cubeplex.sandbox.base import ProcessHandle, Sandbox
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.sandbox_runtime_config import POLICY_DENY_NUDGE
 from cubeplex.tools.builtin.sandbox_config import (
@@ -163,6 +164,17 @@ class _ExecuteArgs(BaseModel):
             "Raise this for installs, downloads, or builds (max 1800)."
         ),
     )
+    background: bool = Field(
+        default=False,
+        description=(
+            "If true, start the command and return a command_id immediately. "
+            "You will be notified when it exits. Do not use shell &."
+        ),
+    )
+    notify_on_complete: bool = Field(
+        default=True,
+        description="When background=true, inject a notice when the command exits.",
+    )
 
 
 class _WriteFileArgs(BaseModel):
@@ -258,11 +270,19 @@ def _is_timeout_error(exc: BaseException) -> bool:
     return "timeout" in text or "timed out" in text
 
 
+_SHELL_BG_RE = re.compile(r"(^|\s)(nohup|disown)(\s|$)|&\s*$")
+
+
+def _looks_like_shell_background(command: str) -> bool:
+    return _SHELL_BG_RE.search(command.strip()) is not None
+
+
 def _make_execute_tool(
     sandbox: Sandbox,
     *,
     workspace_id: str | None = None,
     conversation_id: str | None = None,
+    live: dict[str, ProcessHandle] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
@@ -270,6 +290,7 @@ def _make_execute_tool(
     ``SandboxMiddleware.before_tool_call`` — the tool body itself is a pure
     executor.
     """
+    live_commands = live if live is not None else {}
 
     async def _execute(
         tool_call_id: str,
@@ -285,6 +306,42 @@ def _make_execute_tool(
             if args.timeout_seconds is not None
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
+        if _looks_like_shell_background(args.command):
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        text=(
+                            "Do not background with shell &, nohup, or disown. "
+                            "Pass background=true instead."
+                        )
+                    )
+                ],
+                is_error=True,
+            )
+        if args.background:
+            if not sandbox.supports_background():
+                return AgentToolResult(
+                    content=[TextContent(text="This sandbox cannot run background commands.")],
+                    is_error=True,
+                )
+            handle = await sandbox.start(args.command)
+            command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
+            handle.command_id = command_id
+            live_commands[command_id] = handle
+            log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+            notice = (
+                f"Command running in background as {command_id}."
+                if args.notify_on_complete
+                else (f"Command running in background as {command_id} (no completion notice).")
+            )
+            return AgentToolResult(
+                content=[TextContent(text=notice)],
+                details={
+                    "status": "running",
+                    "command_id": command_id,
+                    "log_path": log_path,
+                },
+            )
         pieces: list[str] = []
         pending: list[asyncio.Task[None]] = []
         last_emit = 0.0
@@ -401,6 +458,43 @@ def _make_execute_tool(
         ),
         parameters=_ExecuteArgs,
         execute=_execute,
+    )
+
+
+class _KillExecuteArgs(BaseModel):
+    command_id: str = Field(description="CubePlex command id returned by background execute.")
+
+
+def _make_kill_execute_tool(
+    sandbox: Sandbox,
+    live: dict[str, ProcessHandle],
+) -> AgentTool[_KillExecuteArgs]:
+    async def _kill(
+        tool_call_id: str,
+        args: _KillExecuteArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+        handle = live.get(args.command_id)
+        if handle is None:
+            return AgentToolResult(
+                content=[TextContent(text=f"command not found: {args.command_id}")],
+                is_error=True,
+            )
+        await sandbox.kill(handle)
+        live.pop(args.command_id, None)
+        return AgentToolResult(
+            content=[TextContent(text=f"killed {args.command_id}")],
+            details={"status": "killed", "command_id": args.command_id},
+        )
+
+    return AgentTool(
+        name="kill_execute",
+        description="Stop a background sandbox command started with execute(background=true).",
+        parameters=_KillExecuteArgs,
+        execute=_kill,
     )
 
 
@@ -902,13 +996,16 @@ class SandboxMiddleware(Middleware):
         self.command_rules = command_rules or []
         self.channel = channel
         self.config_loader = config_loader
+        self._live_commands: dict[str, ProcessHandle] = {}
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
                 sandbox,
                 workspace_id=workspace_id,
                 conversation_id=conversation_id,
+                live=self._live_commands,
             ),
+            _make_kill_execute_tool(sandbox, self._live_commands),
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),
             _make_file_read_tool(sandbox, conversation_id),
@@ -920,6 +1017,48 @@ class SandboxMiddleware(Middleware):
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubeloop.AgentTool list for this middleware."""
         return list(self._tools)
+
+    async def on_run_end(
+        self,
+        ctx: AgentContext,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> list[UserMessage] | None:
+        """Wait for in-run background commands, then inject one completion notice."""
+        del ctx, signal
+        if not self._live_commands:
+            return None
+        deadline = time.monotonic() + 3600
+        while self._live_commands and time.monotonic() < deadline:
+            finished: list[str] = []
+            notices: list[UserMessage] = []
+            for command_id, handle in list(self._live_commands.items()):
+                snap = await self.sandbox.poll(handle)
+                if snap.status == "running":
+                    continue
+                finished.append(command_id)
+                notices.append(
+                    UserMessage(
+                        content=[
+                            TextContent(
+                                text=(
+                                    f"Background command {command_id} {snap.status}"
+                                    f" (exit {snap.exit_code})."
+                                )
+                            )
+                        ],
+                        metadata={
+                            "notice_id": command_id,
+                            "command_id": command_id,
+                        },
+                    )
+                )
+            for command_id in finished:
+                self._live_commands.pop(command_id, None)
+            if notices:
+                return notices
+            await asyncio.sleep(0.2)
+        return None
 
     async def before_tool_call(
         self,

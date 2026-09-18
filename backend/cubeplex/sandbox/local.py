@@ -1,14 +1,47 @@
 """Local sandbox using asyncio subprocesses — for dev/debug only."""
 
 import asyncio
+import inspect
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from loguru import logger
 
-from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
+from cubeplex.sandbox.base import (
+    BrowserEndpoint,
+    ExecuteResult,
+    ProcessHandle,
+    ProcessSnapshot,
+    Sandbox,
+)
+
+
+class _LocalBgProc:
+    def __init__(self, proc: asyncio.subprocess.Process) -> None:
+        self.proc = proc
+        self.killed = False
+        self.pump_task: asyncio.Task[None] | None = None
+        self._buf = bytearray()
+        self._lock = asyncio.Lock()
+
+    async def pump(self) -> None:
+        assert self.proc.stdout is not None
+        while True:
+            data = await self.proc.stdout.read(4096)
+            if not data:
+                break
+            async with self._lock:
+                self._buf.extend(data)
+
+    async def take(self) -> str:
+        async with self._lock:
+            if not self._buf:
+                return ""
+            text = bytes(self._buf).decode(errors="replace")
+            self._buf.clear()
+            return text
 
 
 def _emit_chunk(on_chunk: Callable[[str], None] | None, text: str) -> None:
@@ -29,6 +62,7 @@ class LocalSandbox(Sandbox):
     def __init__(self, *, workdir: str | None = None) -> None:
         self._id = str(uuid.uuid4())
         self._workdir = workdir or os.getcwd()
+        self._bg: dict[str, _LocalBgProc] = {}
 
     @property
     def id(self) -> str:
@@ -84,6 +118,59 @@ class LocalSandbox(Sandbox):
             output="".join(chunks),
             exit_code=proc.returncode,
         )
+
+    def supports_background(self) -> bool:
+        return True
+
+    async def start(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_started: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> ProcessHandle:
+        del timeout, envs, as_root, on_chunk
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=self._workdir,
+        )
+        rec = _LocalBgProc(proc)
+        ref = str(id(rec))
+        self._bg[ref] = rec
+        rec.pump_task = asyncio.create_task(rec.pump())
+        if on_started is not None:
+            maybe = on_started(ref)
+            if inspect.isawaitable(maybe):
+                await maybe
+        return ProcessHandle(command_id="", provider_ref=ref)
+
+    async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        rec = self._bg.get(handle.provider_ref)
+        if rec is None:
+            return ProcessSnapshot(status="killed", new_output="")
+        new_output = await rec.take()
+        code = rec.proc.returncode
+        if rec.killed and code is not None:
+            return ProcessSnapshot(status="killed", exit_code=code, new_output=new_output)
+        if code is not None:
+            return ProcessSnapshot(status="exited", exit_code=code, new_output=new_output)
+        return ProcessSnapshot(status="running", new_output=new_output)
+
+    async def kill(self, handle: ProcessHandle) -> None:
+        rec = self._bg.get(handle.provider_ref)
+        if rec is None:
+            return
+        rec.killed = True
+        rec.proc.kill()
+        try:
+            await rec.proc.wait()
+        except Exception:
+            pass
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         for path, content in files:
