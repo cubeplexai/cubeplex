@@ -50,9 +50,34 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
     await _stamp_cubeloop_runs(recovered)
     await _fail_stranded_scheduled_runs([rid for _, rid in recovered])
     await _repair_stranded_threads([cid for cid, _ in recovered])
+    await _kill_stranded_commands([rid for _, rid in recovered])
 
     logger.info("Startup recovery: {} stranded run(s) cleaned up", len(recovered))
     return len(recovered)
+
+
+async def _kill_stranded_commands(run_ids: list[str]) -> None:
+    if not run_ids:
+        return
+    try:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.sandbox.command_coordinator import kill_run_commands, sandbox_from_row
+    except Exception as exc:
+        logger.warning("Could not import command killer for recovery: {}", exc)
+        return
+    try:
+        async with async_session_maker() as session:
+
+            async def _get(row):  # type: ignore[no-untyped-def]
+                return await sandbox_from_row(row, session)
+
+            for run_id in run_ids:
+                try:
+                    await kill_run_commands(session, run_id, get_sandbox=_get)
+                except Exception as exc:
+                    logger.warning("Failed to kill commands for stranded run {}: {}", run_id, exc)
+    except Exception as exc:
+        logger.warning("Could not kill leftover sandbox commands on recovery: {}", exc)
 
 
 async def _stamp_cubeloop_runs(pairs: list[tuple[str, str]]) -> None:

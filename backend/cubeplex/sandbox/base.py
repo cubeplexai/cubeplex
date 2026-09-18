@@ -87,6 +87,11 @@ class Sandbox(ABC):
         """Working directory for command execution."""
         ...
 
+    @property
+    def user_sandbox_id(self) -> str | None:
+        """CubePlex ``user_sandboxes.id`` once the instance is attached."""
+        return None
+
     @abstractmethod
     async def execute(
         self,

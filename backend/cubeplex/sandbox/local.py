@@ -166,18 +166,26 @@ class LocalSandbox(Sandbox):
         return ProcessSnapshot(status="running", new_output=new_output)
 
     async def kill(self, handle: ProcessHandle) -> None:
-        rec = self._bg.get(handle.provider_ref)
+        rec = self._bg.pop(handle.provider_ref, None)
         if rec is None:
             return
         rec.killed = True
+        if rec.pump_task is not None and not rec.pump_task.done():
+            rec.pump_task.cancel()
         pid = rec.proc.pid
         if pid is not None:
             try:
                 os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
-                rec.proc.kill()
+                try:
+                    rec.proc.kill()
+                except ProcessLookupError:
+                    pass
         else:
-            rec.proc.kill()
+            try:
+                rec.proc.kill()
+            except ProcessLookupError:
+                pass
         try:
             await rec.proc.wait()
         except Exception:
