@@ -287,7 +287,7 @@ def _make_execute_tool(
     *,
     workspace_id: str | None = None,
     conversation_id: str | None = None,
-    live: dict[str, ProcessHandle] | None = None,
+    live: dict[str, tuple[ProcessHandle, bool]] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
@@ -329,10 +329,15 @@ def _make_execute_tool(
                     content=[TextContent(text="This sandbox cannot run background commands.")],
                     is_error=True,
                 )
+            if len(live_commands) >= 8:
+                return AgentToolResult(
+                    content=[TextContent(text="at most 8 running commands per sandbox")],
+                    is_error=True,
+                )
             handle = await sandbox.start(args.command)
             command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
             handle.command_id = command_id
-            live_commands[command_id] = handle
+            live_commands[command_id] = (handle, args.notify_on_complete)
             log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
             notice = (
                 f"Command running in background as {command_id}."
@@ -472,7 +477,7 @@ class _KillExecuteArgs(BaseModel):
 
 def _make_kill_execute_tool(
     sandbox: Sandbox,
-    live: dict[str, ProcessHandle],
+    live: dict[str, tuple[ProcessHandle, bool]],
 ) -> AgentTool[_KillExecuteArgs]:
     async def _kill(
         tool_call_id: str,
@@ -482,12 +487,13 @@ def _make_kill_execute_tool(
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
-        handle = live.get(args.command_id)
-        if handle is None:
+        entry = live.get(args.command_id)
+        if entry is None:
             return AgentToolResult(
                 content=[TextContent(text=f"command not found: {args.command_id}")],
                 is_error=True,
             )
+        handle, _notify = entry
         await sandbox.kill(handle)
         live.pop(args.command_id, None)
         return AgentToolResult(
@@ -1001,7 +1007,7 @@ class SandboxMiddleware(Middleware):
         self.command_rules = command_rules or []
         self.channel = channel
         self.config_loader = config_loader
-        self._live_commands: dict[str, ProcessHandle] = {}
+        self._live_commands: dict[str, tuple[ProcessHandle, bool]] = {}
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
@@ -1033,11 +1039,18 @@ class SandboxMiddleware(Middleware):
         del ctx, signal
         if not self._live_commands:
             return None
+        for command_id, (handle, notify) in list(self._live_commands.items()):
+            if notify:
+                continue
+            await self.sandbox.kill(handle)
+            self._live_commands.pop(command_id, None)
+        if not self._live_commands:
+            return None
         deadline = time.monotonic() + 3600
         while self._live_commands and time.monotonic() < deadline:
             finished: list[str] = []
             notices: list[UserMessage | AssistantMessage | ToolResultMessage] = []
-            for command_id, handle in list(self._live_commands.items()):
+            for command_id, (handle, _notify) in list(self._live_commands.items()):
                 snap = await self.sandbox.poll(handle)
                 if snap.status == "running":
                     continue

@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import os
+import signal
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -138,6 +139,7 @@ class LocalSandbox(Sandbox):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=self._workdir,
+            start_new_session=True,
         )
         rec = _LocalBgProc(proc)
         ref = str(id(rec))
@@ -156,8 +158,10 @@ class LocalSandbox(Sandbox):
         new_output = await rec.take()
         code = rec.proc.returncode
         if rec.killed and code is not None:
+            self._bg.pop(handle.provider_ref, None)
             return ProcessSnapshot(status="killed", exit_code=code, new_output=new_output)
         if code is not None:
+            self._bg.pop(handle.provider_ref, None)
             return ProcessSnapshot(status="exited", exit_code=code, new_output=new_output)
         return ProcessSnapshot(status="running", new_output=new_output)
 
@@ -166,7 +170,14 @@ class LocalSandbox(Sandbox):
         if rec is None:
             return
         rec.killed = True
-        rec.proc.kill()
+        pid = rec.proc.pid
+        if pid is not None:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                rec.proc.kill()
+        else:
+            rec.proc.kill()
         try:
             await rec.proc.wait()
         except Exception:
