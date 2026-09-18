@@ -80,7 +80,7 @@ async def test_reconcile_marks_exited_command(session: AsyncSession) -> None:
     assert row.id in finished
     await session.refresh(row)
     assert row.status == SandboxCommandStatus.exited.value
-    assert row.notice_state == "pending"
+    assert row.notice_state == "none"
 
 
 @pytest.mark.asyncio
@@ -99,3 +99,18 @@ async def test_kill_run_commands_stops_process(session: AsyncSession) -> None:
     assert row.provider_ref is not None
     snap = await sandbox.poll(ProcessHandle(command_id=row.id, provider_ref=row.provider_ref))
     assert snap.status == "killed"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_kills_abandoned_running_command(session: AsyncSession) -> None:
+    sandbox = LocalSandbox()
+    row = await _row(session, sandbox=sandbox, command="sleep 30")
+
+    async def _get(_row: SandboxCommand) -> LocalSandbox:
+        del _row
+        return sandbox
+
+    finished = await reconcile_once(session, get_sandbox=_get)
+    assert row.id in finished
+    await session.refresh(row)
+    assert row.status == SandboxCommandStatus.killed.value
