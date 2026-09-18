@@ -33,6 +33,8 @@
   </a>
 </p>
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 CubePlex is a cloud-native platform for managed agents in team workspaces —
 skills, shared memory, MCP tools, persistent sandboxes, governed access, and
 self-hosted deploy on Docker Compose or Kubernetes.
