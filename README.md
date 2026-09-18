@@ -33,23 +33,30 @@
   </a>
 </p>
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-CubePlex is a cloud-native platform for managed agents in team workspaces —
-skills, shared memory, MCP tools, persistent sandboxes, governed access, and
-self-hosted deploy on Docker Compose or Kubernetes.
+CubePlex is a cloud-native platform for **long-lived, team-owned Agents**. A Workspace gives a team one Agent with a stable role, shared knowledge, approved tools, and a persistent work environment—available from the web and the channels where the team already works.
+
+<p align="center">
+  <a href="https://cubeplex.ai">Try CubePlex</a> ·
+  <a href="https://docs.cubeplex.ai">Read the docs</a> ·
+  <a href="https://cubeplex.ai/docs/deployment/overview">Self-host</a>
+</p>
 
 <p align="center">
   <img src="docs/site/static/img/architecture/cubeplex-overview.svg" alt="CubePlex architecture: clients, the application and agent runtime, workspace sandboxes, external services, and persistent infrastructure" width="100%" />
 </p>
 
-The diagram reflects the current application architecture. CubePlex's agent
-runtime is built on [CubeLoop](https://github.com/cubeplexai/cubeloop), an
-async-native agent framework for multi-provider model access, tool execution,
-streaming, middleware, and durable checkpoints. Workspace sandboxes
-are isolated execution environments with persistent working state; external
-model providers, MCP servers, and IM platforms remain outside CubePlex's trust
-boundary.
+## Why CubePlex
+
+- **One long-lived Workspace Agent** — The team returns to the same Agent across tasks, with its role, Skills, memory, MCP connections, and working state intact.
+- **Team-owned state, not personal state** — Agent configuration, shared knowledge, approved tools, deliverables, and working state belong to the Workspace and remain with the team.
+- **One Agent across every entry point** — Use the same Workspace Agent from the web, Slack, Discord, Teams, Feishu, DingTalk, WeCom, and more, while each conversation keeps its own participants and execution context.
+- **Durable, governed execution** — Isolated persistent sandboxes and organization controls make ongoing Agent work inspectable, repeatable, and manageable.
+
+CubePlex's Agent runtime is built on [CubeLoop](https://github.com/cubeplexai/cubeloop), an async-native agent framework for multi-provider model access, tool execution, streaming, middleware, and durable checkpoints. Workspace sandboxes are isolated execution environments with persistent working state; external model providers, MCP servers, and IM platforms remain outside CubePlex's trust boundary.
 
 ## Demos
 
@@ -59,11 +66,14 @@ boundary.
 
 > **Build Interactive Website** — a full product website generated from a single prompt.
 
+<details>
+<summary>More demos</summary>
+
 <div align="center">
   <video src="https://github.com/user-attachments/assets/d93360b7-8141-42c9-bc4f-3d9488a309b1" width="100%" controls></video>
 </div>
 
-> **Skills Workflow** — find a skill, install it and use it to build agentic frontend, end to end.
+> **Skills Workflow** — find a skill, install it, and use it to build an agentic frontend end to end.
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/85975ccb-b512-45ff-96d2-0b7df7c8de57" width="100%" controls></video>
@@ -81,24 +91,34 @@ boundary.
   <video src="https://github.com/user-attachments/assets/1d979ec6-7ddc-489b-bb43-9f4c78c89b38" width="100%" controls></video>
 </div>
 
-> **Browser Control** — an agent drives the browser to complete a task autonomously.
+> **Browser Control** — an Agent drives the browser to complete a task autonomously.
 
+</details>
 
-
-## Features
+## Platform capabilities
 
 | Area | What you get |
 |---|---|
-| **Multi-model chat** | Hosted and custom providers (Anthropic, OpenAI, and more). Attach files, stream replies, switch models mid-conversation. |
-| **Skills** | Packaged agent capabilities — built-in, org-uploaded, or from remote registries (e.g. skills.sh). |
-| **Memory** | Personal, workspace, and org-scoped memory the agent recalls across conversations. |
-| **MCP tools** | Catalog of connectors with static credentials or OAuth; grant tools per workspace. |
-| **Workspace sandboxes** | Per-workspace isolated runtimes with **persistent storage** — files, packages, and the working tree survive restarts so agents resume the same work site. |
-| **Artifacts** | Versioned deliverables — files, previews, code, images — rendered in the thread. |
-| **Automation** | Scheduled tasks (cron / interval / one-shot) and webhook event triggers. |
-| **IM bridges** | Talk to agents from Slack, Discord, Teams, Feishu, DingTalk, and more. |
-| **Team governance** | Organizations, workspaces, roles, model access policies, and cost tracking. |
-| **Deploy anywhere** | Docker Compose for a single host; Helm for Kubernetes. |
+| **Long-lived Workspace Agents** | Give each team a stable Agent role, shared configuration, approved capabilities, and a work environment that continues across tasks. |
+| **Team conversations** | Use private chats, group chats, and Topics to keep participants, conversation context, and execution separate while the Workspace Agent keeps its shared role and knowledge. |
+| **Layered memory** | Recall personal preferences, shared workspace facts and procedures, and organization policies at the appropriate scope. |
+| **Skills** | Package reusable Agent workflows from built-in capabilities, organization-provided skills, or remote registries such as skills.sh, then make them available in the right workspace. |
+| **Governed MCP tools** | Org admins curate a connector catalog; workspaces enable the tools they need. Credentials can be organization-, workspace-, or user-scoped, using OAuth or static credentials. |
+| **Workspace sandboxes** | Per-workspace isolated runtimes with **persistent storage** — files, packages, and the working tree survive restarts so Agents resume the same work site. |
+| **Secrets and credential controls** | Credentials are encrypted at rest. Kubernetes deployments can resolve approved sandbox secrets at request time rather than exposing them as plain environment variables. |
+| **Multi-model chat** | Use hosted and custom providers including Anthropic, OpenAI, and more. Attach files, stream replies, and switch models mid-conversation. |
+| **Automation** | Run scheduled tasks (cron, interval, or one-shot) and webhook event triggers. |
+| **Artifacts** | Deliver versioned files, previews, code, images, and other outputs directly in the conversation. |
+| **IM bridges** | Bring the same Workspace Agent to Slack, Discord, Teams, Feishu, DingTalk, WeCom, and more; configure shared or per-member conversations in group chats. |
+| **Organization and workspace governance** | Manage organizations, workspaces, roles, model access policies, connector catalogs, credentials, and cost tracking. |
+| **Deploy anywhere** | Use Docker Compose for a single host or Helm for Kubernetes. |
+
+## How CubePlex compares
+
+- [**CubePlex vs DeerFlow**](https://cubeplex.ai/blog/cubeplex-vs-deerflow-workspace-and-harness) — personal Agent environments versus team-owned Workspace Agents.
+- [**CubePlex vs Dify**](https://cubeplex.ai/blog/cubeplex-vs-dify-team-agent-workspace) — long-lived Agents versus scenario-specific Apps.
+- [**QM and CubePlex**](https://cubeplex.ai/blog/qm-cubeplex-team-agent-collaboration) — Agent-computer scopes versus a long-lived team Agent with entry-point-specific execution contexts.
+
 
 ## Get started
 
