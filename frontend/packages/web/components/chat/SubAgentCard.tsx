@@ -11,6 +11,7 @@ import {
   type ToolCallRef,
 } from '@cubeplex/core'
 import { ToolCallItem } from './ToolCallItem'
+import { toolResultIsRunning } from './toolResultStatus'
 import { AgentAvatar } from './AgentAvatar'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { proseClasses } from '@/lib/utils'
@@ -25,7 +26,7 @@ interface Props {
   agentId?: string
   stream?: AgentStream
   isRunning: boolean
-  toolResultMap: Record<string, { content: string; receivedAt: number }>
+  toolResultMap: Record<string, { content: string; receivedAt: number; details?: unknown }>
   conversationId?: string
 }
 
@@ -100,8 +101,16 @@ export const SubAgentCard = memo(function SubAgentCard({
           arguments: tc.data.arguments,
           id: tc.data.tool_call_id,
         }))
-  const completedCount = toolCalls.filter((tc) => toolResultMap[tc.data.tool_call_id]).length
-  const pendingTc = toolCalls.find((tc) => !toolResultMap[tc.data.tool_call_id])
+  const completedCount = toolCalls.filter(
+    (tc) =>
+      toolResultMap[tc.data.tool_call_id] &&
+      !toolResultIsRunning(toolResultMap[tc.data.tool_call_id]),
+  ).length
+  const pendingTc = toolCalls.find(
+    (tc) =>
+      !toolResultMap[tc.data.tool_call_id] ||
+      toolResultIsRunning(toolResultMap[tc.data.tool_call_id]),
+  )
   const hasContent = stream && (toolBlocks.length > 0 || toolCalls.length > 0 || stream.text)
   const displayTime = isRunning ? elapsed : hasContent ? elapsed : 0
 
@@ -155,7 +164,7 @@ export const SubAgentCard = memo(function SubAgentCard({
             : undefined
         }
         toolResult={result}
-        isPending={isRunning && !result}
+        isPending={isRunning && (!result || toolResultIsRunning(result))}
         allowOpenWhenPending={supportsPreview}
         showDivider={showDivider}
       />

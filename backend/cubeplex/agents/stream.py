@@ -36,6 +36,7 @@ from cubeloop.agent.types import (
     MessageEndEvent,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
+    ToolExecutionUpdateEvent,
 )
 from cubeloop.hitl.types import ApproveAnswer
 from cubeloop.providers.base import (
@@ -521,6 +522,18 @@ class StreamConverter:
 
 def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
     """Translation for AgentEvents that don't carry streaming state."""
+    if isinstance(evt, ToolExecutionUpdateEvent):
+        text, details = _stringify_tool_result(evt.partial_result)
+        return [
+            {
+                "type": "tool_result",
+                "tool_call_id": evt.tool_call_id,
+                "name": evt.tool_name,
+                "result": text,
+                "details": details,
+                "is_error": False,
+            }
+        ]
     if isinstance(evt, ToolExecutionEndEvent):
         text, details = _stringify_tool_result(evt.result)
         out: list[dict[str, Any]] = [

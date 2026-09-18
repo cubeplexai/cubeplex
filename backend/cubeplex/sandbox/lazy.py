@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -452,11 +452,18 @@ class LazySandbox(Sandbox):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         sandbox = await self._ensure_with_retry()
         try:
             return await self._run_with_keepalive(
-                sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
+                sandbox.execute(
+                    command,
+                    timeout=timeout,
+                    envs=envs,
+                    as_root=as_root,
+                    on_chunk=on_chunk,
+                ),
             )
         except Exception:
             # Sandbox may have died — invalidate and retry once
@@ -468,7 +475,13 @@ class LazySandbox(Sandbox):
             sandbox = await self._ensure()
             await self._ensure_skills_synced(sandbox)
             return await self._run_with_keepalive(
-                sandbox.execute(command, timeout=timeout, envs=envs, as_root=as_root),
+                sandbox.execute(
+                    command,
+                    timeout=timeout,
+                    envs=envs,
+                    as_root=as_root,
+                    on_chunk=on_chunk,
+                ),
             )
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:

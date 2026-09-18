@@ -4,15 +4,16 @@ import asyncio
 import base64
 import re
 import shlex
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
+from typing import Any
 
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxException as _ProviderError
-from opensandbox.models.execd import RunCommandOpts
+from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 
 from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox, SandboxError
 from cubeplex.sandbox.panel_token import (
@@ -92,6 +93,7 @@ class OpenSandbox(Sandbox):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         # Merge: run-level env (set by manager) is the base; per-call envs win.
         merged = {**self._run_env, **(envs or {})}
@@ -105,9 +107,24 @@ class OpenSandbox(Sandbox):
             gid=gid,
         )
 
+        async def _handle_output(msg: Any) -> None:
+            text = getattr(msg, "text", "") or ""
+            if not text or on_chunk is None:
+                return
+            try:
+                on_chunk(text)
+            except Exception:
+                logger.exception("OpenSandbox on_chunk failed")
+
+        handlers = (
+            ExecutionHandlers(on_stdout=_handle_output, on_stderr=_handle_output)
+            if on_chunk is not None
+            else None
+        )
+
         async def _run() -> ExecuteResult:
             with _as_sandbox_error():
-                execution = await self._sandbox.commands.run(command, opts=opts)
+                execution = await self._sandbox.commands.run(command, opts=opts, handlers=handlers)
 
                 output_lines: list[str] = []
                 for msg in execution.logs.stdout:

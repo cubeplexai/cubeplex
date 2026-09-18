@@ -3,9 +3,21 @@
 import asyncio
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
+from loguru import logger
+
 from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
+
+
+def _emit_chunk(on_chunk: Callable[[str], None] | None, text: str) -> None:
+    if on_chunk is None or not text:
+        return
+    try:
+        on_chunk(text)
+    except Exception:
+        logger.exception("LocalSandbox on_chunk failed")
 
 
 class LocalSandbox(Sandbox):
@@ -33,6 +45,7 @@ class LocalSandbox(Sandbox):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         # envs/as_root accepted for interface compatibility but not applied:
         # LocalSandbox runs in the host process environment and is not used
@@ -44,15 +57,31 @@ class LocalSandbox(Sandbox):
             stderr=asyncio.subprocess.STDOUT,
             cwd=self._workdir,
         )
+        chunks: list[str] = []
+
+        async def _pump() -> None:
+            assert proc.stdout is not None
+            while True:
+                data = await proc.stdout.read(4096)
+                if not data:
+                    break
+                text = data.decode(errors="replace")
+                chunks.append(text)
+                _emit_chunk(on_chunk, text)
+
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            await asyncio.wait_for(_pump(), timeout=timeout)
+            await proc.wait()
         except TimeoutError:
             proc.kill()
-            await proc.communicate()
+            try:
+                await proc.wait()
+            except Exception:
+                pass
             return ExecuteResult(output="[timeout]", exit_code=-1)
 
         return ExecuteResult(
-            output=stdout.decode(errors="replace"),
+            output="".join(chunks),
             exit_code=proc.returncode,
         )
 

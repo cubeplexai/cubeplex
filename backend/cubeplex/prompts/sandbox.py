@@ -76,12 +76,12 @@ call. Prefer this over `sed`/`awk`.
 - Pipes: `cat file.txt | grep pattern | wc -l`
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
-- Background: `cmd &`
+- Do not background with `&`. Output streams to the chat while the command \
+runs. For installs, downloads, or builds, pass `timeout_seconds` (max 1800).
 
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
 - Commands are killed after 120 seconds by default and return `[timeout]`. \
-For installs, downloads, or builds, pass `timeout_seconds` (max 1800). \
 If you still time out, split the work or raise `timeout_seconds` and retry.
 - Commands run in an isolated sandbox — safe to experiment"""

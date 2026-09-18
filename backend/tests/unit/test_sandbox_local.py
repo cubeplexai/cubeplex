@@ -27,6 +27,32 @@ async def test_execute_timeout_kills_and_returns_marker():
 
 
 @pytest.mark.asyncio
+async def test_execute_on_chunk_fires_before_return() -> None:
+    sandbox = LocalSandbox()
+    chunks: list[str] = []
+    result = await sandbox.execute(
+        "python3 -c \"import sys,time; print('one', flush=True); "
+        "time.sleep(0.15); print('two', flush=True)\"",
+        on_chunk=chunks.append,
+    )
+    assert chunks, "on_chunk must run before execute returns"
+    assert "one" in "".join(chunks)
+    assert "two" in result.output
+
+
+@pytest.mark.asyncio
+async def test_execute_on_chunk_exception_does_not_fail_command() -> None:
+    sandbox = LocalSandbox()
+
+    def _boom(_text: str) -> None:
+        raise RuntimeError("chunk listener failed")
+
+    result = await sandbox.execute("echo ok", on_chunk=_boom)
+    assert result.exit_code == 0
+    assert "ok" in result.output
+
+
+@pytest.mark.asyncio
 async def test_execute_combines_stderr():
     sandbox = LocalSandbox()
     result = await sandbox.execute("echo out && echo err >&2")

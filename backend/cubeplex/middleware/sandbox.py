@@ -36,6 +36,7 @@ from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
 from cubeloop.providers.base import TextContent
 from cubeloop.types import StructuredValue
+from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from cubeplex.parsers import ParseOptions
@@ -111,6 +112,8 @@ def reset_executed_commands() -> None:
 # call becomes a tool result the model can retry from, not a silent stall.
 DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
 MAX_EXECUTE_TIMEOUT_SECONDS = 1800
+# Match ToolResultLimitMiddleware so we spill before that rewrite.
+EXECUTE_RESULT_SPILL_CHARS = 20_000
 
 
 class _ExecuteArgs(BaseModel):
@@ -246,15 +249,33 @@ def _make_execute_tool(
         signal: asyncio.Event | None = None,
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
-        del tool_call_id, signal, on_update
+        del signal
 
         timeout = (
             args.timeout_seconds
             if args.timeout_seconds is not None
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
+        pieces: list[str] = []
+
+        def _on_chunk(text: str) -> None:
+            if not text:
+                return
+            pieces.append(text)
+            if on_update is None:
+                return
+            try:
+                on_update(
+                    AgentToolResult(
+                        content=[TextContent(text="".join(pieces))],
+                        details={"status": "running"},
+                    )
+                )
+            except Exception:
+                logger.exception("execute on_update failed")
+
         try:
-            result = await sandbox.execute(args.command, timeout=timeout)
+            result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
         except TimeoutError:
             return AgentToolResult(
                 content=[TextContent(text=_timeout_tool_message(timeout))],
@@ -278,7 +299,17 @@ def _make_execute_tool(
         output = result.output
         if result.exit_code is not None and result.exit_code != 0:
             output += f"\n[exit code: {result.exit_code}]"
-        return AgentToolResult(content=[TextContent(text=output)])
+        if len(output) > EXECUTE_RESULT_SPILL_CHARS:
+            spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{tool_call_id}.log"
+            await sandbox.upload([(spill_path, output.encode())])
+            output = (
+                output[:EXECUTE_RESULT_SPILL_CHARS]
+                + f"\n\n[truncated] full output written to {spill_path}"
+            )
+        return AgentToolResult(
+            content=[TextContent(text=output)],
+            details={"status": "exited"},
+        )
 
     return AgentTool(
         name="execute",

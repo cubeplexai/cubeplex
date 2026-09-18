@@ -12,11 +12,15 @@ import {
 } from '@cubeplex/core'
 import { AskUserResolvedCard } from './AskUserResolvedCard'
 import { ToolCallItem } from './ToolCallItem'
+import { toolResultIsRunning } from './toolResultStatus'
 import { cn } from '@/lib/utils'
 
 interface ToolCallGroupProps {
   blocks: (ContentBlock & { type: 'tool_call' })[]
-  toolResultMap: Record<string, { content: string; receivedAt: number; startedAt?: number }>
+  toolResultMap: Record<
+    string,
+    { content: string; receivedAt: number; startedAt?: number; details?: unknown }
+  >
   isStreaming: boolean
   /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
   messageCreatedAt?: string
@@ -54,7 +58,7 @@ export function ToolCallGroup({
   // block renders null (e.g. an ask_user tool_call with no result yet).
   const children: ReactNode[] = blocks.map((block, i) => {
     const result = toolResultMap[block.id] ?? null
-    const isPending = isStreaming && !result
+    const isPending = isStreaming && (!result || toolResultIsRunning(result))
     if (block.name === 'ask_user' && result) {
       const questions = extractAskQuestions(block.arguments)
       if (questions && questions.length > 0) {
@@ -98,9 +102,15 @@ export function ToolCallGroup({
   if (children.every((c) => c === null)) return null
 
   const visibleCount = children.filter((c) => c != null).length
-  const completedCount = blocks.filter((b) => b.name !== 'ask_user' && toolResultMap[b.id]).length
+  const completedCount = blocks.filter(
+    (b) =>
+      b.name !== 'ask_user' && toolResultMap[b.id] && !toolResultIsRunning(toolResultMap[b.id]),
+  ).length
   const pendingCount = blocks.filter(
-    (b) => b.name !== 'ask_user' && isStreaming && !toolResultMap[b.id],
+    (b) =>
+      b.name !== 'ask_user' &&
+      isStreaming &&
+      (!toolResultMap[b.id] || toolResultIsRunning(toolResultMap[b.id])),
   ).length
   const collapsible = visibleCount >= 2
   const isExpanded = isStreaming || userExpanded
