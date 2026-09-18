@@ -8,10 +8,13 @@ from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
-from cubeloop.agent.types import AgentTool, AgentToolResult
-from cubeloop.providers.base import TextContent
+from cubeloop.agent.types import AfterToolCallContext, AgentContext, AgentTool, AgentToolResult
+from cubeloop.middleware import ToolResultLimitMiddleware
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
+from cubeplex.middleware._compose import compose_after_tool_call
 from cubeplex.middleware.sandbox import (
+    EXECUTE_RESULT_SPILL_CHARS,
     SandboxMiddleware,
     _EditFileArgs,
     _EditSpec,
@@ -446,7 +449,7 @@ async def test_execute_tool_live_update_is_capped() -> None:
         on_update=updates.append,
     )
     assert updates
-    assert all(len(_text(u)) <= 21_000 for u in updates)
+    assert all(len(_text(u)) <= EXECUTE_RESULT_SPILL_CHARS for u in updates)
     text = _text(result)
     assert text.startswith("x")
     assert "omitted" in text
@@ -476,6 +479,44 @@ async def test_execute_tool_spills_oversized_output_to_sandbox_file() -> None:
     path, content = sandbox.upload.await_args.args[0][0]
     assert path.endswith("execute-tc-huge.log")
     assert content == huge.encode()
+    assert len(text) <= EXECUTE_RESULT_SPILL_CHARS
+
+
+@pytest.mark.asyncio
+async def test_execute_spill_survives_tool_result_limit_middleware() -> None:
+    sandbox = _make_sandbox()
+    sandbox.workdir = "/workspace"
+    sandbox.upload = AsyncMock()
+    huge = "H" * 12_000 + "T" * 12_000
+    exec_result = MagicMock()
+    exec_result.output = huge
+    exec_result.exit_code = 0
+    sandbox.execute = AsyncMock(return_value=exec_result)
+
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-pipe",
+        _ExecuteArgs(command="cat big.log", description="Dump a large log"),
+    )
+    limit = ToolResultLimitMiddleware(exclude_tool_names={"load_skill"})
+    composed = compose_after_tool_call([limit])
+    assert composed is not None
+    ctx = AfterToolCallContext(
+        assistant_message=AssistantMessage(
+            content=[ToolCall(id="tc-pipe", name="execute", arguments={})]
+        ),
+        tool_call=ToolCall(id="tc-pipe", name="execute", arguments={}),
+        args={},
+        result=result,
+        is_error=False,
+        context=AgentContext(system_prompt="", messages=[]),
+    )
+    out = await composed(ctx)
+    text = _text(result)
+    assert "T" * 20 in text
+    assert "execute-tc-pipe.log" in text
+    assert len(text) <= EXECUTE_RESULT_SPILL_CHARS
+    assert out is None
 
 
 # ---------------------------------------------------------------------------

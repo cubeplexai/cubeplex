@@ -119,13 +119,30 @@ EXECUTE_RESULT_SPILL_CHARS = 20_000
 _EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
 
 
-def _bounded_execute_excerpt(text: str) -> str:
-    """Keep live and final truncated views on the same head+tail excerpt."""
-    if len(text) <= EXECUTE_RESULT_SPILL_CHARS:
-        return text
-    keep = EXECUTE_RESULT_SPILL_CHARS // 2
+def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
+    """Head+tail excerpt that still fits in ToolResultLimitMiddleware.
+
+    ``suffix`` (spill path, truncated marker) is included in the 20k budget
+    so after_tool_call cannot strip the tail or the path.
+    """
+    budget = EXECUTE_RESULT_SPILL_CHARS - len(suffix)
+    if budget < 64:
+        budget = 64
+    if len(text) <= budget:
+        return text + suffix
+    omitted = len(text)
+    marker = f"\n\n[... {omitted} chars omitted ...]\n\n"
+    keep_total = budget - len(marker)
+    if keep_total < 2:
+        return (text[:budget] + suffix)[:EXECUTE_RESULT_SPILL_CHARS]
+    keep = keep_total // 2
     omitted = len(text) - 2 * keep
-    return f"{text[:keep]}\n\n[... {omitted} chars omitted ...]\n\n{text[-keep:]}"
+    marker = f"\n\n[... {omitted} chars omitted ...]\n\n"
+    body = f"{text[:keep]}{marker}{text[-keep:]}"
+    out = body + suffix
+    if len(out) > EXECUTE_RESULT_SPILL_CHARS:
+        return out[:EXECUTE_RESULT_SPILL_CHARS]
+    return out
 
 
 class _ExecuteArgs(BaseModel):
@@ -358,13 +375,13 @@ def _make_execute_tool(
             if len(output) > EXECUTE_RESULT_SPILL_CHARS:
                 safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", tool_call_id)[:80] or "tool"
                 spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{safe_id}.log"
-                excerpt = _bounded_execute_excerpt(output)
                 try:
                     await sandbox.upload([(spill_path, output.encode())])
-                    output = excerpt + f"\n\n[truncated] full output written to {spill_path}"
+                    suffix = f"\n\n[truncated] full output written to {spill_path}"
                 except Exception:
                     logger.exception("execute spill upload failed")
-                    output = excerpt + "\n\n[truncated]"
+                    suffix = "\n\n[truncated]"
+                output = _bounded_execute_excerpt(output, suffix=suffix)
             return AgentToolResult(
                 content=[TextContent(text=output)],
                 details={"status": "exited"},
