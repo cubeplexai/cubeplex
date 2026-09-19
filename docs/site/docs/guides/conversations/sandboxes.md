@@ -5,7 +5,7 @@ title: Managing Sandboxes
 
 # Managing Sandboxes
 
-A sandbox is the isolated environment where the agent runs code for a conversation or topic. Each sandbox has its own files and installed packages, and CubePlex keeps it around across container restarts — so the working files from a conversation are still there the next time you open it. The **Sandboxes** tab in your workspace settings is where you see every sandbox that belongs to you in this workspace and take action on one when something goes wrong.
+A sandbox is the isolated environment where the agent runs code for a conversation or topic. Each sandbox has its own files and installed packages, and CubePlex keeps it around across container restarts — so the working files from a conversation are still there the next time you open it. While a command is running, its output appears in the chat as it is produced. The **Sandboxes** tab in your workspace settings is where you see every sandbox that belongs to you in this workspace and take action on one when something goes wrong.
 
 ![Workspace settings Sandboxes tab showing a running sandbox with Restart and Delete actions](/img/conversations/sandboxes-panel.png)
 

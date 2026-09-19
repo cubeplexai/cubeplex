@@ -13,7 +13,7 @@ This page covers org-level administration. For the user-facing side — listing,
 
 ## What the sandbox can run
 
-The agent runs code in the sandbox through a single shell-based `execute` tool — it issues shell commands, writes files via heredocs, and runs scripts (for example, `python script.py`). It is not tied to a fixed list of languages.
+The agent runs code in the sandbox through a single shell-based `execute` tool — it issues shell commands, writes files via heredocs, and runs scripts (for example, `python script.py`). It is not tied to a fixed list of languages. Command output streams into the chat while the command is still running.
 
 Which languages and tools are actually available depends on the **sandbox image** configured for your organization (the `default_image` in the sandbox policy). Whatever is installed in that image — Python, Node.js, and any other runtimes or CLI tools — is what the agent can use. To support an additional language or library, configure a sandbox image that includes it.
 

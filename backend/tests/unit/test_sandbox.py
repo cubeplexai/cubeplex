@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
-from cubeloop.agent.types import AgentTool, AgentToolResult
-from cubeloop.providers.base import TextContent
+from cubeloop.agent.types import AfterToolCallContext, AgentContext, AgentTool, AgentToolResult
+from cubeloop.middleware import ToolResultLimitMiddleware
+from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
 
+from cubeplex.middleware._compose import compose_after_tool_call
 from cubeplex.middleware.sandbox import (
+    EXECUTE_RESULT_SPILL_CHARS,
     SandboxMiddleware,
     _EditFileArgs,
     _EditSpec,
@@ -177,7 +180,7 @@ async def test_execute_tool_delegates_to_sandbox() -> None:
     args = _ExecuteArgs(command="echo hello world", description="Echo a greeting")
     result = await tool.execute("tc-1", args, signal=None, on_update=None)
 
-    sandbox.execute.assert_called_once_with("echo hello world", timeout=120)
+    sandbox.execute.assert_called_once_with("echo hello world", timeout=120, on_chunk=ANY)
     assert isinstance(result, AgentToolResult)
     assert "hello world" in _text(result)
 
@@ -227,7 +230,7 @@ async def test_execute_tool_timeout_returns_error_result() -> None:
     args = _ExecuteArgs(command="sleep 999", description="Sleep past timeout")
     result = await tool.execute("tc-timeout", args)
 
-    sandbox.execute.assert_called_once_with("sleep 999", timeout=120)
+    sandbox.execute.assert_called_once_with("sleep 999", timeout=120, on_chunk=ANY)
     text = _text(result)
     assert text.startswith("[timeout]")
     assert "120s" in text
@@ -250,7 +253,7 @@ async def test_execute_tool_forwards_custom_timeout() -> None:
     )
     await tool.execute("tc-custom", args)
 
-    sandbox.execute.assert_called_once_with("pip install foo", timeout=300)
+    sandbox.execute.assert_called_once_with("pip install foo", timeout=300, on_chunk=ANY)
 
 
 def test_execute_args_requires_description() -> None:
@@ -309,6 +312,211 @@ async def test_execute_tool_maps_timeout_exception_to_result() -> None:
     assert text.startswith("[timeout]")
     assert "120s" in text
     assert result.is_error is True
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_streams_on_update_while_running() -> None:
+    sandbox = _make_sandbox()
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk("hello ")
+            on_chunk("world")
+        result = MagicMock()
+        result.output = "hello world"
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    updates: list[AgentToolResult] = []
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-stream",
+        _ExecuteArgs(command="echo hello world", description="Echo greeting"),
+        on_update=updates.append,
+    )
+    assert updates
+    assert all(
+        isinstance(u.details, dict) and u.details.get("status") == "running" for u in updates
+    )
+    assert isinstance(result.details, dict)
+    assert result.details.get("status") == "exited"
+    assert "hello world" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_awaits_async_on_update() -> None:
+    """CubeLoop's on_update wraps async emit_event; dropping the coro hides live output."""
+    sandbox = _make_sandbox()
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk("hello")
+        result = MagicMock()
+        result.output = "hello"
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    seen: list[str] = []
+
+    async def _on_update(payload: AgentToolResult) -> None:
+        await asyncio.sleep(0)
+        seen.append(_text(payload))
+
+    tool = _make_execute_tool(sandbox)
+    await tool.execute(
+        "tc-async",
+        _ExecuteArgs(command="echo hello", description="Echo greeting"),
+        on_update=_on_update,
+    )
+    assert seen == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_trailing_update_after_throttle() -> None:
+    sandbox = _make_sandbox()
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk("one")
+            on_chunk("two")
+            await asyncio.sleep(0.15)
+        result = MagicMock()
+        result.output = "onetwo"
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    updates: list[AgentToolResult] = []
+    tool = _make_execute_tool(sandbox)
+    await tool.execute(
+        "tc-trail",
+        _ExecuteArgs(command="echo onetwo", description="Echo two chunks"),
+        on_update=updates.append,
+    )
+    assert any("two" in _text(u) for u in updates)
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_live_update_is_capped() -> None:
+    sandbox = _make_sandbox()
+    huge = "x" * 30_000
+
+    async def _run(
+        command: str,
+        *,
+        timeout: int | None = None,
+        on_chunk: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        del command, timeout, kwargs
+        if on_chunk is not None:
+            on_chunk(huge)
+        result = MagicMock()
+        result.output = huge
+        result.exit_code = 0
+        return result
+
+    sandbox.execute = _run
+    sandbox.upload = AsyncMock()
+    updates: list[AgentToolResult] = []
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-cap",
+        _ExecuteArgs(command="cat big.log", description="Dump a large log"),
+        on_update=updates.append,
+    )
+    assert updates
+    assert all(len(_text(u)) <= EXECUTE_RESULT_SPILL_CHARS for u in updates)
+    text = _text(result)
+    assert text.startswith("x")
+    assert "omitted" in text
+    assert "[truncated]" in text
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_spills_oversized_output_to_sandbox_file() -> None:
+    sandbox = _make_sandbox()
+    sandbox.workdir = "/workspace"
+    sandbox.upload = AsyncMock()
+    huge = "x" * 20_001
+    exec_result = MagicMock()
+    exec_result.output = huge
+    exec_result.exit_code = 0
+    sandbox.execute = AsyncMock(return_value=exec_result)
+
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-huge",
+        _ExecuteArgs(command="cat big.log", description="Dump a large log"),
+    )
+    text = _text(result)
+    assert "[truncated]" in text
+    assert "/workspace/.cubeplex/execute-tc-huge.log" in text
+    sandbox.upload.assert_awaited_once()
+    path, content = sandbox.upload.await_args.args[0][0]
+    assert path.endswith("execute-tc-huge.log")
+    assert content == huge.encode()
+    assert len(text) <= EXECUTE_RESULT_SPILL_CHARS
+
+
+@pytest.mark.asyncio
+async def test_execute_spill_survives_tool_result_limit_middleware() -> None:
+    sandbox = _make_sandbox()
+    sandbox.workdir = "/workspace"
+    sandbox.upload = AsyncMock()
+    huge = "H" * 12_000 + "T" * 12_000
+    exec_result = MagicMock()
+    exec_result.output = huge
+    exec_result.exit_code = 0
+    sandbox.execute = AsyncMock(return_value=exec_result)
+
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-pipe",
+        _ExecuteArgs(command="cat big.log", description="Dump a large log"),
+    )
+    limit = ToolResultLimitMiddleware(exclude_tool_names={"load_skill"})
+    composed = compose_after_tool_call([limit])
+    assert composed is not None
+    ctx = AfterToolCallContext(
+        assistant_message=AssistantMessage(
+            content=[ToolCall(id="tc-pipe", name="execute", arguments={})]
+        ),
+        tool_call=ToolCall(id="tc-pipe", name="execute", arguments={}),
+        args={},
+        result=result,
+        is_error=False,
+        context=AgentContext(system_prompt="", messages=[]),
+    )
+    out = await composed(ctx)
+    text = _text(result)
+    assert "T" * 20 in text
+    assert "execute-tc-pipe.log" in text
+    assert len(text) <= EXECUTE_RESULT_SPILL_CHARS
+    assert out is None
 
 
 # ---------------------------------------------------------------------------

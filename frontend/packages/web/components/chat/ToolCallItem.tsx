@@ -48,6 +48,7 @@ interface ToolCallItemProps {
     receivedAt: number
     startedAt?: number
     contentType?: string
+    details?: unknown
   } | null
   timestamp?: string
   /** True while this tool is still executing */

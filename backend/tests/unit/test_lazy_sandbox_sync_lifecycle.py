@@ -219,8 +219,9 @@ async def test_execute_keepalives_touch_and_lease_while_command_runs() -> None:
         timeout: int | None = None,
         envs: object = None,
         as_root: bool = False,
+        on_chunk: object = None,
     ) -> object:
-        del command, timeout, envs, as_root
+        del command, timeout, envs, as_root, on_chunk
         await asyncio.sleep(0.12)
         return MagicMock(output="", exit_code=0)
 

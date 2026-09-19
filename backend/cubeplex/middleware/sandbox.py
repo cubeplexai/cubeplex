@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import inspect
 import re
 import shlex
+import time
 import unicodedata
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -36,6 +38,7 @@ from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
 from cubeloop.providers.base import TextContent
 from cubeloop.types import StructuredValue
+from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from cubeplex.parsers import ParseOptions
@@ -111,6 +114,35 @@ def reset_executed_commands() -> None:
 # call becomes a tool result the model can retry from, not a silent stall.
 DEFAULT_EXECUTE_TIMEOUT_SECONDS = 120
 MAX_EXECUTE_TIMEOUT_SECONDS = 1800
+# Match ToolResultLimitMiddleware so we spill before that rewrite.
+EXECUTE_RESULT_SPILL_CHARS = 20_000
+_EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
+
+
+def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
+    """Head+tail excerpt that still fits in ToolResultLimitMiddleware.
+
+    ``suffix`` (spill path, truncated marker) is included in the 20k budget
+    so after_tool_call cannot strip the tail or the path.
+    """
+    budget = EXECUTE_RESULT_SPILL_CHARS - len(suffix)
+    if budget < 64:
+        budget = 64
+    if len(text) <= budget:
+        return text + suffix
+    omitted = len(text)
+    marker = f"\n\n[... {omitted} chars omitted ...]\n\n"
+    keep_total = budget - len(marker)
+    if keep_total < 2:
+        return (text[:budget] + suffix)[:EXECUTE_RESULT_SPILL_CHARS]
+    keep = keep_total // 2
+    omitted = len(text) - 2 * keep
+    marker = f"\n\n[... {omitted} chars omitted ...]\n\n"
+    body = f"{text[:keep]}{marker}{text[-keep:]}"
+    out = body + suffix
+    if len(out) > EXECUTE_RESULT_SPILL_CHARS:
+        return out[:EXECUTE_RESULT_SPILL_CHARS]
+    return out
 
 
 class _ExecuteArgs(BaseModel):
@@ -246,39 +278,116 @@ def _make_execute_tool(
         signal: asyncio.Event | None = None,
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
-        del tool_call_id, signal, on_update
+        del signal
 
         timeout = (
             args.timeout_seconds
             if args.timeout_seconds is not None
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
-        try:
-            result = await sandbox.execute(args.command, timeout=timeout)
-        except TimeoutError:
-            return AgentToolResult(
-                content=[TextContent(text=_timeout_tool_message(timeout))],
-                is_error=True,
+        pieces: list[str] = []
+        pending: list[asyncio.Task[None]] = []
+        last_emit = 0.0
+        trail_task: asyncio.Task[None] | None = None
+
+        def _schedule_update(text: str) -> None:
+            if on_update is None:
+                return
+            payload = AgentToolResult(
+                content=[TextContent(text=text)],
+                details={"status": "running"},
             )
-        except Exception as exc:
-            if _is_timeout_error(exc):
+            try:
+                maybe = on_update(payload)
+            except Exception:
+                logger.exception("execute on_update failed")
+                return
+            if inspect.isawaitable(maybe):
+
+                async def _await_update(aw: Awaitable[object] = maybe) -> None:
+                    await asyncio.shield(aw)
+
+                pending.append(asyncio.create_task(_await_update()))
+
+        def _emit_snapshot() -> None:
+            _schedule_update(_bounded_execute_excerpt("".join(pieces)))
+
+        def _cancel_trail() -> None:
+            nonlocal trail_task
+            if trail_task is not None and not trail_task.done():
+                trail_task.cancel()
+            trail_task = None
+
+        def _on_chunk(text: str) -> None:
+            nonlocal last_emit, trail_task
+            if not text:
+                return
+            pieces.append(text)
+            now = time.monotonic()
+            remaining = _EXECUTE_UPDATE_INTERVAL_SECONDS - (now - last_emit)
+            if remaining > 0:
+
+                async def _trail() -> None:
+                    nonlocal last_emit
+                    await asyncio.sleep(remaining)
+                    last_emit = time.monotonic()
+                    _emit_snapshot()
+
+                if trail_task is None or trail_task.done():
+                    trail_task = asyncio.create_task(_trail())
+                return
+            _cancel_trail()
+            last_emit = now
+            _emit_snapshot()
+
+        async def _drain_updates() -> None:
+            _cancel_trail()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+                pending.clear()
+
+        try:
+            try:
+                result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
+            except TimeoutError:
                 return AgentToolResult(
                     content=[TextContent(text=_timeout_tool_message(timeout))],
                     is_error=True,
                 )
-            raise
+            except Exception as exc:
+                if _is_timeout_error(exc):
+                    return AgentToolResult(
+                        content=[TextContent(text=_timeout_tool_message(timeout))],
+                        is_error=True,
+                    )
+                raise
 
-        if _is_timeout_result(result.output, result.exit_code):
+            if _is_timeout_result(result.output, result.exit_code):
+                return AgentToolResult(
+                    content=[TextContent(text=_timeout_tool_message(timeout))],
+                    is_error=True,
+                )
+            if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
+                _record_executed(workspace_id, conversation_id, args.command)
+            output = result.output
+            if result.exit_code is not None and result.exit_code != 0:
+                output += f"\n[exit code: {result.exit_code}]"
+            if len(output) > EXECUTE_RESULT_SPILL_CHARS:
+                safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", tool_call_id)[:80] or "tool"
+                spill_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{safe_id}.log"
+                try:
+                    await sandbox.upload([(spill_path, output.encode())])
+                    suffix = f"\n\n[truncated] full output written to {spill_path}"
+                except Exception:
+                    logger.exception("execute spill upload failed")
+                    suffix = "\n\n[truncated]"
+                output = _bounded_execute_excerpt(output, suffix=suffix)
             return AgentToolResult(
-                content=[TextContent(text=_timeout_tool_message(timeout))],
-                is_error=True,
+                content=[TextContent(text=output)],
+                details={"status": "exited"},
             )
-        if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
-            _record_executed(workspace_id, conversation_id, args.command)
-        output = result.output
-        if result.exit_code is not None and result.exit_code != 0:
-            output += f"\n[exit code: {result.exit_code}]"
-        return AgentToolResult(content=[TextContent(text=output)])
+        finally:
+            await _drain_updates()
 
     return AgentTool(
         name="execute",

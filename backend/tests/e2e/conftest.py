@@ -93,8 +93,9 @@ class MemSandbox(Sandbox):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
-        del timeout, envs, as_root
+        del timeout, envs, as_root, on_chunk
         # Process each ``&&``-separated token in ORDER so that:
         #   mkdir -p ... → rm -rf <old> → tar -xzf ... → rm -f tgz
         # mirrors what the real sandbox shell does.  Extracting the tar first
@@ -1346,8 +1347,14 @@ class _FakeCommandStatus:
 
 
 class _FakeCommands:
-    async def run(self, command: str, *, opts: object = None) -> _FakeExecution:
-        del command, opts
+    async def run(
+        self,
+        command: str,
+        *,
+        opts: object = None,
+        handlers: object = None,
+    ) -> _FakeExecution:
+        del command, opts, handlers
         return _FakeExecution()
 
     async def get_command_status(self, execution_id: str) -> _FakeCommandStatus:

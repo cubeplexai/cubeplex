@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -77,6 +78,7 @@ class Sandbox(ABC):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         """Execute a shell command. Returns combined stdout+stderr and exit code.
 
@@ -90,6 +92,8 @@ class Sandbox(ABC):
                   instead of the sandbox agent user. Used for infra helpers
                   (browser stack, workspace chown). Ignored by drivers that
                   have no privilege separation.
+            on_chunk: Optional callback for stdout/stderr text as it arrives.
+                  Exceptions in the callback must not fail the command.
         """
         ...
 
