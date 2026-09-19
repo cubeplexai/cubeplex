@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
@@ -18,6 +19,7 @@ from cubeplex.middleware._compose import compose_after_tool_call
 from cubeplex.middleware.sandbox import (
     EXECUTE_RESULT_SPILL_CHARS,
     SandboxMiddleware,
+    _append_sandbox_log,
     _EditFileArgs,
     _EditSpec,
     _ExecuteArgs,
@@ -26,7 +28,9 @@ from cubeplex.middleware.sandbox import (
     _make_edit_file_tool,
     _make_execute_tool,
     _make_file_read_tool,
+    _make_monitor_tool,
     _make_write_file_tool,
+    _MonitorArgs,
     _normalize_for_fuzzy,
     _WriteFileArgs,
 )
@@ -36,7 +40,7 @@ from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 # Helpers
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TOOL_NAMES = {"execute", "kill_execute", "write", "edit", "read"}
+_EXPECTED_TOOL_NAMES = {"execute", "kill_execute", "monitor", "write", "edit", "read"}
 
 
 def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
@@ -402,14 +406,47 @@ async def test_execute_background_returns_command_id_before_exit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_kill_execute_stops_live_handle() -> None:
+async def test_execute_background_schedules_requested_timeout() -> None:
     from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    handle = ProcessHandle(command_id="", provider_ref="p1")
+    sandbox.start = AsyncMock(return_value=handle)
+    deadlines: dict[str, asyncio.Task[None]] = {}
+    tool = _make_execute_tool(sandbox, deadline_tasks=deadlines)
+
+    result = await tool.execute(
+        "tc-bg-timeout",
+        _ExecuteArgs(
+            command="sleep 30",
+            description="Sleep in background",
+            background=True,
+            timeout_seconds=7,
+        ),
+    )
+
+    assert isinstance(result.details, dict)
+    command_id = result.details["command_id"]
+    assert handle.deadline_at is not None
+    assert command_id in deadlines
+    assert sandbox.start.await_args.kwargs["timeout"] == 7
+    deadline_task = deadlines[command_id]
+    deadline_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await deadline_task
+
+
+@pytest.mark.asyncio
+async def test_kill_execute_stops_live_handle() -> None:
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
 
     sandbox = _make_sandbox()
     sandbox.supports_background = MagicMock(return_value=True)
     sandbox.workdir = "/workspace"
     sandbox.start = AsyncMock(return_value=ProcessHandle("", "p1"))
     sandbox.kill = AsyncMock()
+    sandbox.poll = AsyncMock(return_value=ProcessSnapshot(status="killed"))
     live: dict[str, tuple[ProcessHandle, bool]] = {}
     execute = _make_execute_tool(sandbox, live=live)
     started = await execute.execute(
@@ -424,6 +461,30 @@ async def test_kill_execute_stops_live_handle() -> None:
     sandbox.kill.assert_awaited_once()
     assert "killed" in _text(killed)
     assert cid not in live
+
+
+@pytest.mark.asyncio
+async def test_kill_execute_retains_handle_until_interrupt_is_confirmed() -> None:
+    from cubeplex.middleware.sandbox import _KillExecuteArgs, _make_kill_execute_tool
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+
+    sandbox = _make_sandbox()
+    sandbox.kill = AsyncMock()
+    sandbox.poll = AsyncMock(return_value=ProcessSnapshot(status="running"))
+    handle = ProcessHandle(command_id="scmd-live", provider_ref="p1")
+    live = {"scmd-live": (handle, True)}
+    persist_killed = AsyncMock()
+    killer = _make_kill_execute_tool(
+        sandbox,
+        live,
+        persist_killed=persist_killed,
+    )
+
+    result = await killer.execute("tc-kill", _KillExecuteArgs(command_id="scmd-live"))
+
+    assert result.is_error is True
+    assert "scmd-live" in live
+    persist_killed.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -461,6 +522,32 @@ async def test_execute_background_cap_is_atomic() -> None:
     assert len(ok) == MAX_LIVE_BACKGROUND_COMMANDS
     assert len(errors) == 1
     assert started == MAX_LIVE_BACKGROUND_COMMANDS
+
+
+@pytest.mark.asyncio
+async def test_auto_background_quota_falls_back_to_foreground() -> None:
+    from cubeplex.middleware.sandbox import MAX_LIVE_BACKGROUND_COMMANDS
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="files", exit_code=0))
+    live = {
+        f"scmd-{index}": (ProcessHandle(f"scmd-{index}", f"p-{index}"), False)
+        for index in range(MAX_LIVE_BACKGROUND_COMMANDS)
+    }
+    tool = _make_execute_tool(sandbox, live=live)
+
+    result = await tool.execute(
+        "tc-foreground-at-cap",
+        _ExecuteArgs(command="ls", description="List files"),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert _text(result) == "files"
+    sandbox.execute.assert_awaited_once()
+    sandbox.start.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -504,6 +591,31 @@ async def test_kill_execute_keeps_handle_if_kill_fails() -> None:
     killed = await killer.execute("tc-kill", _KillExecuteArgs(command_id=str(cid)))
     assert killed.is_error is True
     assert cid in live
+
+
+@pytest.mark.asyncio
+async def test_kill_execute_falls_back_to_conversation_command_index() -> None:
+    from cubeplex.middleware.sandbox import _KillExecuteArgs, _make_kill_execute_tool
+
+    sandbox = _make_sandbox()
+    seen: list[str] = []
+
+    async def _kill_persisted(command_id: str) -> bool:
+        seen.append(command_id)
+        return True
+
+    killer = _make_kill_execute_tool(
+        sandbox,
+        {},
+        kill_persisted=_kill_persisted,
+    )
+    result = await killer.execute(
+        "tc-kill-durable",
+        _KillExecuteArgs(command_id="scmd-durable"),
+    )
+    assert result.is_error is not True
+    assert seen == ["scmd-durable"]
+    assert "killed" in _text(result)
 
 
 @pytest.mark.asyncio
@@ -560,6 +672,490 @@ async def test_mark_running_cas_miss_kills_started_process() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auto_background_promotes_long_command(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.local import LocalSandbox
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.15)
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-auto",
+        _ExecuteArgs(command="sleep 2 && echo done", description="Long job"),
+    )
+    assert result.is_error is not True
+    assert isinstance(result.details, dict)
+    assert result.details.get("status") == "running"
+    cid = result.details.get("command_id")
+    assert isinstance(cid, str) and cid.startswith("scmd-")
+
+
+@pytest.mark.asyncio
+async def test_auto_background_preserves_non_notifying_conversation_lifetime(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle
+    from cubeplex.sandbox.local import LocalSandbox
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    live: dict[str, tuple[ProcessHandle, bool]] = {}
+    reservations: list[dict[str, Any]] = []
+
+    async def _reserve(**kwargs: Any) -> bool:
+        reservations.append(kwargs)
+        return True
+
+    tool = _make_execute_tool(sandbox, live=live, persist_reserve=_reserve)
+    result = await tool.execute(
+        "tc-auto-server",
+        _ExecuteArgs(
+            command="sleep 30 && true",
+            description="Development server",
+            notify_on_complete=False,
+        ),
+    )
+
+    command_id = result.details["command_id"]  # type: ignore[index]
+    assert reservations[0]["notify_on_complete"] is False
+    assert reservations[0]["monitor_deadline_at"] is None
+    assert live[str(command_id)][1] is False
+    assert live[str(command_id)][0].deadline_at is None
+    await sandbox.kill(live[str(command_id)][0])
+
+
+@pytest.mark.asyncio
+async def test_explicit_conversation_background_has_no_implicit_timeout() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.upload = AsyncMock()
+    deadlines: dict[str, asyncio.Task[None]] = {}
+    reservations: list[dict[str, Any]] = []
+
+    async def _reserve(**kwargs: Any) -> bool:
+        reservations.append(kwargs)
+        return True
+
+    tool = _make_execute_tool(
+        sandbox,
+        persist_reserve=_reserve,
+        deadline_tasks=deadlines,
+    )
+    result = await tool.execute(
+        "tc-server",
+        _ExecuteArgs(
+            command="python -m http.server",
+            description="Development server",
+            background=True,
+            notify_on_complete=False,
+        ),
+    )
+
+    assert result.is_error is not True
+    assert reservations[0]["monitor_deadline_at"] is None
+    assert sandbox.start.await_args.kwargs["timeout"] is None
+    assert deadlines == {}
+
+
+@pytest.mark.asyncio
+async def test_deadline_task_persists_exit_observed_before_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(return_value=ProcessSnapshot(status="exited", exit_code=7))
+    sandbox.kill = AsyncMock()
+    persisted = asyncio.Event()
+    exits: list[tuple[str, int | None, bool]] = []
+
+    async def _persist_exited(
+        command_id: str,
+        exit_code: int | None,
+        notify: bool,
+    ) -> None:
+        exits.append((command_id, exit_code, notify))
+        persisted.set()
+
+    live: dict[str, tuple[ProcessHandle, bool]] = {}
+    tool = _make_execute_tool(
+        sandbox,
+        live=live,
+        persist_exited=_persist_exited,
+    )
+    result = await tool.execute(
+        "tc-deadline-exit",
+        _ExecuteArgs(
+            command="long command",
+            description="Long command",
+            background=True,
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    command_id = str(result.details["command_id"])  # type: ignore[index]
+    assert exits == [(command_id, 7, True)]
+    assert command_id not in live
+    sandbox.kill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_background_honors_short_explicit_timeout(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.local import LocalSandbox
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 2)
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-timeout",
+        _ExecuteArgs(command="sleep 3", description="Short timeout", timeout_seconds=1),
+    )
+    assert result.is_error is True
+    assert result.details is None
+    assert "Command exceeded 1s and was killed" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_auto_background_preserves_timeout_after_handoff(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle
+    from cubeplex.sandbox.local import LocalSandbox
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    middleware = SandboxMiddleware(sandbox=sandbox)
+    execute = next(tool for tool in middleware.tools if tool.name == "execute")
+    result = await execute.execute(
+        "tc-handoff-timeout",
+        _ExecuteArgs(command="sleep 30 && true", description="Timed job", timeout_seconds=1),
+    )
+    assert isinstance(result.details, dict)
+    assert result.details["status"] == "running"
+    provider_ref = next(iter(sandbox._bg))
+    await asyncio.sleep(1.1)
+
+    handle = ProcessHandle(command_id=str(result.details["command_id"]), provider_ref=provider_ref)
+    assert (await sandbox.poll(handle)).status == "killed"
+
+    notices = await middleware.on_run_end(AgentContext(system_prompt="", messages=[]))
+
+    assert notices is not None
+    assert "timed out and was killed" in notices[0].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_auto_background_persists_consumed_log_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(
+            status="running",
+            new_output="already consumed\n",
+            log_cursor="17",
+        )
+    )
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock()
+    persisted_cursors: list[tuple[str, str]] = []
+
+    async def _persist_cursor(command_id: str, cursor: str) -> None:
+        persisted_cursors.append((command_id, cursor))
+
+    tool = _make_execute_tool(
+        sandbox,
+        live={},
+        persist_reserve=AsyncMock(return_value=True),
+        persist_running=AsyncMock(),
+        persist_cursor=_persist_cursor,
+    )
+    result = await tool.execute(
+        "tc-cursor",
+        _ExecuteArgs(command="long command", description="Long command"),
+    )
+
+    assert isinstance(result.details, dict)
+    assert persisted_cursors == [(result.details["command_id"], "17")]
+
+
+@pytest.mark.asyncio
+async def test_background_deadline_persists_final_output_cursor_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessSnapshot(status="running", new_output="before kill\n", log_cursor="1"),
+            ProcessSnapshot(status="killed", new_output="after kill\n", log_cursor="2"),
+        ]
+    )
+    sandbox.kill = AsyncMock()
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
+    cursors: list[str] = []
+    timed_out = asyncio.Event()
+    timeout_notices: list[bool] = []
+
+    async def _persist_cursor(_command_id: str, cursor: str) -> None:
+        cursors.append(cursor)
+
+    async def _persist_timed_out(_command_id: str, notify: bool) -> None:
+        timeout_notices.append(notify)
+        timed_out.set()
+
+    tool = _make_execute_tool(
+        sandbox,
+        live={},
+        persist_cursor=_persist_cursor,
+        persist_timed_out=_persist_timed_out,
+    )
+    await tool.execute(
+        "tc-deadline-output",
+        _ExecuteArgs(
+            command="long command",
+            description="Long command",
+            background=True,
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(timed_out.wait(), timeout=1)
+
+    assert cursors == ["1", "2"]
+    assert timeout_notices == [True]
+    sandbox.kill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_background_deadline_preserves_completion_notice_opt_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessSnapshot(status="running"),
+            ProcessSnapshot(status="killed"),
+        ]
+    )
+    sandbox.kill = AsyncMock()
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
+    timeout_notices: list[bool] = []
+    persisted = asyncio.Event()
+
+    async def _persist_timed_out(_command_id: str, notify: bool) -> None:
+        timeout_notices.append(notify)
+        persisted.set()
+
+    tool = _make_execute_tool(
+        sandbox,
+        live={},
+        persist_timed_out=_persist_timed_out,
+    )
+    await tool.execute(
+        "tc-deadline-no-notice",
+        _ExecuteArgs(
+            command="long command",
+            description="Long command",
+            background=True,
+            notify_on_complete=False,
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    assert timeout_notices == [False]
+
+
+@pytest.mark.asyncio
+async def test_auto_started_fast_command_spills_oversized_output(tmp_path: Any) -> None:
+    from cubeplex.sandbox.local import LocalSandbox
+
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    tool = _make_execute_tool(sandbox)
+    result = await tool.execute(
+        "tc-auto-spill",
+        _ExecuteArgs(
+            command="python -c 'print(\"x\" * 25000)'",
+            description="Print large output",
+        ),
+    )
+    assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
+    assert "[truncated] full output written to" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_auto_started_command_reports_external_kill() -> None:
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle("", "p1"))
+    sandbox.poll = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+    sandbox.upload = AsyncMock()
+    sandbox.download = AsyncMock(return_value=[])
+    killed: list[str] = []
+    discarded: list[str] = []
+
+    async def _killed(command_id: str) -> None:
+        killed.append(command_id)
+
+    async def _discard(command_id: str) -> None:
+        discarded.append(command_id)
+
+    tool = _make_execute_tool(
+        sandbox,
+        persist_killed=_killed,
+        persist_discard=_discard,
+    )
+    result = await tool.execute(
+        "tc-auto-killed",
+        _ExecuteArgs(command="build", description="Build project"),
+    )
+    assert result.is_error is True
+    assert result.details == {"status": "killed"}
+    assert "killed by user" in _text(result)
+    assert len(killed) == 1
+    assert discarded == []
+
+
+@pytest.mark.asyncio
+async def test_monitor_rejects_shell_backgrounding() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock()
+    tool = _make_monitor_tool(sandbox, live={})
+    result = await tool.execute(
+        "tc-monitor-bg",
+        _MonitorArgs(description="Watch worker", command="worker &"),
+    )
+    assert result.is_error is True
+    assert "monitor tool manages" in _text(result)
+    sandbox.start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_monitor_hands_off_to_durable_coordinator_immediately() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle("", "provider-ref"))
+    sandbox.upload = AsyncMock()
+    live: dict[str, tuple[ProcessHandle, bool]] = {}
+    handed_off: list[str] = []
+
+    async def _handoff(command_id: str) -> bool:
+        handed_off.append(command_id)
+        live.pop(command_id)
+        return True
+
+    tool = _make_monitor_tool(
+        sandbox,
+        live=live,
+        persist_reserve=AsyncMock(return_value=True),
+        persist_running=AsyncMock(),
+        handoff=_handoff,
+    )
+    result = await tool.execute(
+        "tc-monitor",
+        _MonitorArgs(description="Watch worker", command="worker", persistent=True),
+    )
+
+    assert isinstance(result.details, dict)
+    assert handed_off == [result.details["command_id"]]
+    assert live == {}
+
+
+@pytest.mark.asyncio
+async def test_auto_background_skips_when_command_exits_quickly(tmp_path: Any) -> None:
+    from cubeplex.sandbox.local import LocalSandbox
+
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    discarded: list[str] = []
+
+    async def _reserve(**kwargs: Any) -> bool:
+        del kwargs
+        return True
+
+    async def _discard(command_id: str) -> None:
+        discarded.append(command_id)
+
+    tool = _make_execute_tool(
+        sandbox,
+        persist_reserve=_reserve,
+        persist_discard=_discard,
+    )
+    result = await tool.execute(
+        "tc-fast",
+        _ExecuteArgs(command="echo hello-auto", description="Echo"),
+    )
+    assert isinstance(result.details, dict)
+    assert result.details.get("status") == "exited"
+    assert "hello-auto" in _text(result)
+    assert len(discarded) == 1
+
+
+@pytest.mark.asyncio
+async def test_bare_sleep_does_not_auto_background() -> None:
+    from cubeplex.sandbox.base import ExecuteResult
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="ok", exit_code=0))
+    sandbox.start = AsyncMock()
+    tool = _make_execute_tool(sandbox)
+    await tool.execute(
+        "tc-sleep",
+        _ExecuteArgs(command="sleep 30", description="Sleep", timeout_seconds=1),
+    )
+    sandbox.execute.assert_awaited()
+    sandbox.start.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_background_log_path_is_written(tmp_path: Any) -> None:
     from cubeplex.sandbox.local import LocalSandbox
 
@@ -577,6 +1173,20 @@ async def test_background_log_path_is_written(tmp_path: Any) -> None:
     path = Path(log_path)
     assert path.exists()
     assert "hello-bg" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_log_append_does_not_put_large_output_in_shell_command(tmp_path: Any) -> None:
+    from cubeplex.sandbox.local import LocalSandbox
+
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    path = tmp_path / "large.log"
+    output = "x" * 1_000_000
+
+    await _append_sandbox_log(sandbox, str(path), output)
+
+    assert path.read_text() == output
+    assert list(tmp_path.glob("large.log.append-*")) == []
 
 
 @pytest.mark.asyncio
@@ -602,7 +1212,8 @@ async def test_on_run_end_heartbeats_while_waiting(tmp_path: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_run_end_kills_notify_false(tmp_path: Any) -> None:
+async def test_on_run_end_kills_notify_false_without_durable_repository(tmp_path: Any) -> None:
+    from cubeplex.sandbox.base import ProcessHandle
     from cubeplex.sandbox.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -618,9 +1229,343 @@ async def test_on_run_end_kills_notify_false(tmp_path: Any) -> None:
         ),
     )
     cid = started.details["command_id"]  # type: ignore[index]
+    provider_ref = next(iter(sandbox._bg))
     notices = await mw.on_run_end(AgentContext(system_prompt="", messages=[]))
     assert notices is None
     assert cid not in mw._live_commands
+    handle = ProcessHandle(command_id=str(cid), provider_ref=provider_ref)
+    assert (await sandbox.poll(handle)).status == "killed"
+
+
+@pytest.mark.asyncio
+async def test_on_run_end_kills_unfinished_command_after_wait_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle
+
+    monkeypatch.setattr(sandbox_mod, "_ON_RUN_END_WAIT_SECONDS", 0)
+    sandbox = _make_sandbox()
+    sandbox.kill = AsyncMock()
+    mw = SandboxMiddleware(sandbox=sandbox)
+    handle = ProcessHandle(command_id="scmd-run", provider_ref="provider-1")
+    mw._live_commands["scmd-run"] = (handle, True)
+    mw._release_conversation_commands = AsyncMock()
+    mw._persist_killed = AsyncMock()
+
+    notices = await mw.on_run_end(AgentContext(system_prompt="", messages=[]))
+
+    assert notices is None
+    sandbox.kill.assert_awaited_once_with(handle)
+    mw._persist_killed.assert_awaited_once_with("scmd-run")
+    assert mw._live_commands == {}
+
+
+@pytest.mark.asyncio
+async def test_monitor_deadline_persists_timeout_after_confirmed_kill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="running", new_output="predicate\n")
+    )
+    sandbox.kill = AsyncMock()
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
+    persisted = asyncio.Event()
+
+    async def _persist_timeout(_command_id: str) -> None:
+        persisted.set()
+
+    tool = _make_monitor_tool(
+        sandbox,
+        live={},
+        persist_monitor_timed_out=_persist_timeout,
+    )
+    await tool.execute(
+        "tc-monitor-timeout",
+        _MonitorArgs(
+            command="monitor command",
+            description="Monitor command",
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    sandbox.kill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_run_releases_monitors_and_kills_run_commands() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.kill = AsyncMock()
+    mw = SandboxMiddleware(sandbox=sandbox)
+    monitor = ProcessHandle(command_id="scmd-monitor", provider_ref="monitor-ref")
+    run_command = ProcessHandle(command_id="scmd-run", provider_ref="run-ref")
+    mw._live_commands.update(
+        {
+            "scmd-monitor": (monitor, False),
+            "scmd-run": (run_command, True),
+        }
+    )
+    mw._release_conversation_commands = AsyncMock(
+        side_effect=lambda: mw._live_commands.pop("scmd-monitor")
+    )
+    mw._persist_killed = AsyncMock()
+    mw._lease_task = asyncio.create_task(asyncio.Event().wait())
+
+    await mw.finalize_run()
+
+    mw._release_conversation_commands.assert_awaited_once()
+    sandbox.kill.assert_awaited_once_with(run_command)
+    mw._persist_killed.assert_awaited_once_with("scmd-run")
+    assert mw._lease_task is None
+    assert mw._live_commands == {}
+
+
+@pytest.mark.asyncio
+async def test_finalize_run_preserves_durable_tracking_when_kill_fails() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    sandbox.kill = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+    mw = SandboxMiddleware(sandbox=sandbox)
+    mw._live_commands["scmd-run"] = (
+        ProcessHandle(command_id="scmd-run", provider_ref="run-ref"),
+        True,
+    )
+    mw._release_conversation_commands = AsyncMock()
+    mw._persist_killed = AsyncMock()
+
+    await mw.finalize_run()
+
+    mw._persist_killed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_command_persistence_helpers_delegate_with_owner_and_notice_state() -> None:
+    from cubeplex.models.sandbox_command import SandboxCommandNoticeState
+    from cubeplex.sandbox.base import ProcessHandle
+
+    sandbox = _make_sandbox()
+    repo = MagicMock()
+    repo.mark_running = AsyncMock(return_value=True)
+    repo.update_log_cursor = AsyncMock(return_value=True)
+    repo.mark_terminal = AsyncMock(return_value=True)
+    repo.discard_reservation = AsyncMock(return_value=True)
+    repo.renew_owner = AsyncMock()
+    row = MagicMock(status="running")
+    repo.get = AsyncMock(return_value=row)
+    mw = _make_middleware(
+        sandbox=sandbox,
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=MagicMock(),
+    )
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    mw._live_commands["scmd-live"] = (
+        ProcessHandle(command_id="scmd-live", provider_ref="provider-1"),
+        True,
+    )
+
+    await mw._persist_running("scmd-live", "provider-1")
+    await mw._persist_cursor("scmd-live", "17")
+    assert await mw._persisted_command_status("scmd-live") == "running"
+    await mw._persist_discard("scmd-discard")
+    await mw._persist_terminal(
+        "scmd-none",
+        status="killed",
+        exit_code=None,
+        notify=False,
+    )
+    await mw._persist_terminal(
+        "scmd-pending",
+        status="exited",
+        exit_code=0,
+        notify=True,
+    )
+    await mw._persist_terminal(
+        "scmd-delivered",
+        status="exited",
+        exit_code=0,
+        notify=True,
+        delivered=True,
+    )
+    await mw._renew_live_leases()
+
+    repo.mark_running.assert_awaited_once_with(
+        "scmd-live",
+        provider_ref="provider-1",
+        owner_id="run:run-1",
+    )
+    repo.update_log_cursor.assert_awaited_once_with(
+        "scmd-live",
+        log_cursor="17",
+        owner_id="run:run-1",
+    )
+    notices = [call.kwargs["notice_state"] for call in repo.mark_terminal.await_args_list]
+    assert notices == [
+        SandboxCommandNoticeState.none.value,
+        SandboxCommandNoticeState.pending.value,
+        SandboxCommandNoticeState.delivered.value,
+    ]
+    repo.discard_reservation.assert_awaited_once_with(
+        "scmd-discard",
+        owner_id="run:run-1",
+    )
+    assert repo.renew_owner.await_args.kwargs["owner_id"] == "run:run-1"
+    assert repo.renew_owner.await_args.args == (["scmd-live"],)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["mark_running", "update_log_cursor"])
+async def test_command_persistence_cas_miss_is_not_silently_accepted(method: str) -> None:
+    repo = MagicMock()
+    setattr(repo, method, AsyncMock(return_value=False))
+    mw = _make_middleware(
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=MagicMock(),
+    )
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="cas missed"):
+        if method == "mark_running":
+            await mw._persist_running("scmd-1", "provider-1")
+        else:
+            await mw._persist_cursor("scmd-1", "17")
+
+
+@pytest.mark.asyncio
+async def test_persist_reserve_ensures_sandbox_and_records_lifetime() -> None:
+    sandbox = _make_sandbox()
+    sandbox.user_sandbox_id = "usb-1"
+    sandbox.ensure_created = AsyncMock()
+    repo = MagicMock()
+    repo.reserve = AsyncMock()
+    mw = _make_middleware(
+        sandbox=sandbox,
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=MagicMock(),
+    )
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    reserved = await mw._persist_reserve(
+        command_id="scmd-1",
+        tool_call_id="tc-1",
+        command="serve",
+        description="Development server",
+        notify_on_complete=False,
+        log_path="/workspace/server.log",
+    )
+
+    assert reserved is True
+    sandbox.ensure_created.assert_awaited_once()
+    assert repo.reserve.await_args.kwargs["lifetime"] == "conversation"
+    assert repo.reserve.await_args.kwargs["owner_id"] == "run:run-1"
+    assert repo.reserve.await_args.kwargs["user_sandbox_id"] == "usb-1"
+
+
+@pytest.mark.asyncio
+async def test_handoff_releases_owner_and_cancels_local_deadline() -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+
+    repo = MagicMock()
+    repo.release_owner = AsyncMock()
+    mw = _make_middleware(
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=MagicMock(),
+    )
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    mw._live_commands["scmd-monitor"] = (
+        ProcessHandle(command_id="scmd-monitor", provider_ref="provider-1"),
+        False,
+    )
+    deadline = asyncio.create_task(asyncio.Event().wait())
+    mw._command_deadline_tasks["scmd-monitor"] = deadline
+
+    assert await mw._handoff_conversation_command("scmd-monitor") is True
+    repo.release_owner.assert_awaited_once_with(
+        ["scmd-monitor"],
+        owner_id="run:run-1",
+    )
+    assert "scmd-monitor" not in mw._live_commands
+    assert deadline.cancelled() or deadline.cancelling()
+
+
+@pytest.mark.asyncio
+async def test_kill_persisted_command_requires_current_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = _make_sandbox()
+    sandbox.id = "sandbox-1"
+    repo = MagicMock()
+    row = MagicMock(
+        conversation_id="conv-test",
+        user_sandbox_id="usb-1",
+        status="running",
+    )
+    repo.get = AsyncMock(return_value=row)
+    repo.session.get = AsyncMock(return_value=MagicMock(sandbox_id="sandbox-1"))
+    mw = _make_middleware(
+        sandbox=sandbox,
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=MagicMock(),
+    )
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    kill = AsyncMock(return_value=True)
+    from cubeplex.sandbox import command_coordinator
+
+    monkeypatch.setattr(command_coordinator, "kill_command", kill)
+
+    assert await mw._kill_persisted_command("scmd-1") is True
+    assert kill.await_args.args[:2] == (repo.session, row)
+
+    repo.session.get.return_value = MagicMock(sandbox_id="other-sandbox")
+    assert await mw._kill_persisted_command("scmd-1") is False
+    assert kill.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -1275,6 +2220,6 @@ def test_constructor_without_optional_ids() -> None:
     """SandboxMiddleware with only sandbox= should work fine."""
     sandbox = _make_sandbox()
     mw = SandboxMiddleware(sandbox=sandbox)
-    assert len(mw.tools) == 5
+    assert len(mw.tools) == 6
     names = {t.name for t in mw.tools}
     assert names == _EXPECTED_TOOL_NAMES

@@ -76,11 +76,13 @@ call. Prefer this over `sed`/`awk`.
 - Pipes: `cat file.txt | grep pattern | wc -l`
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
-- Do not background with `&`, nohup, or disown. For long jobs pass \
-`background=true`; you will be told when they finish. Do not sleep or poll. \
-Set `notify_on_complete=false` only for servers (they still die when the \
-run ends). Use `kill_execute` to stop a background command. Output streams \
-to the chat while a foreground command runs.
+- Do not background with `&`, nohup, or disown. Long commands may omit \
+`background=true`; after 15 seconds they continue in the background and you \
+are told when they finish. Bare `sleep N` still blocks. Do not sleep to wait \
+on a job. Set `notify_on_complete=false` only for servers that should outlive \
+the turn. Use `monitor` for predicates (log lines), not builds. Use \
+`kill_execute` to stop a background command. The sandbox panel lists running \
+jobs and can Kill them.
 
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`

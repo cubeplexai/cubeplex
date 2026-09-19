@@ -61,6 +61,7 @@ PREFIX_MCP_CONNECTOR: str = "mcpco"
 PREFIX_MCP_TEMPLATE_SETTINGS: str = "mcts"
 PREFIX_STEERING_MESSAGE: str = "stm"
 PREFIX_SANDBOX_COMMAND: str = "scmd"
+PREFIX_SANDBOX_COMMAND_WAKE: str = "scmw"
 
 
 @dataclass

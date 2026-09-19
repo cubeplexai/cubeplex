@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
@@ -42,6 +43,8 @@ class ProcessHandle:
 
     command_id: str
     provider_ref: str
+    log_cursor: str | None = None
+    deadline_at: datetime | None = None
 
 
 @dataclass
@@ -51,6 +54,7 @@ class ProcessSnapshot:
     status: Literal["running", "exited", "killed"]
     exit_code: int | None = None
     new_output: str = ""
+    log_cursor: str | None = None
 
 
 @dataclass
