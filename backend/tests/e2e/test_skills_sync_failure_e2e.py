@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -191,6 +192,7 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> Any:
         # Must accept as_root: LazySandbox always forwards it. Dropping the
         # kwarg raises TypeError after the intentional tar failure; the lazy
@@ -199,7 +201,13 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
         if "tar -xzf" in command and not fail_once["done"]:
             fail_once["done"] = True
             raise RuntimeError("simulated extract failure")
-        return await original_execute(command, timeout=timeout, envs=envs, as_root=as_root)
+        return await original_execute(
+            command,
+            timeout=timeout,
+            envs=envs,
+            as_root=as_root,
+            on_chunk=on_chunk,
+        )
 
     sandbox.execute = _flaky_execute  # type: ignore[method-assign]
 
