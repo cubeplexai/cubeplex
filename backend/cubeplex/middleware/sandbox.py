@@ -23,9 +23,10 @@ import re
 import shlex
 import time
 import unicodedata
+import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -125,10 +126,17 @@ MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 # Match ToolResultLimitMiddleware so we spill before that rewrite.
 EXECUTE_RESULT_SPILL_CHARS = 20_000
 _EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
+_BACKGROUND_POLL_INTERVAL_SECONDS = 1.0
 MAX_LIVE_BACKGROUND_COMMANDS = 8
 _ON_RUN_END_WAIT_SECONDS = 3600
 _RUN_END_HEARTBEAT_INTERVAL_SECONDS = 30.0
 _COMMAND_LEASE_SECONDS = 15
+AUTO_BACKGROUND_SECONDS = 15
+_BARE_SLEEP_RE = re.compile(r"^sleep(\s+\S+)?\s*$")
+
+
+class _AutoBackgroundUnavailable(Exception):
+    """The command must use the foreground path because background slots are full."""
 
 
 def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
@@ -288,6 +296,11 @@ def _looks_like_shell_background(command: str) -> bool:
     return _SHELL_BG_RE.search(command.strip()) is not None
 
 
+def _is_bare_sleep(command: str) -> bool:
+    """True for `sleep` / `sleep 30`, not `sleep 5 && make`."""
+    return _BARE_SLEEP_RE.match(command.strip()) is not None
+
+
 async def _maybe_await(result: Any) -> Any:
     if inspect.isawaitable(result):
         return await result
@@ -304,14 +317,24 @@ async def _write_sandbox_log(sandbox: Sandbox, path: str, data: bytes) -> None:
 async def _append_sandbox_log(sandbox: Sandbox, path: str, text: str) -> None:
     if not text:
         return
-    existing = b""
+    chunk_path = f"{path}.append-{uuid.uuid4().hex}"
     try:
-        downloaded = await _maybe_await(sandbox.download([path]))
-        if downloaded:
-            existing = downloaded[0][1]
+        parent = path.rsplit("/", 1)[0] or "."
+        await _maybe_await(sandbox.upload([(chunk_path, text.encode())]))
+        result = await sandbox.execute(
+            f"mkdir -p {shlex.quote(parent)} && "
+            f"cat {shlex.quote(chunk_path)} >> {shlex.quote(path)} && "
+            f"rm -f {shlex.quote(chunk_path)}",
+            timeout=30,
+        )
+        if result.exit_code not in (0, None):
+            raise RuntimeError(f"append exited with {result.exit_code}")
     except Exception:
-        existing = b""
-    await _write_sandbox_log(sandbox, path, existing + text.encode())
+        logger.exception("failed to append execute log {}", path)
+        try:
+            await sandbox.execute(f"rm -f {shlex.quote(chunk_path)}", timeout=30)
+        except Exception:
+            logger.debug("failed to clean execute log chunk {}", chunk_path)
 
 
 def _make_execute_tool(
@@ -323,7 +346,13 @@ def _make_execute_tool(
     live_lock: asyncio.Lock | None = None,
     persist_reserve: Callable[..., Awaitable[bool]] | None = None,
     persist_running: Callable[[str, str], Awaitable[None]] | None = None,
+    persist_cursor: Callable[[str, str], Awaitable[None]] | None = None,
     persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    persist_exited: Callable[[str, int | None, bool], Awaitable[None]] | None = None,
+    persist_discard: Callable[[str], Awaitable[None]] | None = None,
+    persist_timed_out: Callable[[str, bool], Awaitable[None]] | None = None,
+    load_persisted_status: Callable[[str], Awaitable[str | None]] | None = None,
+    deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
     on_live: Callable[[], None] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
@@ -333,6 +362,7 @@ def _make_execute_tool(
     executor.
     """
     live_commands = live if live is not None else {}
+    timeout_tasks = deadline_tasks if deadline_tasks is not None else {}
     lock = live_lock if live_lock is not None else asyncio.Lock()
 
     async def _execute(
@@ -349,6 +379,66 @@ def _make_execute_tool(
             if args.timeout_seconds is not None
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
+        background_timeout = args.timeout_seconds if not args.notify_on_complete else timeout
+
+        def _schedule_deadline(
+            command_id: str,
+            handle: ProcessHandle,
+            log_path: str,
+            *,
+            kill_at: float,
+        ) -> None:
+            async def _enforce_deadline() -> None:
+                await asyncio.sleep(max(0.0, kill_at - time.monotonic()))
+                try:
+                    async with lock:
+                        current = live_commands.get(command_id)
+                        if current is None or current[0] is not handle:
+                            return
+                        deadline_snapshot = await sandbox.poll(handle)
+                        if deadline_snapshot.new_output:
+                            await _append_sandbox_log(
+                                sandbox,
+                                log_path,
+                                deadline_snapshot.new_output,
+                            )
+                        if deadline_snapshot.log_cursor is not None and persist_cursor is not None:
+                            await persist_cursor(command_id, deadline_snapshot.log_cursor)
+                        if deadline_snapshot.status != "running":
+                            live_commands.pop(command_id, None)
+                            if deadline_snapshot.status == "killed" and persist_killed is not None:
+                                await persist_killed(command_id)
+                            elif persist_exited is not None:
+                                await persist_exited(
+                                    command_id,
+                                    deadline_snapshot.exit_code,
+                                    current[1],
+                                )
+                            return
+                        await sandbox.kill(handle)
+                        confirmed = await sandbox.poll(handle)
+                        if confirmed.new_output:
+                            await _append_sandbox_log(sandbox, log_path, confirmed.new_output)
+                        if confirmed.log_cursor is not None and persist_cursor is not None:
+                            await persist_cursor(command_id, confirmed.log_cursor)
+                        if confirmed.status == "running":
+                            logger.warning(
+                                "sandbox command {} still running after deadline interrupt",
+                                command_id,
+                            )
+                            return
+                        if persist_timed_out is not None:
+                            await persist_timed_out(command_id, current[1])
+                except Exception:
+                    logger.exception(
+                        "failed to enforce sandbox command deadline {}",
+                        command_id,
+                    )
+
+            task = asyncio.create_task(_enforce_deadline())
+            timeout_tasks[command_id] = task
+            task.add_done_callback(lambda _task: timeout_tasks.pop(command_id, None))
+
         if _looks_like_shell_background(args.command):
             return AgentToolResult(
                 content=[
@@ -369,6 +459,11 @@ def _make_execute_tool(
                 )
             command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
             log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+            deadline_at = (
+                datetime.now(UTC) + timedelta(seconds=background_timeout)
+                if background_timeout is not None
+                else None
+            )
             reserved = False
             async with lock:
                 if persist_reserve is not None:
@@ -380,6 +475,7 @@ def _make_execute_tool(
                             description=args.description,
                             notify_on_complete=args.notify_on_complete,
                             log_path=log_path,
+                            monitor_deadline_at=deadline_at,
                         )
                     except Exception as exc:
                         from cubeplex.repositories.sandbox_command import (
@@ -414,12 +510,17 @@ def _make_execute_tool(
                         logger.exception("sandbox command mark_running failed")
 
                 try:
-                    handle = await sandbox.start(args.command, on_started=_on_started)
+                    handle = await sandbox.start(
+                        args.command,
+                        timeout=background_timeout,
+                        on_started=_on_started,
+                    )
                 except Exception:
                     if reserved and persist_killed is not None:
                         await persist_killed(command_id)
                     raise
                 handle.command_id = command_id
+                handle.deadline_at = deadline_at
                 if persist_error is not None:
                     await sandbox.kill(handle)
                     if persist_killed is not None:
@@ -432,6 +533,13 @@ def _make_execute_tool(
             if on_live is not None:
                 on_live()
             await _write_sandbox_log(sandbox, log_path, b"")
+            if background_timeout is not None:
+                _schedule_deadline(
+                    command_id,
+                    handle,
+                    log_path,
+                    kill_at=time.monotonic() + background_timeout,
+                )
             notice = (
                 f"Command running in background as {command_id}."
                 if args.notify_on_complete
@@ -508,6 +616,188 @@ def _make_execute_tool(
 
         try:
             try:
+                if not _is_bare_sleep(args.command) and sandbox.supports_background() is True:
+                    command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
+                    log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+                    deadline_at = (
+                        datetime.now(UTC) + timedelta(seconds=background_timeout)
+                        if background_timeout is not None
+                        else None
+                    )
+                    reserved = False
+                    auto_persist_error: BaseException | None = None
+
+                    async def _on_started_auto(ref: str) -> None:
+                        nonlocal auto_persist_error
+                        if persist_running is None:
+                            return
+                        try:
+                            await persist_running(command_id, ref)
+                        except Exception as exc:
+                            auto_persist_error = exc
+
+                    async with lock:
+                        if persist_reserve is not None:
+                            try:
+                                reserved = await persist_reserve(
+                                    command_id=command_id,
+                                    tool_call_id=tool_call_id,
+                                    command=args.command,
+                                    description=args.description,
+                                    notify_on_complete=args.notify_on_complete,
+                                    log_path=log_path,
+                                    monitor_deadline_at=deadline_at,
+                                )
+                            except Exception as exc:
+                                from cubeplex.repositories.sandbox_command import (
+                                    SandboxCommandCapError,
+                                )
+
+                                if isinstance(exc, SandboxCommandCapError):
+                                    raise _AutoBackgroundUnavailable from exc
+                                logger.exception("sandbox command reserve failed")
+                                return AgentToolResult(
+                                    content=[
+                                        TextContent(text="failed to reserve background command")
+                                    ],
+                                    is_error=True,
+                                )
+                        if not reserved and len(live_commands) >= MAX_LIVE_BACKGROUND_COMMANDS:
+                            raise _AutoBackgroundUnavailable
+                        try:
+                            handle = await sandbox.start(
+                                args.command,
+                                timeout=background_timeout,
+                                on_started=_on_started_auto,
+                            )
+                        except Exception:
+                            if reserved and persist_killed is not None:
+                                await persist_killed(command_id)
+                            raise
+                        handle.command_id = command_id
+                        handle.deadline_at = deadline_at
+                        if auto_persist_error is not None:
+                            await sandbox.kill(handle)
+                            if persist_killed is not None:
+                                await persist_killed(command_id)
+                            return AgentToolResult(
+                                content=[TextContent(text="failed to persist background command")],
+                                is_error=True,
+                            )
+                        live_commands[command_id] = (handle, args.notify_on_complete)
+                    if on_live is not None:
+                        on_live()
+                    await _write_sandbox_log(sandbox, log_path, b"")
+                    bg_deadline = time.monotonic() + AUTO_BACKGROUND_SECONDS
+                    kill_at = (
+                        time.monotonic() + background_timeout
+                        if background_timeout is not None
+                        else None
+                    )
+                    while True:
+                        snap = await sandbox.poll(handle)
+                        if snap.new_output:
+                            _on_chunk(snap.new_output)
+                            await _append_sandbox_log(sandbox, log_path, snap.new_output)
+                        if snap.log_cursor is not None and persist_cursor is not None:
+                            await persist_cursor(command_id, snap.log_cursor)
+                        if snap.status != "running":
+                            durable_status = (
+                                await load_persisted_status(command_id)
+                                if load_persisted_status is not None
+                                else None
+                            )
+                            if durable_status == "killed":
+                                snap.status = "killed"
+                            live_commands.pop(command_id, None)
+                            if snap.status == "killed" and persist_killed is not None:
+                                await persist_killed(command_id)
+                            elif persist_discard is not None:
+                                await persist_discard(command_id)
+                            if snap.status == "killed":
+                                output = "".join(pieces)
+                                suffix = "\n[killed by user]" if output else "[killed by user]"
+                                return AgentToolResult(
+                                    content=[TextContent(text=output + suffix)],
+                                    details={"status": "killed"},
+                                    is_error=True,
+                                )
+                            if snap.exit_code is not None and snap.exit_code != 0:
+                                pieces.append(
+                                    f"\n[exit code: {snap.exit_code}]"
+                                    if snap.exit_code not in (None, 0)
+                                    else ""
+                                )
+                            output = "".join(pieces)
+                            if len(output) > EXECUTE_RESULT_SPILL_CHARS:
+                                suffix = f"\n\n[truncated] full output written to {log_path}"
+                                output = _bounded_execute_excerpt(output, suffix=suffix)
+                            if workspace_id is not None and conversation_id is not None:
+                                if snap.exit_code == 0:
+                                    _record_executed(workspace_id, conversation_id, args.command)
+                            return AgentToolResult(
+                                content=[TextContent(text=output)],
+                                details={"status": "exited"},
+                            )
+                        now = time.monotonic()
+                        if kill_at is not None and now >= kill_at:
+                            await sandbox.kill(handle)
+                            confirmed = await sandbox.poll(handle)
+                            if confirmed.new_output:
+                                await _append_sandbox_log(sandbox, log_path, confirmed.new_output)
+                            if confirmed.status == "running":
+                                return AgentToolResult(
+                                    content=[
+                                        TextContent(
+                                            text=(
+                                                f"Command exceeded {timeout}s, but termination "
+                                                "could not be confirmed."
+                                            )
+                                        )
+                                    ],
+                                    details={"status": "running", "command_id": command_id},
+                                    is_error=True,
+                                )
+                            live_commands.pop(command_id, None)
+                            if persist_killed is not None:
+                                await persist_killed(command_id)
+                            return AgentToolResult(
+                                content=[TextContent(text=_timeout_tool_message(timeout))],
+                                is_error=True,
+                            )
+                        if now >= bg_deadline:
+                            if kill_at is not None:
+                                _schedule_deadline(
+                                    command_id,
+                                    handle,
+                                    log_path,
+                                    kill_at=kill_at,
+                                )
+                            notice = (
+                                f"Command still running; continuing in background as {command_id}."
+                            )
+                            return AgentToolResult(
+                                content=[TextContent(text=notice)],
+                                details={
+                                    "status": "running",
+                                    "command_id": command_id,
+                                    "log_path": log_path,
+                                },
+                            )
+                        until_background = max(0.0, bg_deadline - now)
+                        until_timeout = (
+                            max(0.0, kill_at - now) if kill_at is not None else until_background
+                        )
+                        await asyncio.sleep(
+                            min(
+                                _BACKGROUND_POLL_INTERVAL_SECONDS,
+                                until_background,
+                                until_timeout,
+                            )
+                        )
+
+                result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
+            except _AutoBackgroundUnavailable:
                 result = await sandbox.execute(args.command, timeout=timeout, on_chunk=_on_chunk)
             except TimeoutError:
                 return AgentToolResult(
@@ -568,12 +858,186 @@ class _KillExecuteArgs(BaseModel):
     command_id: str = Field(description="CubePlex command id returned by background execute.")
 
 
+class _MonitorArgs(BaseModel):
+    description: str = Field(description="Short summary of what this monitor watches.")
+    command: str
+    persistent: bool = Field(
+        default=False,
+        description="If true, run until kill_execute or sandbox death.",
+    )
+    timeout_seconds: int | None = Field(
+        default=3600,
+        ge=1,
+        le=36000,
+        description="Kill after this many seconds unless persistent. Default 3600.",
+    )
+
+
+def _make_monitor_tool(
+    sandbox: Sandbox,
+    *,
+    live: dict[str, tuple[ProcessHandle, bool]],
+    live_lock: asyncio.Lock | None = None,
+    persist_reserve: Callable[..., Awaitable[bool]] | None = None,
+    persist_running: Callable[[str, str], Awaitable[None]] | None = None,
+    persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    persist_monitor_timed_out: Callable[[str], Awaitable[None]] | None = None,
+    deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
+    on_live: Callable[[], None] | None = None,
+    handoff: Callable[[str], Awaitable[bool]] | None = None,
+) -> AgentTool[_MonitorArgs]:
+    lock = live_lock if live_lock is not None else asyncio.Lock()
+    timeout_tasks = deadline_tasks if deadline_tasks is not None else {}
+
+    async def _monitor(
+        tool_call_id: str,
+        args: _MonitorArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        del signal, on_update
+        if not sandbox.supports_background():
+            return AgentToolResult(
+                content=[TextContent(text="This sandbox cannot run background commands.")],
+                is_error=True,
+            )
+        if _looks_like_shell_background(args.command):
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        text=(
+                            "Do not background with shell &, nohup, or disown. "
+                            "The monitor tool manages the process lifetime."
+                        )
+                    )
+                ],
+                is_error=True,
+            )
+        command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
+        log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+        deadline = None
+        if not args.persistent:
+            seconds = args.timeout_seconds or 3600
+            deadline = datetime.now(UTC) + timedelta(seconds=seconds)
+        reserved = False
+        async with lock:
+            if persist_reserve is not None:
+                try:
+                    reserved = await persist_reserve(
+                        command_id=command_id,
+                        tool_call_id=tool_call_id,
+                        command=args.command,
+                        description=args.description,
+                        notify_on_complete=False,
+                        log_path=log_path,
+                        kind="monitor",
+                        lifetime="conversation",
+                        monitor_deadline_at=deadline,
+                    )
+                except Exception as exc:
+                    from cubeplex.repositories.sandbox_command import SandboxCommandCapError
+
+                    if isinstance(exc, SandboxCommandCapError):
+                        return AgentToolResult(
+                            content=[TextContent(text=str(exc))],
+                            is_error=True,
+                        )
+                    logger.exception("monitor reserve failed")
+                    return AgentToolResult(
+                        content=[TextContent(text="failed to reserve monitor")],
+                        is_error=True,
+                    )
+            if not reserved and len(live) >= MAX_LIVE_BACKGROUND_COMMANDS:
+                return AgentToolResult(
+                    content=[TextContent(text="at most 8 running commands per sandbox")],
+                    is_error=True,
+                )
+            persist_error: BaseException | None = None
+
+            async def _on_started(ref: str) -> None:
+                nonlocal persist_error
+                if persist_running is None:
+                    return
+                try:
+                    await persist_running(command_id, ref)
+                except Exception as exc:
+                    persist_error = exc
+
+            try:
+                handle = await sandbox.start(args.command, on_started=_on_started)
+            except Exception:
+                if reserved and persist_killed is not None:
+                    await persist_killed(command_id)
+                raise
+            handle.command_id = command_id
+            handle.deadline_at = deadline
+            if persist_error is not None:
+                await sandbox.kill(handle)
+                if persist_killed is not None:
+                    await persist_killed(command_id)
+                return AgentToolResult(
+                    content=[TextContent(text="failed to persist monitor")],
+                    is_error=True,
+                )
+            live[command_id] = (handle, False)
+        if deadline is not None:
+
+            async def _enforce_monitor_deadline() -> None:
+                await asyncio.sleep(max(0.0, (deadline - datetime.now(UTC)).total_seconds()))
+                try:
+                    async with lock:
+                        current = live.get(command_id)
+                        if current is None or current[0] is not handle:
+                            return
+                        deadline_snapshot = await sandbox.poll(handle)
+                        if deadline_snapshot.new_output:
+                            await _append_sandbox_log(
+                                sandbox,
+                                log_path,
+                                deadline_snapshot.new_output,
+                            )
+                        if deadline_snapshot.status == "running":
+                            await sandbox.kill(handle)
+                            live.pop(command_id, None)
+                            if persist_monitor_timed_out is not None:
+                                await persist_monitor_timed_out(command_id)
+                except Exception:
+                    logger.exception("failed to enforce monitor deadline {}", command_id)
+
+            task = asyncio.create_task(_enforce_monitor_deadline())
+            timeout_tasks[command_id] = task
+            task.add_done_callback(lambda _task: timeout_tasks.pop(command_id, None))
+        await _write_sandbox_log(sandbox, log_path, b"")
+        handed_off = handoff is not None and await handoff(command_id)
+        if not handed_off and on_live is not None:
+            on_live()
+        return AgentToolResult(
+            content=[
+                TextContent(text=f"Monitor running as {command_id}. Use kill_execute to stop.")
+            ],
+            details={"status": "running", "command_id": command_id, "log_path": log_path},
+        )
+
+    return AgentTool(
+        name="monitor",
+        description=(
+            "Watch a long-running command for stdout lines (predicates), not builds. "
+            "The process stays with the conversation after the turn ends."
+        ),
+        parameters=_MonitorArgs,
+        execute=_monitor,
+    )
+
+
 def _make_kill_execute_tool(
     sandbox: Sandbox,
     live: dict[str, tuple[ProcessHandle, bool]],
     *,
     persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    kill_persisted: Callable[[str], Awaitable[bool]] | None = None,
     live_lock: asyncio.Lock | None = None,
+    deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
 ) -> AgentTool[_KillExecuteArgs]:
     lock = live_lock if live_lock is not None else asyncio.Lock()
 
@@ -588,6 +1052,19 @@ def _make_kill_execute_tool(
         async with lock:
             entry = live.get(args.command_id)
         if entry is None:
+            if kill_persisted is not None:
+                try:
+                    if await kill_persisted(args.command_id):
+                        return AgentToolResult(
+                            content=[TextContent(text=f"killed {args.command_id}")],
+                            details={"status": "killed", "command_id": args.command_id},
+                        )
+                except Exception:
+                    logger.exception("durable kill_execute failed for {}", args.command_id)
+                    return AgentToolResult(
+                        content=[TextContent(text=f"failed to kill {args.command_id}")],
+                        is_error=True,
+                    )
             return AgentToolResult(
                 content=[TextContent(text=f"command not found: {args.command_id}")],
                 is_error=True,
@@ -595,14 +1072,23 @@ def _make_kill_execute_tool(
         handle, _notify = entry
         try:
             await sandbox.kill(handle)
+            confirmed = await sandbox.poll(handle)
         except Exception:
             logger.exception("kill_execute failed for {}", args.command_id)
             return AgentToolResult(
                 content=[TextContent(text=f"failed to kill {args.command_id}")],
                 is_error=True,
             )
+        if confirmed.status == "running":
+            return AgentToolResult(
+                content=[TextContent(text=f"failed to confirm kill for {args.command_id}")],
+                is_error=True,
+            )
         async with lock:
             live.pop(args.command_id, None)
+        deadline_task = deadline_tasks.pop(args.command_id, None) if deadline_tasks else None
+        if deadline_task is not None:
+            deadline_task.cancel()
         if persist_killed is not None:
             try:
                 await persist_killed(args.command_id)
@@ -1132,6 +1618,7 @@ class SandboxMiddleware(Middleware):
         self._heartbeat = heartbeat
         self._heartbeat_interval = heartbeat_interval
         self._live_commands: dict[str, tuple[ProcessHandle, bool]] = {}
+        self._command_deadline_tasks: dict[str, asyncio.Task[None]] = {}
         self._live_lock = asyncio.Lock()
         self._owner_id = f"run:{run_id}" if run_id else "run:local"
         self._lease_task: asyncio.Task[None] | None = None
@@ -1145,14 +1632,34 @@ class SandboxMiddleware(Middleware):
                 live_lock=self._live_lock,
                 persist_reserve=self._persist_reserve,
                 persist_running=self._persist_running,
+                persist_cursor=self._persist_cursor,
                 persist_killed=self._persist_killed,
+                persist_exited=self._persist_exited,
+                persist_discard=self._persist_discard,
+                persist_timed_out=self._persist_timed_out,
+                load_persisted_status=self._persisted_command_status,
+                deadline_tasks=self._command_deadline_tasks,
                 on_live=self._ensure_lease_task,
             ),
             _make_kill_execute_tool(
                 sandbox,
                 self._live_commands,
                 persist_killed=self._persist_killed,
+                kill_persisted=self._kill_persisted_command,
                 live_lock=self._live_lock,
+                deadline_tasks=self._command_deadline_tasks,
+            ),
+            _make_monitor_tool(
+                sandbox,
+                live=self._live_commands,
+                live_lock=self._live_lock,
+                persist_reserve=self._persist_reserve,
+                persist_running=self._persist_running,
+                persist_killed=self._persist_killed,
+                persist_monitor_timed_out=self._persist_monitor_timed_out,
+                deadline_tasks=self._command_deadline_tasks,
+                on_live=self._ensure_lease_task,
+                handoff=self._handoff_conversation_command,
             ),
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),
@@ -1176,17 +1683,15 @@ class SandboxMiddleware(Middleware):
         del ctx
         if not self._live_commands:
             return None
-        for command_id, (handle, notify) in list(self._live_commands.items()):
-            if notify:
-                continue
-            await self.sandbox.kill(handle)
-            self._live_commands.pop(command_id, None)
-            await self._persist_killed(command_id)
-        if not self._live_commands:
+        await self._release_conversation_commands()
+        wait_ids = {
+            command_id for command_id, (_handle, notify) in self._live_commands.items() if notify
+        }
+        if not wait_ids:
             return None
         deadline = time.monotonic() + _ON_RUN_END_WAIT_SECONDS
         last_beat = 0.0
-        while self._live_commands and time.monotonic() < deadline:
+        while wait_ids and time.monotonic() < deadline:
             if signal is not None and signal.is_set():
                 break
             now = time.monotonic()
@@ -1199,29 +1704,51 @@ class SandboxMiddleware(Middleware):
             await self._renew_live_leases()
             finished: list[str] = []
             notices: list[UserMessage | AssistantMessage | ToolResultMessage] = []
-            for command_id, (handle, _notify) in list(self._live_commands.items()):
-                snap = await self.sandbox.poll(handle)
+            for command_id in list(wait_ids):
+                async with self._live_lock:
+                    entry = self._live_commands.get(command_id)
+                    if entry is None:
+                        wait_ids.discard(command_id)
+                        continue
+                    handle, _notify = entry
+                    deadline_reached = (
+                        handle.deadline_at is not None and datetime.now(UTC) >= handle.deadline_at
+                    )
+                    snap = await self.sandbox.poll(handle)
+                    timed_out = deadline_reached and snap.status in ("running", "killed")
+                    if timed_out and snap.status == "running":
+                        await self.sandbox.kill(handle)
+                        confirmed = await self.sandbox.poll(handle)
+                        if confirmed.new_output:
+                            snap.new_output += confirmed.new_output
+                        snap.status = confirmed.status
+                        snap.exit_code = confirmed.exit_code
+                        if snap.status == "running":
+                            continue
+                durable_status = await self._persisted_command_status(command_id)
+                if durable_status == "killed":
+                    snap.status = "killed"
                 log_path = f"{self.sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
                 await _append_sandbox_log(self.sandbox, log_path, snap.new_output)
-                if snap.status == "running":
+                if snap.status == "running" and not timed_out:
                     continue
                 finished.append(command_id)
-                await self._persist_terminal(
-                    command_id,
-                    status=snap.status,
-                    exit_code=snap.exit_code,
-                    notify=True,
-                )
+                if timed_out:
+                    await self._persist_timed_out(command_id)
+                    notice_text = f"Background command {command_id} timed out and was killed."
+                else:
+                    await self._persist_terminal(
+                        command_id,
+                        status=snap.status,
+                        exit_code=snap.exit_code,
+                        notify=True,
+                    )
+                    notice_text = (
+                        f"Background command {command_id} {snap.status} (exit {snap.exit_code})."
+                    )
                 notices.append(
                     UserMessage(
-                        content=[
-                            TextContent(
-                                text=(
-                                    f"Background command {command_id} {snap.status}"
-                                    f" (exit {snap.exit_code})."
-                                )
-                            )
-                        ],
+                        content=[TextContent(text=notice_text)],
                         metadata={
                             "notice_id": command_id,
                             "command_id": command_id,
@@ -1230,10 +1757,79 @@ class SandboxMiddleware(Middleware):
                 )
             for command_id in finished:
                 self._live_commands.pop(command_id, None)
+                wait_ids.discard(command_id)
+                deadline_task = self._command_deadline_tasks.pop(command_id, None)
+                if deadline_task is not None and deadline_task is not asyncio.current_task():
+                    deadline_task.cancel()
             if notices:
                 return notices
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(_BACKGROUND_POLL_INTERVAL_SECONDS)
+        for command_id in list(wait_ids):
+            entry = self._live_commands.pop(command_id, None)
+            if entry is None:
+                continue
+            handle, _notify = entry
+            await self.sandbox.kill(handle)
+            await self._persist_killed(command_id)
         return None
+
+    async def _release_conversation_commands(self) -> None:
+        """Hand conversation-scoped processes to the durable coordinator."""
+        command_ids = [
+            command_id
+            for command_id, (_handle, notify) in self._live_commands.items()
+            if not notify
+        ]
+        for command_id in command_ids:
+            if await self._handoff_conversation_command(command_id):
+                continue
+            async with self._live_lock:
+                entry = self._live_commands.pop(command_id, None)
+                deadline_task = self._command_deadline_tasks.pop(command_id, None)
+                if deadline_task is not None:
+                    deadline_task.cancel()
+            if entry is not None:
+                await self.sandbox.kill(entry[0])
+                await self._persist_killed(command_id)
+
+    async def _handoff_conversation_command(self, command_id: str) -> bool:
+        """Release one durable monitor so the coordinator can poll it immediately."""
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return False
+            await repo.release_owner([command_id], owner_id=self._owner_id)
+        async with self._live_lock:
+            self._live_commands.pop(command_id, None)
+            deadline_task = self._command_deadline_tasks.pop(command_id, None)
+            if deadline_task is not None:
+                deadline_task.cancel()
+        return True
+
+    async def finalize_run(self) -> None:
+        """Release durable monitors and stop run-scoped work on every exit path."""
+        lease_task = self._lease_task
+        self._lease_task = None
+        if lease_task is not None and lease_task is not asyncio.current_task():
+            lease_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await lease_task
+
+        await self._release_conversation_commands()
+
+        async with self._live_lock:
+            remaining = dict(self._live_commands)
+            self._live_commands.clear()
+            deadline_tasks = list(self._command_deadline_tasks.values())
+            self._command_deadline_tasks.clear()
+            for task in deadline_tasks:
+                task.cancel()
+        for command_id, (handle, _notify) in remaining.items():
+            try:
+                await self.sandbox.kill(handle)
+            except Exception:
+                logger.exception("failed to stop sandbox command {} during run cleanup", command_id)
+                continue
+            await self._persist_killed(command_id)
 
     async def _persist_reserve(
         self,
@@ -1244,6 +1840,9 @@ class SandboxMiddleware(Middleware):
         description: str,
         notify_on_complete: bool,
         log_path: str,
+        kind: str = "execute",
+        lifetime: str | None = None,
+        monitor_deadline_at: datetime | None = None,
     ) -> bool:
         if self._session_factory is None:
             return False
@@ -1277,6 +1876,11 @@ class SandboxMiddleware(Middleware):
                 owner_until=datetime.now(UTC) + timedelta(seconds=COMMAND_LEASE_SECONDS),
                 log_path=log_path,
                 command_id=command_id,
+                kind=kind,
+                lifetime=lifetime
+                if lifetime is not None
+                else ("conversation" if not notify_on_complete else "run"),
+                monitor_deadline_at=monitor_deadline_at,
             )
         return True
 
@@ -1290,6 +1894,18 @@ class SandboxMiddleware(Middleware):
             if not ok:
                 raise RuntimeError(f"mark_running cas missed for {command_id}")
 
+    async def _persist_cursor(self, command_id: str, log_cursor: str) -> None:
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            ok = await repo.update_log_cursor(
+                command_id,
+                log_cursor=log_cursor,
+                owner_id=self._owner_id,
+            )
+            if not ok:
+                raise RuntimeError(f"update_log_cursor cas missed for {command_id}")
+
     async def _persist_killed(self, command_id: str) -> None:
         await self._persist_terminal(
             command_id,
@@ -1297,6 +1913,87 @@ class SandboxMiddleware(Middleware):
             exit_code=None,
             notify=False,
         )
+
+    async def _persist_exited(
+        self,
+        command_id: str,
+        exit_code: int | None,
+        notify: bool,
+    ) -> None:
+        await self._persist_terminal(
+            command_id,
+            status="exited",
+            exit_code=exit_code,
+            notify=notify,
+        )
+
+    async def _persist_timed_out(self, command_id: str, notify: bool = True) -> None:
+        await self._persist_terminal(
+            command_id,
+            status="killed",
+            exit_code=None,
+            notify=notify,
+        )
+
+    async def _persist_monitor_timed_out(self, command_id: str) -> None:
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            row = await repo.get(command_id)
+            if row is None:
+                return
+            from cubeplex.sandbox.command_coordinator import _terminalize
+
+            await _terminalize(
+                repo.session,
+                row,
+                status="killed",
+                exit_code=None,
+                now=datetime.now(UTC),
+                sandbox=self.sandbox,
+                interrupt=False,
+                wake_text="monitor timeout reached",
+            )
+
+    async def _persisted_command_status(self, command_id: str) -> str | None:
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return None
+            row = await repo.get(command_id)
+            return row.status if row is not None else None
+
+    async def _persist_discard(self, command_id: str) -> None:
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            await repo.discard_reservation(command_id, owner_id=self._owner_id)
+
+    async def _kill_persisted_command(self, command_id: str) -> bool:
+        if self.conversation_id is None:
+            return False
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return False
+            row = await repo.get(command_id)
+            if row is None or row.conversation_id != self.conversation_id:
+                return False
+            from cubeplex.models import UserSandbox
+            from cubeplex.models.sandbox_command import SandboxCommandStatus
+            from cubeplex.sandbox.command_coordinator import kill_command
+
+            sandbox_row = await repo.session.get(UserSandbox, row.user_sandbox_id)
+            if sandbox_row is None or sandbox_row.sandbox_id != self.sandbox.id:
+                return False
+            if row.status not in (
+                SandboxCommandStatus.starting.value,
+                SandboxCommandStatus.running.value,
+            ):
+                return False
+
+            async def _current_sandbox(_row: object) -> Sandbox:
+                return self.sandbox
+
+            return await kill_command(repo.session, row, get_sandbox=_current_sandbox)
 
     async def _persist_terminal(
         self,
@@ -1373,20 +2070,22 @@ class SandboxMiddleware(Middleware):
         *,
         signal: asyncio.Event | None = None,
     ) -> BeforeToolCallResult | None:
-        """Enforce command rules before the execute tool runs.
+        """Enforce command rules before an execute or monitor tool runs.
 
-        v1: execute only. deny → block; confirm → pause on the HITL channel
+        Shell commands share one policy boundary. deny → block; confirm → pause
+        on the HITL channel
         (approve runs it, deny/timeout/cancel block it); edit is rejected.
         Because this runs before the tool body, a blocked command never reaches
         ``sandbox.execute`` — no sandbox side effects, TTL clock untouched.
         """
-        if getattr(ctx.tool_call, "name", None) != "execute":
+        tool_name = getattr(ctx.tool_call, "name", None)
+        if tool_name not in ("execute", "monitor"):
             return None
         if not self.command_rules:
             return None
 
         raw_args = ctx.args
-        if isinstance(raw_args, _ExecuteArgs):
+        if isinstance(raw_args, (_ExecuteArgs, _MonitorArgs)):
             command = raw_args.command
         elif isinstance(raw_args, dict):
             command_value = raw_args.get("command")
@@ -1418,7 +2117,7 @@ class SandboxMiddleware(Middleware):
 
         try:
             answer = await self.channel.approve(
-                tool_name="execute",
+                tool_name=tool_name,
                 tool_call_id=ctx.tool_call.id,
                 args={"command": command},
                 details={"matched_pattern": pattern, "command": command},

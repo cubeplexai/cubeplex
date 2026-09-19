@@ -2,13 +2,15 @@
 
 from datetime import datetime
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from cubeplex.models.sandbox_command import (
     SandboxCommand,
     SandboxCommandStatus,
+    SandboxCommandWake,
+    SandboxCommandWakeState,
 )
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.base import ScopedRepository
@@ -44,6 +46,9 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
         agent_id: str | None = None,
         provider: str = "opensandbox",
         command_id: str | None = None,
+        kind: str = "execute",
+        lifetime: str = "run",
+        monitor_deadline_at: datetime | None = None,
     ) -> SandboxCommand:
         locked = await self.session.execute(
             select(UserSandbox).where(col(UserSandbox.id) == user_sandbox_id).with_for_update()
@@ -80,6 +85,9 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
             log_path=log_path,
             provider=provider,
             status=SandboxCommandStatus.starting.value,
+            kind=kind,
+            lifetime=lifetime,
+            monitor_deadline_at=monitor_deadline_at,
         )
         if command_id:
             row.id = command_id
@@ -126,6 +134,8 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
             "owner_id": None,
             "owner_until": None,
         }
+        if status == SandboxCommandStatus.killed.value:
+            values["provider_ref"] = None
         if notice_state is not None:
             values["notice_state"] = notice_state
         stmt = (
@@ -137,6 +147,41 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
                 col(SandboxCommand.status).in_(_INFLIGHT),
             )
             .values(**values)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+
+    async def update_log_cursor(
+        self,
+        command_id: str,
+        *,
+        log_cursor: str,
+        owner_id: str,
+    ) -> bool:
+        stmt = (
+            update(SandboxCommand)
+            .where(
+                col(SandboxCommand.id) == command_id,
+                col(SandboxCommand.org_id) == self.org_id,
+                col(SandboxCommand.workspace_id) == self.workspace_id,
+                col(SandboxCommand.owner_id) == owner_id,
+                col(SandboxCommand.status).in_(_INFLIGHT),
+            )
+            .values(log_cursor=log_cursor)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+
+    async def discard_reservation(self, command_id: str, *, owner_id: str) -> bool:
+        """Delete a short foreground command that never became background work."""
+        stmt = delete(SandboxCommand).where(
+            col(SandboxCommand.id) == command_id,
+            col(SandboxCommand.org_id) == self.org_id,
+            col(SandboxCommand.workspace_id) == self.workspace_id,
+            col(SandboxCommand.owner_id) == owner_id,
+            col(SandboxCommand.status).in_(_INFLIGHT),
         )
         result = await self.session.execute(stmt)
         await self.session.commit()
@@ -164,6 +209,31 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
         )
         await self.session.execute(stmt)
         await self.session.commit()
+
+    async def release_owner(self, command_ids: list[str], *, owner_id: str) -> None:
+        if not command_ids:
+            return
+        stmt = (
+            update(SandboxCommand)
+            .where(
+                col(SandboxCommand.id).in_(command_ids),
+                col(SandboxCommand.org_id) == self.org_id,
+                col(SandboxCommand.workspace_id) == self.workspace_id,
+                col(SandboxCommand.owner_id) == owner_id,
+                col(SandboxCommand.status).in_(_INFLIGHT),
+            )
+            .values(owner_id=None, owner_until=None)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    async def list_inflight_for_conversation(self, conversation_id: str) -> list[SandboxCommand]:
+        stmt = self._scoped_select().where(
+            col(SandboxCommand.conversation_id) == conversation_id,
+            col(SandboxCommand.status).in_(_INFLIGHT),
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def list_inflight_for_run(self, run_id: str) -> list[SandboxCommand]:
         stmt = self._scoped_select().where(
@@ -227,5 +297,39 @@ async def mark_notice_delivered(session: AsyncSession, command_id: str) -> bool:
         .execution_options(synchronize_session=False)
     )
     result = await session.execute(stmt)
+    await session.commit()
+    return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
+
+
+async def mark_wake_delivered(session: AsyncSession, wake_id: str) -> bool:
+    """Checkpoint path: an injected wake message is now durable."""
+    wake = await session.get(SandboxCommandWake, wake_id)
+    if wake is None:
+        return False
+    stmt = (
+        update(SandboxCommandWake)
+        .where(
+            col(SandboxCommandWake.id) == wake_id,
+            col(SandboxCommandWake.state) != SandboxCommandWakeState.delivered.value,
+        )
+        .values(
+            state=SandboxCommandWakeState.delivered.value,
+            owner_id=None,
+            owner_until=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    if int(result.rowcount or 0) == 1:  # type: ignore[attr-defined]
+        from cubeplex.models.sandbox_command import SandboxCommandNoticeState
+
+        await session.execute(
+            update(SandboxCommand)
+            .where(
+                col(SandboxCommand.id) == wake.command_id,
+                col(SandboxCommand.notice_state) == SandboxCommandNoticeState.pending.value,
+            )
+            .values(notice_state=SandboxCommandNoticeState.delivered.value)
+        )
     await session.commit()
     return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]

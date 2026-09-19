@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from cubeloop.hitl import ApproveAnswer, HitlCancelled, HitlTimedOut
 
-from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.sandbox import SandboxMiddleware, _MonitorArgs
 
 
 class _ToolCall:
@@ -15,9 +15,13 @@ class _ToolCall:
 
 
 class _Ctx:
-    def __init__(self, name: str, command: str) -> None:
+    def __init__(self, name: str, command: str, *, typed: bool = False) -> None:
         self.tool_call = _ToolCall(name)
-        self.args = {"command": command}
+        self.args = (
+            _MonitorArgs(description="Watch logs", command=command)
+            if typed
+            else {"command": command}
+        )
 
 
 class _StubChannel:
@@ -86,6 +90,24 @@ async def test_deny_blocks_without_channel_call():
     assert ch.calls == []
     assert res.hitl_trace["decision"] == "policy_deny"
     assert POLICY_DENY_NUDGE in (res.reason or "")
+
+
+@pytest.mark.asyncio
+async def test_monitor_uses_the_same_command_policy_gate():
+    ch = _StubChannel()
+    mw = _mw(ch, [{"action": "deny", "pattern": "rm *"}])
+    res = await mw.before_tool_call(_Ctx("monitor", "rm -rf /tmp/x"), signal=None)
+    assert res is not None and res.block is True
+    assert ch.calls == []
+
+
+@pytest.mark.asyncio
+async def test_monitor_typed_args_use_the_same_command_policy_gate():
+    ch = _StubChannel()
+    mw = _mw(ch, [{"action": "deny", "pattern": "rm *"}])
+    res = await mw.before_tool_call(_Ctx("monitor", "rm -rf /tmp/x", typed=True), signal=None)
+    assert res is not None and res.block is True
+    assert ch.calls == []
 
 
 @pytest.mark.asyncio

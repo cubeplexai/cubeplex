@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Self
 from cubeloop.providers.base import ReasoningControl
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -982,11 +982,25 @@ class SteerMessageRequest(BaseModel):
     content: str
     steer_id: str = Field(min_length=1, max_length=64)
 
+    @field_validator("steer_id")
+    @classmethod
+    def reject_internal_wake_id(cls, value: str) -> str:
+        if value.startswith("scmw-"):
+            raise ValueError("steer_id uses a reserved prefix")
+        return value
+
 
 class CancelSteerRequest(BaseModel):
     """Request body for cancelling a not-yet-drained steer."""
 
     steer_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("steer_id")
+    @classmethod
+    def reject_internal_wake_id(cls, value: str) -> str:
+        if value.startswith("scmw-"):
+            raise ValueError("steer_id uses a reserved prefix")
+        return value
 
 
 def _durable_steer_status(state: object) -> str:
