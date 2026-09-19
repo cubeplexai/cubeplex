@@ -6,7 +6,25 @@ import pytest
 from cubeplex.streams.steering_delivery import (
     DurableSteeringCoordinator,
     SteeringRunScope,
+    steering_message_to_cubeloop,
 )
+
+
+def test_wake_steer_attempt_keeps_canonical_notice_id() -> None:
+    row = MagicMock(
+        client_steer_id="scmw-123:run-attempt",
+        sender_user_id="user-1",
+        sender_display_name=None,
+        content="wake",
+    )
+
+    message = steering_message_to_cubeloop(row)
+
+    assert message.metadata == {
+        "steer_id": "scmw-123:run-attempt",
+        "sender_user_id": "user-1",
+        "notice_id": "scmw-123",
+    }
 
 
 async def test_checkpoint_ack_retries_transient_database_failure(monkeypatch) -> None:  # noqa: ANN001

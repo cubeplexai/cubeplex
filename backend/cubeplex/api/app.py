@@ -100,6 +100,28 @@ def _build_mcp_user_token_signer() -> Any:
     return build_user_token_signer()
 
 
+async def _stop_sandbox_background_tasks(
+    command_coord_task: asyncio.Task[None] | None,
+    cleanup_task: asyncio.Task[None] | None,
+) -> None:
+    """Stop lease renewal and cleanup together before draining agent runs."""
+    tasks = (
+        (command_coord_task, "Sandbox command coordinator"),
+        (cleanup_task, "Sandbox cleanup loop"),
+    )
+    for task, _label in tasks:
+        if task is not None:
+            task.cancel()
+    for task, label in tasks:
+        if task is None:
+            continue
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        logger.info("{} stopped", label)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):  # type: ignore
     """
@@ -305,7 +327,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     command_coord_task = None
     from cubeplex.sandbox.command_coordinator import command_coordinator_loop
 
-    command_coord_task = asyncio.create_task(command_coordinator_loop(async_session_maker))
+    command_coord_task = asyncio.create_task(
+        command_coordinator_loop(
+            async_session_maker,
+            run_manager=run_manager,
+            redis=redis_client,
+            redis_key_prefix=_app.state.redis_key_prefix,
+        )
+    )
     logger.info("Sandbox command coordinator started")
 
     # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).
@@ -478,6 +507,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
         _app.state.drain_state.enter_draining()
 
     logger.info("Shutdown phase 2/5: stopping background services and connectors")
+    await _stop_sandbox_background_tasks(command_coord_task, cleanup_task)
     from cubeplex.services.conversation_search.startup import stop_search_subsystem
 
     await stop_search_subsystem(_app)
@@ -534,20 +564,6 @@ async def lifespan(_app: FastAPI):  # type: ignore
     mcp_oauth_http_client = getattr(_app.state, "_mcp_oauth_http_client", None)
     if mcp_oauth_http_client is not None:
         await mcp_oauth_http_client.aclose()
-    if cleanup_task:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Sandbox cleanup loop stopped")
-    if command_coord_task:
-        command_coord_task.cancel()
-        try:
-            await command_coord_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Sandbox command coordinator stopped")
     logger.info("Shutdown phase 5/5: application shutdown complete")
     log.shutdown()
 
@@ -652,6 +668,7 @@ def create_app(
         presented_files_router,
         public_artifacts,
         public_attachments,
+        sandbox_commands_router,
         shares,
         system,
         trigger_ingest,
@@ -705,6 +722,7 @@ def create_app(
     app.include_router(im_link.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(presented_files_router, prefix="/api/v1")
+    app.include_router(sandbox_commands_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(me_api_keys_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")

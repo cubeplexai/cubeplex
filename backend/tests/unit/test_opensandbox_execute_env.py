@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from opensandbox.models.execd import RunCommandOpts
 
+from cubeplex.sandbox.base import ProcessHandle
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
 
@@ -101,6 +102,24 @@ async def test_execute_timeout_error_returns_marker() -> None:
     result = await backend.execute("sleep 999", timeout=120)
     assert result.output == "[timeout]"
     assert result.exit_code == -1
+
+
+@pytest.mark.asyncio
+async def test_poll_prefers_persisted_handle_cursor_over_process_cache() -> None:
+    backend, raw = _make_backend()
+    raw.commands.get_command_status = AsyncMock(
+        return_value=MagicMock(running=True, exit_code=None)
+    )
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=MagicMock(content="line", cursor=3)
+    )
+    backend._log_cursors["process-1"] = 9
+    handle = ProcessHandle(command_id="scmd-1", provider_ref="process-1", log_cursor="2")
+
+    snapshot = await backend.poll(handle)
+
+    assert snapshot.log_cursor == "3"
+    raw.commands.get_background_command_logs.assert_awaited_once_with("process-1", cursor=2)
 
 
 @pytest.mark.asyncio

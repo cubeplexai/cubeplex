@@ -2,7 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+
+
+@pytest.mark.asyncio
+async def test_sandbox_coordinator_and_cleanup_stop_as_one_shutdown_phase() -> None:
+    from cubeplex.api.app import _stop_sandbox_background_tasks
+
+    started = [asyncio.Event(), asyncio.Event()]
+
+    async def _background(index: int) -> None:
+        started[index].set()
+        await asyncio.Event().wait()
+
+    coordinator = asyncio.create_task(_background(0))
+    cleanup = asyncio.create_task(_background(1))
+    await asyncio.gather(*(event.wait() for event in started))
+
+    await _stop_sandbox_background_tasks(coordinator, cleanup)
+
+    assert coordinator.cancelled()
+    assert cleanup.cancelled()
 
 
 @pytest.mark.parametrize(

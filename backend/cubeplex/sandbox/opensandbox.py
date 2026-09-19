@@ -217,7 +217,9 @@ class OpenSandbox(Sandbox):
 
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
         ref = handle.provider_ref
-        cursor = self._log_cursors.get(ref)
+        cursor = (
+            int(handle.log_cursor) if handle.log_cursor is not None else self._log_cursors.get(ref)
+        )
         with _as_sandbox_error():
             status = await self._sandbox.commands.get_command_status(ref)
             logs = await self._sandbox.commands.get_background_command_logs(ref, cursor=cursor)
@@ -225,14 +227,23 @@ class OpenSandbox(Sandbox):
         next_cursor = getattr(logs, "cursor", None)
         if next_cursor is not None:
             self._log_cursors[ref] = next_cursor
+        serialized_cursor = str(next_cursor) if next_cursor is not None else handle.log_cursor
         running = bool(getattr(status, "running", True))
         code = getattr(status, "exit_code", None)
         if running:
             st: ProcessSnapshot = ProcessSnapshot(
-                status="running", exit_code=code, new_output=new_output
+                status="running",
+                exit_code=code,
+                new_output=new_output,
+                log_cursor=serialized_cursor,
             )
             return st
-        return ProcessSnapshot(status="exited", exit_code=code, new_output=new_output)
+        return ProcessSnapshot(
+            status="exited",
+            exit_code=code,
+            new_output=new_output,
+            log_cursor=serialized_cursor,
+        )
 
     async def kill(self, handle: ProcessHandle) -> None:
         with _as_sandbox_error():
