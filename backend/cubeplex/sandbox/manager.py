@@ -1809,6 +1809,15 @@ class SandboxManager:
                         exc,
                     )
         if killed:
+            try:
+                from cubeplex.sandbox.command_coordinator import kill_sandbox_commands
+
+                async def _no_sandbox(_row: object) -> None:
+                    return None
+
+                await kill_sandbox_commands(session, record.id, get_sandbox=_no_sandbox)
+            except Exception:
+                logger.exception("failed to mark sandbox commands killed for {}", record.id)
             # clear_sandbox_id frees the provider id for reuse on the next
             # provision and matches the spec invariant (terminal rows carry
             # sandbox_id=None); the in-memory ``record.sandbox_id`` used for

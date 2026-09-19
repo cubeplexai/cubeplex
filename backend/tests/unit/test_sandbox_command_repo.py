@@ -66,6 +66,65 @@ async def test_reserve_inserts_starting_row(session: AsyncSession) -> None:
     assert [r.id for r in inflight] == ["scmd-testreserve01"]
 
 
+async def test_discard_reservation_removes_short_foreground_row(
+    session: AsyncSession,
+) -> None:
+    us = await _sandbox(session)
+    repo = SandboxCommandRepository(session, org_id="org-1", workspace_id="ws-1")
+    row = await repo.reserve(
+        user_sandbox_id=us.id,
+        conversation_id="conv-1",
+        run_id="run-1",
+        tool_call_id="tc-1",
+        started_by_user_id="user-1",
+        command="echo quick",
+        description="quick",
+        notify_on_complete=True,
+        owner_id="run:run-1",
+        owner_until=_until(),
+        log_path="/tmp/quick.log",
+    )
+
+    assert await repo.discard_reservation(row.id, owner_id="run:run-1") is True
+    assert await repo.get(row.id) is None
+
+
+async def test_log_cursor_update_requires_current_owner(session: AsyncSession) -> None:
+    us = await _sandbox(session)
+    repo = SandboxCommandRepository(session, org_id="org-1", workspace_id="ws-1")
+    row = await repo.reserve(
+        user_sandbox_id=us.id,
+        conversation_id="conv-1",
+        run_id="run-1",
+        tool_call_id="tc-cursor",
+        started_by_user_id="user-1",
+        command="long command",
+        description="long command",
+        notify_on_complete=True,
+        owner_id="run:run-1",
+        owner_until=_until(),
+        log_path="/tmp/cursor.log",
+    )
+    assert await repo.mark_running(
+        row.id,
+        provider_ref="provider-1",
+        owner_id="run:run-1",
+    )
+
+    assert not await repo.update_log_cursor(
+        row.id,
+        log_cursor="16",
+        owner_id="run:other",
+    )
+    assert await repo.update_log_cursor(
+        row.id,
+        log_cursor="17",
+        owner_id="run:run-1",
+    )
+    await session.refresh(row)
+    assert row.log_cursor == "17"
+
+
 async def test_reserve_rejects_ninth_inflight(session: AsyncSession) -> None:
     us = await _sandbox(session)
     repo = SandboxCommandRepository(session, org_id="org-1", workspace_id="ws-1")

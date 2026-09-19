@@ -53,6 +53,8 @@ def steering_message_to_cubeloop(row: SteeringMessage) -> UserMessage:
     }
     if row.sender_display_name:
         metadata["sender_display_name"] = row.sender_display_name
+    if row.client_steer_id.startswith("scmw-"):
+        metadata["notice_id"] = row.client_steer_id.split(":", 1)[0]
     return UserMessage(
         content=[TextContent(text=row.content)],
         metadata=metadata,
