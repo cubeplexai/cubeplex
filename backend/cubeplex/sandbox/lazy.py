@@ -19,7 +19,13 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from loguru import logger
 
-from cubeplex.sandbox.base import ExecuteResult, Sandbox, SandboxError
+from cubeplex.sandbox.base import (
+    ExecuteResult,
+    ProcessHandle,
+    ProcessSnapshot,
+    Sandbox,
+    SandboxError,
+)
 from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
 from cubeplex.sandbox.sync_result import SyncResult
 from cubeplex.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
@@ -243,6 +249,14 @@ class LazySandbox(Sandbox):
     def initialized(self) -> bool:
         """Whether the underlying sandbox has been created."""
         return self._sandbox is not None
+
+    @property
+    def user_sandbox_id(self) -> str | None:
+        return self._user_sandbox_id
+
+    async def ensure_created(self) -> None:
+        """Create/connect the underlying sandbox so ``user_sandbox_id`` is set."""
+        await self._ensure_with_retry()
 
     # ------------------------------------------------------------------
     # Internal: ensure a live sandbox exists
@@ -483,6 +497,42 @@ class LazySandbox(Sandbox):
                     on_chunk=on_chunk,
                 ),
             )
+
+    def supports_background(self) -> bool:
+        # Concrete drivers used in production implement start/poll/kill.
+        # Do not return False before _ensure — the first background execute
+        # would be rejected on a fresh LazySandbox.
+        if self._sandbox is not None:
+            return self._sandbox.supports_background()
+        return True
+
+    async def start(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_started: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> ProcessHandle:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.start(
+            command,
+            timeout=timeout,
+            envs=envs,
+            as_root=as_root,
+            on_chunk=on_chunk,
+            on_started=on_started,
+        )
+
+    async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.poll(handle)
+
+    async def kill(self, handle: ProcessHandle) -> None:
+        sandbox = await self._ensure_with_retry()
+        await sandbox.kill(handle)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         sandbox = await self._ensure_with_retry()

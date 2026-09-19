@@ -99,3 +99,41 @@ def compose_after_tool_call(
         )
 
     return composed
+
+
+def _overrides_on_run_end(mw: Middleware) -> bool:
+    method = getattr(type(mw), "on_run_end", None)
+    return method is not None and method is not Middleware.on_run_end
+
+
+def compose_on_run_end(
+    middlewares: list[Middleware],
+) -> Callable[..., Awaitable[list[Any] | None]] | None:
+    """Run sandbox wait+heartbeat first, then other ``on_run_end`` hooks.
+
+    Cubeloop concatenates ``on_run_end`` in middleware order. Waiting inside
+    that default chain would stall later hooks (e.g. Goal) for the whole
+    notify window. SandboxMiddleware must finish (or inject) before Goal
+    evaluates.
+    """
+
+    chain = [m for m in middlewares if _overrides_on_run_end(m)]
+    if not chain:
+        return None
+
+    sandbox_first = [m for m in chain if type(m).__name__ == "SandboxMiddleware"]
+    rest = [m for m in chain if type(m).__name__ != "SandboxMiddleware"]
+
+    async def composed(
+        ctx: Any,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> list[Any] | None:
+        inject: list[Any] = []
+        for mw in sandbox_first + rest:
+            result = await mw.on_run_end(ctx, signal=signal)
+            if result:
+                inject.extend(result)
+        return inject or None
+
+    return composed

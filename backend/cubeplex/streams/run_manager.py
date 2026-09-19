@@ -202,6 +202,18 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
+async def _mark_sandbox_notice_delivered(command_id: str) -> None:
+    """Mark a sandbox command notice delivered after it is checkpointed."""
+    try:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.sandbox_command import mark_notice_delivered
+
+        async with async_session_maker() as session:
+            await mark_notice_delivered(session, command_id)
+    except Exception:
+        logger.exception("failed to mark sandbox notice {} delivered", command_id)
+
+
 def _make_failover_publisher(
     run_id: str,
     publish: Callable[[str, dict[str, Any]], Awaitable[None]],
@@ -2240,6 +2252,9 @@ class RunManager:
                     _user_msg_seen += 1
                     if _user_msg_seen == 1:
                         return  # seed prompt — already shown optimistically
+                    notice_id = (evt.message.metadata or {}).get("notice_id")
+                    if isinstance(notice_id, str) and notice_id.startswith("scmd-"):
+                        await _mark_sandbox_notice_delivered(notice_id)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
                         d,
@@ -2752,6 +2767,9 @@ class RunManager:
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
+                from cubeloop.agent.types import MessageEndEvent as _HitlMsgEnd
+                from cubeloop.providers.base import UserMessage as _HitlUserMsg
+
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 if isinstance(evt, _AgentStartEvent):
@@ -2760,6 +2778,10 @@ class RunManager:
                     # point at which public input admission is open.
                     await self._drain_pre_execution_inputs(run_id, agent.session)
                     await self._steering_delivery.drain(run_id)
+                if isinstance(evt, _HitlMsgEnd) and isinstance(evt.message, _HitlUserMsg):
+                    notice_id = (evt.message.metadata or {}).get("notice_id")
+                    if isinstance(notice_id, str) and notice_id.startswith("scmd-"):
+                        await _mark_sandbox_notice_delivered(notice_id)
                 await auto_detach.quiesce_then_schedule(evt)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
@@ -3745,6 +3767,16 @@ class RunManager:
                     user_id=ctx.user_id,
                     default_image=_sb_default_image,
                 )
+
+                async def _sandbox_heartbeat() -> None:
+                    await touch_run_heartbeat(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        conversation_id=conversation_id,
+                        ttl_seconds=self._run_event_ttl_seconds,
+                    )
+
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
@@ -3752,6 +3784,11 @@ class RunManager:
                     command_rules=_command_rules,
                     channel=sandbox_hitl_channel,
                     config_loader=_sb_config_loader,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    run_id=run_id,
+                    session_factory=async_session_maker,
+                    heartbeat=_sandbox_heartbeat,
                 )
                 cubeloop_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write, edit, read) collected for

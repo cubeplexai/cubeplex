@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from cubeplex.sandbox.local import LocalSandbox
@@ -79,3 +81,52 @@ def test_sandbox_id_is_stable():
     sandbox = LocalSandbox()
     assert sandbox.id == sandbox.id
     assert isinstance(sandbox.id, str)
+
+
+@pytest.mark.asyncio
+async def test_start_returns_before_sleep_exits() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start("sleep 2")
+    snap = await sandbox.poll(handle)
+    assert snap.status == "running"
+    await asyncio.sleep(2.2)
+    snap = await sandbox.poll(handle)
+    assert snap.status == "exited"
+    assert snap.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_kill_marks_process_killed() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start("sleep 30")
+    await sandbox.kill(handle)
+    snap = await sandbox.poll(handle)
+    assert snap.status == "killed"
+    assert handle.provider_ref not in sandbox._bg
+
+
+@pytest.mark.asyncio
+async def test_kill_after_natural_exit_does_not_raise() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start("true")
+    await asyncio.sleep(0.05)
+    await sandbox.kill(handle)
+    assert handle.provider_ref not in sandbox._bg
+
+
+@pytest.mark.asyncio
+async def test_poll_returns_output_from_running_process() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start(
+        "python3 -c \"import sys,time; print('one', flush=True); "
+        "time.sleep(0.2); print('two', flush=True)\""
+    )
+    seen = ""
+    for _ in range(20):
+        snap = await sandbox.poll(handle)
+        seen += snap.new_output
+        if snap.status != "running":
+            break
+        await asyncio.sleep(0.05)
+    assert "one" in seen
+    assert "two" in seen

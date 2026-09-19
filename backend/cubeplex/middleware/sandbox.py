@@ -24,7 +24,9 @@ import shlex
 import time
 import unicodedata
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cubeloop.agent.types import (
@@ -36,14 +38,20 @@ from cubeloop.agent.types import (
 )
 from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
-from cubeloop.providers.base import TextContent
+from cubeloop.providers.base import (
+    AssistantMessage,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+)
 from cubeloop.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
+from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import Sandbox
+from cubeplex.sandbox.base import ProcessHandle, Sandbox
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.sandbox_runtime_config import POLICY_DENY_NUDGE
 from cubeplex.tools.builtin.sandbox_config import (
@@ -117,6 +125,10 @@ MAX_EXECUTE_TIMEOUT_SECONDS = 1800
 # Match ToolResultLimitMiddleware so we spill before that rewrite.
 EXECUTE_RESULT_SPILL_CHARS = 20_000
 _EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
+MAX_LIVE_BACKGROUND_COMMANDS = 8
+_ON_RUN_END_WAIT_SECONDS = 3600
+_RUN_END_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_COMMAND_LEASE_SECONDS = 15
 
 
 def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
@@ -162,6 +174,17 @@ class _ExecuteArgs(BaseModel):
             "Seconds before the command is killed. Default 120. "
             "Raise this for installs, downloads, or builds (max 1800)."
         ),
+    )
+    background: bool = Field(
+        default=False,
+        description=(
+            "If true, start the command and return a command_id immediately. "
+            "You will be notified when it exits. Do not use shell &."
+        ),
+    )
+    notify_on_complete: bool = Field(
+        default=True,
+        description="When background=true, inject a notice when the command exits.",
     )
 
 
@@ -258,11 +281,50 @@ def _is_timeout_error(exc: BaseException) -> bool:
     return "timeout" in text or "timed out" in text
 
 
+_SHELL_BG_RE = re.compile(r"(^|\s)(nohup|disown)(\s|$)|&\s*$")
+
+
+def _looks_like_shell_background(command: str) -> bool:
+    return _SHELL_BG_RE.search(command.strip()) is not None
+
+
+async def _maybe_await(result: Any) -> Any:
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _write_sandbox_log(sandbox: Sandbox, path: str, data: bytes) -> None:
+    try:
+        await _maybe_await(sandbox.upload([(path, data)]))
+    except Exception:
+        logger.exception("failed to write execute log {}", path)
+
+
+async def _append_sandbox_log(sandbox: Sandbox, path: str, text: str) -> None:
+    if not text:
+        return
+    existing = b""
+    try:
+        downloaded = await _maybe_await(sandbox.download([path]))
+        if downloaded:
+            existing = downloaded[0][1]
+    except Exception:
+        existing = b""
+    await _write_sandbox_log(sandbox, path, existing + text.encode())
+
+
 def _make_execute_tool(
     sandbox: Sandbox,
     *,
     workspace_id: str | None = None,
     conversation_id: str | None = None,
+    live: dict[str, tuple[ProcessHandle, bool]] | None = None,
+    live_lock: asyncio.Lock | None = None,
+    persist_reserve: Callable[..., Awaitable[bool]] | None = None,
+    persist_running: Callable[[str, str], Awaitable[None]] | None = None,
+    persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    on_live: Callable[[], None] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
@@ -270,6 +332,8 @@ def _make_execute_tool(
     ``SandboxMiddleware.before_tool_call`` — the tool body itself is a pure
     executor.
     """
+    live_commands = live if live is not None else {}
+    lock = live_lock if live_lock is not None else asyncio.Lock()
 
     async def _execute(
         tool_call_id: str,
@@ -285,6 +349,102 @@ def _make_execute_tool(
             if args.timeout_seconds is not None
             else DEFAULT_EXECUTE_TIMEOUT_SECONDS
         )
+        if _looks_like_shell_background(args.command):
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        text=(
+                            "Do not background with shell &, nohup, or disown. "
+                            "Pass background=true instead."
+                        )
+                    )
+                ],
+                is_error=True,
+            )
+        if args.background:
+            if not sandbox.supports_background():
+                return AgentToolResult(
+                    content=[TextContent(text="This sandbox cannot run background commands.")],
+                    is_error=True,
+                )
+            command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
+            log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+            reserved = False
+            async with lock:
+                if persist_reserve is not None:
+                    try:
+                        reserved = await persist_reserve(
+                            command_id=command_id,
+                            tool_call_id=tool_call_id,
+                            command=args.command,
+                            description=args.description,
+                            notify_on_complete=args.notify_on_complete,
+                            log_path=log_path,
+                        )
+                    except Exception as exc:
+                        from cubeplex.repositories.sandbox_command import (
+                            SandboxCommandCapError,
+                        )
+
+                        if isinstance(exc, SandboxCommandCapError):
+                            return AgentToolResult(
+                                content=[TextContent(text=str(exc))],
+                                is_error=True,
+                            )
+                        logger.exception("sandbox command reserve failed")
+                        return AgentToolResult(
+                            content=[TextContent(text="failed to reserve background command")],
+                            is_error=True,
+                        )
+                if not reserved and len(live_commands) >= MAX_LIVE_BACKGROUND_COMMANDS:
+                    return AgentToolResult(
+                        content=[TextContent(text="at most 8 running commands per sandbox")],
+                        is_error=True,
+                    )
+                persist_error: BaseException | None = None
+
+                async def _on_started(ref: str) -> None:
+                    nonlocal persist_error
+                    if persist_running is None:
+                        return
+                    try:
+                        await persist_running(command_id, ref)
+                    except Exception as exc:
+                        persist_error = exc
+                        logger.exception("sandbox command mark_running failed")
+
+                try:
+                    handle = await sandbox.start(args.command, on_started=_on_started)
+                except Exception:
+                    if reserved and persist_killed is not None:
+                        await persist_killed(command_id)
+                    raise
+                handle.command_id = command_id
+                if persist_error is not None:
+                    await sandbox.kill(handle)
+                    if persist_killed is not None:
+                        await persist_killed(command_id)
+                    return AgentToolResult(
+                        content=[TextContent(text="failed to persist background command")],
+                        is_error=True,
+                    )
+                live_commands[command_id] = (handle, args.notify_on_complete)
+            if on_live is not None:
+                on_live()
+            await _write_sandbox_log(sandbox, log_path, b"")
+            notice = (
+                f"Command running in background as {command_id}."
+                if args.notify_on_complete
+                else (f"Command running in background as {command_id} (no completion notice).")
+            )
+            return AgentToolResult(
+                content=[TextContent(text=notice)],
+                details={
+                    "status": "running",
+                    "command_id": command_id,
+                    "log_path": log_path,
+                },
+            )
         pieces: list[str] = []
         pending: list[asyncio.Task[None]] = []
         last_emit = 0.0
@@ -401,6 +561,63 @@ def _make_execute_tool(
         ),
         parameters=_ExecuteArgs,
         execute=_execute,
+    )
+
+
+class _KillExecuteArgs(BaseModel):
+    command_id: str = Field(description="CubePlex command id returned by background execute.")
+
+
+def _make_kill_execute_tool(
+    sandbox: Sandbox,
+    live: dict[str, tuple[ProcessHandle, bool]],
+    *,
+    persist_killed: Callable[[str], Awaitable[None]] | None = None,
+    live_lock: asyncio.Lock | None = None,
+) -> AgentTool[_KillExecuteArgs]:
+    lock = live_lock if live_lock is not None else asyncio.Lock()
+
+    async def _kill(
+        tool_call_id: str,
+        args: _KillExecuteArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+        async with lock:
+            entry = live.get(args.command_id)
+        if entry is None:
+            return AgentToolResult(
+                content=[TextContent(text=f"command not found: {args.command_id}")],
+                is_error=True,
+            )
+        handle, _notify = entry
+        try:
+            await sandbox.kill(handle)
+        except Exception:
+            logger.exception("kill_execute failed for {}", args.command_id)
+            return AgentToolResult(
+                content=[TextContent(text=f"failed to kill {args.command_id}")],
+                is_error=True,
+            )
+        async with lock:
+            live.pop(args.command_id, None)
+        if persist_killed is not None:
+            try:
+                await persist_killed(args.command_id)
+            except Exception:
+                logger.exception("sandbox command kill persist failed")
+        return AgentToolResult(
+            content=[TextContent(text=f"killed {args.command_id}")],
+            details={"status": "killed", "command_id": args.command_id},
+        )
+
+    return AgentTool(
+        name="kill_execute",
+        description="Stop a background sandbox command started with execute(background=true).",
+        parameters=_KillExecuteArgs,
+        execute=_kill,
     )
 
 
@@ -895,6 +1112,12 @@ class SandboxMiddleware(Middleware):
         command_rules: list[dict[str, Any]] | None = None,
         channel: HitlChannel | None = None,
         config_loader: SandboxConfigLoader | Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        org_id: str | None = None,
+        user_id: str | None = None,
+        run_id: str | None = None,
+        session_factory: Any | None = None,
+        heartbeat: Callable[[], Awaitable[None]] | None = None,
+        heartbeat_interval: float = _RUN_END_HEARTBEAT_INTERVAL_SECONDS,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
@@ -902,12 +1125,34 @@ class SandboxMiddleware(Middleware):
         self.command_rules = command_rules or []
         self.channel = channel
         self.config_loader = config_loader
+        self.org_id = org_id
+        self.user_id = user_id
+        self.run_id = run_id
+        self._session_factory = session_factory
+        self._heartbeat = heartbeat
+        self._heartbeat_interval = heartbeat_interval
+        self._live_commands: dict[str, tuple[ProcessHandle, bool]] = {}
+        self._live_lock = asyncio.Lock()
+        self._owner_id = f"run:{run_id}" if run_id else "run:local"
+        self._lease_task: asyncio.Task[None] | None = None
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
                 sandbox,
                 workspace_id=workspace_id,
                 conversation_id=conversation_id,
+                live=self._live_commands,
+                live_lock=self._live_lock,
+                persist_reserve=self._persist_reserve,
+                persist_running=self._persist_running,
+                persist_killed=self._persist_killed,
+                on_live=self._ensure_lease_task,
+            ),
+            _make_kill_execute_tool(
+                sandbox,
+                self._live_commands,
+                persist_killed=self._persist_killed,
+                live_lock=self._live_lock,
             ),
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),
@@ -920,6 +1165,207 @@ class SandboxMiddleware(Middleware):
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubeloop.AgentTool list for this middleware."""
         return list(self._tools)
+
+    async def on_run_end(
+        self,
+        ctx: AgentContext,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> list[UserMessage | AssistantMessage | ToolResultMessage] | None:
+        """Wait for in-run background commands, then inject one completion notice."""
+        del ctx
+        if not self._live_commands:
+            return None
+        for command_id, (handle, notify) in list(self._live_commands.items()):
+            if notify:
+                continue
+            await self.sandbox.kill(handle)
+            self._live_commands.pop(command_id, None)
+            await self._persist_killed(command_id)
+        if not self._live_commands:
+            return None
+        deadline = time.monotonic() + _ON_RUN_END_WAIT_SECONDS
+        last_beat = 0.0
+        while self._live_commands and time.monotonic() < deadline:
+            if signal is not None and signal.is_set():
+                break
+            now = time.monotonic()
+            if self._heartbeat is not None and now - last_beat >= self._heartbeat_interval:
+                try:
+                    await self._heartbeat()
+                except Exception:
+                    logger.exception("run heartbeat failed during on_run_end wait")
+                last_beat = now
+            await self._renew_live_leases()
+            finished: list[str] = []
+            notices: list[UserMessage | AssistantMessage | ToolResultMessage] = []
+            for command_id, (handle, _notify) in list(self._live_commands.items()):
+                snap = await self.sandbox.poll(handle)
+                log_path = f"{self.sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+                await _append_sandbox_log(self.sandbox, log_path, snap.new_output)
+                if snap.status == "running":
+                    continue
+                finished.append(command_id)
+                await self._persist_terminal(
+                    command_id,
+                    status=snap.status,
+                    exit_code=snap.exit_code,
+                    notify=True,
+                )
+                notices.append(
+                    UserMessage(
+                        content=[
+                            TextContent(
+                                text=(
+                                    f"Background command {command_id} {snap.status}"
+                                    f" (exit {snap.exit_code})."
+                                )
+                            )
+                        ],
+                        metadata={
+                            "notice_id": command_id,
+                            "command_id": command_id,
+                        },
+                    )
+                )
+            for command_id in finished:
+                self._live_commands.pop(command_id, None)
+            if notices:
+                return notices
+            await asyncio.sleep(0.2)
+        return None
+
+    async def _persist_reserve(
+        self,
+        *,
+        command_id: str,
+        tool_call_id: str,
+        command: str,
+        description: str,
+        notify_on_complete: bool,
+        log_path: str,
+    ) -> bool:
+        if self._session_factory is None:
+            return False
+        ensure = getattr(self.sandbox, "ensure_created", None)
+        if callable(ensure):
+            maybe = ensure()
+            if inspect.isawaitable(maybe):
+                await maybe
+        user_sandbox_id = self.sandbox.user_sandbox_id
+        if (
+            not isinstance(user_sandbox_id, str)
+            or self.conversation_id is None
+            or self.user_id is None
+        ):
+            return False
+        from cubeplex.sandbox.command_coordinator import COMMAND_LEASE_SECONDS
+
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return False
+            await repo.reserve(
+                user_sandbox_id=user_sandbox_id,
+                conversation_id=self.conversation_id,
+                run_id=self.run_id or "",
+                tool_call_id=tool_call_id,
+                started_by_user_id=self.user_id,
+                command=command,
+                description=description,
+                notify_on_complete=notify_on_complete,
+                owner_id=self._owner_id,
+                owner_until=datetime.now(UTC) + timedelta(seconds=COMMAND_LEASE_SECONDS),
+                log_path=log_path,
+                command_id=command_id,
+            )
+        return True
+
+    async def _persist_running(self, command_id: str, provider_ref: str) -> None:
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            ok = await repo.mark_running(
+                command_id, provider_ref=provider_ref, owner_id=self._owner_id
+            )
+            if not ok:
+                raise RuntimeError(f"mark_running cas missed for {command_id}")
+
+    async def _persist_killed(self, command_id: str) -> None:
+        await self._persist_terminal(
+            command_id,
+            status="killed",
+            exit_code=None,
+            notify=False,
+        )
+
+    async def _persist_terminal(
+        self,
+        command_id: str,
+        *,
+        status: str,
+        exit_code: int | None,
+        notify: bool,
+        delivered: bool = False,
+    ) -> None:
+        from cubeplex.models.sandbox_command import SandboxCommandNoticeState
+
+        if delivered:
+            notice = SandboxCommandNoticeState.delivered.value
+        elif notify:
+            notice = SandboxCommandNoticeState.pending.value
+        else:
+            notice = SandboxCommandNoticeState.none.value
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            await repo.mark_terminal(
+                command_id,
+                status=status,
+                exit_code=exit_code,
+                finished_at=datetime.now(UTC),
+                notice_state=notice,
+            )
+
+    async def _renew_live_leases(self) -> None:
+        if not self._live_commands:
+            return
+        from cubeplex.sandbox.command_coordinator import COMMAND_LEASE_SECONDS
+
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            await repo.renew_owner(
+                list(self._live_commands),
+                owner_id=self._owner_id,
+                owner_until=datetime.now(UTC) + timedelta(seconds=COMMAND_LEASE_SECONDS),
+            )
+
+    def _ensure_lease_task(self) -> None:
+        if self._lease_task is None or self._lease_task.done():
+            self._lease_task = asyncio.create_task(self._lease_loop())
+
+    async def _lease_loop(self) -> None:
+        try:
+            while self._live_commands:
+                await asyncio.sleep(_COMMAND_LEASE_SECONDS / 3)
+                try:
+                    await self._renew_live_leases()
+                except Exception:
+                    logger.exception("sandbox command lease renew failed")
+        except asyncio.CancelledError:
+            return
+
+    @asynccontextmanager
+    async def _command_repo_ctx(self) -> AsyncIterator[Any]:
+        from cubeplex.repositories.sandbox_command import SandboxCommandRepository
+
+        if self._session_factory is None or self.org_id is None or self.workspace_id is None:
+            yield None
+            return
+        async with self._session_factory() as session:
+            yield SandboxCommandRepository(
+                session, org_id=self.org_id, workspace_id=self.workspace_id
+            )
 
     async def before_tool_call(
         self,
