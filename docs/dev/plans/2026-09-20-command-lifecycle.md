@@ -30,6 +30,8 @@
 
 推荐审阅顺序 C1 → C2 → C3 → C4 → C5；R 可先完成，C6 可在 C1 接口稳定后独立交付。这里按所有权和接口拆分，不按最初六个症状拆补丁。
 
+实施记录（2026-09-21）：#634 仅交付 C1 的基础模型、增量结构、事务预留和默认期限配置；87 项本地回归及该 PR 的 CI 通过，未接入运行时。C1 的执行管理、C2–C6、R、数据回填和统一切换均未完成；后续以对应提交及真实验证结果更新，不能从基础 PR 全绿推断整套方案完成。
+
 各单元中未带仓库前缀的 backend 路径均相对于 `backend/cubeplex/`；R 单元的路径相对于 CubeLoop 仓库。标“新”的文件由对应实施单元创建。
 
 ### 1.1 身份、事实与写入者
@@ -105,6 +107,7 @@
 - `streams/run_manager.py`、`streams/run_events.py`、`streams/recovery.py`、`streams/hitl_resume.py`：run 关联持久 admission，准备／模型／工具／resume 边界检查，不靠 Redis TTL 恢复执行权。
 - `models/steering_message.py`、`repositories/steering_message.py`：用户输入绑定批次，旧未提交输入取消。
 - `schedules/poller.py`、`schedules/dispatch.py`、`models/scheduled_task.py`、`triggers/pipeline.py`、`im/worker.py`、`im/run_handoff.py` 及现有队列 model／repository：首次排队时绑定来源，转交／重试保留，不能只在最后 start_run 时区分。
+- `triggers/ingest.py`、`triggers/worker.py`（新）、`models/trigger.py`、`repositories/trigger.py`、`api/app.py`：可执行 trigger 事件持久排队、lease claim／过期接管、重试和启动恢复；进程内通知仅作加速，不作唯一消费者。
 - `backend/alembic/versions/`：来源关联所需结构通过 autogenerate。
 
 ### Interfaces / core logic
@@ -118,6 +121,8 @@
 同一首次受理事务还更新 conversation 的 model_key／reasoning，并验证附件 scope／actor／目标后将 pending 改为 attached，相关 repository 只 flush、不自行提前 commit。持有 conversation 锁按新受理顺序更新设置，已有来源的重试不写会话选择，防止旧重试覆盖新消息。附件清理必须与受理在同一附件行的锁／持久删除资格上串行裁决，扫描后重新验证资格再删除对象；受理已成功则不能删，清理先获删除权则受理拒绝并整体回滚，不能只在受理端加锁而让 reaper 继续按旧快照删除。
 
 自动来源的内容也要固定：首次领取 schedule occurrence／trigger event 时，在源记录持久保存已渲染 prompt 及影响执行的非凭据参数、当次目标策略和模型选择；尚未固定 conversation 时先保存在源记录，确定目标后再绑定 admission。后续 dispatch／busy／IM 重试只读同一快照，定义编辑影响新 occurrence／event，不重新渲染旧事件；当前停用／权限／目标可用性检查保留，不能以快照绕过撤销。内部源事件的内容身份同样不可变。
+
+TriggerEvent 增加与审计结果分离的持久 dispatch 状态、claim token／lease、next_attempt_at 及冻结内容。入口完成校验并持久排队后才返回 202 accepted；早先插入的去重／审计行不能被 worker 当作可执行事件，重复未完成请求要恢复入口裁决或明确失败。worker 启动及定期扫描只领取已排队／可接管的过期 claim，沿用同一事件身份和有界重试；旧 owner 失权后不能更新状态。new-each-time 的 conversation 创建与目标绑定同一事务，后续 run 启动／IM outbox 沿用 admission 幂等与回执对账，不重复新建目标或执行。注册 app lifespan 并移除仅靠 create_task 的受理后执行路径；过滤、限流和当前权限检查保留，不扩充为通用调度系统。
 
 Stop 之前已经受理的来源保持旧 generation；之后的新用户请求或独立授权的新 occurrence 才能开启下一批。重新开批不取消旧清理、不放行旧 notice。新 active-slot claim 后和每个副作用前仍复查 generation；两套存储不宣称原子提交。
 
@@ -134,6 +139,7 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 - 相同用户来源 ID 改正文／attachments／model_key／reasoning 逐项拒绝；相同 payload 重试仍返回原 run 和 generation。用 barrier 在 admission 提交后、run 创建前模拟崩溃，改变默认模型／reasoning 后重试仍使用首次快照；并发受理只有一个胜出的快照，事务失败不留下缺少快照的新受理，权限撤销／原模型不可用不静默重选。
 - 受理提交后、run 创建前崩溃：自动 notice 仍使用新会话选择；旧请求重试不能覆盖后来消息的设置。推进附件 orphan TTL 并执行真实清理，已受理附件仍可读；清理／受理双向 barrier、事务回滚及跨 actor 附件复用均验证，不只测 attached 字段存在。
 - occurrence／event 已领取后修改 prompt／template／目标策略，再 busy 或 IM 重试，仍执行原快照；新来源采用新定义。覆盖 new-each-time 目标确定前崩溃，以及当前停用／撤销权限不被快照绕过。
+- 新 trigger 恢复 E2E：202 后、目标解析前停止 worker，再创建新 worker，断言同一事件最终启动且只有一个目标／受理。覆盖双 worker claim、lease 到期、目标提交后崩溃、start_run 响应丢失及 IM outbox 重试；过滤失败、限流拒绝、未完成入口校验和停用事件不得被扫描执行。
 - 同 PR 更新站点 `guides/conversations/basics.md`、`sandboxes.md` 和 `guides/automation/scheduled-tasks.md` 的 Stop／删除／下一次独立触发语义。
 
 ## C3. 每条 notice 独立投递与确认
@@ -313,5 +319,6 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 28 | C2：会话选择／附件与受理原子提交，旧重试不覆盖新选择，reaper 竞争不删已受理附件 |
 | 29 | C2：自动来源首次领取固定内容，定义变更不改旧重试，当前权限仍重查 |
 | 30 | R、C4：先前有效等待的用户取消收尾，不强制续跑或冒用旧许可 |
+| 31 | C2：trigger 持久消费与崩溃恢复，入口资格、唯一目标及转交幂等 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
