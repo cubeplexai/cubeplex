@@ -106,8 +106,9 @@
 - `api/routes/v1/conversations.py`、`api/schemas/conversations.py`、`repositories/conversation.py`：消息首次受理、带 generation 的主 Stop、软删除与停止原子提交。
 - `api/routes/v1/workspaces.py`、`models/workspace.py` 及 workspace teardown 共用服务：持久 deleting 标记、停止／清理门槛、生命周期记录的外键删除顺序；其他组织级删除入口复用同一门槛。
 - `api/routes/v1/auth.py`、`models/user.py` 及账号删除服务：固定待删 actor、持久删除资格与跨 scope 清理；保留账号行和恢复证明直到可安全物理删除。新业务入口拒绝 deleting actor，认证入口仍允许本人查询／重试删除。
-- `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 的 `delo-` 前缀：无目标级联 FK 的删除操作及 token 摘要；账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务，回执 30 天后回收。
+- `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。删除操作及 token 摘要无目标级联 FK；账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务，回执 30 天后回收。
 - `api/routes/v1/ws_members.py`、`workspaces.py` 的 leave、`admin_members.py`、membership models／repositories 及鉴权依赖：持久 revoked 标记、scope 内执行撤销和可恢复清理；成员管理及离开 UI 处理 cleanup_pending，站点 `admin/members.md` 同步。
+- `im/identity.py`、`api/routes/v1/shares.py` 及其他直接读取 membership 的消费者：统一采用有效成员条件，排除撤销／删除中的身份。实施时枚举 `Membership`／`OrganizationMembership` 的直接查询、join、exists 和关联访问；清理用途显式区分，不能把仍保留的清理行当作授权。切换门槛包含这份消费者清单的逐项核对。
 - `frontend/packages/web/components/profile/DeleteAccountDialog.tsx`、账号初始化／auth 状态恢复、`components/workspace-settings/WorkspaceDangerZone.tsx`、对应 core API／store 和 en／zh 文案：cleanup_pending 的持续进度、退避查询／重试与终态退出，刷新恢复删除状态；站点 `guides/account/profile.md` 同步说明。
 - `api/routes/v1/conversations.py` 的 install 快捷分支、技能安装 service 和 checkpointer append 边界：同一 admission 保存非 run 操作回执及稳定合成消息 ID，重试对账而不重复安装／写历史。
 - `repositories/attachment.py`、`services/attachments.py`：附件保护加入受理事务，孤儿清理不得凭旧扫描删除已受理附件。
@@ -145,7 +146,7 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 删除状态的终态证明使用独立 deletion_operation：客户端在首个请求前生成 256-bit 随机 deletion_token 并存 sessionStorage，原删除鉴权／密码确认成功后只保存 token 摘要、固定 actor／目标 ID 和状态；这些 ID 不使用指向待删对象的级联 FK。相同 token 不得改目标。硬删除与 completed 回执同事务；worker 完成后也不丢回执。账号 `GET /api/v1/auth/deletion-status` 与 workspace `GET /api/v1/ws/{ws}/deletion-status` 是独立只读 handler，以专用请求头的 token 校验对应操作，后者同时核对固定 ws；不依赖目标 membership 仍存在、不授予任何其他权限、不返回 PII。日志脱敏该头，终态保留 30 天；404／凭证遗失明确不可确认并停止自动轮询。覆盖首个请求响应丢失、两次轮询之间 worker 完成、事务失败、跨目标 token、过期及刷新恢复。
 
-移除／离开 workspace 和 org 成员撤销复用 actor 清理服务而非 bulk-delete membership：先持久撤销资格，鉴权、受理、工具边界及输入边界立即拒绝，再停止 scope 内旧工作。权限锁先于 conversation／sandbox／task 锁，旧成员行和句柄留到对账完成；清理未知返回 cleanup_pending，管理员或本人受限离开状态可恢复查询。org 路径覆盖其所属 workspace，重加成员不得消除旧 admission 的撤销事实。对活跃命令、排队输入、IM 转交、重启、并发重新加入分别做真实 DB 测试，既有最后管理员／owner 保护仍成立。
+移除／离开 workspace 和 org 成员撤销复用 actor 清理服务而非 bulk-delete membership：先持久撤销资格，鉴权、受理、工具边界及输入边界立即拒绝，再停止 scope 内旧工作。权限锁先于 conversation／sandbox／task 锁，旧成员行和句柄留到对账完成；清理未知返回 cleanup_pending，管理员或本人受限离开状态可恢复查询。org 路径覆盖其所属 workspace，重加成员不得消除旧 admission 的撤销事实。对活跃命令、排队输入、IM 身份识别／转交、组织与 workspace 分享读取／创建、重启、并发重新加入分别做真实 DB 测试：成员行仍在且 cleanup_pending 时也不得通过授权，既有最后管理员／owner 保护仍成立。
 
 用户 steering 也持久绑定 actor：HTTP、准备缓冲、pub/sub、DB claim 和最终 Session.submit_input 全路径只向同 actor run 注入。B 到 A 的 run 时保持 queued（UI 显示等待当前运行结束），slot 释放后经同一受理门槛预绑定 B 的唯一后继 run；不改正文／身份、不复制消息。相同 ID 重试、用户撤回、Stop／权限撤销及已提交中断对账沿用现有规则，当前权限失效不能借 A 执行。自动 run 与普通 run 使用同一身份兼容规则。
 
