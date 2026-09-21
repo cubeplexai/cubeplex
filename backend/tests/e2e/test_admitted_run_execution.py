@@ -24,6 +24,7 @@ from cubeplex.db.engine import engine
 from cubeplex.models import ConversationExecutionAdmission
 from cubeplex.services.conversation_execution import (
     ExecutionConflictError,
+    ExecutionRevokedError,
     RunExecutionBinding,
     UserMessageIntent,
 )
@@ -423,3 +424,195 @@ async def test_stop_before_worker_entry_finishes_cleanup_without_claiming_execut
         assert not closed.cleanup_pending
     finally:
         await cleanup_run_rows(db_session, reservation_context.conversation_id)
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+async def test_admitted_start_cannot_cancel_another_runs_pending_question(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+    revoked: bool,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    conversation_id = reservation_context.conversation_id
+    admitted = await service(db_session).admit_user_message(
+        conversation_id=conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="delayed request"),
+        snapshot=snapshot(),
+        now=datetime.now(UTC),
+    )
+    if revoked:
+        await service(db_session).close_generation(
+            conversation_id=conversation_id,
+            actor_user_id=actor,
+            execution_generation=0,
+            now=datetime.now(UTC),
+        )
+        replacement = await service(db_session).admit_user_message(
+            conversation_id=conversation_id,
+            actor_user_id=actor,
+            namespace="web",
+            source_id=str(uuid4()),
+            intent=UserMessageIntent(content="new generation"),
+            snapshot=snapshot(),
+            now=datetime.now(UTC),
+        )
+        assert replacement.admission.execution_generation == 1
+        pending_run_id = replacement.admission.run_id
+    else:
+        pending_run_id = str(uuid4())
+    await db_session.commit()
+    provider = FauxProvider(provider_id="provider")
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", lambda *args, **kwargs: provider)
+    try:
+        async with shared_checkpointer() as cp:
+            await cp.save_pending_request(
+                conversation_id,
+                HitlRequest(
+                    question_id="keep-question",
+                    thread_id=conversation_id,
+                    payload=AskRequest(questions=[Question(key="choice", prompt="Continue?")]),
+                    created_at=datetime.now(UTC).timestamp(),
+                    timeout_seconds=None,
+                ),
+                run_id=pending_run_id,
+            )
+        result: str | None = None
+        rejection: Exception | None = None
+        try:
+            result = await run_manager.start_run(
+                conversation_id=conversation_id,
+                content="delayed request",
+                ctx=RunContext(
+                    user_id=actor,
+                    org_id=DEFAULT_ORG_ID,
+                    workspace_id=DEFAULT_WS_ID,
+                    conversation_id=conversation_id,
+                ),
+                run_id=admitted.admission.run_id,
+                admission_id=admitted.admission.id,
+                llm_snapshot=snapshot(),
+                cancel_pending_hitl=True,
+            )
+        except (ExecutionRevokedError, RuntimeError) as exc:
+            rejection = exc
+        async with shared_checkpointer() as cp:
+            pending = await cp.load_pending(conversation_id)
+        assert pending is not None, "starting a message must not erase another run's question"
+        assert (pending[0].question_id, pending[1]) == ("keep-question", pending_run_id)
+        assert not run_manager._tasks and provider.call_count == 0
+        assert (
+            await get_active_run(
+                run_manager._redis, prefix=run_manager._key_prefix, conversation_id=conversation_id
+            )
+            is None
+        )
+        if revoked:
+            assert result == admitted.admission.run_id and rejection is None
+        else:
+            assert isinstance(rejection, RuntimeError) and "pending HITL" in str(rejection)
+    finally:
+        await run_manager.cancel_all()
+        await cleanup_run_rows(db_session, conversation_id)
+
+
+async def test_late_model_response_cannot_overwrite_replacement_checkpoint(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    conversation_id = reservation_context.conversation_id
+    current = snapshot()
+    provider_config = current.providers["provider"].model_copy(deep=True)
+    for model in provider_config.models:
+        model.context_window = 128_000
+        model.max_tokens = 4096
+    current = replace(current, providers={"provider": provider_config})
+    ctx = RunContext(
+        user_id=actor,
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=conversation_id,
+        is_group_chat=True,
+    )
+    provider = FauxProvider(provider_id="provider")
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", lambda *args, **kwargs: provider)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def old_response(messages: list[Message], model: Model) -> AssistantMessage:
+        entered.set()
+        await release.wait()
+        return faux_assistant_message([faux_text("late old response")], stop_reason="stop")
+
+    provider.set_responses(
+        [
+            old_response,
+            faux_assistant_message(
+                faux_tool_call(
+                    "write_todos",
+                    {"todos": [{"content": "replacement work", "status": "completed"}]},
+                ),
+                stop_reason="tool_use",
+            ),
+            faux_assistant_message([faux_text("replacement complete")], stop_reason="stop"),
+        ]
+    )
+
+    async def start(content: str) -> str:
+        admitted = await service(db_session).admit_user_message(
+            conversation_id=conversation_id,
+            actor_user_id=actor,
+            namespace="web",
+            source_id=str(uuid4()),
+            intent=UserMessageIntent(content=content),
+            snapshot=current,
+            now=datetime.now(UTC),
+        )
+        await db_session.commit()
+        return await run_manager.start_run(
+            conversation_id=conversation_id,
+            content=content,
+            ctx=ctx,
+            run_id=admitted.admission.run_id,
+            admission_id=admitted.admission.id,
+            llm_snapshot=current,
+        )
+
+    try:
+        old_run_id = await start("old work")
+        old_worker = run_manager._tasks[old_run_id]
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        assert await mark_run_stale(
+            run_manager._redis,
+            prefix=run_manager._key_prefix,
+            conversation_id=conversation_id,
+            run_id=old_run_id,
+        )
+        replacement_id = await start("replacement work")
+        await asyncio.wait_for(asyncio.shield(run_manager._tasks[replacement_id]), timeout=15)
+        replacement_meta = await get_run_meta(
+            run_manager._redis, prefix=run_manager._key_prefix, run_id=replacement_id
+        )
+        assert replacement_meta is not None and replacement_meta.status == "completed"
+        async with shared_checkpointer() as cp:
+            completed = await cp.load(conversation_id)
+        assert completed is not None and completed.extra.get("todos")
+        release.set()
+        await asyncio.wait_for(asyncio.gather(old_worker, return_exceptions=True), timeout=10)
+        async with shared_checkpointer() as cp:
+            after_old_exit = await cp.load(conversation_id)
+        assert after_old_exit is not None
+        assert after_old_exit.extra == completed.extra
+        assert after_old_exit.messages == completed.messages
+        assert provider.call_count == 3
+    finally:
+        release.set()
+        await run_manager.cancel_all()
+        await cleanup_run_rows(db_session, conversation_id)

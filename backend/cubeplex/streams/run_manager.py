@@ -1199,6 +1199,7 @@ class RunManager:
             if (
                 admitted.admission.run_start_token is not None
                 or admitted.admission.run_finished_at is not None
+                or admitted.admission.revoked_at is not None
             ):
                 return run_id
             ctx = replace(
@@ -1230,7 +1231,9 @@ class RunManager:
         async with shared_checkpointer() as _cp:
             _db_pending = await _cp.load_pending(conversation_id)
         if _db_pending is not None:
-            if not cancel_pending_hitl:
+            # An admission authorizes its own work, never cancellation of an
+            # unrelated question. Admitted callers must use explicit HITL control.
+            if ctx.execution is not None or not cancel_pending_hitl:
                 _pending_req = _db_pending[0]
                 raise RuntimeError(
                     f"Conversation {conversation_id} has a pending HITL request "
