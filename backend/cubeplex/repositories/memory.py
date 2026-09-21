@@ -43,11 +43,13 @@ class MemoryRepository:
         user_id: str,
         org_id: str | None,
         workspace_id: str | None,
+        auto_commit: bool = True,
     ) -> None:
         self.session = session
         self.user_id = user_id
         self.org_id = org_id
         self.workspace_id = workspace_id
+        self._auto_commit = auto_commit
 
     async def get(self, memory_id: str) -> MemoryItem | None:
         stmt = select(MemoryItem).where(MemoryItem.id == memory_id)  # type: ignore[arg-type]
@@ -178,14 +180,14 @@ class MemoryRepository:
 
     async def add(self, item: MemoryItem) -> MemoryItem:
         self.session.add(item)
-        await self.session.commit()
+        await self._persist()
         await self.session.refresh(item)
         return item
 
     async def update(self, item: MemoryItem) -> MemoryItem:
         item.updated_at = datetime.now(UTC)
         self.session.add(item)
-        await self.session.commit()
+        await self._persist()
         await self.session.refresh(item)
         return item
 
@@ -224,7 +226,14 @@ class MemoryRepository:
         for row in rows:
             row.last_used_at = now
             self.session.add(row)
-        await self.session.commit()
+        await self._persist()
+
+    async def _persist(self) -> None:
+        if self._auto_commit:
+            await self.session.commit()
+        else:
+            # The caller keeps execution-authority locks until the entire operation commits.
+            await self.session.flush()
 
     async def find_eviction_candidate(
         self, *, scope: MemoryScope = MemoryScope.PERSONAL

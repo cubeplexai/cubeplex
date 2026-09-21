@@ -199,8 +199,7 @@ async def test_touch_used_many_updates_rows() -> None:
     session.commit = AsyncMock()
     session.add = MagicMock()
 
-    repo = MemoryRepository.__new__(MemoryRepository)
-    repo.session = session
+    repo = MemoryRepository(session, user_id="u1", org_id="org-1", workspace_id="ws-1")
     await repo.touch_used_many(["mem-x", "mem-x", ""])
     assert row.last_used_at is not None
     session.add.assert_called_with(row)

@@ -486,11 +486,11 @@ class ConversationExecutionService:
         conversation_id: str,
         actor_user_id: str,
     ) -> Conversation:
-        # Authority rows precede the conversation lock; deletion must use this order too.
+        # Serialize revocation without conflicting with billing/memory foreign-key checks.
         user = await self.session.scalar(
             select(User)
             .where(col(User.id) == actor_user_id)
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         workspace = await self.session.scalar(
@@ -499,7 +499,7 @@ class ConversationExecutionService:
                 col(Workspace.id) == self.workspace_id,
                 col(Workspace.org_id) == self.org_id,
             )
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         member = await self.session.scalar(
@@ -508,7 +508,7 @@ class ConversationExecutionService:
                 col(Membership.user_id) == actor_user_id,
                 col(Membership.workspace_id) == self.workspace_id,
             )
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         if user is None or not user.is_active or workspace is None or member is None:
@@ -525,7 +525,7 @@ class ConversationExecutionService:
                 col(Conversation.deleted_at).is_(None),
                 col(Conversation.id).in_(accessible),
             )
-            .with_for_update()
+            .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         if conversation is None:
