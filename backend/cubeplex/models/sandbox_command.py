@@ -4,7 +4,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar
 
-from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
@@ -44,12 +54,26 @@ class SandboxCommand(CubeplexBase, OrgScopedMixin, table=True):
         Index("ix_sandbox_commands_sandbox_status", "user_sandbox_id", "status"),
         Index("ix_sandbox_commands_run_status", "run_id", "status"),
         Index("ix_sandbox_commands_conv_status", "conversation_id", "status"),
+        UniqueConstraint("task_id", name="uq_sandbox_commands_task_id"),
     )
 
     user_sandbox_id: str = Field(
         foreign_key="user_sandboxes.id",
         max_length=20,
         index=True,
+    )
+    # Nullable during expand/backfill; never infer an old instance from the current row.
+    task_id: str | None = Field(
+        default=None,
+        sa_column=Column(
+            String(20),
+            ForeignKey("background_tasks.id", name="fk_sandbox_commands_task_id"),
+            nullable=True,
+        ),
+    )
+    sandbox_instance_id: str | None = Field(default=None, max_length=255)
+    log_state: str = Field(
+        default="pending", max_length=20, sa_column_kwargs={"server_default": "pending"}
     )
     conversation_id: str = Field(max_length=20, index=True)
     run_id: str = Field(max_length=64, index=True)

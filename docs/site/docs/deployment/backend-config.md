@@ -205,6 +205,7 @@ sandbox:
   domain: "…"             # OpenSandbox API host:port (no scheme)
   image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.8.0"
   api_key: "…"
+  command_default_timeout_seconds: 3600 # default for the new managed-task reservation layer
   use_server_proxy: false # true when the backend can't reach sandbox pods/ports directly
   secure_access: false    # required for docker-runtime OpenSandbox
   ttl: 1800               # idle seconds before cleanup
@@ -223,8 +224,21 @@ sandbox:
 | `sandbox.use_server_proxy` | `true` | Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
 | `sandbox.secure_access` | `false` | Enables Kubernetes ingress-gateway signed URLs when `true`. **Must be `false`** on docker-runtime OpenSandbox. |
 | `sandbox.ttl` | `1800` | Idle sandbox is reaped after 30 min. |
+| `sandbox.command_default_timeout_seconds` | `3600` | Positive integer seconds. The backend rejects zero, negative values, non-integers, booleans, and null at startup. Environment override: `CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`. |
 | `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | Agent commands and uploaded files run as this user. Match the sandbox image. Set `run_uid` to `null` to keep the previous root default. Browser stack still starts as root. |
 | `sandbox.resource.cpu` / `memory` | `2` / `4Gi` | Per-sandbox limits. |
+
+The background-task reservation layer uses `command_default_timeout_seconds` when
+an execute task omits `timeout_seconds`. An explicit positive timeout takes
+precedence and may exceed one hour. The selected absolute deadline is stored once;
+configuration changes do not extend existing reservations. Disabling completion
+notifications does not remove the deadline. Monitor deadlines, persistent monitors,
+HTTP timeouts, sandbox TTL, and the foreground waiting budget are separate settings.
+
+This is the storage/reservation foundation of the lifecycle rollout. The existing
+agent execute path and coordinator have not switched to it yet; adding this setting
+does not by itself change their behavior or enable conversation-owned background
+execution. Existing command records are not assigned a guessed deadline.
 
 ## Streaming
 

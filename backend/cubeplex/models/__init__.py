@@ -5,9 +5,11 @@ from cubeplex.models.api_key import ApiKey
 from cubeplex.models.artifact import Artifact
 from cubeplex.models.artifact_version import ArtifactVersion
 from cubeplex.models.attachment import Attachment
+from cubeplex.models.background_task import BackgroundTask, BackgroundTaskEvent
 from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_chunk import ConversationChunk
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.conversation_share import ConversationShare, ShareScope
 from cubeplex.models.credential import Credential
@@ -73,9 +75,12 @@ __all__ = [
     "Artifact",
     "ArtifactVersion",
     "Attachment",
+    "BackgroundTask",
+    "BackgroundTaskEvent",
     "BillingEvent",
     "Conversation",
     "ConversationChunk",
+    "ConversationExecutionAdmission",
     "ConversationParticipant",
     "ConversationShare",
     "Credential",

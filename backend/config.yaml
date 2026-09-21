@@ -85,6 +85,8 @@ default:
   # opensandbox timeout is set to None (disabled) — CubePlex controls termination via TTL.
   sandbox:
     enabled: true
+    # Total deadline for newly reserved managed execute tasks, not an HTTP timeout.
+    command_default_timeout_seconds: 3600
     # domain: "localhost:8090"
     domain: "@format {env[CUBEPLEX_SANDBOX__DOMAIN]}"
     image: "@format {env[CUBEPLEX_SANDBOX__IMAGE]}"

@@ -65,6 +65,7 @@ def test_validate_sandbox_config_rejects_incomplete_required_configuration(
         "sandbox.domain": "opensandbox.example:8090",
         "sandbox.image": "registry.example/cubeplex-sandbox:latest",
         "sandbox.api_key": "test-key",
+        "sandbox.command_default_timeout_seconds": 3600,
         **values,
     }
     monkeypatch.setattr(config, "get", lambda key, default=None: configured.get(key, default))
@@ -85,9 +86,30 @@ def test_validate_sandbox_config_accepts_complete_required_configuration(
         "sandbox.domain": "opensandbox.example:8090",
         "sandbox.image": "registry.example/cubeplex-sandbox:latest",
         "sandbox.api_key": "test-key",
+        "sandbox.command_default_timeout_seconds": 3600,
     }
     monkeypatch.setattr(config, "get", lambda key, default=None: configured.get(key, default))
 
     from cubeplex.api.app import validate_sandbox_config
 
     validate_sandbox_config()
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 1.5, "3600", None, True, False])
+def test_startup_rejects_invalid_managed_command_default(
+    monkeypatch: pytest.MonkeyPatch, timeout: object
+) -> None:
+    from cubeplex.api.app import validate_sandbox_config
+    from cubeplex.config import config
+
+    configured = {
+        "sandbox.enabled": True,
+        "sandbox.domain": "opensandbox.example:8090",
+        "sandbox.image": "registry.example/cubeplex-sandbox:latest",
+        "sandbox.api_key": "test-key",
+        "sandbox.command_default_timeout_seconds": timeout,
+    }
+    monkeypatch.setattr(config, "get", lambda key, default=None: configured.get(key, default))
+
+    with pytest.raises(RuntimeError, match="COMMAND_DEFAULT_TIMEOUT_SECONDS.*positive integer"):
+        validate_sandbox_config()
