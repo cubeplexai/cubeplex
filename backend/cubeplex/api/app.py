@@ -54,7 +54,7 @@ def validate_auth_secrets() -> None:
 
 def validate_sandbox_config() -> None:
     """Require a complete OpenSandbox configuration before accepting requests."""
-    from cubeplex.config import config
+    from cubeplex.config import config, get_command_default_timeout_seconds
 
     if config.get("sandbox.enabled") is not True:
         raise RuntimeError("CUBEPLEX_SANDBOX__ENABLED must be true")
@@ -74,6 +74,8 @@ def validate_sandbox_config() -> None:
             or normalized_value in _SANDBOX_CONFIG_PLACEHOLDERS
         ):
             raise RuntimeError(f"{env_var} must not use a placeholder value")
+
+    get_command_default_timeout_seconds()
 
 
 def _build_encryption_backend() -> FernetBackend:
