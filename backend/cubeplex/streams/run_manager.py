@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from cubeloop.providers.base import ReasoningControl
@@ -55,6 +56,8 @@ from cubeplex.streams.run_events import (
 from cubeplex.utils.time import utc_isoformat
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from cubeplex.models.conversation_execution import ConversationExecutionAdmission
     from cubeplex.services.conversation_execution import RunExecutionBinding
     from cubeplex.streams.steering_delivery import SteeringRunScope
@@ -2426,7 +2429,9 @@ class RunManager:
             return meta.status
         return None
 
-    async def _require_reflection_authority(self, ctx: RunContext, run_id: str) -> None:
+    async def _require_reflection_authority(
+        self, ctx: RunContext, run_id: str, *, session: AsyncSession | None = None
+    ) -> None:
         if ctx.execution is None:
             return
         from cubeplex.db.engine import async_session_maker
@@ -2435,6 +2440,10 @@ class RunManager:
             ExecutionRevokedError,
         )
 
+        if session is None:
+            async with async_session_maker() as owned_session:
+                await self._require_reflection_authority(ctx, run_id, session=owned_session)
+            return
         if ctx.execution_ownership_lost or not await completed_run_claim_matches(
             self._redis,
             prefix=self._key_prefix,
@@ -2444,13 +2453,12 @@ class RunManager:
         ):
             raise asyncio.CancelledError("reflection completion proof was lost")
         try:
-            async with async_session_maker() as session:
-                await ConversationExecutionService(
-                    session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                ).require_reflection_authority(
-                    admission_id=ctx.execution.admission_id,
-                    attempt_id=ctx.execution.start_token,
-                )
+            await ConversationExecutionService(
+                session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            ).require_reflection_authority(
+                admission_id=ctx.execution.admission_id,
+                attempt_id=ctx.execution.start_token,
+            )
         except (ExecutionRevokedError, LookupError) as exc:
             raise asyncio.CancelledError("reflection authority was revoked") from exc
 
@@ -2951,8 +2959,18 @@ class RunManager:
                                 resolve_reflection_model,
                             )
 
+                            _refl_memory_factory = _memory_service_factory
+                            if ctx.execution is not None:
+                                _refl_memory_factory = partial(
+                                    _memory_service_factory,
+                                    authorize_transaction=lambda session: (
+                                        self._require_reflection_authority(
+                                            ctx, run_id, session=session
+                                        )
+                                    ),
+                                )
                             _mem_tools = create_memory_tools(
-                                service_factory=_memory_service_factory,
+                                service_factory=_refl_memory_factory,
                                 conversation_id=_inp.conversation_id,
                                 run_id=_inp.run_id,
                                 max_creates=2,
@@ -3618,13 +3636,19 @@ class RunManager:
             from cubeplex.tools.builtin.memory import create_memory_tools
 
             @_asynccontextmanager
-            async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
+            async def _memory_service_factory(
+                *,
+                authorize_transaction: Callable[[AsyncSession], Awaitable[None]] | None = None,
+            ) -> _AsyncIterator[_MemoryService]:
                 async with _mem_session_maker() as _session:
+                    if authorize_transaction is not None:
+                        await authorize_transaction(_session)
                     _repo = _MemoryRepository(
                         _session,
                         user_id=ctx.user_id,
                         org_id=ctx.org_id,
                         workspace_id=ctx.workspace_id,
+                        auto_commit=authorize_transaction is None,
                     )
                     yield _MemoryService(
                         _repo,
@@ -3632,6 +3656,8 @@ class RunManager:
                         org_id=ctx.org_id,
                         workspace_id=ctx.workspace_id,
                     )
+                    if authorize_transaction is not None:
+                        await _session.commit()
 
             _builtin_tools.extend(
                 create_memory_tools(

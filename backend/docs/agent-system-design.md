@@ -99,6 +99,15 @@ reflection work. Normal completion alone does not revoke this existing best-effo
 postprocessing; cancelled, errored, paused, or unfinished runs cannot authorize it.
 These checks do not change prompt bytes or retry a lost reflection.
 
+Reflection memory tools additionally check the original execution identity in
+the memory operation's own transaction. Authority locks stay held through reads,
+deduplication, capacity eviction and the final save/update; the memory repository
+flushes without committing when the caller owns this transaction. Stop and the
+memory commit therefore have a single database order, with rollback covering the
+whole operation. Authority rows use `FOR NO KEY UPDATE` to serialize revocation
+while remaining compatible with unrelated billing/memory foreign-key checks.
+No model request runs while these locks are held.
+
 ## Durable state and human input
 
 `cubeplex/agents/checkpointer.py` wraps CubeLoop's `PostgresCheckpointer` over a shared asyncpg pool. Conversation ID is the agent thread ID, so checkpoints and resumable human-in-the-loop requests survive a process restart. The app opens the shared checkpointer during its lifespan and closes it on shutdown.

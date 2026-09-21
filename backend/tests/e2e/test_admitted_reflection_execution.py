@@ -12,9 +12,18 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from cubeplex.models import Conversation
-from cubeplex.models.memory import MemoryItem, MemoryScope, MemorySourceType, MemoryType
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import Conversation, User
+from cubeplex.models.memory import (
+    MemoryItem,
+    MemoryScope,
+    MemorySourceType,
+    MemoryStatus,
+    MemoryType,
+)
+from cubeplex.repositories.memory import MemoryRepository
 from cubeplex.services.conversation_execution import UserMessageIntent
+from cubeplex.services.memory import PERSONAL_ACTIVE_SOFT_CAP, CreateMemoryInput, MemoryService
 from cubeplex.services.user_event_bus import UserEventBus
 from cubeplex.streams.run_events import _run_meta_key, get_active_run
 from cubeplex.streams.run_manager import RunContext, RunManager
@@ -27,6 +36,67 @@ reservation_context = run_fixtures.reservation_context
 run_manager = run_fixtures.run_manager
 
 
+async def stop_during_memory_write(
+    *, conversation_id: str, actor: str, new_content: str, release_reflection: asyncio.Event
+) -> bool:
+    """The memory transaction either precedes Stop or must not commit after it."""
+    async with (
+        async_session_maker() as blocker,
+        async_session_maker() as stop_session,
+        async_session_maker() as observer,
+    ):
+        stop_task: asyncio.Task[bool] | None = None
+        try:
+            await blocker.execute(text("LOCK TABLE memory_items IN SHARE MODE"))
+            blocker_pid = await blocker.scalar(text("SELECT pg_backend_pid()"))
+            stop_pid = await stop_session.scalar(text("SELECT pg_backend_pid()"))
+            release_reflection.set()
+            async with asyncio.timeout(10):
+                while not await observer.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE :blocker = ANY(pg_blocking_pids(pid)))"
+                    ),
+                    {"blocker": blocker_pid},
+                ):
+                    await observer.rollback()
+                    await asyncio.sleep(0.01)
+            await observer.rollback()
+
+            async def stop_and_read() -> bool:
+                await service(stop_session).close_generation(
+                    conversation_id=conversation_id,
+                    actor_user_id=actor,
+                    execution_generation=0,
+                    now=datetime.now(UTC),
+                )
+                await stop_session.commit()
+                return (
+                    await stop_session.scalar(
+                        select(MemoryItem.id).where(
+                            col(MemoryItem.source_conversation_id) == conversation_id,
+                            col(MemoryItem.content) == new_content,
+                        )
+                    )
+                    is not None
+                )
+
+            stop_task = asyncio.create_task(stop_and_read())
+            async with asyncio.timeout(10):
+                while not stop_task.done() and not await observer.scalar(
+                    text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"), {"pid": stop_pid}
+                ):
+                    await observer.rollback()
+                    await asyncio.sleep(0.01)
+            await blocker.rollback()
+            return await asyncio.wait_for(stop_task, timeout=10)
+        finally:
+            await blocker.rollback()
+            if stop_task is not None and not stop_task.done():
+                stop_task.cancel()
+                await asyncio.gather(stop_task, return_exceptions=True)
+
+
 @pytest.mark.parametrize(
     ("scenario", "operation"),
     [
@@ -35,6 +105,8 @@ run_manager = run_fixtures.run_manager
         ("stop", "save"),
         ("stop", "update"),
         ("stop_before_model", "save"),
+        ("commit_race", "save"),
+        ("commit_race", "update"),
         ("reopened", "save"),
         ("replaced_claim", "save"),
         ("missing_meta", "save"),
@@ -189,7 +261,16 @@ async def test_reflection_rechecks_authority_after_the_main_run_finishes(
         await db_session.commit()
         reflections = scheduled_reflections or list(run_manager._reflection_tasks)
         assert reflections
-        release_reflection.set()
+        stop_saw_memory = True
+        if scenario == "commit_race":
+            stop_saw_memory = await stop_during_memory_write(
+                conversation_id=conversation_id,
+                actor=actor,
+                new_content=new_content,
+                release_reflection=release_reflection,
+            )
+        else:
+            release_reflection.set()
         await asyncio.wait_for(asyncio.gather(*reflections, return_exceptions=True), timeout=15)
         memories = list(
             (
@@ -200,7 +281,8 @@ async def test_reflection_rechecks_authority_after_the_main_run_finishes(
                 )
             ).all()
         )
-        if scenario == "completed":
+        assert stop_saw_memory, "memory committed after Stop closed its execution generation"
+        if scenario in ("completed", "commit_race"):
             assert len(memories) == 1 and memories[0].content == new_content
             if operation == "save":
                 assert memories[0].source_type == MemorySourceType.REFLECTION
@@ -227,3 +309,70 @@ async def test_reflection_rechecks_authority_after_the_main_run_finishes(
         )
         await db_session.commit()
         await run_fixtures.cleanup_run_rows(db_session, conversation_id)
+
+
+@pytest.mark.usefixtures("reservation_context")
+@pytest.mark.parametrize("operation", ["save", "update", "dedup", "cap"])
+async def test_memory_changes_do_not_escape_the_authorizing_transaction(
+    db_session: AsyncSession, operation: str
+) -> None:
+    user = User(email=f"memory-transaction-{uuid4()}@example.com", hashed_password="test")
+    db_session.add(user)
+    await db_session.flush()
+    user_id = user.id
+    count = PERSONAL_ACTIVE_SOFT_CAP if operation == "cap" else 1
+    originals = [
+        MemoryItem(
+            scope=MemoryScope.PERSONAL,
+            owner_user_id=user_id,
+            workspace_id=DEFAULT_WS_ID,
+            type=MemoryType.PREFERENCE,
+            content=f"Original preference {index}",
+            updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        for index in range(count)
+    ]
+    db_session.add_all(originals)
+    await db_session.commit()
+    original_ids = {item.id for item in originals}
+    original_id = originals[0].id
+    try:
+        repo = MemoryRepository(
+            db_session,
+            user_id=user_id,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            auto_commit=False,
+        )
+        memory = MemoryService(
+            repo, user_id=user_id, org_id=DEFAULT_ORG_ID, workspace_id=DEFAULT_WS_ID
+        )
+        if operation == "update":
+            await memory.update(original_id, content="Changed preference")
+        else:
+            await memory.create(
+                CreateMemoryInput(
+                    scope=MemoryScope.PERSONAL,
+                    type=MemoryType.PREFERENCE,
+                    content="Original preference 0" if operation == "dedup" else "New preference",
+                )
+            )
+        await db_session.rollback()
+        after = list(
+            (
+                await db_session.scalars(
+                    select(MemoryItem)
+                    .where(col(MemoryItem.owner_user_id) == user_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        )
+        assert {item.id for item in after} == original_ids
+        assert all(item.status == MemoryStatus.ACTIVE for item in after)
+        assert all(item.content.startswith("Original preference") for item in after)
+        assert all(item.updated_at == datetime(2026, 1, 1, tzinfo=UTC) for item in after)
+    finally:
+        await db_session.rollback()
+        await db_session.execute(delete(MemoryItem).where(col(MemoryItem.owner_user_id) == user_id))
+        await db_session.execute(delete(User).where(col(User.id) == user_id))
+        await db_session.commit()
