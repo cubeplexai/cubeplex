@@ -2112,7 +2112,7 @@ async def cancel_active_run(
             raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
         except ResumeConflict as exc:
             raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
-        return {"status": "cancelled", "run_id": paused_run_id}
+        return {"status": "published", "run_id": paused_run_id}
 
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}

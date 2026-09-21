@@ -53,10 +53,11 @@ Startup recovery applies the same stale-heartbeat threshold as inline recovery a
 compares the observed heartbeat atomically before revoking an owner. Starting another
 replica alone must not cancel a live worker or stamp its checkpoint run complete.
 
-HITL answer/cancel entry points recognize the run's durable admission without
+HITL answer entry points recognize the run's durable admission without
 accepting a replacement source identity. They check the original generation and
-both the responding participant's and original actor's current access, then continue
-under the original actor, model/reasoning snapshot and trigger. The Redis resume
+the original actor's current access. Only that actor may answer or approve;
+conversation participation is not delegation to use another person's credentials.
+The run continues under its original model/reasoning snapshot and trigger. The Redis resume
 attempt gets a fresh claim token, while the durable initial start token and timestamps
 stay unchanged. Worker entry and model/tool boundaries recheck authority. A second
 HITL pause leaves the receipt unfinished; only owned teardown with no matching
@@ -77,6 +78,26 @@ Uncertain-start recovery also remains a
 cutover requirement. The existing entrances must not be treated
 as protected merely because this internal path is available. The new task coordinator
 stays inactive until all entrances and the data-migration gate are complete.
+
+The paused-run branch of main Stop no longer synthesizes an answer or starts a
+model. For admitted work it durably closes the original generation, then claims
+the paused run for cleanup. The cleanup holds the conversation lock, checks its
+Redis attempt, repairs only that run's unanswered tool calls, clears only the
+matching question, and emits a cancelled Done before terminal metadata. Queued
+guidance is cancelled; checkpoint-proven input stays injected. A lost terminal
+reply does not prevent the finish receipt and slot release. The 202 response is
+an accepted dispatch (`published`), not evidence that cleanup already finished.
+General Stop dispatch for all run/task states and restart reconciliation remain
+part of C2; this paused branch alone does not complete the Stop contract.
+
+Automatic memory reflection for admitted work waits until its original worker has
+finished cleanup. It does not keep the run or active slot open. Each model/tool
+boundary requires the original attempt's completed Redis metadata, its finished
+durable receipt, the same open generation, and the original actor's current access.
+Stop, deletion, revoked access, or missing/replaced completion proof prevents new
+reflection work. Normal completion alone does not revoke this existing best-effort
+postprocessing; cancelled, errored, paused, or unfinished runs cannot authorize it.
+These checks do not change prompt bytes or retry a lost reflection.
 
 ## Durable state and human input
 

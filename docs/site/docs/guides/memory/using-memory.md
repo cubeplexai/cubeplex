@@ -54,6 +54,10 @@ Beyond explicit instructions, the agent may store memory items when it identifie
 
 Each automatically created memory includes a confidence score. Items from explicit instructions ("remember that...") typically get higher confidence than items the agent infers from context.
 
+Automatic memory review can finish shortly after the reply; the response does not
+need to stay active for this step. Stop does not undo memories already saved. To
+change or remove them, use the [Memory Center](./managing-memory.md).
+
 ## Memory in action
 
 Here is a practical example of how memory accumulates and helps over time:
