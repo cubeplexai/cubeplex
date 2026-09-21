@@ -150,9 +150,9 @@ class ConversationExecutionService:
             return None
         if admission.conversation_id != conversation_id:
             raise ExecutionConflictError("resume does not match the admitted conversation")
-        admission = await self._lock_live_admission(
-            admission.id, additional_actor_user_id=responding_user_id
-        )
+        if admission.actor_user_id != responding_user_id:
+            raise ExecutionConflictError("only the original execution actor may answer")
+        admission = await self._lock_live_admission(admission.id)
         if (
             admission.run_start_token is None
             or admission.run_started_at is None
@@ -163,6 +163,29 @@ class ConversationExecutionService:
         return AdmittedExecution(
             admission, ResolvedExecution.model_validate(admission.resolved_execution), False
         )
+
+    async def close_run_generation(
+        self, *, conversation_id: str, run_id: str, actor_user_id: str, now: datetime
+    ) -> ConversationExecutionAdmission | None:
+        """Stop the original generation, including an already-revoked HITL run."""
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission).where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.run_id) == run_id,
+            )
+        )
+        if admission is None:
+            return None
+        if admission.conversation_id != conversation_id:
+            raise ExecutionConflictError("stop does not match the admitted conversation")
+        await self.close_generation(
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            execution_generation=admission.execution_generation,
+            now=now,
+        )
+        return admission
 
     @staticmethod
     def _fingerprint(intent: UserMessageIntent) -> str:
@@ -346,9 +369,18 @@ class ConversationExecutionService:
         ):
             raise ExecutionRevokedError("worker no longer owns this execution")
 
-    async def _lock_live_admission(
-        self, admission_id: str, *, additional_actor_user_id: str | None = None
-    ) -> ConversationExecutionAdmission:
+    async def require_reflection_authority(self, *, admission_id: str, attempt_id: str) -> None:
+        """Allow post-run memory work only for a finished, still-authorized source."""
+        admission = await self._lock_live_admission(admission_id)
+        if (
+            not attempt_id
+            or admission.run_start_token != attempt_id
+            or admission.run_started_at is None
+            or admission.run_finished_at is None
+        ):
+            raise ExecutionRevokedError("reflection has no finished execution receipt")
+
+    async def _lock_live_admission(self, admission_id: str) -> ConversationExecutionAdmission:
         repository = ConversationExecutionAdmissionRepository(
             self.session, org_id=self.org_id, workspace_id=self.workspace_id
         )
@@ -358,7 +390,6 @@ class ConversationExecutionService:
         conversation = await self._lock_authorized_conversation(
             admission.conversation_id,
             admission.actor_user_id,
-            additional_actor_user_id=additional_actor_user_id,
         )
         await self.session.refresh(admission, with_for_update=True)
         if (
@@ -454,21 +485,13 @@ class ConversationExecutionService:
         self,
         conversation_id: str,
         actor_user_id: str,
-        *,
-        additional_actor_user_id: str | None = None,
     ) -> Conversation:
         # Authority rows precede the conversation lock; deletion must use this order too.
-        actors = sorted({actor_user_id, additional_actor_user_id or actor_user_id})
-        users = list(
-            (
-                await self.session.scalars(
-                    select(User)
-                    .where(col(User.id).in_(actors))
-                    .order_by(col(User.id))
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-            ).all()
+        user = await self.session.scalar(
+            select(User)
+            .where(col(User.id) == actor_user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         workspace = await self.session.scalar(
             select(Workspace)
@@ -479,44 +502,32 @@ class ConversationExecutionService:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        members = list(
-            (
-                await self.session.scalars(
-                    select(Membership)
-                    .where(
-                        col(Membership.user_id).in_(actors),
-                        col(Membership.workspace_id) == self.workspace_id,
-                    )
-                    .order_by(col(Membership.user_id))
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-            ).all()
+        member = await self.session.scalar(
+            select(Membership)
+            .where(
+                col(Membership.user_id) == actor_user_id,
+                col(Membership.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if (
-            len(users) != len(actors)
-            or any(not user.is_active for user in users)
-            or workspace is None
-            or len(members) != len(actors)
-        ):
+        if user is None or not user.is_active or workspace is None or member is None:
             raise LookupError("conversation not found")
-        query = (
+        accessible = ConversationRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id, user_id=actor_user_id
+        ).accessible_id_subquery()
+        conversation = await self.session.scalar(
             select(Conversation)
             .where(
                 col(Conversation.id) == conversation_id,
                 col(Conversation.org_id) == self.org_id,
                 col(Conversation.workspace_id) == self.workspace_id,
                 col(Conversation.deleted_at).is_(None),
+                col(Conversation.id).in_(accessible),
             )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        for actor in actors:
-            accessible = ConversationRepository(
-                self.session, org_id=self.org_id, workspace_id=self.workspace_id, user_id=actor
-            ).accessible_id_subquery()
-            query = query.where(col(Conversation.id).in_(accessible))
-        conversation = await self.session.scalar(query)
         if conversation is None:
             raise LookupError("conversation not found")
         return conversation

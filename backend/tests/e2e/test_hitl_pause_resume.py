@@ -671,7 +671,7 @@ async def test_cancel_route_paused_dispatches_to_cancel_paused_run(
     resp = await client.post(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/cancel")
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert body["status"] == "cancelled"
+    assert body["status"] == "published"
     assert body["run_id"] == run_id
 
     stub_cancel_paused.assert_awaited_once()

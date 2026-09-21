@@ -40,6 +40,7 @@ from cubeplex.streams.run_events import (
     append_run_event,
     clear_active_run,
     clear_conversation_last_error,
+    completed_run_claim_matches,
     create_run,
     expire_run_data,
     get_active_run,
@@ -54,6 +55,7 @@ from cubeplex.streams.run_events import (
 from cubeplex.utils.time import utc_isoformat
 
 if TYPE_CHECKING:
+    from cubeplex.models.conversation_execution import ConversationExecutionAdmission
     from cubeplex.services.conversation_execution import RunExecutionBinding
     from cubeplex.streams.steering_delivery import SteeringRunScope
 
@@ -803,7 +805,9 @@ async def _build_attachment_content_blocks(
         return blocks
 
 
-async def _repair_dangling_tool_calls(conversation_id: str) -> None:
+async def _repair_dangling_tool_calls(
+    conversation_id: str, *, expected_run_id: str | None = None
+) -> None:
     """Backfill synthetic tool_results for tool_calls a cancel left unanswered.
 
     Mirrors cubeloop's own cancel cleanup as a fallback. Loads the checkpointed
@@ -834,6 +838,8 @@ async def _repair_dangling_tool_calls(conversation_id: str) -> None:
             return
         last_assistant = data.messages[last_idx]
         assert isinstance(last_assistant, AssistantMessage)
+        if expected_run_id is not None and last_assistant.run_id != expected_run_id:
+            return
 
         # Only this turn's results count as answered — tool_call ids are not
         # globally unique, so scanning all history could treat a reused id
@@ -980,36 +986,6 @@ class ResumeInFlight(Exception):
 
 class ResumeConflict(Exception):
     """The conversation has moved on; the active run_id has changed."""
-
-
-def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
-    """Synthesise an answer payload for ``cancel_paused_run`` to feed
-    through cubeloop's respond path.
-
-    The shape matches what cubeloop's ask_user / confirm tools format
-    into the synthetic tool_result body. The ``_cancelled`` and
-    ``_reason`` markers are unambiguous signals to the model that the
-    user did not actually answer — typical models react with "OK, I'll
-    skip / let me know if my question was off". For the per-question
-    keys we still fill a placeholder so the JSON shape isn't surprising
-    if the model checks individual fields.
-    """
-    kind = getattr(payload, "kind", None)
-    if kind == "ask":
-        questions = list(getattr(payload, "questions", []) or [])
-        answer: dict[str, Any] = {
-            getattr(q, "key", str(i)): "[user cancelled this question]"
-            for i, q in enumerate(questions)
-        }
-        answer["_cancelled"] = True
-        answer["_reason"] = reason
-        return answer
-    if kind == "confirm":
-        # confirm has a binary decision; a cancel ≈ explicit deny, plus
-        # marker fields so the model can distinguish "user clicked deny"
-        # from "user clicked cancel" if it matters.
-        return {"approved": False, "_cancelled": True, "_reason": reason}
-    return {"_cancelled": True, "_reason": reason}
 
 
 def _extract_tool_summaries(
@@ -1740,22 +1716,8 @@ class RunManager:
         run_id: str,
         reason: str = "cancelled by user",
         ctx: RunContext,
-        llm_snapshot: Any | None = None,
     ) -> str:
-        """Cancel a conversation parked in ``paused_hitl``.
-
-        Earlier revisions called ``agent.abort_pending`` which wrote a
-        synthetic deny tool_result AND a terminal "Conversation aborted"
-        assistant message, finalising the run as ``cancelled``. The
-        terminal write left a cold dead-end: the user clicked Cancel
-        and the conversation just stopped. The new flow synthesises a
-        cancel-flavoured *answer* and feeds it through the normal
-        respond path — cubeloop's ask_user / confirm tool writes a
-        tool_result containing the cancel marker, then the agent loop
-        runs and the model gets to respond (typically: "OK, was the
-        question off-base? What did you have in mind?"). Run finalises
-        as ``completed`` via the normal respond path.
-        """
+        """Stop a paused run without interpreting Stop as another model input."""
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
@@ -1769,7 +1731,7 @@ class RunManager:
         if pending_run_id != run_id:
             raise ResumeConflict("question belongs to another run")
         started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
-        ctx = await self._resolve_resume_context(ctx=ctx, run_id=run_id)
+        admission = await self._close_paused_execution(ctx=ctx, run_id=run_id)
 
         # 2. Single-flight CAS — only one cancel/resume may own the slot.
         claim = await claim_resume(
@@ -1781,41 +1743,199 @@ class RunManager:
             ttl_seconds=self._run_event_ttl_seconds,
         )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
-            raise ResumeInFlight("cancel raced another resume/cancel in flight")
+            await self.dispatch_cancel(run_id)
+            return run_id
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
-        if ctx.execution is not None:
-            ctx = replace(ctx, execution=replace(ctx.execution, attempt_id=claim.claim_token))
-
-        # 3. Synthesise a cancel-flavoured answer. cubeloop's ask_user /
-        #    confirm tool stringifies whatever we pass as the answer
-        #    into the tool_result body, so the model sees the marker
-        #    keys and can respond contextually.
-        cancel_answer = _build_cancel_answer(pending.payload, reason)
-
-        # 4. Spawn the respond task — reuses the existing resume pipeline
-        #    that handles the agent loop, terminal CAS write, and Redis
-        #    cleanup. Same shape as ``resume_run_with_answer``.
         self._resume_claim_tokens[run_id] = claim.claim_token
-        self._preparing_runs.add(run_id)
-        self._set_preparing_claim(run_id, claim.claim_token)
         task = asyncio.create_task(
-            self._execute_respond_run(
+            self._execute_cancel_paused_run(
                 run_id=run_id,
                 conversation_id=conversation_id,
                 question_id=pending.question_id,
-                answer=cancel_answer,
                 claim_token=claim.claim_token,
                 ctx=ctx,
-                **({"llm_snapshot": llm_snapshot} if llm_snapshot is not None else {}),
+                admission=admission,
+                reason=reason,
             ),
-            name=f"cancel_respond:{run_id}",
+            name=f"cancel_paused:{run_id}",
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
+
+    async def _close_paused_execution(
+        self, *, ctx: RunContext, run_id: str
+    ) -> ConversationExecutionAdmission | None:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.services.conversation_execution import (
+            ConversationExecutionService,
+            ExecutionConflictError,
+        )
+
+        try:
+            async with async_session_maker() as session:
+                admission = await ConversationExecutionService(
+                    session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                ).close_run_generation(
+                    conversation_id=ctx.conversation_id,
+                    run_id=run_id,
+                    actor_user_id=ctx.user_id,
+                    now=datetime.now(UTC),
+                )
+                await session.commit()
+                return admission
+        except (ExecutionConflictError, LookupError) as exc:
+            raise ResumeConflict("original execution cannot be stopped") from exc
+
+    async def _execute_cancel_paused_run(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        question_id: str,
+        claim_token: str,
+        ctx: RunContext,
+        admission: ConversationExecutionAdmission | None,
+        reason: str,
+    ) -> None:
+        from sqlalchemy import select
+        from sqlmodel import col
+
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.config import config
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.models.conversation import Conversation
+        from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
+        from cubeplex.services.conversation_execution import ConversationExecutionService
+        from cubeplex.streams.hitl_resume import begin_resume_finalization
+        from cubeplex.streams.steering_delivery import SteeringRunScope
+
+        async def require_claim() -> None:
+            if not await run_claim_matches(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                claim_token=claim_token,
+            ):
+                raise RunClaimLost("paused cleanup lost its execution slot")
+
+        async def finish_cancelled() -> None:
+            await require_claim()
+            async with shared_checkpointer() as cp:
+                if await cp.load_pending(conversation_id) is not None:
+                    raise RuntimeError("paused cleanup still has a pending question")
+            if admission is not None and admission.run_start_token is not None:
+                async with async_session_maker() as session:
+                    await ConversationExecutionService(
+                        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                    ).record_run_finished(
+                        admission_id=admission.id,
+                        attempt_id=admission.run_start_token,
+                        worker_started=admission.run_started_at is not None,
+                        now=datetime.now(UTC),
+                    )
+                    await session.commit()
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                claim_token=claim_token,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+                claim_token=claim_token,
+            )
+            with suppress(Exception):
+                await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
+
+        try:
+            # New admitted work locks the same conversation before claiming a slot.
+            async with async_session_maker() as session:
+                conversation = await session.scalar(
+                    select(Conversation)
+                    .where(
+                        col(Conversation.id) == conversation_id,
+                        col(Conversation.org_id) == ctx.org_id,
+                        col(Conversation.workspace_id) == ctx.workspace_id,
+                    )
+                    .with_for_update()
+                )
+                if conversation is None:
+                    return
+                await require_claim()
+                if not await begin_resume_finalization(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                    lease_seconds=max(
+                        1, int(config.get("lifecycle.stale_run_threshold_seconds", 180))
+                    ),
+                ):
+                    raise RunClaimLost("paused cleanup could not reserve finalization")
+                async with shared_checkpointer() as cp:
+                    pending = await cp.load_pending(conversation_id)
+                    if pending is not None and (
+                        pending[1] != run_id or pending[0].question_id != question_id
+                    ):
+                        raise RunClaimLost("paused cleanup does not own the current question")
+                    await require_claim()
+                    await _repair_dangling_tool_calls(conversation_id, expected_run_id=run_id)
+                    await require_claim()
+                    await cp.mark_run_complete(conversation_id, run_id)
+                    await require_claim()
+                    if pending is not None and not await cp.clear_pending_request_if_matches(
+                        conversation_id, question_id=question_id, run_id=run_id
+                    ):
+                        raise RunClaimLost("paused question changed during cleanup")
+                await require_claim()
+                await self._steering_delivery.finalize_run(
+                    run_id,
+                    scope=SteeringRunScope(ctx.org_id, ctx.workspace_id, conversation_id),
+                    cancel_uncommitted=True,
+                )
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    DoneEvent(
+                        timestamp=utc_isoformat(datetime.now(UTC)),
+                        data={"cancelled": True, "reason": reason},
+                    ),
+                    claim_token=claim_token,
+                )
+                await update_run_meta(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    status="cancelled",
+                    claim_token=claim_token,
+                )
+                await session.commit()
+            await finish_cancelled()
+        except RunClaimLost:
+            logger.warning(
+                "Paused cleanup {} lost ownership; leaving reconciliation pending", run_id
+            )
+        except (Exception, asyncio.CancelledError):
+            # A lost terminal reply must not turn completed cleanup into a 12-hour lock.
+            with suppress(Exception, RunClaimLost):
+                await require_claim()
+                meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+                if meta is not None and meta.status == "cancelled":
+                    await finish_cancelled()
+                    return
+            logger.exception("Paused cleanup {} failed; leaving reconciliation pending", run_id)
 
     async def _resolve_resume_context(self, *, ctx: RunContext, run_id: str) -> RunContext:
         from cubeplex.db.engine import async_session_maker
@@ -2276,6 +2396,27 @@ class RunManager:
             raise RunClaimLost("execution finalization claim was replaced")
         ctx.execution_finalization_acquired = True
 
+    async def _require_execution_authority(self, ctx: RunContext, run_id: str) -> None:
+        if ctx.execution is None:
+            return
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.services.conversation_execution import (
+            ConversationExecutionService,
+            ExecutionRevokedError,
+        )
+
+        await self._require_execution_slot(ctx, run_id)
+        try:
+            async with async_session_maker() as session:
+                await ConversationExecutionService(
+                    session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                ).require_run_authority(
+                    admission_id=ctx.execution.admission_id,
+                    attempt_id=ctx.execution.start_token,
+                )
+        except (ExecutionRevokedError, LookupError) as exc:
+            raise asyncio.CancelledError("execution was revoked before finalization") from exc
+
     async def _owned_terminal_status(self, ctx: RunContext, run_id: str) -> str | None:
         if ctx.execution is None:
             return None
@@ -2284,6 +2425,34 @@ class RunManager:
         if meta is not None and meta.status != "running":
             return meta.status
         return None
+
+    async def _require_reflection_authority(self, ctx: RunContext, run_id: str) -> None:
+        if ctx.execution is None:
+            return
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.services.conversation_execution import (
+            ConversationExecutionService,
+            ExecutionRevokedError,
+        )
+
+        if ctx.execution_ownership_lost or not await completed_run_claim_matches(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=ctx.conversation_id,
+            run_id=run_id,
+            claim_token=ctx.execution.attempt_id,
+        ):
+            raise asyncio.CancelledError("reflection completion proof was lost")
+        try:
+            async with async_session_maker() as session:
+                await ConversationExecutionService(
+                    session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                ).require_reflection_authority(
+                    admission_id=ctx.execution.admission_id,
+                    attempt_id=ctx.execution.start_token,
+                )
+        except (ExecutionRevokedError, LookupError) as exc:
+            raise asyncio.CancelledError("reflection authority was revoked") from exc
 
     async def _record_user_cancel(
         self, *, run_id: str, conversation_id: str, ctx: RunContext | None = None
@@ -2684,6 +2853,7 @@ class RunManager:
                                 projection_error,
                             )
                         final_status = require_host_success(result)
+                        await self._require_execution_authority(ctx, run_id)
                         await self._begin_execution_finalization(ctx, run_id)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
@@ -2765,6 +2935,7 @@ class RunManager:
                             run_id,
                         )
                     elif _bus is not None:
+                        _owner_task = asyncio.current_task()
 
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
                             from cubeloop import Agent
@@ -2819,6 +2990,19 @@ class RunManager:
                                     price_lookup=_refl_price_lookup,
                                 )
                             ]
+                            if ctx.execution is not None:
+                                from cubeplex.middleware.execution_authority import (
+                                    ExecutionAuthorityMiddleware,
+                                )
+
+                                _refl_mw.insert(
+                                    0,
+                                    ExecutionAuthorityMiddleware(
+                                        require_authority=lambda: (
+                                            self._require_reflection_authority(ctx, run_id)
+                                        ),
+                                    ),
+                                )
 
                             return Agent(
                                 model=_refl_model,
@@ -2833,6 +3017,18 @@ class RunManager:
                             bus: Any = _bus,
                             agent_factory: Any = _make_reflection_agent,
                         ) -> None:
+                            if ctx.execution is not None:
+                                # Reflection is postprocessing, not a reason to hold a run open.
+                                assert _owner_task is not None
+                                try:
+                                    await asyncio.shield(_owner_task)
+                                    await self._require_reflection_authority(ctx, run_id)
+                                except Exception:
+                                    logger.opt(exception=True).warning(
+                                        "reflection: completion could not be verified for {}",
+                                        run_id,
+                                    )
+                                    return
                             try:
                                 await asyncio.wait_for(agent_ref.wait_for_idle(), timeout=10.0)
                             except (TimeoutError, Exception):
@@ -3180,6 +3376,7 @@ class RunManager:
                             result,
                             answered_question_id=question_id,
                         )
+                await self._require_execution_authority(ctx, run_id)
                 if not await begin_resume_finalization(
                     self._redis,
                     prefix=self._key_prefix,
@@ -3851,11 +4048,7 @@ class RunManager:
 
             authority_middleware.append(
                 ExecutionAuthorityMiddleware(
-                    async_session_maker,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    binding=ctx.execution,
-                    require_slot=lambda: self._require_execution_slot(ctx, run_id),
+                    require_authority=lambda: self._require_execution_authority(ctx, run_id),
                 )
             )
             cubeloop_middleware.extend(authority_middleware)
@@ -4097,6 +4290,7 @@ class RunManager:
                         run_id=run_id,
                         conversation_id=conversation_id,
                         ttl_seconds=self._run_event_ttl_seconds,
+                        claim_token=ctx.execution.attempt_id if ctx.execution is not None else None,
                     )
 
                 sandbox_mw = SandboxMiddleware(

@@ -139,6 +139,7 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
     [
         "completed",
         "stop",
+        "stop_final",
         "stale_slot",
         "concurrent",
         "paused",
@@ -207,8 +208,8 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
                 ),
                 stop_reason="tool_use",
             )
-        if scenario == "stop" or lost_ownership:
-            if scenario == "stop":
+        if scenario in ("stop", "stop_final") or lost_ownership:
+            if scenario in ("stop", "stop_final"):
                 await service(db_session).close_generation(
                     conversation_id=reservation_context.conversation_id,
                     actor_user_id=actor,
@@ -216,6 +217,10 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
                     now=datetime.now(UTC),
                 )
                 await db_session.commit()
+                if scenario == "stop_final":
+                    return faux_assistant_message(
+                        [faux_text("late final answer")], stop_reason="stop"
+                    )
             elif scenario == "replaced_claim":
                 await run_manager._redis.hset(
                     _run_meta_key(run_manager._key_prefix, admitted.admission.run_id),
@@ -308,6 +313,7 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         assert meta is not None
         expected_status = {
             "stop": "cancelled",
+            "stop_final": "cancelled",
             "paused": "paused_hitl",
             "replaced_claim": "running",
             "replaced_slot": "stale",

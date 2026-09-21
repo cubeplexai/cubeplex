@@ -502,6 +502,7 @@ class DurableSteeringCoordinator:
         run_id: str,
         *,
         scope: SteeringRunScope | None = None,
+        cancel_uncommitted: bool = False,
     ) -> None:
         scope = scope or self._scopes.get(run_id)
         if scope is None:
@@ -519,6 +520,11 @@ class DurableSteeringCoordinator:
                                 row_id=row.id,
                                 state=SteeringMessageState.injected,
                             )
+                        elif cancel_uncommitted:
+                            await repo.reconcile_terminal(
+                                row_id=row.id,
+                                state=SteeringMessageState.cancelled,
+                            )
                     await repo.finalize_active_for_run(run_id)
                     await session.commit()
             except Exception:
@@ -526,6 +532,8 @@ class DurableSteeringCoordinator:
                     "durable steering finalization failed for run {}",
                     run_id,
                 )
+                if cancel_uncommitted:
+                    raise
 
     async def poll_once(self) -> None:
         for run_id in tuple(self._sessions):
