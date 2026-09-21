@@ -48,6 +48,11 @@ a pre-write read alone cannot protect against a takeover between the two calls.
 Terminal checkpoint cleanup uses the existing finalization lease to exclude stale
 recovery while the owner is committing. A superseded worker stops new work and
 does not finalize its replacement or repair the replacement's pending history.
+For admitted terminal runs, publishing terminal metadata does not release this
+lease: it remains until the durable finish receipt is committed and the active
+slot is released. A fast next send cannot steal unfinished cleanup. HITL pauses
+release the finalization lease so an immediate answer is not delayed; crashed
+terminal owners remain recoverable after the bounded lease expires.
 Unresolved durable receipts remain available for reconciliation, not automatic replay.
 Startup recovery applies the same stale-heartbeat threshold as inline recovery and
 compares the observed heartbeat atomically before revoking an owner. Starting another
@@ -107,6 +112,18 @@ memory commit therefore have a single database order, with rollback covering the
 whole operation. Authority rows use `FOR NO KEY UPDATE` to serialize revocation
 while remaining compatible with unrelated billing/memory foreign-key checks.
 No model request runs while these locks are held.
+Topic access additionally locks the topic archive gate and the actor's matching
+topic/conversation participation rows before locking the conversation. A concurrent
+move to another topic or an unreserved new grant requires fresh admission; removing
+a participant or archiving a topic cannot commit between authorization and memory.
+
+Admitted memory consolidation uses the same completed-attempt and authority checks.
+It waits outside the main run for owner cleanup, rechecks before its model call,
+and validates inside the transaction applying the complete extract/merge/archive
+batch. Memory operations do not commit individually; a failure rolls the batch
+back, and source memory records retain the triggering run ID. Stop or revocation
+while the model is pending prevents any later batch write. Normal completion still
+permits personal and workspace consolidation without keeping the run open.
 
 ## Durable state and human input
 

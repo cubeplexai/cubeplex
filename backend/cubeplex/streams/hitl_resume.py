@@ -240,7 +240,10 @@ if finalizing and finalizing ~= ARGV[1] then
   return 0
 end
 redis.call('HSET', KEYS[1], 'status', ARGV[2])
-redis.call('HDEL', KEYS[1], 'resume_finalizing_token', 'resume_finalizing_until')
+-- An admitted owner still needs its claim for the durable finish receipt.
+if ARGV[3] == '' or ARGV[2] == 'paused_hitl' then
+  redis.call('HDEL', KEYS[1], 'resume_finalizing_token', 'resume_finalizing_until')
+end
 return 1
 """
 

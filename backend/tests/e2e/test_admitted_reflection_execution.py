@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from cubeplex.db.engine import async_session_maker
-from cubeplex.models import Conversation, User
+from cubeplex.models import Conversation, ConversationParticipant, Topic, TopicParticipant, User
 from cubeplex.models.memory import (
     MemoryItem,
     MemoryScope,
@@ -22,6 +22,7 @@ from cubeplex.models.memory import (
     MemoryType,
 )
 from cubeplex.repositories.memory import MemoryRepository
+from cubeplex.repositories.topic import TopicRepository
 from cubeplex.services.conversation_execution import UserMessageIntent
 from cubeplex.services.memory import PERSONAL_ACTIVE_SOFT_CAP, CreateMemoryInput, MemoryService
 from cubeplex.services.user_event_bus import UserEventBus
@@ -34,6 +35,169 @@ from tests.e2e.test_conversation_execution_control import actor_id, service, sna
 
 reservation_context = run_fixtures.reservation_context
 run_manager = run_fixtures.run_manager
+
+
+@pytest.mark.parametrize(
+    "access", ["topic_member", "topic_archive", "topic_conversation_member", "conversation_member"]
+)
+@pytest.mark.parametrize("revocation_first", [False, True])
+async def test_memory_transaction_serializes_with_participation_revocation(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    access: str,
+    revocation_first: bool,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    conversation_id = reservation_context.conversation_id
+    other = User(email=f"memory-owner-{uuid4()}@example.com", hashed_password="test")
+    db_session.add(other)
+    await db_session.flush()
+    conversation = await db_session.get(Conversation, conversation_id)
+    assert conversation is not None
+    conversation.creator_user_id = other.id
+    topic: Topic | None = None
+    if access != "conversation_member":
+        topic = Topic(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            creator_user_id=actor,
+            title="memory authority",
+        )
+        db_session.add(topic)
+        await db_session.flush()
+        conversation.topic_id = topic.id
+    if access in ("topic_member", "topic_archive"):
+        assert topic is not None
+        db_session.add(TopicParticipant(topic_id=topic.id, user_id=actor))
+    else:
+        db_session.add(
+            ConversationParticipant(
+                org_id=DEFAULT_ORG_ID,
+                workspace_id=DEFAULT_WS_ID,
+                conversation_id=conversation_id,
+                user_id=actor,
+            )
+        )
+    await db_session.flush()
+    admitted = await service(db_session).admit_user_message(
+        conversation_id=conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="remember a preference"),
+        snapshot=snapshot(),
+        now=datetime.now(UTC),
+    )
+    identity = {"admission_id": admitted.admission.id, "attempt_id": "original"}
+    assert await service(db_session).claim_run_start(**identity, now=datetime.now(UTC))
+    assert await service(db_session).record_run_started(**identity, now=datetime.now(UTC))
+    assert await service(db_session).record_run_finished(
+        **identity, worker_started=True, now=datetime.now(UTC)
+    )
+    await db_session.commit()
+    new_content = f"Prefers concise output {uuid4()}"
+
+    async def revoke(session: AsyncSession) -> None:
+        repository = TopicRepository(
+            session, org_id=DEFAULT_ORG_ID, workspace_id=DEFAULT_WS_ID, user_id=actor
+        )
+        if access == "topic_archive":
+            assert topic is not None
+            await repository.archive(topic.id)
+        elif access == "topic_member":
+            assert topic is not None
+            await repository.remove_participant(topic.id, actor)
+        else:
+            await session.execute(
+                delete(ConversationParticipant).where(
+                    col(ConversationParticipant.conversation_id) == conversation_id,
+                    col(ConversationParticipant.user_id) == actor,
+                )
+            )
+        await session.commit()
+
+    revoke_task: asyncio.Task[bool] | None = None
+    try:
+        async with (
+            async_session_maker() as memory_session,
+            async_session_maker() as revoke_session,
+            async_session_maker() as observer,
+        ):
+            revoke_pid = await revoke_session.scalar(text("SELECT pg_backend_pid()"))
+            if revocation_first:
+                await revoke(revoke_session)
+                with pytest.raises(LookupError):
+                    await service(memory_session).require_reflection_authority(**identity)
+                return
+            await service(memory_session).require_reflection_authority(**identity)
+
+            async def revoke_and_read() -> bool:
+                await revoke(revoke_session)
+                return (
+                    await revoke_session.scalar(
+                        select(MemoryItem.id).where(col(MemoryItem.content) == new_content)
+                    )
+                    is not None
+                )
+
+            revoke_task = asyncio.create_task(revoke_and_read())
+            async with asyncio.timeout(10):
+                while not revoke_task.done() and not await observer.scalar(
+                    text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"), {"pid": revoke_pid}
+                ):
+                    await observer.rollback()
+                    await asyncio.sleep(0.01)
+            await MemoryService(
+                MemoryRepository(
+                    memory_session,
+                    user_id=actor,
+                    org_id=DEFAULT_ORG_ID,
+                    workspace_id=DEFAULT_WS_ID,
+                    auto_commit=False,
+                ),
+                user_id=actor,
+                org_id=DEFAULT_ORG_ID,
+                workspace_id=DEFAULT_WS_ID,
+            ).create(
+                CreateMemoryInput(
+                    scope=MemoryScope.PERSONAL,
+                    type=MemoryType.PREFERENCE,
+                    content=new_content,
+                    source_conversation_id=conversation_id,
+                )
+            )
+            await memory_session.commit()
+            assert await asyncio.wait_for(revoke_task, 10), (
+                "memory committed after access revocation"
+            )
+            await memory_session.rollback()
+            with pytest.raises(LookupError):
+                await service(memory_session).require_reflection_authority(**identity)
+    finally:
+        if revoke_task is not None and not revoke_task.done():
+            revoke_task.cancel()
+            await asyncio.gather(revoke_task, return_exceptions=True)
+        await db_session.rollback()
+        await db_session.execute(
+            delete(MemoryItem).where(col(MemoryItem.source_conversation_id) == conversation_id)
+        )
+        await db_session.execute(
+            delete(ConversationParticipant).where(
+                col(ConversationParticipant.conversation_id) == conversation_id
+            )
+        )
+        conversation = await db_session.get(Conversation, conversation_id)
+        assert conversation is not None
+        conversation.topic_id = None
+        conversation.creator_user_id = actor
+        await db_session.flush()
+        if topic is not None:
+            await db_session.execute(
+                delete(TopicParticipant).where(col(TopicParticipant.topic_id) == topic.id)
+            )
+            await db_session.delete(topic)
+        await db_session.delete(other)
+        await db_session.commit()
 
 
 async def stop_during_memory_write(

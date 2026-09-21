@@ -149,6 +149,7 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
         "foreign_pending",
         "terminal_reply_lost",
         "terminal_cancel",
+        "next_send",
     ],
 )
 async def test_model_runs_once_with_original_selection_after_default_changes_and_redis_expires(
@@ -275,14 +276,27 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         "llm_snapshot": current,
     }
     reply_lost = False
-    if scenario in ("terminal_reply_lost", "terminal_cancel"):
+    next_send_claimed = False
+    if scenario in ("terminal_reply_lost", "terminal_cancel", "next_send"):
         original_eval = run_manager._redis.eval
 
         async def lose_terminal_reply(script: str, numkeys: int, *args: Any) -> Any:
-            nonlocal reply_lost
+            nonlocal reply_lost, next_send_claimed
             result = await original_eval(script, numkeys, *args)
             if not reply_lost and "completed" in args:
                 reply_lost = True
+                if scenario == "next_send":
+                    next_send_claimed = await create_run(
+                        run_manager._redis,
+                        prefix=run_manager._key_prefix,
+                        conversation_id=reservation_context.conversation_id,
+                        run_id=replacement_run_id,
+                        claim_token="next-send",
+                        status="running",
+                        started_at=datetime.now(UTC).isoformat(),
+                        ttl_seconds=60,
+                    )
+                    return result
                 if scenario == "terminal_cancel":
                     raise asyncio.CancelledError("worker cancelled after terminal commit")
                 raise ConnectionError("terminal write committed, Redis response lost")
@@ -354,6 +368,9 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
                     replacement_run_id if scenario == "replaced_slot" else run_id
                 )
         await db_session.refresh(admitted.admission)
+        if scenario == "next_send":
+            assert not next_send_claimed, "next send replaced an owner before its finish receipt"
+            assert reply_lost
         assert admitted.admission.run_start_requested_at is not None
         assert admitted.admission.run_started_at is not None
         assert (admitted.admission.run_finished_at is None) == (

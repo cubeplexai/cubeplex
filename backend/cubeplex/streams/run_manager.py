@@ -4520,6 +4520,7 @@ class RunManager:
         self,
         *,
         conversation_id: str,
+        run_id: str,
         ctx: RunContext,
         cached_snapshot: Any | None = None,
     ) -> None:
@@ -4574,8 +4575,20 @@ class RunManager:
             # by conversation_id / user_id / oneshot_operation.
             tracer = getattr(self._app.state, "tracer", None)
 
-            task = asyncio.create_task(
-                mc.run_consolidation(
+            owner_task = asyncio.current_task()
+
+            async def consolidate_after_cleanup() -> None:
+                if ctx.execution is not None:
+                    assert owner_task is not None
+                    try:
+                        await asyncio.shield(owner_task)
+                        await self._require_reflection_authority(ctx, run_id)
+                    except Exception:
+                        logger.opt(exception=True).warning(
+                            "consolidation: completion could not be verified for {}", run_id
+                        )
+                        return
+                await mc.run_consolidation(
                     redis=self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
@@ -4587,7 +4600,18 @@ class RunManager:
                     session_maker=async_session_maker,
                     min_hours=min_hours,
                     min_runs=min_runs,
-                ),
+                    run_id=run_id,
+                    authorize_transaction=(
+                        lambda session: self._require_reflection_authority(
+                            ctx, run_id, session=session
+                        )
+                    )
+                    if ctx.execution is not None
+                    else None,
+                )
+
+            task = asyncio.create_task(
+                consolidate_after_cleanup(),
                 name=f"memcons:{conversation_id}",
             )
             self._consolidation_tasks.add(task)
@@ -5135,6 +5159,7 @@ class RunManager:
                 logger.opt(exception=True).warning("post-done search-index enqueue failed")
             await self._maybe_consolidate_memory(
                 conversation_id=conversation_id,
+                run_id=run_id,
                 ctx=ctx,
                 cached_snapshot=extra_ref_holder.get("llm_snapshot"),
             )
@@ -5773,6 +5798,7 @@ class RunManager:
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             await self._maybe_consolidate_memory(
                 conversation_id=conversation_id,
+                run_id=run_id,
                 ctx=ctx,
                 cached_snapshot=extra_ref_holder.get("llm_snapshot"),
             )

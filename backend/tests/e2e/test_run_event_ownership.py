@@ -172,3 +172,51 @@ async def test_finalization_lease_keeps_its_coordination_keys_alive(
     )
     assert await redis.pttl(_run_meta_key(prefix, run_id)) > 59_000
     assert await redis.pttl(_active_run_key(prefix, conversation_id)) > 59_000
+
+
+@pytest.mark.parametrize("path", ["prompt", "respond"])
+@pytest.mark.parametrize("cleanup", ["finished", "expired"])
+async def test_terminal_claim_is_kept_until_cleanup_or_lease_expiry(
+    owned_redis: tuple[Redis, str], path: str, cleanup: str
+) -> None:
+    redis, prefix = owned_redis
+    conversation_id, run_id, next_run_id = (str(uuid4()) for _ in range(3))
+    identity = {
+        "prefix": prefix,
+        "conversation_id": conversation_id,
+        "run_id": run_id,
+        "claim_token": "owner",
+    }
+    assert await create_run(
+        redis,
+        **identity,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+    assert await begin_resume_finalization(redis, **identity, ttl_seconds=60, lease_seconds=60)
+    if path == "prompt":
+        await update_run_meta(redis, **identity, status="completed")
+    else:
+        assert await finalize_run_meta_if_claim_matches(redis, **identity, status="completed")
+
+    async def next_send() -> bool:
+        return await create_run(
+            redis,
+            prefix=prefix,
+            conversation_id=conversation_id,
+            run_id=next_run_id,
+            claim_token="next",
+            status="running",
+            started_at=datetime.now(UTC).isoformat(),
+            ttl_seconds=60,
+        )
+
+    assert not await next_send()
+    if cleanup == "finished":
+        await clear_active_run(redis, **identity)
+        assert not await redis.hexists(_run_meta_key(prefix, run_id), "resume_finalizing_token")
+    else:
+        await redis.hset(_run_meta_key(prefix, run_id), "resume_finalizing_until", "0")
+    assert await next_send()
+    assert not await run_claim_matches(redis, **identity)
