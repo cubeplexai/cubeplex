@@ -35,8 +35,8 @@
 - #634 交付 C1 基础模型、增量结构、事务预留和默认期限配置；87 项本地回归及该 PR 的 CI 通过。
 - #635（`6f3dcc7e2`）交付 C1 运行时的原实例接管、owner 隔离、停止事实、monitor 限流和期限恢复，CI 通过。新 coordinator 尚未注册到应用，不代表生产入口已切换；宿主交接和日志收尾分别继续由 C4、C6 完成。
 - CubeLoop #231（`b488ab8584`）交付 R 的等待校验、输入失效、HITL 审批来源和 extra 持久化，CI 通过；尚未合并／发布，CubePlex 依赖与宿主校验尚未接入。
-- #636 是 C2 的增量 draft，当前提交 `1982c9ea9`：已实现用户请求身份及设置快照、附件保护、关闭批次、内部 RunManager 绑定及启动／退出回执、模型／工具执行资格校验，以及初始 worker 的 Redis 写入隔离和安全收尾。已撤销的启动重试不清理新问题；持久受理的启动入口不隐式取消其他 run 的 HITL。196 项局部回归通过，新增问题隔离／迟到旧响应回归后的受理与 owner 测试合跑 39 项通过，推送前完整 backend check-ci 通过。
-- C2 仍须接通 Web／IM／steering／HITL／schedule／trigger 入口、主 Stop 的实际取消派发、删除／撤权清理、自动来源快照及恢复、启动回执未决的对账。尤其 HITL 恢复尚未绑定原 admission，不能从 prompt 路径的测试推断它已受 Stop 保护。C3–C6、依赖集成、数据回填及统一切换也未完成；上述测试不是原始六项问题的全链路验收。
+- #636 是 C2 的增量 draft，当前提交 `1727c453a`：已实现用户请求身份及设置快照、附件保护、关闭批次、内部 RunManager 绑定及启动／退出回执、模型／工具执行资格校验，以及 prompt／HITL 恢复 worker 的 Redis 写入隔离和安全收尾。持久受理的 HITL 恢复校验原批次、原 actor 和回答者当前权限，保留原模型／reasoning／trigger；新的恢复 attempt 不替换首次启动回执，连续暂停不记作结束。已撤销的启动重试不清理新问题，启动入口不隐式取消其他 run 的 HITL。终态写入后丢响应或被取消仍保留已提交结果并释放 slot；不会再次执行的幂等重试不因原模型已删除而失败。最新局部回归 167 项通过，推送前完整 backend check-ci 通过；本次提交的远端 CI／复审仍待确认。
+- C2 仍须接通 Web／IM／steering／schedule／trigger 的受理入口、主 Stop 的实际取消派发、删除／撤权清理、自动来源快照及恢复、启动回执未决的对账。HITL 已能识别原 admission，但旧入口创建的无 admission run 仍走切换前路径，不能据此声称公共入口已受完整保护；主 Stop 尚未改为不调用模型的 HITL 清理。C3–C6、依赖集成、数据回填及统一切换也未完成；上述测试不是原始六项问题的全链路验收。
 
 以上 PR 均不包含部署或线上数据切换授权。分 PR 审核不等于中间版本可独立启用。
 
@@ -134,7 +134,7 @@
 
 首次受理与 Stop 锁定同一 conversation；受理记录持久存在后才能排队或取得 Redis active slot。fixed schedule 在 occurrence 首次持久领取时绑定批次，早于 worker dispatch；目标尚未确定的 new-each-time 流程在目标固定后、首次排队前绑定。相同来源键在不同 actor／目标下冲突，不能重新指定目标绕过旧绑定。
 
-用户来源还持久绑定规范化请求摘要：正文、有序 attachment IDs、请求的 model_key／reasoning 及其他影响执行的提交字段。复用 client_message_id 等身份但请求不同返回冲突，不更改原 run；不把临时 URL、发送时间或重试时重新解析的默认模型算入摘要。C2 为 admission 增加 typed request_fingerprint 和 resolved_execution 字段，首次解析的模型／provider 选择、有效 reasoning 等不含凭据的执行设置必须与受理在同一事务提交，先于排队或 run 创建；run 从它构造，不依赖重试时重新解析默认值。已有受理重试仍校验当前权限／凭据，原选择不可用则明确失败，不静默换模型。没有可靠历史请求证明的旧受理不猜填摘要或执行快照。
+用户来源还持久绑定规范化请求摘要：正文、有序 attachment IDs、请求的 model_key／reasoning 及其他影响执行的提交字段。复用 client_message_id 等身份但请求不同返回冲突，不更改原 run；不把临时 URL、发送时间或重试时重新解析的默认模型算入摘要。C2 为 admission 增加 typed request_fingerprint 和 resolved_execution 字段，首次解析的模型／provider 选择、有效 reasoning 等不含凭据的执行设置必须与受理在同一事务提交，先于排队或 run 创建；run 从它构造，不依赖重试时重新解析默认值。已有受理重试仍校验当前访问权限；需要实际执行时校验当前模型／凭据，原选择不可用则明确失败，不静默换模型。已经启动／结束或被撤销、只返回原 run 绑定的重试不依赖模型仍可用，也不再次执行。没有可靠历史请求证明的旧受理不猜填摘要或执行快照。
 
 同一首次受理事务还更新 conversation 的 model_key／reasoning，并验证附件 scope／actor／目标后将 pending 改为 attached，相关 repository 只 flush、不自行提前 commit。持有 conversation 锁按新受理顺序更新设置，已有来源的重试不写会话选择，防止旧重试覆盖新消息。附件清理必须与受理在同一附件行的锁／持久删除资格上串行裁决，扫描后重新验证资格再删除对象；受理已成功则不能删，清理先获删除权则受理拒绝并整体回滚，不能只在受理端加锁而让 reaper 继续按旧快照删除。
 
