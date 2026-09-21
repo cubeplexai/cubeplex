@@ -81,7 +81,7 @@
 ### 4.1 安装／构建等一次性长命令
 
 1. 在同一事务登记公共 task 和 command 详情，再请求 provider 启动；command 前台最多等 15 秒。显式 background 则尽快返回句柄。15 秒是 command 的交互预算，不是所有适配器的统一超时。
-2. 前台已拿到终态时，工具直接返回结果，不额外发送同一完成通知。交给后台时，返回 task ID、command ID、日志路径、deadline 和是否自动通知，并持久标记结果由任务事件通道负责。Todo 和公共控制引用 task ID；command ID 只用于命令领域操作。
+2. 前台已拿到终态且最终输出可读时，工具直接交付最终结果，不额外发送同一完成通知。交给后台时，返回 task ID、command ID、真实执行状态、日志路径、deadline 和是否自动通知，并持久标记结果由任务事件通道负责。进程已退出但输出尚未就绪也可交后台，明确 result_pending，不能把它伪装为仍在执行或已经交付完整结果。Todo 和公共控制引用 task ID；command ID 只用于命令领域操作。
 3. 模型继续独立工作。剩余步骤都依赖后台结果时，保留未完成 Todo，说明“任务在后台运行，完成后继续”，结束本轮 run。
 4. coordinator 管理进程、日志、deadline 和 sandbox 保活；此时不需要 Agent、旧 Session 或旧 run heartbeat。
 5. 命令结束后创建带来源的会话事件。有当前 run 就内部注入；没有就新建 run。模型结合原会话和 command 结果继续验证、执行后续步骤、回复用户。用户看到任务状态和折叠结果行，不看到一条伪装成自己输入的待发送消息。
@@ -90,7 +90,7 @@
 
 后台交接与终态观察通过 task 的当前 owner 串行处理，明确选择“本次工具直接给终态”或“工具给 running、之后任务事件给终态”，不能两条路径各通知一次。后台交接已经提交但工具结果投影失败时，任务仍能从持久列表找到；不因 worker 崩溃重新执行同一 shell command。该交接规则属于公共层，不由各适配器再实现一份通知流程。
 
-前台 owner 在交接前崩溃也不能漏管：确认旧 attempt 已失去执行权后，接管者检查原 tool result 的 checkpoint。终态结果已提交则不补 completion；尚未提交终态则接管已受理命令、完成后台交接，让后续结果走 wake。无法确认旧 attempt 已退出或 checkpoint 状态时保留恢复中，不因一次查询失败就重复通知。
+前台 owner 在交接前崩溃也不能漏管：确认旧 attempt 已失去执行权后，接管者检查原 tool result 的 checkpoint。最终结果已交付则不补 completion；尚未交付则接管已受理命令、完成后台交接，让后续结果走 wake。含 result_pending 的终态快照不是最终交付证明。无法确认旧 attempt 已退出或 checkpoint 状态时保留恢复中，不因一次查询失败就重复通知。
 
 ### 4.2 monitor 与 server
 
@@ -130,6 +130,10 @@
 受理来源必须由服务端区分，不能仅凭 `trigger="automated"` 决定能否开启新批次。现有 fixed-target schedule 会重复进入同一 conversation；它的新 occurrence 保留独立授权，但旧 command completion 没有这个权限。持久受理记录保存 `source_kind`、稳定 `source_id`、目标 conversation 和受理时 generation；同一来源重试只读取原绑定，不能重新分配批次。用户消息、schedule occurrence、既有 trigger occurrence、后台 notice 分别来自已鉴权的入口，客户端不能自报为内部调度。
 
 用户消息的受理身份还绑定不可变请求摘要：正文、有序 attachment IDs、请求的 model_key 与规范化 reasoning 等影响执行的提交字段。相同 client_message_id／receipt／steer_id 携带不同请求时拒绝复用，不能把改过的消息当作原 run 的成功重试。摘要按规范化请求计算，不包含发送时间、临时 URL 或重试时重新解析的默认模型。首次解析出的模型／provider 选择、有效 reasoning 等执行设置，以不含凭据的不可变快照与受理记录在同一事务持久保存，先于排队及 run 创建；不能只存在内存或尚未创建的 run 上。受理提交后崩溃，即使默认配置改变，重试仍读取原快照而不重新选默认值；权限和凭据仍按当前状态校验，原选择不可用则明确失败，不静默换模型。旧记录若没有可靠请求证明，不猜造摘要或执行快照。
+
+首次用户受理的事务同时保存其会话 model_key／reasoning 选择，并校验、锁定附件后将其从 pending 标记为 attached；任一部分失败则整体回滚。会话选择按新的受理顺序更新，相同来源重试只读取原受理，不覆盖后来消息的选择；后台新 run 因而能看到最后一次已受理的会话配置。附件孤儿清理与受理按同一行的锁／删除资格串行裁决：受理先成功的附件不能被先前扫描结果删除，清理先获得删除权时受理明确拒绝，不能接受即将消失的对象。持久附件引用不保存临时签名 URL。
+
+schedule occurrence／trigger event 在首次持久领取时保存已渲染内容及影响执行的非凭据参数，包括当次目标策略和模型选择；目标 conversation 尚未确定时先随源记录保存，目标确定后将该快照绑定到 admission，再排队。忙碌重试、IM 转交和 worker 恢复均使用同一快照，不重新渲染可变模板或读取修改后的 prompt；编辑定义影响之后的新 occurrence／event。当前停用／撤销授权、目标删除等控制仍重新检查，快照不授予永久执行权限，也不重开旧 generation。
 
 首次受理与 Stop 使用同一 conversation 锁串行：固定会话的 occurrence 被领取并登记待执行时就绑定批次，不等 worker 真正开始调用模型；先受理则属于 Stop 关闭的旧批次，后受理且来源有独立授权才可进入新批次。Stop 后不得把旧 occurrence 的 busy 重试、IM 队列重试或恢复任务解释为下一次触发。经 IM 转交的调度仍保留原 occurrence 身份。这里只补入口分类、幂等绑定和停止边界，不改变调度计划、missed／busy 策略或引入新调度引擎。
 
@@ -268,8 +272,9 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 1. 模型显式声明：当前没有可独立执行的剩余步骤，它们在等这些后台任务的结果。保留原 Todo 列表和 pending／in_progress 状态。
 2. CubePlex 经公共 task 查询校验 ID 属于当前可访问 conversation、当前批次仍有效、确实由后台管理、尚有待交付的结果、会产生自动通知且自身／父任务未被用户撤销继续处理和通知权限。仅 deadline 到期、仍有待交付超时结果时不据此拒绝等待。notify=false 的 server、不可恢复且已失去执行方的任务不能成为自动续办的等待凭据。
 3. 等待声明和对应 Todo 快照随 Session extra 一起 checkpoint。普通 Todo 更新未携带等待声明时清空它，不把旧声明套在新计划上。
-4. 自然收尾时重新校验；仅对有效等待声明跳过“未完成所以必须再调用模型”的 finalization guard，保留 payload 校验、错误处理和显式 stop。任务已终态但结果尚未送达，也允许结束本轮，由通知接续。
+4. 自然收尾时重新校验；对有效等待声明跳过“未完成所以必须再调用模型”的 finalization guard，保留 payload 校验、错误处理和显式 stop。任务已终态但结果尚未送达，也允许结束本轮，由通知接续。
 5. 用户新输入或相关结果输入提交后，旧收尾许可失效，模型先处理新输入、更新计划；若仍需等待，再显式声明。不能因为会话里任意一个 monitor 还活着，就放行所有未完成任务。
+6. 声明创建时就做宿主校验并持久保存成功校验的绑定；若自然收尾前其中依赖被用户单独停止，宿主可返回 cancelled 收尾结果，而不是强制模型忙等。仅适用于同一 Todo／输入边界上先前有效的声明，且每个依赖仍有效或有后来发生的用户取消事实；任意无效 ID、权限不明、查询故障不获得此许可。保留未完成 Todo，记录“等待已由用户取消”的收尾原因后正常结束当前 run，不发新的结果通知、不唤醒空闲 run，也不终止已接收其他输入的共享 attempt。新输入仍使该绑定失效，主 Stop 按原取消机制优先处理；不能把已取消任务作为新的等待依据。
 
 无 Todo 的简单命令不需要补一次 write_todos；正常给出进度回复并结束即可。后续 run 通过现有 `load_checkpoint` 同时恢复消息和 extra，不自行拼接私有 Agent 状态。业务步骤完成仍由模型验证，不因命令 exit/0 自动把整个任务勾完。
 
@@ -310,7 +315,7 @@ conversation 保存执行批次和停止标记；run／task／事件／内部输
 
 command log writer 区分写入成功和删除临时分片成功。它不是所有 task 必须实现的日志服务。专用目录在运行用户权限下可写；限定路径、检查非目录／symlink，不递归 chown 工作区，也不以 root 跟随代理可控制的路径。
 
-poll 提供候选 cursor，确认日志数据写入后才持久 ack。cleanup-only 失败不重放已确认输出；write 失败保留旧 cursor，记录 retrying。进程可先进入终态，完成通知说明日志尚不完整；coordinator 独立继续收集，确认环境不可读后才记 unavailable。
+poll 提供候选 cursor，确认日志数据写入后才持久 ack。cleanup-only 失败不重放已确认输出；write 失败保留旧 cursor，记录 retrying。进程可先进入终态，但依赖尾部输出的 completion／monitor exit 事件保持 pending，直到最终日志可读，或有可靠证据证明不可恢复并明确标为 unavailable；临时失败不能直接当作不可恢复。结果就绪由适配器报告给公共投递层，投递重试先检查它，不能用截断结果触发一次无人续办的模型处理。coordinator 在无活跃 run 时继续收集，UI 仍可立即显示真实退出状态及日志恢复中，Todo 可等待尚未交付的最终结果。
 
 不承诺文件与数据库之间 exactly-once：写入成功但 cursor 未提交可能导致重复片段，不能为去重而静默跳过未知数据。日志重试不重发完成通知。现场 orphan 的删除是另需批准的运维动作。
 
@@ -382,12 +387,12 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 2. 原 run 结束后命令仍可观察；worker 重启后从同一 provider_ref 接管，不重新执行 shell command；sandbox 保活不依赖原 run。
 3. 同一后台事件在活跃 run 中经内部输入通道接收，无活跃 run 时启动新 run；两条路径都保留来源与 notice ID，不伪装成用户发言；新 run 恢复原会话消息和 Todo，HITL 不被绕过。
 4. run 收尾、用户新消息、wake claim 和 checkpoint 的竞争不导致并行活跃 run、丢通知或重复已提交的通知。
-5. 前台已返回终态的命令不再发 completion；后台交接后即使原工具结果投影失败，命令与结果也可恢复查询。
-6. Todo 的 `wait_for_tasks` 只接受可访问的公共 task ID，经公共查询校验；不存在／已被用户停止／无自动通知的任务、无恢复来源的执行和过期等待声明不能绕过 guard，command ID 不能冒充 task ID。合法等待不强制续跑、不伪造完成，新输入使旧收尾许可失效；deadline 到期但结果待交付不等于通知已被用户取消。
+5. 前台已交付最终结果的命令不再发 completion；后台交接后即使原工具结果投影失败，命令与结果也可恢复查询。进程终态但输出仍在恢复时明确 result_pending，最终结果就绪前不触发 completion 消费。
+6. Todo 的 `wait_for_tasks` 只接受可访问的公共 task ID，经公共查询校验；不存在／已被用户停止／无自动通知的任务、无恢复来源的执行和过期等待声明不能建立新等待许可，command ID 不能冒充 task ID。合法等待不强制续跑、不伪造完成，新输入使旧收尾许可失效；先前有效等待随后被取消按第 30 项收尾，deadline 到期但结果待交付不等于通知已被用户取消。
 7. 主 Stop 在有／无 active run、paused HITL 时均能持久关闭本批次，取消 run／子代理／待确认请求及未提交输入，对受管 task 请求停止；本轮 command／monitor 必须继续观察到可靠退出事实或明确报告未知。旧 completion、watch 输出、通知重试和 worker 恢复均不能自动重开执行。已终态但通知 pending 的任务同样覆盖。
 8. 旧 run-lifetime notice 在原 run 关闭后不能重开会话；不能把现场的取消复活漏洞通过更名当作修好。
 9. 停止受理与实际退出分开，重复 kill 幂等；真实 exit code、deadline、8-command cap、scope 和 owner fencing 不回归。未指定 timeout 默认 3600 秒，配置可覆盖、显式参数优先；非法配置被拒绝，后台／notify=false 不绕过期限，配置变化和 worker 接管不改已有 deadline，monitor 规则不受影响。
-10. 日志写入未确认不推进 cursor；cleanup-only 失败不重放；日志错误不把已退出进程显示为运行中。
+10. 日志写入未确认不推进 cursor；cleanup-only 失败不重放；日志错误不把已退出进程显示为运行中。进程退出后日志恢复才成功时，最终通知仍只交付一次且消费者能读到完整输出；可靠不可恢复时交付明确不完整的结果，Stop 后不因日志恢复自动唤醒。
 11. UI 在没有旧 run SSE 的情况下发现自动回复；刷新、乱序响应、快速完成的新 run 不造成假成功或漏回复。
 12. prompt-cache 稳定、每 run 唯一 Done、required event consumer、durable checkpoint 与 attempt fencing 不被绕过。
 13. Stop 与 reservation、迟到 provider_ref、wake claim、checkpoint 提交和新用户消息竞争时，不漏管远端进程、不删除已提交历史、不让旧批次借新批次恢复；重复旧 Stop 不误停新任务。202 与全部确认退出明确分开，provider 故障不会显示虚假停止完成。
@@ -405,5 +410,8 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 25. Helm 与 Compose 的旧库升级都在旧写入者确已退出、迁移执行者唯一时回填核对，再删除迁移源字段；未回填或核对失败时禁止收缩及启动新写入者。覆盖空库、旧库、中断重跑、并发启动和 pending completion 尚无 wake 的旧记录。
 26. 包含后台 notice 的自动或混合轮次不触发自动个人记忆 reflection，且在后续 consolidation 读取历史时仍被排除；日志中的偏好／纠正文案及这些轮次的回复不能由两条自动路径写入个人或 workspace memory。过滤发生在窗口裁剪／文本化之前，无合格历史时不调用模型也不反复消费已扫描计数；普通纯用户历史保持原行为。
 27. 同一用户消息来源 ID 重试复用原 generation／run；正文、attachments、model_key 或 reasoning 不一致时明确拒绝，不能篡改已受理请求。首次受理提交后、run 创建前崩溃，再改变默认模型／reasoning，重试仍使用受理事务保存的首次执行快照；权限撤销或原模型不可用时拒绝执行，不静默重选。
+28. 用户受理、会话模型选择、附件保护原子提交；提交后崩溃再清理孤儿不删除已受理附件，后台通知看到最新已受理选择，旧请求重试不覆盖新选择。附件清理与受理双向竞争有明确结果，不接受已获得删除资格的对象。
+29. schedule／trigger 首次领取后修改定义，再忙碌重试或 IM 转交仍使用当次固定内容和目标策略；之后的新 occurrence／event 使用新定义，当前权限撤销仍拒绝执行。
+30. 单任务 Stop 与有效 Todo 等待声明的收尾复查竞争时，不因取消强制追加模型调用、不勾选未完成 Todo、不产生自动唤醒；保留用户取消原因。未经成功校验的新声明或已有新输入不能借用 cancelled 收尾许可，同级任务通知仍正常。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。
