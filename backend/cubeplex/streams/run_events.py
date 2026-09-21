@@ -159,6 +159,7 @@ if ARGV[2] ~= '' and redis.call('HGET', KEYS[2], 'claim_token') ~= ARGV[2] then
   return 0
 end
 if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('HDEL', KEYS[2], 'resume_finalizing_token', 'resume_finalizing_until')
   return redis.call('DEL', KEYS[1])
 end
 return 0
@@ -203,11 +204,13 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1]
     or redis.call('HGET', KEYS[2], 'claim_token') ~= ARGV[2] then
   return 0
 end
+-- Terminal status is visible before the durable finish receipt. Keep its lease
+-- until clear_active_run; HITL pauses must instead allow an immediate answer.
 local fields = {}
 for i = 4, #ARGV do fields[#fields + 1] = ARGV[i] end
 if #fields > 0 then redis.call('HSET', KEYS[2], unpack(fields)) end
 for i = 1, #fields, 2 do
-  if fields[i] == 'status' and fields[i + 1] ~= 'running' then
+  if fields[i] == 'status' and fields[i + 1] == 'paused_hitl' then
     redis.call('HDEL', KEYS[2], 'resume_finalizing_token', 'resume_finalizing_until')
   end
 end
