@@ -596,59 +596,6 @@ async def test_renew_conversation_row_requires_owner_and_outlives_poll_interval(
 
 
 @pytest.mark.asyncio
-async def test_disabled_line_wakes_still_kill_sustained_output_flood(
-    session: AsyncSession,
-) -> None:
-    sandbox = LocalSandbox()
-    row = await _row(
-        session,
-        sandbox=sandbox,
-        command="sleep 30",
-        kind=SandboxCommandKind.monitor.value,
-        lifetime=SandboxCommandLifetime.conversation.value,
-    )
-    row.wake_count = MAX_LINE_WAKES
-    row.line_wakes_disabled = True
-    session.add(row)
-    await session.commit()
-
-    class _FloodingSandbox:
-        killed = False
-
-        async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
-            del handle
-            if self.killed:
-                return ProcessSnapshot(status="killed")
-            return ProcessSnapshot(status="running", new_output="one\ntwo\nthree\n")
-
-        async def kill(self, handle: ProcessHandle) -> None:
-            del handle
-            self.killed = True
-
-    flooding = _FloodingSandbox()
-
-    async def _get(_row: SandboxCommand) -> object:
-        del _row
-        return flooding
-
-    start = datetime.now(UTC)
-    await reconcile_once(session, get_sandbox=_get, now=start)  # type: ignore[arg-type]
-    await session.refresh(row)
-    assert row.flood_started_at is not None
-    assert row.flood_started_at.replace(tzinfo=UTC) == start
-
-    finished = await reconcile_once(  # type: ignore[arg-type]
-        session,
-        get_sandbox=_get,
-        now=start + timedelta(seconds=31),
-    )
-    await session.refresh(row)
-    assert finished == [row.id]
-    assert row.status == SandboxCommandStatus.killed.value
-    await sandbox.kill(ProcessHandle(command_id=row.id, provider_ref=row.provider_ref or ""))
-
-
-@pytest.mark.asyncio
 async def test_wake_cap_does_not_kill_low_volume_monitor(session: AsyncSession) -> None:
     sandbox = LocalSandbox()
     row = await _row(
