@@ -270,7 +270,7 @@ class ConversationExecutionService:
         return True
 
     async def record_run_finished(
-        self, *, admission_id: str, attempt_id: str, now: datetime
+        self, *, admission_id: str, attempt_id: str, worker_started: bool, now: datetime
     ) -> bool:
         """Record owner teardown even after Stop; a paused HITL is not finished."""
         require_aware(now)
@@ -289,6 +289,7 @@ class ConversationExecutionService:
             or not attempt_id
             or admission.run_start_token != attempt_id
             or admission.run_finished_at is not None
+            or (admission.run_started_at is not None) != worker_started
         ):
             return False
         admission.run_finished_at = now

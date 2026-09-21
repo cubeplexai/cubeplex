@@ -7,7 +7,6 @@ calls recover_stranded_runs() and verifies cleanup.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -17,12 +16,11 @@ from redis.asyncio import Redis
 
 from cubeplex.agents.checkpointer import _build_dsn
 from cubeplex.streams.recovery import recover_stranded_runs
+from cubeplex.streams.run_events import touch_run_heartbeat
 
 
 def _test_prefix() -> str:
-    base = "cubeplex"
-    env = os.getenv("ENV_FOR_DYNACONF", "development")
-    return f"{base}:{env}"
+    return f"test-recovery:{uuid.uuid4()}"
 
 
 async def _plant_stranded_run(
@@ -101,7 +99,7 @@ async def test_recover_stranded_runs_clears_redis_and_stamps_db() -> None:
             assert await redis.exists(active_key)
 
             count = await recover_stranded_runs(redis, prefix=prefix)
-            assert count >= 1
+            assert count == 1
 
             assert not await redis.exists(active_key)
 
@@ -138,5 +136,44 @@ async def test_recover_noop_when_no_stranded_runs() -> None:
     try:
         count = await recover_stranded_runs(redis, prefix=prefix)
         assert count == 0
+    finally:
+        await redis.aclose()
+
+
+@pytest.mark.parametrize("freshness", ["started", "heartbeat"])
+async def test_starting_another_worker_does_not_recover_a_live_run(freshness: str) -> None:
+    from cubeplex.config import config
+
+    prefix = _test_prefix()
+    redis = Redis.from_url(config.get("redis.url"), decode_responses=True)
+    try:
+        conv_id, run_id = await _plant_stranded_run(redis, prefix)
+        try:
+            meta_key = f"{prefix}:run_meta:v2:{run_id}"
+            if freshness == "started":
+                await redis.hset(meta_key, "started_at", datetime.now(UTC).isoformat())
+            else:
+                await touch_run_heartbeat(
+                    redis,
+                    prefix=prefix,
+                    conversation_id=conv_id,
+                    run_id=run_id,
+                    ttl_seconds=3600,
+                )
+            assert await recover_stranded_runs(redis, prefix=prefix) == 0
+            assert await redis.get(f"{prefix}:conversation_active_run:{conv_id}") == run_id
+            assert await redis.hget(meta_key, "status") == "running"
+            conn = await asyncpg.connect(_build_dsn())
+            try:
+                row = await conn.fetchrow(
+                    "SELECT completed_at FROM cubepi_runs WHERE thread_id = $1 AND run_id = $2",
+                    conv_id,
+                    run_id,
+                )
+                assert row is not None and row["completed_at"] is None
+            finally:
+                await conn.close()
+        finally:
+            await _cleanup_thread(conv_id, run_id, prefix, redis)
     finally:
         await redis.aclose()

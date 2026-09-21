@@ -32,11 +32,27 @@ entry, and the main agent and its subagents recheck authority at model and tool
 boundaries. These checks do not rewrite messages or the cached prompt prefix.
 `run_finished_at` records owner teardown, not successful task completion. A durable
 HITL pause remains unfinished even though the current worker has detached.
+If Stop wins before worker entry, the rejected worker records a cancellation and
+finishes cleanup without setting `run_started_at`. A receipt that says the worker
+never entered cannot finish an attempt whose entry was already recorded.
+
+Admitted prompt workers put the same attempt token in Redis and their durable
+start claim. Model/tool admission and the required Session event consumer check
+that token and the conversation's active slot. Redis event append, metadata,
+heartbeat, error-pointer, and slot-release writes also check ownership atomically;
+a pre-write read alone cannot protect against a takeover between the two calls.
+Terminal checkpoint cleanup uses the existing finalization lease to exclude stale
+recovery while the owner is committing. A superseded worker stops new work and
+does not finalize its replacement or repair the replacement's pending history.
+Unresolved durable receipts remain available for reconciliation, not automatic replay.
+Startup recovery applies the same stale-heartbeat threshold as inline recovery and
+compares the observed heartbeat atomically before revoking an owner. Starting another
+replica alone must not cancel a live worker or stamp its checkpoint run complete.
 
 This is an integration step, not the lifecycle cutover: the public message, IM,
 scheduler, trigger, steering, and HITL-resume entrances still need their corresponding
-durable admission and authority wiring. Expired/replaced Redis-slot fencing and
-uncertain-start recovery also remain cutover requirements. The existing entrances must not be treated
+durable admission and authority wiring. Uncertain-start recovery also remains a
+cutover requirement. The existing entrances must not be treated
 as protected merely because this internal path is available. The new task coordinator
 stays inactive until all entrances and the data-migration gate are complete.
 
