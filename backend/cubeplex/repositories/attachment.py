@@ -3,7 +3,9 @@
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, text
+from sqlmodel import col
 
+from cubeplex.api.exceptions import AttachmentReferenceInvalidError
 from cubeplex.models import Attachment
 from cubeplex.repositories.base import ScopedRepository
 
@@ -27,9 +29,39 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         stmt = self._scoped_select().where(
             Attachment.id == attachment_id,
             Attachment.conversation_id == conversation_id,
+            Attachment.status != "deleting",
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def claim_pending_deletion(
+        self,
+        *,
+        conversation_id: str,
+        attachment_id: str,
+        older_than: datetime | None = None,
+    ) -> Attachment | None:
+        """Reserve deletion under the same row lock used by message admission; no commit."""
+        row: Attachment | None = (
+            await self.session.execute(
+                self._scoped_select()
+                .where(
+                    col(Attachment.id) == attachment_id,
+                    col(Attachment.conversation_id) == conversation_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status not in ("pending", "deleting"):
+            return None
+        if row.status == "pending":
+            if older_than is not None and row.created_at >= older_than:
+                return None
+            row.status = "deleting"
+            row.updated_at = datetime.now(UTC)
+            await self.session.flush()
+        return row
 
     async def get_with_fork_fallback(
         self, *, conversation_id: str, attachment_id: str
@@ -77,7 +109,7 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         return None
 
     async def list_by_conversation(
-        self, *, conversation_id: str, status: str | None = None
+        self, *, conversation_id: str, status: str | None = None, include_deleting: bool = False
     ) -> list[Attachment]:
         stmt = (
             self._scoped_select()
@@ -86,6 +118,8 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         )
         if status is not None:
             stmt = stmt.where(Attachment.status == status)
+        if not include_deleting:
+            stmt = stmt.where(Attachment.status != "deleting")
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -112,7 +146,25 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         """
         if not attachment_ids:
             return 0
-        rows = await self.list_by_conversation(conversation_id=conversation_id)
+        rows = list(
+            (
+                await self.session.scalars(
+                    self._scoped_select()
+                    .where(
+                        col(Attachment.conversation_id) == conversation_id,
+                        col(Attachment.id).in_(attachment_ids),
+                    )
+                    .order_by(col(Attachment.id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        )
+        by_id = {row.id: row for row in rows}
+        for attachment_id in attachment_ids:
+            row = by_id.get(attachment_id)
+            if row is None or row.status not in ("pending", "attached"):
+                raise AttachmentReferenceInvalidError(attachment_id)
         now = datetime.now(UTC)
         n = 0
         target = set(attachment_ids)

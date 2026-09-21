@@ -38,6 +38,11 @@ Drag files from your desktop onto the chat area. A drop zone overlay appears con
 
 While files are still uploading or staged (before you send the message), click the **X** on any file chip to remove it. Once a message is sent, its attachments become permanent and cannot be removed.
 
+Files already accepted with a message are protected from unused-upload cleanup.
+If removal or cleanup claims an unsent file first, it can no longer be sent;
+upload it again if needed. Storage deletion failures are retried without making
+the file available again or discarding the cleanup record.
+
 ## How attachments reach the agent
 
 When you send a message with attachments, the files are:
