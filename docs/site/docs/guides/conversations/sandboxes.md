@@ -56,6 +56,12 @@ The badge on each row reflects the sandbox's runtime state:
 | **Off** | The container is stopped, but the sandbox row and its files are still around. It starts again on next use. |
 | **Failed** | The last provisioning attempt failed. Use **Restart** to try again, or **Delete** to clear it. |
 
+## Command recovery in local development
+
+The local subprocess driver is for development only. Its process handles belong to the backend worker that started them; another worker cannot reconnect to them after a restart. An unavailable handle is an unknown process state, not confirmation that the command stopped. Repeated status checks or Stop requests preserve a command's observed exit code, including a command that finished before Stop arrived.
+
+The new durable background-task runtime is being introduced in stages and is not enabled yet. Adding its storage and recovery services does not switch the existing command tools, notifications, or chat controls. Cross-run recovery and the new Stop interaction require the coordinated lifecycle cutover.
+
 ## Storage isolation
 
 Each sandbox gets its own isolated storage — files in one sandbox are never visible to another. This holds for the [shared sandboxes in topics](./topics.md) too: a topic with the **Dedicated topic sandbox** mode gets a fresh sandbox with its own storage, separate from the creator's personal sandbox and from every other topic. Files from the conversation you upgraded are **not** carried over into a dedicated topic sandbox.
