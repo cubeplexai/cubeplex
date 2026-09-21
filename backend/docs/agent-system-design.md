@@ -16,6 +16,30 @@ CubePlex runs agents with [CubeLoop](https://github.com/cubeplexai/cubeloop). Th
 
 `RunManager` owns background execution and Redis persistence. Redis holds active-run coordination, control signals, event streams, and their expiry; it is not a replacement for the durable conversation state in Postgres.
 
+### Durable execution admission integration
+
+The lifecycle implementation adds an internal `admission_id` input to `start_run`.
+For an admitted user input, RunManager checks the original scope, actor, conversation,
+run ID, and request fingerprint before claiming Redis. It builds the model chain
+from the admission's frozen model selection and reasoning, using the current provider
+configuration rather than resolving the default again. A recorded start request or
+finished run returns the original run ID without executing it again, even after Redis
+history expires. An uncertain start is not permission to replay.
+
+`run_start_requested_at` records the persisted start claim; `run_started_at` records
+the claimed worker entering execution. The worker rechecks generation closure before
+entry, and the main agent and its subagents recheck authority at model and tool
+boundaries. These checks do not rewrite messages or the cached prompt prefix.
+`run_finished_at` records owner teardown, not successful task completion. A durable
+HITL pause remains unfinished even though the current worker has detached.
+
+This is an integration step, not the lifecycle cutover: the public message, IM,
+scheduler, trigger, steering, and HITL-resume entrances still need their corresponding
+durable admission and authority wiring. Expired/replaced Redis-slot fencing and
+uncertain-start recovery also remain cutover requirements. The existing entrances must not be treated
+as protected merely because this internal path is available. The new task coordinator
+stays inactive until all entrances and the data-migration gate are complete.
+
 ## Durable state and human input
 
 `cubeplex/agents/checkpointer.py` wraps CubeLoop's `PostgresCheckpointer` over a shared asyncpg pool. Conversation ID is the agent thread ID, so checkpoints and resumable human-in-the-loop requests survive a process restart. The app opens the shared checkpointer during its lifespan and closes it on shutdown.

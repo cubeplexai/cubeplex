@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset
-from cubeplex.llm.snapshot import LLMSnapshot
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 from cubeplex.models.attachment import Attachment
 from cubeplex.models.background_task import (
     INFLIGHT_TASK_STATES,
@@ -57,6 +57,23 @@ class ResolvedExecution(BaseModel):
     fallbacks: tuple[str, ...] = ()
     reasoning: ReasoningControl
 
+    def model_preset(self) -> ModelPreset:
+        return ModelPreset(
+            key=self.model_key,
+            primary=self.primary,
+            fallbacks=self.fallbacks,
+            kind="custom",
+            is_default=False,
+        )
+
+
+@dataclass(frozen=True)
+class RunExecutionBinding:
+    admission_id: str
+    attempt_id: str
+    execution_generation: int
+    execution: ResolvedExecution
+
 
 @dataclass(frozen=True)
 class AdmittedExecution:
@@ -78,6 +95,42 @@ class ConversationExecutionService:
         self.session = session
         self.org_id = org_id
         self.workspace_id = workspace_id
+
+    async def resolve_user_run(
+        self,
+        *,
+        admission_id: str,
+        conversation_id: str,
+        actor_user_id: str,
+        run_id: str,
+        intent: UserMessageIntent,
+        snapshot: LLMSnapshot,
+    ) -> AdmittedExecution:
+        await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        admission = await ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        ).get(admission_id)
+        if (
+            admission is None
+            or admission.conversation_id != conversation_id
+            or admission.actor_user_id != actor_user_id
+            or admission.run_id != run_id
+            or admission.source_kind != "user_message"
+            or admission.request_fingerprint != self._fingerprint(intent)
+            or admission.resolved_execution is None
+        ):
+            raise ExecutionConflictError("run does not match its immutable admission")
+        execution = ResolvedExecution.model_validate(admission.resolved_execution)
+        self._validate_models(execution, snapshot)
+        return AdmittedExecution(admission, execution, False)
+
+    @staticmethod
+    def _fingerprint(intent: UserMessageIntent) -> str:
+        return sha256(
+            json.dumps(
+                intent.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
 
     async def close_generation(
         self,
@@ -172,7 +225,7 @@ class ConversationExecutionService:
             any(task.state in INFLIGHT_TASK_STATES for task in tasks)
             or any(notice.state in ("pending", "claimed") for notice in notices)
             or any(
-                admission.run_started_at is not None and admission.run_finished_at is None
+                admission.run_start_token is not None and admission.run_finished_at is None
                 for admission in admissions
             )
         )
@@ -188,6 +241,71 @@ class ConversationExecutionService:
         require_aware(now)
         if not 0 < len(attempt_id) <= 64:
             raise ValueError("run start requires an attempt identity")
+        admission = await self._lock_live_admission(admission_id)
+        if admission.run_id is None or admission.resolved_execution is None:
+            raise ExecutionConflictError("admission has no proven run binding")
+        if admission.run_start_token is not None or admission.run_finished_at is not None:
+            return False
+        # Persist before starting. A lost response is uncertain, never permission to replay.
+        admission.run_start_token = attempt_id
+        admission.run_start_requested_at = now
+        await self.session.flush()
+        return True
+
+    async def record_run_started(
+        self, *, admission_id: str, attempt_id: str, now: datetime
+    ) -> bool:
+        """Authorize the claimed worker once, immediately before its first work."""
+        require_aware(now)
+        admission = await self._lock_live_admission(admission_id)
+        if (
+            not attempt_id
+            or admission.run_start_token != attempt_id
+            or admission.run_started_at is not None
+            or admission.run_finished_at is not None
+        ):
+            return False
+        admission.run_started_at = now
+        await self.session.flush()
+        return True
+
+    async def record_run_finished(
+        self, *, admission_id: str, attempt_id: str, now: datetime
+    ) -> bool:
+        """Record owner teardown even after Stop; a paused HITL is not finished."""
+        require_aware(now)
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            admission is None
+            or not attempt_id
+            or admission.run_start_token != attempt_id
+            or admission.run_finished_at is not None
+        ):
+            return False
+        admission.run_finished_at = now
+        await self.session.flush()
+        return True
+
+    async def require_run_authority(self, *, admission_id: str, attempt_id: str) -> None:
+        admission = await self._lock_live_admission(admission_id)
+        if (
+            not attempt_id
+            or admission.run_start_token != attempt_id
+            or admission.run_started_at is None
+            or admission.run_finished_at is not None
+        ):
+            raise ExecutionRevokedError("worker no longer owns this execution")
+
+    async def _lock_live_admission(self, admission_id: str) -> ConversationExecutionAdmission:
         repository = ConversationExecutionAdmissionRepository(
             self.session, org_id=self.org_id, workspace_id=self.workspace_id
         )
@@ -195,8 +313,7 @@ class ConversationExecutionService:
         if admission is None:
             raise LookupError("execution admission not found")
         conversation = await self._lock_authorized_conversation(
-            admission.conversation_id,
-            admission.actor_user_id,
+            admission.conversation_id, admission.actor_user_id
         )
         await self.session.refresh(admission, with_for_update=True)
         if (
@@ -205,15 +322,7 @@ class ConversationExecutionService:
             or conversation.execution_generation != admission.execution_generation
         ):
             raise ExecutionRevokedError("original admission has been revoked")
-        if admission.run_id is None or admission.resolved_execution is None:
-            raise ExecutionConflictError("admission has no proven run binding")
-        if admission.run_start_token is not None or admission.run_finished_at is not None:
-            return False
-        # Persist before starting. A lost response is uncertain, never permission to replay.
-        admission.run_start_token = attempt_id
-        admission.run_started_at = now
-        await self.session.flush()
-        return True
+        return admission
 
     async def admit_user_message(
         self,
@@ -232,11 +341,7 @@ class ConversationExecutionService:
         if not intent.content.strip() and not intent.attachment_ids:
             raise ValueError("a user input requires content or attachments")
         conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
-        fingerprint = sha256(
-            json.dumps(
-                intent.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-            ).encode()
-        ).hexdigest()
+        fingerprint = self._fingerprint(intent)
         repository = ConversationExecutionAdmissionRepository(
             self.session, org_id=self.org_id, workspace_id=self.workspace_id
         )
