@@ -104,6 +104,41 @@ async def test_start_once_and_late_receipt_survives_stop_and_takeover(
     assert saved.state == "starting"
 
 
+async def test_ancestor_deadline_is_checked_again_before_start_and_observation(
+    db_session: AsyncSession, reservation_context: ReservationContext
+) -> None:
+    parent = await reserve(
+        db_session,
+        reservation_context,
+        details=replace(reservation_context.details, timeout_seconds=1),
+    )
+    child = await reserve(
+        db_session,
+        reservation_context,
+        spec=replace(reservation_context.spec, parent_task_id=parent.task.id),
+    )
+    grandchild = await reserve(
+        db_session,
+        reservation_context,
+        spec=replace(
+            reservation_context.spec, tool_call_id="grandchild", parent_task_id=child.task.id
+        ),
+    )
+    await db_session.commit()
+    moment = NOW + timedelta(seconds=2)
+    assert not await service(db_session).begin_start(
+        task_id=grandchild.task.id, owner_token=grandchild.task.owner_token, now=moment
+    )
+    assert grandchild.command.start_requested_at is None
+    await service(db_session).prepare_observation(
+        task_id=child.task.id, owner_token=child.task.owner_token, now=moment
+    )
+    await db_session.commit()
+    assert child.task.stop_reason == grandchild.task.stop_reason == "deadline"
+    assert child.task.notifications_cancelled_at is None
+    assert grandchild.task.notifications_cancelled_at is None
+
+
 async def test_single_stop_includes_descendants_but_not_siblings(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
