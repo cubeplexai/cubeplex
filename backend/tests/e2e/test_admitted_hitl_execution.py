@@ -20,7 +20,13 @@ from cubeplex.models import ConversationParticipant, Membership, User
 from cubeplex.models.billing import BillingEvent
 from cubeplex.repositories.steering_message import SteeringMessageRepository
 from cubeplex.services.conversation_execution import AdmittedExecution, UserMessageIntent
-from cubeplex.streams.run_events import _active_run_key, _run_meta_key, get_active_run, get_run_meta
+from cubeplex.streams.run_events import (
+    _active_run_key,
+    _run_meta_key,
+    create_run,
+    get_active_run,
+    get_run_meta,
+)
 from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
 from tests.e2e import test_admitted_run_execution as run_fixtures
 from tests.e2e import test_background_task_reservation as reservation_fixtures
@@ -391,7 +397,7 @@ async def test_late_stop_worker_cannot_modify_a_replacement(
     assert meta is not None and meta.status == "running"
 
 
-@pytest.mark.parametrize("failure", ["reply_lost", "cancelled"])
+@pytest.mark.parametrize("failure", ["reply_lost", "cancelled", "next_send"])
 @pytest.mark.parametrize("action", ["answer", "cancel"])
 async def test_terminal_resume_committed_before_interruption_releases_its_slot(
     db_session: AsyncSession,
@@ -405,12 +411,25 @@ async def test_terminal_resume_committed_before_interruption_releases_its_slot(
     terminal_status = "cancelled" if action == "cancel" else "completed"
     original_eval = run_manager._redis.eval
     interrupted = False
+    next_send_claimed = False
 
     async def interrupt_terminal_reply(script: str, numkeys: int, *args: Any) -> Any:
-        nonlocal interrupted
+        nonlocal interrupted, next_send_claimed
         result = await original_eval(script, numkeys, *args)
         if not interrupted and terminal_status in args:
             interrupted = True
+            if failure == "next_send":
+                next_send_claimed = await create_run(
+                    run_manager._redis,
+                    prefix=run_manager._key_prefix,
+                    conversation_id=paused.ctx.conversation_id,
+                    run_id=str(uuid4()),
+                    claim_token="next-send",
+                    status="running",
+                    started_at=datetime.now(UTC).isoformat(),
+                    ttl_seconds=60,
+                )
+                return result
             if failure == "cancelled":
                 raise asyncio.CancelledError("cancel after committed resume")
             raise ConnectionError("committed resume reply lost")
@@ -420,6 +439,7 @@ async def test_terminal_resume_committed_before_interruption_releases_its_slot(
     await respond(run_manager, paused, action)
     await run_manager.drain(timeout_seconds=15)
     assert interrupted and paused.provider.call_count == (1 if action == "cancel" else 2)
+    assert not next_send_claimed, "next send replaced an owner before its finish receipt"
     meta = await get_run_meta(
         run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
     )
