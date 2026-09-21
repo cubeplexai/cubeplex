@@ -86,6 +86,7 @@ class RunContext:
     conversation_creator_user_id: str | None = None
     execution: RunExecutionBinding | None = None
     execution_ownership_lost: bool = False
+    execution_finalization_acquired: bool = False
 
 
 def _registration_was_replaced(
@@ -1202,11 +1203,14 @@ class RunManager:
                 or admitted.admission.revoked_at is not None
             ):
                 return run_id
+            start_token = str(uuid7())
             ctx = replace(
                 ctx,
+                trigger=admitted.execution.trigger,
                 execution=RunExecutionBinding(
                     admission_id=admission_id,
-                    attempt_id=str(uuid7()),
+                    attempt_id=start_token,
+                    start_token=start_token,
                     execution_generation=admitted.admission.execution_generation,
                     execution=admitted.execution,
                 ),
@@ -1665,6 +1669,7 @@ class RunManager:
         question_id: str,
         answer: Any,
         ctx: RunContext,
+        llm_snapshot: Any | None = None,
     ) -> str:
         """Resume a paused HITL conversation. Reuses the original run_id;
         events stream into the same Redis stream key. See spec §5.
@@ -1674,15 +1679,20 @@ class RunManager:
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
-        # 1. Authoritative: DB pending. load_pending_request shape unchanged
-        #    per cubeloop v3 prereq — returns HitlRequest | None.
+        if ctx.conversation_id != conversation_id:
+            raise ResumeConflict("resume context belongs to another conversation")
+        # The question and its run are one durable identity, even without Redis.
         async with shared_checkpointer() as cp:
-            pending = await cp.load_pending_request(conversation_id)
-        if pending is None:
+            loaded_pending = await cp.load_pending(conversation_id)
+        if loaded_pending is None:
             raise ResumeNoPending(f"no pending for {conversation_id}")
+        pending, pending_run_id = loaded_pending
+        if pending_run_id != run_id:
+            raise ResumeConflict("question belongs to another run")
         if pending.question_id != question_id:
             raise ResumeStaleAnswer(f"answer for {question_id}; pending is {pending.question_id}")
         started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+        ctx = await self._resolve_resume_context(ctx=ctx, run_id=run_id)
 
         # 2. Single-flight claim — pass started_at so the long-pause rebuild
         #    branch in claim_resume's Lua can repopulate the meta hash.
@@ -1699,6 +1709,8 @@ class RunManager:
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
+        if ctx.execution is not None:
+            ctx = replace(ctx, execution=replace(ctx.execution, attempt_id=claim.claim_token))
 
         # 3. Spawn the respond task. Reuse the original run_id.
         self._resume_claim_tokens[run_id] = claim.claim_token
@@ -1712,6 +1724,7 @@ class RunManager:
                 answer=answer,
                 claim_token=claim.claim_token,
                 ctx=ctx,
+                **({"llm_snapshot": llm_snapshot} if llm_snapshot is not None else {}),
             ),
             name=f"respond:{run_id}",
         )
@@ -1727,6 +1740,7 @@ class RunManager:
         run_id: str,
         reason: str = "cancelled by user",
         ctx: RunContext,
+        llm_snapshot: Any | None = None,
     ) -> str:
         """Cancel a conversation parked in ``paused_hitl``.
 
@@ -1745,13 +1759,17 @@ class RunManager:
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
-        # 1. DB pending recovers started_at — needed for claim_resume's
-        #    rebuild branch (long-pause case where Redis meta has aged out).
+        if ctx.conversation_id != conversation_id:
+            raise ResumeConflict("resume context belongs to another conversation")
         async with shared_checkpointer() as cp:
-            pending = await cp.load_pending_request(conversation_id)
-        if pending is None:
+            loaded_pending = await cp.load_pending(conversation_id)
+        if loaded_pending is None:
             raise ResumeNoPending(f"no pending for {conversation_id}")
+        pending, pending_run_id = loaded_pending
+        if pending_run_id != run_id:
+            raise ResumeConflict("question belongs to another run")
         started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+        ctx = await self._resolve_resume_context(ctx=ctx, run_id=run_id)
 
         # 2. Single-flight CAS — only one cancel/resume may own the slot.
         claim = await claim_resume(
@@ -1767,6 +1785,8 @@ class RunManager:
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
+        if ctx.execution is not None:
+            ctx = replace(ctx, execution=replace(ctx.execution, attempt_id=claim.claim_token))
 
         # 3. Synthesise a cancel-flavoured answer. cubeloop's ask_user /
         #    confirm tool stringifies whatever we pass as the answer
@@ -1788,6 +1808,7 @@ class RunManager:
                 answer=cancel_answer,
                 claim_token=claim.claim_token,
                 ctx=ctx,
+                **({"llm_snapshot": llm_snapshot} if llm_snapshot is not None else {}),
             ),
             name=f"cancel_respond:{run_id}",
         )
@@ -1795,6 +1816,46 @@ class RunManager:
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
+
+    async def _resolve_resume_context(self, *, ctx: RunContext, run_id: str) -> RunContext:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.services.conversation_execution import (
+            ConversationExecutionService,
+            ExecutionConflictError,
+            ExecutionRevokedError,
+            RunExecutionBinding,
+        )
+
+        try:
+            async with async_session_maker() as session:
+                admitted = await ConversationExecutionService(
+                    session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                ).resolve_run_continuation(
+                    conversation_id=ctx.conversation_id,
+                    run_id=run_id,
+                    responding_user_id=ctx.user_id,
+                )
+                await session.commit()
+        except (ExecutionConflictError, ExecutionRevokedError, LookupError) as exc:
+            raise ResumeConflict("original execution cannot be resumed") from exc
+        if admitted is None:
+            return ctx
+        start_token = admitted.admission.run_start_token
+        assert start_token is not None
+        return replace(
+            ctx,
+            user_id=admitted.admission.actor_user_id,
+            trigger=admitted.execution.trigger,
+            execution_ownership_lost=False,
+            execution_finalization_acquired=False,
+            execution=RunExecutionBinding(
+                admission_id=admitted.admission.id,
+                attempt_id=start_token,
+                start_token=start_token,
+                execution_generation=admitted.admission.execution_generation,
+                execution=admitted.execution,
+            ),
+        )
 
     async def _force_cancel_hitl(
         self,
@@ -2200,6 +2261,8 @@ class RunManager:
         from cubeplex.streams.hitl_resume import begin_resume_finalization
 
         await self._require_execution_slot(ctx, run_id)
+        if ctx.execution_finalization_acquired:
+            return
         if not await begin_resume_finalization(
             self._redis,
             prefix=self._key_prefix,
@@ -2211,6 +2274,16 @@ class RunManager:
         ):
             ctx.execution_ownership_lost = True
             raise RunClaimLost("execution finalization claim was replaced")
+        ctx.execution_finalization_acquired = True
+
+    async def _owned_terminal_status(self, ctx: RunContext, run_id: str) -> str | None:
+        if ctx.execution is None:
+            return None
+        await self._require_execution_slot(ctx, run_id)
+        meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+        if meta is not None and meta.status != "running":
+            return meta.status
+        return None
 
     async def _record_user_cancel(
         self, *, run_id: str, conversation_id: str, ctx: RunContext | None = None
@@ -2231,6 +2304,8 @@ class RunManager:
         )
         if claim_token is not None:
             assert ctx is not None
+            if await self._owned_terminal_status(ctx, run_id) is not None:
+                return
             await self._begin_execution_finalization(ctx, run_id)
             with suppress(Exception):
                 await _repair_dangling_tool_calls(conversation_id)
@@ -2937,13 +3012,17 @@ class RunManager:
                     if _counter is not None:
                         await _counter.seed_from_messages(checkpoint.messages)
             except Exception as checkpoint_exc:
-                finalized = await finalize_run_meta_if_claim_matches(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    claim_token=claim_token,
-                    status="errored",
-                )
+                if ctx.execution is not None:
+                    await self._require_execution_slot(ctx, run_id)
+                    finalized = True  # The outer owner leases and records the failure.
+                else:
+                    finalized = await finalize_run_meta_if_claim_matches(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        claim_token=claim_token,
+                        status="errored",
+                    )
                 if not finalized:
                     raise ResumeConflict(
                         "resume claim was replaced during checkpoint restoration"
@@ -2974,9 +3053,11 @@ class RunManager:
                 run_id=run_id,
                 conversation_id=conversation_id,
                 ttl_seconds=self._run_event_ttl_seconds,
+                claim_token=claim_token if ctx.execution is not None else None,
             )
 
             async def _on_event(evt: Any, _signal: Any = None) -> None:
+                await self._require_execution_slot(ctx, run_id)
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
                 from cubeloop.agent.types import MessageEndEvent as _HitlMsgEnd
@@ -3061,6 +3142,7 @@ class RunManager:
             # matches the existing crash story.
             final_status: str = "errored"
             finalized_with_claim = False
+            defer_terminal_to_owner = False
             claim_conflict_reason: str | None = None
             stale_pending = None
             projection_error: BaseException | None = None
@@ -3080,7 +3162,7 @@ class RunManager:
                             session=agent.session,
                             request=RespondExecutionRequest(
                                 run_id=run_id,
-                                attempt_id=str(uuid7()),
+                                attempt_id=claim_token,
                                 question_id=question_id,
                                 answer=answer,
                             ),
@@ -3151,6 +3233,7 @@ class RunManager:
                     await before_terminal_commit()
             except BaseException as _run_exc:
                 final_status = "errored"
+                defer_terminal_to_owner = ctx.execution is not None
                 _schedule_writeback(
                     org_id=ctx.org_id,
                     provider_slug=provider_name,
@@ -3163,13 +3246,20 @@ class RunManager:
                 # finalize succeeding — a timeout there would leave the
                 # in-flight loop refreshing a dead resume.
                 try:
-                    finalized_with_claim = await finalize_run_meta_if_claim_matches(
-                        self._redis,
-                        prefix=self._key_prefix,
-                        run_id=run_id,
-                        claim_token=claim_token,
-                        status=final_status,
-                    )
+                    if defer_terminal_to_owner:
+                        # Keep running until the outer cancel/error owner leases
+                        # checkpoint cleanup; an early terminal stamp loses that lease.
+                        await self._require_execution_slot(ctx, run_id)
+                        finalized_with_claim = True
+                    else:
+                        finalized_with_claim = await finalize_run_meta_if_claim_matches(
+                            self._redis,
+                            prefix=self._key_prefix,
+                            run_id=run_id,
+                            claim_token=claim_token,
+                            status=final_status,
+                            **({"conversation_id": conversation_id} if ctx.execution else {}),
+                        )
                 finally:
                     tool_heartbeat.stop()
                     self._remove_agent_for_attempt(run_id, agent)
@@ -4180,7 +4270,11 @@ class RunManager:
             checkpointer=cp,
             thread_id=conversation_id,
             middleware=cubeloop_middleware,
-            reasoning=reasoning or ReasoningControl(),
+            reasoning=(
+                ctx.execution.execution.reasoning
+                if ctx.execution is not None
+                else reasoning or ReasoningControl()
+            ),
             channel=sandbox_hitl_channel,
             deferred_tool_groups=_deferred_groups or None,
         )
@@ -4839,6 +4933,11 @@ class RunManager:
                 await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except Exception as exc:
+            persisted_terminal = await self._owned_terminal_status(ctx, run_id)
+            if persisted_terminal is not None:
+                final_status = persisted_terminal
+                logger.warning("Run {} terminal write survived a lost response: {}", run_id, exc)
+                return
             await self._begin_execution_finalization(ctx, run_id)
             logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
             # Model/provider/context_window are fallbacks for non-cubeloop
@@ -5047,6 +5146,7 @@ class RunManager:
         answer: Any,
         claim_token: str,
         ctx: RunContext,
+        llm_snapshot: Any | None = None,
     ) -> None:
         """Spawn-wrapper around :meth:`_run_cubeloop_respond_path`.
 
@@ -5123,10 +5223,11 @@ class RunManager:
                     timestamp=datetime.now(UTC).isoformat(),
                     data=data,
                 ),
+                **claim_kwargs,
             )
 
         async def publish_event(event: AgentEvent) -> None:
-            await self._append_event(run_id, conversation_id, event)
+            await self._append_event(run_id, conversation_id, event, **claim_kwargs)
 
         async def flush_citation_buffer(
             agent_key: str | None,
@@ -5186,8 +5287,30 @@ class RunManager:
         extra_ref_holder: dict[str, Any] = {}
         durable_final_status = "errored"
         resume_ownership_lost = False
+        claim_kwargs: _ClaimTokenKwargs = {"claim_token": claim_token} if ctx.execution else {}
+        meta_claim_kwargs: _RunMetaClaimKwargs = (
+            {**claim_kwargs, "conversation_id": conversation_id} if claim_kwargs else {}
+        )
 
         try:
+            await self._require_execution_slot(ctx, run_id)
+            if ctx.execution is not None:
+                from cubeplex.db.engine import async_session_maker
+                from cubeplex.services.conversation_execution import (
+                    ConversationExecutionService,
+                    ExecutionRevokedError,
+                )
+
+                try:
+                    async with async_session_maker() as admission_session:
+                        await ConversationExecutionService(
+                            admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                        ).require_run_authority(
+                            admission_id=ctx.execution.admission_id,
+                            attempt_id=ctx.execution.start_token,
+                        )
+                except (ExecutionRevokedError, LookupError) as exc:
+                    raise asyncio.CancelledError("resume execution was revoked") from exc
             try:
                 from pathlib import Path
 
@@ -5250,13 +5373,22 @@ class RunManager:
 
             context_window: int = 0
             try:
-                async with async_session_maker() as ctx_session:
-                    ctx_snap = await load_llm_snapshot(
-                        ctx_session, ctx.org_id, self._app.state.encryption_backend
-                    )
-                    await ctx_session.commit()
+                from cubeplex.llm.snapshot import LLMSnapshot
+
+                if isinstance(llm_snapshot, LLMSnapshot):
+                    ctx_snap = llm_snapshot
+                else:
+                    async with async_session_maker() as ctx_session:
+                        ctx_snap = await load_llm_snapshot(
+                            ctx_session, ctx.org_id, self._app.state.encryption_backend
+                        )
+                        await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
-                _ctx_preset = resolve_model_preset(ctx_snap, None)
+                _ctx_preset = (
+                    ctx.execution.execution.model_preset()
+                    if ctx.execution is not None
+                    else resolve_model_preset(ctx_snap, None)
+                )
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)
@@ -5411,6 +5543,7 @@ class RunManager:
                     timestamp=datetime.now(UTC).isoformat(),
                     data=done_data,
                 ),
+                **claim_kwargs,
             )
             # NOTE: no update_run_meta here — _run_cubeloop_respond_path
             # already wrote the terminal status via
@@ -5427,7 +5560,12 @@ class RunManager:
             # Mirror prompt-path cancel handling. We bypass the CAS guard
             # on cancel because cancel is itself the takeover signal — the
             # cancel route already set the meta state appropriately.
-            await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
+            if ctx.execution is not None:
+                await self._record_user_cancel(
+                    run_id=run_id, conversation_id=conversation_id, ctx=ctx
+                )
+            else:
+                await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except ResumeConflict:
             # A newer claim owns this run. The old attempt must not append an
@@ -5436,6 +5574,14 @@ class RunManager:
             resume_ownership_lost = True
             logger.warning("Respond run {} lost its claim before finalization", run_id)
         except Exception as exc:
+            persisted_terminal = await self._owned_terminal_status(ctx, run_id)
+            if persisted_terminal is not None:
+                durable_final_status = persisted_terminal
+                logger.warning(
+                    "Respond run {} was already terminal before failure: {}", run_id, exc
+                )
+                return
+            await self._begin_execution_finalization(ctx, run_id)
             logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
             # Don't clear DB pending — leaving it allows the user to retry
             # the answer. Don't finalize meta status here either: if the body
@@ -5458,9 +5604,11 @@ class RunManager:
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
+                    status="errored" if ctx.execution else None,
                     error_code=_err_code.value,
                     error_params=json.dumps(_err_params, ensure_ascii=False),
                     error_message=_err_message,
+                    **meta_claim_kwargs,
                 )
             with suppress(Exception):
                 await set_conversation_last_error(
@@ -5472,6 +5620,7 @@ class RunManager:
                     error_params=json.dumps(_err_params, ensure_ascii=False),
                     error_message=_err_message,
                     ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
                 )
             with suppress(Exception):
                 await self._append_error(
@@ -5481,8 +5630,15 @@ class RunManager:
                     details=str(exc),
                     exc=exc,
                     params=_classify_params,
+                    **claim_kwargs,
                 )
         finally:
+            if ctx.execution is not None:
+                try:
+                    await self._require_execution_slot(ctx, run_id)
+                except (RunClaimLost, Exception):
+                    ctx.execution_ownership_lost = True
+                resume_ownership_lost = resume_ownership_lost or ctx.execution_ownership_lost
             sandbox_middleware = extra_ref_holder.get("sandbox_middleware")
             if sandbox_middleware is not None:
                 with suppress(Exception):
@@ -5491,7 +5647,7 @@ class RunManager:
             # Mirror the prompt-path safety net: cancel/exception bypassed
             # the success-path enqueue, but cubeloop may have written partial
             # history before the failure. Idempotent enqueue.
-            if not search_index_enqueued:
+            if not search_index_enqueued and not resume_ownership_lost:
                 with suppress(Exception):
                     await _enqueue_search_index(
                         conversation_id,
@@ -5506,7 +5662,7 @@ class RunManager:
                     await stream_task
 
             if event_q_drainer is not None:
-                with suppress(Exception):
+                with suppress(asyncio.CancelledError, Exception):
                     await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
@@ -5574,15 +5730,38 @@ class RunManager:
             # the pointer atomically). On "completed" the pointer must be
             # gone so the next start_run can allocate a fresh run.
             if not registration_replaced:
+                if ctx.execution is not None and durable_final_status != "paused_hitl":
+                    from cubeplex.agents.checkpointer import shared_checkpointer
+                    from cubeplex.services.conversation_execution import (
+                        ConversationExecutionService,
+                    )
+
+                    async with shared_checkpointer() as receipt_cp:
+                        pending = await receipt_cp.load_pending(conversation_id)
+                    if pending is None or pending[1] != run_id:
+                        async with async_session_maker() as admission_session:
+                            await ConversationExecutionService(
+                                admission_session,
+                                org_id=ctx.org_id,
+                                workspace_id=ctx.workspace_id,
+                            ).record_run_finished(
+                                admission_id=ctx.execution.admission_id,
+                                attempt_id=ctx.execution.start_token,
+                                worker_started=True,
+                                now=datetime.now(UTC),
+                            )
+                            await admission_session.commit()
                 await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
+                    **claim_kwargs,
                 )
                 await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
                     ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
                 )

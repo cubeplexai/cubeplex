@@ -9,7 +9,10 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from cubeplex.config import config
-from cubeplex.streams.hitl_resume import begin_resume_finalization
+from cubeplex.streams.hitl_resume import (
+    begin_resume_finalization,
+    finalize_run_meta_if_claim_matches,
+)
 from cubeplex.streams.run_events import (
     RunClaimLost,
     _active_run_key,
@@ -104,6 +107,8 @@ async def test_lost_owner_cannot_append_finalize_heartbeat_or_release(
         redis, prefix=prefix, conversation_id=conversation_id
     )
     assert not await run_claim_matches(redis, **kwargs)
+    assert not await begin_resume_finalization(redis, **kwargs, ttl_seconds=60, lease_seconds=60)
+    assert not await finalize_run_meta_if_claim_matches(redis, **kwargs, status="completed")
 
     with pytest.raises(RunClaimLost):
         await append_run_event(

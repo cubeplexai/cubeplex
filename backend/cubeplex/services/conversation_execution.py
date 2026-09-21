@@ -56,6 +56,7 @@ class ResolvedExecution(BaseModel):
     primary: str
     fallbacks: tuple[str, ...] = ()
     reasoning: ReasoningControl
+    trigger: Literal["interactive", "im", "automated"] = "interactive"
 
     def model_preset(self) -> ModelPreset:
         return ModelPreset(
@@ -71,6 +72,7 @@ class ResolvedExecution(BaseModel):
 class RunExecutionBinding:
     admission_id: str
     attempt_id: str
+    start_token: str
     execution_generation: int
     execution: ResolvedExecution
 
@@ -121,8 +123,46 @@ class ConversationExecutionService:
         ):
             raise ExecutionConflictError("run does not match its immutable admission")
         execution = ResolvedExecution.model_validate(admission.resolved_execution)
-        self._validate_models(execution, snapshot)
+        if self._needs_run_start(admission):
+            self._validate_models(execution, snapshot)
         return AdmittedExecution(admission, execution, False)
+
+    @staticmethod
+    def _needs_run_start(admission: ConversationExecutionAdmission) -> bool:
+        return (
+            admission.run_start_token is None
+            and admission.run_finished_at is None
+            and admission.revoked_at is None
+        )
+
+    async def resolve_run_continuation(
+        self, *, conversation_id: str, run_id: str, responding_user_id: str
+    ) -> AdmittedExecution | None:
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission).where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.run_id) == run_id,
+            )
+        )
+        # Pre-cutover runs have no admission; the migration gate removes that case.
+        if admission is None:
+            return None
+        if admission.conversation_id != conversation_id:
+            raise ExecutionConflictError("resume does not match the admitted conversation")
+        admission = await self._lock_live_admission(
+            admission.id, additional_actor_user_id=responding_user_id
+        )
+        if (
+            admission.run_start_token is None
+            or admission.run_started_at is None
+            or admission.run_finished_at is not None
+            or admission.resolved_execution is None
+        ):
+            raise ExecutionRevokedError("run has no unfinished execution to continue")
+        return AdmittedExecution(
+            admission, ResolvedExecution.model_validate(admission.resolved_execution), False
+        )
 
     @staticmethod
     def _fingerprint(intent: UserMessageIntent) -> str:
@@ -306,7 +346,9 @@ class ConversationExecutionService:
         ):
             raise ExecutionRevokedError("worker no longer owns this execution")
 
-    async def _lock_live_admission(self, admission_id: str) -> ConversationExecutionAdmission:
+    async def _lock_live_admission(
+        self, admission_id: str, *, additional_actor_user_id: str | None = None
+    ) -> ConversationExecutionAdmission:
         repository = ConversationExecutionAdmissionRepository(
             self.session, org_id=self.org_id, workspace_id=self.workspace_id
         )
@@ -314,7 +356,9 @@ class ConversationExecutionService:
         if admission is None:
             raise LookupError("execution admission not found")
         conversation = await self._lock_authorized_conversation(
-            admission.conversation_id, admission.actor_user_id
+            admission.conversation_id,
+            admission.actor_user_id,
+            additional_actor_user_id=additional_actor_user_id,
         )
         await self.session.refresh(admission, with_for_update=True)
         if (
@@ -361,7 +405,8 @@ class ConversationExecutionService:
                     "source is already bound to different or unproven work"
                 )
             execution = ResolvedExecution.model_validate(previous.resolved_execution)
-            self._validate_models(execution, snapshot)
+            if self._needs_run_start(previous):
+                self._validate_models(execution, snapshot)
             return AdmittedExecution(previous, execution, False)
 
         preset = resolve_model_preset(snapshot, intent.model_key)
@@ -370,6 +415,7 @@ class ConversationExecutionService:
             primary=preset.primary,
             fallbacks=preset.fallbacks,
             reasoning=intent.reasoning.model_copy(deep=True),
+            trigger="im" if namespace == "im" else "interactive",
         )
         await self._attach_files(conversation_id, actor_user_id, intent.attachment_ids, now)
         if conversation.execution_closed_at is not None:
@@ -408,13 +454,21 @@ class ConversationExecutionService:
         self,
         conversation_id: str,
         actor_user_id: str,
+        *,
+        additional_actor_user_id: str | None = None,
     ) -> Conversation:
         # Authority rows precede the conversation lock; deletion must use this order too.
-        user = await self.session.scalar(
-            select(User)
-            .where(col(User.id) == actor_user_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+        actors = sorted({actor_user_id, additional_actor_user_id or actor_user_id})
+        users = list(
+            (
+                await self.session.scalars(
+                    select(User)
+                    .where(col(User.id).in_(actors))
+                    .order_by(col(User.id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
         )
         workspace = await self.session.scalar(
             select(Workspace)
@@ -425,35 +479,44 @@ class ConversationExecutionService:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        member = await self.session.scalar(
-            select(Membership)
-            .where(
-                col(Membership.user_id) == actor_user_id,
-                col(Membership.workspace_id) == self.workspace_id,
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
+        members = list(
+            (
+                await self.session.scalars(
+                    select(Membership)
+                    .where(
+                        col(Membership.user_id).in_(actors),
+                        col(Membership.workspace_id) == self.workspace_id,
+                    )
+                    .order_by(col(Membership.user_id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
         )
-        if user is None or not user.is_active or workspace is None or member is None:
+        if (
+            len(users) != len(actors)
+            or any(not user.is_active for user in users)
+            or workspace is None
+            or len(members) != len(actors)
+        ):
             raise LookupError("conversation not found")
-        accessible = ConversationRepository(
-            self.session,
-            org_id=self.org_id,
-            workspace_id=self.workspace_id,
-            user_id=actor_user_id,
-        ).accessible_id_subquery()
-        conversation = await self.session.scalar(
+        query = (
             select(Conversation)
             .where(
                 col(Conversation.id) == conversation_id,
                 col(Conversation.org_id) == self.org_id,
                 col(Conversation.workspace_id) == self.workspace_id,
                 col(Conversation.deleted_at).is_(None),
-                col(Conversation.id).in_(accessible),
             )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+        for actor in actors:
+            accessible = ConversationRepository(
+                self.session, org_id=self.org_id, workspace_id=self.workspace_id, user_id=actor
+            ).accessible_id_subquery()
+            query = query.where(col(Conversation.id).in_(accessible))
+        conversation = await self.session.scalar(query)
         if conversation is None:
             raise LookupError("conversation not found")
         return conversation
