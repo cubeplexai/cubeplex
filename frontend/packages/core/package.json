@@ -68,15 +68,15 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
-    "@types/react": "^19.2.18",
-    "@vitest/ui": "^5.0.0",
-    "jsdom": "^30.0.1",
-    "react": "19.2.8",
+    "@types/node": "^26.6.1",
+    "@types/react": "^19.3.0",
+    "@vitest/ui": "^5.0.1",
+    "jsdom": "^30.1.0",
+    "react": "19.3.0",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "peerDependencies": {
-    "react": "19.2.8"
+    "react": "19.3.0"
   }
 }
