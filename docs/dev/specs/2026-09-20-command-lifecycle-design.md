@@ -129,6 +129,8 @@
 
 受理来源必须由服务端区分，不能仅凭 `trigger="automated"` 决定能否开启新批次。现有 fixed-target schedule 会重复进入同一 conversation；它的新 occurrence 保留独立授权，但旧 command completion 没有这个权限。持久受理记录保存 `source_kind`、稳定 `source_id`、目标 conversation 和受理时 generation；同一来源重试只读取原绑定，不能重新分配批次。用户消息、schedule occurrence、既有 trigger occurrence、后台 notice 分别来自已鉴权的入口，客户端不能自报为内部调度。
 
+用户消息的受理身份还绑定不可变请求摘要：正文、有序 attachment IDs、请求的 model_key 与规范化 reasoning 等影响执行的提交字段。相同 client_message_id／receipt／steer_id 携带不同请求时拒绝复用，不能把改过的消息当作原 run 的成功重试。摘要按规范化请求计算，不包含发送时间、临时 URL 或重试时重新解析的默认模型；首次解析出的实际执行设置随原受理／run 保留。旧记录若没有可靠请求证据，不猜造摘要并接受不同 payload。
+
 首次受理与 Stop 使用同一 conversation 锁串行：固定会话的 occurrence 被领取并登记待执行时就绑定批次，不等 worker 真正开始调用模型；先受理则属于 Stop 关闭的旧批次，后受理且来源有独立授权才可进入新批次。Stop 后不得把旧 occurrence 的 busy 重试、IM 队列重试或恢复任务解释为下一次触发。经 IM 转交的调度仍保留原 occurrence 身份。这里只补入口分类、幂等绑定和停止边界，不改变调度计划、missed／busy 策略或引入新调度引擎。
 
 停止接口持久受理后返回 202；这表示平台内旧工作的继续执行权限已撤销，不表示底层执行已经消失。UI 立即显示“正在停止”，支持远端停止但尚未确认的任务显示“停止未确认／正在重试”，全部确认后才显示“已停止”。如果适配器明确不支持远端取消，显示“已停止后续处理，远端任务无法取消”；不显示取消成功，也不无限重试一个不存在的取消接口。底层状态未知则继续如实显示未知。不能在持久写入失败时返回成功，不能把清理失败或取消后的迟到结果变成新的模型唤醒。
@@ -234,7 +236,9 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 
 因此 A、B 同时排队时，单独停止 A 只撤回 A 的输入，B 保持可投递。撤回返回 `closed`、响应丢失或提交状态未知，都不能当作“肯定未送达”；先按第 7.3 节对账，已提交的历史保留，未确认失去提交资格前不重投。不增加 Session 内修改已排队输入内容或拆批的协议，UI 的聚合展示也不改变输入边界。
 
-新 run 的首条 notice 单独处理：它通过 PromptExecutionRequest 进入，不在 `cancel_input` 的可撤回队列中。宿主持久绑定首条 notice 与投递 attempt，准备阶段和调用 Session 前都检查源 task 的通知权限，不能只检查 conversation generation。停止该 task 时取消尚在准备的对应 attempt；若已开始执行且初始输入提交状态未知，先停止该 attempt 并按 checkpoint 对账，不把 `closed` 当作取消成功。若初始输入已提交，保留 delivered 的真实历史，不承诺回滚；若尚未提交，失权 attempt 不得继续调用模型。取消首条 A 导致该 attempt 结束时，B 等独立通知仍保留源记录；已提交者不重发，未提交者在旧 attempt 确认不能提交后重新路由。这里不关闭整个会话批次，也不撤销 B 的执行权限；本轮不为此新增 CubeLoop Session 输入 API。
+新 run 的首条 notice 单独处理：它通过 PromptExecutionRequest 进入，不在 `cancel_input` 的可撤回队列中。宿主持久绑定首条 notice 与投递 attempt，准备阶段和调用 Session 前都检查源 task 的通知权限，不能只检查 conversation generation。初始输入的持久提交尚未确认时，B 等其他 notice 与用户追加输入保留在各自持久队列中，不向这个 Session 提交。确认初始输入已提交后，才允许其他输入进入；开放这一入口与首条 notice 的取消裁决必须串行，不能让取消 handler 读到旧状态后误停一个已经接收 B 的 attempt。
+
+停止首条 A 的 task 时，若仍在准备／初始提交未决阶段，先关闭该 attempt 的其他输入入口，再取消对应 attempt，并按 checkpoint 对账，不把 `closed` 当作取消成功。A 已提交保留 delivered 历史，未提交且 attempt 已失权则 discarded；B 等此时尚未进入 Session 的输入仍可重新路由。若初始提交已确认并已开放其他输入，单 task Stop 不再取消整个共享 attempt，只撤销 A 后续执行／未提交通知；尤其不能让已提交 B 因停掉共享 attempt 而失去处理机会。主 Stop 仍可取消整个批次。这里不新增 delivered 通知的自动业务重试，也不新增 CubeLoop Session 输入 API。
 
 ### 7.3 排队成功不等于结果已送达
 
@@ -251,6 +255,7 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 - 不修改稳定 system prompt，不回写旧 tool result，不伪造旧 tool call 的第二个结果。来源元数据随新输入持久保存，刷新和重放不能把它还原成用户发言。
 - `pending_steers` 与用户 steering 实时事件只包含 `source=user` 的主动输入。`/steer`、`/steer/cancel` 只处理用户消息；source 由服务端入口确定，客户端不能通过自填 source 获得内部通知身份，保留内部 ID 的防伪校验。
 - 后台结果的产品状态来自源 wake 及 checkpoint 对账；一次投递尝试失败不是一条新的产品消息。同一 notice 换 run 重试、重新 claim 或 bootstrap 后仍是同一条事件，旧 failed／queued steering 不得重新进入用户列表。
+- 来源分类也约束个人记忆提炼：首条输入或本轮已提交追加输入含 background_task notice 时，不触发本轮自动个人记忆 reflection，避免将日志／自动结果当成用户偏好或纠正。普通纯用户输入的 reflection 保持原行为；不回写历史或修改 prompt 缓存前缀。本轮采用保守跳过混合轮次，不新增一套自动结果记忆系统。
 - UI 的折叠不改变投递。需要阻止后续处理时，停止源 task 或使用主 Stop，由服务端取消源事件和未提交输入；不提供“把内部通知恢复到输入框”或仅取消某次内部 steering 的入口。
 
 ## 8. Todo 如何允许本轮结束
@@ -360,7 +365,9 @@ poll 提供候选 cursor，确认日志数据写入后才持久 ack。cleanup-on
 
 migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期限并立即 kill。旧新 coordinator 不同时写同一批记录；保留 provider handles/cursors，部署、数据处理和环境清理需另获授权。
 
-结构升级必须有数据回填门槛：隔离旧写入者后，仅升级到新增结构的指定 revision，保留旧字段／表；完成可重跑的回填及完整性核对后，才允许执行删除旧结构的 revision 并启动新生命周期写入者。当前 Helm init container 的无条件 `alembic upgrade head` 不能跨过这个门槛，部署流程必须显式编排阶段并拒绝未完成回填的旧库启动。删除旧字段的 revision 不与尚未具备门槛的版本一起启用。空库可通过“没有旧记录”的检查直接完成迁移；已有库、回填中断重跑和绕过回填的启动均需验证。新增 task_id 等回填字段在新增结构阶段允许未绑定；回填核对通过后才收紧约束，历史实例未知仍按 unknown 契约保留，不因收紧约束伪造实例身份。
+结构升级必须有数据回填门槛：隔离旧写入者后，仅升级到新增结构的指定 revision，保留旧字段／表；完成可重跑的回填及完整性核对后，才允许执行删除旧结构的 revision 并启动新生命周期写入者。Helm init container 与 Compose 的 backend-migrate 都必须使用同一个有门槛的升级入口，不再无条件 `alembic upgrade head`。已有数据的切换是独立维护阶段：先停旧 API／worker／coordinator／排队入口并确认退出，再由持有数据库迁移锁的单一执行者回填和升级；不能把停旧写入者寄托于 RollingUpdate 新 pod 的 init container，也不能让多个副本分别迁移。普通启动只接受已经核对完成的结构／数据；空库在同一迁移锁内通过无旧记录检查后可安装。删除旧字段的 revision 不与尚未具备门槛的版本一起启用。已有库、回填中断重跑、并发升级和绕过回填的启动均需验证。新增 task_id 等回填字段在新增结构阶段允许未绑定；回填核对通过后才收紧约束，历史实例未知仍按 unknown 契约保留，不因收紧约束伪造实例身份。
+
+回填还覆盖旧终态与 outbox 分事务造成的空档：command 已 `notice_state=pending`、但 completion wake 尚未创建。先检查旧 wake 去重键和 checkpoint 的 notice／command 证明；已送达不重放，有明确合法通知权的 conversation-lifetime 工作幂等补一条稳定 completion 事件。缺少继续执行权限、旧 run 已关闭的 run-lifetime 工作或历史停止证据不明时，不提升为新授权，保留 discarded 原因供核对。重复回填或中断恢复不能补出第二条通知。
 
 旧 command 的 sandbox_instance_id 只按可验证的原启动／运行记录回填，不能从当前 UserSandbox.sandbox_id 猜填。无法证明实例归属的 inflight 行保留 unknown 和原句柄，进入明确的人工核对清单，不自动向当前容器 poll／kill、不自动释放 cap。旧会话删除标记必须转换为持久清理意图；已删除会话不会因初始化 generation 而恢复。受理记录的历史来源与批次同样按证据迁移，旧调度／IM 重试不能作为首次新受理越过 Stop。
 
@@ -393,7 +400,9 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 21. fixed-target schedule 的新 occurrence 在 Stop 后仍可按独立授权进入新批次；Stop 前已受理的 occurrence、其 busy／IM 重试及旧 notice 不能重开。首次受理与 Stop 竞争的归属唯一且持久，重复旧 Stop 不误停新 occurrence；权限或目标失效时仍拒绝执行。
 22. 同一 UserSandbox 行重建为新实例后，旧 command 的 poll／kill／日志收集不落到新实例；无可靠旧实例证据时保留 unknown 和 cap 占用，不从当前行猜造成功／退出。原实例已确认销毁时可正确收敛并释放名额。
 23. 全部 task 已终态、待发事件超过窗口且冷刷新时，summary 仍反映 pending；可分页发现 task 并停止指定通知来源，停止其他项不受影响。空页、乱序响应、查询失败不导致提前停止刷新；全部送达／取消后完成最终历史对账再停止轮询。
-24. notice A 作为新 run 的首条输入时，在准备阶段停止 A 不调用模型、不写入其通知；提交在途则按 checkpoint 事实收敛。B 已排队时仍恰好交付一次，停止 A 不关闭会话批次，也不依赖 `cancel_input` 能撤回初始输入。
-25. 旧库升级在删除任何迁移源字段前完成回填核对；未回填或核对失败时禁止越过结构迁移门槛及启动新写入者。空库升级、旧库升级和回填中断重跑均有实际验证。
+24. notice A 作为新 run 的首条输入时，在准备阶段停止 A 不调用模型、不写入其通知；提交在途则按 checkpoint 事实收敛。初始提交未决时 B／用户追加输入不进入 Session；初始提交已确认并开放其他输入后，单独停止 A 不取消共享 attempt，B 仍可处理且不重复提交。停止 A 不关闭会话批次，也不依赖 `cancel_input` 能撤回初始输入。
+25. Helm 与 Compose 的旧库升级都在旧写入者确已退出、迁移执行者唯一时回填核对，再删除迁移源字段；未回填或核对失败时禁止收缩及启动新写入者。覆盖空库、旧库、中断重跑、并发启动和 pending completion 尚无 wake 的旧记录。
+26. 包含后台 notice 的自动或混合轮次不触发自动个人记忆 reflection；日志中的偏好／纠正文案不能由该路径写入用户记忆，普通用户轮次保持原行为。
+27. 同一用户消息来源 ID 重试复用原 generation／run；正文、attachments、model_key 或 reasoning 不一致时明确拒绝，不能篡改已受理请求。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。

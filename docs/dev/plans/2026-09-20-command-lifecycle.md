@@ -39,7 +39,7 @@
 | `background_tasks` | 唯一公共执行状态；scope、conversation、task kind、发起身份／run／tool、可选 parent、generation、notify policy、deadline、停止原因、通知取消标记、owner token／lease、结果引用、revision、backgrounded_at |
 | `sandbox_commands` | `task_id` 唯一一对一；保留 command ID、user_sandbox_id、不可变 sandbox_instance_id、provider_ref、命令参数、真实进程观察／exit code、日志 cursor／state、monitor 匹配与限流 |
 | `background_task_events` | 单一 outbox；稳定 notice ID、task ID、reason、摘要／结果引用、去重键、pending／claimed／delivered／discarded、投递 attempt 及 checkpoint 证明 |
-| `conversation_execution_admissions` | 来源／稳定 source ID、actor、conversation、generation、run 关联；scope 内来源键唯一。不是第二份 run 状态机或调度计划 |
+| `conversation_execution_admissions` | 来源／稳定 source ID、actor、conversation、generation、run 关联、不可变用户请求摘要；scope 内来源键唯一。不是第二份 run 状态机或调度计划 |
 | conversation／输入 | conversation 保存单调 generation 与关闭标记；run 关联受理记录，用户／内部输入保存 generation 和明确 source；task revision 与事件 revision 分开 |
 
 公共 task 与事件由同一 service 按适配器证据更新；command 详情不是第二个状态写入者。采用 spec 的 starting／running／waiting_input／succeeded／failed／cancelled／unknown，command 不产生 waiting_input。停止意图、执行事实、日志状态和通知状态不互相代替。
@@ -50,7 +50,7 @@
 
 以下是实施要共同遵守的 typed 边界，不是逐行实现稿：
 
-- `admit_execution(scope, actor, source_kind, source_id) -> admission`：首次受理绑定 generation，重试返回同一绑定；冲突 actor／目标不可复用身份。
+- `admit_execution(scope, actor, source_kind, source_id, request_fingerprint) -> admission`：首次受理绑定 generation，重试返回同一绑定；冲突 actor／目标／用户请求摘要不可复用身份。内部事件身份仍由源记录确定，不接受客户端提供内部摘要。
 - `close_execution(scope, expected_generation, reason) -> stop_receipt`：主 Stop 可指定旧批次幂等重入；删除另在同一事务写 deleted_at。
 - `reserve_task(scope, admission, task_spec, execution_details) -> reservation`：事务内验证执行权、父任务约束、command cap 和环境身份；提交后才产生远端副作用。
 - `handoff_task(task_id, owner_token, tool_result_evidence)`：选择前台结果或后台事件，保证只交付一次终态。
@@ -112,6 +112,8 @@
 
 首次受理与 Stop 锁定同一 conversation；受理记录持久存在后才能排队或取得 Redis active slot。fixed schedule 在 occurrence 首次持久领取时绑定批次，早于 worker dispatch；目标尚未确定的 new-each-time 流程在目标固定后、首次排队前绑定。相同来源键在不同 actor／目标下冲突，不能重新指定目标绕过旧绑定。
 
+用户来源还持久绑定规范化请求摘要：正文、有序 attachment IDs、请求的 model_key／reasoning 及其他影响执行的提交字段。复用 client_message_id 等身份但请求不同返回冲突，不更改原 run；不把临时 URL、发送时间或重试时重新解析的默认模型算入摘要，实际执行设置保留首次快照。没有可靠历史请求证明的旧受理不猜填摘要后接受不同 payload。
+
 Stop 之前已经受理的来源保持旧 generation；之后的新用户请求或独立授权的新 occurrence 才能开启下一批。重新开批不取消旧清理、不放行旧 notice。新 active-slot claim 后和每个副作用前仍复查 generation；两套存储不宣称原子提交。
 
 主 Stop 请求 `{execution_generation}`；202 返回 `{execution_generation, accepted, cleanup_pending}`，成功表示持久控制已关闭，不表示远端退出。单 task Stop 不关闭 conversation。恢复与重复旧 Stop 不能作用于新批次。
@@ -124,6 +126,7 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 - 删除事务失败不隐藏会话；提交后 worker 崩溃仍能清理，迟到句柄不丢、deleted API 404、其他会话不受影响。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
 - Web 消息重试、IM receipt 重试、trigger 重试不重新授权；伪造内部来源、跨 scope／actor 复用键失败；原调度权限和 HITL 限制不回归。
+- 相同用户来源 ID 改正文／attachments／model_key／reasoning 逐项拒绝；相同 payload 重试仍返回原 run 和 generation，不因配置默认值变化变成新请求。
 - 同 PR 更新站点 `guides/conversations/basics.md`、`sandboxes.md` 和 `guides/automation/scheduled-tasks.md` 的 Stop／删除／下一次独立触发语义。
 
 ## C3. 每条 notice 独立投递与确认
@@ -134,6 +137,7 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 - `streams/steering_delivery.py`、`streams/execution_adapter.py`、`streams/run_manager.py`：输入来源、稳定 delivery ID、checkpoint ack、取消与 attempt fencing。
 - `models/steering_message.py`、`repositories/steering_message.py`、`agents/schemas.py`：持久 source／notice／generation，后台事件与用户 steering 的实时投影分流。
 - `api/routes/v1/conversations.py` 的 bootstrap／历史读取：旧内部输入关联源 notice 归类，不回写 checkpoint。
+- `streams/run_manager.py` 的 reflection 调度及 `services/reflection_runner.py` 的输入来源契约：含后台 notice 的自动／混合轮次跳过自动个人记忆提炼，正常用户轮次不变。
 
 ### Interfaces / core logic
 
@@ -145,15 +149,18 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 
 A/B 独立输入时停止 A 只撤回 A，B 不变。取消返回 closed、响应丢失或 checkpoint 在途，先对账；确认原 attempt 不能再提交且历史无证据才重路由。用户停止／删除取消通知，deadline 仍可报告超时；通知取消后观察迟到终态只保存事实。
 
-初始 notice 不在 Session 的 cancel_input 队列中，需单独的宿主路径：投递记录绑定首条 notice／attempt；准备阶段及 Session 执行前检查源 task 的通知权限，单 task Stop 使对应准备 attempt 失效，而非关闭整个 generation。执行已经开始但首条提交状态未知时取消该 attempt 并对账；已提交保留历史，未提交且 attempt 已失权才 discard。B 等其他输入逐条对账，未提交者仍 pending 并可重新路由，不能随 A 一起丢弃。复用 RunManager 准备任务取消与既有 attempt fencing，不扩充 CubeLoop Session API。
+初始 notice 不在 Session 的 cancel_input 队列中，需单独的宿主路径：投递记录绑定首条 notice／attempt；准备阶段及 Session 执行前检查源 task 的通知权限。初始输入持久提交未决时，其他 notice 和用户追加输入留在各自持久队列，不向 Session 提交。初始提交确认后开放其他输入，与首条取消裁决在同一 attempt 绑定上串行：取消先获权则保持入口关闭、取消 attempt 并对账 A，B 仍 pending 可重路由；提交确认先开放入口则单 task Stop 不再取消这个共享 attempt，避免中断已提交 B。已提交 A 保留历史，未提交且 attempt 已失权才 discard；主 Stop 仍可停整个批次。复用 RunManager 准备任务取消与既有 attempt fencing，不扩充 CubeLoop Session API，也不引入 delivered 通知的自动业务重试。
 
 `pending_steers` 和用户 steering SSE 只返回 source=user。后台输出作为有来源的任务数据，不作用户指令或审批答案；不改稳定系统 prompt、不补旧 ToolResult、不修改历史 metadata。
+
+该来源规则贯穿副作用消费者：首条或本轮已提交输入含 background_task 时跳过自动个人记忆 reflection，不把命令日志当作用户偏好／纠正；本轮先保守跳过整个混合轮次，不建设新记忆系统。
 
 ### Tests / docs
 
 - 新 `backend/tests/e2e/test_background_task_delivery.py`：真实 Session／Postgres／Redis，active／idle／preparing／finishing／HITL 路由，start_run 响应丢失、worker 重启、claim 接管。
 - A、B 同 run 排队 → Stop A 与 InputCommitted 竞争 → B 恰有一份持久输入；A 已提交保留历史、未提交不续办，closed 不被当成取消成功。
 - 首条 A 已 claim、run 尚在准备 → B 保留独立投递 → Stop A：用 barrier 验证 A 不进入模型且 B 最终只提交一次；另覆盖初始 checkpoint 在途、已提交、取消响应丢失和 worker 崩溃后的逐 notice 对账。
+- A 初始提交／取消裁决双向 barrier：其他输入在未决期间不能提交；B 已提交后 Stop A 不结束共享 attempt，模型可继续处理 B。纯后台与用户＋后台混合轮次均不调度自动个人记忆 reflection，普通用户轮次仍正常。
 - 旧 generation 的 completion／monitor line／调度重试不复活；多个投递 owner 不重复确认；权限失效 discarded，不以 system actor 兜底。
 - 更新 `test_steer_endpoint.py` 和历史投影用例：内部 queued／failed 不进入用户列表，真实用户撤回／恢复正常，旧 checkpoint 不被重写。
 - 现有站点 sandbox 页同步说明后台事件与用户 steering 分离。
@@ -219,7 +226,7 @@ wait_for_tasks 只接受本 conversation／有效批次、后台可观察、通�
 | 现有 bootstrap | 增加 execution_generation、停止状态及 `background_summary {has_inflight, has_pending, has_cleanup, can_stop}` 和事件首页 |
 | 现有 cancel／消息请求 | C2 的目标 generation／稳定 client_message_id；前后端一起切换，不接受缺字段绕过控制 |
 
-pending 包括 pending／claimed／等待重试但未 delivered／discarded 的源事件；分页按不可变 created_at、notice_id。cursor 绑定 scope／conversation／过滤条件，拒绝跨上下文复用。summary 在同一 DB 读取快照中从完整可访问集合计算；当前页之外的待处理也计入，查询错误不能回 false。has_cleanup 包括停止未确认和日志收尾；can_stop 只表达后台工作仍可撤销的权限，不保存第二份 run 状态。Redis active-run 另按现有协议对账，不假装与 DB 原子。
+pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状态下等待重试／对账的事件）；明确排除 delivered 和 discarded，二者只进入 delivery=all／历史。分页按不可变 created_at、notice_id。cursor 绑定 scope／conversation／过滤条件，拒绝跨上下文复用。summary 在同一 DB 读取快照中从完整可访问集合计算；当前页之外的待处理也计入，查询错误不能回 false。has_cleanup 包括停止未确认和日志收尾；can_stop 只表达后台工作仍可撤销的权限，不保存第二份 run 状态。Redis active-run 另按现有协议对账，不假装与 DB 原子。
 
 ### UI / core logic
 
@@ -261,14 +268,14 @@ pending 包括 pending／claimed／等待重试但未 delivered／discarded 的�
 1. 在隔离测试库验证结构和数据迁移。新增表／字段、旧字段退出分别由模型 metadata 经 `alembic revision --autogenerate` 产生；不手写／改写结构 migration。新增表承接原记录是数据复制，不依赖 autogenerate 自动识别 rename。新增结构阶段 task_id 等待回填字段允许为空，旧字段／表保留；回填验证后才生成／应用收紧约束和删除旧结构的阶段，未知历史实例不靠伪造值满足约束。
 2. 数据搬迁工具计划放 `backend/scripts/dev/migrate_background_tasks.py`，默认只读 dry-run。列出旧 inflight、run／conversation lifetime、已删除会话、notice／checkpoint 证明、实例证据和未知 deadline；实际执行需独立授权。
 3. 经授权隔离所有旧写入者（API／run worker／coordinator／相关排队入口），记录 checkpoint／provider 句柄和旧新 ID 映射，再回填 task、事件、admission。仍在运行的旧 run-lifetime 命令先完成或明确停止，不能直接授予跨 run 权限。
-4. 每个 command 恰好一条 task；notice ID、去重键、投递证明保留。只从可靠原始证据回填实例和受理批次；未知不猜当前容器、不重跑、不释放名额、不回放旧通知。已删除会话补持久清理意图，不能恢复可见性或执行权。
+4. 每个 command 恰好一条 task；notice ID、去重键、投递证明保留。旧 terminal command 的 notice_state=pending 但 completion wake 尚未创建时，按旧 completion 去重键及 checkpoint notice／command 证明对账：已送达不重放，明确有通知权的 conversation-lifetime 工作幂等补一条稳定事件，无权继续的 run-lifetime／取消／证据不明记录保留 discarded 原因。只从可靠原始证据回填实例和受理批次；未知不猜当前容器、不重跑、不释放名额、不回放旧通知。已删除会话补持久清理意图，不能恢复可见性或执行权。
 5. 回填可中断重跑、重复执行不增任务／事件。核对行数、唯一性、scope、终态事实与 pending 分类，失败停止切换。唯一合法升级顺序为：停旧写入者 → 升到新增结构的指定 revision → 回填并核对 → 删除旧结构／收紧约束 → 启动新 service，最终只有一个生命周期写入者；无双写同步或旧控制路由转发层。
 6. 新旧客户端／API 配套切换。中间 PR 不直接投产，不能在 Stop／通知校验尚未齐备时启用新的跨 run 行为。切换后若回退，不让旧 worker 对新 schema／新权限语义盲写；回退与备份恢复需单独审核。
 7. 开发按 [testing](../../testing.md) 的 red→green 保护各单元契约，只运行改动模块；联调再跑相关 E2E。Postgres／Redis／FastAPI 用真实服务，只在最外层注入故障；小时级时间用可控时钟、barrier 和有界状态等待，不真等几小时。
 8. C4/C5 完成后验证唯一 Done、prompt cache、HITL、SSE 结束后新 run、原现场业务流程。保留每项命令与结果；不把文档检查当运行时验收。噪声测试输出写入 gitignored tmp 日志，失败先读 traceback，不重复盲跑。
 9. 用户可见改动与匹配站点文档同 PR；常规 push 由 pre-push 运行对应 check-ci，不提前重复手跑。用户已批准实施；实际发布及线上数据操作仍需独立审批。
 
-迁移门槛另作为切换实施项：调整 `deploy/kubernetes/charts/cubeplex/templates/backend-deployment.yaml` 的 init 流程及实际共用升级入口，禁止原有无条件 `alembic upgrade head` 越过外部回填。由升级入口显式停在新增结构 revision，执行／核对回填后再升级最终 head；后端启动校验拒绝仍有未迁移旧记录的新生命周期写入者。C1 只交付新增结构阶段，不提前删除旧字段；最终删除阶段在 C2–C6 完整验证、门槛就绪后交付。空库通过无旧记录校验可直接完成。新增 `backend/tests/e2e/test_background_task_migration.py` 验证旧数据保全、回填中断重跑、核对失败阻止收缩和启动、空库安装；更新现有部署文档。实际发布操作仍另行审批。
+迁移门槛另作为切换实施项：`deploy/kubernetes/charts/cubeplex/templates/backend-deployment.yaml` 的 init 和 `deploy/docker-compose/compose.yaml` 的 backend-migrate 使用同一个有门槛的升级入口，禁止无条件 `alembic upgrade head`。已有库必须通过独立、串行的维护步骤停旧 API／worker／coordinator／排队入口并确认退出，再由持有数据库迁移锁的唯一执行者升级到新增结构 revision、回填核对、升级最终 head；不能在 RollingUpdate 新 pod 的 init 内假定旧 pod 已停止，也不能让多副本各自回填。普通启动只检查已完成的切换，空库可在迁移锁内完成安装；后端拒绝未完成回填的新生命周期写入者。C1 只交付新增结构阶段，不提前删除旧字段；最终删除阶段在 C2–C6 完整验证、门槛就绪后交付。新增 `backend/tests/e2e/test_background_task_migration.py` 验证旧数据保全、pending completion 缺 wake 的幂等补齐、回填中断重跑、核对失败阻止收缩和启动、空库安装、多个升级者争锁；Helm／Compose 启动入口都覆盖拒绝未切换旧库的契约，现有 Kubernetes／Compose 部署文档同步维护步骤。实际发布操作仍另行审批。
 
 ## 3. Spec 覆盖与完成定义
 
@@ -291,5 +298,7 @@ pending 包括 pending／claimed／等待重试但未 delivered／discarded 的�
 | 23 | C5：窗口外 pending 冷刷新发现、分页控制与最终对账 |
 | 24 | C3：首条 notice 准备期取消、初始 checkpoint 竞争及 B 独立交付 |
 | 25 | 第 2 节切换：新增结构／回填／删除旧结构门槛与启动拒绝 |
+| 26 | C3：纯后台／混合轮次不触发自动个人记忆 reflection |
+| 27 | C2：用户请求摘要绑定与相同来源不同 payload 的冲突拒绝 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
