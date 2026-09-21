@@ -95,6 +95,13 @@ When the agent needs your input (for example, a confirmation before proceeding),
 
 Attachments remain unavailable while a run is active, including while an input or confirmation card is waiting. If you hard-stop a run, the composer shows cancellation progress and stays locked until the previous run has fully stopped.
 
+Pressing the main **Stop** button while a question or confirmation is waiting
+cancels that paused run without another model response. It clears the waiting
+card and cancels guidance that has not reached the conversation history; input
+already recorded in history stays there. This differs from answering or denying
+a confirmation, which can let the agent continue. A successful Stop request
+means cleanup was accepted; the composer waits for the server to confirm it is idle.
+
 ## Managing conversations
 
 Right-click (or click the three-dot menu) on any conversation in the sidebar to access these actions:

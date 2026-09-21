@@ -409,6 +409,20 @@ async def run_claim_matches(
     )
 
 
+async def completed_run_claim_matches(
+    redis: Redis, *, prefix: str, conversation_id: str, run_id: str, claim_token: str
+) -> bool:
+    """Prove successful owner teardown without keeping the active-run slot occupied."""
+    raw = await redis.hgetall(_run_meta_key(prefix, run_id))  # type: ignore[misc]
+    return bool(
+        claim_token
+        and raw.get("run_id") == run_id
+        and raw.get("conversation_id") == conversation_id
+        and raw.get("claim_token") == claim_token
+        and raw.get("status") == "completed"
+    )
+
+
 async def update_run_meta(
     redis: Redis,
     *,

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from cubeloop.providers.base import AssistantMessage, Message, Model
+from cubeloop.providers.base import AssistantMessage, Message, Model, TextContent, UserMessage
 from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.llm.snapshot import LLMSnapshot
 from cubeplex.models import ConversationParticipant, Membership, User
 from cubeplex.models.billing import BillingEvent
+from cubeplex.repositories.steering_message import SteeringMessageRepository
 from cubeplex.services.conversation_execution import AdmittedExecution, UserMessageIntent
 from cubeplex.streams.run_events import _active_run_key, _run_meta_key, get_active_run, get_run_meta
 from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
@@ -133,7 +134,6 @@ async def respond(manager: RunManager, paused: PausedExecution, action: str = "a
             conversation_id=paused.ctx.conversation_id,
             run_id=paused.run_id,
             ctx=paused.ctx,
-            llm_snapshot=changed_default,
         )
 
 
@@ -161,7 +161,7 @@ async def test_resume_keeps_original_authority_and_model_after_redis_pause_expir
     keys = [key async for key in run_manager._redis.scan_iter(match=f"{run_manager._key_prefix}:*")]
     if keys:
         await run_manager._redis.delete(*keys)
-    if stopped:
+    if stopped and action == "answer":
         with pytest.raises(ResumeConflict):
             await respond(run_manager, paused, action)
         assert not run_manager._tasks and paused.provider.call_count == 1
@@ -171,10 +171,14 @@ async def test_resume_keeps_original_authority_and_model_after_redis_pause_expir
         meta = await get_run_meta(
             run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
         )
-        assert meta is not None and meta.status == "completed", meta
-        assert paused.models == ["first", "first"]
+        assert meta is not None and meta.status == (
+            "cancelled" if action == "cancel" else "completed"
+        )
+        assert paused.models == (["first"] if action == "cancel" else ["first", "first"])
         await db_session.refresh(paused.admitted.admission)
         assert paused.admitted.admission.run_finished_at is not None
+        if action == "cancel":
+            assert paused.admitted.admission.revoked_at is not None
     assert (
         await get_active_run(
             run_manager._redis, prefix=run_manager._key_prefix, conversation_id=conversation_id
@@ -182,7 +186,9 @@ async def test_resume_keeps_original_authority_and_model_after_redis_pause_expir
         is None
     )
     async with shared_checkpointer() as cp:
-        assert await cp.load_pending(conversation_id) == (pending if stopped else None)
+        assert await cp.load_pending(conversation_id) == (
+            pending if stopped and action == "answer" else None
+        )
 
 
 @pytest.mark.parametrize("action", ["answer", "cancel"])
@@ -302,22 +308,108 @@ async def test_second_hitl_pause_keeps_the_original_receipt_unfinished(
     assert paused.provider.call_count == 3
 
 
+async def test_stop_cancels_uncommitted_guidance_but_preserves_checkpointed_input(
+    db_session: AsyncSession, run_manager: RunManager, paused_execution: PausedExecution
+) -> None:
+    paused = paused_execution
+    repo = SteeringMessageRepository(db_session, org_id=DEFAULT_ORG_ID, workspace_id=DEFAULT_WS_ID)
+    rows = []
+    for key in ("committed", "queued"):
+        row, _ = await repo.enqueue(
+            conversation_id=paused.ctx.conversation_id,
+            run_id=paused.run_id,
+            client_steer_id=key,
+            content=key,
+            sender_user_id=paused.ctx.user_id,
+            sender_display_name=None,
+            hitl_question_id=paused.question_id,
+        )
+        rows.append(row)
+    await repo.claim_queued(run_id=paused.run_id, owner="pre-pause-attempt")
+    await db_session.commit()
+    async with shared_checkpointer() as cp:
+        await cp.append(
+            paused.ctx.conversation_id,
+            [
+                UserMessage(
+                    content=[TextContent(text="committed")], metadata={"steer_id": "committed"}
+                )
+            ],
+        )
+    await respond(run_manager, paused, "cancel")
+    await run_manager.drain(timeout_seconds=15)
+    for row in rows:
+        await db_session.refresh(row)
+    assert [row.state for row in rows] == ["injected", "cancelled"]
+    assert paused.provider.call_count == 1
+
+
+@pytest.mark.parametrize("replacement", ["claim", "question"])
+async def test_late_stop_worker_cannot_modify_a_replacement(
+    db_session: AsyncSession,
+    run_manager: RunManager,
+    paused_execution: PausedExecution,
+    monkeypatch: pytest.MonkeyPatch,
+    replacement: str,
+) -> None:
+    paused = paused_execution
+    original_eval = run_manager._redis.eval
+    replaced = False
+    async with shared_checkpointer() as cp:
+        pending = await cp.load_pending(paused.ctx.conversation_id)
+    assert pending is not None
+    newer = pending[0].model_copy(update={"question_id": "replacement-question"})
+
+    async def replace_after_claim(script: str, numkeys: int, *args: Any) -> Any:
+        nonlocal replaced
+        result = await original_eval(script, numkeys, *args)
+        if not replaced and result == "ok":
+            replaced = True
+            if replacement == "claim":
+                await run_manager._redis.hset(
+                    _run_meta_key(run_manager._key_prefix, paused.run_id),
+                    "claim_token",
+                    "new-owner",
+                )
+            async with shared_checkpointer() as cp:
+                await cp.save_pending_request(
+                    paused.ctx.conversation_id, newer, run_id=paused.run_id
+                )
+        return result
+
+    monkeypatch.setattr(run_manager._redis, "eval", replace_after_claim)
+    await respond(run_manager, paused, "cancel")
+    await run_manager.drain(timeout_seconds=15)
+    assert replaced and paused.provider.call_count == 1
+    async with shared_checkpointer() as cp:
+        assert await cp.load_pending(paused.ctx.conversation_id) == (newer, paused.run_id)
+    await db_session.refresh(paused.admitted.admission)
+    assert paused.admitted.admission.run_finished_at is None
+    meta = await get_run_meta(
+        run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
+    )
+    assert meta is not None and meta.status == "running"
+
+
 @pytest.mark.parametrize("failure", ["reply_lost", "cancelled"])
+@pytest.mark.parametrize("action", ["answer", "cancel"])
 async def test_terminal_resume_committed_before_interruption_releases_its_slot(
     db_session: AsyncSession,
     run_manager: RunManager,
     paused_execution: PausedExecution,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
+    action: str,
 ) -> None:
     paused = paused_execution
+    terminal_status = "cancelled" if action == "cancel" else "completed"
     original_eval = run_manager._redis.eval
     interrupted = False
 
     async def interrupt_terminal_reply(script: str, numkeys: int, *args: Any) -> Any:
         nonlocal interrupted
         result = await original_eval(script, numkeys, *args)
-        if not interrupted and "completed" in args:
+        if not interrupted and terminal_status in args:
             interrupted = True
             if failure == "cancelled":
                 raise asyncio.CancelledError("cancel after committed resume")
@@ -325,13 +417,13 @@ async def test_terminal_resume_committed_before_interruption_releases_its_slot(
         return result
 
     monkeypatch.setattr(run_manager._redis, "eval", interrupt_terminal_reply)
-    await respond(run_manager, paused)
+    await respond(run_manager, paused, action)
     await run_manager.drain(timeout_seconds=15)
-    assert interrupted and paused.provider.call_count == 2
+    assert interrupted and paused.provider.call_count == (1 if action == "cancel" else 2)
     meta = await get_run_meta(
         run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
     )
-    assert meta is not None and meta.status == "completed"
+    assert meta is not None and meta.status == terminal_status
     assert (
         await get_active_run(
             run_manager._redis,
@@ -347,7 +439,7 @@ async def test_terminal_resume_committed_before_interruption_releases_its_slot(
 
 
 @pytest.mark.parametrize("stopped", [False, True])
-async def test_another_participant_answer_cannot_replace_the_execution_actor(
+async def test_other_participant_cannot_answer_with_original_actors_credentials(
     db_session: AsyncSession,
     run_manager: RunManager,
     paused_execution: PausedExecution,
@@ -380,24 +472,19 @@ async def test_another_participant_answer_cannot_replace_the_execution_actor(
             )
             await db_session.commit()
         other = replace(paused, ctx=replace(paused.ctx, user_id=responder_id))
-        if stopped:
-            with pytest.raises(ResumeConflict):
-                await respond(run_manager, other)
-            assert paused.provider.call_count == 1
-        else:
+        with pytest.raises(ResumeConflict):
             await respond(run_manager, other)
-            await run_manager.drain(timeout_seconds=15)
-            assert paused.provider.call_count == 2
-            billing_actors = list(
-                (
-                    await db_session.scalars(
-                        select(BillingEvent.user_id).where(
-                            BillingEvent.conversation_id == paused.ctx.conversation_id
-                        )
+        assert paused.provider.call_count == 1
+        billing_actors = list(
+            (
+                await db_session.scalars(
+                    select(BillingEvent.user_id).where(
+                        BillingEvent.conversation_id == paused.ctx.conversation_id
                     )
-                ).all()
-            )
-            assert billing_actors and set(billing_actors) == {paused.ctx.user_id}
+                )
+            ).all()
+        )
+        assert billing_actors and set(billing_actors) == {paused.ctx.user_id}
     finally:
         await run_manager.cancel_all()
         await cleanup_run_rows(db_session, paused.ctx.conversation_id)
