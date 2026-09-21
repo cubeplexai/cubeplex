@@ -129,7 +129,7 @@
 
 受理来源必须由服务端区分，不能仅凭 `trigger="automated"` 决定能否开启新批次。现有 fixed-target schedule 会重复进入同一 conversation；它的新 occurrence 保留独立授权，但旧 command completion 没有这个权限。持久受理记录保存 `source_kind`、稳定 `source_id`、目标 conversation 和受理时 generation；同一来源重试只读取原绑定，不能重新分配批次。用户消息、schedule occurrence、既有 trigger occurrence、后台 notice 分别来自已鉴权的入口，客户端不能自报为内部调度。
 
-用户消息的受理身份还绑定不可变请求摘要：正文、有序 attachment IDs、请求的 model_key 与规范化 reasoning 等影响执行的提交字段。相同 client_message_id／receipt／steer_id 携带不同请求时拒绝复用，不能把改过的消息当作原 run 的成功重试。摘要按规范化请求计算，不包含发送时间、临时 URL 或重试时重新解析的默认模型；首次解析出的实际执行设置随原受理／run 保留。旧记录若没有可靠请求证据，不猜造摘要并接受不同 payload。
+用户消息的受理身份还绑定不可变请求摘要：正文、有序 attachment IDs、请求的 model_key 与规范化 reasoning 等影响执行的提交字段。相同 client_message_id／receipt／steer_id 携带不同请求时拒绝复用，不能把改过的消息当作原 run 的成功重试。摘要按规范化请求计算，不包含发送时间、临时 URL 或重试时重新解析的默认模型。首次解析出的模型／provider 选择、有效 reasoning 等执行设置，以不含凭据的不可变快照与受理记录在同一事务持久保存，先于排队及 run 创建；不能只存在内存或尚未创建的 run 上。受理提交后崩溃，即使默认配置改变，重试仍读取原快照而不重新选默认值；权限和凭据仍按当前状态校验，原选择不可用则明确失败，不静默换模型。旧记录若没有可靠请求证明，不猜造摘要或执行快照。
 
 首次受理与 Stop 使用同一 conversation 锁串行：固定会话的 occurrence 被领取并登记待执行时就绑定批次，不等 worker 真正开始调用模型；先受理则属于 Stop 关闭的旧批次，后受理且来源有独立授权才可进入新批次。Stop 后不得把旧 occurrence 的 busy 重试、IM 队列重试或恢复任务解释为下一次触发。经 IM 转交的调度仍保留原 occurrence 身份。这里只补入口分类、幂等绑定和停止边界，不改变调度计划、missed／busy 策略或引入新调度引擎。
 
@@ -256,6 +256,7 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 - `pending_steers` 与用户 steering 实时事件只包含 `source=user` 的主动输入。`/steer`、`/steer/cancel` 只处理用户消息；source 由服务端入口确定，客户端不能通过自填 source 获得内部通知身份，保留内部 ID 的防伪校验。
 - 后台结果的产品状态来自源 wake 及 checkpoint 对账；一次投递尝试失败不是一条新的产品消息。同一 notice 换 run 重试、重新 claim 或 bootstrap 后仍是同一条事件，旧 failed／queued steering 不得重新进入用户列表。
 - 来源分类也约束个人记忆提炼：首条输入或本轮已提交追加输入含 background_task notice 时，不触发本轮自动个人记忆 reflection，避免将日志／自动结果当成用户偏好或纠正。普通纯用户输入的 reflection 保持原行为；不回写历史或修改 prompt 缓存前缀。本轮采用保守跳过混合轮次，不新增一套自动结果记忆系统。
+- 自动 memory consolidation 同样排除后台来源：读取持久历史时，先按输入来源与 run 关联识别并排除含后台 notice 的整个轮次，再裁剪窗口及转成 role／text。仅跳过后台 run 的即时调度不够，后续普通用户 run 再次合并历史也必须使用相同过滤；旧通知按可靠 wake 关联分类，不靠正文猜测。窗口边界和缺失关联不能把孤立的后台回复误算为纯用户轮次，无法可靠分类的片段不用于自动记忆。无合格历史时不调用提炼模型、不写个人或 workspace memory，但按现有 cutoff／consumed 规则完成本次扫描，保留扫描期间新增 run 的计数，避免反复扫描同一批排除内容。正常纯用户历史的合并保持原行为，不回写 checkpoint。
 - UI 的折叠不改变投递。需要阻止后续处理时，停止源 task 或使用主 Stop，由服务端取消源事件和未提交输入；不提供“把内部通知恢复到输入框”或仅取消某次内部 steering 的入口。
 
 ## 8. Todo 如何允许本轮结束
@@ -285,7 +286,7 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 | `background_tasks` | 第 6.2 节的公共身份、状态、owner、控制与结果引用；统一 `deadline_at`、`stop_requested_at/stop_reason`、`notifications_cancelled_at`、`last_observed_at`、`revision`、`backgrounded_at` |
 | `sandbox_commands` | 与 task 一对一、`task_id` 唯一的命令详情；保留 command ID、稳定 `user_sandbox_id`，另存不可变 `sandbox_instance_id`，以及命令参数、provider_ref、原始进程观察／exit code、日志路径／cursor／log_state、monitor 匹配和限流数据 |
 | `background_task_events` | 从原 wake 表迁移的单一通知 outbox；关联 task ID，保存 notice ID、事件事实、去重键与投递／claim 状态 |
-| `conversation_execution_admissions` | 首次受理的来源身份、目标 conversation、generation 和 run 关联；同一 scope 内 `(source_kind, source_id)` 唯一。只用于停止边界与重试幂等，不保存另一份任务运行状态或调度计划 |
+| `conversation_execution_admissions` | 首次受理的来源身份、目标 conversation、generation、run 关联及不可变请求摘要／有效执行设置快照；同一 scope 内 `(source_kind, source_id)` 唯一。只用于停止边界与重试幂等，不保存另一份任务运行状态或调度计划 |
 
 公共状态由 task service 根据适配器证据统一更新，命令原始 exit code 是证据，不是另一套业务状态机。类型详情和任务记录的关联必须满足同一 org／workspace／conversation，读取和控制均不能绕过 scope。具体结果和公共终态／事件需要一起提交时使用同一数据库事务；不依赖双写后异步补齐两套事实。
 
@@ -320,7 +321,7 @@ poll 提供候选 cursor，确认日志数据写入后才持久 ack。cleanup-on
 ### 10.1 控制与快照
 
 - `GET .../background-tasks` 默认查询 inflight，支持有界 task IDs 查询；`GET .../background-tasks/{task_id}` 返回单条只读快照。查询不顺便 poll 执行方、抢 owner 或消费日志；具体详情按 task kind 返回，不强制存在日志／exit code。
-- 同一 conversation 下新增只读 `GET .../background-task-events?delivery=pending|all&cursor=...&limit=...`，返回 `items, next_cursor, has_more`；默认 pending 包括 queued／claimed／待重试但尚未 delivered／discarded 的源事件，按不可变 `(created_at, notice_id)` 稳定分页，limit 有上限。每项带 task ID，可用任务详情接口查找并停止已经终态但通知未送达的任务；不依赖历史消息或默认 inflight 列表发现它。跨 scope 的 cursor／ID 不泄露记录，查询不消费事件。
+- 同一 conversation 下新增只读 `GET .../background-task-events?delivery=pending|all&cursor=...&limit=...`，返回 `items, next_cursor, has_more`；默认 pending 与 summary.has_pending 仅计算 state ∈ {pending, claimed}，包括这些状态下待重试／对账的源事件。delivered 和 discarded 明确排除，只进入 delivery=all／历史。按不可变 `(created_at, notice_id)` 稳定分页，limit 有上限。每项带 task ID，可用任务详情接口查找并停止已经终态但通知未送达的任务；不依赖历史消息或默认 inflight 列表发现它。跨 scope 的 cursor／ID 不泄露记录，查询不消费事件。
 - 现有 `POST .../conversations/{conversation_id}/cancel` 升级为第 5.2 节的主 Stop；请求绑定目标 `execution_generation`，重复请求不能作用于后来开启的新批次。无 active run 但有后台工作时照样受理。202 返回目标批次、停止已受理和清理进度；scope／权限不变，不能只因 Redis 无 active key 就返回“无事可停”。
 - `POST .../background-tasks/{task_id}/stop`：持久受理但底层尚未确认结束返回 202；已确认终态返回 200 + 原事实。响应分别表达本地停止已受理、远端取消能力和确认状态，不把 HTTP 成功当作远端取消成功。无法持久受理返回真实错误。终态任务的待发事件也按用户停止规则取消。
 - 当前 `sandbox-commands` 列表／快照／kill 调用方在实施时一并切换到公共接口，不保留只做转发的旧控制 API。命令专属工具仍可以接收 command ID，由其一对一关联找到 task 后调用同一 service；不新增一套泛化工具替代全部领域工具。
@@ -402,7 +403,7 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 23. 全部 task 已终态、待发事件超过窗口且冷刷新时，summary 仍反映 pending；可分页发现 task 并停止指定通知来源，停止其他项不受影响。空页、乱序响应、查询失败不导致提前停止刷新；全部送达／取消后完成最终历史对账再停止轮询。
 24. notice A 作为新 run 的首条输入时，在准备阶段停止 A 不调用模型、不写入其通知；提交在途则按 checkpoint 事实收敛。初始提交未决时 B／用户追加输入不进入 Session；初始提交已确认并开放其他输入后，单独停止 A 不取消共享 attempt，B 仍可处理且不重复提交。停止 A 不关闭会话批次，也不依赖 `cancel_input` 能撤回初始输入。
 25. Helm 与 Compose 的旧库升级都在旧写入者确已退出、迁移执行者唯一时回填核对，再删除迁移源字段；未回填或核对失败时禁止收缩及启动新写入者。覆盖空库、旧库、中断重跑、并发启动和 pending completion 尚无 wake 的旧记录。
-26. 包含后台 notice 的自动或混合轮次不触发自动个人记忆 reflection；日志中的偏好／纠正文案不能由该路径写入用户记忆，普通用户轮次保持原行为。
-27. 同一用户消息来源 ID 重试复用原 generation／run；正文、attachments、model_key 或 reasoning 不一致时明确拒绝，不能篡改已受理请求。
+26. 包含后台 notice 的自动或混合轮次不触发自动个人记忆 reflection，且在后续 consolidation 读取历史时仍被排除；日志中的偏好／纠正文案及这些轮次的回复不能由两条自动路径写入个人或 workspace memory。过滤发生在窗口裁剪／文本化之前，无合格历史时不调用模型也不反复消费已扫描计数；普通纯用户历史保持原行为。
+27. 同一用户消息来源 ID 重试复用原 generation／run；正文、attachments、model_key 或 reasoning 不一致时明确拒绝，不能篡改已受理请求。首次受理提交后、run 创建前崩溃，再改变默认模型／reasoning，重试仍使用受理事务保存的首次执行快照；权限撤销或原模型不可用时拒绝执行，不静默重选。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。

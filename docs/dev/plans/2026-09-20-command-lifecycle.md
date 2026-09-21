@@ -39,7 +39,7 @@
 | `background_tasks` | 唯一公共执行状态；scope、conversation、task kind、发起身份／run／tool、可选 parent、generation、notify policy、deadline、停止原因、通知取消标记、owner token／lease、结果引用、revision、backgrounded_at |
 | `sandbox_commands` | `task_id` 唯一一对一；保留 command ID、user_sandbox_id、不可变 sandbox_instance_id、provider_ref、命令参数、真实进程观察／exit code、日志 cursor／state、monitor 匹配与限流 |
 | `background_task_events` | 单一 outbox；稳定 notice ID、task ID、reason、摘要／结果引用、去重键、pending／claimed／delivered／discarded、投递 attempt 及 checkpoint 证明 |
-| `conversation_execution_admissions` | 来源／稳定 source ID、actor、conversation、generation、run 关联、不可变用户请求摘要；scope 内来源键唯一。不是第二份 run 状态机或调度计划 |
+| `conversation_execution_admissions` | 来源／稳定 source ID、actor、conversation、generation、run 关联、不可变用户请求摘要与有效执行设置快照；scope 内来源键唯一。C1 建基础关联，C2 在开放受理入口前补齐摘要／快照及事务契约。不是第二份 run 状态机或调度计划 |
 | conversation／输入 | conversation 保存单调 generation 与关闭标记；run 关联受理记录，用户／内部输入保存 generation 和明确 source；task revision 与事件 revision 分开 |
 
 公共 task 与事件由同一 service 按适配器证据更新；command 详情不是第二个状态写入者。采用 spec 的 starting／running／waiting_input／succeeded／failed／cancelled／unknown，command 不产生 waiting_input。停止意图、执行事实、日志状态和通知状态不互相代替。
@@ -50,7 +50,7 @@
 
 以下是实施要共同遵守的 typed 边界，不是逐行实现稿：
 
-- `admit_execution(scope, actor, source_kind, source_id, request_fingerprint) -> admission`：首次受理绑定 generation，重试返回同一绑定；冲突 actor／目标／用户请求摘要不可复用身份。内部事件身份仍由源记录确定，不接受客户端提供内部摘要。
+- `admit_execution(scope, actor, source_kind, source_id, request_fingerprint) -> admission`：首次受理绑定 generation，并在同一事务持久保存服务端首次解析的执行设置快照；重试读取原绑定和快照。冲突 actor／目标／用户请求摘要不可复用身份。内部事件身份仍由源记录确定，不接受客户端提供内部摘要或执行快照。
 - `close_execution(scope, expected_generation, reason) -> stop_receipt`：主 Stop 可指定旧批次幂等重入；删除另在同一事务写 deleted_at。
 - `reserve_task(scope, admission, task_spec, execution_details) -> reservation`：事务内验证执行权、父任务约束、command cap 和环境身份；提交后才产生远端副作用。
 - `handoff_task(task_id, owner_token, tool_result_evidence)`：选择前台结果或后台事件，保证只交付一次终态。
@@ -112,7 +112,7 @@
 
 首次受理与 Stop 锁定同一 conversation；受理记录持久存在后才能排队或取得 Redis active slot。fixed schedule 在 occurrence 首次持久领取时绑定批次，早于 worker dispatch；目标尚未确定的 new-each-time 流程在目标固定后、首次排队前绑定。相同来源键在不同 actor／目标下冲突，不能重新指定目标绕过旧绑定。
 
-用户来源还持久绑定规范化请求摘要：正文、有序 attachment IDs、请求的 model_key／reasoning 及其他影响执行的提交字段。复用 client_message_id 等身份但请求不同返回冲突，不更改原 run；不把临时 URL、发送时间或重试时重新解析的默认模型算入摘要，实际执行设置保留首次快照。没有可靠历史请求证明的旧受理不猜填摘要后接受不同 payload。
+用户来源还持久绑定规范化请求摘要：正文、有序 attachment IDs、请求的 model_key／reasoning 及其他影响执行的提交字段。复用 client_message_id 等身份但请求不同返回冲突，不更改原 run；不把临时 URL、发送时间或重试时重新解析的默认模型算入摘要。C2 为 admission 增加 typed request_fingerprint 和 resolved_execution 字段，首次解析的模型／provider 选择、有效 reasoning 等不含凭据的执行设置必须与受理在同一事务提交，先于排队或 run 创建；run 从它构造，不依赖重试时重新解析默认值。已有受理重试仍校验当前权限／凭据，原选择不可用则明确失败，不静默换模型。没有可靠历史请求证明的旧受理不猜填摘要或执行快照。
 
 Stop 之前已经受理的来源保持旧 generation；之后的新用户请求或独立授权的新 occurrence 才能开启下一批。重新开批不取消旧清理、不放行旧 notice。新 active-slot claim 后和每个副作用前仍复查 generation；两套存储不宣称原子提交。
 
@@ -126,7 +126,7 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 - 删除事务失败不隐藏会话；提交后 worker 崩溃仍能清理，迟到句柄不丢、deleted API 404、其他会话不受影响。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
 - Web 消息重试、IM receipt 重试、trigger 重试不重新授权；伪造内部来源、跨 scope／actor 复用键失败；原调度权限和 HITL 限制不回归。
-- 相同用户来源 ID 改正文／attachments／model_key／reasoning 逐项拒绝；相同 payload 重试仍返回原 run 和 generation，不因配置默认值变化变成新请求。
+- 相同用户来源 ID 改正文／attachments／model_key／reasoning 逐项拒绝；相同 payload 重试仍返回原 run 和 generation。用 barrier 在 admission 提交后、run 创建前模拟崩溃，改变默认模型／reasoning 后重试仍使用首次快照；并发受理只有一个胜出的快照，事务失败不留下缺少快照的新受理，权限撤销／原模型不可用不静默重选。
 - 同 PR 更新站点 `guides/conversations/basics.md`、`sandboxes.md` 和 `guides/automation/scheduled-tasks.md` 的 Stop／删除／下一次独立触发语义。
 
 ## C3. 每条 notice 独立投递与确认
@@ -137,7 +137,7 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 - `streams/steering_delivery.py`、`streams/execution_adapter.py`、`streams/run_manager.py`：输入来源、稳定 delivery ID、checkpoint ack、取消与 attempt fencing。
 - `models/steering_message.py`、`repositories/steering_message.py`、`agents/schemas.py`：持久 source／notice／generation，后台事件与用户 steering 的实时投影分流。
 - `api/routes/v1/conversations.py` 的 bootstrap／历史读取：旧内部输入关联源 notice 归类，不回写 checkpoint。
-- `streams/run_manager.py` 的 reflection 调度及 `services/reflection_runner.py` 的输入来源契约：含后台 notice 的自动／混合轮次跳过自动个人记忆提炼，正常用户轮次不变。
+- `streams/run_manager.py` 的 reflection／consolidation 调度、`services/reflection_runner.py` 与 `services/memory_consolidation.py` 的来源契约：含后台 notice 的自动／混合轮次跳过 reflection；consolidation 在历史窗口裁剪与 `_render_history` 前过滤这些轮次及其回复，正常纯用户历史不变。
 
 ### Interfaces / core logic
 
@@ -153,7 +153,7 @@ A/B 独立输入时停止 A 只撤回 A，B 不变。取消返回 closed、响�
 
 `pending_steers` 和用户 steering SSE 只返回 source=user。后台输出作为有来源的任务数据，不作用户指令或审批答案；不改稳定系统 prompt、不补旧 ToolResult、不修改历史 metadata。
 
-该来源规则贯穿副作用消费者：首条或本轮已提交输入含 background_task 时跳过自动个人记忆 reflection，不把命令日志当作用户偏好／纠正；本轮先保守跳过整个混合轮次，不建设新记忆系统。
+该来源规则贯穿副作用消费者：首条或本轮已提交输入含 background_task 时跳过自动个人记忆 reflection，不把命令日志当作用户偏好／纠正；本轮先保守跳过整个混合轮次，不建设新记忆系统。consolidation 不能只在当前 run 的调度点跳过：以后由普通用户 run 触发时，仍须先按持久输入来源及 run 关联排除含后台 notice 的完整轮次，再裁剪 HISTORY_MSG_CAP 和转成文本，避免留下孤立的后台回复。旧输入使用可靠 wake 关联，无法可靠分类的片段不用于自动记忆，不回写 checkpoint。全部被排除时不调用提炼模型、不写个人／workspace memory，仍按已有 cutoff／consumed 高水位规则结束扫描，不能重置或消费扫描期间新增 run 的计数。
 
 ### Tests / docs
 
@@ -161,6 +161,7 @@ A/B 独立输入时停止 A 只撤回 A，B 不变。取消返回 closed、响�
 - A、B 同 run 排队 → Stop A 与 InputCommitted 竞争 → B 恰有一份持久输入；A 已提交保留历史、未提交不续办，closed 不被当成取消成功。
 - 首条 A 已 claim、run 尚在准备 → B 保留独立投递 → Stop A：用 barrier 验证 A 不进入模型且 B 最终只提交一次；另覆盖初始 checkpoint 在途、已提交、取消响应丢失和 worker 崩溃后的逐 notice 对账。
 - A 初始提交／取消裁决双向 barrier：其他输入在未决期间不能提交；B 已提交后 Stop A 不结束共享 attempt，模型可继续处理 B。纯后台与用户＋后台混合轮次均不调度自动个人记忆 reflection，普通用户轮次仍正常。
+- 真实 checkpoint 历史含纯用户、后台、混合轮次及窗口边界的后台回复：后续普通用户 run 触发 consolidation 时，自动结果及其回复不进入提炼输入；个人／workspace memory 不受其影响，纯用户历史正常合并。全部被过滤时不调用模型；用并发 barrier 验证只扣除本次已扫描计数，后到 run 仍能触发后续合并；失败重试沿用相同过滤。
 - 旧 generation 的 completion／monitor line／调度重试不复活；多个投递 owner 不重复确认；权限失效 discarded，不以 system actor 兜底。
 - 更新 `test_steer_endpoint.py` 和历史投影用例：内部 queued／failed 不进入用户列表，真实用户撤回／恢复正常，旧 checkpoint 不被重写。
 - 现有站点 sandbox 页同步说明后台事件与用户 steering 分离。
@@ -298,7 +299,7 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 23 | C5：窗口外 pending 冷刷新发现、分页控制与最终对账 |
 | 24 | C3：首条 notice 准备期取消、初始 checkpoint 竞争及 B 独立交付 |
 | 25 | 第 2 节切换：新增结构／回填／删除旧结构门槛与启动拒绝 |
-| 26 | C3：纯后台／混合轮次不触发自动个人记忆 reflection |
-| 27 | C2：用户请求摘要绑定与相同来源不同 payload 的冲突拒绝 |
+| 26 | C3：后台／混合轮次不触发 reflection，后续 consolidation 也过滤这些历史及回复 |
+| 27 | C2：请求摘要冲突拒绝、受理事务持久保存首次执行快照及 run 创建前崩溃恢复 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
