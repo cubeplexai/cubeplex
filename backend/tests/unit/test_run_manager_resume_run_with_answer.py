@@ -34,12 +34,15 @@ PREFIX = "test_resume_rwa"
 
 
 def _make_rm() -> RunManager:
-    return RunManager(
+    manager = RunManager(
         app=MagicMock(),
         redis=MagicMock(),
         key_prefix=PREFIX,
         run_event_ttl_seconds=60,
     )
+    # Durable authority is covered with real Postgres in admitted HITL E2E tests.
+    manager._resolve_resume_context = AsyncMock(side_effect=lambda *, ctx, run_id: ctx)
+    return manager
 
 
 def _ctx() -> RunContext:
@@ -47,12 +50,12 @@ def _ctx() -> RunContext:
 
 
 def _patch_checkpointer(monkeypatch: pytest.MonkeyPatch, *, pending: Any) -> AsyncMock:
-    """Patch ``init_checkpointer`` to yield a stub with ``load_pending_request``
+    """Patch ``init_checkpointer`` to yield a stub with ``load_pending``
     returning ``pending``. Returns the AsyncMock for assertion.
     """
     cp = MagicMock()
-    load_mock = AsyncMock(return_value=pending)
-    cp.load_pending_request = load_mock
+    load_mock = AsyncMock(return_value=(pending, "r1") if pending is not None else None)
+    cp.load_pending = load_mock
 
     @asynccontextmanager
     async def _fake_cm() -> Any:

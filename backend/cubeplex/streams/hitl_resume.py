@@ -178,6 +178,9 @@ def classify_terminal_status(
 # the resume claim. The marker prevents stale recovery from handing the same
 # question to another resume attempt while durable cleanup is in flight.
 _BEGIN_FINALIZATION_IF_CLAIM_MATCHES_LUA = """
+if redis.call('GET', KEYS[2]) ~= ARGV[2] then
+  return 0
+end
 if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then
   return 0
 end
@@ -221,11 +224,14 @@ async def begin_resume_finalization(
     return int(result) == 1
 
 
-# KEYS[1] = meta_key
-# ARGV[1] = expected_claim_token, ARGV[2] = new_status
+# KEYS[1] = meta_key, KEYS[2] = optional active_key
+# ARGV[1] = expected_claim_token, ARGV[2] = new_status, ARGV[3] = optional run_id
 # Returns 1 if status was set, 0 if token mismatch (caller's claim was
 # superseded by some other flow — do not clobber).
 _FINALIZE_IF_CLAIM_MATCHES_LUA = """
+if ARGV[3] ~= '' and redis.call('GET', KEYS[2]) ~= ARGV[3] then
+  return 0
+end
 if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then
   return 0
 end
@@ -246,6 +252,7 @@ async def finalize_run_meta_if_claim_matches(
     run_id: str,
     claim_token: str,
     status: str,
+    conversation_id: str | None = None,
 ) -> bool:
     """Write the terminal status to the run meta only if the claim token
     still matches. Returns True if status was written; False if some other
@@ -256,10 +263,12 @@ async def finalize_run_meta_if_claim_matches(
     """
     result = await redis.eval(  # type: ignore[misc]
         _FINALIZE_IF_CLAIM_MATCHES_LUA,
-        1,
+        2,
         _run_meta_key(prefix, run_id),
+        _active_run_key(prefix, conversation_id) if conversation_id is not None else "",
         claim_token,
         status,
+        run_id if conversation_id is not None else "",
     )
     return int(result) == 1
 
