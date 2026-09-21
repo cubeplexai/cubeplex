@@ -52,6 +52,7 @@ from cubeplex.streams.run_events import (
 from cubeplex.utils.time import utc_isoformat
 
 if TYPE_CHECKING:
+    from cubeplex.services.conversation_execution import RunExecutionBinding
     from cubeplex.streams.steering_delivery import SteeringRunScope
 
 
@@ -73,6 +74,7 @@ class RunContext:
     # group chats, so non-creator participants don't accidentally drive a
     # row keyed under the wrong user_id.
     conversation_creator_user_id: str | None = None
+    execution: RunExecutionBinding | None = None
 
 
 def _registration_was_replaced(
@@ -1138,6 +1140,7 @@ class RunManager:
         cancel_pending_hitl: bool = False,
         llm_snapshot: Any | None = None,
         input_metadata: dict[str, Any] | None = None,
+        admission_id: str | None = None,
     ) -> str:
         """Create and start a new background run.
 
@@ -1146,6 +1149,57 @@ class RunManager:
         completion hook can find the row by ``run_id`` even if ``_execute_run``
         finishes faster than the poller's post-dispatch UPDATE.
         """
+        if admission_id is not None:
+            from cubeplex.db.engine import async_session_maker
+            from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+            from cubeplex.services.conversation_execution import (
+                ConversationExecutionService,
+                ExecutionConflictError,
+                RunExecutionBinding,
+                UserMessageIntent,
+            )
+
+            if run_id is None or ctx.conversation_id != conversation_id:
+                raise ExecutionConflictError("admitted run requires its original run and context")
+            async with async_session_maker() as admission_session:
+                if not isinstance(llm_snapshot, LLMSnapshot):
+                    llm_snapshot = await load_llm_snapshot(
+                        admission_session, ctx.org_id, self._app.state.encryption_backend
+                    )
+                admitted = await ConversationExecutionService(
+                    admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                ).resolve_user_run(
+                    admission_id=admission_id,
+                    conversation_id=conversation_id,
+                    actor_user_id=ctx.user_id,
+                    run_id=run_id,
+                    intent=UserMessageIntent(
+                        content=content,
+                        attachment_ids=tuple(attachments or []),
+                        model_key=model_key,
+                        reasoning=reasoning or ReasoningControl(),
+                    ),
+                    snapshot=llm_snapshot,
+                )
+                await admission_session.commit()
+            if (
+                admitted.admission.run_start_token is not None
+                or admitted.admission.run_finished_at is not None
+            ):
+                return run_id
+            ctx = replace(
+                ctx,
+                execution=RunExecutionBinding(
+                    admission_id=admission_id,
+                    attempt_id=str(uuid7()),
+                    execution_generation=admitted.admission.execution_generation,
+                    execution=admitted.execution,
+                ),
+            )
+            model_key = admitted.execution.model_key
+            reasoning = admitted.execution.reasoning
+        elif ctx.execution is not None:
+            raise ValueError("execution binding must be resolved from a durable admission")
         if run_id is None:
             run_id = str(uuid7())
         started_at = utc_isoformat(datetime.now(UTC))
@@ -1229,6 +1283,8 @@ class RunManager:
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                 )
+                if ctx.execution is not None and existing and existing.run_id == run_id:
+                    return run_id
                 if existing and existing.status in ("running", "paused_hitl"):
                     raise RuntimeError(f"Conversation {conversation_id} already has an active run")
                 raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
@@ -1237,6 +1293,38 @@ class RunManager:
         # buffer steers before any later await can yield to a control handler.
         self._preparing_runs.add(run_id)
         self._set_preparing_claim(run_id, None)
+
+        if ctx.execution is not None:
+            try:
+                async with async_session_maker() as admission_session:
+                    claimed = await ConversationExecutionService(
+                        admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                    ).claim_run_start(
+                        admission_id=ctx.execution.admission_id,
+                        attempt_id=ctx.execution.attempt_id,
+                        now=datetime.now(UTC),
+                    )
+                    await admission_session.commit()
+                if not claimed:
+                    await clear_active_run(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                    )
+                    self._preparing_runs.discard(run_id)
+                    self._preparing_claim_tokens.pop(run_id, None)
+                    return run_id
+            except BaseException:
+                self._preparing_runs.discard(run_id)
+                self._preparing_claim_tokens.pop(run_id, None)
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+                raise
 
         # Clear the per-conversation last-error pointer so subsequent reloads
         # after a successful new run don't keep showing the previous failure.
@@ -2410,7 +2498,9 @@ class RunManager:
                             session=agent.session,
                             request=PromptExecutionRequest(
                                 run_id=run_id,
-                                attempt_id=str(uuid7()),
+                                attempt_id=ctx.execution.attempt_id
+                                if ctx.execution is not None
+                                else str(uuid7()),
                                 message=_user_msg,
                             ),
                             on_agent_event=_on_event,
@@ -3056,7 +3146,11 @@ class RunManager:
                 )
                 await llm_session.commit()
 
-        preset = resolve_model_preset(snap, model_key)
+        preset = (
+            ctx.execution.execution.model_preset()
+            if ctx.execution is not None
+            else resolve_model_preset(snap, model_key)
+        )
 
         async def _publish_failover_dict(rid: str, data_payload: dict[str, Any]) -> None:
             event = FailoverEvent(
@@ -3560,6 +3654,19 @@ class RunManager:
             return ref
 
         cubeloop_middleware: list[Any] = []
+        authority_middleware: list[Any] = []
+        if ctx.execution is not None:
+            from cubeplex.middleware.execution_authority import ExecutionAuthorityMiddleware
+
+            authority_middleware.append(
+                ExecutionAuthorityMiddleware(
+                    async_session_maker,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    binding=ctx.execution,
+                )
+            )
+            cubeloop_middleware.extend(authority_middleware)
 
         # Cap tool-result text before ToolExecutionEndEvent so a runaway
         # execute/fetch/MCP payload cannot blow the 1 MiB projection budget.
@@ -3861,7 +3968,11 @@ class RunManager:
                 shared_tools=_subagent_shared_tools(
                     _sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
                 ),
-                inherited_middleware=[*_cost_mw_for_inherit, tool_result_limit_mw],
+                inherited_middleware=[
+                    *authority_middleware,
+                    *_cost_mw_for_inherit,
+                    tool_result_limit_mw,
+                ],
                 excluded_tool_names={"subagent", "load_skill"},
                 event_mapper=map_subagent_event,
                 event_handler=forward_subagent_event,
@@ -4294,6 +4405,7 @@ class RunManager:
         # status returned by `_run_cubeloop_path`; on exception the default
         # "errored" applies, which keeps the existing teardown semantics.
         final_status: str = "errored"
+        admission_worker_owned = False
 
         # Declared here so the except block can read model/provider/context_window
         # even when the exception is raised inside _run_cubeloop_path (a separate
@@ -4301,6 +4413,25 @@ class RunManager:
         extra_ref_holder: dict[str, Any] = {}
 
         try:
+            if ctx.execution is not None:
+                from cubeplex.db.engine import async_session_maker
+                from cubeplex.services.conversation_execution import (
+                    ConversationExecutionService,
+                    ExecutionRevokedError,
+                )
+
+                async with async_session_maker() as admission_session:
+                    started = await ConversationExecutionService(
+                        admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                    ).record_run_started(
+                        admission_id=ctx.execution.admission_id,
+                        attempt_id=ctx.execution.attempt_id,
+                        now=datetime.now(UTC),
+                    )
+                    await admission_session.commit()
+                if not started:
+                    raise ExecutionRevokedError("worker does not own a fresh start")
+                admission_worker_owned = True
             # Open a long-lived session for the SkillCatalogService — used by
             # load_skill and LazySandbox (which pushes files to the sandbox on
             # first use). Same session is fine: skill reads are idempotent and
@@ -4381,7 +4512,11 @@ class RunManager:
                         )
                         await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
-                _ctx_preset = resolve_model_preset(ctx_snap, None)
+                _ctx_preset = (
+                    ctx.execution.execution.model_preset()
+                    if ctx.execution is not None
+                    else resolve_model_preset(ctx_snap, None)
+                )
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)
@@ -4715,6 +4850,25 @@ class RunManager:
             # orphaning the paused turn. The respond / cancel paths clear
             # the lock when they terminate.
             if final_status != "paused_hitl" and not registration_replaced:
+                if ctx.execution is not None and admission_worker_owned:
+                    from cubeplex.agents.checkpointer import shared_checkpointer
+                    from cubeplex.db.engine import async_session_maker
+                    from cubeplex.services.conversation_execution import (
+                        ConversationExecutionService,
+                    )
+
+                    async with shared_checkpointer() as receipt_cp:
+                        pending = await receipt_cp.load_pending(conversation_id)
+                    if pending is None or pending[1] != run_id:
+                        async with async_session_maker() as admission_session:
+                            await ConversationExecutionService(
+                                admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                            ).record_run_finished(
+                                admission_id=ctx.execution.admission_id,
+                                attempt_id=ctx.execution.attempt_id,
+                                now=datetime.now(UTC),
+                            )
+                            await admission_session.commit()
                 await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
