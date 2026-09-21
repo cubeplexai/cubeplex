@@ -5,13 +5,19 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
-from cubeplex.models import BackgroundTaskEvent, Conversation, ConversationExecutionAdmission
+from cubeplex.models import (
+    BackgroundTaskEvent,
+    Conversation,
+    ConversationExecutionAdmission,
+    Membership,
+    User,
+)
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
     ExecutionConflictError,
@@ -462,6 +468,69 @@ async def test_concurrent_retries_bind_one_run_and_one_model_snapshot(
     results = await asyncio.wait_for(asyncio.gather(admit("first"), admit("next")), timeout=10)
     assert results[0][:2] == results[1][:2]
     assert sorted(row[2] for row in results) == [False, True]
+
+
+async def test_source_conflict_across_actors_and_conversations_is_a_domain_error(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    first_actor = await actor_id(db_session, reservation_context)
+    other = User(email=f"source-race-{uuid4()}@example.invalid", hashed_password="not-a-login")
+    db_session.add(other)
+    await db_session.flush()
+    other_id = other.id
+    second = Conversation(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        creator_user_id=other_id,
+        title="source identity race",
+        is_group_chat=True,
+    )
+    db_session.add(second)
+    db_session.add(Membership(user_id=other_id, workspace_id=DEFAULT_WS_ID, role="member"))
+    await db_session.commit()
+    second_id = second.id
+    source_id = str(uuid4())
+    barrier = asyncio.Barrier(2)
+
+    async def admit(conversation_id: str, actor: str) -> str:
+        try:
+            async with session_factory() as session, session.begin():
+                await barrier.wait()
+                result = await service(session).admit_user_message(
+                    conversation_id=conversation_id,
+                    actor_user_id=actor,
+                    namespace="web",
+                    source_id=source_id,
+                    intent=UserMessageIntent(content="immutable source"),
+                    snapshot=snapshot(),
+                    now=NOW,
+                )
+                return result.admission.id
+        except ExecutionConflictError:
+            return "conflict"
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                admit(reservation_context.conversation_id, first_actor), admit(second_id, other_id)
+            ),
+            timeout=10,
+        )
+        assert results.count("conflict") == 1
+        assert len(set(results)) == 2
+    finally:
+        await db_session.rollback()
+        await db_session.execute(
+            delete(ConversationExecutionAdmission).where(
+                col(ConversationExecutionAdmission.conversation_id) == second_id
+            )
+        )
+        await db_session.execute(delete(Conversation).where(col(Conversation.id) == second_id))
+        await db_session.execute(delete(Membership).where(col(Membership.user_id) == other_id))
+        await db_session.execute(delete(User).where(col(User.id) == other_id))
+        await db_session.commit()
 
 
 @pytest.mark.parametrize("first_operation", ["admit", "stop"])

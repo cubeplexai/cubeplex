@@ -23,6 +23,7 @@ from cubeloop.hitl import CheckpointedChannel
 
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.services.conversation_execution import RunExecutionBinding
 from cubeplex.streams.run_manager import RunContext, RunManager
 
 pytestmark = pytest.mark.asyncio
@@ -53,6 +54,9 @@ async def _build(
     monkeypatch: pytest.MonkeyPatch,
     *,
     sandbox: Any | None,
+    execution: RunExecutionBinding | None = None,
+    redis: Any | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> tuple[MagicMock, list[Any], Any]:
     """Drive the factory with the minimum viable mock surface."""
     # The agent factory's actual implementation needs a real provider +
@@ -120,15 +124,21 @@ async def _build(
 
     rm = RunManager(
         app=_stub_app(),
-        redis=MagicMock(),
+        redis=redis if redis is not None else MagicMock(),
         key_prefix="test_t7",
         run_event_ttl_seconds=60,
     )
     cp = _stub_cp()
-    extra_ref_holder: dict[str, Any] = {"extra": None}
+    extra_ref_holder: dict[str, Any] = extra if extra is not None else {"extra": None}
 
     agent, all_tools, channel = await rm._build_agent_for_conversation(
-        ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id=_CONV_ID),
+        ctx=RunContext(
+            user_id="u1",
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id=_CONV_ID,
+            execution=execution,
+        ),
         conversation_id=_CONV_ID,
         run_id=_RUN_ID,
         cp=cp,
@@ -146,6 +156,57 @@ async def _build(
     assert extra_ref_holder["model_id"] == "claude-stub"
     assert callable(extra_ref_holder["mem_repo_factory"])
     return agent, all_tools, channel
+
+
+async def test_sandbox_teardown_heartbeat_cannot_refresh_a_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fakeredis.aioredis
+    from cubeloop.providers.base import ReasoningControl
+
+    from cubeplex.services.conversation_execution import ResolvedExecution
+    from cubeplex.streams.run_events import RunClaimLost, _run_meta_key, create_run
+
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    try:
+        await create_run(
+            redis,
+            prefix="test_t7",
+            run_id=_RUN_ID,
+            conversation_id=_CONV_ID,
+            status="running",
+            started_at="2026-09-21T00:00:00+00:00",
+            ttl_seconds=60,
+            claim_token="original",
+        )
+        extra: dict[str, Any] = {}
+        await _build(
+            monkeypatch,
+            sandbox=MagicMock(),
+            redis=redis,
+            extra=extra,
+            execution=RunExecutionBinding(
+                admission_id="admission",
+                attempt_id="original",
+                start_token="initial",
+                execution_generation=0,
+                execution=ResolvedExecution(
+                    model_key="default",
+                    primary="anthropic/claude-stub",
+                    reasoning=ReasoningControl(),
+                ),
+            ),
+        )
+        heartbeat = extra["sandbox_middleware"]._heartbeat
+        await heartbeat()
+        key = _run_meta_key("test_t7", _RUN_ID)
+        await redis.hset(key, "claim_token", "replacement")
+        before = await redis.hgetall(key)
+        with pytest.raises(RunClaimLost):
+            await heartbeat()
+        assert await redis.hgetall(key) == before
+    finally:
+        await redis.aclose()
 
 
 async def test_build_returns_tuple_shape(monkeypatch: pytest.MonkeyPatch) -> None:
