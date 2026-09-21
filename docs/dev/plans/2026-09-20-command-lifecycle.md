@@ -104,6 +104,8 @@
 - `services/conversation_execution.py`（新）、C1 的受理 repository：受理和关闭的唯一事务入口。
 - `api/routes/v1/conversations.py`、`api/schemas/conversations.py`、`repositories/conversation.py`：消息首次受理、带 generation 的主 Stop、软删除与停止原子提交。
 - `api/routes/v1/workspaces.py`、`models/workspace.py` 及 workspace teardown 共用服务：持久 deleting 标记、停止／清理门槛、生命周期记录的外键删除顺序；其他组织级删除入口复用同一门槛。
+- `api/routes/v1/auth.py`、`models/user.py` 及账号删除服务：固定待删 actor、持久删除资格与跨 scope 清理；保留账号行和恢复证明直到可安全物理删除。新业务入口拒绝 deleting actor，认证入口仍允许本人查询／重试删除。
+- `api/routes/v1/conversations.py` 的 install 快捷分支、技能安装 service 和 checkpointer append 边界：同一 admission 保存非 run 操作回执及稳定合成消息 ID，重试对账而不重复安装／写历史。
 - `repositories/attachment.py`、`services/attachments.py`：附件保护加入受理事务，孤儿清理不得凭旧扫描删除已受理附件。
 - `streams/run_manager.py`、`streams/run_events.py`、`streams/recovery.py`、`streams/hitl_resume.py`：run 关联持久 admission，准备／模型／工具／resume 边界检查，不靠 Redis TTL 恢复执行权。
 - `models/steering_message.py`、`repositories/steering_message.py`：用户输入绑定批次，旧未提交输入取消。
@@ -124,6 +126,8 @@
 
 需要新 run 的受理先在事务中预分配并绑定稳定 run_id，再调用已有接受显式 run_id 的 RunManager.start_run；禁止启动成功后才补关联。run 的持久启动／结束证明参与相同来源重试对账，不依赖 Redis 存活时间；已经启动／完成则只返回原 run，不以同一 ID 再执行。启动前崩溃与启动后响应丢失分开恢复，未能证明原 attempt 无副作用时保持待对账，不换 ID 重放。
 
+admission 区分 model_run 与 install 快捷操作，首次决定后不可改分支。快捷操作保存安装目标、已完成结果及稳定 user／assistant message ID；安装数据库变更与操作回执同事务，外部内容准备不在未保存回执时宣称完成。恢复先读回执和 checkpoint ID 证明，只追加缺失消息、重放原一轮 SSE 结果，不把无 run_id 当作可启动模型。已有副作用保留事实；执行前检查 Stop／删除／当前权限，活跃 slot 和 attempt fencing 同普通受理，不靠随机 fallback_run_id 重新取得执行权。
+
 自动来源的内容也要固定：首次领取 schedule occurrence／trigger event 时，在源记录持久保存已渲染 prompt 及影响执行的非凭据参数、当次目标策略和模型选择；尚未固定 conversation 时先保存在源记录，确定目标后再绑定 admission。后续 dispatch／busy／IM 重试只读同一快照，定义编辑影响新 occurrence／event，不重新渲染旧事件；当前停用／权限／目标可用性检查保留，不能以快照绕过撤销。内部源事件的内容身份同样不可变。
 
 源快照固定 actor：trigger 持久受理时在定义行锁内保存原 run_as_user_id，schedule 保留原 occurrence actor。定义编辑不改变旧事件身份；worker／IM handoff 重新校验原 actor 当前账户、成员资格和目标权限，不能读新定义替换执行人。
@@ -140,6 +144,8 @@ Stop 之前已经受理的来源保持旧 generation；之后的新用户请求�
 
 workspace 删除先持久标记 deleting，串行关闭受理／调度并登记所属会话 Stop；标记由恢复清理扫描消费。未完成真实停止及输入对账时返回 409 cleanup_pending，保留 scope／成员／provider 句柄和事件证据，重试可继续。确认完成后按 event → command 详情 → task（后代先于父）→ admission 的外键顺序删除，再执行既有 workspace 子表清理；不能仅扩展 bulk-delete 列表就丢弃活进程。仅 admission、没有 task 的 workspace 同样覆盖。所有受理路径遵循 workspace → conversation → sandbox → task 的外层锁序，已有 coordinator 不反向取 workspace 锁；组织级入口共用删除门槛。
 
+账号删除采用同一先撤权／清理、后硬删门槛，但以 actor 而非 workspace 定位：持久删除标记先阻止新用户／自动受理，固定所有 scope 的原发起身份，保留清理所需 user／membership／凭据／事件／checkpoint。本人拥有的会话按现有删除范围关闭；他人共享会话仅停止该 actor 的工作，不关闭整个 generation 或取消其他人的 run。未决返回 409 cleanup_pending，后台恢复扫描继续；仅本人查询／重试删除仍可认证，其他业务入口拒绝。全部对账后先按依赖删除该 actor 的 lifecycle 行，再执行既有账号清理；不能从原 auth 路径提前 bulk-delete TriggerEvent、ScheduledTaskRun、IM receipt 或 checkpoint。受理与删除资格检查串行，跨 scope 清理按稳定 ID 排序取得锁，不把普通 workspace service 提升为任意用户可调的全局接口。
+
 ### Tests / docs
 
 - 新 `backend/tests/e2e/test_conversation_execution_control.py`：无 active run、有 starting reservation、paused HITL、旧批次 cleanup 场景；停止与首次受理／checkpoint／新消息的双向 barrier。
@@ -153,6 +159,8 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 新 trigger 恢复 E2E：202 后、目标解析前停止 worker，再创建新 worker，断言同一事件最终启动且只有一个目标／受理。覆盖双 worker claim、lease 到期、目标提交后崩溃、start_run 响应丢失及 IM outbox 重试；过滤失败、限流拒绝、未完成入口校验和停用事件不得被扫描执行。
 - trigger 202 后编辑 actor，重试仍使用原身份；撤销原 actor 权限则失败，不借新 actor 继续。删除分别与 claim、目标绑定、run／IM handoff 回执丢失竞争，源证明保留、无重复或新执行，已交接历史不丢。
 - workspace 只有普通 admission、含运行任务、含已提交／未提交事件三类删除 E2E；清理失败／unknown 返回 cleanup_pending 且句柄仍在，worker 重启继续；清理完成后无 FK 错误，跨 workspace 不受影响。并发新受理不能越过 deleting 标记，删除事务失败可重试。
+- 账号删除覆盖 admission-only、本人会话活任务、在他人共享会话发起的任务／通知、待交接 trigger／IM、清理失败和 worker 重启；保留恢复证明且其他参与者不受影响，完成后无新 FK 阻塞。
+- install 快捷操作分别在安装事务提交后、checkpoint append 后丢失响应，再用同一 client_message_id 重试：只有一次安装／一组稳定消息，原 SSE 结果可重放，无模型 run；Stop／当前权限失效阻止尚未执行的操作。
 - 同 PR 更新站点 `guides/conversations/basics.md`、`sandboxes.md` 和 `guides/automation/scheduled-tasks.md` 的 Stop／删除／下一次独立触发语义。
 
 ## C3. 每条 notice 独立投递与确认
@@ -169,7 +177,7 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 
 `BackgroundTaskNotice {source: background_task, notice_id, task_id, task_kind, originating_run_id, execution_generation, reason, summary, result_ref}`。command 详情可选；权限主体来自持久发起身份，不从消息角色推断。每条 notice 单独映射初始输入或 InputEnvelope，不跨 notice 拼接一条可撤回输入。
 
-有 active run 则在安全输入边界接收；准备／收尾不能接收时保留 pending；无 active run 且没有持久 HITL 才走 C2 的旧工作受理校验和现有 active-slot claim。同一调度的多个就绪 notice 可进入同一 run；不保证一次模型调用，buffer 满时保留未投递项，不丢弃也不忙等。
+有 active run 且其 RunContext／持久 admission 的 actor 与源 task.started_by_user_id 相同，才在安全输入边界接收；其他 actor 的 run 或身份无法可靠对账时保持 pending，不能仅因 conversation／generation 相同就借用其凭据。准备／收尾不能接收时保留 pending；无 active run 且没有持久 HITL 才走 C2 的旧工作受理校验和现有 active-slot claim，并以源 actor 构建 RunContext。同一调度的多个同 actor 就绪 notice 可进入同一 run；不保证一次模型调用，buffer 满时保留未投递项，不丢弃也不忙等。
 
 只凭 InputCommitted(checkpoint) 或同 notice ID 的持久历史证明确认 delivered。初始消息不能因 start_run 返回成功就 ACK。提交证明已存在时不因后续模型失败再次投递；事件显示“已送达”而非“业务已完成”。
 
@@ -189,6 +197,7 @@ A/B 独立输入时停止 A 只撤回 A，B 不变。取消返回 closed、响�
 - A 初始提交／取消裁决双向 barrier：其他输入在未决期间不能提交；B 已提交后 Stop A 不结束共享 attempt，模型可继续处理 B。纯后台与用户＋后台混合轮次均不调度自动个人记忆 reflection，普通用户轮次仍正常。
 - 真实 checkpoint 历史含纯用户、后台、混合轮次及窗口边界的后台回复：后续普通用户 run 触发 consolidation 时，自动结果及其回复不进入提炼输入；个人／workspace memory 不受其影响，纯用户历史正常合并。全部被过滤时不调用模型；用并发 barrier 验证只扣除本次已扫描计数，后到 run 仍能触发后续合并；失败重试沿用相同过滤。
 - 旧 generation 的 completion／monitor line／调度重试不复活；多个投递 owner 不重复确认；权限失效 discarded，不以 system actor 兜底。
+- 两参与者共享会话：A 任务结果到达时 B 正在运行，B 的 Session／模型／工具不收到 A 的输入；B 结束后 A 结果以 A 身份运行且仅提交一次。期间撤销 A 权限则 discarded，禁止借 B 的凭据／个人上下文继续；同 actor 多 notice 合并 run 仍有效。
 - 更新 `test_steer_endpoint.py` 和历史投影用例：内部 queued／failed 不进入用户列表，真实用户撤回／恢复正常，旧 checkpoint 不被重写。
 - 现有站点 sandbox 页同步说明后台事件与用户 steering 分离。
 
@@ -337,5 +346,8 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 33 | C2：自动来源冻结 actor，当前权限重查且不替换身份 |
 | 34 | C2：workspace 删除持久关闭受理、清理后按 FK 顺序删除、失败可恢复 |
 | 35 | C2：run ID 启动前持久绑定，成功响应丢失后重试无第二次执行 |
+| 36 | C2：账号删除以原 actor 跨 scope 停止／对账，再清理外键，不影响其他参与者 |
+| 37 | C3：后台续办仅进入同 actor Session，否则等待原身份的新 run |
+| 38 | C2：install 快捷操作的持久回执、稳定消息 ID 和响应丢失恢复 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
