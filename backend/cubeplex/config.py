@@ -48,12 +48,15 @@ config = dynaconf.Dynaconf(
     load_dotenv=True,
 )
 
+MAX_COMMAND_TIMEOUT_SECONDS = 2_147_483_647
+
 
 def get_command_default_timeout_seconds() -> int:
     """Validate the deployment default without treating null or zero as unlimited."""
     value = config.get("sandbox.command_default_timeout_seconds")
-    if type(value) is not int or value <= 0:
+    if type(value) is not int or not 0 < value <= MAX_COMMAND_TIMEOUT_SECONDS:
         raise RuntimeError(
-            "CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS must be a positive integer"
+            "CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS must be a positive integer "
+            f"not exceeding {MAX_COMMAND_TIMEOUT_SECONDS}"
         )
     return value
