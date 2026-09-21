@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 from typing import Literal
 
 from sqlalchemy import select
@@ -25,6 +26,13 @@ from cubeplex.repositories.conversation import ConversationRepository
 from cubeplex.sandbox.base import ProcessSnapshot
 
 LogState = Literal["pending", "retrying", "complete", "unavailable"]
+USER_STOP_REASONS = frozenset(
+    {
+        TaskStopReason.user_stop,
+        TaskStopReason.conversation_stop,
+        TaskStopReason.conversation_deleted,
+    }
+)
 
 
 class TaskOwnerLostError(ValueError):
@@ -194,6 +202,8 @@ class BackgroundTaskLifecycle:
             or command.provider_ref is not None
         ):
             return False
+        if await self._ancestor_stop_reason(task, now) is not None:
+            return False
         if (
             sandbox.deleted_at is not None
             or sandbox.status != "running"
@@ -231,6 +241,29 @@ class BackgroundTaskLifecycle:
         await self.session.flush()
         return True
 
+    async def _ancestor_stop_reason(
+        self, task: BackgroundTask, now: datetime
+    ) -> TaskStopReason | None:
+        parent_id = task.parent_task_id
+        visited = {task.id}
+        while parent_id is not None:
+            if parent_id in visited:
+                raise ValueError("invalid cyclic task ancestry")
+            visited.add(parent_id)
+            parent = await self.tasks.get_locked(parent_id)
+            if parent is None or parent.conversation_id != task.conversation_id:
+                raise LookupError("parent task not found")
+            if parent.execution_generation != task.execution_generation:
+                return TaskStopReason.conversation_stop
+            if parent.notifications_cancelled_at is not None:
+                return TaskStopReason.user_stop
+            if parent.stop_requested_at is not None:
+                return TaskStopReason(parent.stop_reason or TaskStopReason.user_stop)
+            if parent.deadline_at is not None and parent.deadline_at <= now:
+                return TaskStopReason.deadline
+            parent_id = parent.parent_task_id
+        return None
+
     async def prepare_observation(
         self, *, task_id: str, owner_token: str, now: datetime
     ) -> tuple[BackgroundTask, SandboxCommand]:
@@ -247,6 +280,8 @@ class BackgroundTaskLifecycle:
             and task.deadline_at <= now
         ):
             reason = TaskStopReason.deadline
+        if reason is None:
+            reason = await self._ancestor_stop_reason(task, now)
         if reason is not None:
             await self.request_task_stop(task_id=task_id, reason=reason, now=now)
         return task, command
@@ -383,12 +418,12 @@ class BackgroundTaskLifecycle:
             if task.id not in selected:
                 continue
             task.stop_requested_at = task.stop_requested_at or now
-            if task.stop_reason is None or reason != TaskStopReason.deadline:
+            if task.stop_reason is None or reason in USER_STOP_REASONS:
                 task.stop_reason = reason.value
-            if reason != TaskStopReason.deadline:
+            if reason in USER_STOP_REASONS:
                 task.notifications_cancelled_at = task.notifications_cancelled_at or now
             task.revision += 1
-        if reason != TaskStopReason.deadline:
+        if reason in USER_STOP_REASONS:
             notices = (
                 await self.session.execute(
                     select(BackgroundTaskEvent)
@@ -442,10 +477,91 @@ class BackgroundTaskLifecycle:
         if command.log_state not in ("complete", "unavailable"):
             command.log_state = log_state
         if confirmed_log_cursor is not None:
+            if command.kind == "monitor" and command.log_cursor != confirmed_log_cursor:
+                await self._record_monitor_output(
+                    conversation, task, command, snapshot.new_output, confirmed_log_cursor, now
+                )
+            elif command.kind == "monitor" and not snapshot.new_output.strip():
+                command.flood_started_at = None
             command.log_cursor = confirmed_log_cursor
         task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
+
+    async def _record_monitor_output(
+        self,
+        conversation: Conversation,
+        task: BackgroundTask,
+        command: SandboxCommand,
+        output: str,
+        cursor: str,
+        now: datetime,
+    ) -> None:
+        if (
+            task.state != BackgroundTaskState.running
+            or task.backgrounded_at is None
+            or task.stop_requested_at is not None
+            or task.notifications_cancelled_at is not None
+            or not task.notify_on_complete
+            or not self._execution_open(conversation, task)
+        ):
+            return
+        lines = [line for line in output.splitlines() if line.strip()]
+        if not lines:
+            command.flood_started_at = None
+            return
+        # Preserve the monitor policy: one notice per 15s, eight total, three drops
+        # disable line notices; sustained flooding for 30s requests process Stop.
+        flood = False
+        if not command.line_wakes_disabled:
+            last = await self.session.scalar(
+                select(col(BackgroundTaskEvent.created_at))
+                .where(
+                    col(BackgroundTaskEvent.org_id) == self.org_id,
+                    col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+                    col(BackgroundTaskEvent.task_id) == task.id,
+                    col(BackgroundTaskEvent.reason) == "line",
+                )
+                .order_by(col(BackgroundTaskEvent.created_at).desc())
+                .limit(1)
+            )
+            if last is None or (now - last).total_seconds() >= 15:
+                self.session.add(
+                    BackgroundTaskEvent(
+                        org_id=self.org_id,
+                        workspace_id=self.workspace_id,
+                        task_id=task.id,
+                        conversation_id=task.conversation_id,
+                        execution_generation=task.execution_generation,
+                        reason="line",
+                        dedupe_key="line:" + sha256(cursor.encode()).hexdigest(),
+                        summary=lines[-1][-4000:],
+                        result_ref=command.log_path or None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                command.wake_count += 1
+                command.wake_drops = len(lines) - 1
+                command.flood_started_at = now if command.wake_drops else None
+                if command.wake_count >= 8 or command.wake_drops >= 3:
+                    command.line_wakes_disabled = True
+            else:
+                command.wake_drops += len(lines)
+                command.flood_started_at = command.flood_started_at or now
+                flood = (now - command.flood_started_at).total_seconds() >= 30
+                if command.wake_drops >= 3:
+                    command.line_wakes_disabled = True
+        elif len(lines) >= 3:
+            command.wake_drops += len(lines)
+            command.flood_started_at = command.flood_started_at or now
+            flood = (now - command.flood_started_at).total_seconds() >= 30
+        else:
+            command.flood_started_at = None
+        if flood:
+            await self.request_task_stop(
+                task_id=task.id, reason=TaskStopReason.output_flood, now=now
+            )
 
     async def record_observation_failure(
         self, *, task_id: str, owner_token: str, now: datetime, message: str

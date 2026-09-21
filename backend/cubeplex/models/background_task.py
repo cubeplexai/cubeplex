@@ -32,6 +32,7 @@ class TaskStopReason(StrEnum):
     conversation_stop = "conversation_stop"
     conversation_deleted = "conversation_deleted"
     deadline = "deadline"
+    output_flood = "output_flood"
 
 
 class BackgroundTaskEventState(StrEnum):
