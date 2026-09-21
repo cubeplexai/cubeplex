@@ -20,14 +20,14 @@ def test_unknown_execution_is_not_terminal() -> None:
     assert "unknown" not in TERMINAL_TASK_STATES
 
 
-@pytest.mark.parametrize("seconds", [1, 3600, 7200])
+@pytest.mark.parametrize("seconds", [1, 3600, 7200, 2**31 - 1])
 def test_explicit_timeout_overrides_default(seconds: int) -> None:
     assert command_deadline(now=NOW, details=replace(DETAILS, timeout_seconds=seconds)) == (
         NOW + timedelta(seconds=seconds)
     )
 
 
-@pytest.mark.parametrize("seconds", [0, -1, 10**100, True])
+@pytest.mark.parametrize("seconds", [0, -1, 2**31, 10**100, True])
 def test_unusable_explicit_timeout_is_rejected(seconds: int) -> None:
     with pytest.raises(ValueError, match="timeout_seconds"):
         command_deadline(now=NOW, details=replace(DETAILS, timeout_seconds=seconds))
@@ -43,6 +43,30 @@ def test_monitor_retains_its_own_absolute_deadline() -> None:
 def test_naive_time_is_rejected() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         command_deadline(now=NOW.replace(tzinfo=None), details=DETAILS)
+
+
+@pytest.mark.parametrize("seconds", [2**31, 10**100])
+def test_unrepresentable_deployment_default_is_rejected_before_admission(
+    monkeypatch: pytest.MonkeyPatch, seconds: int
+) -> None:
+    import cubeplex.config as config_module
+
+    monkeypatch.setattr(config_module.config, "get", lambda key: seconds)
+    with pytest.raises(RuntimeError, match="COMMAND_DEFAULT_TIMEOUT_SECONDS"):
+        config_module.get_command_default_timeout_seconds()
+
+
+def test_default_and_explicit_timeout_share_the_upper_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cubeplex.config as config_module
+
+    monkeypatch.setattr(config_module.config, "get", lambda key: 2**31 - 1)
+    assert command_deadline(now=NOW, details=DETAILS) == NOW + timedelta(seconds=2**31 - 1)
+    with pytest.raises(ValueError, match="representable"):
+        command_deadline(
+            now=datetime.max.replace(tzinfo=UTC), details=replace(DETAILS, timeout_seconds=1)
+        )
 
 
 def test_base_default_and_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:

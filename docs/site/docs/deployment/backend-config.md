@@ -224,13 +224,14 @@ sandbox:
 | `sandbox.use_server_proxy` | `true` | Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
 | `sandbox.secure_access` | `false` | Enables Kubernetes ingress-gateway signed URLs when `true`. **Must be `false`** on docker-runtime OpenSandbox. |
 | `sandbox.ttl` | `1800` | Idle sandbox is reaped after 30 min. |
-| `sandbox.command_default_timeout_seconds` | `3600` | Positive integer seconds. The backend rejects zero, negative values, non-integers, booleans, and null at startup. Environment override: `CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`. |
+| `sandbox.command_default_timeout_seconds` | `3600` | Positive integer seconds, at most `2147483647` (the technical 32-bit seconds limit). The backend rejects out-of-range values, non-integers, booleans, and null at startup. Environment override: `CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`. |
 | `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | Agent commands and uploaded files run as this user. Match the sandbox image. Set `run_uid` to `null` to keep the previous root default. Browser stack still starts as root. |
 | `sandbox.resource.cpu` / `memory` | `2` / `4Gi` | Per-sandbox limits. |
 
 The background-task reservation layer uses `command_default_timeout_seconds` when
 an execute task omits `timeout_seconds`. An explicit positive timeout takes
-precedence and may exceed one hour. The selected absolute deadline is stored once;
+precedence and may exceed one hour, up to the same technical limit. Oversized values
+are rejected, not truncated or treated as unlimited. The absolute deadline is stored once;
 configuration changes do not extend existing reservations. Disabling completion
 notifications does not remove the deadline. Monitor deadlines, persistent monitors,
 HTTP timeouts, sandbox TTL, and the foreground waiting budget are separate settings.

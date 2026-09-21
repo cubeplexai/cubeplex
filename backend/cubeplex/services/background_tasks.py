@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from cubeplex.config import get_command_default_timeout_seconds
+from cubeplex.config import MAX_COMMAND_TIMEOUT_SECONDS, get_command_default_timeout_seconds
 from cubeplex.models.background_task import INFLIGHT_TASK_STATES, BackgroundTask
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.membership import Membership
@@ -79,8 +79,11 @@ def command_deadline(*, now: datetime, details: CommandExecutionDetails) -> date
     seconds = details.timeout_seconds
     if seconds is None:
         seconds = get_command_default_timeout_seconds()
-    if type(seconds) is not int or seconds <= 0:
-        raise ValueError("timeout_seconds must be a positive integer")
+    if type(seconds) is not int or not 0 < seconds <= MAX_COMMAND_TIMEOUT_SECONDS:
+        raise ValueError(
+            "timeout_seconds must be a positive integer "
+            f"not exceeding {MAX_COMMAND_TIMEOUT_SECONDS}"
+        )
     try:
         return now + timedelta(seconds=seconds)
     except OverflowError as exc:
