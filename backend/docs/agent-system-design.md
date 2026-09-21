@@ -25,6 +25,10 @@ from the admission's frozen model selection and reasoning, using the current pro
 configuration rather than resolving the default again. A recorded start request or
 finished run returns the original run ID without executing it again, even after Redis
 history expires. An uncertain start is not permission to replay.
+Revoked inputs likewise return their original run binding without touching a newer
+pending question. Admitted starts never implicitly cancel a pending HITL request;
+answering or stopping that request belongs to its explicit control path, even when
+the Redis pause keys have expired.
 
 `run_start_requested_at` records the persisted start claim; `run_started_at` records
 the claimed worker entering execution. The worker rechecks generation closure before
