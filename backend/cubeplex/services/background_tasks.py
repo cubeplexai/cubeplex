@@ -19,11 +19,11 @@ from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandKind
 from cubeplex.models.topic import Topic
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.background_task import (
-    BackgroundTaskRepository,
     ConversationExecutionAdmissionRepository,
 )
 from cubeplex.repositories.conversation import ConversationRepository
 from cubeplex.repositories.sandbox_command import MAX_INFLIGHT_COMMANDS, SandboxCommandCapError
+from cubeplex.services.background_task_lifecycle import BackgroundTaskLifecycle
 
 
 class TaskExecutionRevokedError(ValueError):
@@ -87,12 +87,9 @@ def command_deadline(*, now: datetime, details: CommandExecutionDetails) -> date
         raise ValueError("timeout_seconds exceeds the representable deadline") from exc
 
 
-class BackgroundTaskService:
+class BackgroundTaskService(BackgroundTaskLifecycle):
     def __init__(self, session: AsyncSession, *, org_id: str, workspace_id: str) -> None:
-        self.session = session
-        self.org_id = org_id
-        self.workspace_id = workspace_id
-        self.tasks = BackgroundTaskRepository(session, org_id=org_id, workspace_id=workspace_id)
+        super().__init__(session, org_id=org_id, workspace_id=workspace_id)
         self.admissions = ConversationExecutionAdmissionRepository(
             session, org_id=org_id, workspace_id=workspace_id
         )
