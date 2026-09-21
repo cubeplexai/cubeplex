@@ -15,6 +15,7 @@ class Attachment(CubeplexBase, OrgScopedMixin, table=True):
     Status state machine:
       pending  - uploaded but not yet referenced by any sent message
       attached - referenced by at least one sent message (immutable from this point)
+      deleting - deletion reserved durably; never attachable, retry until objects are removed
     Deletion is physical (no soft-delete state).
     """
 
