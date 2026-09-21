@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from cubeloop.hitl.types import AskRequest, HitlRequest, Question
 from cubeloop.providers.base import AssistantMessage, Message, Model
 from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
 from fastapi import FastAPI
@@ -21,8 +22,19 @@ from cubeplex.agents.checkpointer import close_shared_checkpointer, shared_check
 from cubeplex.config import config
 from cubeplex.db.engine import engine
 from cubeplex.models import ConversationExecutionAdmission
-from cubeplex.services.conversation_execution import ExecutionConflictError, UserMessageIntent
-from cubeplex.streams.run_events import create_run, get_run_meta
+from cubeplex.services.conversation_execution import (
+    ExecutionConflictError,
+    RunExecutionBinding,
+    UserMessageIntent,
+)
+from cubeplex.streams.run_events import (
+    _active_run_key,
+    _run_meta_key,
+    create_run,
+    get_active_run,
+    get_run_meta,
+    mark_run_stale,
+)
 from cubeplex.streams.run_manager import RunContext, RunManager
 from tests.e2e import test_background_task_reservation as reservation_fixtures
 from tests.e2e.conftest import _SYNC_ENCRYPTION_BACKEND, DEFAULT_ORG_ID, DEFAULT_WS_ID
@@ -30,6 +42,27 @@ from tests.e2e.test_background_task_reservation import ReservationContext
 from tests.e2e.test_conversation_execution_control import actor_id, service, snapshot
 
 reservation_context = reservation_fixtures.reservation_context
+
+
+async def cleanup_run_rows(session: AsyncSession, conversation_id: str) -> None:
+    await session.rollback()
+    await session.execute(
+        text("DELETE FROM cubepi_threads WHERE thread_id = :thread"),
+        {"thread": conversation_id},
+    )
+    await session.execute(
+        text(
+            "DELETE FROM billing_llm_events WHERE billing_event_id IN "
+            "(SELECT id FROM billing_events WHERE conversation_id = :conversation)"
+        ),
+        {"conversation": conversation_id},
+    )
+    for table in ("billing_events", "embedding_jobs", "conversation_chunks"):
+        await session.execute(
+            text(f"DELETE FROM {table} WHERE conversation_id = :conversation"),
+            {"conversation": conversation_id},
+        )
+    await session.commit()
 
 
 @pytest_asyncio.fixture
@@ -100,7 +133,20 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
     assert admitted.admission.run_start_token is None
 
 
-@pytest.mark.parametrize("scenario", ["completed", "stop", "stale_slot", "concurrent", "paused"])
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "completed",
+        "stop",
+        "stale_slot",
+        "concurrent",
+        "paused",
+        "replaced_claim",
+        "replaced_slot",
+        "lost_slot",
+        "foreign_pending",
+    ],
+)
 async def test_model_runs_once_with_original_selection_after_default_changes_and_redis_expires(
     db_session: AsyncSession,
     reservation_context: ReservationContext,
@@ -109,6 +155,8 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
     scenario: str,
 ) -> None:
     actor = await actor_id(db_session, reservation_context)
+    lost_ownership = scenario in ("replaced_claim", "replaced_slot", "lost_slot")
+    replacement_run_id = str(uuid4())
     initial = snapshot()
     provider_config = initial.providers["provider"].model_copy(deep=True)
     for model in provider_config.models:
@@ -136,6 +184,19 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
     provider.subscribe_request(capture_request)
 
     async def model_response(messages: list[Message], model: Model) -> AssistantMessage:
+        if scenario == "foreign_pending":
+            async with shared_checkpointer() as cp:
+                await cp.save_pending_request(
+                    reservation_context.conversation_id,
+                    HitlRequest(
+                        question_id="replacement-question",
+                        thread_id=reservation_context.conversation_id,
+                        payload=AskRequest(questions=[Question(key="new", prompt="Keep this?")]),
+                        created_at=datetime.now(UTC).timestamp(),
+                        timeout_seconds=None,
+                    ),
+                    run_id=replacement_run_id,
+                )
         if scenario == "paused":
             return faux_assistant_message(
                 faux_tool_call(
@@ -143,14 +204,42 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
                 ),
                 stop_reason="tool_use",
             )
-        if scenario == "stop":
-            await service(db_session).close_generation(
-                conversation_id=reservation_context.conversation_id,
-                actor_user_id=actor,
-                execution_generation=0,
-                now=datetime.now(UTC),
-            )
-            await db_session.commit()
+        if scenario == "stop" or lost_ownership:
+            if scenario == "stop":
+                await service(db_session).close_generation(
+                    conversation_id=reservation_context.conversation_id,
+                    actor_user_id=actor,
+                    execution_generation=0,
+                    now=datetime.now(UTC),
+                )
+                await db_session.commit()
+            elif scenario == "replaced_claim":
+                await run_manager._redis.hset(
+                    _run_meta_key(run_manager._key_prefix, admitted.admission.run_id),
+                    "claim_token",
+                    "replacement-worker",
+                )
+            elif scenario == "lost_slot":
+                await run_manager._redis.delete(
+                    _active_run_key(run_manager._key_prefix, reservation_context.conversation_id)
+                )
+            else:
+                assert await mark_run_stale(
+                    run_manager._redis,
+                    prefix=run_manager._key_prefix,
+                    conversation_id=reservation_context.conversation_id,
+                    run_id=admitted.admission.run_id,
+                )
+                assert await create_run(
+                    run_manager._redis,
+                    prefix=run_manager._key_prefix,
+                    conversation_id=reservation_context.conversation_id,
+                    run_id=replacement_run_id,
+                    claim_token="replacement-worker",
+                    status="running",
+                    started_at=datetime.now(UTC).isoformat(),
+                    ttl_seconds=60,
+                )
             return faux_assistant_message(
                 faux_tool_call(
                     "write_todos",
@@ -199,17 +288,43 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         await run_manager.drain(timeout_seconds=30)
         meta = await get_run_meta(run_manager._redis, prefix=run_manager._key_prefix, run_id=run_id)
         assert meta is not None
-        expected_status = {"stop": "cancelled", "paused": "paused_hitl"}.get(scenario, "completed")
+        expected_status = {
+            "stop": "cancelled",
+            "paused": "paused_hitl",
+            "replaced_claim": "running",
+            "replaced_slot": "stale",
+            "lost_slot": "running",
+        }.get(scenario, "completed")
         assert meta.status == expected_status, meta
         assert provider.call_count == 1
-        if scenario == "stop":
+        if scenario == "foreign_pending":
+            async with shared_checkpointer() as cp:
+                pending = await cp.load_pending(reservation_context.conversation_id)
+            assert pending is not None and pending[1] == replacement_run_id
+            assert pending[0].question_id == "replacement-question"
+        if scenario == "stop" or lost_ownership:
             async with shared_checkpointer() as cp:
                 checkpoint = await cp.load(reservation_context.conversation_id)
             assert checkpoint is not None and not checkpoint.extra.get("todos")
+        if lost_ownership:
+            active = await get_active_run(
+                run_manager._redis,
+                prefix=run_manager._key_prefix,
+                conversation_id=reservation_context.conversation_id,
+            )
+            if scenario == "lost_slot":
+                assert active is None
+            else:
+                assert active is not None and active.status == "running"
+                assert active.run_id == (
+                    replacement_run_id if scenario == "replaced_slot" else run_id
+                )
         await db_session.refresh(admitted.admission)
         assert admitted.admission.run_start_requested_at is not None
         assert admitted.admission.run_started_at is not None
-        assert (admitted.admission.run_finished_at is None) == (scenario == "paused")
+        assert (admitted.admission.run_finished_at is None) == (
+            scenario == "paused" or lost_ownership
+        )
         assert models == ["first"]
         await db_session.rollback()
         keys = [
@@ -221,24 +336,90 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         assert not run_manager._tasks and provider.call_count == 1
         receipt = await db_session.get(ConversationExecutionAdmission, kwargs["admission_id"])
         assert receipt is not None
-        assert (receipt.run_finished_at is None) == (scenario == "paused")
+        assert (receipt.run_finished_at is None) == (scenario == "paused" or lost_ownership)
     finally:
         await run_manager.cancel_all()
-        await db_session.rollback()
-        await db_session.execute(
-            text("DELETE FROM cubepi_threads WHERE thread_id = :thread"),
-            {"thread": reservation_context.conversation_id},
-        )
-        await db_session.execute(
-            text(
-                "DELETE FROM billing_llm_events WHERE billing_event_id IN "
-                "(SELECT id FROM billing_events WHERE conversation_id = :conversation)"
-            ),
-            {"conversation": reservation_context.conversation_id},
-        )
-        for table in ("billing_events", "embedding_jobs", "conversation_chunks"):
-            await db_session.execute(
-                text(f"DELETE FROM {table} WHERE conversation_id = :conversation"),
-                {"conversation": reservation_context.conversation_id},
+        await cleanup_run_rows(db_session, reservation_context.conversation_id)
+
+
+async def test_stop_before_worker_entry_finishes_cleanup_without_claiming_execution(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    admitted = await service(db_session).admit_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="cancel before entry"),
+        snapshot=snapshot(),
+        now=datetime.now(UTC),
+    )
+    assert await service(db_session).claim_run_start(
+        admission_id=admitted.admission.id, attempt_id="queued-worker", now=datetime.now(UTC)
+    )
+    await db_session.commit()
+    run_id = admitted.admission.run_id
+    assert run_id is not None
+    assert await create_run(
+        run_manager._redis,
+        prefix=run_manager._key_prefix,
+        run_id=run_id,
+        conversation_id=reservation_context.conversation_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+        claim_token="queued-worker",
+    )
+    ctx = RunContext(
+        user_id=actor,
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=reservation_context.conversation_id,
+        execution=RunExecutionBinding(
+            admission_id=admitted.admission.id,
+            attempt_id="queued-worker",
+            execution_generation=0,
+            execution=admitted.execution,
+        ),
+    )
+    closed = await service(db_session).close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=0,
+        now=datetime.now(UTC),
+    )
+    await db_session.commit()
+    assert closed.cleanup_pending
+    provider = FauxProvider(provider_id="provider")
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", lambda *args, **kwargs: provider)
+    try:
+        worker = asyncio.create_task(
+            run_manager._execute_run(
+                run_id=run_id,
+                conversation_id=reservation_context.conversation_id,
+                content="cancel before entry",
+                attachments=[],
+                ctx=ctx,
+                llm_snapshot=snapshot(),
             )
-        await db_session.commit()
+        )
+        await asyncio.gather(worker, return_exceptions=True)
+        meta = await get_run_meta(run_manager._redis, prefix=run_manager._key_prefix, run_id=run_id)
+        assert meta is not None and meta.status == "cancelled", meta
+        assert provider.call_count == 0
+        await db_session.refresh(admitted.admission)
+        assert admitted.admission.run_started_at is None
+        assert admitted.admission.run_finished_at is not None
+        closed = await service(db_session).close_generation(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            execution_generation=0,
+            now=datetime.now(UTC),
+        )
+        assert not closed.cleanup_pending
+    finally:
+        await cleanup_run_rows(db_session, reservation_context.conversation_id)

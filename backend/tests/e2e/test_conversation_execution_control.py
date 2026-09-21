@@ -362,7 +362,16 @@ async def test_worker_receipts_are_owned_and_do_not_reexecute_a_started_attempt(
         admission_id=admission_id, attempt_id="owner", now=NOW + timedelta(seconds=3)
     )
     assert not await controller.record_run_finished(
-        admission_id=admission_id, attempt_id="other", now=NOW + timedelta(seconds=4)
+        admission_id=admission_id,
+        attempt_id="other",
+        worker_started=True,
+        now=NOW + timedelta(seconds=4),
+    )
+    assert not await controller.record_run_finished(
+        admission_id=admission_id,
+        attempt_id="owner",
+        worker_started=False,
+        now=NOW + timedelta(seconds=4),
     )
     await db_session.refresh(accepted.admission)
     assert accepted.admission.run_start_requested_at == NOW
@@ -376,10 +385,13 @@ async def test_worker_receipts_are_owned_and_do_not_reexecute_a_started_attempt(
     )
     finished_at = NOW + timedelta(seconds=6)
     assert await controller.record_run_finished(
-        admission_id=admission_id, attempt_id="owner", now=finished_at
+        admission_id=admission_id, attempt_id="owner", worker_started=True, now=finished_at
     )
     assert not await controller.record_run_finished(
-        admission_id=admission_id, attempt_id="owner", now=NOW + timedelta(seconds=7)
+        admission_id=admission_id,
+        attempt_id="owner",
+        worker_started=True,
+        now=NOW + timedelta(seconds=7),
     )
     await db_session.commit()
     await db_session.refresh(accepted.admission)
