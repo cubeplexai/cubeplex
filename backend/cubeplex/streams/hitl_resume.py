@@ -215,7 +215,7 @@ async def begin_resume_finalization(
         _active_run_key(prefix, conversation_id),
         claim_token,
         run_id,
-        str(ttl_seconds),
+        str(max(ttl_seconds, lease_seconds)),
         str(lease_seconds),
     )
     return int(result) == 1

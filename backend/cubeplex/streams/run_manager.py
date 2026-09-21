@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from cubeloop.providers.base import ReasoningControl
 from cubeloop.providers.fallback import FallbackBoundModel
@@ -35,6 +35,7 @@ from cubeplex.streams.execution_adapter import (
     ensure_event_fits,
 )
 from cubeplex.streams.run_events import (
+    RunClaimLost,
     RunMeta,
     append_run_event,
     clear_active_run,
@@ -45,6 +46,7 @@ from cubeplex.streams.run_events import (
     get_run_meta,
     is_stale_meta,
     mark_run_stale,
+    run_claim_matches,
     set_conversation_last_error,
     touch_run_heartbeat,
     update_run_meta,
@@ -54,6 +56,14 @@ from cubeplex.utils.time import utc_isoformat
 if TYPE_CHECKING:
     from cubeplex.services.conversation_execution import RunExecutionBinding
     from cubeplex.streams.steering_delivery import SteeringRunScope
+
+
+class _ClaimTokenKwargs(TypedDict, total=False):
+    claim_token: str
+
+
+class _RunMetaClaimKwargs(_ClaimTokenKwargs, total=False):
+    conversation_id: str
 
 
 @dataclass(slots=True)
@@ -75,6 +85,7 @@ class RunContext:
     # row keyed under the wrong user_id.
     conversation_creator_user_id: str | None = None
     execution: RunExecutionBinding | None = None
+    execution_ownership_lost: bool = False
 
 
 def _registration_was_replaced(
@@ -153,6 +164,7 @@ class _InFlightToolHeartbeat:
         conversation_id: str,
         ttl_seconds: int,
         interval_seconds: float = _TOOL_HEARTBEAT_INTERVAL_SECONDS,
+        claim_token: str | None = None,
     ) -> None:
         self._redis = redis
         self._prefix = prefix
@@ -160,6 +172,7 @@ class _InFlightToolHeartbeat:
         self._conversation_id = conversation_id
         self._ttl_seconds = ttl_seconds
         self._interval_seconds = interval_seconds
+        self._claim_token = claim_token
         self._in_flight = 0
         self._task: asyncio.Task[None] | None = None
 
@@ -191,6 +204,7 @@ class _InFlightToolHeartbeat:
                         run_id=self._run_id,
                         conversation_id=self._conversation_id,
                         ttl_seconds=self._ttl_seconds,
+                        claim_token=self._claim_token,
                     )
                 except Exception:
                     logger.exception("run heartbeat failed for {}", self._run_id)
@@ -1247,6 +1261,7 @@ class RunManager:
                 user_message=content,
                 ttl_seconds=self._run_event_ttl_seconds,
                 trigger=ctx.trigger,
+                claim_token=ctx.execution.attempt_id if ctx.execution is not None else None,
             )
 
         created_run = await _try_create_run()
@@ -1292,7 +1307,10 @@ class RunManager:
         # Admission is externally visible as soon as create_run succeeds, so
         # buffer steers before any later await can yield to a control handler.
         self._preparing_runs.add(run_id)
-        self._set_preparing_claim(run_id, None)
+        initial_claim = ctx.execution.attempt_id if ctx.execution is not None else None
+        self._set_preparing_claim(run_id, initial_claim)
+        if initial_claim is not None:
+            self._resume_claim_tokens[run_id] = initial_claim
 
         if ctx.execution is not None:
             try:
@@ -1311,18 +1329,22 @@ class RunManager:
                         prefix=self._key_prefix,
                         conversation_id=conversation_id,
                         run_id=run_id,
+                        claim_token=initial_claim,
                     )
                     self._preparing_runs.discard(run_id)
                     self._preparing_claim_tokens.pop(run_id, None)
+                    self._resume_claim_tokens.pop(run_id, None)
                     return run_id
             except BaseException:
                 self._preparing_runs.discard(run_id)
                 self._preparing_claim_tokens.pop(run_id, None)
+                self._resume_claim_tokens.pop(run_id, None)
                 await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
+                    claim_token=initial_claim,
                 )
                 raise
 
@@ -1333,6 +1355,7 @@ class RunManager:
                 self._redis,
                 prefix=self._key_prefix,
                 conversation_id=conversation_id,
+                **({"run_id": run_id, "claim_token": initial_claim} if initial_claim else {}),
             )
         task = asyncio.create_task(
             self._execute_run(
@@ -2154,7 +2177,41 @@ class RunManager:
         except asyncio.CancelledError:
             return
 
-    async def _record_user_cancel(self, *, run_id: str, conversation_id: str) -> None:
+    async def _require_execution_slot(self, ctx: RunContext, run_id: str) -> None:
+        if ctx.execution is None:
+            return
+        if ctx.execution_ownership_lost or not await run_claim_matches(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=ctx.conversation_id,
+            run_id=run_id,
+            claim_token=ctx.execution.attempt_id,
+        ):
+            ctx.execution_ownership_lost = True
+            raise RunClaimLost("execution slot belongs to another attempt")
+
+    async def _begin_execution_finalization(self, ctx: RunContext, run_id: str) -> None:
+        if ctx.execution is None:
+            return
+        from cubeplex.config import config
+        from cubeplex.streams.hitl_resume import begin_resume_finalization
+
+        await self._require_execution_slot(ctx, run_id)
+        if not await begin_resume_finalization(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=ctx.conversation_id,
+            run_id=run_id,
+            claim_token=ctx.execution.attempt_id,
+            ttl_seconds=self._run_event_ttl_seconds,
+            lease_seconds=max(1, int(config.get("lifecycle.stale_run_threshold_seconds", 180))),
+        ):
+            ctx.execution_ownership_lost = True
+            raise RunClaimLost("execution finalization claim was replaced")
+
+    async def _record_user_cancel(
+        self, *, run_id: str, conversation_id: str, ctx: RunContext | None = None
+    ) -> None:
         """Mark a user-stopped run cancelled. Do not publish an ErrorEvent.
 
         Cancel is a status (cubeloop persists ``stop_reason=aborted``). An
@@ -2163,17 +2220,37 @@ class RunManager:
         """
         from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
 
+        claim_token = ctx.execution.attempt_id if ctx is not None and ctx.execution else None
+        claim_kwargs: _RunMetaClaimKwargs = (
+            {"conversation_id": conversation_id, "claim_token": claim_token}
+            if claim_token is not None
+            else {}
+        )
+        if claim_token is not None:
+            assert ctx is not None
+            await self._begin_execution_finalization(ctx, run_id)
+            with suppress(Exception):
+                await _repair_dangling_tool_calls(conversation_id)
         await update_run_meta(
             self._redis,
             prefix=self._key_prefix,
             run_id=run_id,
             status="cancelled",
+            **claim_kwargs,
         )
         await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
-        with suppress(Exception):
-            await _repair_dangling_tool_calls(conversation_id)
+        if claim_token is None:
+            with suppress(Exception):
+                await _repair_dangling_tool_calls(conversation_id)
 
-    async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
+    async def _append_event(
+        self,
+        run_id: str,
+        conversation_id: str,
+        event: AgentEvent,
+        *,
+        claim_token: str | None = None,
+    ) -> str:
         payload = event.model_dump()
         ensure_event_fits(payload)
         return await append_run_event(
@@ -2184,6 +2261,7 @@ class RunManager:
             payload=payload,
             ttl_seconds=self._run_event_ttl_seconds,
             maxlen=self._run_stream_max_events,
+            **({"claim_token": claim_token} if claim_token is not None else {}),
         )
 
     async def _append_error(
@@ -2196,6 +2274,7 @@ class RunManager:
         exc: BaseException | None = None,
         error_code: ErrorCode | None = None,
         params: dict[str, Any] | None = None,
+        claim_token: str | None = None,
     ) -> None:
         """Publish a classified ErrorEvent on the run's SSE stream.
 
@@ -2232,7 +2311,12 @@ class RunManager:
                 "details": final_details,
             },
         )
-        await self._append_event(run_id, conversation_id, error_event)
+        await self._append_event(
+            run_id,
+            conversation_id,
+            error_event,
+            **({"claim_token": claim_token} if claim_token is not None else {}),
+        )
 
     async def _run_cubeloop_path(
         self,
@@ -2282,6 +2366,9 @@ class RunManager:
         if extra_ref_holder is None:
             extra_ref_holder = {}
         extra_ref_holder.setdefault("extra", None)
+        claim_kwargs: _ClaimTokenKwargs = (
+            {"claim_token": ctx.execution.attempt_id} if ctx.execution else {}
+        )
 
         async with shared_checkpointer() as cp:
             with suppress(Exception):
@@ -2292,6 +2379,7 @@ class RunManager:
                         timestamp=datetime.now(UTC).isoformat(),
                         data={"phase": "loading_tools"},
                     ),
+                    **claim_kwargs,
                 )
             # all_tools is part of the factory contract for future callers
             # (e.g. T8/T10) but the prompt path doesn't need it directly —
@@ -2315,7 +2403,9 @@ class RunManager:
             # Register as soon as the Agent exists so steers received during
             # checkpoint, memory, or attachment preparation enter its pending
             # input queue instead of being dropped by the control listener.
-            self._register_agent_for_attempt(run_id, agent, None)
+            self._register_agent_for_attempt(
+                run_id, agent, ctx.execution.attempt_id if ctx.execution is not None else None
+            )
             if sandbox_hitl_channel is not None:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
             checkpoint = await agent.session.load_checkpoint()
@@ -2344,9 +2434,11 @@ class RunManager:
                 run_id=run_id,
                 conversation_id=conversation_id,
                 ttl_seconds=self._run_event_ttl_seconds,
+                claim_token=ctx.execution.attempt_id if ctx.execution is not None else None,
             )
 
             async def _on_event(evt: Any, _signal: Any = None) -> None:
+                await self._require_execution_slot(ctx, run_id)
                 # auto_detach must run FIRST so HitlRequestEvent triggers
                 # detach before the SSE conversion below.
                 _log_tool_start(run_id, evt)
@@ -2474,6 +2566,7 @@ class RunManager:
                         timestamp=datetime.now(UTC).isoformat(),
                         data={"phase": "starting"},
                     ),
+                    **claim_kwargs,
                 )
             try:
                 with tracing_context(metadata=_trace_meta):
@@ -2513,6 +2606,7 @@ class RunManager:
                                 projection_error,
                             )
                         final_status = require_host_success(result)
+                        await self._begin_execution_finalization(ctx, run_id)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
@@ -2744,11 +2838,15 @@ class RunManager:
                         "failed to schedule reflection for run_id={}", run_id
                     )
 
-                # A completed Session result makes any remaining DB pending
-                # request a stale host record. A suspended result already
-                # proved its pending request was durably checkpointed.
-                if final_status == "completed" and await cp.load_pending(conversation_id):
-                    await cp.save_pending_request(conversation_id, None)
+                # Only this completed run's request is stale; never erase a replacement.
+                if final_status == "completed":
+                    pending = await cp.load_pending(conversation_id)
+                    if pending is not None and pending[1] == run_id:
+                        await cp.clear_pending_request_if_matches(
+                            conversation_id,
+                            question_id=pending[0].question_id,
+                            run_id=run_id,
+                        )
             finally:
                 # Stop accepting steers for this run before tearing down.
                 tool_heartbeat.stop()
@@ -3664,6 +3762,7 @@ class RunManager:
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     binding=ctx.execution,
+                    require_slot=lambda: self._require_execution_slot(ctx, run_id),
                 )
             )
             cubeloop_middleware.extend(authority_middleware)
@@ -4316,6 +4415,12 @@ class RunManager:
         # enqueue is idempotent (replace_for_conversation), so the flag is
         # only to skip a redundant enqueue on the happy path.
         search_index_enqueued = False
+        claim_kwargs: _ClaimTokenKwargs = (
+            {"claim_token": ctx.execution.attempt_id} if ctx.execution else {}
+        )
+        meta_claim_kwargs: _RunMetaClaimKwargs = (
+            {**claim_kwargs, "conversation_id": conversation_id} if claim_kwargs else {}
+        )
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -4328,10 +4433,11 @@ class RunManager:
                     timestamp=datetime.now(UTC).isoformat(),
                     data=data,
                 ),
+                **claim_kwargs,
             )
 
         async def publish_event(event: AgentEvent) -> None:
-            await self._append_event(run_id, conversation_id, event)
+            await self._append_event(run_id, conversation_id, event, **claim_kwargs)
 
         async def flush_citation_buffer(
             agent_key: str | None,
@@ -4397,9 +4503,6 @@ class RunManager:
         # First sign of life on the stream: the frontend renders these
         # phases in the assistant placeholder instead of dead air while
         # snapshots / tools / MCP are prepared below.
-        with suppress(Exception):
-            await emit_status("preparing")
-
         # Outer-scope default so `finally` can branch on terminal status.
         # The success path inside `try` overwrites this with the real
         # status returned by `_run_cubeloop_path`; on exception the default
@@ -4413,6 +4516,9 @@ class RunManager:
         extra_ref_holder: dict[str, Any] = {}
 
         try:
+            with suppress(Exception):
+                await emit_status("preparing")
+            await self._require_execution_slot(ctx, run_id)
             if ctx.execution is not None:
                 from cubeplex.db.engine import async_session_maker
                 from cubeplex.services.conversation_execution import (
@@ -4420,17 +4526,21 @@ class RunManager:
                     ExecutionRevokedError,
                 )
 
-                async with async_session_maker() as admission_session:
-                    started = await ConversationExecutionService(
-                        admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                    ).record_run_started(
-                        admission_id=ctx.execution.admission_id,
-                        attempt_id=ctx.execution.attempt_id,
-                        now=datetime.now(UTC),
-                    )
-                    await admission_session.commit()
+                try:
+                    async with async_session_maker() as admission_session:
+                        started = await ConversationExecutionService(
+                            admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                        ).record_run_started(
+                            admission_id=ctx.execution.admission_id,
+                            attempt_id=ctx.execution.attempt_id,
+                            now=datetime.now(UTC),
+                        )
+                        await admission_session.commit()
+                except (ExecutionRevokedError, LookupError) as exc:
+                    raise asyncio.CancelledError("execution revoked before worker entry") from exc
                 if not started:
-                    raise ExecutionRevokedError("worker does not own a fresh start")
+                    ctx.execution_ownership_lost = True
+                    raise RunClaimLost("worker did not acquire a fresh execution entry")
                 admission_worker_owned = True
             # Open a long-lived session for the SkillCatalogService — used by
             # load_skill and LazySandbox (which pushes files to the sandbox on
@@ -4666,6 +4776,7 @@ class RunManager:
                     timestamp=datetime.now(UTC).isoformat(),
                     data=done_data,
                 ),
+                **claim_kwargs,
             )
             # Mark the run terminal AFTER appending DoneEvent so the SSE consumer
             # cannot observe active_run=None with no more events (which would cause
@@ -4677,6 +4788,7 @@ class RunManager:
                 prefix=self._key_prefix,
                 run_id=run_id,
                 status=final_status,
+                **meta_claim_kwargs,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             # Post-done bookkeeping: the stream is closed, so failures here
@@ -4715,9 +4827,16 @@ class RunManager:
             # short the persisted thread would still have orphan tool_calls
             # and every later turn would 400. Repair here too — idempotent, so
             # it's a no-op when cubeloop already handled it.
-            await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
+            if ctx.execution is not None:
+                await self._require_execution_slot(ctx, run_id)
+                await self._record_user_cancel(
+                    run_id=run_id, conversation_id=conversation_id, ctx=ctx
+                )
+            else:
+                await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
             raise
         except Exception as exc:
+            await self._begin_execution_finalization(ctx, run_id)
             logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
             # Model/provider/context_window are fallbacks for non-cubeloop
             # exceptions. Cubeloop typed errors already carry tokens_in etc.
@@ -4737,6 +4856,7 @@ class RunManager:
                 error_code=_err_code.value,
                 error_params=json.dumps(_err_params, ensure_ascii=False),
                 error_message=_err_message,
+                **meta_claim_kwargs,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
@@ -4749,6 +4869,7 @@ class RunManager:
                     error_params=json.dumps(_err_params, ensure_ascii=False),
                     error_message=_err_message,
                     ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
                 )
             with suppress(Exception):
                 await self._append_error(
@@ -4758,8 +4879,14 @@ class RunManager:
                     details=str(exc),
                     exc=exc,
                     params=_classify_params,
+                    **claim_kwargs,
                 )
         finally:
+            if ctx.execution is not None:
+                try:
+                    await self._require_execution_slot(ctx, run_id)
+                except (RunClaimLost, Exception):
+                    ctx.execution_ownership_lost = True
             sandbox_middleware = extra_ref_holder.get("sandbox_middleware")
             if sandbox_middleware is not None:
                 with suppress(Exception):
@@ -4770,7 +4897,7 @@ class RunManager:
             # history (user message + any completed assistant/tool turns)
             # before the failure, so enqueue best-effort here. The job is
             # idempotent; the worker re-chunks whatever history exists.
-            if not search_index_enqueued:
+            if not search_index_enqueued and not ctx.execution_ownership_lost:
                 with suppress(Exception):
                     await _enqueue_search_index(
                         conversation_id,
@@ -4796,7 +4923,7 @@ class RunManager:
             # doesn't leak. The success path nulls `event_q_drainer` after
             # its own drain, so this block is a no-op then.
             if event_q_drainer is not None:
-                with suppress(Exception):
+                with suppress(asyncio.CancelledError, Exception):
                     await _finish_subagent_citation_queue(event_q, event_q_drainer)
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
@@ -4822,6 +4949,7 @@ class RunManager:
             registration_replaced = _registration_was_replaced(
                 current_agent=current_agent,
                 originating_agent=steering_agent,
+                ownership_lost=ctx.execution_ownership_lost,
             )
             if not registration_replaced:
                 if final_status != "paused_hitl":
@@ -4850,7 +4978,7 @@ class RunManager:
             # orphaning the paused turn. The respond / cancel paths clear
             # the lock when they terminate.
             if final_status != "paused_hitl" and not registration_replaced:
-                if ctx.execution is not None and admission_worker_owned:
+                if ctx.execution is not None:
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.db.engine import async_session_maker
                     from cubeplex.services.conversation_execution import (
@@ -4866,6 +4994,7 @@ class RunManager:
                             ).record_run_finished(
                                 admission_id=ctx.execution.admission_id,
                                 attempt_id=ctx.execution.attempt_id,
+                                worker_started=admission_worker_owned,
                                 now=datetime.now(UTC),
                             )
                             await admission_session.commit()
@@ -4874,12 +5003,14 @@ class RunManager:
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
+                    **claim_kwargs,
                 )
                 await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
                     ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
                 )
 
             if sandbox:

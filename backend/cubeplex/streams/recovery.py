@@ -9,7 +9,8 @@ from __future__ import annotations
 from loguru import logger
 from redis.asyncio import Redis
 
-from cubeplex.streams.run_events import get_run_meta, mark_run_stale
+from cubeplex.config import config
+from cubeplex.streams.run_events import get_run_meta, is_stale_meta, mark_run_stale
 
 
 async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
@@ -20,6 +21,7 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
     pattern = f"{prefix}:conversation_active_run:*"
     prefix_len = len(f"{prefix}:conversation_active_run:")
     recovered: list[tuple[str, str]] = []
+    threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
 
     async for key in redis.scan_iter(match=pattern, count=200):
         run_id = await redis.get(key)
@@ -28,12 +30,16 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
         meta = await get_run_meta(redis, prefix=prefix, run_id=run_id)
         if meta is None or meta.status != "running":
             continue
+        # A newly started replica is not evidence that every other worker died.
+        if not is_stale_meta(meta, threshold_seconds=threshold):
+            continue
         conversation_id = key[prefix_len:]
         marked = await mark_run_stale(
             redis,
             prefix=prefix,
             run_id=run_id,
             conversation_id=conversation_id,
+            observed_last_event_at=meta.last_event_at or meta.started_at,
         )
         if not marked:
             continue
