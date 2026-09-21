@@ -24,7 +24,9 @@ from cubeplex.models.background_task import (
 )
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.membership import Membership
+from cubeplex.models.topic import Topic, TopicParticipant
 from cubeplex.models.user import User
 from cubeplex.models.workspace import Workspace
 from cubeplex.repositories.background_task import ConversationExecutionAdmissionRepository
@@ -513,6 +515,50 @@ class ConversationExecutionService:
         )
         if user is None or not user.is_active or workspace is None or member is None:
             raise LookupError("conversation not found")
+        location = (
+            await self.session.execute(
+                select(col(Conversation.id), col(Conversation.topic_id)).where(
+                    col(Conversation.id) == conversation_id,
+                    col(Conversation.org_id) == self.org_id,
+                    col(Conversation.workspace_id) == self.workspace_id,
+                    col(Conversation.deleted_at).is_(None),
+                )
+            )
+        ).one_or_none()
+        if location is None:
+            raise LookupError("conversation not found")
+        topic_id = location.topic_id
+        topic_member = None
+        # Lock access-granting rows before the conversation, including B4's archive gate.
+        if topic_id is not None:
+            topic = await self.session.scalar(
+                select(Topic)
+                .where(
+                    col(Topic.id) == topic_id,
+                    col(Topic.org_id) == self.org_id,
+                    col(Topic.workspace_id) == self.workspace_id,
+                    col(Topic.is_archived).is_(False),
+                )
+                .with_for_update(key_share=True)
+            )
+            if topic is None:
+                raise LookupError("conversation not found")
+            topic_member = await self.session.scalar(
+                select(TopicParticipant)
+                .where(
+                    col(TopicParticipant.topic_id) == topic_id,
+                    col(TopicParticipant.user_id) == actor_user_id,
+                )
+                .with_for_update(key_share=True)
+            )
+        conversation_member = await self.session.scalar(
+            select(ConversationParticipant)
+            .where(
+                col(ConversationParticipant.conversation_id) == conversation_id,
+                col(ConversationParticipant.user_id) == actor_user_id,
+            )
+            .with_for_update(key_share=True)
+        )
         accessible = ConversationRepository(
             self.session, org_id=self.org_id, workspace_id=self.workspace_id, user_id=actor_user_id
         ).accessible_id_subquery()
@@ -523,12 +569,20 @@ class ConversationExecutionService:
                 col(Conversation.org_id) == self.org_id,
                 col(Conversation.workspace_id) == self.workspace_id,
                 col(Conversation.deleted_at).is_(None),
+                col(Conversation.topic_id).is_not_distinct_from(topic_id),
                 col(Conversation.id).in_(accessible),
             )
             .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
         if conversation is None:
+            raise LookupError("conversation not found")
+        if (
+            topic_member is None
+            and conversation_member is None
+            and not (topic_id is None and conversation.creator_user_id == actor_user_id)
+        ):
+            # A just-inserted grant was not locked; retry admission instead of using it.
             raise LookupError("conversation not found")
         return conversation
 

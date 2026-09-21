@@ -43,6 +43,24 @@ def test_parse_ops_rejects_malformed():
     assert mc.parse_ops(big, max_ops=10) is None
 
 
+@pytest.mark.asyncio
+async def test_apply_ops_propagates_a_write_failure_to_the_owning_transaction():
+    class FailingService(_FakeService):
+        async def create(self, inp):
+            if inp.content == "fail":
+                raise RuntimeError("write failed")
+            await super().create(inp)
+
+    service = FailingService()
+    ops = [
+        {"action": "extract", "scope": "personal", "type": "preference", "content": value}
+        for value in ("first", "fail", "must not run")
+    ]
+    with pytest.raises(RuntimeError, match="write failed"):
+        await mc.apply_ops(service, ops, conversation_id="conv", run_id="run")
+    assert [item.content for item in service.created] == ["first"]
+
+
 def test_parse_ops_filters_invalid_ops_keeps_valid():
     raw = json.dumps(
         {

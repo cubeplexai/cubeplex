@@ -10,11 +10,14 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from collections.abc import Awaitable
-from typing import Any, cast
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 from redis.asyncio import Redis
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 _TTL_S = 7 * 24 * 3600  # keep gate keys ~a week of inactivity
 
@@ -183,31 +186,28 @@ async def apply_ops(
     """
     for op in ops:
         action = op["action"]
-        try:
-            if action == "extract":
-                await service.create(
-                    CreateMemoryInput(
-                        scope=MemoryScope(op["scope"]),
-                        type=MemoryType(op["type"]),
-                        content=op["content"].strip(),
-                        source_type=MemorySourceType.CONSOLIDATION,
-                        source_conversation_id=conversation_id,
-                        source_run_id=run_id,
-                    )
+        if action == "extract":
+            await service.create(
+                CreateMemoryInput(
+                    scope=MemoryScope(op["scope"]),
+                    type=MemoryType(op["type"]),
+                    content=op["content"].strip(),
+                    source_type=MemorySourceType.CONSOLIDATION,
+                    source_conversation_id=conversation_id,
+                    source_run_id=run_id,
                 )
-            elif action in ("merge", "archive"):
-                target = await service.repo.get(op["id"])
-                if target is None or target.scope not in (
-                    MemoryScope.PERSONAL,
-                    MemoryScope.WORKSPACE,
-                ):
-                    continue
-                if action == "merge":
-                    await service.update(op["id"], content=op["content"].strip())
-                else:
-                    await service.archive(op["id"])
-        except Exception:
-            logger.opt(exception=True).warning("consolidation op failed: {}", op)
+            )
+        elif action in ("merge", "archive"):
+            target = await service.repo.get(op["id"])
+            if target is None or target.scope not in (
+                MemoryScope.PERSONAL,
+                MemoryScope.WORKSPACE,
+            ):
+                continue
+            if action == "merge":
+                await service.update(op["id"], content=op["content"].strip())
+            else:
+                await service.archive(op["id"])
 
 
 DEFAULT_MIN_HOURS = 6.0
@@ -267,6 +267,8 @@ async def run_consolidation(
     tracer: Any | None = None,
     min_hours: float = DEFAULT_MIN_HOURS,
     min_runs: int = DEFAULT_MIN_RUNS,
+    run_id: str | None = None,
+    authorize_transaction: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> None:
     """Best-effort per-conversation consolidation. Never raises into the caller.
 
@@ -296,6 +298,8 @@ async def run_consolidation(
         history_text = _render_history(data.messages[-HISTORY_MSG_CAP:])
 
         async with session_maker() as s:
+            if authorize_transaction is not None:
+                await authorize_transaction(s)
             repo = MemoryRepository(s, user_id=user_id, org_id=org_id, workspace_id=workspace_id)
             personal = await repo.list(
                 scope=MemoryScope.PERSONAL,
@@ -329,6 +333,9 @@ async def run_consolidation(
         if org_id is not None:
             meta["org_id"] = org_id
 
+        if authorize_transaction is not None:
+            async with session_maker() as s:
+                await authorize_transaction(s)
         if tracer is not None:
             async with tracer.oneshot(
                 model=model,
@@ -362,15 +369,22 @@ async def run_consolidation(
                 conversation_id,
             )
             return
-        if ops:  # ops == [] is a valid "nothing worth saving" → advance below
+        if ops or authorize_transaction is not None:
             async with session_maker() as s:
+                if authorize_transaction is not None:
+                    await authorize_transaction(s)
                 repo = MemoryRepository(
-                    s, user_id=user_id, org_id=org_id, workspace_id=workspace_id
+                    s,
+                    user_id=user_id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    auto_commit=False,
                 )
                 service = MemoryService(
                     repo, user_id=user_id, org_id=org_id, workspace_id=workspace_id
                 )
-                await apply_ops(service, ops, conversation_id=conversation_id, run_id=None)
+                await apply_ops(service, ops, conversation_id=conversation_id, run_id=run_id)
+                await s.commit()
 
         await mark_consolidated(redis, prefix, conversation_id, cutoff=cutoff, consumed=consumed)
     except Exception:
