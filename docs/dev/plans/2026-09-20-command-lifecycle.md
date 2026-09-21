@@ -35,7 +35,7 @@
 - #634 交付 C1 基础模型、增量结构、事务预留和默认期限配置；87 项本地回归及该 PR 的 CI 通过。
 - #635（`6f3dcc7e2`）交付 C1 运行时的原实例接管、owner 隔离、停止事实、monitor 限流和期限恢复，CI 通过。新 coordinator 尚未注册到应用，不代表生产入口已切换；宿主交接和日志收尾分别继续由 C4、C6 完成。
 - CubeLoop #231（`b488ab8584`）交付 R 的等待校验、输入失效、HITL 审批来源和 extra 持久化，CI 通过；尚未合并／发布，CubePlex 依赖与宿主校验尚未接入。
-- #636 是 C2 的增量 draft，当前提交 `65a51e07e`：已实现用户请求身份及设置快照、附件保护、关闭批次、内部 RunManager 绑定及启动／退出回执、模型／工具执行资格校验，以及 prompt／HITL 恢复 worker 的 Redis 写入隔离和安全收尾。HITL 回答仅接受原 actor，保留原模型／reasoning／trigger；新的恢复 attempt 不替换首次启动回执，连续暂停不记作结束。暂停中的主 Stop 已改为无模型清理：关闭原批次、修复原 run 的未回答工具、取消未提交 guidance、清理匹配问题，写 cancelled 后释放 slot；202 只表示受理派发。终态写入后丢响应仍可完成清理；模型返回时重查执行权，sandbox 清理心跳也隔离 attempt。独立 reflection 等待正常结束证明，模型／工具边界检查 Stop 和原身份，正常自动记忆不受影响。最新联合回归 83 项、原记忆模块 34 项通过，严格类型检查通过；本次提交的推送检查、远端 CI／复审以 PR 实际结果为准，尚未作为切换依据。
+- #636 是 C2 的增量 draft，当前提交 `01f3fffe8`：已实现用户请求身份及设置快照、附件保护、关闭批次、内部 RunManager 绑定及启动／退出回执、模型／工具资格校验，以及 prompt／HITL 恢复 worker 的 Redis 写入隔离和安全收尾。HITL 回答仅接受原 actor，暂停中的主 Stop 不调用模型；终态写入后丢响应仍可完成清理，连续暂停不记作结束。独立 reflection 等待正常结束证明，模型／工具边界检查 Stop 和原身份，记忆操作的权限锁覆盖去重、容量清理和最终写事务；真实 PG 竞争用例先复现 Stop 后写入，再验证修复，正常自动记忆不受影响。最新联合回归 106 项通过，严格类型检查通过。前一提交 `65a51e07e` 的 CI 与 Codex review 已通过；最新提交的推送检查、远端 CI／复审以 PR 实际结果为准，尚未作为切换依据。
 - C2 仍须接通 Web／IM／steering／schedule／trigger 的受理入口、覆盖所有状态的主 Stop 及持久恢复、删除／撤权清理、自动来源快照及恢复、启动回执未决的对账。暂停清理在终态提交前失败或进程退出时的恢复尚未完成；单个分支可无模型停止，不等于完整 Stop 协议已落地。HITL 已能识别原 admission，但旧入口创建的无 admission run 仍走切换前路径，不能据此声称公共入口已受完整保护；非原 actor 的明确错误展示由 C5 配套。C3–C6、依赖集成、数据回填及统一切换也未完成；上述测试不是原始六项问题的全链路验收。
 
 以上 PR 均不包含部署或线上数据切换授权。分 PR 审核不等于中间版本可独立启用。
@@ -117,6 +117,7 @@
 - `api/routes/v1/auth.py`、`models/user.py` 及账号删除服务：固定待删 actor、持久删除资格与跨 scope 清理；保留账号行和恢复证明直到可安全物理删除。新业务入口拒绝 deleting actor，认证入口仍允许本人查询／重试删除。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。删除操作及 token 摘要无目标级联 FK；账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务，回执 30 天后回收。
 - `api/routes/v1/ws_members.py`、`workspaces.py` 的 leave、`admin_members.py`、membership models／repositories 及鉴权依赖：持久 revoked 标记、scope 内执行撤销和可恢复清理；成员管理及离开 UI 处理 cleanup_pending，站点 `admin/members.md` 同步。
+- `frontend/packages/core/src/api/workspaces.ts`、`members.ts` 及离开／移除调用方：保存操作 token，查询不依赖已删 membership 的终态回执；刷新恢复、凭证过期和重新加入后的旧操作重试均覆盖。
 - `im/identity.py`、`api/routes/v1/shares.py` 及其他直接读取 membership 的消费者：统一采用有效成员条件，排除撤销／删除中的身份。实施时枚举 `Membership`／`OrganizationMembership` 的直接查询、join、exists 和关联访问；清理用途显式区分，不能把仍保留的清理行当作授权。切换门槛包含这份消费者清单的逐项核对。
 - `frontend/packages/web/components/profile/DeleteAccountDialog.tsx`、账号初始化／auth 状态恢复、`components/workspace-settings/WorkspaceDangerZone.tsx`、对应 core API／store 和 en／zh 文案：cleanup_pending 的持续进度、退避查询／重试与终态退出，刷新恢复删除状态；站点 `guides/account/profile.md` 同步说明。
 - `api/routes/v1/conversations.py` 的 install 快捷分支、技能安装 service 和 checkpointer append 边界：同一 admission 保存非 run 操作回执及稳定合成消息 ID，重试对账而不重复安装／写历史。
@@ -125,6 +126,8 @@
 - `models/steering_message.py`、`repositories/steering_message.py`：用户输入绑定批次，旧未提交输入取消。
 - `schedules/poller.py`、`schedules/dispatch.py`、`models/scheduled_task.py`、`triggers/pipeline.py`、`im/worker.py`、`im/run_handoff.py` 及现有队列 model／repository：首次排队时绑定来源，转交／重试保留，不能只在最后 start_run 时区分。
 - `api/routes/v1/ws_im.py`、`services/im_connector.py`、`models/im_connector.py`：connector 删除先停用并持久标记，与入队／claim 串行；保留 receipt、queue item、来源绑定和必要清理凭据，未决交接核对结束后才硬删。
+- `frontend/packages/core/src/api/im.ts` 及其 API 测试、`frontend/packages/web/components/workspace-settings/ImPanel.tsx`、`components/im/ImAccountDetailPanel.tsx`、en／zh 文案：typed 删除状态、持久进度恢复、退避查询和幂等重试；站点 `docs/site/docs/guides/im/overview.md` 同 PR 说明删除清理进度。
+- `repositories/memory.py`、`streams/run_manager.py`：reflection 的原执行身份进入记忆事务，仓库支持调用方提交，权限检查／容量清理／去重／写入与 Stop 串行。
 - `triggers/ingest.py`、`triggers/worker.py`（新）、`models/trigger.py`、`repositories/trigger.py`、`api/app.py`：可执行 trigger 事件持久排队、lease claim／过期接管、重试和启动恢复；进程内通知仅作加速，不作唯一消费者。
 - `api/routes/v1/ws_triggers.py`：定义编辑与原 actor 快照串行；删除改为持久停用／删除标记及逐事件取消对账，不能丢失未决源事件。
 - `services/scheduled_task.py`、`repositories/scheduled_task.py` 及 schedule API：删除定义与 occurrence claim／执行启动裁决共用源锁，取消未执行的已领取／busy／IM 项，保留未决 admission 与交接证明。
@@ -158,15 +161,23 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 移除／离开 workspace 和 org 成员撤销复用 actor 清理服务而非 bulk-delete membership：先持久撤销资格，鉴权、受理、工具边界及输入边界立即拒绝，再停止 scope 内旧工作。权限锁先于 conversation／sandbox／task 锁，旧成员行和句柄留到对账完成；清理未知返回 cleanup_pending，管理员或本人受限离开状态可恢复查询。org 路径覆盖其所属 workspace，重加成员不得消除旧 admission 的撤销事实。对活跃命令、排队输入、IM 身份识别／转交、组织与 workspace 分享读取／创建、重启、并发重新加入分别做真实 DB 测试：成员行仍在且 cleanup_pending 时也不得通过授权，既有最后管理员／owner 保护仍成立。
 
+成员清理也创建 deletion_operation，token 在首次操作前生成并保存，原鉴权通过后绑定 kind、原 actor、scope 和原 membership ID；记录不引用待删 membership 的级联 FK。移除成员行与 completed 同事务。新增 `GET /api/v1/ws/{ws}/leave-status` 仅按专用 token 和固定 ws 核对本人原离开操作，不要求当前 membership；管理员 workspace／org 成员状态各用独立 handler，不复用 scope 参数。回执保留 30 天，只读 token 不允许发起新清理；人工重试另检查当前登录身份为原操作人及固定操作范围，不重新授予成员权限。已完成操作只返回原回执，不能以旧 user/ws 配对删除重新加入的新 membership。前端在失去 workspace 访问后仍可恢复自己的离开进度，只有 completed 才确认完成；凭证丢失／过期明确不可确认而非永久 pending。
+
 用户 steering 也持久绑定 actor：HTTP、准备缓冲、pub/sub、DB claim 和最终 Session.submit_input 全路径只向同 actor run 注入。B 到 A 的 run 时保持 queued（UI 显示等待当前运行结束），slot 释放后经同一受理门槛预绑定 B 的唯一后继 run；不改正文／身份、不复制消息。相同 ID 重试、用户撤回、Stop／权限撤销及已提交中断对账沿用现有规则，当前权限失效不能借 A 执行。自动 run 与普通 run 使用同一身份兼容规则。
 
 HITL 回答／审批必须来自原 admission 的 actor；会话参与者身份不是使用他人凭据的委托授权。Web／IM 均在恢复 claim 前检查，错误回答不改 pending、不取得 slot、不启动模型。主 Stop 是撤销执行权，不是回答或审批，仍按原会话控制权限清理。C5 对非原 actor 展示“等待发起者回答”，不提供可用的审批按钮；不把旧运行时允许任意参与者回答的规则带入新执行身份协议。
 
 独立 reflection 同样检查执行来源，但不能直接要求仍占用 active slot，否则正常完成后的自动记忆会被全部禁用。先等原 worker 清理结束，再检查同一 attempt 的 completed 元数据、持久结束回执、仍开放的原 generation 和当前 actor 权限；模型／工具边界重复检查。不为后处理保持 run，不把取消／失败／HITL 暂停当正常完成，不重试丢失的提炼。用真实主 run 结束及有界 provider barrier 验证正常 save／update、首次模型调用前 Stop、模型返回前 Stop、旧批次重开、完成凭据替换／丢失及删除；C3 的后台来源过滤另行叠加。
 
+记忆工具另在自己的 DB 事务中校验原身份并按权限行 → conversation → admission → memory 的顺序持锁，直到整个操作提交。仓库在该模式只 flush，去重更新时间、容量清理和最终保存不能各自 commit；失败全部回滚。锁应串行化 Stop／权限撤销，但不与无关账单的外键读取冲突。真实数据库 barrier 分别验证 Stop 先取得权和 memory 先取得权：前者拒绝写入，后者先提交再让 Stop 提交；不允许已关闭 generation 的事务后来写入。该事务内不等待模型，也不延长主 run。
+
 topic 归档先阻止新增会话／受理，并在归档事务关闭其全部 conversation 的当前批次、登记停止与通知取消。提交后隐藏 topic／conversation，恢复扫描仍能清理原 scope 的 run、HITL 和 task；不依赖用户重新打开已归档 topic。归档与新启动双向竞争必须串行，未归档的其他 topic 不受影响。
 
 IM connector 删除与入队、领取、交接裁决共用 connector 锁。先停用并标记删除，拒绝新 webhook／主动发送及新交接，取消尚未执行的队列项；已有 admission、启动回执或来源 handoff 未决时保留去重及取消证明，worker 只做核对／清理。已经执行的会话历史保留，不重新派发、不 Stop 同会话无关工作。核对完成后才按依赖硬删 receipt／queue／connector；不能让级联外键先删除调度／trigger 的唯一交接证明。删除请求清理未决返回 cleanup_pending，前端可查询／重试，凭据只对清理流程保留。
+
+IM 删除配套契约：`DELETE /api/v1/ws/{ws}/im/accounts/{account}` 在原权限校验后绑定预先生成的 deletion_token；409 `{code: cleanup_pending, operation_id}` 表示持久受理，200 `{state: completed, operation_id}` 才表示完成。幂等重试沿用 token 与原 scope／account，仍要求当前删除权限；不能只凭只读 token 发起删除。`GET .../{account}/deletion-status` 只读核对 token 摘要、kind、ws/account 后返回 pending／completed，不依赖 connector 或 membership 行仍存在。硬删除与终态回执同事务，沿用 30 天保留／脱敏／过期规则。
+
+`wsDeleteImAccount` 解析明确的 409 cleanup_pending，不把它当普通异常；`ImPanel` 不把任意 2xx 当完成。操作信息保存在 sessionStorage，清理中的项仍可查看状态但不能重启；每项最多一个在途请求，指数退避到 30 秒，允许手动重试，重新挂载后恢复查询。只有 completed 才移除本地账号并显示成功提示。网络失败保持待确认，401 提示登录失效，404／凭证过期停止自动查询并显示不可确认；关闭对话框不撤回删除。后端回执和前端状态机必须同 PR 交付。
 
 TriggerEvent 增加与审计结果分离的持久 dispatch 状态、claim token／lease、next_attempt_at 及冻结内容。入口完成校验并持久排队后才返回 202 accepted；早先插入的去重／审计行不能被 worker 当作可执行事件，重复未完成请求要恢复入口裁决或明确失败。worker 启动及定期扫描只领取已排队／可接管的过期 claim，沿用同一事件身份和有界重试；旧 owner 失权后不能更新状态。new-each-time 的 conversation 创建与目标绑定同一事务，后续 run 启动／IM outbox 沿用 admission 幂等与回执对账，不重复新建目标或执行。注册 app lifespan 并移除仅靠 create_task 的受理后执行路径；过滤、限流和当前权限检查保留，不扩充为通用调度系统。
 
@@ -187,6 +198,9 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 新 `backend/tests/e2e/test_conversation_execution_control.py`：无 active run、有 starting reservation、paused HITL、旧批次 cleanup 场景；停止与首次受理／checkpoint／新消息的双向 barrier。
 - 删除事务失败不隐藏会话；提交后 worker 崩溃仍能清理，迟到句柄不丢、deleted API 404、其他会话不受影响。
 - topic 归档与首次受理／reservation 双向竞争、归档后重启清理；IM connector 在 enqueue 后、claim 前及交接回执丢失时删除，验证不丢来源证明、不重复执行、不影响无关会话工作。
+- IM 删除业务流：409 pending → 断网／重试 → 刷新恢复 → worker 在两次查询间硬删 → token 状态返回 completed；只有终态移除账号／显示成功，跨 ws/account token、401、404、过期及重复 DELETE 都验证。补 core API 的 409 解析、前端业务流及 `guides/im/overview.md`，不用静态文案测试替代。
+- 成员离开／移除：worker 在两次状态查询间删除 membership、完成响应丢失、刷新恢复，仍由独立回执确认 completed；旧 token／旧 membership ID 不得影响重新加入，其他 actor／scope 的凭据被拒绝。过期／凭证遗失明确不可确认。
+- Reflection 写事务：模型／工具检查后用真实 PG 锁控制 Stop 与提交顺序，验证 save、update、去重及容量清理的原子回滚；正常完成及 Stop 先胜时的既有回归保留。
 - 不同参与者回答／审批原 actor 的 HITL 被拒绝；原 actor 当前权限失效仍拒绝，主 Stop 不经过模型回答路径。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
 - Web 消息重试、IM receipt 重试、trigger 重试不重新授权；伪造内部来源、跨 scope／actor 复用键失败；原调度权限和 HITL 限制不回归。
@@ -396,12 +410,12 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 41 | C2：schedule 删除与已领取 occurrence／IM 交接串行并保留未决证明 |
 | 42 | C2：删除回执跨硬删除保留，首请求前持有只读 token，worker 完成／响应丢失／过期可确认处理 |
 | 43 | C2、C3、C5：所有用户输入投递边界检查 actor，其他 actor 排队后独立受理并在 UI 区分 |
-| 44 | C2：成员撤销先持久撤权再停止／对账，重启及重新加入不恢复旧执行权 |
+| 44 | C2：成员撤销先持久撤权再停止／对账，独立终态回执跨 membership 删除存活，重新加入不受旧操作影响 |
 | 45 | C1、C4：配置／工具参数共用正整数及 32-bit 秒数上限，受理防御日期溢出 |
 | 46 | C2：topic 归档关闭所属会话执行权，归档与启动串行，隐藏后继续清理 |
-| 47 | C2：IM connector 删除保留并核对 receipt／queue／来源 handoff，未决不硬删 |
+| 47 | C2：IM connector 删除保留并核对 handoff，配套客户端解析／进度恢复／终态回执及 IM 文档，未决不硬删 |
 | 48 | C5：summary 全 false 后仍发现新自动 run；可见页基线、隐藏恢复及已完成回复均覆盖 |
 | 49 | C2、C5：HITL 只接受原 actor 回答／审批，非发起者的展示不暗示可代用凭据 |
-| 50 | C2：正常完成后的 reflection 不占 run；每次模型／工具边界仍受 Stop 和原执行身份约束 |
+| 50 | C2：reflection 不占 run；模型／工具边界及完整记忆事务均受 Stop 和原执行身份约束 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
