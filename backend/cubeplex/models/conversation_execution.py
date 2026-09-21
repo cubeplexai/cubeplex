@@ -1,9 +1,10 @@
 """Durable source identity; retrying an input never grants it a new generation."""
 
+from datetime import datetime
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, Index, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
@@ -35,3 +36,17 @@ class ConversationExecutionAdmission(CubeplexBase, OrgScopedMixin, table=True):
     source_id: str = Field(max_length=255)
     execution_generation: int = Field(sa_column=Column(BigInteger, nullable=False))
     run_id: str | None = Field(default=None, max_length=64)
+    request_fingerprint: str | None = Field(default=None, max_length=64)
+    resolved_execution: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    run_start_token: str | None = Field(default=None, max_length=64)
+    run_started_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    run_finished_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    revoked_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
