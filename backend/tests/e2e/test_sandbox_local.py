@@ -89,8 +89,10 @@ async def test_start_returns_before_sleep_exits() -> None:
     handle = await sandbox.start("sleep 2")
     snap = await sandbox.poll(handle)
     assert snap.status == "running"
-    await asyncio.sleep(2.2)
-    snap = await sandbox.poll(handle)
+    async with asyncio.timeout(5):
+        while snap.status == "running":
+            await asyncio.sleep(0.01)
+            snap = await sandbox.poll(handle)
     assert snap.status == "exited"
     assert snap.exit_code == 0
 
@@ -102,16 +104,19 @@ async def test_kill_marks_process_killed() -> None:
     await sandbox.kill(handle)
     snap = await sandbox.poll(handle)
     assert snap.status == "killed"
-    assert handle.provider_ref not in sandbox._bg
+    assert snap.exit_code is not None and snap.exit_code < 0
 
 
 @pytest.mark.asyncio
 async def test_kill_after_natural_exit_does_not_raise() -> None:
     sandbox = LocalSandbox()
     handle = await sandbox.start("true")
-    await asyncio.sleep(0.05)
+    async with asyncio.timeout(5):
+        while (await sandbox.poll(handle)).status == "running":
+            await asyncio.sleep(0.01)
     await sandbox.kill(handle)
-    assert handle.provider_ref not in sandbox._bg
+    snap = await sandbox.poll(handle)
+    assert (snap.status, snap.exit_code) == ("exited", 0)
 
 
 @pytest.mark.asyncio

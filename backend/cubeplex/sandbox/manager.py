@@ -19,6 +19,8 @@ import asyncio
 import hashlib
 import re
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -33,18 +35,27 @@ from opensandbox.exceptions import (
     SandboxException as ProviderSandboxError,
 )
 from opensandbox.models.sandboxes import PVC, Volume
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlmodel import col
 
 from cubeplex.config import config
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.models import EgressRef
+from cubeplex.models.background_task import BackgroundTask
+from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.credential import CredentialRepository
 from cubeplex.repositories.egress_ref import EgressRefRepository
 from cubeplex.repositories.sandbox_env import SandboxEnvRepository
 from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
-from cubeplex.sandbox.base import Sandbox, SandboxConflictError, SandboxError
+from cubeplex.sandbox.base import (
+    Sandbox,
+    SandboxConflictError,
+    SandboxError,
+    SandboxInstanceGoneError,
+)
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubeplex.sandbox_policy.rules import build_network_policy
@@ -294,6 +305,72 @@ class SandboxManager:
             run_gid=self._run_gid,
             run_user=self._run_user,
         )
+
+    @asynccontextmanager
+    async def connect_command_instance(
+        self, *, command_id: str, org_id: str, workspace_id: str
+    ) -> AsyncIterator[Sandbox]:
+        """Attach only to the immutable instance recorded for a managed task."""
+        async with self._session_factory() as session:
+            command = (
+                await session.execute(
+                    select(SandboxCommand)
+                    .join(BackgroundTask, col(BackgroundTask.id) == col(SandboxCommand.task_id))
+                    .join(UserSandbox, col(UserSandbox.id) == col(SandboxCommand.user_sandbox_id))
+                    .where(
+                        col(SandboxCommand.id) == command_id,
+                        col(SandboxCommand.org_id) == org_id,
+                        col(SandboxCommand.workspace_id) == workspace_id,
+                        col(BackgroundTask.org_id) == org_id,
+                        col(BackgroundTask.workspace_id) == workspace_id,
+                        col(UserSandbox.org_id) == org_id,
+                        col(UserSandbox.workspace_id) == workspace_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if command is None:
+                raise LookupError("command not found")
+            instance_id, provider = command.sandbox_instance_id, command.provider
+        if not instance_id:
+            raise SandboxError("original command instance is unknown")
+        if provider != "opensandbox":
+            raise SandboxError(f"{provider} does not support cross-worker process reconnect")
+
+        control: opensandbox.SandboxManager | None = None
+        raw: opensandbox.Sandbox | None = None
+        try:
+            async with asyncio.timeout(10):
+                control = await opensandbox.SandboxManager.create(
+                    connection_config=self._build_connection_config(request_timeout=10)
+                )
+                try:
+                    info = await control.get_sandbox_info(instance_id)
+                except ProviderApiError as exc:
+                    if exc.status_code == 404:
+                        raise SandboxInstanceGoneError(instance_id) from exc
+                    raise
+                if info.status.state != "Running":
+                    raise SandboxError(f"original sandbox instance is {info.status.state}")
+            # An endpoint/command 404 is not proof the instance itself is gone.
+            async with asyncio.timeout(10):
+                raw = await opensandbox.Sandbox.connect(
+                    instance_id,
+                    connection_config=self._build_connection_config(request_timeout=10),
+                    skip_health_check=True,
+                )
+            if raw.id != instance_id:
+                raise SandboxError("provider attached a different sandbox instance")
+            yield self._wrap_backend(raw)
+        except (ProviderSandboxError, TimeoutError) as exc:
+            raise SandboxError(f"could not observe original sandbox instance: {exc}") from exc
+        finally:
+            for client in (raw, control):
+                if client is not None:
+                    try:
+                        async with asyncio.timeout(5):
+                            await client.close()
+                    except Exception:
+                        logger.warning("failed to close command observer for {}", instance_id)
 
     async def _renew_provider_ttl(self, sandbox_id: str) -> None:
         """Best-effort extend the provider-side expiration so the OpenSandbox

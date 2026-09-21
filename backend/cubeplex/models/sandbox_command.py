@@ -23,6 +23,7 @@ from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, PREFIX_SANDBOX_COM
 
 class SandboxCommandStatus(StrEnum):
     starting = "starting"
+    not_started = "not_started"
     running = "running"
     exited = "exited"
     killed = "killed"
@@ -72,6 +73,10 @@ class SandboxCommand(CubeplexBase, OrgScopedMixin, table=True):
         ),
     )
     sandbox_instance_id: str | None = Field(default=None, max_length=255)
+    start_token: str | None = Field(default=None, max_length=64)
+    start_requested_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
     log_state: str = Field(
         default="pending", max_length=20, sa_column_kwargs={"server_default": "pending"}
     )

@@ -166,6 +166,18 @@ class OpenSandbox(Sandbox):
     def supports_background(self) -> bool:
         return True
 
+    def supports_background_reconnect(self) -> bool:
+        return True
+
+    async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
+        with _as_sandbox_error():
+            status = await self._sandbox.commands.get_command_status(handle.provider_ref)
+        running = getattr(status, "running", None)
+        code = getattr(status, "exit_code", None)
+        if not isinstance(running, bool) or (code is not None and type(code) is not int):
+            raise SandboxError("provider returned an invalid process status")
+        return ProcessSnapshot(status="running" if running else "exited", exit_code=code)
+
     async def start(
         self,
         command: str,

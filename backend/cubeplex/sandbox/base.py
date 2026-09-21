@@ -29,6 +29,14 @@ class SandboxConflictError(SandboxError):
     (e.g. restart while provisioning)."""
 
 
+class SandboxInstanceGoneError(SandboxError):
+    """The provider's instance-info endpoint confirms this exact instance is gone."""
+
+    def __init__(self, sandbox_instance_id: str) -> None:
+        self.sandbox_instance_id = sandbox_instance_id
+        super().__init__(f"original sandbox instance {sandbox_instance_id} no longer exists")
+
+
 @dataclass
 class ExecuteResult:
     """Result of a shell command execution."""
@@ -137,6 +145,15 @@ class Sandbox(ABC):
     def supports_background(self) -> bool:
         """Whether ``start`` / ``poll`` / ``kill`` are implemented."""
         return False
+
+    def supports_background_reconnect(self) -> bool:
+        """Whether another worker can recover a persisted process handle."""
+        return False
+
+    async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
+        """Observe execution independently of fetching or acknowledging output."""
+        del handle
+        raise SandboxError("this sandbox driver does not support process observation")
 
     async def start(
         self,

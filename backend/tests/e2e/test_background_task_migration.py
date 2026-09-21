@@ -117,13 +117,14 @@ async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
             "running",
         )
         await db_session.commit()
-        await asyncio.to_thread(_migrate, "0430ad3006d8")
+        await asyncio.to_thread(_migrate, "head")
         restored = await db_session.get(SandboxCommand, command_id)
         restored_wake = await db_session.get(SandboxCommandWake, wake_id)
         assert restored is not None and restored_wake is not None
         assert restored.provider_ref == "original-process-handle"
         assert restored.log_cursor == "original-log-cursor"
         assert restored.task_id is None and restored.sandbox_instance_id is None
+        assert restored.start_token is None and restored.start_requested_at is None
         assert restored_wake.state == "delivered"
         assert restored_wake.delivery_run_id == "notification-run"
         assert restored_wake.delivery_steer_id == "original-input-id"

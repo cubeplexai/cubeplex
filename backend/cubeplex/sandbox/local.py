@@ -16,6 +16,7 @@ from cubeplex.sandbox.base import (
     ProcessHandle,
     ProcessSnapshot,
     Sandbox,
+    SandboxError,
 )
 
 
@@ -123,6 +124,17 @@ class LocalSandbox(Sandbox):
     def supports_background(self) -> bool:
         return True
 
+    async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
+        rec = self._bg.get(handle.provider_ref)
+        if rec is None:
+            raise SandboxError("local process reference is not available on this worker")
+        code = rec.proc.returncode
+        if code is None:
+            return ProcessSnapshot(status="running")
+        return ProcessSnapshot(
+            status="killed" if rec.killed and code < 0 else "exited", exit_code=code
+        )
+
     async def start(
         self,
         command: str,
@@ -154,42 +166,41 @@ class LocalSandbox(Sandbox):
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
         rec = self._bg.get(handle.provider_ref)
         if rec is None:
-            return ProcessSnapshot(status="killed", new_output="")
-        new_output = await rec.take()
+            raise SandboxError("local process reference is not available on this worker")
         code = rec.proc.returncode
-        if rec.killed and code is not None:
-            self._bg.pop(handle.provider_ref, None)
+        if code is not None and rec.pump_task is not None:
+            await rec.pump_task
+        new_output = await rec.take()
+        if rec.killed and code is not None and code < 0:
             return ProcessSnapshot(status="killed", exit_code=code, new_output=new_output)
         if code is not None:
-            self._bg.pop(handle.provider_ref, None)
             return ProcessSnapshot(status="exited", exit_code=code, new_output=new_output)
         return ProcessSnapshot(status="running", new_output=new_output)
 
     async def kill(self, handle: ProcessHandle) -> None:
-        rec = self._bg.pop(handle.provider_ref, None)
+        rec = self._bg.get(handle.provider_ref)
         if rec is None:
+            raise SandboxError("local process reference is not available on this worker")
+        if rec.proc.returncode is not None:
             return
-        rec.killed = True
-        if rec.pump_task is not None and not rec.pump_task.done():
-            rec.pump_task.cancel()
         pid = rec.proc.pid
         if pid is not None:
             try:
                 os.killpg(pid, signal.SIGKILL)
+                rec.killed = True
             except ProcessLookupError:
                 try:
                     rec.proc.kill()
+                    rec.killed = True
                 except ProcessLookupError:
                     pass
         else:
             try:
                 rec.proc.kill()
+                rec.killed = True
             except ProcessLookupError:
                 pass
-        try:
-            await rec.proc.wait()
-        except Exception:
-            pass
+        await rec.proc.wait()
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         for path, content in files:
