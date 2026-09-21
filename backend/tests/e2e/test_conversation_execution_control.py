@@ -320,11 +320,107 @@ async def test_lost_start_response_does_not_authorize_reexecution(
         now=NOW,
     )
     await db_session.commit()
+    await db_session.refresh(accepted.admission)
+    assert accepted.admission.run_started_at is None
     assert not await service(db_session).claim_run_start(
         admission_id=accepted.admission.id,
         attempt_id="retry-start",
         now=NOW,
     )
+
+
+async def test_worker_receipts_are_owned_and_do_not_reexecute_a_started_attempt(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    accepted = await service(db_session).admit_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="build"),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    admission_id = accepted.admission.id
+    assert await service(db_session).claim_run_start(
+        admission_id=admission_id, attempt_id="owner", now=NOW
+    )
+    await db_session.commit()
+    controller = service(db_session)
+    assert hasattr(controller, "record_run_started"), "worker start needs a separate receipt"
+    assert not await controller.record_run_started(
+        admission_id=admission_id, attempt_id="other", now=NOW
+    )
+    started_at = NOW + timedelta(seconds=2)
+    assert await controller.record_run_started(
+        admission_id=admission_id, attempt_id="owner", now=started_at
+    )
+    await db_session.commit()
+    assert not await controller.record_run_started(
+        admission_id=admission_id, attempt_id="owner", now=NOW + timedelta(seconds=3)
+    )
+    assert not await controller.record_run_finished(
+        admission_id=admission_id, attempt_id="other", now=NOW + timedelta(seconds=4)
+    )
+    await db_session.refresh(accepted.admission)
+    assert accepted.admission.run_start_requested_at == NOW
+    assert accepted.admission.run_started_at == started_at
+    assert accepted.admission.run_finished_at is None
+    await controller.close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=0,
+        now=NOW + timedelta(seconds=5),
+    )
+    finished_at = NOW + timedelta(seconds=6)
+    assert await controller.record_run_finished(
+        admission_id=admission_id, attempt_id="owner", now=finished_at
+    )
+    assert not await controller.record_run_finished(
+        admission_id=admission_id, attempt_id="owner", now=NOW + timedelta(seconds=7)
+    )
+    await db_session.commit()
+    await db_session.refresh(accepted.admission)
+    assert accepted.admission.run_finished_at == finished_at
+
+
+async def test_stop_between_start_request_and_worker_entry_revokes_execution(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    accepted = await service(db_session).admit_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="build"),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    assert await service(db_session).claim_run_start(
+        admission_id=accepted.admission.id, attempt_id="owner", now=NOW
+    )
+    await db_session.commit()
+    controller = service(db_session)
+    assert hasattr(controller, "record_run_started"), "worker entry must recheck Stop"
+    closed = await controller.close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=0,
+        now=NOW + timedelta(seconds=1),
+    )
+    await db_session.commit()
+    assert closed.cleanup_pending
+    with pytest.raises(ExecutionRevokedError):
+        await controller.record_run_started(
+            admission_id=accepted.admission.id, attempt_id="owner", now=NOW + timedelta(seconds=2)
+        )
+    await db_session.rollback()
+    await db_session.refresh(accepted.admission)
+    assert accepted.admission.run_started_at is None
 
 
 async def test_concurrent_retries_bind_one_run_and_one_model_snapshot(
