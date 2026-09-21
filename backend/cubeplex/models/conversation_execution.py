@@ -41,6 +41,9 @@ class ConversationExecutionAdmission(CubeplexBase, OrgScopedMixin, table=True):
         default=None, sa_column=Column(JSON, nullable=True)
     )
     run_start_token: str | None = Field(default=None, max_length=64)
+    run_start_requested_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
     run_started_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
