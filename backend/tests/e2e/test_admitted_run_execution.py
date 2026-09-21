@@ -146,6 +146,8 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
         "replaced_slot",
         "lost_slot",
         "foreign_pending",
+        "terminal_reply_lost",
+        "terminal_cancel",
     ],
 )
 async def test_model_runs_once_with_original_selection_after_default_changes_and_redis_expires(
@@ -267,6 +269,21 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         "admission_id": admitted.admission.id,
         "llm_snapshot": current,
     }
+    reply_lost = False
+    if scenario in ("terminal_reply_lost", "terminal_cancel"):
+        original_eval = run_manager._redis.eval
+
+        async def lose_terminal_reply(script: str, numkeys: int, *args: Any) -> Any:
+            nonlocal reply_lost
+            result = await original_eval(script, numkeys, *args)
+            if not reply_lost and "completed" in args:
+                reply_lost = True
+                if scenario == "terminal_cancel":
+                    raise asyncio.CancelledError("worker cancelled after terminal commit")
+                raise ConnectionError("terminal write committed, Redis response lost")
+            return result
+
+        monkeypatch.setattr(run_manager._redis, "eval", lose_terminal_reply)
     try:
         if scenario == "stale_slot":
             assert admitted.admission.run_id is not None
@@ -297,6 +314,16 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
             "lost_slot": "running",
         }.get(scenario, "completed")
         assert meta.status == expected_status, meta
+        if scenario in ("terminal_reply_lost", "terminal_cancel"):
+            assert reply_lost
+            assert (
+                await get_active_run(
+                    run_manager._redis,
+                    prefix=run_manager._key_prefix,
+                    conversation_id=reservation_context.conversation_id,
+                )
+                is None
+            )
         assert provider.call_count == 1
         if scenario == "foreign_pending":
             async with shared_checkpointer() as cp:
@@ -333,11 +360,22 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         ]
         if keys:
             await run_manager._redis.delete(*keys)
-        assert await run_manager.start_run(**kwargs) == run_id
+        unavailable = snapshot("next", available=("next",))
+        assert await run_manager.start_run(**{**kwargs, "llm_snapshot": unavailable}) == run_id
         assert not run_manager._tasks and provider.call_count == 1
         receipt = await db_session.get(ConversationExecutionAdmission, kwargs["admission_id"])
         assert receipt is not None
         assert (receipt.run_finished_at is None) == (scenario == "paused" or lost_ownership)
+        retried = await service(db_session).admit_user_message(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            namespace="web",
+            source_id=receipt.source_id.removeprefix("web:"),
+            intent=UserMessageIntent(content="one answer only"),
+            snapshot=unavailable,
+            now=datetime.now(UTC),
+        )
+        assert retried.admission.run_id == run_id and not retried.created
     finally:
         await run_manager.cancel_all()
         await cleanup_run_rows(db_session, reservation_context.conversation_id)
@@ -383,6 +421,7 @@ async def test_stop_before_worker_entry_finishes_cleanup_without_claiming_execut
         execution=RunExecutionBinding(
             admission_id=admitted.admission.id,
             attempt_id="queued-worker",
+            start_token="queued-worker",
             execution_generation=0,
             execution=admitted.execution,
         ),
@@ -495,7 +534,7 @@ async def test_admitted_start_cannot_cancel_another_runs_pending_question(
                 ),
                 run_id=admitted.admission.run_id,
                 admission_id=admitted.admission.id,
-                llm_snapshot=snapshot(),
+                llm_snapshot=snapshot("next", available=("next",)) if revoked else snapshot(),
                 cancel_pending_hitl=True,
             )
         except (ExecutionRevokedError, RuntimeError) as exc:

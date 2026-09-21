@@ -39,7 +39,7 @@ class ExecutionAuthorityMiddleware(Middleware):
                     session, org_id=self._org_id, workspace_id=self._workspace_id
                 ).require_run_authority(
                     admission_id=self._binding.admission_id,
-                    attempt_id=self._binding.attempt_id,
+                    attempt_id=self._binding.start_token,
                 )
         except (ExecutionRevokedError, LookupError) as exc:
             raise asyncio.CancelledError("execution authority was revoked") from exc

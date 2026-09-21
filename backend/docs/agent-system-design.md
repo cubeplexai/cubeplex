@@ -53,9 +53,27 @@ Startup recovery applies the same stale-heartbeat threshold as inline recovery a
 compares the observed heartbeat atomically before revoking an owner. Starting another
 replica alone must not cancel a live worker or stamp its checkpoint run complete.
 
+HITL answer/cancel entry points recognize the run's durable admission without
+accepting a replacement source identity. They check the original generation and
+both the responding participant's and original actor's current access, then continue
+under the original actor, model/reasoning snapshot and trigger. The Redis resume
+attempt gets a fresh claim token, while the durable initial start token and timestamps
+stay unchanged. Worker entry and model/tool boundaries recheck authority. A second
+HITL pause leaves the receipt unfinished; only owned teardown with no matching
+pending question records its end. Question, conversation and run must all match,
+even after Redis expires. Pre-cutover runs without an admission still follow the
+existing path and must be covered by the migration gate before activation.
+
+If a terminal Redis write commits but its response is lost, the owner reads back
+the terminal fact instead of overwriting it with an error or losing cleanup rights.
+Cancellation after terminal commit likewise preserves that outcome. Idempotent
+start retries that cannot execute return the original binding even if its model
+has since been removed; a genuinely unstarted input still validates availability.
+
 This is an integration step, not the lifecycle cutover: the public message, IM,
-scheduler, trigger, steering, and HITL-resume entrances still need their corresponding
-durable admission and authority wiring. Uncertain-start recovery also remains a
+scheduler, trigger and steering entrances still need their corresponding durable
+admission and authority wiring, and Stop must dispatch pending-question cleanup.
+Uncertain-start recovery also remains a
 cutover requirement. The existing entrances must not be treated
 as protected merely because this internal path is available. The new task coordinator
 stays inactive until all entrances and the data-migration gate are complete.
