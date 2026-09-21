@@ -169,6 +169,12 @@ trigger 的 202 受理还必须有持久的后续消费者，不能只依赖进�
 
 执行身份兼容规则同样适用于用户 steering。A 的 run（含后台续办 run）只能接收 A 的新增输入；B 的消息仍先持久受理，但排队等待 slot 释放后以 B 的当前权限启动后继 run，不能调用 A 已组装的 MCP／sandbox 凭据。身份不可可靠确认时不注入。数据库领取、准备缓冲、pub/sub 和 Session 提交都检查同一 actor 绑定，不能只在 HTTP 入口拦截；用户仍能撤回自己的未提交输入，Stop／删除仍可撤销旧批次。UI 区分“等待当前运行结束”和已经提交处理。
 
+HITL 的回答和审批也不是跨身份委托：只能由原 admission 的 actor 提交，并重新检查该 actor 当前权限。其他会话参与者可以看到待确认状态，但显示“等待发起者回答”，不能通过回答使原 actor 的凭据继续执行。拒绝发生在 resume claim 前，保留原问题和运行身份。按会话权限执行主 Stop 不属于回答／审批；它撤销并清理工作，不产生新的模型回合。
+
+topic 删除（归档）同样必须停止所属会话，而不是只隐藏入口。归档事务串行阻止新建会话／新受理，关闭已有会话批次并记录 run／HITL／task 的停止和通知取消。隐藏后后台仍按原 scope 清理，重启不丢意图，其他 topic 不受影响。
+
+IM connector 删除先停用并持久标记，与 webhook／队列入队及 worker claim 串行。未开始执行的交接取消；已有 admission、启动回执或 schedule／trigger handoff 未决时，保留 receipt、queue item 和来源绑定，不能由级联删除抹掉去重／核对证据。worker 在删除状态下只核对和清理，不重新执行旧交接；已执行的会话历史及无关工作不受影响。全部核对完成后才硬删 connector 及其交接记录，必要凭据仅保留给清理流程；删除进度可查询／重试。
+
 ### 5.3 等待预算、执行期限与资源期限分开
 
 execute 的配置与显式 timeout_seconds 共用技术上限 2_147_483_647 秒（有符号 32-bit 秒数），默认仍为 3600；这不是把默认一小时变成硬上限。配置加载、工具 schema 和受理服务均拒绝越界值，再计算 tz-aware deadline；计算仍保留日期溢出的防御检查，不把异常值静默钳制或当作无限期。monitor 的既有期限上限保持不变。
@@ -289,6 +295,7 @@ coordinator 不需要为每个 task 保留一个活数小时的等待协程。�
 - `pending_steers` 与用户 steering 实时事件只包含 `source=user` 的主动输入。`/steer`、`/steer/cancel` 只处理用户消息；source 由服务端入口确定，客户端不能通过自填 source 获得内部通知身份，保留内部 ID 的防伪校验。
 - 后台结果的产品状态来自源 wake 及 checkpoint 对账；一次投递尝试失败不是一条新的产品消息。同一 notice 换 run 重试、重新 claim 或 bootstrap 后仍是同一条事件，旧 failed／queued steering 不得重新进入用户列表。
 - 来源分类也约束个人记忆提炼：首条输入或本轮已提交追加输入含 background_task notice 时，不触发本轮自动个人记忆 reflection，避免将日志／自动结果当成用户偏好或纠正。普通纯用户输入的 reflection 保持原行为；不回写历史或修改 prompt 缓存前缀。本轮采用保守跳过混合轮次，不新增一套自动结果记忆系统。
+- 普通用户轮次的 reflection 是正常结束后的可选后处理，不为它保留 live run 或 active slot。它只接受原 attempt 正常完成及持久清理结束的证明，并在模型／工具边界重新检查原 actor、generation 和完成凭据；Stop、删除、失权或凭据丢失／替换后不再开始提炼工作。取消、失败、HITL 暂停或未清理完成不能授权它；正常结束本身不应误禁用已有自动记忆。已保存的记忆不因 Stop 回滚，失败的提炼不自动重放。
 - 自动 memory consolidation 同样排除后台来源：读取持久历史时，先按输入来源与 run 关联识别并排除含后台 notice 的整个轮次，再裁剪窗口及转成 role／text。仅跳过后台 run 的即时调度不够，后续普通用户 run 再次合并历史也必须使用相同过滤；旧通知按可靠 wake 关联分类，不靠正文猜测。窗口边界和缺失关联不能把孤立的后台回复误算为纯用户轮次，无法可靠分类的片段不用于自动记忆。无合格历史时不调用提炼模型、不写个人或 workspace memory，但按现有 cutoff／consumed 规则完成本次扫描，保留扫描期间新增 run 的计数，避免反复扫描同一批排除内容。正常纯用户历史的合并保持原行为，不回写 checkpoint。
 - UI 的折叠不改变投递。需要阻止后续处理时，停止源 task 或使用主 Stop，由服务端取消源事件和未提交输入；不提供“把内部通知恢复到输入框”或仅取消某次内部 steering 的入口。
 
@@ -382,7 +389,7 @@ poll 提供候选 cursor，确认日志数据写入后才持久 ack。cleanup-on
 - run 正常结束后聊天不再显示模型仍在思考，task 卡片继续显示真实后台状态；未完成 Todo 不显示成功。主 Stop 后未完成 Todo 也不伪造完成，旧等待声明失效。
 - 删除上一版新增 run waiting 事件的要求；任务状态以数据库快照更新，旧 revision 不覆盖新事实，不重写历史 tool result。
 - 原 run 的 SSE 结束后仍须发现后续 automated run。页面可见且 `background_summary` 任一 has_* 为真时，做有界低频快照和 conversation bootstrap 刷新；发现新 active run 后接入现有 run SSE。即使新 run 在两次检查间已完成，也通过历史刷新显示回复。主 Stop 的可用性依据 can_stop 与 active run／HITL 控制状态，不从本页任务／事件是否为空推断。
-- 不在 task 刚变终态或某一页事件为空时立即停掉所有刷新：要确认权威 summary 无剩余工作并完成最后一次历史／active-run 对账。主 Stop 后也要观察旧批次的清理，但只读刷新不得启动模型。冷刷新、重连或回到页面时重新 bootstrap；has_pending=true 时展示待处理入口并可分页查找、停止单项，不需要先把全部历史加载到内存。翻页期间源事件可能送达或新增，按 notice ID／revision 合并并刷新 summary，不能以最后一页为空代替全局对账；未知／查询失败不当作全 false。后台页降频，不依赖旧 SSE 长连接。
+- 不在 task 刚变终态或某一页事件为空时立即停掉后台工作刷新：要确认权威 summary 无剩余工作并完成最后一次历史／active-run 对账。之后，可见会话仍每 30 秒执行一次 bootstrap 基线发现，覆盖未来 schedule／trigger 才产生的新 run 和已经完成的回复；summary 全 false 不是永远不会有自动工作的证明。隐藏页面暂停基线，重新可见立即 bootstrap；每会话最多一个在途请求，失败指数退避至最多 120 秒。主 Stop 后也要观察旧批次的清理，但只读刷新不得启动模型。冷刷新、重连或回到页面时重新 bootstrap；has_pending=true 时展示待处理入口并可分页查找、停止单项，不需要先把全部历史加载到内存。翻页期间源事件可能送达或新增，按 notice ID／revision 合并并刷新 summary，不能以最后一页为空代替全局对账；未知／查询失败不当作全 false，不依赖旧 SSE 长连接。
 - 用户 steering 与后台事件都从服务端事实重建；旧客户端缓存中的内部 steering 按权威快照移除，不转成可编辑草稿。源 notice 已送达／取消时，旧投递尝试不能在刷新后复活。
 - 中英文文案同步、复用现有组件与主题；实施时在同一 PR 更新 `docs/site/docs/guides/conversations/sandboxes.md`。
 
@@ -457,5 +464,11 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 43. B 的用户 steering 到达 A 的自动 run 时不进入 A 的 Session，也不借其凭据执行；释放 slot 后只以 B 的当前权限执行一次，准备期／HITL 排队／pub-sub 不能绕过身份检查。
 44. workspace 移除／离开及 org 成员撤销与活动命令竞争时立即撤销新执行权、保留清理证据并停止原工作；重启可继续清理，重新加入不复活旧工作，其他成员和其他 org 不受影响。有效成员条件覆盖所有直接读取成员行的授权入口，包括 IM 身份识别和组织／workspace 分享的读取、创建；cleanup_pending 期间成员行仍在也不授予权限，不能只修改常规鉴权依赖。
 45. 配置和显式超时同时覆盖默认、合法较长值、技术上限及上限加一；超大值在配置加载／参数验证时拒绝，不产生半条 reservation 或未处理的日期溢出。
+
+46. topic 归档与新建会话／首次受理／reservation 竞争时，停止范围唯一且持久；隐藏后和重启后仍清理所属会话，不影响其他 topic。
+47. IM connector 删除与入队／claim／交接回执丢失竞争时，不丢 receipt／queue／来源证明，不重复执行；未决清理可恢复，不提前硬删。
+48. 可见页面已经完成空 summary 对账后，仍能发现后来触发的 schedule／trigger run 及其回复；隐藏恢复、查询之间已完成和请求失败退避均覆盖。
+49. 其他参与者不能回答／批准原 actor 的 HITL 后借其凭据执行；原发起者失权同样拒绝。主 Stop 仍按会话控制权限清理，不走回答路径。
+50. 普通用户 run 释放 slot 并正常结束后仍可提炼记忆；Stop 在提炼首个模型调用前或模型返回前发生时，不开始新调用／记忆工具。旧批次重开、完成凭据替换或消失、会话删除均不得使旧提炼恢复写入。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。
