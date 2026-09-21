@@ -12,6 +12,7 @@ from loguru import logger
 from PIL import Image, UnidentifiedImageError
 
 from cubeplex.api.exceptions import (
+    AttachmentAlreadyAttachedError,
     AttachmentInvalidImageError,
     AttachmentMimeRejectedError,
     AttachmentQuotaExceededError,
@@ -277,27 +278,38 @@ class AttachmentService:
         return await self.repo.add(row)
 
     async def delete_pending(self, *, conversation_id: str, attachment_id: str) -> None:
-        """Delete a pending attachment row + ObjectStore objects.
-
-        Caller validates state (must be pending) before calling this.
-        """
-        row = await self.repo.get_in_conversation(
+        """Commit deletion authority before touching objects; failures remain recoverable."""
+        row = await self.repo.claim_pending_deletion(
             conversation_id=conversation_id,
             attachment_id=attachment_id,
         )
         if row is None:
+            if (
+                await self.repo.get_in_conversation(
+                    conversation_id=conversation_id, attachment_id=attachment_id
+                )
+                is not None
+            ):
+                raise AttachmentAlreadyAttachedError(attachment_id)
             return
+        await self.repo.session.commit()
+        await self._finish_pending_deletion(row)
+
+    async def _finish_pending_deletion(self, row: Attachment) -> bool:
         try:
             await self.objectstore.delete_file(row.object_key)
             if row.thumbnail_object_key:
                 await self.objectstore.delete_file(row.thumbnail_object_key)
         except Exception as exc:  # noqa: BLE001 — non-fatal
             logger.warning("ObjectStore delete failed for {}: {}", row.id, exc)
-        await self.repo.delete(row.id)
+            return False
+        return await self.repo.delete(row.id)
 
     async def delete_for_conversation(self, *, conversation_id: str) -> None:
         """Cascade-delete every attachment row + ObjectStore object for a conversation."""
-        rows = await self.repo.list_by_conversation(conversation_id=conversation_id)
+        rows = await self.repo.list_by_conversation(
+            conversation_id=conversation_id, include_deleting=True
+        )
         for row in rows:
             try:
                 await self.objectstore.delete_file(row.object_key)
@@ -328,16 +340,12 @@ class AttachmentService:
 
 
 async def cleanup_orphan_attachments() -> int:
-    """Sweep all orgs/workspaces and physically delete pending attachments older than TTL.
-
-    Returns the number of rows removed. Safe to call concurrently — DB rows
-    are deleted under the same scope each time and ObjectStore deletes are
-    idempotent.
-    """
+    """Claim expired pending files, then retry physical deletion without losing evidence."""
     from datetime import UTC as _UTC
     from datetime import datetime as _dt
     from datetime import timedelta as _td
 
+    from sqlalchemy import and_, or_
     from sqlalchemy import select as sa_select
 
     from cubeplex.db.engine import async_session_maker
@@ -347,28 +355,38 @@ async def cleanup_orphan_attachments() -> int:
     objectstore = get_objectstore_client()
     removed = 0
 
-    async with async_session_maker() as session:
-        cutoff = _dt.now(_UTC) - _td(seconds=ttl)
-        stmt = sa_select(_Attachment).where(
-            _Attachment.status == "pending",  # type: ignore[arg-type]
-            _Attachment.created_at < cutoff,  # type: ignore[arg-type]
-        )
-        result = await session.execute(stmt)
-        rows = list(result.scalars().all())
-        for row in rows:
-            try:
-                await objectstore.delete_file(row.object_key)
-                if row.thumbnail_object_key:
-                    await objectstore.delete_file(row.thumbnail_object_key)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "orphan cleanup: ObjectStore delete failed for {}: {}",
-                    row.id,
-                    exc,
+    cutoff = _dt.now(_UTC) - _td(seconds=ttl)
+    table = _Attachment.__table__  # type: ignore[attr-defined]
+    async with async_session_maker() as scan:
+        candidates = (
+            await scan.execute(
+                sa_select(
+                    table.c.id, table.c.org_id, table.c.workspace_id, table.c.conversation_id
+                ).where(
+                    or_(
+                        table.c.status == "deleting",
+                        and_(table.c.status == "pending", table.c.created_at < cutoff),
+                    )
                 )
-            await session.delete(row)
-            removed += 1
-        await session.commit()
+            )
+        ).all()
+    for candidate in candidates:
+        async with async_session_maker() as session:
+            repo = AttachmentRepository(
+                session, org_id=candidate.org_id, workspace_id=candidate.workspace_id
+            )
+            row = await repo.claim_pending_deletion(
+                conversation_id=candidate.conversation_id,
+                attachment_id=candidate.id,
+                older_than=cutoff,
+            )
+            if row is None:
+                continue
+            await session.commit()
+            if await AttachmentService(repo=repo, objectstore=objectstore)._finish_pending_deletion(
+                row
+            ):
+                removed += 1
     if removed:
         logger.info("Cleaned {} orphan attachment(s)", removed)
     return removed
