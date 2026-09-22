@@ -245,7 +245,10 @@ async def test_soft_delete_removes_queued_text(
         workspace_id=DEFAULT_WS_ID,
         user_id=user.id,
     )
-    assert await conversation_repo.delete_conversation(conversation.id) is True
+    assert (
+        await conversation_repo.delete_conversation(conversation.id, now=datetime.now(UTC)) is True
+    )
+    await db_session.commit()
     assert await steering_repo.count_for_conversation(conversation.id) == 0
 
 
