@@ -89,6 +89,7 @@ class BackgroundTaskCoordinator:
                             and_(
                                 col(BackgroundTask.backgrounded_at).is_(None),
                                 col(BackgroundTask.foreground_result_delivered_at).is_(None),
+                                col(BackgroundTask.notifications_cancelled_at).is_(None),
                             ),
                         ),
                     )
@@ -214,6 +215,7 @@ class BackgroundTaskCoordinator:
                 recovering_task is not None
                 and recovering_task.backgrounded_at is None
                 and recovering_task.foreground_result_delivered_at is None
+                and recovering_task.notifications_cancelled_at is None
             ):
                 # The host must fence the original run attempt and inspect its checkpoint.
                 async with asyncio.timeout(10):
