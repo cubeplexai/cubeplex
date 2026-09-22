@@ -117,6 +117,14 @@
 
 C2 的边界是准确停止用户选择的对象：聊天 Stop 只停当前 run 和未交接前台执行，独立后台任务保留；全部停止才关闭会话批次。失败／重启不能复活被取消的目标，新的合法独立工作仍可继续。它不是账号删除、共享资源或全站授权重构。
 
+对应 spec 的阅读顺序：先看 [5.2 的按钮行为与例子](../specs/2026-09-20-command-lifecycle-design.md#stop-actions)，再按实施内容查阅附录：
+
+- 停止与恢复：[A.1 聊天 Stop](../specs/2026-09-20-command-lifecycle-design.md#stop-current-run)、[A.2 全部停止](../specs/2026-09-20-command-lifecycle-design.md#stop-all-generation)、[A.3 单任务与回执](../specs/2026-09-20-command-lifecycle-design.md#stop-task-receipt)。
+- 受理与自动来源：[A.4 消息重试](../specs/2026-09-20-command-lifecycle-design.md#request-admission)、[A.5 调度与恢复](../specs/2026-09-20-command-lifecycle-design.md#automatic-sources)。
+- 已有控制入口：[A.6 删除与撤权](../specs/2026-09-20-command-lifecycle-design.md#delete-and-revoke)、[A.7 执行身份](../specs/2026-09-20-command-lifecycle-design.md#execution-identity)。
+
+这次文档重组不改变 C2 的范围、接口或验收要求。
+
 ### Files
 
 - `services/conversation_execution.py`、C1 的 admission model／repository、`middleware/execution_authority.py`：统一受理、目标 run 停止、批次关闭及原执行资格检查；在 ConversationExecutionAdmission 上增加 run_stop_requested_at，与 admission 的整体失权／撤销分开；复用原 run 启动回执的权威关联，不另建 run 状态表。
