@@ -43,6 +43,12 @@ class ExecutionRevokedError(ValueError):
     """The original admission no longer authorizes execution."""
 
 
+RunTerminalStatus = Literal["completed", "cancelled", "errored", "failed"]
+RUN_TERMINAL_STATUSES = frozenset[RunTerminalStatus](
+    ("completed", "cancelled", "errored", "failed")
+)
+
+
 class UserMessageIntent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -437,9 +443,50 @@ class ConversationExecutionService:
             or admission.run_start_token != attempt_id
             or admission.run_finished_at is not None
             or (admission.run_started_at is not None) != worker_started
+            or (worker_started and admission.run_terminal_status is None)
         ):
             return False
+        if not worker_started:
+            admission.run_terminal_status = "cancelled"
+            admission.run_terminal_at = admission.run_terminal_at or now
         admission.run_finished_at = now
+        await self.session.flush()
+        return True
+
+    async def record_run_terminal_outcome(
+        self,
+        *,
+        admission_id: str,
+        attempt_id: str,
+        status: RunTerminalStatus,
+        now: datetime,
+    ) -> bool:
+        """Persist a worker-owned result before Redis teardown can erase it."""
+        require_aware(now)
+        if status not in RUN_TERMINAL_STATUSES:
+            raise ValueError("run terminal outcome is not durable")
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            admission is None
+            or not attempt_id
+            or admission.run_start_token != attempt_id
+            or admission.run_started_at is None
+            or admission.run_finished_at is not None
+        ):
+            return False
+        if admission.run_terminal_status is not None:
+            return admission.run_terminal_status == status
+        admission.run_terminal_status = status
+        admission.run_terminal_at = now
         await self.session.flush()
         return True
 
@@ -466,6 +513,8 @@ class ConversationExecutionService:
         ):
             return False
         admission.run_finished_at = now
+        admission.run_terminal_status = "cancelled"
+        admission.run_terminal_at = now
         await self.session.flush()
         return True
 
