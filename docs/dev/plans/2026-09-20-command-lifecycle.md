@@ -1,6 +1,6 @@
 # 后台任务生命周期实施计划
 
-- 状态：实施中，遵循已确认的 [spec](../specs/2026-09-20-command-lifecycle-design.md) 和已收缩的生命周期范围。#635 已补齐 C1 的一次性 monitor 与公共结果就绪契约；#636 已接通明确目标的停止控制，并补齐持久 HITL、问题已清除后的中断、终态收尾失败及丢失 live Stop 信号的恢复。上述增量已通过回归及本地 Codex 复审；启动未决和“checkpoint 已完成但 Redis 终态丢失”仍保持待对账，不代表整个 C2 已完成。新 coordinator 仍未启用，部署与线上数据操作需独立授权。
+- 状态：实施中，遵循已确认的 [spec](../specs/2026-09-20-command-lifecycle-design.md) 和已收缩的生命周期范围。#635 已补齐 C1 的一次性 monitor 与公共结果就绪契约；#636 已接通明确目标的停止控制，并补齐 worker 入口前、持久 HITL、问题已清除后的中断、终态收尾失败及丢失 live Stop 信号的恢复。上述增量已通过回归及本地 Codex 复审；“checkpoint 已完成但 Redis 终态丢失”仍保持待对账，不代表整个 C2 已完成。新 coordinator 仍未启用，部署与线上数据操作需独立授权。
 - 日期：2026-09-20；更新：2026-09-22（America/Phoenix）。保留原路径供已有链接引用。
 - Goal：让 command／monitor 跨 run 运行、可恢复观察并可靠停止，结果按 conversation 投递，用户能区分模型运行、后台执行与通知处理。
 - Architecture：公共 task service 保存生命周期，command 适配器处理原实例、进程和日志，并将一次性 monitor 的最终结果交给公共事件通道。conversation 控制服务区分按 run_id 的聊天 Stop 与按 generation 的全部停止；已后台交接的工作不继承发起 run 的单独停止。通知按 conversation 内部输入／新 run 投递，前台输出仍走 on_update／SSE；CubeLoop 仅增加 Todo 收尾扩展，不保持小时级 Session。
@@ -49,8 +49,8 @@
 | 本轮已补齐 | #635：一次性 monitor、冻结最终结果、公共 pending／ready／unavailable；本地审核发现的子任务旧缓存竞态已复现并修复 | C1 |
 | 本轮已补齐的控制基础 | #636 已同步 C1，拆出 run Stop、封住新 reservation／迟到 handoff、保留已交接任务及结果；用户输入按来源／目标取消；已取消前台任务清理后不再反复补交接 | C2a，尚非完整交付 |
 | 本轮已补齐的接口 | `cancel(run_id)`／`stop-all(execution_generation)` 提交后返回目标回执；丢失控制信号仍保留停止意图；重复 Stop 不打断当前 worker 的收尾 | C2a，仍不能单独启用 |
-| 本轮已补齐的恢复 | Stop／全部停止可重发给仍存活的 owner；持久 HITL、问题已清除后的中断和已知 Redis 终态可在 worker 重启、记录过期、清理失败或租约到期后继续清理。完成回执只在 slot 释放和事件过期均已确认后写入，不重新调用模型 | C2a，已知结果分支 |
-| 下一步接入 | 对账启动未决状态；对“checkpoint 已完成但 Redis 终态丢失”保守保留并确定可靠结果来源；随后接通真实输入来源写入和前端调用 | C2a，之后 C2b、C5 |
+| 本轮已补齐的恢复 | Stop／全部停止可重发给仍存活的 owner；未进入 worker、持久 HITL、问题已清除后的中断和已知 Redis 终态可在 worker 重启、记录过期、清理失败或租约到期后继续清理。完成回执只在 slot 释放和事件过期均已确认后写入，不重新调用模型 | C2a，已有可靠事实的分支 |
+| 下一步接入 | 对“checkpoint 已完成但 Redis 终态丢失”保守保留并增加可靠结果来源；随后接通真实输入来源写入和前端调用 | C2a，之后 C2b、C5 |
 | 尚未接通或完成 | Web／IM／steering／schedule／trigger 入口、上述未知状态对账、最小删除挂接、结果投递、工具交接、UI 与日志收尾 | C2a–C2d、C3–C6 |
 | 上游已有提交，宿主仍待集成 | CubeLoop #231 的 Todo 扩展；确认发布版本后接入依赖与宿主校验 | R、C4 |
 | 尚未统一切换 | 数据回填、部署启动门槛、最终结构收缩与完整链路验证 | C7 |
@@ -537,7 +537,7 @@ C7 验收要分别给出“切换准备已验证”和“实际部署状态”�
 - #635（`6f3dcc7e2`）交付 C1 运行时的原实例接管、owner 隔离、停止事实、monitor 限流和期限恢复，CI 通过。新 coordinator 尚未注册到应用，不代表生产入口已切换；宿主交接和日志收尾分别继续由 C4、C6 完成。
 - CubeLoop #231（`b488ab8584`）交付 R 的等待校验、输入失效、HITL 审批来源和 extra 持久化，CI 通过；尚未合并／发布，CubePlex 依赖与宿主校验尚未接入。
 - #636 是 C2 的增量 draft，当前提交 `b8d59599a`。它从 `c5c3266f8` 的用户请求身份、设置快照、附件保护、批次关闭、启动／退出回执、执行资格和记忆事务保护继续补齐明确目标的停止接口及已知结果分支的持久恢复。HITL 回答仅接受原 actor；正常结束证明、清理所有权和后处理资格仍彼此分开。各提交的新增证据见下方记录，中间结果不作为统一切换依据。
-- C2 仍须接通 Web／IM／steering／schedule／trigger 的受理入口、删除／撤权清理、自动来源快照及恢复，并对账启动回执未决以及 checkpoint 已完成但 Redis 终态丢失的状态。单个已知结果分支可无模型停止，不等于两种停止协议已完整落地。旧入口创建的无 admission run 仍走切换前路径；非原 actor 的明确错误展示由 C5 配套。C3–C6、依赖集成、数据回填及统一切换也未完成；上述测试不是原始六项问题的全链路验收。
+- C2 仍须接通 Web／IM／steering／schedule／trigger 的受理入口、删除／撤权清理、自动来源快照及恢复，并为 checkpoint 已完成但 Redis 终态丢失的状态增加可靠结果来源。单个已有可靠事实的分支可无模型停止，不等于两种停止协议已完整落地。旧入口创建的无 admission run 仍走切换前路径；非原 actor 的明确错误展示由 C5 配套。C3–C6、依赖集成、数据回填及统一切换也未完成；上述测试不是原始六项问题的全链路验收。
 
 以上 PR 均不包含部署或线上数据切换授权。分 PR 审核不等于中间版本可独立启用。
 
@@ -558,6 +558,7 @@ C7 验收要分别给出“切换准备已验证”和“实际部署状态”�
 - `69ac1f833` 增加持久停止意图的有界分页扫描，应用关闭时先停扫描再 drain。暂停分支在 Redis 过期、原 actor 失去资格、清理失败及租约到期后恢复；不重启模型，不修改新问题、后来 run 或已知终态。四个暂停恢复用例先失败；修复后恢复／控制相关 41 项、完整 run／HITL／停止 API／旧恢复模块 70 项通过，严格 mypy 3 个源文件和 pre-push 后端检查通过。commit／push 后在同一本地会话 R5 复审，无可操作发现。另有下一增量的三个故障用例已复现：问题清除后恢复漏扫，或 slot 未释放却提前返回清理完成；它们尚未修复，不计入上述通过结果。
 - `c48a15eea` 修复问题已清除或终态已写入、但 slot 释放失败后的恢复。恢复只在 matching completed checkpoint 和剩余 Redis 终态证据同时存在时接管，以 cleanup-only claim 清理 checkpoint、steering、slot 和事件 TTL；不重放模型，也不凭 checkpoint 猜测结果。终态清理故障注入 5 项、恢复／归属／claim 回归 42 项、final claim 单测 14 项及 admitted run／HITL 46 项通过；pre-push 通过。R6 随后发现失去清理 token 后仍可能提前写完成回执，因此该提交不单独作为最终证明。
 - `b8d59599a` 将 slot 释放及事件过期的所有权结果返回给调用方；prompt、respond 和 paused cleanup 只有在两者均确认后才写 `run_finished_at`。历史终态回退不能绕过失败的清理租约。恢复扫描还会先向 fresh running owner 重发持久 Stop，再决定是否需要接管。所有权替换／租约失败 6 项和本地／远端丢失 Stop 信号 4 项先失败后通过；既有停止、恢复、事件归属和 HITL 回归 61 项，完整 admitted run／HITL 46 项，ruff／format／mypy 及 pre-push 后端检查通过。同一本地会话 R7 确认 R6 HIGH 已关闭，范围内无可操作发现。
-- 以上证明 C2a 的持久控制、前台任务清理、停止 HTTP，以及持久暂停与有明确结果证据的终态清理恢复增量。启动未决和缺失终态证据的 completed checkpoint 仍保守保持待对账；实际输入来源写入、前端稳定目标调用、C2b–C2d、C3–C7 及 R 的宿主集成仍未完成。未修改用户确认的 spec 范围，未触发 GitHub Codex 审核。
+- `5e879c7d1` 处理 Stop 已提交但 worker 尚未进入的启动未决状态。`run_started_at` 为空且 Stop／撤销已持久化时，原 worker 已不能越过同一 admission／conversation 锁取得模型／工具执行权；恢复可 fenced 清理仍在或已过期的 Redis 状态，且不创建 CubeLoop 执行。两种停止、是否已有 start token、Redis 在／不在、后来 run 和迟到 worker 共 10 项通过；无 token 回执权限 1 项、相关组合回归 80 项、事件归属／Stop 20 项及完整 admitted run／HITL 46 项通过，ruff／format／mypy 和 pre-push 后端检查通过。本地 R8 确认该证明及竞态处理无可操作问题。
+- 以上证明 C2a 的持久控制、前台任务清理、停止 HTTP，以及 worker 入口前、持久暂停与有明确结果证据的终态清理恢复增量。缺失终态证据的 completed checkpoint 仍保守保持待对账；实际输入来源写入、前端稳定目标调用、C2b–C2d、C3–C7 及 R 的宿主集成仍未完成。未修改用户确认的 spec 范围，未触发 GitHub Codex 审核。
 
 本次实施不重开此前移除的通用删除协调与跨系统治理。#635 的旧 monitor 限流仅保留为历史记录；新一次性契约的 C1 证据如上。C2 继续接通控制入口与持久恢复，C3–C5 接通交接、通知和 UI，C6/C7 完成日志联调与切换门槛后才能启用。沿用既有原实例与记忆事务保护，不为这两项产品变化扩展其他子系统。
