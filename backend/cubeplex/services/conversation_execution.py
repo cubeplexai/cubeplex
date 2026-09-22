@@ -77,6 +77,15 @@ class ResolvedExecution(BaseModel):
         )
 
 
+class DirectExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["skill_install"]
+    request_content: str
+    content: str
+    timestamp: datetime
+
+
 @dataclass(frozen=True)
 class RunExecutionBinding:
     admission_id: str
@@ -90,6 +99,13 @@ class RunExecutionBinding:
 class AdmittedExecution:
     admission: ConversationExecutionAdmission
     execution: ResolvedExecution
+    created: bool
+
+
+@dataclass(frozen=True)
+class AdmittedDirectExecution:
+    admission: ConversationExecutionAdmission
+    result: DirectExecutionResult | None
     created: bool
 
 
@@ -135,6 +151,7 @@ class ConversationExecutionService:
             or admission.actor_user_id != actor_user_id
             or admission.run_id != run_id
             or admission.source_kind != "user_message"
+            or admission.execution_kind != "run"
             or admission.request_fingerprint != self._fingerprint(intent)
             or admission.resolved_execution is None
         ):
@@ -376,11 +393,18 @@ class ConversationExecutionService:
                 }
             )
         )
+        direct_pending = any(
+            admission.execution_kind != "run"
+            and admission.direct_started_at is not None
+            and admission.direct_result is None
+            for admission in admissions
+        )
         cleanup_pending = (
             inputs_pending
             or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
             or any(notice.state in ("pending", "claimed") for notice in notices)
             or bool(run_ids)
+            or direct_pending
         )
         return ClosedExecution(execution_generation, True, cleanup_pending, run_ids)
 
@@ -588,6 +612,7 @@ class ConversationExecutionService:
             if (
                 previous.conversation_id != conversation_id
                 or previous.actor_user_id != actor_user_id
+                or previous.execution_kind != "run"
                 or previous.request_fingerprint != fingerprint
                 or previous.resolved_execution is None
                 or previous.run_id is None
@@ -620,6 +645,7 @@ class ConversationExecutionService:
             source_kind="user_message",
             source_id=f"{namespace}:{source_id}",
             execution_generation=conversation.execution_generation,
+            execution_kind="run",
             request_fingerprint=fingerprint,
             resolved_execution=execution.model_dump(mode="json"),
             run_id=str(uuid4()),
@@ -633,6 +659,162 @@ class ConversationExecutionService:
         self.session.add(admission)
         await self.session.flush()
         return AdmittedExecution(admission, execution, True)
+
+    async def admit_direct_user_message(
+        self,
+        *,
+        conversation_id: str,
+        actor_user_id: str,
+        namespace: Literal["web", "steer", "im"],
+        source_id: str,
+        intent: UserMessageIntent,
+        operation: Literal["skill_install"],
+        now: datetime,
+    ) -> AdmittedDirectExecution:
+        require_aware(now)
+        if namespace not in ("web", "steer", "im") or not 0 < len(source_id) <= 200:
+            raise ValueError("a user input requires a namespaced stable source ID")
+        conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        fingerprint = self._fingerprint(intent)
+        repository = ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        )
+        previous = await repository.get_source(
+            source_kind="user_message", source_id=f"{namespace}:{source_id}"
+        )
+        if previous is not None:
+            if (
+                previous.conversation_id != conversation_id
+                or previous.actor_user_id != actor_user_id
+                or previous.execution_kind != operation
+                or previous.request_fingerprint != fingerprint
+                or previous.run_id is not None
+            ):
+                raise ExecutionConflictError(
+                    "source is already bound to different or unproven work"
+                )
+            result = (
+                DirectExecutionResult.model_validate(previous.direct_result)
+                if previous.direct_result is not None
+                else None
+            )
+            return AdmittedDirectExecution(previous, result, False)
+
+        if conversation.execution_closed_at is not None:
+            conversation.execution_generation += 1
+            conversation.execution_closed_at = None
+        admission = ConversationExecutionAdmission(
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            source_kind="user_message",
+            source_id=f"{namespace}:{source_id}",
+            execution_generation=conversation.execution_generation,
+            execution_kind=operation,
+            request_fingerprint=fingerprint,
+            created_at=now,
+            updated_at=now,
+        )
+        conversation.has_messages = True
+        conversation.updated_at = now
+        self.session.add(admission)
+        await self.session.flush()
+        return AdmittedDirectExecution(admission, None, True)
+
+    async def claim_direct_execution(
+        self,
+        *,
+        admission_id: str,
+        conversation_id: str,
+        actor_user_id: str,
+        now: datetime,
+    ) -> None:
+        require_aware(now)
+        conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        admission = await self.session.get(
+            ConversationExecutionAdmission,
+            admission_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
+        if (
+            admission is None
+            or admission.conversation_id != conversation_id
+            or admission.actor_user_id != actor_user_id
+            or admission.execution_kind != "skill_install"
+            or admission.direct_result is not None
+        ):
+            raise ExecutionConflictError("direct execution does not match its admission")
+        if admission.direct_started_at is not None:
+            raise ExecutionConflictError("direct execution outcome is pending reconciliation")
+        if (
+            admission.revoked_at is not None
+            or conversation.execution_closed_at is not None
+            or conversation.execution_generation != admission.execution_generation
+        ):
+            raise ExecutionRevokedError("original admission has been revoked")
+        admission.direct_started_at = now
+        admission.updated_at = now
+        await self.session.flush()
+
+    async def finish_direct_execution(
+        self,
+        *,
+        admission_id: str,
+        result: DirectExecutionResult,
+        now: datetime,
+    ) -> None:
+        require_aware(now)
+        admission = await self.session.get(
+            ConversationExecutionAdmission,
+            admission_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
+        if (
+            admission is None
+            or admission.execution_kind != result.kind
+            or admission.direct_started_at is None
+        ):
+            raise ExecutionConflictError("direct execution has no matching start")
+        if admission.direct_result is not None:
+            if DirectExecutionResult.model_validate(admission.direct_result) != result:
+                raise ExecutionConflictError("direct execution already has a different result")
+            return
+        admission.direct_result = result.model_dump(mode="json")
+        admission.updated_at = now
+        await self.session.flush()
+
+    async def mark_direct_checkpoint_committed(self, *, admission_id: str, now: datetime) -> None:
+        require_aware(now)
+        admission = await self.session.get(
+            ConversationExecutionAdmission,
+            admission_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
+        if admission is None or admission.direct_result is None:
+            raise ExecutionConflictError("direct execution has no durable result")
+        admission.checkpoint_committed_at = admission.checkpoint_committed_at or now
+        admission.updated_at = now
+        await self.session.flush()
+
+    async def lock_direct_checkpoint_result(
+        self, *, admission_id: str
+    ) -> tuple[DirectExecutionResult, bool]:
+        admission = await self.session.get(
+            ConversationExecutionAdmission,
+            admission_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
+        if admission is None or admission.direct_result is None:
+            raise ExecutionConflictError("direct execution has no durable result")
+        return (
+            DirectExecutionResult.model_validate(admission.direct_result),
+            admission.checkpoint_committed_at is not None,
+        )
 
     @staticmethod
     def _validate_models(execution: ResolvedExecution, snapshot: LLMSnapshot) -> None:

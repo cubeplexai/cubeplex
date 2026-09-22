@@ -78,13 +78,15 @@ Cancellation after terminal commit likewise preserves that outcome. Idempotent
 start retries that cannot execute return the original binding even if its model
 has since been removed; a genuinely unstarted input still validates availability.
 
-This is an integration step, not the lifecycle cutover. The ordinary Web model-run
-entrance now creates this admission before calling RunManager and reuses the bound run
-on retry. The install shortcut, IM, scheduler, trigger, and steering entrances still
-need their corresponding durable admission and authority wiring. Those entrances must
-not be treated as protected merely because the model-run path is available. The new
-task coordinator stays inactive until all entrances and the data-migration gate are
-complete.
+This is an integration step, not the lifecycle cutover. The Web model-run entrance now
+creates this admission before calling RunManager and reuses the bound run on retry. The
+Web install shortcut uses the same source identity but records a direct-execution result:
+the installation and result commit together, and stable checkpoint message IDs let a
+retry repair a lost checkpoint acknowledgement without installing or appending twice.
+IM, scheduler, trigger, and steering entrances still need their corresponding durable
+admission and authority wiring. Those entrances must not be treated as protected merely
+because the Web paths are available. The new task coordinator stays inactive until all
+entrances and the data-migration gate are complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
 model. For admitted work it durably stops the named run, then claims

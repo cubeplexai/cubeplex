@@ -4,7 +4,16 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, BigInteger, CheckConstraint, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
@@ -36,6 +45,10 @@ class ConversationExecutionAdmission(CubeplexBase, OrgScopedMixin, table=True):
     source_id: str = Field(max_length=255)
     execution_generation: int = Field(sa_column=Column(BigInteger, nullable=False))
     run_id: str | None = Field(default=None, max_length=64)
+    execution_kind: str = Field(
+        default="run",
+        sa_column=Column(String(32), nullable=False, server_default="run"),
+    )
     request_fingerprint: str | None = Field(default=None, max_length=64)
     resolved_execution: dict[str, Any] | None = Field(
         default=None, sa_column=Column(JSON, nullable=True)
@@ -55,6 +68,15 @@ class ConversationExecutionAdmission(CubeplexBase, OrgScopedMixin, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     run_stop_requested_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    direct_started_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    direct_result: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    checkpoint_committed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     revoked_at: datetime | None = Field(

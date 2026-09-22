@@ -355,6 +355,7 @@ class SkillPublishService:
         workspace_id: str | None = None,
         imported_from_registry_id: str | None = None,
         imported_from_source_ref: str | None = None,
+        commit: bool = True,
     ) -> SkillVersion:
         if "SKILL.md" not in files:
             logger.warning(
@@ -421,10 +422,15 @@ class SkillPublishService:
                 current_version=fm.version,
                 imported_from_registry_id=imported_from_registry_id,
                 imported_from_source_ref=imported_from_source_ref,
+                commit=commit,
             )
         else:
             await skills.update_current_version(
-                existing_skill.id, fm.version, fm.description, fm.keywords
+                existing_skill.id,
+                fm.version,
+                fm.description,
+                fm.keywords,
+                commit=commit,
             )
             skill = existing_skill
 
@@ -439,6 +445,7 @@ class SkillPublishService:
             entry_file="SKILL.md",
             uploaded_by_user_id=actor_user_id,
             content_hash=content_hash,
+            commit=commit,
         )
         if workspace_id is None:
             await installs.upsert(
@@ -447,6 +454,7 @@ class SkillPublishService:
                 installed_version=fm.version,
                 installed_by_user_id=actor_user_id,
                 auto_bind=False,  # uploaded skills opt-in; admin enables per workspace
+                commit=commit,
             )
         else:
             await installs.create_for_workspace(
@@ -455,6 +463,7 @@ class SkillPublishService:
                 skill_id=skill.id,
                 installed_version=fm.version,
                 installed_by_user_id=actor_user_id,
+                commit=commit,
             )
         return sv
 
