@@ -958,6 +958,55 @@ async def test_conversation_delete_closes_generation_with_delete_reason(
     assert admission is not None and admission.revoked_at == NOW
 
 
+async def test_actor_revocation_stops_only_that_actors_execution(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    revoked_actor = await actor_id(db_session, reservation_context)
+    revoked_task = await reserve(db_session, reservation_context)
+    other = User(email=f"revocation-{uuid4()}@example.invalid", hashed_password="not-a-login")
+    db_session.add(other)
+    await db_session.flush()
+    other_admission = ConversationExecutionAdmission(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=other.id,
+        execution_generation=0,
+        source_kind="user_message",
+        source_id=f"web:{uuid4()}",
+        run_id=str(uuid4()),
+    )
+    db_session.add(other_admission)
+    await db_session.commit()
+
+    result = await service(db_session).revoke_actor_access(
+        actor_user_id=revoked_actor,
+        conversation_ids=(reservation_context.conversation_id,),
+        now=NOW,
+    )
+    await db_session.commit()
+
+    assert result.cleanup_pending
+    assert result.conversation_runs == (
+        (reservation_context.conversation_id, (reservation_context.spec.originating_run_id,)),
+    )
+    await db_session.refresh(revoked_task.task)
+    await db_session.refresh(other_admission)
+    conversation = await db_session.get(Conversation, reservation_context.conversation_id)
+    assert revoked_task.task.stop_reason == "user_stop"
+    assert revoked_task.task.notifications_cancelled_at == NOW
+    assert other_admission.revoked_at is None
+    assert conversation is not None and conversation.execution_closed_at is None
+    await db_session.execute(
+        delete(ConversationExecutionAdmission).where(
+            col(ConversationExecutionAdmission.id) == other_admission.id
+        )
+    )
+    await db_session.execute(delete(User).where(col(User.id) == other.id))
+    await db_session.commit()
+
+
 async def test_stop_keeps_claimed_notice_for_checkpoint_reconciliation(
     db_session: AsyncSession,
     reservation_context: ReservationContext,

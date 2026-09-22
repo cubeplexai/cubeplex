@@ -8,7 +8,7 @@ from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.auth.users import UserManager
-from cubeplex.models import OrgRole, User
+from cubeplex.models import Conversation, ConversationExecutionAdmission, OrgRole, User, Workspace
 from cubeplex.repositories import OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
@@ -142,11 +142,47 @@ async def test_remove_workspace_member(admin_client, session_factory):
     await client.post(
         f"/api/v1/ws/{ws_id}/members", json={"user_id": new_user.id, "role": "member"}
     )
+    async with session_factory() as session:
+        conversation = Conversation(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=new_user.id,
+            title="revoked member work",
+        )
+        session.add(conversation)
+        await session.flush()
+        admission = ConversationExecutionAdmission(
+            org_id=org_id,
+            workspace_id=ws_id,
+            conversation_id=conversation.id,
+            actor_user_id=new_user.id,
+            execution_generation=0,
+            source_kind="user_message",
+            source_id=f"web:{secrets.token_hex(8)}",
+            run_id=secrets.token_hex(16),
+        )
+        session.add(admission)
+        await session.commit()
+        admission_id = admission.id
+
     resp = await client.delete(f"/api/v1/ws/{ws_id}/members/{new_user.id}")
-    assert resp.status_code == 204
+    assert resp.status_code == 200
+    assert resp.json() == {"removed": True, "cleanup_pending": True}
+
+    async with session_factory() as session:
+        revoked = await session.get(ConversationExecutionAdmission, admission_id)
+        assert revoked is not None and revoked.revoked_at is not None
+
+    readd = await client.post(
+        f"/api/v1/ws/{ws_id}/members", json={"user_id": new_user.id, "role": "member"}
+    )
+    assert readd.status_code == 201, readd.text
+    async with session_factory() as session:
+        still_revoked = await session.get(ConversationExecutionAdmission, admission_id)
+        assert still_revoked is not None and still_revoked.revoked_at is not None
 
     list_resp = await client.get(f"/api/v1/ws/{ws_id}/members")
-    assert new_user.id not in [m["user_id"] for m in list_resp.json()]
+    assert new_user.id in [m["user_id"] for m in list_resp.json()]
 
 
 async def test_remove_self_returns_400(admin_client):
@@ -155,6 +191,45 @@ async def test_remove_self_returns_400(admin_client):
     my_id = me.json()["id"]
     resp = await client.delete(f"/api/v1/ws/{ws_id}/members/{my_id}")
     assert resp.status_code == 400
+
+
+async def test_leave_workspace_revokes_the_members_existing_execution(
+    member_client, session_factory
+):
+    client, ws_id = member_client
+    me = await client.get("/api/v1/auth/me")
+    user_id = me.json()["id"]
+    async with session_factory() as session:
+        workspace = await session.get(Workspace, ws_id)
+        assert workspace is not None
+        conversation = Conversation(
+            org_id=workspace.org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            title="leaving member work",
+        )
+        session.add(conversation)
+        await session.flush()
+        admission = ConversationExecutionAdmission(
+            org_id=workspace.org_id,
+            workspace_id=ws_id,
+            conversation_id=conversation.id,
+            actor_user_id=user_id,
+            execution_generation=0,
+            source_kind="user_message",
+            source_id=f"web:{secrets.token_hex(8)}",
+            run_id=secrets.token_hex(16),
+        )
+        session.add(admission)
+        await session.commit()
+        admission_id = admission.id
+
+    response = await client.post(f"/api/v1/workspaces/{ws_id}/leave")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"left": True, "cleanup_pending": True}
+    async with session_factory() as session:
+        revoked = await session.get(ConversationExecutionAdmission, admission_id)
+        assert revoked is not None and revoked.revoked_at is not None
 
 
 async def test_cannot_demote_last_admin_self(admin_client):

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 import { ArrowUp, LogOut, UserPlus, X } from 'lucide-react'
 import {
   createApiClient,
@@ -104,7 +105,8 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
     setBusy(`remove:${userId}`)
     setError(null)
     try {
-      await removeMember(client, topicId, userId)
+      const result = await removeMember(client, topicId, userId)
+      if (result.cleanup_pending) toast.info(t('cleanupPending'))
     } catch {
       setError(tPanel('removeError'))
     } finally {
@@ -129,7 +131,8 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
     setBusy('leave')
     setError(null)
     try {
-      await removeMember(client, topicId, currentUserId)
+      const result = await removeMember(client, topicId, currentUserId)
+      if (result.cleanup_pending) toast.info(t('cleanupPending'))
       onClose()
     } catch {
       setError(tPanel('leaveError'))

@@ -1,6 +1,6 @@
 """Workspace routes: list / create / members / archive."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.api.schemas.execution import LeaveWorkspaceResponse
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import current_active_user, require_admin
 from cubeplex.db import get_session
@@ -18,6 +19,8 @@ from cubeplex.repositories import (
     OrganizationMembershipRepository,
     WorkspaceRepository,
 )
+from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -152,7 +155,7 @@ async def leave_workspace(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
-) -> dict[str, bool]:
+) -> LeaveWorkspaceResponse:
     from sqlalchemy import delete as sa_delete
 
     from cubeplex.models import Membership
@@ -173,7 +176,9 @@ async def leave_workspace(
             )
 
     ws = await WorkspaceRepository(session).get(workspace_id)
-    org_id = ws.org_id if ws else None
+    if ws is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    org_id = ws.org_id
 
     await session.execute(
         sa_delete(Membership).where(
@@ -181,7 +186,20 @@ async def leave_workspace(
             Membership.workspace_id == workspace_id,  # type: ignore[arg-type]
         )
     )
+    revoked = await ConversationExecutionService(
+        session, org_id=org_id, workspace_id=workspace_id
+    ).revoke_actor_access(actor_user_id=user.id, now=datetime.now(UTC))
     await session.commit()
+
+    for conversation_id, run_ids in revoked.conversation_runs:
+        await signal_stopped_runs(
+            request.app.state.run_manager,
+            conversation_id=conversation_id,
+            run_ids=run_ids,
+            user_id=user.id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
 
     await audit_log(
         action="workspace.member_left",
@@ -190,7 +208,7 @@ async def leave_workspace(
         workspace_id=workspace_id,
         ip=request.client.host if request.client else None,
     )
-    return {"left": True}
+    return LeaveWorkspaceResponse(left=True, cleanup_pending=revoked.cleanup_pending)
 
 
 @router.post("/{workspace_id}/archive")

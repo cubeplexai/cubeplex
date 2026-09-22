@@ -1,4 +1,5 @@
 import { toApiError, type ApiClient } from './client'
+import type { AccessRemovalResult } from './execution'
 
 export interface OrgMember {
   user_id: string
@@ -78,9 +79,13 @@ export async function updateOrgMemberRole(
   if (!res.ok) throw await toApiError(res)
 }
 
-export async function removeOrgMember(client: ApiClient, userId: string): Promise<void> {
+export async function removeOrgMember(
+  client: ApiClient,
+  userId: string,
+): Promise<AccessRemovalResult> {
   const res = await client.del(`/api/v1/admin/members/${userId}`)
   if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as AccessRemovalResult
 }
 
 export async function listWsMembers(client: ApiClient, wsId: string): Promise<WsMember[]> {
@@ -123,7 +128,8 @@ export async function removeWsMember(
   client: ApiClient,
   wsId: string,
   userId: string,
-): Promise<void> {
+): Promise<AccessRemovalResult> {
   const res = await client.del(`/api/v1/ws/${wsId}/members/${userId}`)
   if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as AccessRemovalResult
 }

@@ -17,6 +17,7 @@ from cubeplex.db.engine import _build_database_url
 from cubeplex.models import (
     Conversation,
     ConversationExecutionAdmission,
+    ConversationParticipant,
     OrgRole,
     Role,
     User,
@@ -391,7 +392,9 @@ class TestTopicParticipants:
 
     @pytest.mark.anyio
     async def test_add_and_remove_participant(
-        self, four_layer_admin_and_member: FourLayerFixture
+        self,
+        four_layer_admin_and_member: FourLayerFixture,
+        db_session: AsyncSession,
     ) -> None:
         (admin_c, ws_id, _), (member_c, _, member_uid) = four_layer_admin_and_member
 
@@ -400,6 +403,7 @@ class TestTopicParticipants:
             json={"title": "Team"},
         )
         topic_id = create_resp.json()["topic"]["id"]
+        conversation_id = create_resp.json()["conversation"]["id"]
 
         # Add member
         add_resp = await admin_c.post(
@@ -413,11 +417,29 @@ class TestTopicParticipants:
         assert get_resp.status_code == 200, get_resp.text
         assert len(get_resp.json()["participants"]) == 2
 
+        conversation = await db_session.get(Conversation, conversation_id)
+        assert conversation is not None
+        admission = ConversationExecutionAdmission(
+            org_id=conversation.org_id,
+            workspace_id=ws_id,
+            conversation_id=conversation_id,
+            actor_user_id=member_uid,
+            execution_generation=conversation.execution_generation,
+            source_kind="user_message",
+            source_id=f"web:{secrets.token_hex(8)}",
+            run_id=secrets.token_hex(16),
+        )
+        db_session.add(admission)
+        await db_session.commit()
+
         # Member leaves (self-removal)
         leave_resp = await member_c.delete(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}/participants/{member_uid}"
         )
-        assert leave_resp.status_code == 204, leave_resp.text
+        assert leave_resp.status_code == 200, leave_resp.text
+        assert leave_resp.json() == {"removed": True, "cleanup_pending": True}
+        await db_session.refresh(admission)
+        assert admission.revoked_at is not None
 
         # Member can no longer see the topic
         get_resp2 = await member_c.get(f"/api/v1/ws/{ws_id}/topics/{topic_id}")
@@ -439,11 +461,56 @@ class TestTopicParticipants:
         resp = await admin_c.delete(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}/participants/{member_uid}"
         )
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 200, resp.text
 
         # Member can no longer see the topic
         get_resp = await member_c.get(f"/api/v1/ws/{ws_id}/topics/{topic_id}")
         assert get_resp.status_code == 404, get_resp.text
+
+    @pytest.mark.anyio
+    async def test_participant_removal_preserves_execution_with_direct_conversation_access(
+        self,
+        four_layer_admin_and_member: FourLayerFixture,
+        db_session: AsyncSession,
+    ) -> None:
+        (admin_c, ws_id, _), (member_c, _, member_uid) = four_layer_admin_and_member
+        create_resp = await admin_c.post(
+            f"/api/v1/ws/{ws_id}/topics",
+            json={"title": "Direct access", "member_user_ids": [member_uid]},
+        )
+        body = create_resp.json()
+        conversation = await db_session.get(Conversation, body["conversation"]["id"])
+        assert conversation is not None
+        db_session.add(
+            ConversationParticipant(
+                org_id=conversation.org_id,
+                workspace_id=ws_id,
+                conversation_id=conversation.id,
+                user_id=member_uid,
+            )
+        )
+        admission = ConversationExecutionAdmission(
+            org_id=conversation.org_id,
+            workspace_id=ws_id,
+            conversation_id=conversation.id,
+            actor_user_id=member_uid,
+            execution_generation=conversation.execution_generation,
+            source_kind="user_message",
+            source_id=f"web:{secrets.token_hex(8)}",
+            run_id=secrets.token_hex(16),
+        )
+        db_session.add(admission)
+        await db_session.commit()
+
+        response = await admin_c.delete(
+            f"/api/v1/ws/{ws_id}/topics/{body['topic']['id']}/participants/{member_uid}"
+        )
+        assert response.status_code == 200, response.text
+        assert response.json() == {"removed": True, "cleanup_pending": False}
+        await db_session.refresh(admission)
+        assert admission.revoked_at is None
+        direct = await member_c.get(f"/api/v1/ws/{ws_id}/conversations/{conversation.id}")
+        assert direct.status_code == 200, direct.text
 
     @pytest.mark.anyio
     async def test_non_owner_cannot_remove_other(
@@ -479,7 +546,7 @@ class TestTopicParticipants:
         resp = await admin_c.delete(
             f"/api/v1/ws/{ws_id}/topics/{topic_id}/participants/{admin_uid}"
         )
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 200, resp.text
 
         # Member is now the auto-promoted owner
         get_resp = await member_c.get(f"/api/v1/ws/{ws_id}/topics/{topic_id}")

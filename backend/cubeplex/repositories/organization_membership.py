@@ -68,5 +68,5 @@ class OrganizationMembershipRepository:
             OrganizationMembership.org_id == org_id,  # type: ignore[arg-type]
         )
         result = cast(CursorResult[tuple[()]], await self.session.execute(stmt))
-        await self.session.commit()
+        await self.session.flush()
         return result.rowcount > 0

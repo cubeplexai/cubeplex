@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
 import { createApiClient, useMemberStore, type OrgMember } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
@@ -63,7 +64,8 @@ export function OrgMembersTable({ addOpen, onAddOpenChange }: OrgMembersTablePro
 
   const handleRemove = useCallback(
     async (userId: string) => {
-      await removeOrgMember(client, userId)
+      const result = await removeOrgMember(client, userId)
+      if (result.cleanup_pending) toast.info(t('cleanupPending'))
       setRemoving(null)
     },
     [client, removeOrgMember],

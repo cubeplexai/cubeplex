@@ -14,6 +14,7 @@ import {
   type WsMember,
   type AvailableMember,
 } from '../api/members'
+import type { AccessRemovalResult } from '../api/execution'
 
 export interface MemberStore {
   orgMembers: OrgMember[]
@@ -25,13 +26,13 @@ export interface MemberStore {
   loadOrgMembers(client: ApiClient): Promise<void>
   addOrgMember(client: ApiClient, email: string, role: string): Promise<void>
   updateOrgMemberRole(client: ApiClient, userId: string, role: string): Promise<void>
-  removeOrgMember(client: ApiClient, userId: string): Promise<void>
+  removeOrgMember(client: ApiClient, userId: string): Promise<AccessRemovalResult>
 
   loadWsMembers(client: ApiClient, wsId: string): Promise<void>
   loadAvailable(client: ApiClient, wsId: string): Promise<void>
   addWsMember(client: ApiClient, wsId: string, userId: string, role: string): Promise<void>
   updateWsMemberRole(client: ApiClient, wsId: string, userId: string, role: string): Promise<void>
-  removeWsMember(client: ApiClient, wsId: string, userId: string): Promise<void>
+  removeWsMember(client: ApiClient, wsId: string, userId: string): Promise<AccessRemovalResult>
 
   reset(): void
 }
@@ -68,8 +69,9 @@ export const useMemberStore = create<MemberStore>((set, get) => ({
   },
 
   async removeOrgMember(client, userId) {
-    await apiRemoveOrgMember(client, userId)
+    const result = await apiRemoveOrgMember(client, userId)
     set((s) => ({ orgMembers: s.orgMembers.filter((m) => m.user_id !== userId) }))
+    return result
   },
 
   async loadWsMembers(client, wsId) {
@@ -103,9 +105,10 @@ export const useMemberStore = create<MemberStore>((set, get) => ({
   },
 
   async removeWsMember(client, wsId, userId) {
-    await apiRemoveWsMember(client, wsId, userId)
+    const result = await apiRemoveWsMember(client, wsId, userId)
     set((s) => ({ wsMembers: s.wsMembers.filter((m) => m.user_id !== userId) }))
     await get().loadAvailable(client, wsId)
+    return result
   },
 
   reset() {

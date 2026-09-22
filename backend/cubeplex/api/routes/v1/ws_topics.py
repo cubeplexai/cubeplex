@@ -8,7 +8,9 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
+from cubeplex.api.schemas.execution import AccessRemovalResponse
 from cubeplex.api.schemas.sandbox_policy import (
     SandboxStatusOut,
     SandboxStatusValue,
@@ -362,14 +364,15 @@ async def add_participants(
 
 @router.delete(
     "/{topic_id}/participants/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=AccessRemovalResponse,
 )
 async def remove_participant(
     topic_id: str,
     user_id: str,
+    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
-) -> None:
+) -> AccessRemovalResponse:
     repo = _topic_repo(session, ctx)
     topic = await repo.get(topic_id)
     if topic is None:
@@ -387,7 +390,43 @@ async def remove_participant(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    accessible = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=user_id,
+    ).accessible_id_subquery()
+    lost_conversation_ids = tuple(
+        await session.scalars(
+            select(col(Conversation.id))
+            .where(
+                col(Conversation.org_id) == ctx.org_id,
+                col(Conversation.workspace_id) == ctx.workspace_id,
+                col(Conversation.topic_id) == topic_id,
+                col(Conversation.deleted_at).is_(None),
+                col(Conversation.id).not_in(accessible),
+            )
+            .order_by(col(Conversation.id))
+        )
+    )
+    revoked = await ConversationExecutionService(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    ).revoke_actor_access(
+        actor_user_id=user_id,
+        conversation_ids=lost_conversation_ids,
+        now=datetime.now(UTC),
+    )
     await session.commit()
+    for conversation_id, run_ids in revoked.conversation_runs:
+        await signal_stopped_runs(
+            raw_request.app.state.run_manager,
+            conversation_id=conversation_id,
+            run_ids=run_ids,
+            user_id=user_id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+    return AccessRemovalResponse(removed=True, cleanup_pending=revoked.cleanup_pending)
 
 
 @router.patch("/{topic_id}/participants/{user_id}")
