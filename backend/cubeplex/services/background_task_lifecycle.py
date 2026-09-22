@@ -192,7 +192,11 @@ class BackgroundTaskLifecycle:
         return (
             task.state in INFLIGHT_TASK_STATES
             or command.log_state in ("pending", "retrying")
-            or (task.backgrounded_at is None and task.foreground_result_delivered_at is None)
+            or (
+                task.backgrounded_at is None
+                and task.foreground_result_delivered_at is None
+                and task.notifications_cancelled_at is None
+            )
         )
 
     async def claim_task(
