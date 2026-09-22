@@ -29,6 +29,7 @@ INFLIGHT_TASK_STATES = frozenset(set(BackgroundTaskState) - TERMINAL_TASK_STATES
 
 class TaskStopReason(StrEnum):
     user_stop = "user_stop"
+    run_stop = "run_stop"
     conversation_stop = "conversation_stop"
     conversation_deleted = "conversation_deleted"
     deadline = "deadline"

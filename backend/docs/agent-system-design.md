@@ -31,7 +31,7 @@ answering or stopping that request belongs to its explicit control path, even wh
 the Redis pause keys have expired.
 
 `run_start_requested_at` records the persisted start claim; `run_started_at` records
-the claimed worker entering execution. The worker rechecks generation closure before
+the claimed worker entering execution. The worker rechecks generation closure and run Stop before
 entry, and the main agent and its subagents recheck authority at model and tool
 boundaries. These checks do not rewrite messages or the cached prompt prefix.
 `run_finished_at` records owner teardown, not successful task completion. A durable
@@ -85,7 +85,7 @@ as protected merely because this internal path is available. The new task coordi
 stays inactive until all entrances and the data-migration gate are complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
-model. For admitted work it durably closes the original generation, then claims
+model. For admitted work it durably stops the named run, then claims
 the paused run for cleanup. The cleanup holds the conversation lock, checks its
 Redis attempt, repairs only that run's unanswered tool calls, clears only the
 matching question, and emits a cancelled Done before terminal metadata. Queued
@@ -94,6 +94,17 @@ reply does not prevent the finish receipt and slot release. The 202 response is
 an accepted dispatch (`published`), not evidence that cleanup already finished.
 General Stop dispatch for all run/task states and restart reconciliation remain
 part of C2; this paused branch alone does not complete the Stop contract.
+
+The control service now separates `run_stop_requested_at` from admission revocation
+and generation closure. Run Stop cancels only that run's unhanded foreground tasks
+and user inputs; handoff and Stop serialize under the conversation/admission locks.
+Already handed-off tasks retain their execution and result-notification authority.
+New reservations and late handoffs cannot escape a run Stop. Deadline expiry is
+different: its final result may still be handed to the background for delivery.
+Steering records carry source kind and generation for targeted cancellation;
+unsettled input claims retain their owner and require checkpoint reconciliation.
+Public control handlers, input-source assignment, and restart reconciliation still
+require the following integration steps before the coordinated cutover.
 
 Automatic memory reflection for admitted work waits until its original worker has
 finished cleanup. It does not keep the run or active slot open. Each model/tool

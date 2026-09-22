@@ -26,6 +26,7 @@ from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.membership import Membership
+from cubeplex.models.steering_message import SteeringMessage, SteeringMessageState
 from cubeplex.models.topic import Topic, TopicParticipant
 from cubeplex.models.user import User
 from cubeplex.models.workspace import Workspace
@@ -94,6 +95,14 @@ class ClosedExecution:
     run_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class StoppedRun:
+    run_id: str
+    accepted: bool
+    cleanup_pending: bool
+    admission: ConversationExecutionAdmission
+
+
 class ConversationExecutionService:
     def __init__(self, session: AsyncSession, *, org_id: str, workspace_id: str) -> None:
         self.session = session
@@ -135,6 +144,7 @@ class ConversationExecutionService:
             admission.run_start_token is None
             and admission.run_finished_at is None
             and admission.revoked_at is None
+            and admission.run_stop_requested_at is None
         )
 
     async def resolve_run_continuation(
@@ -166,28 +176,99 @@ class ConversationExecutionService:
             admission, ResolvedExecution.model_validate(admission.resolved_execution), False
         )
 
-    async def close_run_generation(
+    async def stop_run(
         self, *, conversation_id: str, run_id: str, actor_user_id: str, now: datetime
-    ) -> ConversationExecutionAdmission | None:
-        """Stop the original generation, including an already-revoked HITL run."""
+    ) -> StoppedRun:
+        """Stop only the named run and work that it has not handed to the background."""
+        require_aware(now)
+        await self._lock_authorized_conversation(conversation_id, actor_user_id)
         admission = await self.session.scalar(
-            select(ConversationExecutionAdmission).where(
+            select(ConversationExecutionAdmission)
+            .where(
                 col(ConversationExecutionAdmission.org_id) == self.org_id,
                 col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.conversation_id) == conversation_id,
                 col(ConversationExecutionAdmission.run_id) == run_id,
             )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if admission is None:
-            return None
-        if admission.conversation_id != conversation_id:
-            raise ExecutionConflictError("stop does not match the admitted conversation")
-        await self.close_generation(
-            conversation_id=conversation_id,
-            actor_user_id=actor_user_id,
-            execution_generation=admission.execution_generation,
-            now=now,
+            raise LookupError("execution admission not found")
+        admission.run_stop_requested_at = admission.run_stop_requested_at or now
+        tasks = list(
+            await self.session.scalars(
+                select(BackgroundTask)
+                .where(
+                    col(BackgroundTask.org_id) == self.org_id,
+                    col(BackgroundTask.workspace_id) == self.workspace_id,
+                    col(BackgroundTask.conversation_id) == conversation_id,
+                    col(BackgroundTask.originating_run_id) == run_id,
+                    col(BackgroundTask.backgrounded_at).is_(None),
+                )
+                .order_by(col(BackgroundTask.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
-        return admission
+        for task in tasks:
+            task.stop_requested_at = task.stop_requested_at or now
+            task.notifications_cancelled_at = task.notifications_cancelled_at or now
+            task.stop_reason = task.stop_reason or TaskStopReason.run_stop.value
+            task.revision += 1
+        inputs_pending = await self._cancel_user_inputs(conversation_id, run_id=run_id)
+        await self.session.flush()
+        return StoppedRun(
+            run_id,
+            True,
+            admission.run_finished_at is None
+            or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
+            or inputs_pending,
+            admission,
+        )
+
+    async def _cancel_user_inputs(
+        self,
+        conversation_id: str,
+        *,
+        run_id: str | None = None,
+        generation: int | None = None,
+    ) -> bool:
+        query = select(SteeringMessage).where(
+            col(SteeringMessage.org_id) == self.org_id,
+            col(SteeringMessage.workspace_id) == self.workspace_id,
+            col(SteeringMessage.conversation_id) == conversation_id,
+            col(SteeringMessage.source_kind) == "user_message",
+            col(SteeringMessage.state).in_(
+                (
+                    SteeringMessageState.queued,
+                    SteeringMessageState.failed,
+                    SteeringMessageState.dispatched,
+                    SteeringMessageState.cancel_requested,
+                )
+            ),
+        )
+        if run_id is not None:
+            query = query.where(col(SteeringMessage.run_id) == run_id)
+        elif generation is not None:
+            query = query.where(col(SteeringMessage.execution_generation) == generation)
+        else:
+            raise ValueError("input cancellation requires a run or generation")
+        rows = list(
+            await self.session.scalars(
+                query.order_by(col(SteeringMessage.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        for row in rows:
+            if row.state in (SteeringMessageState.queued, SteeringMessageState.failed):
+                row.state = SteeringMessageState.cancelled
+                row.delivery_owner = None
+                row.delivery_lease_until = None
+            else:
+                row.state = SteeringMessageState.cancel_requested
+        return any(row.state == SteeringMessageState.cancel_requested for row in rows)
 
     @staticmethod
     def _fingerprint(intent: UserMessageIntent) -> str:
@@ -276,6 +357,9 @@ class ConversationExecutionService:
                 notice.state = "discarded"
                 notice.discard_reason = TaskStopReason.conversation_stop.value
                 notice.revision += 1
+        inputs_pending = await self._cancel_user_inputs(
+            conversation_id, generation=execution_generation
+        )
         await self.session.flush()
         run_ids = tuple(
             sorted(
@@ -287,7 +371,8 @@ class ConversationExecutionService:
             )
         )
         cleanup_pending = (
-            any(task.state in INFLIGHT_TASK_STATES for task in tasks)
+            inputs_pending
+            or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
             or any(notice.state in ("pending", "claimed") for notice in notices)
             or any(
                 admission.run_start_token is not None and admission.run_finished_at is None
@@ -396,6 +481,7 @@ class ConversationExecutionService:
         await self.session.refresh(admission, with_for_update=True)
         if (
             admission.revoked_at is not None
+            or admission.run_stop_requested_at is not None
             or conversation.execution_closed_at is not None
             or conversation.execution_generation != admission.execution_generation
         ):

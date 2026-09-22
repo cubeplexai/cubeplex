@@ -30,7 +30,7 @@ def _make_rm() -> RunManager:
         run_event_ttl_seconds=60,
     )
     # Durable authority is covered with real Postgres in admitted HITL E2E tests.
-    manager._close_paused_execution = AsyncMock(return_value=None)
+    manager._stop_paused_execution = AsyncMock(return_value=None)
     return manager
 
 
