@@ -1796,8 +1796,29 @@ class RunManager:
         assert claim.claim_token is not None  # OK outcome guarantees a token
         if question_id is None:
             meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
-            if meta is not None and meta.status in ("completed", "cancelled", "errored"):
+            if meta is not None and meta.status in (
+                "completed",
+                "cancelled",
+                "errored",
+                "failed",
+            ):
+                if (
+                    preserved_terminal_status is not None
+                    and preserved_terminal_status != meta.status
+                ):
+                    raise ResumeConflict("durable and Redis terminal outcomes disagree")
                 preserved_terminal_status = meta.status
+            elif meta is not None and preserved_terminal_status is not None:
+                restored = await update_run_meta(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    conversation_id=conversation_id,
+                    status=preserved_terminal_status,
+                    claim_token=claim.claim_token,
+                )
+                if restored is None or restored.status != preserved_terminal_status:
+                    raise ResumeConflict("could not restore the durable terminal outcome")
         self._resume_claim_tokens[run_id] = claim.claim_token
         task = asyncio.create_task(
             self._execute_cancel_paused_run(
@@ -1845,13 +1866,15 @@ class RunManager:
             )
             run_id = admission.run_id
         unstarted = admission.run_started_at is None
+        durable_terminal_status = admission.run_terminal_status
+        takeover_proven = unstarted or durable_terminal_status is not None
         meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
         if meta is not None:
             if meta.conversation_id != ctx.conversation_id:
                 return False
             threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
             if meta.status == "running":
-                if unstarted:
+                if takeover_proven:
                     if not await mark_run_stale(
                         self._redis,
                         prefix=self._key_prefix,
@@ -1880,7 +1903,7 @@ class RunManager:
                 )
             if completed is None:
                 return False
-        preserved_terminal_status = None
+        preserved_terminal_status = durable_terminal_status
         if meta is not None:
             if meta.status == "running":
                 if not await mark_run_stale(
@@ -1891,11 +1914,21 @@ class RunManager:
                     observed_last_event_at=meta.last_event_at or meta.started_at,
                 ):
                     return False
-            elif pending is None and meta.status in ("completed", "cancelled", "errored"):
+            elif pending is None and meta.status in (
+                "completed",
+                "cancelled",
+                "errored",
+                "failed",
+            ):
+                if (
+                    preserved_terminal_status is not None
+                    and preserved_terminal_status != meta.status
+                ):
+                    return False
                 preserved_terminal_status = meta.status
             elif meta.status not in ("paused_hitl", "stale"):
                 return False
-        elif pending is None and not unstarted:
+        elif pending is None and not unstarted and preserved_terminal_status is None:
             # A completed checkpoint has no outcome field; don't invent a cancelled result.
             return False
         try:
@@ -1911,7 +1944,8 @@ class RunManager:
                 admission=admission,
                 reason="recovering persisted Stop",
                 preserved_terminal_status=preserved_terminal_status,
-                rebuild_missing_meta=unstarted and meta is None,
+                rebuild_missing_meta=(unstarted or preserved_terminal_status is not None)
+                and meta is None,
             )
         except ResumeConflict:
             return False
@@ -1961,7 +1995,10 @@ class RunManager:
         from cubeplex.db.engine import async_session_maker
         from cubeplex.models.conversation import Conversation
         from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
-        from cubeplex.services.conversation_execution import ConversationExecutionService
+        from cubeplex.services.conversation_execution import (
+            RUN_TERMINAL_STATUSES,
+            ConversationExecutionService,
+        )
         from cubeplex.streams.hitl_resume import begin_resume_finalization
         from cubeplex.streams.steering_delivery import SteeringRunScope
 
@@ -1985,6 +2022,23 @@ class RunManager:
             async with shared_checkpointer() as cp:
                 if await cp.load_pending(conversation_id) is not None:
                     raise RuntimeError("paused cleanup still has a pending question")
+            if admission is not None and admission.run_started_at is not None:
+                if terminal_status not in RUN_TERMINAL_STATUSES:
+                    raise RuntimeError("cleanup has no durable terminal outcome")
+                async with async_session_maker() as outcome_session:
+                    recorded = await ConversationExecutionService(
+                        outcome_session,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    ).record_run_terminal_outcome(
+                        admission_id=admission.id,
+                        attempt_id=admission.run_start_token or "",
+                        status=terminal_status,
+                        now=datetime.now(UTC),
+                    )
+                    if not recorded:
+                        raise RunClaimLost("cleanup terminal outcome belongs to another attempt")
+                    await outcome_session.commit()
             released = await clear_active_run(
                 self._redis,
                 prefix=self._key_prefix,
@@ -2623,6 +2677,30 @@ class RunManager:
         if meta is not None and meta.status != "running":
             return meta.status
         return None
+
+    async def _record_execution_terminal_outcome(self, ctx: RunContext, status: str) -> bool:
+        if ctx.execution is None:
+            return True
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.services.conversation_execution import (
+            RUN_TERMINAL_STATUSES,
+            ConversationExecutionService,
+        )
+
+        if status not in RUN_TERMINAL_STATUSES:
+            return False
+        async with async_session_maker() as session:
+            recorded = await ConversationExecutionService(
+                session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            ).record_run_terminal_outcome(
+                admission_id=ctx.execution.admission_id,
+                attempt_id=ctx.execution.start_token,
+                status=status,
+                now=datetime.now(UTC),
+            )
+            if recorded:
+                await session.commit()
+            return recorded
 
     async def _require_reflection_authority(
         self, ctx: RunContext, run_id: str, *, session: AsyncSession | None = None
@@ -5371,8 +5449,10 @@ class RunManager:
                 await self._record_user_cancel(
                     run_id=run_id, conversation_id=conversation_id, ctx=ctx
                 )
+                final_status = await self._owned_terminal_status(ctx, run_id) or "cancelled"
             else:
                 await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
+                final_status = "cancelled"
             raise
         except Exception as exc:
             persisted_terminal = await self._owned_terminal_status(ctx, run_id)
@@ -5392,6 +5472,7 @@ class RunManager:
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
             _err_message = _message_for_run_exception(exc, _err_code, _err_params)
+            final_status = "failed"
             await update_run_meta(
                 self._redis,
                 prefix=self._key_prefix,
@@ -5523,15 +5604,23 @@ class RunManager:
             # orphaning the paused turn. The respond / cancel paths clear
             # the lock when they terminate.
             if final_status != "paused_hitl" and not registration_replaced:
+                outcome_recorded = not admission_worker_owned or (
+                    await self._record_execution_terminal_outcome(ctx, final_status)
+                )
+                if not outcome_recorded:
+                    logger.warning(
+                        "Run {} terminal outcome was not persisted; leaving cleanup pending",
+                        run_id,
+                    )
                 # Keep durable cleanup pending if release or expiry fails.
-                released = await clear_active_run(
+                released = outcome_recorded and await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
                     **claim_kwargs,
                 )
-                expired = await expire_run_data(
+                expired = outcome_recorded and await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
@@ -6009,8 +6098,10 @@ class RunManager:
                 await self._record_user_cancel(
                     run_id=run_id, conversation_id=conversation_id, ctx=ctx
                 )
+                durable_final_status = await self._owned_terminal_status(ctx, run_id) or "cancelled"
             else:
                 await self._record_user_cancel(run_id=run_id, conversation_id=conversation_id)
+                durable_final_status = "cancelled"
             raise
         except ResumeConflict:
             # A newer claim owns this run. The old attempt must not append an
@@ -6176,14 +6267,23 @@ class RunManager:
             # the pointer atomically). On "completed" the pointer must be
             # gone so the next start_run can allocate a fresh run.
             if not registration_replaced:
-                released = await clear_active_run(
+                outcome_recorded = durable_final_status == "paused_hitl" or (
+                    await self._record_execution_terminal_outcome(ctx, durable_final_status)
+                )
+                if not outcome_recorded:
+                    logger.warning(
+                        "Respond run {} terminal outcome was not persisted; "
+                        "leaving cleanup pending",
+                        run_id,
+                    )
+                released = outcome_recorded and await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
                     **claim_kwargs,
                 )
-                expired = await expire_run_data(
+                expired = outcome_recorded and await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,

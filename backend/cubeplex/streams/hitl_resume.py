@@ -75,7 +75,8 @@ if meta_exists then
   if status == 'running' then
     return 'already_running'
   end
-  terminal = status == 'completed' or status == 'cancelled' or status == 'errored'
+  terminal = status == 'completed' or status == 'cancelled'
+    or status == 'errored' or status == 'failed'
   if status ~= 'paused_hitl' and status ~= 'stale' and not (ARGV[7] == '1' and terminal) then
     return 'conflict'
   end
@@ -193,7 +194,8 @@ def classify_terminal_status(
 _BEGIN_FINALIZATION_IF_CLAIM_MATCHES_LUA = """
 local active = redis.call('GET', KEYS[2])
 local status = redis.call('HGET', KEYS[1], 'status')
-local terminal = status == 'completed' or status == 'cancelled' or status == 'errored'
+local terminal = status == 'completed' or status == 'cancelled'
+  or status == 'errored' or status == 'failed'
 local released_cleanup = ARGV[5] == '1' and terminal and not active
 if active ~= ARGV[2] and not released_cleanup then return 0 end
 if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then

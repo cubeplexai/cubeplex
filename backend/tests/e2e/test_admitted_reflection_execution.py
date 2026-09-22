@@ -91,6 +91,9 @@ async def test_memory_transaction_serializes_with_participation_revocation(
     identity = {"admission_id": admitted.admission.id, "attempt_id": "original"}
     assert await service(db_session).claim_run_start(**identity, now=datetime.now(UTC))
     assert await service(db_session).record_run_started(**identity, now=datetime.now(UTC))
+    assert await service(db_session).record_run_terminal_outcome(
+        **identity, status="completed", now=datetime.now(UTC)
+    )
     assert await service(db_session).record_run_finished(
         **identity, worker_started=True, now=datetime.now(UTC)
     )
