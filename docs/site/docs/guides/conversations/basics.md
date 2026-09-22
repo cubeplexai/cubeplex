@@ -106,8 +106,10 @@ The new background-task lifecycle is still being introduced and is not enabled y
 Its control service distinguishes stopping a named response from stopping all work
 in the conversation: work already handed to the background keeps running after that
 response is stopped, while unhanded foreground work cannot escape cancellation by
-moving to the background afterward. These storage and control changes do not yet
-provide the complete new buttons or restart recovery; those require the coordinated
+moving to the background afterward. The staged API requires the response's run ID
+for Stop and the execution generation for Stop all, so retrying an old request cannot
+stop newer work. A 202 response confirms durable acceptance, not completed cleanup.
+These changes do not yet provide the complete new buttons or restart recovery; those require the coordinated
 lifecycle cutover described in [Sandboxes](./sandboxes.md).
 
 ## Managing conversations
