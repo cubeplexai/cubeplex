@@ -509,6 +509,8 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 #### 旧执行不恢复，独立新工作仍可继续
 
 - 停止目标 run 的旧重试与 HITL 恢复永远不能重开它；仍有效的独立后台结果、新用户消息或调度可以在旧 slot 安全释放后正常产生新的执行。
+- run 在正常 prompt／HITL answer 路径进入终态时，先把终态和时间按当前 attempt 写进持久 admission，再清理 Redis slot 和临时事件。恢复只能使用同一 run 的这份终态：Redis 终态存在时必须一致，Redis 元数据已过期时可重建 cleanup-only 状态；不能只看 completed checkpoint 猜测成功或失败。
+- HITL answer 已经产生终态、但原 pending question 因收尾中断仍存在时，恢复者取得清理权后再次核对 question／run，只删除这条遗留问题并完成清理，不恢复 Session、不再调用模型。缺少持久终态或状态冲突时保留待对账。
 - 界面标明新执行的来源，不把它呈现为被停止的回复自行恢复。
 
 <a id="stop-all-generation"></a>
