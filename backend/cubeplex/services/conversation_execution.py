@@ -443,6 +443,32 @@ class ConversationExecutionService:
         await self.session.flush()
         return True
 
+    async def record_unclaimed_run_finished(self, *, admission_id: str, now: datetime) -> bool:
+        """Finish stopped work that never acquired a durable start token."""
+        require_aware(now)
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            admission is None
+            or admission.run_id is None
+            or admission.run_start_token is not None
+            or admission.run_started_at is not None
+            or admission.run_finished_at is not None
+            or (admission.run_stop_requested_at is None and admission.revoked_at is None)
+        ):
+            return False
+        admission.run_finished_at = now
+        await self.session.flush()
+        return True
+
     async def require_run_authority(self, *, admission_id: str, attempt_id: str) -> None:
         admission = await self._lock_live_admission(admission_id)
         if (

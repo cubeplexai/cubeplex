@@ -1774,6 +1774,7 @@ class RunManager:
         admission: ConversationExecutionAdmission | None,
         reason: str,
         preserved_terminal_status: str | None = None,
+        rebuild_missing_meta: bool = False,
     ) -> str:
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
@@ -1785,7 +1786,7 @@ class RunManager:
             expected_run_id=run_id,
             started_at=started_at,
             ttl_seconds=self._run_event_ttl_seconds,
-            cleanup_only=question_id is None,
+            cleanup_only=question_id is None and not rebuild_missing_meta,
         )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
             await self.notify_run_stop(run_id)
@@ -1843,21 +1844,34 @@ class RunManager:
                 conversation_id=admission.conversation_id,
             )
             run_id = admission.run_id
+        unstarted = admission.run_started_at is None
         meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
         if meta is not None:
             if meta.conversation_id != ctx.conversation_id:
                 return False
             threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
-            if meta.status == "running" and not is_stale_meta(meta, threshold_seconds=threshold):
-                await self.notify_run_stop(run_id)
-                return False
+            if meta.status == "running":
+                if unstarted:
+                    if not await mark_run_stale(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        conversation_id=ctx.conversation_id,
+                        observed_last_event_at=meta.last_event_at or meta.started_at,
+                    ):
+                        await self.notify_run_stop(run_id)
+                        return False
+                    meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+                elif not is_stale_meta(meta, threshold_seconds=threshold):
+                    await self.notify_run_stop(run_id)
+                    return False
         # Stop is immutable authorization to clean up, not to act as the former user.
         async with shared_checkpointer() as cp:
             loaded_pending = await cp.load_pending(ctx.conversation_id)
         if loaded_pending is not None and loaded_pending[1] != run_id:
             return False
         pending = loaded_pending[0] if loaded_pending is not None else None
-        if pending is None:
+        if pending is None and not unstarted:
             async with async_session_maker() as session:
                 completed = await session.scalar(
                     select(CubeloopRun.completed_at).where(
@@ -1881,7 +1895,7 @@ class RunManager:
                 preserved_terminal_status = meta.status
             elif meta.status not in ("paused_hitl", "stale"):
                 return False
-        elif pending is None:
+        elif pending is None and not unstarted:
             # A completed checkpoint has no outcome field; don't invent a cancelled result.
             return False
         try:
@@ -1897,6 +1911,7 @@ class RunManager:
                 admission=admission,
                 reason="recovering persisted Stop",
                 preserved_terminal_status=preserved_terminal_status,
+                rebuild_missing_meta=unstarted and meta is None,
             )
         except ResumeConflict:
             return False
@@ -1951,6 +1966,7 @@ class RunManager:
         from cubeplex.streams.steering_delivery import SteeringRunScope
 
         terminal_status = preserved_terminal_status or "cancelled"
+        worker_never_started = admission is not None and admission.run_started_at is None
         cleanup_ready = False
 
         async def require_claim() -> None:
@@ -1985,16 +2001,23 @@ class RunManager:
             )
             if not released or not expired:
                 raise RunClaimLost("cleanup release or expiry belongs to another attempt")
-            if admission is not None and admission.run_start_token is not None:
+            if admission is not None:
                 async with async_session_maker() as session:
-                    await ConversationExecutionService(
+                    execution_service = ConversationExecutionService(
                         session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                    ).record_run_finished(
-                        admission_id=admission.id,
-                        attempt_id=admission.run_start_token,
-                        worker_started=admission.run_started_at is not None,
-                        now=datetime.now(UTC),
                     )
+                    if admission.run_start_token is None:
+                        await execution_service.record_unclaimed_run_finished(
+                            admission_id=admission.id,
+                            now=datetime.now(UTC),
+                        )
+                    else:
+                        await execution_service.record_run_finished(
+                            admission_id=admission.id,
+                            attempt_id=admission.run_start_token,
+                            worker_started=admission.run_started_at is not None,
+                            now=datetime.now(UTC),
+                        )
                     await session.commit()
             with suppress(Exception):
                 await record_scheduled_run_terminal_state(run_id=run_id, run_status=terminal_status)
@@ -2034,10 +2057,11 @@ class RunManager:
                     ):
                         raise RunClaimLost("paused cleanup does not own the current question")
                     await require_claim()
-                    await _repair_dangling_tool_calls(conversation_id, expected_run_id=run_id)
-                    await require_claim()
-                    await cp.mark_run_complete(conversation_id, run_id)
-                    await require_claim()
+                    if not worker_never_started:
+                        await _repair_dangling_tool_calls(conversation_id, expected_run_id=run_id)
+                        await require_claim()
+                        await cp.mark_run_complete(conversation_id, run_id)
+                        await require_claim()
                     if pending is not None:
                         assert question_id is not None
                         if not await cp.clear_pending_request_if_matches(
