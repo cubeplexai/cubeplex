@@ -78,9 +78,8 @@ has since been removed; a genuinely unstarted input still validates availability
 
 This is an integration step, not the lifecycle cutover: the public message, IM,
 scheduler, trigger and steering entrances still need their corresponding durable
-admission and authority wiring, and Stop must dispatch pending-question cleanup.
-Uncertain-start recovery also remains a
-cutover requirement. The existing entrances must not be treated
+admission and authority wiring. Uncertain-start and durable Stop recovery also remain
+cutover requirements. The existing entrances must not be treated
 as protected merely because this internal path is available. The new task coordinator
 stays inactive until all entrances and the data-migration gate are complete.
 
@@ -90,10 +89,10 @@ the paused run for cleanup. The cleanup holds the conversation lock, checks its
 Redis attempt, repairs only that run's unanswered tool calls, clears only the
 matching question, and emits a cancelled Done before terminal metadata. Queued
 guidance is cancelled; checkpoint-proven input stays injected. A lost terminal
-reply does not prevent the finish receipt and slot release. The 202 response is
-an accepted dispatch (`published`), not evidence that cleanup already finished.
-General Stop dispatch for all run/task states and restart reconciliation remain
-part of C2; this paused branch alone does not complete the Stop contract.
+reply does not prevent the finish receipt and slot release. The 202 response confirms
+the persisted stop intent, not evidence that cleanup already finished.
+Restart reconciliation remains part of C2; this paused branch alone does not
+complete the Stop contract.
 
 The control service now separates `run_stop_requested_at` from admission revocation
 and generation closure. Run Stop cancels only that run's unhanded foreground tasks
@@ -106,8 +105,15 @@ The coordinator stops scanning them once execution and log recovery are settled;
 it does not invent foreground delivery evidence to make them disappear.
 Steering records carry source kind and generation for targeted cancellation;
 unsettled input claims retain their owner and require checkpoint reconciliation.
-Public control handlers, input-source assignment, and restart reconciliation still
-require the following integration steps before the coordinated cutover.
+The workspace-scoped `POST /conversations/{id}/cancel` now requires `run_id`,
+and the separate `POST /conversations/{id}/stop-all` requires `execution_generation`.
+Both return 202 with the same target, `accepted`, and `cleanup_pending` only after
+committing the stop transaction. Signalling is best effort and bounded; it does not
+choose whichever run happens to be active or report cleanup complete from a publish
+acknowledgement. An accepted run without a start receipt still requires reconciliation.
+Input-source assignment, durable restart reconciliation, and frontend callers remain
+staged integration work before the coordinated cutover; old bodyless Cancel calls
+are rejected rather than allowed to bypass the stable-target contract.
 
 Automatic memory reflection for admitted work waits until its original worker has
 finished cleanup. It does not keep the run or active slot open. Each model/tool

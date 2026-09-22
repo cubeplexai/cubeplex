@@ -18,8 +18,7 @@ Scenarios:
 5. POST ask-user-answer with no pending → 404 no_pending.
 6. Two concurrent POSTs → exactly one 2xx + one 409 ``resume_in_flight``.
 7. Steer route on a paused conversation → durable queued row.
-8. Cancel route on a paused conversation → dispatches to
-   ``cancel_paused_run``.
+Named-run cancellation through the real runtime is covered by ``test_run_stop_api``.
 """
 
 from __future__ import annotations
@@ -156,21 +155,6 @@ async def stub_respond_task(
     rm = client._transport.app.state.run_manager  # type: ignore[attr-defined]
     mock = AsyncMock()
     monkeypatch.setattr(rm, "_execute_respond_run", mock)
-    return mock
-
-
-@pytest_asyncio.fixture
-async def stub_cancel_paused(
-    member_client: tuple[httpx.AsyncClient, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> AsyncMock:
-    """Stub run_manager.cancel_paused_run so the route call path is
-    exercised but the transient-agent build (which needs a real LLM
-    factory + middleware stack) doesn't run."""
-    client, _ = member_client
-    rm = client._transport.app.state.run_manager  # type: ignore[attr-defined]
-    mock = AsyncMock(return_value="r-cancelled")
-    monkeypatch.setattr(rm, "cancel_paused_run", mock)
     return mock
 
 
@@ -656,25 +640,3 @@ async def test_dispatched_cancel_wakeup_failure_still_returns_accepted(
 
     assert response.status_code == 202, response.text
     assert response.json() == {"status": "accepted", "run_id": run_id}
-
-
-@pytest.mark.asyncio
-async def test_cancel_route_paused_dispatches_to_cancel_paused_run(
-    member_client: tuple[httpx.AsyncClient, str],
-    stub_cancel_paused: AsyncMock,
-) -> None:
-    """Cancel on a paused_hitl conversation routes to cancel_paused_run,
-    not the existing task-cancel path."""
-    client, ws_id = member_client
-    conv_id, run_id = await _seed_paused_conversation(client, ws_id, _ask_pending("q-cancel"))
-
-    resp = await client.post(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/cancel")
-    assert resp.status_code == 202, resp.text
-    body = resp.json()
-    assert body["status"] == "published"
-    assert body["run_id"] == run_id
-
-    stub_cancel_paused.assert_awaited_once()
-    kwargs = stub_cancel_paused.await_args.kwargs
-    assert kwargs["conversation_id"] == conv_id
-    assert kwargs["run_id"] == run_id

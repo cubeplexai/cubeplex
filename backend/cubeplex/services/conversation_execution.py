@@ -374,10 +374,7 @@ class ConversationExecutionService:
             inputs_pending
             or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
             or any(notice.state in ("pending", "claimed") for notice in notices)
-            or any(
-                admission.run_start_token is not None and admission.run_finished_at is None
-                for admission in admissions
-            )
+            or bool(run_ids)
         )
         return ClosedExecution(execution_generation, True, cleanup_pending, run_ids)
 
