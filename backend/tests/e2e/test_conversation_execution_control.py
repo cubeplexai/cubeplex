@@ -470,6 +470,43 @@ async def test_stop_between_start_request_and_worker_entry_revokes_execution(
     assert accepted.admission.run_started_at is None
 
 
+async def test_unclaimed_finish_receipt_requires_a_persisted_stop(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    accepted = await service(db_session).admit_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="never entered"),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    await db_session.commit()
+    controller = service(db_session)
+    assert not await controller.record_unclaimed_run_finished(
+        admission_id=accepted.admission.id,
+        now=NOW + timedelta(seconds=1),
+    )
+    await controller.stop_run(
+        conversation_id=reservation_context.conversation_id,
+        run_id=accepted.admission.run_id or "",
+        actor_user_id=actor,
+        now=NOW + timedelta(seconds=2),
+    )
+    await db_session.commit()
+    assert await controller.record_unclaimed_run_finished(
+        admission_id=accepted.admission.id,
+        now=NOW + timedelta(seconds=3),
+    )
+    assert not await controller.record_unclaimed_run_finished(
+        admission_id=accepted.admission.id,
+        now=NOW + timedelta(seconds=4),
+    )
+
+
 async def test_concurrent_retries_bind_one_run_and_one_model_snapshot(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
