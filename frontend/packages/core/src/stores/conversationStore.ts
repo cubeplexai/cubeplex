@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Conversation, ConversationParticipant } from '../types'
 import type { ApiClient } from '../api'
 import {
+  type DeleteConversationResult,
   createConversation,
   listConversations,
   deleteConversation,
@@ -45,7 +46,7 @@ export interface ConversationStore {
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, title?: string, opts?: { draft?: boolean }): Promise<Conversation>
   fork(client: ApiClient, sourceId: string, afterRunId: string): Promise<Conversation>
-  remove(client: ApiClient, id: string): Promise<void>
+  remove(client: ApiClient, id: string): Promise<DeleteConversationResult>
   rename(client: ApiClient, id: string, title: string): Promise<void>
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
   generateTitle(client: ApiClient, id: string, content: string): Promise<void>
@@ -107,12 +108,13 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   async remove(client: ApiClient, id: string) {
     try {
-      await deleteConversation(client, id)
+      const result = await deleteConversation(client, id)
       set((s) => ({
         conversations: s.conversations.filter((c) => c.id !== id),
         activeId: s.activeId === id ? null : s.activeId,
         viewingConversationId: s.viewingConversationId === id ? null : s.viewingConversationId,
       }))
+      return result
     } catch (err) {
       set({ error: (err as Error).message })
       throw err

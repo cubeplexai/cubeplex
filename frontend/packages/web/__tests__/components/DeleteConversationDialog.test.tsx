@@ -6,12 +6,14 @@ import { DeleteConversationDialog } from '@/components/layout/DeleteConversation
 
 const remove = vi.fn()
 const toastError = vi.fn()
+const toastInfo = vi.fn()
 const routerReplace = vi.fn()
 let pathname = '/w/ws-1'
 
 vi.mock('sonner', () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
+    info: (...args: unknown[]) => toastInfo(...args),
     success: vi.fn(),
   },
 }))
@@ -50,6 +52,7 @@ describe('DeleteConversationDialog', () => {
   beforeEach(() => {
     remove.mockReset()
     toastError.mockReset()
+    toastInfo.mockReset()
     routerReplace.mockReset()
     pathname = '/w/ws-1'
   })
@@ -84,7 +87,7 @@ describe('DeleteConversationDialog', () => {
   })
 
   it('Confirm calls remove once and closes on success', async () => {
-    remove.mockResolvedValue(undefined)
+    remove.mockResolvedValue({ deleted: true, cleanup_pending: false })
     const { onOpenChange } = renderDialog()
 
     fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
@@ -103,7 +106,7 @@ describe('DeleteConversationDialog', () => {
 
   it('navigates to workspace home when deleting the open conversation', async () => {
     pathname = '/w/ws-1/conversations/conv-1'
-    remove.mockResolvedValue(undefined)
+    remove.mockResolvedValue({ deleted: true, cleanup_pending: false })
     renderDialog()
 
     fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
@@ -118,8 +121,8 @@ describe('DeleteConversationDialog', () => {
     let resolveRemove: (() => void) | undefined
     remove.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveRemove = resolve
+        new Promise<{ deleted: boolean; cleanup_pending: boolean }>((resolve) => {
+          resolveRemove = () => resolve({ deleted: true, cleanup_pending: false })
         }),
     )
     const { rerender } = renderDialog()
@@ -189,12 +192,27 @@ describe('DeleteConversationDialog', () => {
     expect(screen.getByTestId('conversation-delete-confirm')).not.toBeDisabled()
   })
 
+  it('reports background cleanup without treating deletion as a failure', async () => {
+    remove.mockResolvedValue({ deleted: true, cleanup_pending: true })
+    const { onOpenChange } = renderDialog()
+
+    fireEvent.click(screen.getByTestId('conversation-delete-confirm'))
+
+    await waitFor(() => {
+      expect(toastInfo).toHaveBeenCalledWith(
+        'Conversation deleted. Background work is still stopping.',
+      )
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
   it('disables Confirm while remove is in flight', async () => {
     let resolveRemove: (() => void) | undefined
     remove.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveRemove = resolve
+        new Promise<{ deleted: boolean; cleanup_pending: boolean }>((resolve) => {
+          resolveRemove = () => resolve({ deleted: true, cleanup_pending: false })
         }),
     )
     renderDialog()

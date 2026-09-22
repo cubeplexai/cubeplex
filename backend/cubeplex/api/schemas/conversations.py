@@ -35,6 +35,11 @@ class StopAllResponse(BaseModel):
     cleanup_pending: bool
 
 
+class DeleteConversationResponse(BaseModel):
+    deleted: bool
+    cleanup_pending: bool
+
+
 class InviteToGroupRequest(BaseModel):
     """Request body for inviting workspace members into a conversation."""
 

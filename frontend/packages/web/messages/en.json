@@ -130,6 +130,7 @@
     "inviteMembers": "Invite Members",
     "removeMember": "Remove",
     "leaveGroup": "Leave Group",
+    "cleanupPending": "The topic was removed. Background work is still stopping.",
     "sandboxDedicated": "Dedicated topic sandbox",
     "sandboxDedicatedDescription": "Create a fresh sandbox for this topic. Files from the current conversation will not be carried over.",
     "sandboxCreator": "Keep the current sandbox",
@@ -1942,6 +1943,7 @@
     "deleteConversationCancel": "Cancel",
     "deleteConversationDeleting": "Deleting\u2026",
     "deleteConversationFailed": "Failed to delete conversation",
+    "deleteConversationCleanupPending": "Conversation deleted. Background work is still stopping.",
     "workspaceSettings": "Workspace settings",
     "accountMenu": "Account menu",
     "signOut": "Sign out"

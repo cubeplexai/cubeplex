@@ -324,6 +324,7 @@ class ConversationExecutionService:
         conversation_id: str,
         actor_user_id: str,
         execution_generation: int,
+        reason: TaskStopReason = TaskStopReason.conversation_stop,
         now: datetime,
     ) -> ClosedExecution:
         require_aware(now)
@@ -372,7 +373,7 @@ class ConversationExecutionService:
         for task in tasks:
             task.stop_requested_at = task.stop_requested_at or now
             task.notifications_cancelled_at = task.notifications_cancelled_at or now
-            task.stop_reason = TaskStopReason.conversation_stop.value
+            task.stop_reason = reason.value
             task.revision += 1
         notices = list(
             (
@@ -395,7 +396,7 @@ class ConversationExecutionService:
             # Attempted inputs need checkpoint reconciliation, not a guessed discard.
             if notice.state == "pending" and notice.delivery_attempt_id is None:
                 notice.state = "discarded"
-                notice.discard_reason = TaskStopReason.conversation_stop.value
+                notice.discard_reason = reason.value
                 notice.revision += 1
         inputs_pending = await self._cancel_user_inputs(
             conversation_id, generation=execution_generation
