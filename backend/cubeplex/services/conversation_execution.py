@@ -125,6 +125,12 @@ class StoppedRun:
     admission: ConversationExecutionAdmission
 
 
+@dataclass(frozen=True)
+class RevokedActorExecutions:
+    cleanup_pending: bool
+    conversation_runs: tuple[tuple[str, tuple[str, ...]], ...]
+
+
 class ConversationExecutionService:
     def __init__(self, session: AsyncSession, *, org_id: str, workspace_id: str) -> None:
         self.session = session
@@ -273,6 +279,7 @@ class ConversationExecutionService:
         *,
         run_id: str | None = None,
         generation: int | None = None,
+        sender_user_id: str | None = None,
     ) -> bool:
         query = select(SteeringMessage).where(
             col(SteeringMessage.org_id) == self.org_id,
@@ -292,8 +299,10 @@ class ConversationExecutionService:
             query = query.where(col(SteeringMessage.run_id) == run_id)
         elif generation is not None:
             query = query.where(col(SteeringMessage.execution_generation) == generation)
+        elif sender_user_id is not None:
+            query = query.where(col(SteeringMessage.sender_user_id) == sender_user_id)
         else:
-            raise ValueError("input cancellation requires a run or generation")
+            raise ValueError("input cancellation requires a run, generation, or sender")
         rows = list(
             await self.session.scalars(
                 query.order_by(col(SteeringMessage.id))
@@ -309,6 +318,142 @@ class ConversationExecutionService:
             else:
                 row.state = SteeringMessageState.cancel_requested
         return any(row.state == SteeringMessageState.cancel_requested for row in rows)
+
+    async def revoke_actor_access(
+        self,
+        *,
+        actor_user_id: str,
+        now: datetime,
+        conversation_ids: tuple[str, ...] | None = None,
+    ) -> RevokedActorExecutions:
+        """Revoke work admitted for one actor without closing shared conversations."""
+        require_aware(now)
+        admissions_query = select(ConversationExecutionAdmission).where(
+            col(ConversationExecutionAdmission.org_id) == self.org_id,
+            col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            col(ConversationExecutionAdmission.actor_user_id) == actor_user_id,
+        )
+        if conversation_ids is not None:
+            if not conversation_ids:
+                return RevokedActorExecutions(False, ())
+            admissions_query = admissions_query.where(
+                col(ConversationExecutionAdmission.conversation_id).in_(conversation_ids)
+            )
+        admissions = list(
+            await self.session.scalars(
+                admissions_query.order_by(col(ConversationExecutionAdmission.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        for admission in admissions:
+            admission.revoked_at = admission.revoked_at or now
+            if admission.run_id is not None and admission.run_finished_at is None:
+                admission.run_stop_requested_at = admission.run_stop_requested_at or now
+
+        admission_ids = tuple(admission.id for admission in admissions)
+        target_conversation_ids = tuple(
+            sorted({admission.conversation_id for admission in admissions})
+        )
+        if target_conversation_ids:
+            await self.session.scalars(
+                select(Conversation)
+                .where(
+                    col(Conversation.org_id) == self.org_id,
+                    col(Conversation.workspace_id) == self.workspace_id,
+                    col(Conversation.id).in_(target_conversation_ids),
+                )
+                .order_by(col(Conversation.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        tasks: list[BackgroundTask] = []
+        if admission_ids:
+            tasks = list(
+                await self.session.scalars(
+                    select(BackgroundTask)
+                    .where(
+                        col(BackgroundTask.org_id) == self.org_id,
+                        col(BackgroundTask.workspace_id) == self.workspace_id,
+                        col(BackgroundTask.admission_id).in_(admission_ids),
+                        col(BackgroundTask.started_by_user_id) == actor_user_id,
+                    )
+                    .order_by(col(BackgroundTask.id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            )
+        for task in tasks:
+            task.stop_requested_at = task.stop_requested_at or now
+            task.notifications_cancelled_at = task.notifications_cancelled_at or now
+            task.stop_reason = task.stop_reason or TaskStopReason.user_stop.value
+            task.revision += 1
+
+        task_ids = tuple(task.id for task in tasks)
+        notices: list[BackgroundTaskEvent] = []
+        if task_ids:
+            notices = list(
+                await self.session.scalars(
+                    select(BackgroundTaskEvent)
+                    .where(
+                        col(BackgroundTaskEvent.org_id) == self.org_id,
+                        col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+                        col(BackgroundTaskEvent.task_id).in_(task_ids),
+                        col(BackgroundTaskEvent.state).in_(("pending", "claimed")),
+                    )
+                    .order_by(col(BackgroundTaskEvent.id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            )
+        for notice in notices:
+            if notice.state == "pending" and notice.delivery_attempt_id is None:
+                notice.state = "discarded"
+                notice.discard_reason = TaskStopReason.user_stop.value
+                notice.revision += 1
+
+        inputs_pending = False
+        for conversation_id in target_conversation_ids:
+            inputs_pending = (
+                await self._cancel_user_inputs(
+                    conversation_id,
+                    sender_user_id=actor_user_id,
+                )
+                or inputs_pending
+            )
+        await self.session.flush()
+
+        conversation_runs = tuple(
+            (
+                conversation_id,
+                tuple(
+                    sorted(
+                        admission.run_id
+                        for admission in admissions
+                        if admission.conversation_id == conversation_id
+                        and admission.run_id is not None
+                        and admission.run_finished_at is None
+                    )
+                ),
+            )
+            for conversation_id in target_conversation_ids
+        )
+        direct_pending = any(
+            admission.execution_kind != "run"
+            and admission.direct_started_at is not None
+            and admission.direct_result is None
+            for admission in admissions
+        )
+        return RevokedActorExecutions(
+            cleanup_pending=(
+                inputs_pending
+                or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
+                or any(notice.state in ("pending", "claimed") for notice in notices)
+                or any(run_ids for _, run_ids in conversation_runs)
+                or direct_pending
+            ),
+            conversation_runs=conversation_runs,
+        )
 
     @staticmethod
     def _fingerprint(intent: UserMessageIntent) -> str:

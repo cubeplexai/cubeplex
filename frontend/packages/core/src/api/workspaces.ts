@@ -1,4 +1,5 @@
 import { toApiError, type ApiClient } from './client'
+import type { LeaveWorkspaceResult } from './execution'
 
 export interface Workspace {
   id: string
@@ -34,9 +35,13 @@ export async function renameWorkspace(
   return (await res.json()) as Workspace
 }
 
-export async function leaveWorkspace(client: ApiClient, wsId: string): Promise<void> {
+export async function leaveWorkspace(
+  client: ApiClient,
+  wsId: string,
+): Promise<LeaveWorkspaceResult> {
   const res = await client.post(`/api/v1/workspaces/${wsId}/leave`, {})
   if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as LeaveWorkspaceResult
 }
 
 export async function archiveWorkspace(client: ApiClient, wsId: string): Promise<void> {

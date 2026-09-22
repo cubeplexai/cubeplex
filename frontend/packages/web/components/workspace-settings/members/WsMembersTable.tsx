@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useFormatter, useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 import { LogOut, Trash2, Users } from 'lucide-react'
 import {
   createApiClient,
@@ -60,14 +61,16 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
 
   const handleRemove = useCallback(
     async (userId: string) => {
-      await removeWsMember(client, wsId, userId)
+      const result = await removeWsMember(client, wsId, userId)
+      if (result.cleanup_pending) toast.info(t('cleanupPending'))
       setRemoving(null)
     },
     [client, wsId, removeWsMember],
   )
 
   const handleLeave = useCallback(async () => {
-    await leaveFromStore(client, wsId)
+    const result = await leaveFromStore(client, wsId)
+    if (result.cleanup_pending) toast.info(t('cleanupPending'))
     router.push('/')
   }, [client, wsId, leaveFromStore, router])
 

@@ -62,6 +62,8 @@ Every participant has one of two roles:
 
 Invited people must already be workspace members. A topic is visible only to its participants. If the owner leaves or is removed, ownership passes to the earliest-joined remaining participant.
 
+Leaving or removing a participant stops work that person started in conversations they can no longer access. Work started by other participants continues. If the person still has direct access to a particular conversation, their work in that conversation is not stopped. Adding the person again does not revive work that was already stopped.
+
 The default participant limit is **20**. Topics created from a shared IM channel allow up to **100** participants.
 
 ## The shared sandbox
@@ -88,7 +90,7 @@ Each message in a shared topic is tagged with the participant who sent it. In a 
 - **Ordering.** Topics, group chats, and 1:1 conversations share one sidebar list ordered by recent activity. A topic moves when any child conversation gets a new message.
 - **Pinning.** Pinning a topic is shared by all members. Pinning an individual conversation lifts only that conversation.
 - **Renaming.** Use **Rename** on the topic's ⋮ menu to edit the title inline. Hover a truncated topic or conversation name in the sidebar to see the full title.
-- **Archiving.** An owner can archive a topic for all participants. A member who wants out can leave from the topic member controls.
+- **Archiving.** An owner can archive a topic for all participants. Archiving stops active responses and background work in its conversations. The topic disappears immediately; CubePlex reports when process cleanup is still finishing. A member who wants out can leave from the topic member controls.
 
 ## Topics as automation destinations
 

@@ -125,7 +125,7 @@ Right-click (or click the three-dot menu) on any conversation in the sidebar to 
 - **Rename** — give the conversation a descriptive title. By default, CubePlex auto-generates a title from your first message.
 - **Pin** — pinned conversations stick to the top of the sidebar list so you can find them quickly.
 - **Unpin** — remove a conversation from the pinned section.
-- **Delete** — asks for confirmation, then soft-deletes the conversation. It leaves the sidebar; messages are no longer available in that conversation; related artifacts leave the library and conversation surfaces. Rows and stored files are retained for integrity, cost audit, and future cleanup — not hard-wiped. There is no user-facing restore. Existing share links are not revoked by delete.
+- **Delete** — asks for confirmation, then soft-deletes the conversation and stops its active responses and background work. It leaves the sidebar immediately; if process cleanup is still running, CubePlex shows a one-time notice that the background work is still stopping. Messages are no longer available in that conversation; related artifacts leave the library and conversation surfaces. Rows and stored files are retained for integrity, cost audit, and future cleanup — not hard-wiped. There is no user-facing restore. Existing share links are not revoked by delete.
 
 ## Auto-generated titles
 
