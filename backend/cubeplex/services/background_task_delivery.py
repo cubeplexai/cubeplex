@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from cubeloop.checkpointer.exceptions import (
+    RunAlreadyClaimedError,
+    RunAlreadyCompletedError,
+    RunNotClaimedError,
+)
 from redis.asyncio import Redis
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -756,6 +761,9 @@ class BackgroundTaskDeliveryCoordinator:
             )
         cancelled: list[str] = []
         for event, steering in rows:
+            current_state: SteeringMessageState | None = None
+            current_run_id: str | None = None
+            current_input_id: str | None = None
             async with self.session_factory() as session:
                 from cubeplex.repositories.steering_message import (
                     SteeringMessageRepository,
@@ -772,25 +780,55 @@ class BackgroundTaskDeliveryCoordinator:
                 )
                 if current is None:
                     continue
-                if current.state == SteeringMessageState.cancelled:
+                current_state = current.state
+                current_run_id = current.run_id
+                current_input_id = current.client_steer_id
+                # Release the steering-row lock before settlement takes the
+                # canonical admission -> task/event locks.
+                await session.commit()
+            if (
+                current_state == SteeringMessageState.cancelled
+                and current_run_id is not None
+                and current_input_id is not None
+            ):
+                async with self.session_factory() as session:
                     released = await BackgroundTaskDeliveryService(
                         session,
                         org_id=event.org_id,
                         workspace_id=event.workspace_id,
                     ).settle_uncommitted_attempt(
                         notice_id=event.id,
-                        run_id=current.run_id,
-                        input_id=current.client_steer_id,
+                        run_id=current_run_id,
+                        input_id=current_input_id,
                         discard_cancelled_initial=False,
                     )
                     if released:
-                        await session.delete(current)
+                        repo = SteeringMessageRepository(
+                            session,
+                            org_id=event.org_id,
+                            workspace_id=event.workspace_id,
+                        )
+                        cancelled_row = await repo.get_by_client_id(
+                            conversation_id=event.conversation_id,
+                            client_steer_id=current_input_id,
+                            for_update=True,
+                        )
+                        if (
+                            cancelled_row is not None
+                            and cancelled_row.state == SteeringMessageState.cancelled
+                            and cancelled_row.notice_id == event.id
+                        ):
+                            await session.delete(cancelled_row)
                         cancelled.append(event.id)
-                await session.commit()
-            if current.state == SteeringMessageState.cancel_requested:
+                    await session.commit()
+            if (
+                current_state == SteeringMessageState.cancel_requested
+                and current_run_id is not None
+                and current_input_id is not None
+            ):
                 await self.run_manager.notify_durable_cancel(
-                    current.run_id,
-                    current.client_steer_id,
+                    current_run_id,
+                    current_input_id,
                 )
         return cancelled
 
@@ -837,6 +875,45 @@ class BackgroundTaskDeliveryCoordinator:
                         for message in checkpoint.messages
                     )
                 )
+                if not in_history:
+                    meta = await get_run_meta(
+                        self.redis,
+                        prefix=self.redis_key_prefix,
+                        run_id=event.delivery_run_id,
+                    )
+                    pending_run_id = await checkpointer.load_pending_run_id(event.conversation_id)
+                    if (
+                        meta is not None and meta.status in ("running", "paused_hitl")
+                    ) or pending_run_id == event.delivery_run_id:
+                        continue
+                    # Completion takes CubeLoop's per-conversation advisory
+                    # lock. It waits for an in-flight append, then permanently
+                    # rejects any later append from this fenced old run.
+                    try:
+                        await checkpointer.mark_run_complete(
+                            event.conversation_id,
+                            event.delivery_run_id,
+                        )
+                    except RunNotClaimedError:
+                        try:
+                            await checkpointer.claim_run(
+                                event.conversation_id,
+                                event.delivery_run_id,
+                            )
+                        except (RunAlreadyClaimedError, RunAlreadyCompletedError):
+                            pass
+                        await checkpointer.mark_run_complete(
+                            event.conversation_id,
+                            event.delivery_run_id,
+                        )
+                    checkpoint = await checkpointer.load(event.conversation_id)
+                    in_history = bool(
+                        checkpoint is not None
+                        and any(
+                            getattr(message, "metadata", {}).get("notice_id") == event.id
+                            for message in checkpoint.messages
+                        )
+                    )
                 async with self.session_factory() as session:
                     service = BackgroundTaskDeliveryService(
                         session,
@@ -851,18 +928,6 @@ class BackgroundTaskDeliveryCoordinator:
                             now=now,
                         )
                     else:
-                        meta = await get_run_meta(
-                            self.redis,
-                            prefix=self.redis_key_prefix,
-                            run_id=event.delivery_run_id,
-                        )
-                        pending_run_id = await checkpointer.load_pending_run_id(
-                            event.conversation_id
-                        )
-                        if (
-                            meta is not None and meta.status in ("running", "paused_hitl")
-                        ) or pending_run_id == event.delivery_run_id:
-                            continue
                         changed = await service.settle_uncommitted_attempt(
                             notice_id=event.id,
                             run_id=event.delivery_run_id,
