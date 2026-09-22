@@ -40,6 +40,59 @@ async def already_handed_off(task: BackgroundTask) -> ForegroundRecovery:
     raise AssertionError(f"background task {task.id} must not recover its foreground again")
 
 
+@pytest.mark.parametrize("stop_scope", ["run", "task", "conversation"])
+async def test_cancelled_foreground_cleanup_finishes_without_background_handoff(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    stop_scope: str,
+) -> None:
+    from tests.e2e.test_conversation_execution_control import service as executions
+
+    item = await reserve(db_session, reservation_context)
+    if stop_scope == "run":
+        await executions(db_session).stop_run(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=item.task.started_by_user_id,
+            run_id=item.task.originating_run_id,
+            now=NOW,
+        )
+    elif stop_scope == "conversation":
+        await executions(db_session).close_generation(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=item.task.started_by_user_id,
+            execution_generation=0,
+            now=NOW,
+        )
+    else:
+        await service(db_session).request_task_stop(
+            task_id=item.task.id, reason=TaskStopReason.user_stop, now=NOW
+        )
+    await db_session.commit()
+    recovered: list[str] = []
+
+    async def resolve(task: BackgroundTask) -> ForegroundRecovery:
+        recovered.append(task.id)
+        return "not_delivered"
+
+    for seconds, expected_count in ((31, 1), (61, 0)):
+        coordinator = BackgroundTaskCoordinator(
+            session_factory,
+            SandboxManager(session_factory, mock_encryption_backend),
+            resolve_foreground=resolve,
+            clock=lambda seconds=seconds: NOW + timedelta(seconds=seconds),
+        )
+        assert await coordinator.reconcile_once() == expected_count
+    await db_session.refresh(item.task)
+    await db_session.refresh(item.command)
+    assert item.task.state == "cancelled" and item.task.result_readiness == "ready"
+    assert item.command.provider_ref is None and item.command.log_state == "complete"
+    assert item.task.backgrounded_at is None
+    assert item.task.foreground_result_delivered_at is None
+    assert recovered == []
+
+
 async def started_task(
     session: AsyncSession, context: ReservationContext, *, receipt: bool = True
 ) -> tuple[BackgroundTask, SandboxCommand]:
