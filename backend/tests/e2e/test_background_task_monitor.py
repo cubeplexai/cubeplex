@@ -272,6 +272,57 @@ async def test_restarted_owner_unlocks_original_result_when_logs_arrive(
         assert [notice.id for notice in await events(restarted, item.task.id)] == [first.id]
 
 
+@pytest.mark.parametrize("outcome", ["matched", "timed_out"])
+async def test_parent_stop_preserves_child_result_from_another_session(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    outcome: str,
+) -> None:
+    parent = await reserve(db_session, reservation_context)
+    child = await monitor(
+        db_session,
+        replace(
+            reservation_context,
+            spec=replace(reservation_context.spec, parent_task_id=parent.task.id),
+        ),
+        expires=True,
+    )
+    async with session_factory() as worker:
+        if outcome == "timed_out":
+            await service(worker).request_task_stop(
+                task_id=child.task.id,
+                reason=TaskStopReason.deadline,
+                now=NOW + timedelta(seconds=10),
+            )
+        await service(worker).record_observation(
+            task_id=child.task.id,
+            owner_token=child.task.owner_token,
+            now=NOW + timedelta(seconds=11 if outcome == "timed_out" else 9),
+            snapshot=ProcessSnapshot(status="exited", exit_code=0),
+            log_state="complete",
+        )
+        await worker.commit()
+        original_notice = (await events(worker, child.task.id))[0]
+
+    assert child.command.monitor_outcome is None and child.command.log_state == "pending"
+    await service(db_session).request_task_stop(
+        task_id=parent.task.id,
+        reason=TaskStopReason.deadline if outcome == "matched" else TaskStopReason.user_stop,
+        now=NOW + timedelta(seconds=12),
+    )
+    await db_session.commit()
+    await db_session.refresh(child.task)
+    await db_session.refresh(child.command)
+    assert child.command.monitor_outcome == outcome
+    assert child.task.result_readiness == "ready"
+    assert child.task.result_summary == original_notice.summary
+    notices = await events(db_session, child.task.id)
+    assert [notice.id for notice in notices] == [original_notice.id]
+    assert notices[0].summary == original_notice.summary
+    assert notices[0].state == ("pending" if outcome == "matched" else "discarded")
+
+
 @pytest.mark.parametrize("stop_first", [True, False])
 async def test_stop_and_result_transactions_are_serialized(
     db_session: AsyncSession,
