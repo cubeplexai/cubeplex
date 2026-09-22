@@ -114,6 +114,7 @@
 ### Files
 
 - `services/conversation_execution.py`（新）、C1 的受理 repository：受理和关闭的唯一事务入口。
+- `services/access_authority.py`（新）：从现有 user／membership／participant／资源记录构造 typed 原资格证明，分别提供短只读校验和调用方事务内加锁校验；供受理、公开授权、长连接和 OAuth 共用。它不新增权限数据库或替换原 RBAC，scope handler 仍分开；角色／creator 授权增加单调版本，发生相关降权／归属变化即递增，不能只存 user ID 或当前 role。
 - `api/routes/v1/conversations.py`、`api/schemas/conversations.py`、`repositories/conversation.py`：消息首次受理、带 generation 的主 Stop、软删除与停止原子提交。
 - `api/routes/v1/ws_topics.py`、topic repository／归档服务：归档与所属 conversation 的持久停止同事务；topic 对普通读取不可见后仍恢复清理。归档／新建会话／首次受理共用 workspace、topic、conversation 的固定锁序。
 - 同一 topic 路由的 participant 删除、`models/topic.py`、相关访问查询／自动派发消费者：原参与者撤销标记、只对失去全部访问权的会话撤销该 actor 的 admission、持久停止及独立回执。`frontend/packages/core/src/api/topics.ts`、`components/chat/MemberPanel.tsx` 及 topic store、en／zh 和站点 `guides/conversations/topics.md` 同 PR 处理清理中及恢复查询。
@@ -125,6 +126,11 @@
 - `models/api_key.py`、`external_identity.py`、`org_invite_token.py`、相关 auth／邀请消费者及账号删除服务：撤销个人 API key 和未使用邀请、最终移除外部登录链接，补齐用户外键清单，不把这些凭据转给接任者。纯作者引用置空与业务 owner 转移分开。
 - `services/artifact_share.py`、`api/routes/v1/{artifacts,artifact_share,attachments,public_artifacts,public_attachments,ws_sandbox,sandbox_share}.py`、`im/artifacts.py` 及各 platform 的 dispatcher 构造：Redis 分享／预览令牌的签发身份与原授权证明，公开页面／文件消费统一检查撤权；Web 和 IM 均接通，不只改 HTTP 签发。匹配的现有 artifacts／文件预览和 IM 站点页说明链接失效与旧令牌切换。
 - `models/{topic,conversation}.py` 的持久 sandbox 路由关闭标记／版本、sandbox scope resolver、manager、C1 reservation／迟到句柄及 C4 工具缓存／预览：管理员撤权立即隔离失效个人共享路由，停止其工作而不误删无关实例；topic／成员管理 UI 区分权限已撤销和环境清理中。不新增原 topic 换绑或文件迁移入口。
+- `repositories/org_invite_token.py`、`api/routes/v1/org_invites.py` 和 org 成员移除／角色更新：邀请原签发资格、初始撤销及消费／授予成员的单事务，不只在账号硬删清理邀请。
+- `models/conversation_share.py`、对应 repository、`api/routes/v1/shares.py`、`services/conversation_sharing.py`：分享签发资格、立即停用、复制后激活隔离及正文／artifact 消费校验；现有 sharing 站点页配套更新。
+- `sandbox/panel_token.py`、`sandbox/{base,opensandbox,manager}.py`、`api/routes/sandbox_panel.py`、面板签发调用方：宿主注入原访问资格，签名含原实例／路由版本，HTTP／WS 两向 relay 使用可撤销资格，旧无证明 token 统一失效；沿用原公开代理，不回退 provider 直连。
+- `api/routes/v1/{conversations,user_events,ws_sandbox,sandbox_share,admin_providers}.py` 的所有 StreamingResponse 及共享流包装器：replay／live／下载转发和空闲资格检查；`@cubeplex/core` SSE 消费、对应 Next 流代理及面板组件在失权后停止自动重连、展示权限变化，不把订阅失权写成 run 失败。保留现有 auth／CSRF／SSE 代理和禁压缩要求。
+- `mcp/oauth/{state,callback,token_manager}.py`、OAuth start／DCR／callback 路由、`repositories/{credential,mcp}.py`、credential service 及 post-grant discovery：原签发授权、外部请求后最终事务校验、vault／grant 原子写入及迟到 refresh／discovery 隔离。OAuth return UI 明确失权错误；现有 MCP 站点页和 `backend/docs/mcp_oauth_staging_test_plan.md` 同交付更新，真实供应商 staging 仍是发布门槛。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。同文件定义凭证子记录，前缀 `delc`，只保存唯一 token 摘要、原操作人及 operation ID；可随操作回收，但操作与凭证均无目标级联 FK。账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务。
 - `services/deletion_receipt_cleanup.py`（新）及 `api/app.py` lifespan：启动和每小时执行有界回收，按 completed_at 保留终态 30 天，使用多 worker 安全的数据库批次锁；索引、期限拒绝和物理回收测试随 C2 交付。
 - 删除操作模型／repository 和账号、workspace teardown 共用服务：保存原父 scope／目标实例定位信息，父清理领取及隔离子操作旧 owner，原子写入父子终态；不能通过 bulk delete／级联绕过子操作回执与未决 handoff。
@@ -193,6 +199,20 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 授权清单另覆盖非 FK 的 Redis `share`、`otk`、`otk:att`、`sandbox_otk`：新 payload 有明确 schema 版本、issuer_user_id、固定 scope／conversation／资源及原授权实例／版本；creator 隐式授权需可递增版本，participant／membership 用原实例，不能以重新加入代替。签发 service 从可信用户上下文或原 run admission 取得 actor；IMArtifactDispatcher 及 Feishu／DingTalk／Teams／Discord／WeCom／Slack 构造统一传递原身份，恢复不能读取后来编辑的 connector actor。签发在权限／资源锁内取得授权快照，Redis 写入即使晚于撤权，消费也必须按原证明拒绝；无可验证 actor 时不签发。
 
 公开 artifact 页面、每个子文件、Office artifact／attachment 下载及 sandbox 下载，都先查令牌，再用真实 DB 检查 issuer 未 deleting、原 org／workspace／资源授权仍有效、目标仍存在且未关闭；缺证明、失权和目标不匹配统一不可用，不回显身份资料。校验不能只放页面而让文件 URL 绕过，不信任 object_key 或新版 owner 填补旧令牌，也不只看 Redis TTL。账号初始 deleting 或成员 revoked 提交即使 Redis 删除失败也失效；缓存不绕过 DB 校验，公开响应使用 no-store。存储下载后、发送响应／开始流之前复查资格，已发出的字节不能收回；sandbox 令牌另绑定原实例和路由版本，消费不得为失效路由 ensure_running／revive 替代实例。个人信息硬删后原令牌继续拒绝，B 独立合法证明保留。旧 payload 缺 issuer／授权版本在统一切换后直接拒绝，保留原 TTL 自然回收，不新增双写兼容或要求 Redis 全量扫描成功；Office 仍可在有效 TTL 内多次合法读取。
+
+邀请也按原授权受理：org membership 撤销、管理员降级和账号 deleting 的初始事务取消对应 org 中该 actor 的未使用 OrgInviteToken。签发与接受先取得 User／org 权限锁，再锁 invite；接受读取原 issuer membership 实例／授权版本并确认当前仍有邀请该 role 的权限，然后在同一事务标 used_at、创建受邀者 membership，相关 repository 只 flush。消费先获权则先完成完整授予，再由撤权提交；撤权先提交则不消费／不授予。不能 token.consume 先 commit、再在第二个事务 grant；受邀者自身 deleting 或 scope 无效也整笔拒绝。已完成邀请形成的新成员不追溯删除，其他合法 issuer 的邀请不受影响；降级后再升级不恢复已撤销邀请。
+
+ConversationShare 在创建时保存原 issuer 资格证明，账号 deleting 或相关权限 revoked 的同一事务将其受影响分享 is_active=False，不等最后删行。读取正文、复制 artifact 和受限 scope 校验均先查 issuer 当前资格与原证明，public 仅表示不需查看者登录，不跳过签发资格。copy_artifacts_to_share 在锁外执行，最终 activate 必须在权限 → conversation → share 锁序内重查原证明及未撤销状态；停用后旧复制任务不得激活或重建行。已复制对象不因失权立刻删掉恢复证据，但全部下载路由即时拒绝，按既有物理清理处理；不撤销 B 独立合法分享。缺可靠原授权证明的历史分享在统一切换时停用，用户重新发布，不猜补权限。
+
+panel 令牌继续验 JWT 签名／issuer／expiry，另固定 actor、org／workspace／conversation 及原权限实例／版本、UserSandbox ID、provider instance、允许端口和路由版本。低层 OpenSandbox driver 不独立签出无 actor 的能力，宿主签发点以可信请求／admission 传入资格；不能因方法缺上下文回退旧 token 或 provider 原始地址。HTTP 在读取请求体后、转发前重查，响应按受校验包装器流出；WS 在连上游及 accept 前重查，两向 relay 每批发送前校验，过期／撤权／校验不可用立即取消 pending I/O 并关闭两端。不得向 sandbox 转发平台 session cookie／Authorization，令牌路径日志脱敏。旧缺证明令牌在统一切换后拒绝，前端只能以当前权限重新取 URL。
+
+长连接统一采用短读事务的资格检查：活动流每批发送前（WS 两向、HTTP chunk、SSE replay／coalescer flush／live）校验，空闲最长每 5 秒且不晚于 token expiry 检查；检查超时／DB 不可用就停止发送并关闭。可用跨 worker 通知加速，但持久检查和独立 watchdog 必须在漏通知或 socket 阻塞时仍生效；不跨网络 I/O 持数据库锁，不保留长事务缓存的旧 ORM 权限。授权检查是该批转发的受理点，已受理／已发送的在途字节不承诺回收，撤权后不新受理下一批。所有临时读 session、订阅队列和上下游连接在退出时释放，重连从当前资格重新受理。
+
+`_build_run_streaming_response` 与首次 POST 返回的 SSE 均接收订阅者自己的证明，不用 run.actor 冒充查看者资格；检查覆盖 replay 每批、ReplayCoalescer 的最后 flush、live tail 和无数据 heartbeat。撤权只终止该订阅者，B 的 run／Redis stream 不改状态；如已发响应头，发送不含业务数据的订阅级 access_revoked 结束信号，不写入共享 run event、checkpoint 或 error/done。前端停止此连接自动重连并提示失权，Last-Event-ID 不能绕过重新鉴权。user_events 的历史和实时事件按每项 workspace 当前资格过滤，账号删除时关闭整条连接；admin provider SSE 按当前 admin 权限，sandbox 下载按原路由和实例执行同一规则。Next 代理透传结束并取消上游，不保留无人消费的后台连接。
+
+MCP OAuth state 增加原 actor 的权限实例／版本及固定 connector／grant_scope／workspace／user 证明，保留一次性 consume、PKCE 和 ticket，不把 state 签名当作当前授权。start／DCR 落库、callback 换 token 前均按对应 user／workspace／org 入口的原 RBAC 校验；provider exchange 在锁外，返回后最终写事务按 User → org／workspace 权限 → connector／grant → credential 固定顺序重查当前资格和原版本，再原子保存 vault 与 grant。credential／grant repo 在此模式只 flush，不允许 access token、refresh token 或 grant 分次 commit；失权整体回滚且返回明确 authorization_revoked，不创建孤立凭据或替换 B 的合法 grant。外部返回 token 不记日志，有供应商撤销接口可尽力释放，但不能因此延迟本地拒绝或保留可用 grant。
+
+OAuth post-grant discovery 及 refresh 的迟到结果也校验当前 connector／grant 实例和版本，不能把已删除／替换的 grant 重新置 valid；原 actor 的交互流程不能换成新管理员身份继续。已经合法提交的 org／workspace 共享 grant 不因 created_by 被撤销就一概删除，自动维护按该资源当前资格处理，个人 grant 则受原 user 权限约束。旧 OAuth state 没有可靠原证明时切换后失效，重新发起流程；权限恢复也不能复用旧 state。最终写入与撤权的两个胜出顺序、凭据整笔回滚及 UI 错误都须验证；本地仅在外层供应商接口注入 barrier，不声称代替真实 consent／refresh 的 staging 发布验证。
 
 仍有其他有效参与者的 creator-mode topic（包括旧 null mode）依赖 A 的 user-scope 个人 sandbox 时，预检返回 409 `{code: shared_personal_sandbox_in_use, targets}`，无 deletion_operation、无 deleting 标记；targets 仅含本人可见目标 ID。保留既有 org owner 的 transfer_ownership_first 限制。用户须先结束这些共享关系并完成相关执行清理，或另行授权迁移；本轮不承诺新迁移接口、不自动复制个人目录。预检在上述锁序内，与新增共享关系／个人 sandbox 绑定串行；即使当前尚无 sandbox 行也按路由依赖检查，不能等容器出现才拒绝。前端按明确未受理错误展示解决提示，不进入不可撤销 pending、不自动无限重试；条件解除后沿用首次未受理 token 重新提交仍按新事实检查。
 
@@ -264,6 +284,10 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 搜索归属业务流：共享 conversation 含 chunks 和 pending／running／done／dead jobs，转移后实际硬删 A，B 的词法／向量结果及消息跳转仍可用，未授权 C 不增权。用 provider／PG barrier 覆盖旧 enqueue、claim、embed 返回、replace／done、失败回调、reap 与转移／独占删除双向竞争，检查旧 user FK 零复活、新 token 不被覆盖、索引和 job 提交原子、重启继续且已有索引不因转移消失；无 embedding provider 的降级路径也覆盖。
 - creator-mode 退出／撤权业务流：topic creator 仍是 owner 或已非 owner、null mode、无容器、活跃命令及 ConversationParticipant fallback，分别测试主动退出的依赖拒绝无部分提交，以及管理员 topic／workspace／org 撤权必定立即失权。模拟恶意 actor 并发新增依赖、无接任者、kill 失败、迟到 start、旧缓存／公开预览、重启／重加，旧个人路由不复活；B 的相关命令明确中断但其他独立工作保留，权限已撤销和清理中分别显示。dedicated 路径安全接任与禁用分支都验证，不靠阻塞管理员解决资源问题。
 - 用户 FK／公开授权回归：API key、外部登录、邀请及 shared search／attachments 的实际删用户；用真实 Redis／DB 对全部四类令牌验证 A 初始删除受理前后、Redis key 留存／删除失败、mint 响应丢失、下载在途、IM 原 actor、重新加入、缺证明旧 payload、B 合法链接及硬删 A。分享页面与直接文件 URL 都覆盖，sandbox 令牌不得复活已撤销路由／新实例；Office 合法重复读取仍可用。
+- org 邀请接受与 issuer 撤销／降级的双向 PG barrier：事务级唯一胜出、used_at 与成员授予一起回滚、旧邀请不因重新升级复活、其他 issuer 和先前合法受邀者不受影响。实际 endpoint 而非只测 repository 返回值。
+- ConversationShare 正文／artifact 在账号 cleanup_pending、成员撤权及复制后 activate 竞争时即不可读；public／org／workspace scope、旧无证明分享、B 的独立分享均覆盖。
+- 真实应用的面板 HTTP／WebSocket 和 SSE 连接测试：A 正在观看 B 的 run，撤销 A 后 replay／最后 coalescer flush／live 不再受理新批次，B run 继续；活跃及空闲双向 WS、token 到期、丢通知、DB 不可用、旧 token、新实例、重新连接、Next 取消上游和其他合法连接分别验证。外层 sandbox/provider 用可控端点，PG／Redis／鉴权与连接生命周期是真实服务；5 秒边界用可控时钟，不真等长 TTL。
+- OAuth user／workspace／org 三种 scope：旧 state 在 callback 前、exchange 等待中、vault／grant 最终事务前后遇到撤权／账号删除／角色降级，旧 flow 不写凭据或复活 FK；先合法提交时保留共享 grant，迟到 discovery／refresh 不覆盖替换结果。覆盖重新加入、旧 state、重复 callback、回滚与用户可见错误；发布前按现有 staging 计划补真实供应商验证记录。
 - 终态后立即发送：prompt、respond、暂停 Stop 的结束回执不丢，正常后处理可验证完成；租约释放后下一次发送成功，lease 到期后的崩溃恢复及连续 HITL 不回归。
 - 不同参与者回答／审批原 actor 的 HITL 被拒绝；原 actor 当前权限失效仍拒绝，主 Stop 不经过模型回答路径。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
@@ -498,5 +522,6 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 55 | C2：共享搜索索引及所有 job 原子转移，claim token 隔离迟到写入／失败，硬删用户不丢索引、不复活旧 FK 或扩大搜索权限 |
 | 56 | C2、C4：Redis 分享／预览绑定签发者和原授权，删除受理即失效，Web／IM／文件消费及旧令牌切换共同覆盖 |
 | 57 | C2：账号删除创建或接管全部 acting-user connector 分阶段清理，入队／handoff／创建编辑竞争不丢证明、不阻塞最终用户删除 |
+| 58 | C2、C4、C5：邀请／数据库分享、面板与 SSE 长连接、OAuth 延迟写入共用原资格检查，撤权不只拦新 HTTP；数据转发与写事务、前端停止重连分别验收 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。

@@ -171,6 +171,18 @@ trigger 的 202 受理还必须有持久的后续消费者，不能只依赖进�
 
 公开分享的授权不只存在于数据库。artifact share、artifact／attachment Office 预览以及 sandbox 下载的 Redis 令牌，都必须绑定签发 actor、原授权实例／版本及精确资源；IM 签发使用原 admission 的 actor，不能采用后来修改的 connector 身份。公开页面和每次文件请求均重新检查该身份、原授权及资源当前资格。账号删除或撤权事务一旦提交，A 的失效授权就不能再用；不依赖 Redis 批量删 key 成功，也不等 7 天 TTL。硬删用户后仍拒绝，重新加入不恢复旧授权，B 独立合法授权不因 A 的删除被撤销。历史令牌无法证明签发身份／授权时在统一切换后拒绝，需重新签发，不从资源的新 owner 猜补。预览与分享 API 保留分开的入口和原 TTL，复用下面的校验服务；响应禁止公共缓存，已下载的文件无法追溯收回。
 
+撤权的共同规则还覆盖已经发出的授权和已打开的连接，不只约束新业务 HTTP 请求。原身份／权限实例／版本用于确定要检查什么，不能代替当前资格；角色降级、成员重加和资源归属变化不能使旧授权自动复活。读取在每批数据发送前检查，异步写入在最终数据库事务中与撤权串行；外部服务调用不持数据库锁。清理 pending 期间也必须遵守下表，不能等硬删除才生效。
+
+| 既有入口 | 撤权后必须发生什么 |
+| --- | --- |
+| OrgInviteToken | org 成员移除、管理员降级或账号删除时，撤销该人在对应 org 尚未使用的邀请；接受邀请必须校验原签发者当前管理员资格，消费令牌与授予成员身份同事务，不允许旧邀请在撤权后增员／提权 |
+| ConversationShare | 初始撤权事务停用受影响签发者的分享；公开／org／workspace 分享正文和复制的 artifact 都检查签发授权，不能因 public 提前跳过；后台复制完成也不能再激活已失权的分享 |
+| sandbox browser／terminal 面板 | 签名令牌包含原 actor、授权、sandbox 行／原实例、端口和路由版本；HTTP 与 WebSocket 不只验签名。已连接 relay 在撤权或过期时断开，不能一直用到浏览器关闭 |
+| run SSE 等长连接 | replay、coalescer flush、live tail 都检查订阅者当前访问权；只断开失权订阅者，不停止 B 的共享 run，不向公共 run 写假 error／done。重新连接仍要授权，不能用 Last-Event-ID 绕过 |
+| MCP OAuth state／callback | 保留签名、PKCE 和浏览器 ticket 检查，另校验原 actor 及原授权；换令牌前和写 vault／grant 的事务内重查。失权的旧 flow 不得新增／覆盖 user、workspace、org 凭据，外部调用返回后失权则不落可用凭据 |
+
+长连接用短查询检查资格，不持有小时级 DB 事务：活动连接每批转发前检查，空闲连接最长每 5 秒检查，令牌到期不能等下一个业务包。通知仅加速断开，漏通知、进程重启或切换 worker 不能绕过持久检查；无法验证就停止转发并关闭。撤权前已受理／已经发出的数据无法回收，撤权后不再受理新的转发批次。run SSE、user event SSE、sandbox 下载／面板和 admin provider 流均按各自原身份／scope 校验；用户事件跨 workspace 时逐项过滤失权 scope，不泄露其旧 replay。前端收到仅针对本订阅者的失权结束后停止自动重连，提示重新取得权限；不改变其他人的运行状态。
+
 共享 run 中其他人的输入必须逐条对账：删除 A 先撤销 A 的 attempt 权限，再核对 B 投给它的 steering。只有已证明原 attempt 不能再提交、且输入未进 checkpoint 的项，才保留原 steer ID／正文／发送者，以 B 当前权限等待 slot 释放并启动后继 run；目标投递 attempt 与源输入身份分别保存，不改写普通消息已绑定的原 run ID，也不复制一条用户消息。无法证明提交状态时继续对账。已经提交的 B 输入保留历史；若 A 的中止使其处理未完成或结果未知，明确显示“处理中断”，由 B 主动继续，不自动重放可能已有副作用的模型／工具。checkpoint 已提交只证明接收，不证明处理完成；不得静默将 B 标记取消或已处理。
 
 账号删除 UI 将 409 cleanup_pending 显示为持续的“正在清理”，不恢复成可再次开展业务的普通错误状态。本人删除状态通过受限鉴权的查询／幂等重试可恢复；前端有界退避查询、允许手动重试，刷新后仍进入删除进度。收到明确删除成功回执才显示完成并清理 auth／workspace 状态、跳转登录；401 只表示会话失效，不当作删除成功。断网或清理未知保留 pending 提示，不声称取消成功。workspace 删除页面同样区分 cleanup_pending 与普通失败，删除确认后再移除工作区；关闭进度界面不撤回已提交的删除。
@@ -515,5 +527,6 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 55. 共享会话已有索引及 pending／running／done／dead embedding job 时，删除原创建者仍能硬删用户且 B 可搜索原历史；入队、领取、provider 等待、写入和失败回调的双向竞争不写回旧 creator、不丢新 claim 或索引。独占删除不被旧 worker 复活；索引 owner 变化不扩大其他用户的搜索权限。
 56. A 签发的 Redis 分享／预览令牌在原授权撤销或账号删除受理后即不可用，公开页面和文件入口一致；共享 artifact 保留给 B、Redis key 尚存、签发与删除竞争及账号硬删均不能绕过。重新加入和无签发证明的旧令牌不恢复权限，B 独立有效的链接保持可用；IM 以原 actor 签发，不借新 connector 身份。
 57. 删除账号 A 创建或接管全部 acting_user 为 A 的 connector 清理，包括子删除尚未受理的情形；入队／claim／handoff 响应丢失、worker 重启、同时 workspace 删除及并发修改 acting_user 均不丢恢复证明、不重复派发，真实硬删 A 不被 connector FK 阻塞。其他 actor 的 connector 和已交付会话历史不误删。
+58. 在账号清理 pending、org／workspace／topic 撤权及管理员降级后，旧 org 邀请、ConversationShare 正文／artifact、面板 HTTP／已连 WebSocket、run replay／live tail 和 OAuth 回调都不能继续使用失效授权。用接受邀请、复制后激活、双向 relay、SSE 缓冲及 token exchange／最终写事务的竞争验证；其他 actor 的分享／run／合法共享凭据保留，原授权失效后重新加入不复活旧授权。空闲连接、漏通知、到期及数据库不可用也可有界关闭。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。
