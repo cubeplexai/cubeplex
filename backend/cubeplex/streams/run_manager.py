@@ -1075,6 +1075,7 @@ class RunManager:
         self._run_event_ttl_seconds = run_event_ttl_seconds
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
         self._agents: dict[str, Any] = {}
         self._agent_claim_tokens: dict[str, tuple[Any, str | None]] = {}
         self._resume_claim_tokens: dict[str, str] = {}
@@ -1110,6 +1111,7 @@ class RunManager:
         completed_task: asyncio.Task[None],
     ) -> None:
         """Done-callback that removes the run task and signals drain when empty."""
+        self._cleanup_tasks.discard(completed_task)
         if self._tasks.get(run_id) is not completed_task:
             return
         self._tasks.pop(run_id, None)
@@ -1401,10 +1403,28 @@ class RunManager:
         task = self._tasks.get(run_id)
         if task is None or task.done():
             return False
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        self._signal_local_stop(run_id)
+        try:
+            # A request timeout must not send a second cancellation into teardown.
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            caller = asyncio.current_task()
+            if caller is not None and caller.cancelling():
+                raise
         return True
+
+    def _signal_local_stop(self, run_id: str) -> bool:
+        task = self._tasks.get(run_id)
+        if task is None:
+            return False
+        if not task.done() and task not in self._cleanup_tasks and not task.cancelling():
+            task.cancel()
+        return True
+
+    def _protect_cleanup(self, run_id: str) -> None:
+        task = self._tasks.get(run_id)
+        if task is asyncio.current_task() and task is not None:
+            self._cleanup_tasks.add(task)
 
     async def steer_run(self, run_id: str, content: str) -> bool:
         """Inject a steering message into a live run's agent.
@@ -1765,6 +1785,7 @@ class RunManager:
             ),
             name=f"cancel_paused:{run_id}",
         )
+        self._cleanup_tasks.add(task)
         self._tasks_empty.clear()
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
@@ -2062,9 +2083,7 @@ class RunManager:
 
     async def notify_run_stop(self, run_id: str) -> None:
         """Wake cleanup after durable Stop; acceptance does not await worker teardown."""
-        task = self._tasks.get(run_id)
-        if task is not None and not task.done():
-            task.cancel()
+        if self._signal_local_stop(run_id):
             return
         await self._publish_control(run_id, "cancel")
 
@@ -2387,6 +2406,7 @@ class RunManager:
             raise RunClaimLost("execution slot belongs to another attempt")
 
     async def _begin_execution_finalization(self, ctx: RunContext, run_id: str) -> None:
+        self._protect_cleanup(run_id)
         if ctx.execution is None:
             return
         from cubeplex.config import config
@@ -3404,6 +3424,7 @@ class RunManager:
                             answered_question_id=question_id,
                         )
                 await self._require_execution_authority(ctx, run_id)
+                self._protect_cleanup(run_id)
                 if not await begin_resume_finalization(
                     self._redis,
                     prefix=self._key_prefix,
@@ -3469,6 +3490,7 @@ class RunManager:
                 # Heartbeat / registration teardown must not depend on Redis
                 # finalize succeeding — a timeout there would leave the
                 # in-flight loop refreshing a dead resume.
+                self._protect_cleanup(run_id)
                 try:
                     if defer_terminal_to_owner:
                         # Keep running until the outer cancel/error owner leases
@@ -5238,6 +5260,7 @@ class RunManager:
                     **claim_kwargs,
                 )
         finally:
+            self._protect_cleanup(run_id)
             if ctx.execution is not None:
                 try:
                     await self._require_execution_slot(ctx, run_id)
@@ -5888,6 +5911,7 @@ class RunManager:
                     **claim_kwargs,
                 )
         finally:
+            self._protect_cleanup(run_id)
             if ctx.execution is not None:
                 try:
                     await self._require_execution_slot(ctx, run_id)

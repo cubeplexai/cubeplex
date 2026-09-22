@@ -79,6 +79,8 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     manager._key_prefix = "test-respond"
     manager._run_event_ttl_seconds = 60
     manager._agents = {}
+    manager._tasks = {}
+    manager._cleanup_tasks = set()
     manager._hitl_channels = {}
     manager._steering_delivery = SimpleNamespace(
         register_and_drain=AsyncMock(),
