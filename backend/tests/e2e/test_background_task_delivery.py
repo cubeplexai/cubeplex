@@ -87,6 +87,60 @@ async def _event(
     return event
 
 
+async def _stage_checkpoint_under_advisory_lock(
+    session: AsyncSession,
+    *,
+    conversation_id: str,
+    run_id: str,
+    notice_id: str,
+    input_id: str,
+) -> None:
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
+        {"thread_id": conversation_id},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO cubepi_threads (thread_id) VALUES (:thread_id) "
+            "ON CONFLICT (thread_id) DO NOTHING"
+        ),
+        {"thread_id": conversation_id},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO cubepi_runs (thread_id, run_id) VALUES (:thread_id, :run_id) "
+            "ON CONFLICT (thread_id, run_id) DO NOTHING"
+        ),
+        {"thread_id": conversation_id, "run_id": run_id},
+    )
+    last_seq = int(
+        await session.scalar(
+            text("SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages WHERE thread_id = :thread_id"),
+            {"thread_id": conversation_id},
+        )
+        or 0
+    )
+    checkpoint_message = UserMessage(
+        content=[TextContent(text="Background task result")],
+        metadata={"notice_id": notice_id, "input_id": input_id},
+        run_id=run_id,
+    )
+    await session.execute(
+        text(
+            "INSERT INTO cubepi_messages "
+            "(thread_id, seq, role, metadata, payload, run_id) "
+            "VALUES (:thread_id, :seq, 'user', CAST(:metadata AS jsonb), :payload, :run_id)"
+        ),
+        {
+            "thread_id": conversation_id,
+            "seq": last_seq + 1,
+            "metadata": json.dumps(checkpoint_message.metadata),
+            "payload": msgpack.packb(checkpoint_message.model_dump(mode="json"), use_bin_type=True),
+            "run_id": run_id,
+        },
+    )
+
+
 async def test_pending_result_is_not_claimed(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
@@ -856,6 +910,50 @@ async def test_uncommitted_append_returns_to_notice_queue_after_run_ends(
     )
 
 
+async def test_steering_maintenance_defers_background_settlement_to_fenced_recovery(
+    db_session: AsyncSession, reservation_context: ReservationContext
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert admission is not None and admission.run_id is not None
+    admission.run_start_token = "attempt-1"
+    admission.run_started_at = NOW
+    service = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    await service.claim_ready(
+        owner_token="worker-1",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    steering_id = await service.enqueue_for_active_run(
+        notice_id=event.id,
+        owner_token="worker-1",
+        run_id=admission.run_id,
+    )
+    assert steering_id is not None
+    await db_session.commit()
+    coordinator = DurableSteeringCoordinator(
+        async_session_maker,
+        history_loader=AsyncMock(return_value=set()),
+        redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redis_key_prefix="steering-defers-background",
+    )
+
+    await coordinator.maintain_once()
+
+    await db_session.refresh(event)
+    steering = await db_session.get(SteeringMessage, steering_id)
+    assert event.state == "claimed"
+    assert event.delivery_run_id == admission.run_id
+    assert steering is not None
+    assert steering.state == SteeringMessageState.queued
+
+
 async def test_task_stop_discards_queued_append_without_touching_other_inputs(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
@@ -1191,11 +1289,12 @@ async def test_worker_restart_releases_uncheckpointed_initial_notice(
     service = BackgroundTaskDeliveryService(
         db_session, org_id=event.org_id, workspace_id=event.workspace_id
     )
-    [claim] = await service.claim_ready(
+    claims = await service.claim_ready(
         owner_token="dead-worker",
         now=NOW,
         owner_until=NOW + timedelta(seconds=30),
     )
+    claim = next(item for item in claims if item.notice.notice_id == event.id)
     admitted = await ConversationExecutionService(
         db_session, org_id=event.org_id, workspace_id=event.workspace_id
     ).admit_background_notice(
@@ -1297,11 +1396,12 @@ async def test_worker_restart_fences_inflight_checkpoint_before_retirement(
     service = BackgroundTaskDeliveryService(
         db_session, org_id=event.org_id, workspace_id=event.workspace_id
     )
-    [claim] = await service.claim_ready(
+    claims = await service.claim_ready(
         owner_token="dead-worker",
         now=NOW,
         owner_until=NOW + timedelta(seconds=30),
     )
+    claim = next(item for item in claims if item.notice.notice_id == event.id)
     admitted = await ConversationExecutionService(
         db_session, org_id=event.org_id, workspace_id=event.workspace_id
     ).admit_background_notice(
@@ -1327,49 +1427,12 @@ async def test_worker_restart_fences_inflight_checkpoint_before_retirement(
 
     blocker = session_factory()
     await blocker.begin()
-    await blocker.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
-        {"thread_id": event.conversation_id},
-    )
-    await blocker.execute(
-        text(
-            "INSERT INTO cubepi_threads (thread_id) VALUES (:thread_id) "
-            "ON CONFLICT (thread_id) DO NOTHING"
-        ),
-        {"thread_id": event.conversation_id},
-    )
-    await blocker.execute(
-        text(
-            "INSERT INTO cubepi_runs (thread_id, run_id) VALUES (:thread_id, :run_id) "
-            "ON CONFLICT (thread_id, run_id) DO NOTHING"
-        ),
-        {"thread_id": event.conversation_id, "run_id": admitted.admission.run_id},
-    )
-    last_seq = int(
-        await blocker.scalar(
-            text("SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages WHERE thread_id = :thread_id"),
-            {"thread_id": event.conversation_id},
-        )
-        or 0
-    )
-    checkpoint_message = UserMessage(
-        content=[TextContent(text="Background task result")],
-        metadata={"notice_id": event.id, "input_id": claim.input_id},
+    await _stage_checkpoint_under_advisory_lock(
+        blocker,
+        conversation_id=event.conversation_id,
         run_id=admitted.admission.run_id,
-    )
-    await blocker.execute(
-        text(
-            "INSERT INTO cubepi_messages "
-            "(thread_id, seq, role, metadata, payload, run_id) "
-            "VALUES (:thread_id, :seq, 'user', CAST(:metadata AS jsonb), :payload, :run_id)"
-        ),
-        {
-            "thread_id": event.conversation_id,
-            "seq": last_seq + 1,
-            "metadata": json.dumps(checkpoint_message.metadata),
-            "payload": msgpack.packb(checkpoint_message.model_dump(mode="json"), use_bin_type=True),
-            "run_id": admitted.admission.run_id,
-        },
+        notice_id=event.id,
+        input_id=claim.input_id,
     )
     coordinator = BackgroundTaskDeliveryCoordinator(
         async_session_maker,
@@ -1390,7 +1453,85 @@ async def test_worker_restart_fences_inflight_checkpoint_before_retirement(
         await db_session.refresh(admitted.admission)
         assert event.state == "delivered"
         assert event.checkpoint_input_id == claim.input_id
-        assert admitted.admission.run_finished_at is None
+        assert admitted.admission.run_finished_at == NOW + timedelta(minutes=1)
+        assert admitted.admission.run_terminal_status == "failed"
+    finally:
+        if blocker.in_transaction():
+            await blocker.rollback()
+        await blocker.close()
+        if not reconciliation.done():
+            reconciliation.cancel()
+            await asyncio.gather(reconciliation, return_exceptions=True)
+        await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
+
+
+async def test_worker_restart_fences_inflight_appended_notice(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert admission is not None and admission.run_id is not None
+    admission.run_start_token = "foreground-attempt"
+    admission.run_started_at = NOW
+    service = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    claims = await service.claim_ready(
+        owner_token="dead-worker",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    claim = next(item for item in claims if item.notice.notice_id == event.id)
+    steering_id = await service.enqueue_for_active_run(
+        notice_id=event.id,
+        owner_token="dead-worker",
+        run_id=admission.run_id,
+    )
+    assert steering_id is not None
+    await db_session.commit()
+
+    blocker = session_factory()
+    await blocker.begin()
+    await _stage_checkpoint_under_advisory_lock(
+        blocker,
+        conversation_id=event.conversation_id,
+        run_id=admission.run_id,
+        notice_id=event.id,
+        input_id=claim.input_id,
+    )
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=MagicMock(),
+        redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redis_key_prefix="delivery-appended-checkpoint-race",
+    )
+    reconciliation = asyncio.create_task(
+        coordinator.reconcile_bound_once(now=NOW + timedelta(minutes=1))
+    )
+    try:
+        await asyncio.sleep(0.1)
+        assert not reconciliation.done()
+        await blocker.commit()
+        assert await asyncio.wait_for(reconciliation, timeout=2) == [event.id]
+
+        await db_session.refresh(event)
+        await db_session.refresh(admission)
+        assert event.state == "delivered"
+        assert event.checkpoint_input_id == claim.input_id
+        assert admission.run_finished_at == NOW + timedelta(minutes=1)
+        assert admission.run_terminal_status == "failed"
+        assert (
+            await db_session.scalar(
+                select(SteeringMessage).where(SteeringMessage.id == steering_id)
+            )
+            is None
+        )
     finally:
         if blocker.in_transaction():
             await blocker.rollback()
