@@ -465,6 +465,7 @@ class BackgroundTaskLifecycle:
                     col(SandboxCommand.task_id).in_(selected),
                 )
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalars()
         by_task = {task.id: task for task in rows}
