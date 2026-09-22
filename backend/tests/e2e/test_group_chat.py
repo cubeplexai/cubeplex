@@ -69,7 +69,7 @@ class TestGroupChatMessaging:
 
         msg_resp = await member_c.post(
             f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-            json={"content": "Hello from member"},
+            json={"client_message_id": "member-send", "content": "Hello from member"},
         )
         assert msg_resp.status_code != 404, msg_resp.text
 
@@ -96,7 +96,7 @@ class TestGroupChatMessaging:
         # indistinguishable from "conversation doesn't exist".
         msg_resp = await member_c.post(
             f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-            json={"content": "still here?"},
+            json={"client_message_id": "removed-member-send", "content": "still here?"},
         )
         assert msg_resp.status_code == 404, msg_resp.text
 

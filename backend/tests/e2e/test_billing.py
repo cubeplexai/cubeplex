@@ -11,7 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from cubeplex.db.engine import _build_database_url
 from cubeplex.models.billing import BillingEvent, LlmBillingEvent
-from tests.e2e.conftest import DEFAULT_WS_ID
+from tests.e2e.conftest import DEFAULT_WS_ID, web_message_request
 from tests.e2e.helpers import await_until
 
 pytestmark = [pytest.mark.e2e, pytest.mark.real_llm]
@@ -58,7 +58,7 @@ async def test_send_message_creates_billing_event(
     async with async_client.stream(
         "POST",
         f"/api/v1/ws/{_DEFAULT_WS}/conversations/{conv_id}/messages",
-        json={"content": "Say exactly: hello"},
+        json=web_message_request(content="Say exactly: hello"),
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         assert response.status_code == 200
@@ -117,7 +117,7 @@ async def test_real_run_records_usage(
     async with async_client.stream(
         "POST",
         f"/api/v1/ws/{_DEFAULT_WS}/conversations/{conv_id}/messages",
-        json={"content": "Say: ok"},
+        json=web_message_request(content="Say: ok"),
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as r:
         assert r.status_code == 200

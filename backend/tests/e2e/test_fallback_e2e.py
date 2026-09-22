@@ -40,6 +40,7 @@ from tests.e2e.conftest import (
     _ensure_default_user_and_membership,
     _lifespan_context,
     _login_and_attach,
+    web_message_request,
 )
 
 
@@ -220,10 +221,11 @@ async def _stream_to_done(
     body: dict[str, Any],
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
+    request_body = web_message_request(**body)
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json=body,
+        json=request_body,
         headers={"accept": "text/event-stream"},
     ) as resp:
         assert resp.status_code == 200, resp.text

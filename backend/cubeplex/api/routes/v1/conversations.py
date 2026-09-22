@@ -61,6 +61,8 @@ from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
     ExecutionConflictError,
+    ExecutionRevokedError,
+    UserMessageIntent,
 )
 from cubeplex.skills.cache import SkillCache
 from cubeplex.streams.replay_coalescer import ReplayCoalescer
@@ -1037,6 +1039,7 @@ class SendMessageRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    client_message_id: str = Field(min_length=1, max_length=200, pattern=r"^\S+$")
     content: str = ""
     attachments: list[str] = []
     model_key: str | None = None
@@ -1486,16 +1489,9 @@ async def send_message(
                 if row is None or row.status not in {"pending", "attached"}:
                     raise AttachmentReferenceInvalidError(fid)
 
-    # Validate preset early so unknown_preset / broken_preset surface as HTTP
-    # errors rather than mid-stream SSE error events. The actual run picks up
-    # its own snapshot inside _build_agent_for_conversation.
-    #
-    # NOTE: this runs BEFORE the attachment mark_attached_bulk and conversation
-    # timestamp bump below. resolve_model_preset can raise (UnknownPresetError /
-    # BrokenPresetError / NoDefaultPresetError) and those need to surface as
-    # 4xx without leaving orphaned attachment state or a bumped has_messages /
-    # updated_at on a turn that never ran.
-    from cubeplex.llm.resolver import resolve_model_preset
+    # Load the model catalog before admission. Preset resolution itself happens
+    # in the admission transaction so an invalid selection cannot attach files
+    # or mutate the conversation.
     from cubeplex.llm.snapshot import load_llm_snapshot
 
     async with async_session_maker() as _validate_session:
@@ -1504,24 +1500,36 @@ async def send_message(
             ctx.org_id,
             raw_request.app.state.encryption_backend,
         )
-    # Validate the requested model selection. BrokenPresetError (the preset's
-    # model refs are missing) and NoDefaultPresetError stay 4xx. An
-    # UnknownPresetError means the chosen key (a tier/custom preset) was since
-    # deleted — a stale client cache, or a key stored on the conversation whose
-    # preset is gone. Fall back to the workspace default instead of bricking the
-    # send with a 400, and persist the fallback so the conversation heals.
-    from cubeplex.llm.errors import UnknownPresetError
-
+    intent = UserMessageIntent(
+        content=request_obj.content,
+        attachment_ids=tuple(request_obj.attachments),
+        model_key=request_obj.model_key,
+        reasoning=request_obj.reasoning,
+    )
     try:
-        resolve_model_preset(_snap, request_obj.model_key)
-        effective_model_key = request_obj.model_key
-    except UnknownPresetError:
-        # Re-validate the default synchronously so BrokenPresetError /
-        # NoDefaultPresetError still raise (4xx) BEFORE any mutation, exactly
-        # like the non-fallback path — never let them slip into the stream after
-        # has_messages / updated_at / model_key were already changed.
-        resolve_model_preset(_snap, None)
-        effective_model_key = None
+        async with async_session_maker() as admission_session:
+            admitted = await ConversationExecutionService(
+                admission_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            ).admit_user_message(
+                conversation_id=conversation_id,
+                actor_user_id=ctx.user.id,
+                namespace="web",
+                source_id=request_obj.client_message_id,
+                intent=intent,
+                snapshot=_snap,
+                now=datetime.now(UTC),
+            )
+            await admission_session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Conversation not found") from exc
+    except ExecutionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ExecutionRevokedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise InvalidInputError(message=str(exc)) from exc
 
     (
         _topic_id,
@@ -1530,37 +1538,6 @@ async def send_message(
         _sandbox_mode,
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx)
-
-    if request_obj.attachments:
-        from cubeplex.repositories import AttachmentRepository
-
-        async with async_session_maker() as att_session:
-            att_repo = AttachmentRepository(
-                att_session,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-            )
-            # Flip pending → attached synchronously, before the run starts.
-            # The background _execute_run path also calls this (idempotent),
-            # but doing it here closes a race where the client navigates to
-            # the conversation page and rehydrates `pending` attachments
-            # back into the InputBar staging area.
-            await att_repo.mark_attached_bulk(
-                conversation_id=conversation_id,
-                attachment_ids=list(request_obj.attachments),
-            )
-
-    # Mark the conversation active synchronously, before the run starts.
-    # This ensures the conversation becomes visible in list_all even if the
-    # stream errors before the post-stream persistence runs, and bumps
-    # updated_at on every send so recency ordering tracks activity.
-    await _update_conversation_timestamp(
-        conversation_id,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-        user_id=ctx.user.id,
-        model_setting=(effective_model_key, request_obj.reasoning.model_dump()),
-    )
 
     run_manager = raw_request.app.state.run_manager
     run_ctx = RunContext(
@@ -1582,11 +1559,13 @@ async def send_message(
             content=request_obj.content,
             attachments=list(request_obj.attachments),
             ctx=run_ctx,
-            model_key=effective_model_key,
+            run_id=admitted.admission.run_id,
+            model_key=request_obj.model_key,
             reasoning=request_obj.reasoning,
             llm_snapshot=_snap,
+            admission_id=admitted.admission.id,
         )
-    except RuntimeError as exc:
+    except (ExecutionConflictError, ExecutionRevokedError, RuntimeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
