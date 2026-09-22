@@ -179,11 +179,15 @@ trigger 的 202 受理还必须有持久的后续消费者，不能只依赖进�
 | ConversationShare | 初始撤权事务停用受影响签发者的分享；公开／org／workspace 分享正文和复制的 artifact 都检查签发授权，不能因 public 提前跳过；后台复制完成也不能再激活已失权的分享 |
 | sandbox browser／terminal 面板 | 签名令牌包含原 actor、授权、sandbox 行／原实例、端口和路由版本；HTTP 与 WebSocket 不只验签名。已连接 relay 在撤权或过期时断开，不能一直用到浏览器关闭 |
 | run SSE 等长连接 | replay、coalescer flush、live tail 都检查订阅者当前访问权；只断开失权订阅者，不停止 B 的共享 run，不向公共 run 写假 error／done。重新连接仍要授权，不能用 Last-Event-ID 绕过 |
+| EE 成本 CSV 导出 | org 及按 workspace 筛选的两个导出均维持原 org admin 资格，逐批输出受同一连接租约约束；失权关闭并释放查询资源，不把 workspace 筛选误当普通成员授权，EE 许可边界不变 |
+| 管理员 provider 测试 | 流式和非流式探测都在每次 liveness／模型结果写事务中重查原管理员资格和当前目标配置；外部请求期间失权不得再落库，连接租约不授权写入，不误报 provider 故障或覆盖新配置 |
 | MCP OAuth state／callback | 保留签名、PKCE 和浏览器 ticket 检查，另校验原 actor 及原授权；换令牌前和写 vault／grant 的事务内重查。失权的旧 flow 不得新增／覆盖 user、workspace、org 凭据，外部调用返回后失权则不落可用凭据 |
 
 长连接使用每条连接共享、最长 5 秒的资格租约，不按帧／token 频率查询数据库。短事务续租，每批转发只检查本地租约仍有效；两向 WS 共享一次检查，独立 watchdog 在租约／令牌到期时停止两向转发并关闭，即使连接空闲或 I/O 阻塞也生效。撤权通知尽快废止租约，漏通知时也不能续到超过一次已授予的 5 秒窗口；持久撤权立即阻止新请求和新租约，但既有连接明确存在最长 5 秒的传播窗口，不再承诺零延迟断流。查询失败／超时或租约过期即关闭，不沿用旧许可，不持小时级 DB 事务。run SSE、user event SSE、sandbox 下载／面板和 admin provider 流均按各自原身份／scope 校验；跨 workspace 用户事件只能使用对应 scope 的有效租约，不能套用另一 scope。前端失权结束后停止自动重连；此前已转发数据不能收回，业务写事务仍即时检查，不使用这项连接租约宽限。
 
 Google／企业 SSO 的旧登录流程不能在账号硬删除后自动重建同一账号。账号删除受理时，为已知外部身份及按现有匹配规则规范化的邮箱保存不含明文身份的短期隔离记录，记录不引用待删 User。resolve_identity 的更新、绑定和自动创建路径都在最终事务检查该记录及原登录 state 的绝对期限，不能只依赖进入 callback 时 Redis state 尚未过期；创建用户、身份绑定和相关 bootstrap 数据不能分开提交。删除期间保留隔离记录，硬删除后至少保留到所有旧 state 必定过期（当前最长 300 秒，加时钟容差）；此短窗口内同身份自动登录／重建明确拒绝，过期后按正常策略允许新流程，不永久封禁。旧 state 无论 provider 返回多晚都不能再创建用户／组织／workspace；历史 state 缺少可验证期限时切换后拒绝。隔离记录到期有界回收，不无限保留可关联身份的信息。
+
+企业 SSO 还必须保留原连接的授权边界：state 绑定连接 ID、org、协议和单调配置／授权版本，最终 identity 事务加锁重查其存在、版本和允许的 active／testing 状态，不能沿用 provider 请求前的布尔快照。停用、删除或影响登录的配置／provisioning 变更先提交时，旧 OIDC／SAML 回调整笔拒绝，不保存测试属性、身份、用户或自动成员关系；重新启用和替换连接不复活旧 flow。合法 identity 提交先胜不回溯删除数据，但发 cookie 前还要重查原连接、账号和 state 期限。管理变更与这些短事务串行，不跨外部请求持锁；失效明确要求重新登录，保留 EE 与 OSS 的依赖／许可边界。
 
 共享 run 中其他人的输入必须逐条对账：删除 A 先撤销 A 的 attempt 权限，再核对 B 投给它的 steering。只有已证明原 attempt 不能再提交、且输入未进 checkpoint 的项，才保留原 steer ID／正文／发送者，以 B 当前权限等待 slot 释放并启动后继 run；目标投递 attempt 与源输入身份分别保存，不改写普通消息已绑定的原 run ID，也不复制一条用户消息。无法证明提交状态时继续对账。已经提交的 B 输入保留历史；若 A 的中止使其处理未完成或结果未知，明确显示“处理中断”，由 B 主动继续，不自动重放可能已有副作用的模型／工具。checkpoint 已提交只证明接收，不证明处理完成；不得静默将 B 标记取消或已处理。
 
@@ -531,9 +535,9 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 55. 共享会话已有索引及 pending／running／done／dead embedding job 时，删除原创建者仍能硬删用户且 B 可搜索原历史；入队、领取、provider 等待、写入和失败回调的双向竞争不写回旧 creator、不丢新 claim 或索引。独占删除不被旧 worker 复活；索引 owner 变化不扩大其他用户的搜索权限。
 56. A 签发的 Redis 分享／预览令牌在原授权撤销或账号删除受理后即不可用，公开页面和文件入口一致；共享 artifact 保留给 B、Redis key 尚存、签发与删除竞争及账号硬删均不能绕过。重新加入和无签发证明的旧令牌不恢复权限，B 独立有效的链接保持可用；IM 以原 actor 签发，不借新 connector 身份。
 57. 删除账号 A 创建或接管全部 acting_user 为 A 的 connector 清理，包括子删除尚未受理的情形；入队／claim／handoff 响应丢失、worker 重启、同时 workspace 删除及并发修改 acting_user 均不丢恢复证明、不重复派发，真实硬删 A 不被 connector FK 阻塞。其他 actor 的 connector 和已交付会话历史不误删。
-58. 在账号清理 pending、org／workspace／topic 撤权及管理员降级后，旧 org 邀请、ConversationShare 正文／artifact、面板新请求和 OAuth 最终写入均拒绝失效授权；已连 WebSocket、run replay／live tail 等按第 59 项的最长 5 秒租约传播上限关闭。用接受邀请、复制后激活、双向 relay、SSE 缓冲及 token exchange／最终写事务的竞争验证；其他 actor 的分享／run／合法共享凭据保留，原授权失效后重新加入不复活旧授权。空闲连接、漏通知、到期及数据库不可用也可有界关闭。
+58. 在账号清理 pending、org／workspace／topic 撤权及管理员降级后，旧 org 邀请、ConversationShare 正文／artifact、面板新请求和 OAuth 最终写入均拒绝失效授权；已连 WebSocket、run replay／live tail 及两类 EE CSV 导出按第 59 项的最长 5 秒租约传播上限关闭。provider 测试在外部探测后写 liveness／模型结果时即时重查原管理员资格，不享受流租约宽限，不覆盖变更后的配置。用接受邀请、复制后激活、双向 relay、SSE／CSV 缓冲及外部请求／最终写事务的竞争验证；其他 actor 的分享／run／合法共享凭据保留，原授权失效后重新加入不复活旧授权。空闲连接、漏通知、到期及数据库不可用也可有界关闭。
 59. 万帧终端／浏览器与密集 SSE 输出不产生逐帧数据库查询，两向连接共用有界续租；通知丢失时撤权传播不超过 5 秒，过期／验证故障关闭，慢查询不把租期顺延到返回后，业务写入不享受缓存宽限。
-60. 删除前开始的 Google／SSO 登录在 provider 等待后、账号硬删后或清理恢复时返回，不能重建用户、身份链接或 bootstrap 数据；邮箱自动绑定和已有 external identity 两路都覆盖。短期隔离到期后合法新流程可重新注册，原 state 最终期限仍拒绝迟到旧流程，隔离记录按期回收。
+60. 删除前开始的 Google／SSO 登录在 provider 等待后、账号硬删后或清理恢复时返回，不能重建用户、身份链接或 bootstrap 数据；邮箱自动绑定和已有 external identity 两路都覆盖。短期隔离到期后合法新流程可重新注册，原 state 最终期限仍拒绝迟到旧流程，隔离记录按期回收。企业 OIDC／SAML 在连接停用／删除／配置变更期间的迟到回调不能借旧版本创建身份、测试属性或签 cookie；双向提交竞争及停用后重启也验证，合法 active／testing 流程不回归。
 61. DELETE 返回 pending 后立即关闭客户端／停止 request worker，独立删除恢复 worker 仍能在启动扫描或定期扫描中完成对账和硬删除；双 worker、claim 到期、崩溃重启、父子操作及长期 unknown 不丢证据、不重复终态，不靠状态 GET 的隐式写入推进。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。
