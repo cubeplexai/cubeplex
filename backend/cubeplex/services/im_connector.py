@@ -20,10 +20,12 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from cubeplex.api.schemas.im_connector import ImRuntimeStatus
-from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.models.im_connector import IMConnectorAccount, IMRunQueueItem, IMWebhookReceipt
 from cubeplex.repositories.im_connector import _RuntimeAgg
+from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.services.credential import CredentialService
 from cubeplex.utils.time import utc_isoformat
 
@@ -864,10 +866,11 @@ class IMConnectorService:
         account_id: str,
         workspace_id: str | None = None,
     ) -> None:
-        account = await self.get(account_id=account_id, workspace_id=workspace_id)
+        account = await self._lock_account(account_id=account_id, workspace_id=workspace_id)
         if account is None:
             return
         credential_id = account.credential_id
+        await self._cancel_unstarted_handoffs(account)
         await self._session.delete(account)
         await self._session.commit()
         try:
@@ -882,14 +885,69 @@ class IMConnectorService:
         enabled: bool,
         workspace_id: str | None = None,
     ) -> IMConnectorAccount | None:
-        account = await self.get(account_id=account_id, workspace_id=workspace_id)
+        account = await self._lock_account(account_id=account_id, workspace_id=workspace_id)
         if account is None:
             return None
+        if not enabled:
+            await self._cancel_unstarted_handoffs(account)
         account.enabled = enabled
         self._session.add(account)
         await self._session.commit()
         await self._session.refresh(account)
         return account
+
+    async def _lock_account(
+        self,
+        *,
+        account_id: str,
+        workspace_id: str | None,
+    ) -> IMConnectorAccount | None:
+        query = select(IMConnectorAccount).where(
+            IMConnectorAccount.id == account_id,  # type: ignore[arg-type]
+            IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
+        )
+        if workspace_id is not None:
+            query = query.where(IMConnectorAccount.workspace_id == workspace_id)  # type: ignore[arg-type]
+        return (
+            await self._session.execute(
+                query.with_for_update().execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+
+    async def _cancel_unstarted_handoffs(self, account: IMConnectorAccount) -> None:
+        now = datetime.now(UTC)
+        queue_items = list(
+            await self._session.scalars(
+                select(IMRunQueueItem)
+                .where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                    col(IMRunQueueItem.status).in_(("pending", "started")),
+                )
+                .order_by(IMRunQueueItem.id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        controller = ConversationExecutionService(
+            self._session,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+        )
+        for item in queue_items:
+            if item.execution_admission_id is not None:
+                await controller.cancel_unstarted_admission(
+                    admission_id=item.execution_admission_id,
+                    now=now,
+                )
+            item.status = "completed"
+            item.claim_lease_expires_at = None
+            receipt = await self._session.get(
+                IMWebhookReceipt,
+                item.receipt_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            if receipt is not None and receipt.status == "pending":
+                receipt.status = "failed"
 
     async def update_bot_settings(
         self,
