@@ -78,12 +78,13 @@ Cancellation after terminal commit likewise preserves that outcome. Idempotent
 start retries that cannot execute return the original binding even if its model
 has since been removed; a genuinely unstarted input still validates availability.
 
-This is an integration step, not the lifecycle cutover: the public message, IM,
-scheduler, trigger and steering entrances still need their corresponding durable
-admission and authority wiring. Uncertain-start and durable Stop recovery also remain
-cutover requirements. The existing entrances must not be treated
-as protected merely because this internal path is available. The new task coordinator
-stays inactive until all entrances and the data-migration gate are complete.
+This is an integration step, not the lifecycle cutover. The ordinary Web model-run
+entrance now creates this admission before calling RunManager and reuses the bound run
+on retry. The install shortcut, IM, scheduler, trigger, and steering entrances still
+need their corresponding durable admission and authority wiring. Those entrances must
+not be treated as protected merely because the model-run path is available. The new
+task coordinator stays inactive until all entrances and the data-migration gate are
+complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
 model. For admitted work it durably stops the named run, then claims
@@ -103,10 +104,13 @@ the matching CubeLoop run's completed checkpoint before continuing. A cleanup-on
 claim can retain existing completed/cancelled/errored metadata; it never makes an
 ordinary answer eligible to resume a terminal run or emits a second terminal reply
 for a known result, and never reoccupies an already-released active slot.
-Slot release and finish-receipt failures can then be retried
-without another model call. Preparing runs, incomplete checkpoints and completed
-checkpoints with no remaining Redis outcome still need subsequent C2a work; a
-checkpoint completion timestamp alone does not prove success or cancellation.
+Slot release and finish-receipt failures can then be retried without another model
+call. Prompt and HITL completion now persist an attempt-fenced terminal outcome in
+the admission before Redis cleanup. Recovery may reconcile a matching Redis terminal
+fact or rebuild cleanup-only state after Redis expiry; it never infers an outcome from
+a completed checkpoint alone. Unstarted stopped runs and leftover terminal HITL
+questions follow the same durable proof and cleanup rules. This completes the planned
+C2a recovery paths, while later entrance and cutover work remains gated separately.
 
 The control service now separates `run_stop_requested_at` from admission revocation
 and generation closure. Run Stop cancels only that run's unhanded foreground tasks

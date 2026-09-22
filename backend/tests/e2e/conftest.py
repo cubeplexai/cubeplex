@@ -950,6 +950,11 @@ def docling_url() -> str:
     return url
 
 
+def web_message_request(**values: Any) -> dict[str, Any]:
+    """Build one distinct Web message request for tests unrelated to retry semantics."""
+    return {"client_message_id": secrets.token_urlsafe(18), **values}
+
+
 async def collect_sse_events(
     client: httpx.AsyncClient,
     url: str,
@@ -957,10 +962,11 @@ async def collect_sse_events(
 ) -> list[dict]:  # type: ignore[type-arg]
     """POST to an SSE endpoint and collect all parsed events."""
     events = []
+    request_body = web_message_request(**json_data)
     async with client.stream(
         "POST",
         url,
-        json=json_data,
+        json=request_body,
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         assert response.status_code == 200, response.text

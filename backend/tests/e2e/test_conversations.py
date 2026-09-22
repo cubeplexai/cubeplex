@@ -17,6 +17,7 @@ from tests.e2e.conftest import (
     DEFAULT_TEST_EMAIL,
     DEFAULT_WS_ID,
     _ensure_default_user_and_membership,
+    web_message_request,
 )
 from tests.e2e.helpers import parse_sse_stream
 
@@ -272,7 +273,7 @@ class TestSendMessage:
         async with async_client.stream(
             "POST",
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/messages",
-            json={"content": "Say 'hello' in one word."},
+            json=web_message_request(content="Say 'hello' in one word."),
             headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
         ) as response:
             assert response.status_code == 200
@@ -296,7 +297,7 @@ class TestSendMessage:
         async with async_client.stream(
             "POST",
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/messages",
-            json={"content": "What is 1+1?"},
+            json=web_message_request(content="What is 1+1?"),
             headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
         ) as response:
             assert response.status_code == 200
@@ -325,7 +326,7 @@ class TestSendMessage:
 
         response = await async_client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/messages",
-            json={"content": ""},
+            json=web_message_request(content=""),
         )
         assert response.status_code == 400
 
@@ -336,7 +337,7 @@ class TestSendMessage:
         """Sending to non-existent conversation returns 404."""
         response = await async_client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/nonexistent-id/messages",
-            json={"content": "Hello"},
+            json=web_message_request(content="Hello"),
         )
         assert response.status_code == 404
 

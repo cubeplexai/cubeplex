@@ -9,6 +9,8 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from tests.e2e.conftest import web_message_request
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -40,7 +42,7 @@ async def _drain_to_done(client: httpx.AsyncClient, ws: str, conv: str, content:
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json={"content": content},
+        json=web_message_request(content=content),
         headers=headers,
     ) as resp:
         async for line in resp.aiter_lines():

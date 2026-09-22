@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
+from tests.e2e.conftest import web_message_request
+
 pytestmark = [pytest.mark.asyncio, pytest.mark.real_llm]
 
 
@@ -70,10 +72,10 @@ async def test_view_images_capability_gated(
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json={
-            "content": "Try view_images on the attached image.",
-            "attachments": [fid],
-        },
+        json=web_message_request(
+            content="Try view_images on the attached image.",
+            attachments=[fid],
+        ),
         headers={"accept": "text/event-stream"},
     ) as resp:
         async for line in resp.aiter_lines():
