@@ -1,6 +1,9 @@
 """Trigger repositories — scoped by (org_id, workspace_id)."""
 
+from typing import Any, cast
+
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import col
 
 from cubeplex.models.trigger import Trigger, TriggerEvent
 from cubeplex.repositories.base import ScopedRepository
@@ -8,6 +11,18 @@ from cubeplex.repositories.base import ScopedRepository
 
 class TriggerRepository(ScopedRepository[Trigger]):
     model = Trigger
+
+    def _scoped_select(self) -> Any:
+        return super()._scoped_select().where(cast(Any, Trigger.deleted_at).is_(None))
+
+    async def get_locked(self, trigger_id: str) -> Trigger | None:
+        result = await self.session.execute(
+            self._scoped_select()
+            .where(col(Trigger.id) == trigger_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
 
     async def list_enabled(self) -> list[Trigger]:
         stmt = self._scoped_select().where(Trigger.enabled.is_(True))  # type: ignore[attr-defined]
@@ -57,18 +72,18 @@ class TriggerEventRepository(ScopedRepository[TriggerEvent]):
     async def insert_dedup(self, event: TriggerEvent) -> TriggerEvent | None:
         """Insert event; return None if (trigger_id, dedup_key) conflict.
 
-        Catches `IntegrityError` on the unique constraint, rolls back, and
-        returns None so the caller can ack as duplicate.
+        The insert is flushed in a savepoint but not committed. This lets the
+        ingest transaction add its immutable execution snapshot before a 202
+        response can make the event externally accepted.
         """
         event.org_id = self.org_id
         event.workspace_id = self.workspace_id
-        self.session.add(event)
         try:
-            await self.session.commit()
+            async with self.session.begin_nested():
+                self.session.add(event)
+                await self.session.flush()
         except IntegrityError:
-            await self.session.rollback()
             return None
-        await self.session.refresh(event)
         return event
 
     async def set_terminal(

@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 import cubeplex.db as _cubeplex_db
 from cubeplex.api.app import create_app
 from cubeplex.db.engine import _build_database_url
+from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
 from cubeplex.models import Membership, Role, User
+from cubeplex.models.conversation import Conversation
 from cubeplex.models.credential import Credential
 from cubeplex.models.trigger import Trigger, TriggerEvent
 from cubeplex.repositories import (
@@ -23,8 +29,10 @@ from cubeplex.repositories import (
     TriggerRepository,
     WorkspaceRepository,
 )
+from cubeplex.streams.run_manager import RunManager
 from cubeplex.triggers.events import NormalizedEvent
 from cubeplex.triggers.pipeline import TriggerPipeline
+from cubeplex.triggers.worker import TriggerEventWorker, claim_trigger_events
 
 pytestmark = pytest.mark.e2e
 
@@ -128,6 +136,7 @@ async def _seed_event_row(
             )
         )
         assert inserted is not None, "dedup insert failed unexpectedly"
+        await session.commit()
         return inserted
 
 
@@ -142,6 +151,17 @@ def _make_event(trigger: Trigger, dedup_key: str) -> NormalizedEvent:
         payload={"event": {"action": "opened"}},
         dedup_key=dedup_key,
     )
+
+
+class _FailOnceRunManager:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def start_run(self, **kwargs: Any) -> str:
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError("simulated process loss before start acknowledgement")
+        return cast(str, kwargs["run_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +184,15 @@ async def pipeline_app():  # type: ignore[no-untyped-def]
 
     async with _lifespan(app):
         run_manager = app.state.run_manager
-        pipeline = TriggerPipeline(run_manager=run_manager, session_maker=session_maker)
+
+        async def load_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+            return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
+        pipeline = TriggerPipeline(
+            run_manager=run_manager,
+            session_maker=session_maker,
+            load_execution_snapshot=load_snapshot,
+        )
         yield pipeline, session_maker, app
 
 
@@ -301,3 +329,145 @@ async def test_managed_agent_target_records_failed(pipeline_app):  # type: ignor
         assert trig_row.events_total == 1
         assert trig_row.events_failed == 1
         assert trig_row.events_success == 0
+
+
+@pytest.mark.asyncio
+async def test_expired_claim_reuses_frozen_target_and_run(
+    pipeline_app: tuple[
+        TriggerPipeline,
+        async_sessionmaker[AsyncSession],
+        FastAPI,
+    ],
+) -> None:
+    """A crashed worker cannot rerender or allocate a second execution."""
+    _pipeline, session_maker, app = pipeline_app
+    await app.state.trigger_event_worker.stop()
+
+    fake_manager = _FailOnceRunManager()
+
+    async def load_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+        return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
+    pipeline = TriggerPipeline(
+        run_manager=cast(RunManager, fake_manager),
+        session_maker=session_maker,
+        load_execution_snapshot=load_snapshot,
+        max_attempts=3,
+    )
+    worker = TriggerEventWorker(
+        session_maker=session_maker,
+        pipeline=pipeline,
+        lease_seconds=120,
+    )
+
+    org_id, ws_id, user_id, cred_id = await _seed_context(session_maker)
+    trigger = await _seed_trigger(
+        session_maker,
+        org_id=org_id,
+        ws_id=ws_id,
+        user_id=user_id,
+        cred_id=cred_id,
+    )
+    dedup_key = secrets.token_hex(8)
+    event_row = await _seed_event_row(
+        session_maker,
+        trigger=trigger,
+        dedup_key=dedup_key,
+    )
+
+    await pipeline.fire(trigger, _make_event(trigger, dedup_key), event_row.id)
+
+    async with session_maker() as session:
+        failed_attempt = await session.get(TriggerEvent, event_row.id, with_for_update=True)
+        assert failed_attempt is not None
+        assert failed_attempt.status == "pending"
+        conversation_id = failed_attempt.resulting_conversation_id
+        run_id = failed_attempt.resulting_run_id
+        admission_id = failed_attempt.execution_admission_id
+        assert conversation_id is not None
+        assert run_id is not None
+        assert admission_id is not None
+
+        # Simulate a replacement process finding work whose previous owner died.
+        failed_attempt.status = "claimed"
+        failed_attempt.claim_owner = "lost-worker"
+        failed_attempt.claim_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        failed_attempt.next_attempt_at = None
+        live_trigger = await session.get(Trigger, trigger.id, with_for_update=True)
+        assert live_trigger is not None
+        live_trigger.target_ref = {"prompt_template": "CHANGED {{ event.action }}"}
+        await session.commit()
+
+    assert await worker.poll_once() == 1
+
+    async with session_maker() as session:
+        recovered = await session.get(TriggerEvent, event_row.id)
+        assert recovered is not None
+        assert recovered.status == "accepted"
+        assert recovered.attempts == 2
+        assert recovered.resulting_conversation_id == conversation_id
+        assert recovered.resulting_run_id == run_id
+        assert recovered.execution_admission_id == admission_id
+        conversation_count = await session.scalar(
+            select(func.count()).select_from(Conversation).where(Conversation.workspace_id == ws_id)
+        )
+        assert conversation_count == 1
+
+    assert [call["run_id"] for call in fake_manager.calls] == [run_id, run_id]
+    assert [call["admission_id"] for call in fake_manager.calls] == [
+        admission_id,
+        admission_id,
+    ]
+    first_content = cast(str, fake_manager.calls[0]["content"])
+    assert fake_manager.calls[1]["content"] == first_content
+    assert "opened" in first_content
+    assert "CHANGED" not in first_content
+
+
+@pytest.mark.asyncio
+async def test_parallel_workers_claim_event_once(
+    pipeline_app: tuple[
+        TriggerPipeline,
+        async_sessionmaker[AsyncSession],
+        FastAPI,
+    ],
+) -> None:
+    """SKIP LOCKED prevents two replicas from owning the same event lease."""
+    _pipeline, session_maker, app = pipeline_app
+    await app.state.trigger_event_worker.stop()
+
+    org_id, ws_id, user_id, cred_id = await _seed_context(session_maker)
+    trigger = await _seed_trigger(
+        session_maker,
+        org_id=org_id,
+        ws_id=ws_id,
+        user_id=user_id,
+        cred_id=cred_id,
+    )
+    event = await _seed_event_row(
+        session_maker,
+        trigger=trigger,
+        dedup_key=secrets.token_hex(8),
+    )
+    async with session_maker() as session:
+        pending = await session.get(TriggerEvent, event.id, with_for_update=True)
+        assert pending is not None
+        pending.status = "pending"
+        pending.next_attempt_at = datetime.now(UTC)
+        await session.commit()
+
+    async def claim_once() -> list[tuple[str, str]]:
+        async with session_maker() as session:
+            claimed = await claim_trigger_events(
+                session,
+                now=datetime.now(UTC),
+                lease_seconds=120,
+                limit=1,
+            )
+            await asyncio.sleep(0.1)
+            await session.commit()
+            return claimed
+
+    first, second = await asyncio.gather(claim_once(), claim_once())
+    claimed_ids = [event_id for claims in (first, second) for event_id, _owner in claims]
+    assert claimed_ids == [event.id]

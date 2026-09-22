@@ -97,9 +97,14 @@ older occurrence cannot reopen a conversation after Stop All; an occurrence clai
 after Stop All may open a new generation. IM handoff remains `queued` until the admitted
 run reports an outcome and is not treated as proof that execution started. Pausing or
 deleting the schedule cancels only occurrences that have not acquired a run start token;
-accepted runs keep their history. Trigger
-events still need the equivalent durable claim worker and admission wiring. The new task
-coordinator stays inactive until that entrance and the data-migration gate are complete.
+accepted runs keep their history. Trigger ingest now commits a validated, immutable
+execution snapshot before returning 202. A lease-based worker reclaims pending or
+abandoned events and binds one conversation, run ID, and automatic admission across
+retries. Manual dead-letter replay increments the event execution revision, so it is a new
+authorized occurrence rather than renewed authority for the old admission. Disabling or
+soft-deleting a trigger cancels only unstarted admissions and queued IM handoffs; accepted
+runs and the source proof remain intact. The new task coordinator stays inactive until the
+remaining entrance and data-migration gates are complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
 model. For admitted work it durably stops the named run, then claims
