@@ -183,6 +183,10 @@ IM 删除 API 与客户端配套切换：409 cleanup_pending 是已受理的持�
 
 删除回执由应用启动和每小时触发的有界清理任务回收；多个 worker 通过数据库行锁跳过彼此正在处理的批次。只清理 completed 且 completed_at 已超过 30 天的操作及其凭证摘要，不按创建时间清理，不删除仍 pending 的恢复证明。状态接口即使遇到尚未扫除的过期行也拒绝凭证；清理失败可重试，保留期限不依赖有人再次访问界面。
 
+父资源删除同时接管已受理的子清理，而不是先级联删除其目标。workspace 的范围包含成员、IM connector、topic 参与者和 sandbox 清理；账号删除覆盖实际将被其删除的成员／参与者／sandbox，不能顺带删除其他 actor 的共享资源。子操作保存原 user／workspace／topic／目标实例 ID，不靠仍存在的目标 FK 找回。父操作在固定权限／目标锁序下关闭新增子删除受理、领取并隔离旧子 worker，复用同一清理事实；有未决启动／交接／远端停止时，父子均保持 pending，不能先删恢复证明。逐项清理可独立完成，不要求先等父操作完成；最后硬删除和所有受影响子操作的终态回执在同一事务落库，已存在的 token 继续查询。父已开始清理时，尚未受理的新子请求明确返回上级清理中，不能冒充子删除已受理；子先完成时父复用其终态，不重新清理。多个父删除重叠时也只使用原子操作和单一清理 owner，不形成互相等待父完成的依赖环。
+
+topic 参与者移除也要持久撤权和清理。移除事务按实际访问规则逐会话判断：只有 actor 不再有任何有效 topic／conversation 参与资格的会话，才撤销其原 admission、停止其 run／task 并取消未提交通知；仍有 ConversationParticipant 访问权的会话及其他 actor 不受影响。先标记原 TopicParticipant 撤销并关闭受影响旧执行权，再在锁外清理，最后删除原参与者行；未决返回 cleanup_pending 并沿用独立 token 回执。授权查询必须排除撤销行，重新加入不能恢复旧 admission；清理完成前不原地复活参与者。新增会话／参与者、reservation 与移除串行，迟到 provider_ref 继承停止和通知取消；迟到的旧 run 不能通过补记参与者行恢复权限。不为移除一个人销毁共享 topic sandbox，不能确认某个任务已停止时继续显示清理中。
+
 ### 5.3 等待预算、执行期限与资源期限分开
 
 execute 的配置与显式 timeout_seconds 共用技术上限 2_147_483_647 秒（有符号 32-bit 秒数），默认仍为 3600；这不是把默认一小时变成硬上限。配置加载、工具 schema 和受理服务均拒绝越界值，再计算 tz-aware deadline；计算仍保留日期溢出的防御检查，不把异常值静默钳制或当作无限期。monitor 的既有期限上限保持不变。
@@ -359,6 +363,10 @@ conversation 保存执行批次和停止标记；run／task／事件／内部输
 
 同 scope 已终态 command 的重复 kill 返回原事实，不报虚假 not found；跨 org/workspace/conversation 或不属于当前 sandbox 的停止请求仍不泄露。provider 的 not-running 字符串不能代替观察，也不能把已知 exited/236 改为 guessed killed/None。
 
+自助 sandbox restart／delete 也走受管任务清理，不能只调用 provider kill 后隐藏行。首先在 sandbox 行的短事务写入持久 teardown 标记和原 sandbox_instance_id，阻止新 reservation、get_or_create／revive／保活；提交后再按 conversation → sandbox → task 的固定顺序给该实例的全部任务登记停止和通知取消，不能拿着 sandbox 锁反向取得 conversation 锁。共享实例包含其他会话／actor 的任务，界面须明确影响范围，但不停止其他实例上的工作。已在途的 start 回执仍登记到原实例并继承清理意图；只有可靠的进程退出或原实例销毁证明才可完成，kill 失败／provider 不可达保持 pending 和恢复凭据，不报告成功、不先替换为新实例。provisioning 或实例身份未决时，入口返回明确未受理的 409，不能先隐藏再等待迟到容器。
+
+restart 和 delete 均有持久操作回执，绑定稳定 UserSandbox 行及原 provider 实例；相同操作重试不作用于后来创建的实例，同一实例的同类请求合并，不同 restart／delete 意图并发时后者明确未受理、待前者收敛后再请求。restart 确认旧实例销毁后保留行／PVC供后续合法请求重新分配，delete 确认清理后才完成软删除；均不自动删除 PVC。父 scope 删除可接管这份清理，终态区分旧实例清理完成与目标已随父删除，不能据此把已删资源显示成可重启。202／cleanup_pending 只表示持久受理，客户端刷新后可继续查询，不将所有 2xx 都显示为操作完成；后端入口、前端状态机、翻译及 sandbox 使用文档同 PR 交付。
+
 ### 9.3 命令日志确认独立于执行状态
 
 command log writer 区分写入成功和删除临时分片成功。它不是所有 task 必须实现的日志服务。专用目录在运行用户权限下可写；限定路径、检查非目录／symlink，不递归 chown 工作区，也不以 root 跟随代理可控制的路径。
@@ -477,10 +485,12 @@ migration 使用 autogenerate；无可靠历史 deadline 时不猜造过去期�
 44. workspace 移除／离开及 org 成员撤销与活动命令竞争时立即撤销新执行权、保留清理证据并停止原工作；重启可继续清理，重新加入不复活旧工作，其他成员和其他 org 不受影响。有效成员条件覆盖所有直接读取成员行的授权入口，包括 IM 身份识别和组织／workspace 分享的读取、创建；cleanup_pending 期间成员行仍在也不授予权限，不能只修改常规鉴权依赖。worker 在两次查询间删除 membership 或完成响应丢失后，本人仍能凭独立回执确认终态；旧操作不能删除重新加入的成员实例。
 45. 配置和显式超时同时覆盖默认、合法较长值、技术上限及上限加一；超大值在配置加载／参数验证时拒绝，不产生半条 reservation 或未处理的日期溢出。
 
-46. topic 归档与新建会话／首次受理／reservation 竞争时，停止范围唯一且持久；隐藏后和重启后仍清理所属会话，不影响其他 topic。
+46. topic 归档与新建会话／首次受理／reservation 竞争时，停止范围唯一且持久；隐藏后和重启后仍清理所属会话，不影响其他 topic。topic 参与者移除与 reservation／迟到 start 竞争时，失去全部访问权的 actor 原工作被停止并持久撤销，重新加入不复活；仍有会话参与权限的工作、其他 actor 及共享 sandbox 不被误停。清理失败／刷新／重启可查询同一回执。
 47. IM connector 删除与入队／claim／交接回执丢失竞争时，不丢 receipt／queue／来源证明，不重复执行；未决清理可恢复，不提前硬删。UI 区分 pending 与完成，断网／刷新／重试不伪报成功，worker 在两次查询间硬删后仍可取得终态回执。
 48. 可见页面已经完成空 summary 对账后，仍能发现后来触发的 schedule／trigger run 及其回复；隐藏恢复、查询之间已完成和请求失败退避均覆盖。
 49. 其他参与者不能回答／批准原 actor 的 HITL 后借其凭据执行；原发起者失权同样拒绝。主 Stop 仍按会话控制权限清理，不走回答路径。
 50. 普通用户 run 释放 slot 并正常结束后仍可 reflection／consolidation；Stop 在模型调用前或返回前发生时，不开始新调用／记忆写入。另用数据库双向 barrier 验证校验后至提交之间的竞争：Stop 先提交则拒绝写入，记忆先持锁则先提交，不允许 Stop 提交后再写；事务回滚保留原记忆及容量清理前状态。覆盖 consolidation 整批操作和个人／workspace scope、topic 归档及参与者撤销；旧批次重开、完成凭据替换或消失、会话删除均不得恢复旧写入。终态后快速下一次发送不能丢失原结束回执，HITL 暂停及到期接管不受影响。
+51. 自助 sandbox restart／delete 与 reservation、provider start、迟到句柄竞争时，全部原实例任务继承停止和通知取消；provider 失败／实例未决不假报完成、不先软删丢证据。重启可恢复、旧 token 不作用于新实例；共享实例范围明确，其他实例不受影响。前端刷新后仍能区分受理与完成。
+52. workspace／account 父删除与已受理的成员、IM、topic participant、sandbox 子操作双向竞争时，不丢清理证据或终态回执；父关闭受理后新子请求不伪报已受理，子先完成不重复删除。父子终态失败整体回滚，重启继续，多父重叠不产生重复清理或依赖环；所有已受理 token 仍可查询真实终态。
 
 公共契约用 command 首个实现验证登记、停止、恢复、事件、Todo 与 UI；能力限制和状态映射保护语义，不靠伪造未来 MCP／subagent 适配器宣称集成已完成。涉及真实 Postgres／Redis／FastAPI 的用例放 e2e，只在最外层执行方注入故障，公共 service／repository／投递层用真实实现。前端业务流覆盖“用户 steering 与后台结果同时到达 → 重试／刷新仍分开 → 主 Stop → 迟到完成不再续跑”，以及单任务停止、失败反馈、事件展开不触发取消；不以静态元素计数代替契约验证。长等待用可控时钟推进与重启验证，不真等数小时；`real_llm` nightly 另查模型是否仍主动用 ps/sleep 忙等。设计文档通过检查不等于这些运行时验收已通过，实施需记录实际验证证据。

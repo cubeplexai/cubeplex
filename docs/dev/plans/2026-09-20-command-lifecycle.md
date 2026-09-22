@@ -40,6 +40,8 @@
 
 以上 PR 均不包含部署或线上数据切换授权。分 PR 审核不等于中间版本可独立启用。
 
+后续 review 补充的自助 sandbox teardown、父子删除协调及 topic participant 撤权清理，归 C2／C4 后续交付；#634／#635 的基础能力和 #636 当前增量均不能被当作这些入口已完成的证明。
+
 各单元中未带仓库前缀的 backend 路径均相对于 `backend/cubeplex/`；R 单元的路径相对于 CubeLoop 仓库。标“新”的文件由对应实施单元创建。
 
 ### 1.1 身份、事实与写入者
@@ -89,6 +91,7 @@
 ### Core logic
 
 - 固定锁顺序：conversation → sandbox → task；reserve、Stop、删除和 owner 更新不能互相倒序取锁。短事务完成 cap 与权限检查，provider I/O 在锁外。
+- 自助 restart／delete 不能绕过 reservation：C1 的受理、观察及迟到句柄登记均识别持久 sandbox teardown 标记；C4 交付 manager／HTTP／前端入口。先只锁 sandbox 写入拒绝新启动的标记并提交，再按 conversation → sandbox → task 顺序登记全实例停止；不得持 sandbox 锁反向取 conversation 锁。新的 coordinator 在这些入口接好前不启用。
 - 持久 task／command reservation 和实际 sandbox_instance_id 后才 start；回执携 provider_ref 合并到原实例。UserSandbox 同一行 revive 不改变旧任务的实例绑定。
 - coordinator 在原环境观察、取消、保活；观察路径不得隐式创建替代容器。实例不同不等于已证明旧环境销毁；无证据继续 unknown，占 cap。
 - 停止采用 observe → 必要时请求取消 → 再观察，not-running 字符串／kill 异常不当作终态；重复停止已终态任务返回原 exit code。
@@ -113,10 +116,12 @@
 - `services/conversation_execution.py`（新）、C1 的受理 repository：受理和关闭的唯一事务入口。
 - `api/routes/v1/conversations.py`、`api/schemas/conversations.py`、`repositories/conversation.py`：消息首次受理、带 generation 的主 Stop、软删除与停止原子提交。
 - `api/routes/v1/ws_topics.py`、topic repository／归档服务：归档与所属 conversation 的持久停止同事务；topic 对普通读取不可见后仍恢复清理。归档／新建会话／首次受理共用 workspace、topic、conversation 的固定锁序。
+- 同一 topic 路由的 participant 删除、`models/topic.py`、相关访问查询／自动派发消费者：原参与者撤销标记、只对失去全部访问权的会话撤销该 actor 的 admission、持久停止及独立回执。`frontend/packages/core/src/api/topics.ts`、`components/chat/MemberPanel.tsx` 及 topic store、en／zh 和站点 `guides/conversations/topics.md` 同 PR 处理清理中及恢复查询。
 - `api/routes/v1/workspaces.py`、`models/workspace.py` 及 workspace teardown 共用服务：持久 deleting 标记、停止／清理门槛、生命周期记录的外键删除顺序；其他组织级删除入口复用同一门槛。
 - `api/routes/v1/auth.py`、`models/user.py` 及账号删除服务：固定待删 actor、持久删除资格与跨 scope 清理；保留账号行和恢复证明直到可安全物理删除。新业务入口拒绝 deleting actor，认证入口仍允许本人查询／重试删除。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。同文件定义凭证子记录，前缀 `delc`，只保存唯一 token 摘要、原操作人及 operation ID；可随操作回收，但操作与凭证均无目标级联 FK。账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务。
 - `services/deletion_receipt_cleanup.py`（新）及 `api/app.py` lifespan：启动和每小时执行有界回收，按 completed_at 保留终态 30 天，使用多 worker 安全的数据库批次锁；索引、期限拒绝和物理回收测试随 C2 交付。
+- 删除操作模型／repository 和账号、workspace teardown 共用服务：保存原父 scope／目标实例定位信息，父清理领取及隔离子操作旧 owner，原子写入父子终态；不能通过 bulk delete／级联绕过子操作回执与未决 handoff。
 - `api/routes/v1/ws_members.py`、`workspaces.py` 的 leave、`admin_members.py`、membership models／repositories 及鉴权依赖：持久 revoked 标记、scope 内执行撤销和可恢复清理；成员管理及离开 UI 处理 cleanup_pending，站点 `admin/members.md` 同步。
 - `frontend/packages/core/src/api/workspaces.ts`、`members.ts` 及离开／移除调用方：保存操作 token，查询不依赖已删 membership 的终态回执；刷新恢复、凭证过期和重新加入后的旧操作重试均覆盖。
 - `im/identity.py`、`api/routes/v1/shares.py` 及其他直接读取 membership 的消费者：统一采用有效成员条件，排除撤销／删除中的身份。实施时枚举 `Membership`／`OrganizationMembership` 的直接查询、join、exists 和关联访问；清理用途显式区分，不能把仍保留的清理行当作授权。切换门槛包含这份消费者清单的逐项核对。
@@ -162,6 +167,8 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 不同 token 的删除请求也必须合并：在原删除权限校验、权限行和目标实例锁内，以 kind／org／workspace／目标实例的规范化非空键建立唯一操作，数据库唯一约束兜底；多个管理员不因 actor 不同创建第二个操作。凭证子记录以 token 摘要全局唯一，每个获准 token 绑定该操作及自己的原操作人；状态读取只给出共同终态，不暴露其他 actor 或 token。手动重试按凭证所属原操作人及当前删除权限判断，不能要求所有 token 都属于首位发起人。只在操作及凭证绑定均持久成功后返回 pending／completed；硬删除先胜而新凭证从未受理时返回明确未受理，不制造悬空回执。成员实例用原 membership ID 区分，不能用 user/ws 配对合并新加入的成员；相同 token 改目标仍拒绝。
 
+父子删除共用受理边界：操作保存原 user／workspace／topic／目标实例，父删除按实际 teardown 目标集找到尚未完成的成员、IM、参与者、sandbox 子操作；不依赖目标行仍存在，不扩大到其他 actor 的共享资源。子受理先锁父权限／资源门槛再锁目标与操作，父提交 deleting 后拒绝尚未受理的新子请求，明确返回 parent_cleanup_pending 而非子操作已受理；子先受理则父必须纳入。父 worker 通过原操作的 owner token／lease 领取子清理并隔离旧 worker，外部 I/O 在锁外，迟到回执仍进入原记录；全部退出／交接事实未核对前不得级联删目标。子清理可独立完成，不依赖父 completed；不同父操作重叠时竞争同一子 claim 并继续处理可推进项，不能互等父完成。最终父 hard delete 与尚未终态的受影响子操作 completed 同事务，全部凭证保留且各自从完成时起保留 30 天；已完成子项复用，不重复删除或延后其过期时间。
+
 回执清理任务在每个 app lifespan 注册，启动扫描一次、之后每小时扫描，每轮最多 10 批、每批最多 500 条；按 `(completed_at, id)` 索引查询 `state=completed AND completed_at <= now-30d`，事务内 `FOR UPDATE SKIP LOCKED` 领取并删除操作及凭证，失败回滚且下轮重试。只持有短 DB 事务，不调用外部服务；并发 worker 不重复处理同一批。pending 无论创建多久都保留，刚完成但很早创建的操作从 completed_at 起算；状态 handler 独立检查完成后期限，未扫到的过期行也不能继续查。测试用可控时钟验证 30 天边界、物理回收子凭证、跨批次上限、多 worker、回滚／重启及 pending 保留，不以只返回过期状态代替真实回收。
 
 移除／离开 workspace 和 org 成员撤销复用 actor 清理服务而非 bulk-delete membership：先持久撤销资格，鉴权、受理、工具边界及输入边界立即拒绝，再停止 scope 内旧工作。权限锁先于 conversation／sandbox／task 锁，旧成员行和句柄留到对账完成；清理未知返回 cleanup_pending，管理员或本人受限离开状态可恢复查询。org 路径覆盖其所属 workspace，重加成员不得消除旧 admission 的撤销事实。对活跃命令、排队输入、IM 身份识别／转交、组织与 workspace 分享读取／创建、重启、并发重新加入分别做真实 DB 测试：成员行仍在且 cleanup_pending 时也不得通过授权，既有最后管理员／owner 保护仍成立。
@@ -181,6 +188,10 @@ HITL 回答／审批必须来自原 admission 的 actor；会话参与者身份�
 `streams/run_events.py`／`hitl_resume.py` 的终态写入保留 admitted owner 的有界清理租约；结束回执提交后才释放 active slot 和租约，快速下一次 create_run 不得夺走收尾权。HITL 暂停解除租约以便立即回答；崩溃租约到期后仍可接管。prompt、respond 和暂停 Stop 均覆盖终态后的下一次发送竞争。
 
 topic 归档先阻止新增会话／受理，并在归档事务关闭其全部 conversation 的当前批次、登记停止与通知取消。提交后隐藏 topic／conversation，恢复扫描仍能清理原 scope 的 run、HITL 和 task；不依赖用户重新打开已归档 topic。归档与新启动双向竞争必须串行，未归档的其他 topic 不受影响。
+
+topic participant 移除按 User／Workspace → Topic／参与者 → conversation → sandbox → task 锁序，先在同一事务标记原参与者 revoked，再按移除后的真实访问规则逐会话裁决。只有无任何有效 ConversationParticipant 等访问来源的会话，才撤销该 actor 的旧 admission、停止其 run／task并取消未提交 notice；不关闭其他 actor 的会话批次，也不 kill 共享 topic sandbox。新增参与者／会话、首次发送补记参与者及 reservation 共用门槛，失权旧 attempt 不得用迟到 upsert 恢复访问。所有访问查询排除 revoked 行，清理完成前重加返回明确未完成，之后的新成员实例也不取消原 admission 的撤销事实。
+
+`DELETE /api/v1/ws/{ws}/topics/{topic}/participants/{user}` 保留原 owner／本人权限边界，绑定原 participant ID 和预存 token；409 cleanup_pending 表示受理，200 completed 才确认清理完成并删除原行。`GET .../participants/{user}/removal-status` 按 token、原 scope／topic／user 查询独立回执，不要求原 topic grant 仍存在；旧 token 不得删除后来新加的 participant。前端保留清理进度、单请求退避／刷新恢复和手动重试，不把权限消失或 404 当成功；父删除接管时沿用同一回执。后台 actor 仅经 topic 授权、已有会话 fallback、其他 actor、重加、重启及迟到 provider_ref 均覆盖真实 DB 业务流。
 
 IM connector 删除与入队、领取、交接裁决共用 connector 锁。先停用并标记删除，拒绝新 webhook／主动发送及新交接，取消尚未执行的队列项；已有 admission、启动回执或来源 handoff 未决时保留去重及取消证明，worker 只做核对／清理。已经执行的会话历史保留，不重新派发、不 Stop 同会话无关工作。核对完成后才按依赖硬删 receipt／queue／connector；不能让级联外键先删除调度／trigger 的唯一交接证明。删除请求清理未决返回 cleanup_pending，前端可查询／重试，凭据只对清理流程保留。
 
@@ -211,6 +222,8 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 成员离开／移除：worker 在两次状态查询间删除 membership、完成响应丢失、刷新恢复，仍由独立回执确认 completed；旧 token／旧 membership ID 不得影响重新加入，其他 actor／scope 的凭据被拒绝。过期／凭证遗失明确不可确认。
 - 两条自动记忆路径的写事务：模型／工具检查后用真实 PG 锁控制 Stop 与提交顺序，验证 reflection save／update、consolidation 整批 extract／merge／archive、去重及容量清理的原子回滚；正常完成及 Stop 先胜时的既有回归保留。分别覆盖个人／workspace 记忆、topic 归档和两类 participant 撤销；模型前失权不调用模型，模型后失权不提交。
 - 删除不同 token 并发：同一账号／workspace／IM connector／membership 只受理一个清理操作，已授权的不同操作者凭证都能确认终态，未授权／跨目标 token 无法绑定；完成与新凭证绑定竞争、重新加入及响应丢失均不制造永久 pending。
+- 父子删除双向竞争：workspace 对 IM／membership／topic participant／sandbox、account 对其 membership／participant／sandbox 的实际删除范围，覆盖子先受理、父先关闭受理、子已完成、父子终态事务失败及重启、多父重叠、迟到 handoff／provider_ref；全部已受理 token 最终能查询同一事实，不删除未决证明，不误删无关共享资源。
+- topic-only 自动 actor 移除：受理／reservation 前后、start 已发出尚无句柄、停止失败、重新加入、原成员行已删后刷新；持久撤权且原进程持续清理。另验证 ConversationParticipant fallback 保留、其他 actor 不受影响、共享实例不被 kill、旧 attempt 的迟到参与者写入不能恢复权限。
 - 终态后立即发送：prompt、respond、暂停 Stop 的结束回执不丢，正常后处理可验证完成；租约释放后下一次发送成功，lease 到期后的崩溃恢复及连续 HITL 不回归。
 - 不同参与者回答／审批原 actor 的 HITL 被拒绝；原 actor 当前权限失效仍拒绝，主 Stop 不经过模型回答路径。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
@@ -291,17 +304,27 @@ CubeLoop 不知道 CubePlex 表、command、MCP 或 sandbox；任务存在性和
 - `backend/cubeplex/middleware/sandbox.py`、`prompts/sandbox.py`：工具调用公共 service，明确 task ID／command ID、deadline、日志和通知策略。
 - `backend/cubeplex/middleware/background_task_wait.py`（新）：宿主等待校验与 input 身份解释，平台查询不进入上游 Todo。
 - `backend/cubeplex/streams/run_manager.py`、`middleware/_compose.py`、`agents/graph.py`：绑定 R 的公共回调和 live state_context，移除 run-end 长等待、重复 polling／finalize kill。
+- `backend/cubeplex/api/routes/v1/ws_sandboxes.py`、`api/schemas/ws_sandbox.py`、`sandbox/manager.py`、UserSandbox model／repository、C1 task service 和 C2 清理回执服务：restart／delete 的持久关闭、全实例任务停止、迟到启动核对及 typed 进度；经 autogenerate 增加必要字段。枚举 admin／父删除等 manager 调用方，共用下层门槛，HTTP handlers 仍按 scope 分开。
+- `frontend/packages/web/hooks/useMySandboxes.ts`、`components/workspace-settings/sandboxes/SandboxCard.tsx`、`SandboxesPanel.tsx`、core 的 `MySandboxOut` 类型、en／zh 及 `docs/site/docs/guides/conversations/sandboxes.md`：受理／完成区分、共享实例影响提示、刷新恢复及停止未确认展示，和后端 teardown 同 PR。
 - 通过 `uv add` 更新已发布的 CubeLoop 依赖与 `uv.lock`；不手改 pyproject 或 .venv。
 
 ### Core logic / tests
 
 前台最多等待 15 秒，已交付最终可读结果不发 completion；超时仅交后台，原 run 给进度后正常 Done。进程已终态但输出仍在恢复时，也可交后台并返回真实执行状态与 result_pending，不能返回仍在执行或声称已交付完整结果。正常完成／非用户失败不撤销受理任务，主 Stop／删除走 C2。前台 owner 崩溃按 C1 恢复，不复活旧 Session。
 
+sandbox teardown 先按现有所有权／workspace 权限检查，在短事务持久绑定 UserSandbox、原 provider 实例及操作 token，并设置拒绝 reservation／get_or_create／revive／保活的标记；单独提交此门槛后再锁受影响 conversation（按 ID 顺序）、sandbox、task，登记该实例全部停止及通知取消。不只扫发起者的任务，不触及其他实例；启动 worker 在 provider I/O 前重查门槛，检查后已发出的 start 回执必须保留并继承停止。provisioning／实例身份未决明确返回 409 未受理，不能把缺少 sandbox_id 当销毁证据。管理器不得在 kill 失败时先 soft-delete；未知保持可恢复 pending。每轮 provider I/O 在锁外，重启恢复读取同一操作和原实例，不重复启动命令、不借新实例确认旧实例已消失。
+
+复用 C2 的操作／凭证回执，kind 为 sandbox_restart／sandbox_delete；目标实例键含 UserSandbox ID 和原 provider 实例，token 重试只返回或推进原操作。同类请求按实例合并；不同 teardown kind 冲突返回明确未受理，不能另起互相覆盖的控制动作。`POST .../sandboxes/{id}/restart` 和 `DELETE .../sandboxes/{id}` 返回 202 `{state: cleanup_pending, operation_id}` 或 200 `{state: completed, operation_id, outcome}`；`GET .../sandboxes/{id}/teardown-status` 使用专用 token 请求头，只核对原 scope／sandbox 和回执，即使父目标已删仍可读。restart 的 completed 仅表示旧实例已确认销毁并可由后续合法请求重新分配，不在清理期间自动创建；delete 完成后才 soft-delete，均保留 PVC。父删除接管时返回 outcome=parent_deleted，UI 不声称资源可重启；其他 outcome 区分 restarted／deleted。
+
+前端 token／operation_id 存 sessionStorage，单在途请求、有界退避、手动重试和刷新恢复沿用 C2；只有明确 completed 才显示相应成功并移除／更新条目，202、网络失败、401、404 不当成功。清理中禁用重复相反操作，显示共享 sandbox 会影响其全部任务；关闭界面不撤回停止。运行事实／exit code 仍由原实例证据决定，用户 teardown 的通知取消不改变 deadline 到期应报告的规则。
+
 wait_for_tasks 只接受本 conversation／有效批次、后台可观察、通知仍有效且有待交付结果的公共 task ID。notify=false server、失去恢复来源、用户取消的任务不能建立新的等待许可；deadline 待报告结果可以。先前有效声明随后被取消走 R 的 cancelled 收尾，不冒充仍有结果会来。工具 schema 和静态说明统一发布，动态 task 状态不改 prompt 前缀。
 
 - 新 `backend/tests/e2e/test_background_task_run_flow.py`：脚本化最外层模型＋真实宿主，构建运行 → 保留 Todo → 原 run Done／slot 释放 → 模拟小时推进及 coordinator 重启 → 结果入新 run → 验证业务结果。
 - 等待期没有输入／事件则模型调用数不增长；current run 可接收通知；用户新输入使旧等待失效；prompt 与 respond 均正确恢复 extra。
 - 前台终态结果与交接竞态只交付一次；同步 child 发起的 command 同样受管而不改 child 执行模式。
+- 自助 restart／delete 与 reservation 提交、provider start、迟到回执的双向 barrier：门槛先提交则不开始，reservation 先提交则继承停止；kill 失败、已销毁证明、进程重启、同 token／不同 token 重试、restart/delete 冲突、父删除接管及同一行后续新实例均验证。共享实例所有任务清理而其他实例不受影响，未知不假报完成、cap 不提前释放。
+- sandbox 前端业务流验证 202 → 断网／刷新 → completed，以及未受理的 provisioning／相反操作冲突；不能用“按钮存在”替代停止事实和完成提示测试。
 - 单 task Stop 与自然收尾复查的双向 barrier：先前有效的等待通过 cancelled 收尾，不增加模型调用、不完成 Todo、不杀共享 run 的其他输入／同级任务。Stop 后才声明的任务、无效 task ID、新输入失效及查询错误均不能得到这项许可。
 - 运行现有 prompt-cache、唯一 Done、required consumer 故障和 HITL 回归；`real_llm` nightly 另检查模型不主动 ps/sleep 忙等，确定性测试不冒充真实模型行为。
 - 更新站点 sandbox 页的“等待时本轮已结束、结果自动续办”，明确不等于 Todo 已成功完成。
@@ -423,10 +446,12 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 43 | C2、C3、C5：所有用户输入投递边界检查 actor，其他 actor 排队后独立受理并在 UI 区分 |
 | 44 | C2：成员撤销先持久撤权再停止／对账，独立终态回执跨 membership 删除存活，重新加入不受旧操作影响 |
 | 45 | C1、C4：配置／工具参数共用正整数及 32-bit 秒数上限，受理防御日期溢出 |
-| 46 | C2：topic 归档关闭所属会话执行权，归档与启动串行，隐藏后继续清理 |
+| 46 | C2：topic 归档关闭所属会话执行权；移除参与者只撤销失去全部访问权的原工作，迟到启动与重新加入不绕过清理 |
 | 47 | C2：IM connector 删除保留并核对 handoff，配套客户端解析／进度恢复／终态回执及 IM 文档，未决不硬删 |
 | 48 | C5：summary 全 false 后仍发现新自动 run；可见页基线、隐藏恢复及已完成回复均覆盖 |
 | 49 | C2、C5：HITL 只接受原 actor 回答／审批，非发起者的展示不暗示可代用凭据 |
 | 50 | C2：reflection／consolidation 不占 run；结束回执、完整访问权锁及整批写事务受 Stop 和原执行身份约束 |
+| 51 | C1、C4：自助 sandbox teardown 与 reservation／start 串行，保留迟到句柄，原实例未确认销毁不假报完成；接口／UI 同步 |
+| 52 | C2、C4：父删除纳入已受理子操作并保留 token 终态，未决证据不级联丢失，多父重叠及两种受理顺序均验证 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
