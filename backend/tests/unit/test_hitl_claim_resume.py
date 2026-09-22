@@ -184,7 +184,7 @@ async def test_claim_rebuild_when_meta_expired(redis):
 
 
 async def test_claim_conflict_on_terminal_status(redis):
-    """The CAS must refuse to resurrect a completed/cancelled/errored run."""
+    """The CAS must refuse to resurrect a terminal run."""
     prefix = "test_claim_conflict_terminal"
     created = await create_run(
         redis,
@@ -217,7 +217,7 @@ async def test_claim_conflict_on_terminal_status(redis):
     assert "claim_token" not in raw
 
 
-@pytest.mark.parametrize("status", ["completed", "cancelled", "errored"])
+@pytest.mark.parametrize("status", ["completed", "cancelled", "errored", "failed"])
 async def test_only_cleanup_can_claim_a_terminal_run_without_resurrecting_it(status: str) -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     prefix = "terminal-cleanup"

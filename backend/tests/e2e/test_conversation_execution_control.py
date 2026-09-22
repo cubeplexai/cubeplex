@@ -419,6 +419,30 @@ async def test_worker_receipts_are_owned_and_do_not_reexecute_a_started_attempt(
         now=NOW + timedelta(seconds=5),
     )
     finished_at = NOW + timedelta(seconds=6)
+    assert not await controller.record_run_terminal_outcome(
+        admission_id=admission_id,
+        attempt_id="other",
+        status="completed",
+        now=finished_at,
+    )
+    assert await controller.record_run_terminal_outcome(
+        admission_id=admission_id,
+        attempt_id="owner",
+        status="completed",
+        now=finished_at,
+    )
+    assert await controller.record_run_terminal_outcome(
+        admission_id=admission_id,
+        attempt_id="owner",
+        status="completed",
+        now=finished_at + timedelta(seconds=1),
+    )
+    assert not await controller.record_run_terminal_outcome(
+        admission_id=admission_id,
+        attempt_id="owner",
+        status="errored",
+        now=finished_at + timedelta(seconds=1),
+    )
     assert await controller.record_run_finished(
         admission_id=admission_id, attempt_id="owner", worker_started=True, now=finished_at
     )
@@ -431,6 +455,8 @@ async def test_worker_receipts_are_owned_and_do_not_reexecute_a_started_attempt(
     await db_session.commit()
     await db_session.refresh(accepted.admission)
     assert accepted.admission.run_finished_at == finished_at
+    assert accepted.admission.run_terminal_status == "completed"
+    assert accepted.admission.run_terminal_at == finished_at
 
 
 async def test_stop_between_start_request_and_worker_entry_revokes_execution(
@@ -505,6 +531,9 @@ async def test_unclaimed_finish_receipt_requires_a_persisted_stop(
         admission_id=accepted.admission.id,
         now=NOW + timedelta(seconds=4),
     )
+    await db_session.refresh(accepted.admission)
+    assert accepted.admission.run_terminal_status == "cancelled"
+    assert accepted.admission.run_terminal_at == NOW + timedelta(seconds=3)
 
 
 async def test_concurrent_retries_bind_one_run_and_one_model_snapshot(
