@@ -11,7 +11,7 @@ from cubeloop.checkpointer.exceptions import (
     RunNotClaimedError,
 )
 from redis.asyncio import Redis
-from sqlalchemy import or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 from uuid_utils import uuid7
@@ -24,6 +24,7 @@ from cubeplex.models.background_task import (
     TaskResultReadiness,
 )
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+from cubeplex.models.steering_message import SteeringMessage
 from cubeplex.repositories.steering_message import (
     SteeringMessageQueueFullError,
     SteeringMessageRepository,
@@ -477,9 +478,24 @@ class BackgroundTaskDeliveryService:
         run_id: str,
         input_id: str,
         now: datetime,
+        retire_fenced_run_at: datetime | None = None,
     ) -> bool:
         """Accept a persisted message as proof after a worker restart."""
         require_aware(now)
+        if retire_fenced_run_at is not None:
+            require_aware(retire_fenced_run_at)
+        admission = None
+        if retire_fenced_run_at is not None:
+            admission = await self.session.scalar(
+                select(ConversationExecutionAdmission)
+                .where(
+                    col(ConversationExecutionAdmission.org_id) == self.org_id,
+                    col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                    col(ConversationExecutionAdmission.run_id) == run_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         event = await self.session.get(
             BackgroundTaskEvent, notice_id, with_for_update=True, populate_existing=True
         )
@@ -491,6 +507,10 @@ class BackgroundTaskDeliveryService:
             or event.delivery_run_id != run_id
             or event.delivery_attempt_id is None
             or event.delivery_input_id != input_id
+            or (
+                retire_fenced_run_at is not None
+                and (admission is None or admission.run_start_token != event.delivery_attempt_id)
+            )
         ):
             return False
         event.state = BackgroundTaskEventState.delivered.value
@@ -500,6 +520,8 @@ class BackgroundTaskDeliveryService:
         event.owner_token = None
         event.owner_until = None
         event.revision += 1
+        if retire_fenced_run_at is not None and admission is not None:
+            self._finish_fenced_admission(admission, now=retire_fenced_run_at)
         await self.session.flush()
         return True
 
@@ -510,11 +532,11 @@ class BackgroundTaskDeliveryService:
         run_id: str,
         input_id: str,
         discard_cancelled_initial: bool,
-        retire_orphaned_initial_at: datetime | None = None,
+        retire_fenced_run_at: datetime | None = None,
     ) -> bool:
         """Release a lost append, or discard a cancelled initial notice."""
-        if retire_orphaned_initial_at is not None:
-            require_aware(retire_orphaned_initial_at)
+        if retire_fenced_run_at is not None:
+            require_aware(retire_fenced_run_at)
         task_id = await self.session.scalar(
             select(col(BackgroundTaskEvent.task_id)).where(
                 col(BackgroundTaskEvent.id) == notice_id,
@@ -554,6 +576,8 @@ class BackgroundTaskDeliveryService:
             return False
         if task is None or event.task_id != task.id:
             return False
+        if retire_fenced_run_at is not None and admission is None:
+            return False
         is_initial = bool(
             admission is not None
             and admission.source_kind == "background_task"
@@ -578,21 +602,30 @@ class BackgroundTaskDeliveryService:
             event.delivery_attempt_id = None
             event.discard_reason = None
         if (
-            retire_orphaned_initial_at is not None
-            and is_initial
+            retire_fenced_run_at is not None
             and admission is not None
             and admission.run_finished_at is None
         ):
-            cancelled = discard_cancelled_initial or initial_was_stopped
-            admission.run_terminal_status = admission.run_terminal_status or (
-                "cancelled" if cancelled else "failed"
-            )
-            admission.run_terminal_at = admission.run_terminal_at or retire_orphaned_initial_at
-            admission.run_finished_at = retire_orphaned_initial_at
-            admission.updated_at = retire_orphaned_initial_at
+            self._finish_fenced_admission(admission, now=retire_fenced_run_at)
         event.revision += 1
         await self.session.flush()
         return True
+
+    @staticmethod
+    def _finish_fenced_admission(
+        admission: ConversationExecutionAdmission,
+        *,
+        now: datetime,
+    ) -> None:
+        if admission.run_finished_at is not None:
+            return
+        cancelled = admission.run_stop_requested_at is not None or admission.revoked_at is not None
+        admission.run_terminal_status = admission.run_terminal_status or (
+            "cancelled" if cancelled else "failed"
+        )
+        admission.run_terminal_at = admission.run_terminal_at or now
+        admission.run_finished_at = now
+        admission.updated_at = now
 
 
 class BackgroundTaskDeliveryCoordinator:
@@ -844,17 +877,21 @@ class BackgroundTaskDeliveryCoordinator:
                         select(BackgroundTaskEvent)
                         .join(
                             ConversationExecutionAdmission,
-                            col(ConversationExecutionAdmission.run_id)
-                            == col(BackgroundTaskEvent.delivery_run_id),
+                            and_(
+                                col(ConversationExecutionAdmission.run_id)
+                                == col(BackgroundTaskEvent.delivery_run_id),
+                                col(ConversationExecutionAdmission.org_id)
+                                == col(BackgroundTaskEvent.org_id),
+                                col(ConversationExecutionAdmission.workspace_id)
+                                == col(BackgroundTaskEvent.workspace_id),
+                            ),
                         )
                         .where(
                             col(BackgroundTaskEvent.state)
                             == BackgroundTaskEventState.claimed.value,
                             col(BackgroundTaskEvent.delivery_attempt_id).is_not(None),
-                            col(ConversationExecutionAdmission.source_kind) == "background_task",
-                            col(ConversationExecutionAdmission.source_id)
-                            == col(BackgroundTaskEvent.id),
                         )
+                        .distinct()
                         .order_by(col(BackgroundTaskEvent.id))
                         .limit(100)
                     )
@@ -926,6 +963,7 @@ class BackgroundTaskDeliveryCoordinator:
                             run_id=event.delivery_run_id,
                             input_id=event.delivery_input_id,
                             now=now,
+                            retire_fenced_run_at=now,
                         )
                     else:
                         changed = await service.settle_uncommitted_attempt(
@@ -935,7 +973,16 @@ class BackgroundTaskDeliveryCoordinator:
                             discard_cancelled_initial=(
                                 meta is not None and meta.status == "cancelled"
                             ),
-                            retire_orphaned_initial_at=now,
+                            retire_fenced_run_at=now,
+                        )
+                    if changed:
+                        await session.execute(
+                            delete(SteeringMessage).where(
+                                col(SteeringMessage.org_id) == event.org_id,
+                                col(SteeringMessage.workspace_id) == event.workspace_id,
+                                col(SteeringMessage.notice_id) == event.id,
+                                col(SteeringMessage.source_kind) == "background_task",
+                            )
                         )
                     await session.commit()
                 if changed:
