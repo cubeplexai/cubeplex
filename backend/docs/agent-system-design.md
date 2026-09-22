@@ -49,8 +49,10 @@ Terminal checkpoint cleanup uses the existing finalization lease to exclude stal
 recovery while the owner is committing. A superseded worker stops new work and
 does not finalize its replacement or repair the replacement's pending history.
 For admitted terminal runs, publishing terminal metadata does not release this
-lease: it remains until the durable finish receipt is committed and the active
-slot is released. A fast next send cannot steal unfinished cleanup. HITL pauses
+lease: it remains through checkpoint/input cleanup and active-slot release.
+The durable finish receipt is written after slot release and event-data expiry,
+so a failed release cannot report cleanup complete. A fast next send cannot
+steal the slot before the owner releases it. HITL pauses
 release the finalization lease so an immediate answer is not delayed; crashed
 terminal owners remain recoverable after the bounded lease expires.
 Unresolved durable receipts remain available for reconciliation, not automatic replay.
@@ -96,9 +98,15 @@ in bounded pages and stops that scan before draining workers. The paused-run rec
 can reclaim an expired Redis pause or a failed cleanup attempt after its lease
 expires. It uses the persisted Stop proof, not renewed execution authority from
 the original user, and never starts a model. Current owners and newer questions
-remain protected. Preparing runs, cleanup after the pending question was already
-cleared, and terminal-receipt reconciliation still need subsequent C2a work;
-this paused branch alone does not complete the Stop contract.
+remain protected. If the pending question was already cleared, recovery requires
+the matching CubeLoop run's completed checkpoint before continuing. A cleanup-only
+claim can retain existing completed/cancelled/errored metadata; it never makes an
+ordinary answer eligible to resume a terminal run or emits a second terminal reply
+for a known result, and never reoccupies an already-released active slot.
+Slot release and finish-receipt failures can then be retried
+without another model call. Preparing runs, incomplete checkpoints and completed
+checkpoints with no remaining Redis outcome still need subsequent C2a work; a
+checkpoint completion timestamp alone does not prove success or cancellation.
 
 The control service now separates `run_stop_requested_at` from admission revocation
 and generation closure. Run Stop cancels only that run's unhanded foreground tasks

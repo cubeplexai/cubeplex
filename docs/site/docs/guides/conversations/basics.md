@@ -112,6 +112,9 @@ stop newer work. A 202 response confirms durable acceptance, not completed clean
 For an admitted response paused on a question, a persisted Stop is retried after a
 worker restart or temporary control-channel failure, even if its Redis pause record
 expires. Recovery only finishes cleanup; it never asks the model to continue.
+When a question is already cleared and its run is checkpointed as finished,
+recovery can also retry interrupted cleanup while preserving an existing success,
+failure or cancellation result. A failed release keeps cleanup marked pending.
 The complete new buttons and recovery for other interruption states still require
 the coordinated lifecycle cutover described in [Sandboxes](./sandboxes.md).
 
