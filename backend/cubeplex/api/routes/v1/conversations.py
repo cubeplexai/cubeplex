@@ -1022,7 +1022,7 @@ class SteerMessageRequest(BaseModel):
     @field_validator("steer_id")
     @classmethod
     def reject_internal_wake_id(cls, value: str) -> str:
-        if value.startswith("scmw-"):
+        if value.startswith(("bge-", "scmd-", "scmw-")):
             raise ValueError("steer_id uses a reserved prefix")
         return value
 
@@ -1035,7 +1035,7 @@ class CancelSteerRequest(BaseModel):
     @field_validator("steer_id")
     @classmethod
     def reject_internal_wake_id(cls, value: str) -> str:
-        if value.startswith("scmw-"):
+        if value.startswith(("bge-", "scmd-", "scmw-")):
             raise ValueError("steer_id uses a reserved prefix")
         return value
 
@@ -2292,7 +2292,11 @@ async def steer_active_run(
         client_steer_id=body.steer_id,
     )
     if existing is not None:
-        if existing.content != body.content or existing.sender_user_id != ctx.user.id:
+        if (
+            existing.source_kind != "user_message"
+            or existing.content != body.content
+            or existing.sender_user_id != ctx.user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "steer_id_conflict"},
@@ -2319,7 +2323,7 @@ async def steer_active_run(
     )
     if pending_request is not None and pending_run_id is not None and pending_is_deliverable:
         try:
-            await ConversationExecutionService(
+            input_admission = await ConversationExecutionService(
                 session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
             ).require_run_input_actor(
                 conversation_id=conversation_id,
@@ -2334,6 +2338,11 @@ async def steer_active_run(
                 sender_user_id=ctx.user.id,
                 sender_display_name=_sender_display_name,
                 hitl_question_id=pending_request.question_id,
+                execution_generation=(
+                    input_admission.execution_generation
+                    if input_admission is not None
+                    else conversation.execution_generation
+                ),
             )
         except SteeringMessageContentTooLargeError as exc:
             raise HTTPException(
@@ -2403,7 +2412,7 @@ async def steer_active_run(
         return {"status": "no_active_run", "run_id": None, "steer_id": body.steer_id}
 
     try:
-        await ConversationExecutionService(
+        input_admission = await ConversationExecutionService(
             session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
         ).require_run_input_actor(
             conversation_id=conversation_id,
@@ -2418,6 +2427,11 @@ async def steer_active_run(
             sender_user_id=ctx.user.id,
             sender_display_name=_sender_display_name,
             hitl_question_id=None,
+            execution_generation=(
+                input_admission.execution_generation
+                if input_admission is not None
+                else conversation.execution_generation
+            ),
         )
     except SteeringMessageContentTooLargeError as exc:
         raise HTTPException(

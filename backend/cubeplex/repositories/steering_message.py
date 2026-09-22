@@ -82,8 +82,17 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         *,
         content: str,
         sender_user_id: str,
+        source_kind: str,
+        execution_generation: int,
+        notice_id: str | None,
     ) -> None:
-        if row.content != content or row.sender_user_id != sender_user_id:
+        if (
+            row.content != content
+            or row.sender_user_id != sender_user_id
+            or row.source_kind != source_kind
+            or row.execution_generation != execution_generation
+            or row.notice_id != notice_id
+        ):
             raise SteeringMessageConflictError(row.client_steer_id)
 
     async def _usage(self, *predicates: Any) -> SteeringQueueUsage:
@@ -108,22 +117,30 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         sender_user_id: str,
         sender_display_name: str | None,
         hitl_question_id: str | None,
+        source_kind: str = "user_message",
+        execution_generation: int = 0,
+        notice_id: str | None = None,
+        lock_conversation: bool = True,
     ) -> tuple[SteeringMessage, bool]:
         """Lock a conversation, enforce bounds, and enqueue idempotently."""
+        if source_kind not in ("user_message", "background_task"):
+            raise ValueError("unsupported durable input source")
+        if execution_generation < 0:
+            raise ValueError("durable input generation must be nonnegative")
+        if (source_kind == "background_task") != (notice_id is not None):
+            raise ValueError("background input requires exactly one notice identity")
         content_bytes = len(content.encode("utf-8"))
         if content_bytes > MAX_MESSAGE_BYTES:
             raise SteeringMessageContentTooLargeError
 
-        conversation_stmt = (
-            select(cast(Any, Conversation.id))
-            .where(
-                cast(Any, Conversation.id) == conversation_id,
-                cast(Any, Conversation.org_id) == self.org_id,
-                cast(Any, Conversation.workspace_id) == self.workspace_id,
-                cast(Any, Conversation.deleted_at).is_(None),
-            )
-            .with_for_update()
+        conversation_stmt = select(cast(Any, Conversation.id)).where(
+            cast(Any, Conversation.id) == conversation_id,
+            cast(Any, Conversation.org_id) == self.org_id,
+            cast(Any, Conversation.workspace_id) == self.workspace_id,
+            cast(Any, Conversation.deleted_at).is_(None),
         )
+        if lock_conversation:
+            conversation_stmt = conversation_stmt.with_for_update()
         locked_id = (await self.session.execute(conversation_stmt)).scalar_one_or_none()
         if locked_id is None:
             raise SteeringConversationUnavailableError(conversation_id)
@@ -138,6 +155,9 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
                 existing,
                 content=content,
                 sender_user_id=sender_user_id,
+                source_kind=source_kind,
+                execution_generation=execution_generation,
+                notice_id=notice_id,
             )
             return existing, False
 
@@ -162,6 +182,9 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
             workspace_id=self.workspace_id,
             conversation_id=conversation_id,
             run_id=run_id,
+            source_kind=source_kind,
+            execution_generation=execution_generation,
+            notice_id=notice_id,
             client_steer_id=client_steer_id,
             content=content,
             sender_user_id=sender_user_id,
@@ -177,6 +200,7 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
             self._scoped_select()
             .where(
                 cast(Any, SteeringMessage.conversation_id) == conversation_id,
+                cast(Any, SteeringMessage.source_kind) == "user_message",
                 cast(Any, SteeringMessage.state).in_(BOOTSTRAP_STATES),
             )
             .order_by(

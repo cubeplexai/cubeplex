@@ -101,6 +101,37 @@ async def test_has_more_is_false_when_limit_covers_history(
 
 
 @pytest.mark.asyncio
+async def test_internal_background_input_is_not_projected_as_user_message(
+    db_session: AsyncSession,
+) -> None:
+    thread_id = "t-hwin-background-input"
+    async with init_checkpointer() as cp:
+        await cp.append(
+            thread_id,
+            [
+                UserMessage(
+                    content=[TextContent(text="internal result")],
+                    metadata={
+                        "source": "background_task",
+                        "notice_id": "bge-notice",
+                    },
+                ),
+                AssistantMessage(content=[TextContent(text="result received")]),
+                UserMessage(content=[TextContent(text="visible user message")]),
+            ],
+        )
+    try:
+        window = await load_history_window(db_session, thread_id, limit=10)
+        assert [message["role"] for message in window.messages] == ["assistant", "user"]
+        assert [message["content"][0]["text"] for message in window.messages] == [
+            "result received",
+            "visible user message",
+        ]
+    finally:
+        await _delete_thread(thread_id)
+
+
+@pytest.mark.asyncio
 async def test_empty_thread_returns_empty_window(db_session: AsyncSession) -> None:
     window = await load_history_window(db_session, "t-hwin-nope", limit=50)
     assert window.messages == []

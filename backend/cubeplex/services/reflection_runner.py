@@ -25,6 +25,27 @@ from cubeplex.models.user_event import UserEventType
 from cubeplex.services.reflection_context import set_reflection_source
 from cubeplex.services.user_event import PublishUserEventInput, UserEventService
 
+
+def turn_contains_background_notice(messages: list[Any], initial_message: Any) -> bool:
+    """Return whether the current turn contains an internal task-result input."""
+    start = next(
+        (index for index, message in enumerate(messages) if message is initial_message),
+        None,
+    )
+    if start is None:
+        return True
+    for message in messages[start:]:
+        metadata = getattr(message, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("source") == "background_task":
+            return True
+        notice_id = metadata.get("notice_id")
+        if isinstance(notice_id, str) and notice_id.startswith(("bge-", "scmw-", "scmd-")):
+            return True
+    return False
+
+
 logger = logging.getLogger(__name__)
 
 _CONTENT_TRUNCATE = 200  # max chars per existing memory item in seed
