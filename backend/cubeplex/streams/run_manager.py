@@ -1769,10 +1769,11 @@ class RunManager:
         *,
         ctx: RunContext,
         run_id: str,
-        question_id: str,
+        question_id: str | None,
         started_at: str,
         admission: ConversationExecutionAdmission | None,
         reason: str,
+        preserved_terminal_status: str | None = None,
     ) -> str:
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
@@ -1784,6 +1785,7 @@ class RunManager:
             expected_run_id=run_id,
             started_at=started_at,
             ttl_seconds=self._run_event_ttl_seconds,
+            cleanup_only=question_id is None,
         )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
             await self.notify_run_stop(run_id)
@@ -1791,6 +1793,10 @@ class RunManager:
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
+        if question_id is None:
+            meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+            if meta is not None and meta.status in ("completed", "cancelled", "errored"):
+                preserved_terminal_status = meta.status
         self._resume_claim_tokens[run_id] = claim.claim_token
         task = asyncio.create_task(
             self._execute_cancel_paused_run(
@@ -1801,6 +1807,7 @@ class RunManager:
                 ctx=ctx,
                 admission=admission,
                 reason=reason,
+                preserved_terminal_status=preserved_terminal_status,
             ),
             name=f"cancel_paused:{run_id}",
         )
@@ -1811,7 +1818,10 @@ class RunManager:
         return run_id
 
     async def recover_stopped_run(self, admission_id: str) -> bool:
-        """Wake no-model cleanup of an already-stopped, durably paused run."""
+        """Wake no-model cleanup of a stopped pause or checkpoint-completed run."""
+        from cubeloop.checkpointer.postgres.models import CubeloopRun
+        from sqlalchemy import select
+
         from cubeplex.agents.checkpointer import shared_checkpointer
         from cubeplex.config import config
         from cubeplex.db.engine import async_session_maker
@@ -1836,9 +1846,19 @@ class RunManager:
         # Stop is immutable authorization to clean up, not to act as the former user.
         async with shared_checkpointer() as cp:
             loaded_pending = await cp.load_pending(ctx.conversation_id)
-        if loaded_pending is None or loaded_pending[1] != run_id:
+        if loaded_pending is not None and loaded_pending[1] != run_id:
             return False
-        pending = loaded_pending[0]
+        pending = loaded_pending[0] if loaded_pending is not None else None
+        if pending is None:
+            async with async_session_maker() as session:
+                completed = await session.scalar(
+                    select(CubeloopRun.completed_at).where(
+                        CubeloopRun.thread_id == ctx.conversation_id, CubeloopRun.run_id == run_id
+                    )
+                )
+            if completed is None:
+                return False
+        preserved_terminal_status = None
         meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
         if meta is not None:
             if meta.conversation_id != ctx.conversation_id:
@@ -1856,16 +1876,26 @@ class RunManager:
                     observed_last_event_at=meta.last_event_at or meta.started_at,
                 ):
                     return False
+            elif pending is None and meta.status in ("completed", "cancelled", "errored"):
+                preserved_terminal_status = meta.status
             elif meta.status not in ("paused_hitl", "stale"):
                 return False
+        elif pending is None:
+            # A completed checkpoint has no outcome field; don't invent a cancelled result.
+            return False
         try:
             await self._start_paused_cleanup(
                 ctx=ctx,
                 run_id=run_id,
-                question_id=pending.question_id,
-                started_at=datetime.fromtimestamp(pending.created_at, UTC).isoformat(),
+                question_id=pending.question_id if pending is not None else None,
+                started_at=(
+                    datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+                    if pending is not None
+                    else (admission.run_started_at or admission.created_at).isoformat()
+                ),
                 admission=admission,
                 reason="recovering persisted Stop",
+                preserved_terminal_status=preserved_terminal_status,
             )
         except ResumeConflict:
             return False
@@ -1900,11 +1930,12 @@ class RunManager:
         *,
         run_id: str,
         conversation_id: str,
-        question_id: str,
+        question_id: str | None,
         claim_token: str,
         ctx: RunContext,
         admission: ConversationExecutionAdmission | None,
         reason: str,
+        preserved_terminal_status: str | None = None,
     ) -> None:
         from sqlalchemy import select
         from sqlmodel import col
@@ -1918,6 +1949,8 @@ class RunManager:
         from cubeplex.streams.hitl_resume import begin_resume_finalization
         from cubeplex.streams.steering_delivery import SteeringRunScope
 
+        terminal_status = preserved_terminal_status or "cancelled"
+
         async def require_claim() -> None:
             if not await run_claim_matches(
                 self._redis,
@@ -1925,6 +1958,7 @@ class RunManager:
                 conversation_id=conversation_id,
                 run_id=run_id,
                 claim_token=claim_token,
+                cleanup_only=preserved_terminal_status is not None,
             ):
                 raise RunClaimLost("paused cleanup lost its execution slot")
 
@@ -1933,17 +1967,6 @@ class RunManager:
             async with shared_checkpointer() as cp:
                 if await cp.load_pending(conversation_id) is not None:
                     raise RuntimeError("paused cleanup still has a pending question")
-            if admission is not None and admission.run_start_token is not None:
-                async with async_session_maker() as session:
-                    await ConversationExecutionService(
-                        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                    ).record_run_finished(
-                        admission_id=admission.id,
-                        attempt_id=admission.run_start_token,
-                        worker_started=admission.run_started_at is not None,
-                        now=datetime.now(UTC),
-                    )
-                    await session.commit()
             await clear_active_run(
                 self._redis,
                 prefix=self._key_prefix,
@@ -1958,8 +1981,19 @@ class RunManager:
                 ttl_seconds=self._run_event_ttl_seconds,
                 claim_token=claim_token,
             )
+            if admission is not None and admission.run_start_token is not None:
+                async with async_session_maker() as session:
+                    await ConversationExecutionService(
+                        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                    ).record_run_finished(
+                        admission_id=admission.id,
+                        attempt_id=admission.run_start_token,
+                        worker_started=admission.run_started_at is not None,
+                        now=datetime.now(UTC),
+                    )
+                    await session.commit()
             with suppress(Exception):
-                await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
+                await record_scheduled_run_terminal_state(run_id=run_id, run_status=terminal_status)
 
         try:
             # New admitted work locks the same conversation before claiming a slot.
@@ -1986,6 +2020,7 @@ class RunManager:
                     lease_seconds=max(
                         1, int(config.get("lifecycle.stale_run_threshold_seconds", 180))
                     ),
+                    cleanup_only=question_id is None,
                 ):
                     raise RunClaimLost("paused cleanup could not reserve finalization")
                 async with shared_checkpointer() as cp:
@@ -1999,33 +2034,36 @@ class RunManager:
                     await require_claim()
                     await cp.mark_run_complete(conversation_id, run_id)
                     await require_claim()
-                    if pending is not None and not await cp.clear_pending_request_if_matches(
-                        conversation_id, question_id=question_id, run_id=run_id
-                    ):
-                        raise RunClaimLost("paused question changed during cleanup")
+                    if pending is not None:
+                        assert question_id is not None
+                        if not await cp.clear_pending_request_if_matches(
+                            conversation_id, question_id=question_id, run_id=run_id
+                        ):
+                            raise RunClaimLost("paused question changed during cleanup")
                 await require_claim()
                 await self._steering_delivery.finalize_run(
                     run_id,
                     scope=SteeringRunScope(ctx.org_id, ctx.workspace_id, conversation_id),
                     cancel_uncommitted=True,
                 )
-                await self._append_event(
-                    run_id,
-                    conversation_id,
-                    DoneEvent(
-                        timestamp=utc_isoformat(datetime.now(UTC)),
-                        data={"cancelled": True, "reason": reason},
-                    ),
-                    claim_token=claim_token,
-                )
-                await update_run_meta(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    status="cancelled",
-                    claim_token=claim_token,
-                )
+                if preserved_terminal_status is None:
+                    await self._append_event(
+                        run_id,
+                        conversation_id,
+                        DoneEvent(
+                            timestamp=utc_isoformat(datetime.now(UTC)),
+                            data={"cancelled": True, "reason": reason},
+                        ),
+                        claim_token=claim_token,
+                    )
+                    await update_run_meta(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        status="cancelled",
+                        claim_token=claim_token,
+                    )
                 await session.commit()
             await finish_cancelled()
         except RunClaimLost:
@@ -2037,7 +2075,7 @@ class RunManager:
             with suppress(Exception, RunClaimLost):
                 await require_claim()
                 meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
-                if meta is not None and meta.status == "cancelled":
+                if meta is not None and meta.status == terminal_status:
                     await finish_cancelled()
                     return
             logger.exception("Paused cleanup {} failed; leaving reconciliation pending", run_id)
@@ -5456,6 +5494,21 @@ class RunManager:
             # orphaning the paused turn. The respond / cancel paths clear
             # the lock when they terminate.
             if final_status != "paused_hitl" and not registration_replaced:
+                # Keep durable cleanup pending if release or expiry fails.
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    **claim_kwargs,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
+                )
                 if ctx.execution is not None:
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.db.engine import async_session_maker
@@ -5476,20 +5529,6 @@ class RunManager:
                                 now=datetime.now(UTC),
                             )
                             await admission_session.commit()
-                await clear_active_run(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    **claim_kwargs,
-                )
-                await expire_run_data(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    ttl_seconds=self._run_event_ttl_seconds,
-                    **claim_kwargs,
-                )
 
             if sandbox:
                 from cubeplex.sandbox.lazy import LazySandbox
@@ -6108,6 +6147,20 @@ class RunManager:
             # the pointer atomically). On "completed" the pointer must be
             # gone so the next start_run can allocate a fresh run.
             if not registration_replaced:
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    **claim_kwargs,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                    **claim_kwargs,
+                )
                 if ctx.execution is not None and durable_final_status != "paused_hitl":
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.services.conversation_execution import (
@@ -6129,17 +6182,3 @@ class RunManager:
                                 now=datetime.now(UTC),
                             )
                             await admission_session.commit()
-                await clear_active_run(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                    **claim_kwargs,
-                )
-                await expire_run_data(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    ttl_seconds=self._run_event_ttl_seconds,
-                    **claim_kwargs,
-                )

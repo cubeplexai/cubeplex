@@ -31,10 +31,12 @@ from cubeplex.streams.hitl_resume import (
     stale_answered_pending,
 )
 from cubeplex.streams.run_events import (
+    clear_active_run,
     create_run,
     get_active_run,
     get_run_meta,
     mark_run_stale,
+    run_claim_matches,
     update_run_meta,
 )
 
@@ -213,6 +215,111 @@ async def test_claim_conflict_on_terminal_status(redis):
     raw = await redis.hgetall(f"{prefix}:run_meta:v2:r1")
     assert raw["status"] == "completed"
     assert "claim_token" not in raw
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled", "errored"])
+async def test_only_cleanup_can_claim_a_terminal_run_without_resurrecting_it(status: str) -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prefix = "terminal-cleanup"
+    started_at = "2026-09-22T00:00:00+00:00"
+    try:
+        assert await create_run(
+            redis,
+            prefix=prefix,
+            run_id="old",
+            conversation_id="conversation",
+            status=status,
+            started_at=started_at,
+            ttl_seconds=60,
+        )
+        kwargs = {
+            "prefix": prefix,
+            "conversation_id": "conversation",
+            "expected_run_id": "old",
+            "started_at": started_at,
+            "ttl_seconds": 60,
+        }
+        assert (await claim_resume(redis, **kwargs)).outcome == ClaimResumeOutcome.CONFLICT
+        owner = await claim_resume(redis, **kwargs, cleanup_only=True)
+        assert owner.outcome == ClaimResumeOutcome.OK and owner.claim_token is not None
+        finalization = {
+            "prefix": prefix,
+            "conversation_id": "conversation",
+            "run_id": "old",
+            "claim_token": owner.claim_token,
+            "ttl_seconds": 60,
+            "lease_seconds": 60,
+        }
+        assert not await begin_resume_finalization(redis, **finalization)
+        assert await begin_resume_finalization(redis, **finalization, cleanup_only=True)
+        assert (
+            await claim_resume(redis, **kwargs, cleanup_only=True)
+        ).outcome == ClaimResumeOutcome.ALREADY_RUNNING
+        assert not await create_run(
+            redis,
+            prefix=prefix,
+            run_id="new",
+            conversation_id="conversation",
+            status="running",
+            started_at=started_at,
+            ttl_seconds=60,
+        )
+        meta = await get_run_meta(redis, prefix=prefix, run_id="old")
+        assert meta is not None and meta.status == status
+        assert await redis.hget(f"{prefix}:run_meta:v2:old", "claim_token") == owner.claim_token
+    finally:
+        await redis.aclose()
+
+
+async def test_released_terminal_cleanup_never_gets_model_authority_or_reclaims_the_slot() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prefix = "released-cleanup"
+    started_at = "2026-09-22T00:00:00+00:00"
+    try:
+        assert await create_run(
+            redis,
+            prefix=prefix,
+            run_id="old",
+            conversation_id="conversation",
+            status="completed",
+            started_at=started_at,
+            ttl_seconds=60,
+        )
+        await clear_active_run(redis, prefix=prefix, conversation_id="conversation", run_id="old")
+        owner = await claim_resume(
+            redis,
+            prefix=prefix,
+            conversation_id="conversation",
+            expected_run_id="old",
+            started_at=started_at,
+            ttl_seconds=60,
+            cleanup_only=True,
+        )
+        assert owner.outcome == ClaimResumeOutcome.OK and owner.claim_token is not None
+        kwargs = {
+            "prefix": prefix,
+            "conversation_id": "conversation",
+            "run_id": "old",
+            "claim_token": owner.claim_token,
+        }
+        assert await get_active_run(redis, prefix=prefix, conversation_id="conversation") is None
+        assert not await run_claim_matches(redis, **kwargs)
+        assert await run_claim_matches(redis, **kwargs, cleanup_only=True)
+        assert await begin_resume_finalization(
+            redis, **kwargs, ttl_seconds=60, lease_seconds=60, cleanup_only=True
+        )
+        assert await create_run(
+            redis,
+            prefix=prefix,
+            run_id="new",
+            conversation_id="conversation",
+            status="running",
+            started_at=started_at,
+            ttl_seconds=60,
+        )
+        assert not await run_claim_matches(redis, **kwargs, cleanup_only=True)
+    finally:
+        await redis.aclose()
 
 
 async def test_resume_claim_matches_only_current_owner(redis):
