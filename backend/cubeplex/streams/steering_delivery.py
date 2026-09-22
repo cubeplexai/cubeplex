@@ -717,24 +717,9 @@ class DurableSteeringCoordinator:
                     if pending_run_id == row.run_id and (meta is None or meta.status == "stale"):
                         continue
                     if row.source_kind == "background_task" and row.notice_id:
-                        from cubeplex.services.background_task_delivery import (
-                            BackgroundTaskDeliveryService,
-                        )
-
-                        released = await BackgroundTaskDeliveryService(
-                            session,
-                            org_id=row.org_id,
-                            workspace_id=row.workspace_id,
-                        ).settle_uncommitted_attempt(
-                            notice_id=row.notice_id,
-                            run_id=row.run_id,
-                            input_id=row.client_steer_id,
-                            discard_cancelled_initial=(
-                                meta is not None and meta.status == "cancelled"
-                            ),
-                        )
-                        if released:
-                            await session.delete(row)
+                        # Background recovery must fence CubeLoop append before
+                        # deciding that checkpoint proof is absent. Its delivery
+                        # coordinator owns settlement and this row's deletion.
                         continue
                     run_key = (row.org_id, row.workspace_id, row.run_id)
                     if run_key not in finalized_runs:
