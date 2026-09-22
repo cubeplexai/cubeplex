@@ -222,6 +222,20 @@ Before an attempt, the host restores messages and middleware extra state togethe
 
 Live steering enters through `ExecutionSession.submit_input`. Steers received while the host is still preparing an owned attempt wait in a bounded host buffer and are submitted when `AgentStart` opens Session admission. An unmatched cancellation creates a bounded tombstone before or after that admission boundary; it remains until the matching steer arrives or the attempt ends. Durable steering is acknowledged only from an `InputCommitted` event whose durability is `checkpoint`; an in-memory admission receipt alone does not make a database row injected. A checkpoint acknowledgement retries transient database failures and propagates an exhausted retry budget to the required Session consumer. The acknowledgement carries its immutable workspace scope so later pause or finalization reconciliation can repair the durable row even when HITL auto-detach has removed the live Session registration. The next Session registration reconciles claims still owned by that coordinator: checkpoint-proven inputs become injected, while absent inputs return to the queue for the new Session. Each Agent, preparation buffer, and durable delivery registration keeps the claim token of its concrete attempt. Local delivery, pub/sub admission, cancellation, and PostgreSQL claiming or submission all compare that attempt token with the distributed claim. A superseded Session therefore forwards direct requests and stays silent on broadcasts even if it remains open; only the replacement can act on the input. A closed current registration, or the current task during its no-Agent teardown window, can still reject admission authoritatively. Cancellation uses `cancel_input`, while hard run cancellation remains task cancellation.
 
+Background-task results share the durable input transport but are not user steering.
+Their rows carry `source=background_task`, the event notice ID, and the execution
+generation. They can append only to a live run owned by the task's original actor;
+another participant's run leaves the event pending. An idle conversation gets a new
+admitted run under the original actor, unless HITL is still pending. The initial notice
+is bound to the concrete run attempt before its execution task is scheduled. Its input
+gate stays closed until the initial user-shaped internal message has been appended to the
+checkpoint; later inputs then drain normally. A checkpointed notice is delivered even if
+the model later fails. An uncommitted append returns to the event queue after the old
+attempt loses ownership, while a stopped uncommitted initial notice is discarded.
+Background inputs omit `steer_id`, are excluded from the user steering bootstrap and
+history projection, and suppress reflection for their whole turn. Consolidation removes
+all messages from runs containing such an input before applying its history cap.
+
 ## Event projection limits
 
 The Session consumer is required, is attached before execution, and has a 256-event capacity. Every projected event is limited to 1 MiB. Host publication has a 5-second deadline and the enclosing CubeLoop delivery deadline is 6 seconds. A timeout, oversized event, or Redis publication error fails the required consumer, stops new agent work, and prevents a successful `DoneEvent`. `ToolResultLimitMiddleware` truncates tool-result text to 20,000 characters (except `load_skill`) in `after_tool_call`, before that event is published, so a runaway `execute` / fetch / MCP payload does not hit the 1 MiB ceiling.

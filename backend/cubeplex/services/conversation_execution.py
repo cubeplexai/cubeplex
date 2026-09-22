@@ -164,7 +164,12 @@ class ConversationExecutionService:
             or admission.actor_user_id != actor_user_id
             or admission.run_id != run_id
             or admission.source_kind
-            not in ("user_message", "schedule_occurrence", "trigger_occurrence")
+            not in (
+                "user_message",
+                "schedule_occurrence",
+                "trigger_occurrence",
+                "background_task",
+            )
             or admission.execution_kind != "run"
             or admission.request_fingerprint != self._fingerprint(intent)
             or admission.resolved_execution is None
@@ -215,7 +220,7 @@ class ConversationExecutionService:
 
     async def require_run_input_actor(
         self, *, conversation_id: str, run_id: str, actor_user_id: str
-    ) -> None:
+    ) -> ConversationExecutionAdmission | None:
         admission = await self.session.scalar(
             select(ConversationExecutionAdmission).where(
                 col(ConversationExecutionAdmission.org_id) == self.org_id,
@@ -224,10 +229,26 @@ class ConversationExecutionService:
             )
         )
         if admission is None:
-            return
+            return None
         if admission.conversation_id != conversation_id or admission.actor_user_id != actor_user_id:
             raise ExecutionConflictError("only the original execution actor may add input")
-        await self._lock_live_admission(admission.id)
+        return await self._lock_live_admission(admission.id)
+
+    async def require_background_notice_authority(
+        self,
+        *,
+        conversation_id: str,
+        actor_user_id: str,
+        execution_generation: int,
+    ) -> Conversation:
+        """Fence an internal notice against current access and generation state."""
+        conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        if (
+            conversation.execution_closed_at is not None
+            or conversation.execution_generation != execution_generation
+        ):
+            raise ExecutionRevokedError("background notice generation is closed")
+        return conversation
 
     async def stop_run(
         self, *, conversation_id: str, run_id: str, actor_user_id: str, now: datetime
@@ -1013,6 +1034,112 @@ class ConversationExecutionService:
             request_fingerprint=fingerprint,
             resolved_execution=execution.model_dump(mode="json"),
             run_id=run_id or str(uuid4()),
+            created_at=now,
+            updated_at=now,
+        )
+        conversation.has_messages = True
+        conversation.updated_at = now
+        self.session.add(admission)
+        await self.session.flush()
+        return AdmittedExecution(admission, execution, True)
+
+    async def admit_background_notice(
+        self,
+        *,
+        conversation_id: str,
+        actor_user_id: str,
+        notice_id: str,
+        owner_token: str,
+        execution_generation: int,
+        intent: UserMessageIntent,
+        snapshot: LLMSnapshot,
+        now: datetime,
+    ) -> AdmittedExecution:
+        """Bind one internal notice to one run without reopening a generation."""
+        require_aware(now)
+        if not notice_id or not owner_token or not intent.content.strip() or intent.attachment_ids:
+            raise ValueError("background notice requires stable text-only input")
+        conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        if (
+            conversation.execution_closed_at is not None
+            or conversation.execution_generation != execution_generation
+        ):
+            raise ExecutionRevokedError("background notice generation is closed")
+        notice = await self.session.scalar(
+            select(BackgroundTaskEvent)
+            .where(
+                col(BackgroundTaskEvent.id) == notice_id,
+                col(BackgroundTaskEvent.org_id) == self.org_id,
+                col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            notice is None
+            or notice.conversation_id != conversation_id
+            or notice.execution_generation != execution_generation
+            or notice.state != "claimed"
+            or notice.owner_token != owner_token
+            or notice.delivery_run_id is not None
+            or notice.delivery_attempt_id is not None
+        ):
+            raise ExecutionRevokedError("background notice is not an unbound owned claim")
+        fingerprint = self._fingerprint(intent)
+        repository = ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        )
+        previous = await repository.get_source_locked(
+            source_kind="background_task", source_id=notice_id
+        )
+        if previous is not None:
+            if (
+                previous.conversation_id != conversation_id
+                or previous.actor_user_id != actor_user_id
+                or previous.execution_generation != execution_generation
+                or previous.execution_kind != "run"
+                or previous.request_fingerprint != fingerprint
+                or previous.resolved_execution is None
+                or previous.run_id is None
+            ):
+                raise ExecutionConflictError("background notice is already bound to different work")
+            execution = ResolvedExecution.model_validate(previous.resolved_execution)
+            if previous.run_finished_at is not None:
+                if previous.run_stop_requested_at is not None or previous.revoked_at is not None:
+                    raise ExecutionRevokedError("background notice execution was stopped")
+                previous.run_id = str(uuid4())
+                previous.run_start_token = None
+                previous.run_start_requested_at = None
+                previous.run_started_at = None
+                previous.run_finished_at = None
+                previous.run_terminal_status = None
+                previous.run_terminal_at = None
+                previous.checkpoint_committed_at = None
+                previous.updated_at = now
+            if self._needs_run_start(previous):
+                self._validate_models(execution, snapshot)
+            return AdmittedExecution(previous, execution, False)
+
+        preset = resolve_model_preset(snapshot, conversation.model_key)
+        execution = ResolvedExecution(
+            model_key=preset.key,
+            primary=preset.primary,
+            fallbacks=preset.fallbacks,
+            reasoning=ReasoningControl.model_validate(conversation.reasoning),
+            trigger="automated",
+        )
+        admission = ConversationExecutionAdmission(
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            source_kind="background_task",
+            source_id=notice_id,
+            execution_generation=execution_generation,
+            execution_kind="run",
+            request_fingerprint=fingerprint,
+            resolved_execution=execution.model_dump(mode="json"),
+            run_id=str(uuid4()),
             created_at=now,
             updated_at=now,
         )

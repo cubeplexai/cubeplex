@@ -9,6 +9,7 @@ from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.im_connector import IMRunQueueItem
 from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandWake
+from cubeplex.models.steering_message import SteeringMessage
 from cubeplex.models.trigger import TriggerEvent
 
 
@@ -22,6 +23,7 @@ async def purge_workspace_execution_state(
         SandboxCommandWake,
         TriggerEvent,
         IMRunQueueItem,
+        SteeringMessage,
         BackgroundTaskEvent,
         SandboxCommand,
         BackgroundTask,
@@ -58,6 +60,9 @@ async def purge_user_execution_state(
             col(SandboxCommand.conversation_id).in_(owned_conversation_ids),
         )
     )
+    event_ids = select(col(BackgroundTaskEvent.id)).where(
+        col(BackgroundTaskEvent.task_id).in_(task_ids)
+    )
     await session.execute(
         delete(SandboxCommandWake).where(col(SandboxCommandWake.command_id).in_(command_ids))
     )
@@ -72,6 +77,9 @@ async def purge_user_execution_state(
                 col(IMRunQueueItem.actor_user_id) == user_id,
             )
         )
+    )
+    await session.execute(
+        delete(SteeringMessage).where(col(SteeringMessage.notice_id).in_(event_ids))
     )
     await session.execute(
         delete(BackgroundTaskEvent).where(col(BackgroundTaskEvent.task_id).in_(task_ids))

@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.models import (
     BackgroundTask,
+    BackgroundTaskEvent,
     Conversation,
     ConversationExecutionAdmission,
     SandboxCommand,
+    SteeringMessage,
     UserSandbox,
     Workspace,
 )
@@ -93,12 +95,37 @@ async def test_workspace_delete_retains_cleanup_proof_until_retry(
             owner_until=now + timedelta(seconds=30),
             now=now,
         )
+        notice = BackgroundTaskEvent(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation.id,
+            task_id=reserved.task.id,
+            execution_generation=0,
+            reason="completion",
+            dedupe_key="completion",
+        )
+        session.add(notice)
+        await session.flush()
+        background_input = SteeringMessage(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation.id,
+            run_id=admission.run_id or "",
+            source_kind="background_task",
+            execution_generation=0,
+            notice_id=notice.id,
+            client_steer_id=notice.id,
+            content="internal result",
+            sender_user_id=user_id,
+        )
+        session.add(background_input)
         # A conversation can reopen while an older generation is still cleaning up.
         # Hard deletion must retain that older task and command until both settle.
         conversation.execution_generation = 1
         await session.commit()
         conversation_id, admission_id = conversation.id, admission.id
         task_id, command_id = reserved.task.id, reserved.command.id
+        notice_id, background_input_id = notice.id, background_input.id
 
     first = await client.delete(f"/api/v1/workspaces/{workspace_id}")
     assert first.status_code == 200, first.text
@@ -133,3 +160,5 @@ async def test_workspace_delete_retains_cleanup_proof_until_retry(
         assert await session.get(ConversationExecutionAdmission, admission_id) is None
         assert await session.get(BackgroundTask, task_id) is None
         assert await session.get(SandboxCommand, command_id) is None
+        assert await session.get(BackgroundTaskEvent, notice_id) is None
+        assert await session.get(SteeringMessage, background_input_id) is None
