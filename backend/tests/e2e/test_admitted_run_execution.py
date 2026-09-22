@@ -139,6 +139,7 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
     "scenario",
     [
         "completed",
+        "failed",
         "stop",
         "stop_final",
         "stale_slot",
@@ -192,6 +193,8 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
     provider.subscribe_request(capture_request)
 
     async def model_response(messages: list[Message], model: Model) -> AssistantMessage:
+        if scenario == "failed":
+            raise RuntimeError("provider failed")
         if scenario == "foreign_pending":
             async with shared_checkpointer() as cp:
                 await cp.save_pending_request(
@@ -378,6 +381,7 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
             "replaced_claim": "running",
             "replaced_slot": "stale",
             "lost_slot": "running",
+            "failed": "failed",
         }.get(scenario, "completed")
         assert meta.status == expected_status, meta
         if scenario in ("terminal_reply_lost", "terminal_cancel"):
@@ -429,6 +433,8 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         assert (admitted.admission.run_finished_at is None) == (
             scenario == "paused" or lost_ownership
         )
+        if scenario != "paused" and not lost_ownership:
+            assert admitted.admission.run_terminal_status == expected_status
         assert models == ["first"]
         await db_session.rollback()
         keys = [

@@ -38,7 +38,15 @@ from redis.asyncio import Redis
 #   transitions into on its way out.
 # - ``stale``: set by inline stale-run detection when a worker disappeared
 #   mid-run without transitioning the status itself.
-RUN_STATUSES = ("running", "paused_hitl", "completed", "cancelled", "errored", "stale")
+RUN_STATUSES = (
+    "running",
+    "paused_hitl",
+    "completed",
+    "cancelled",
+    "errored",
+    "failed",
+    "stale",
+)
 
 
 class RunClaimLost(asyncio.CancelledError):
@@ -194,7 +202,8 @@ return eid
 _CLAIM_MATCHES_LUA = """
 local active = redis.call('GET', KEYS[1])
 local status = redis.call('HGET', KEYS[2], 'status')
-local terminal = status == 'completed' or status == 'cancelled' or status == 'errored'
+local terminal = status == 'completed' or status == 'cancelled'
+  or status == 'errored' or status == 'failed'
 local released_cleanup = ARGV[3] == '1' and terminal and not active
 if (active ~= ARGV[1] and not released_cleanup)
     or redis.call('HGET', KEYS[2], 'claim_token') ~= ARGV[2] then
