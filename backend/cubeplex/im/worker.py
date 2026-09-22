@@ -250,41 +250,60 @@ async def process_one_queue_item(
                 await session.commit()
             return False
 
-    # Attachment resolution and lease validation may perform external I/O. Re-read
-    # the account at the last possible point so a concurrent disable/delete cannot
-    # start a new billable run using credentials the operator has revoked.
-    async with session_maker() as session:
-        live_account = await session.get(IMConnectorAccount, captured_item.account_id)
-        if live_account is None:
-            logger.info(
-                "[IM worker] dropping queue item {} — account {} was deleted",
-                captured_item.id,
-                captured_item.account_id,
-            )
-            return False
-        if not live_account.enabled:
-            logger.info(
-                "[IM worker] dropping queue item {} — account {} was disabled before start",
-                captured_item.id,
-                captured_item.account_id,
-            )
-            await mark_queue_item_completed(session, item_id=captured_item.id)
-            await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
-            await session.commit()
-            return True
-
     try:
-        # Human IM messages use the already-durable webhook receipt as their
-        # stable source identity. Synthetic schedule/trigger queue rows have no
-        # inbound_message_id and keep their occurrence identity for C2c instead
-        # of being misclassified as user input here.
+        # Serialize the final handoff with connector disable/delete. The account
+        # lock is held through admission binding, so deletion can either cancel
+        # the still-unstarted admission or observe that run ownership already won.
         admitted = None
         execution_snapshot = None
-        if captured_item.execution_admission_id is not None:
-            async with session_maker() as session:
+        async with session_maker() as session:
+            live_account = await session.scalar(
+                select(IMConnectorAccount)
+                .where(IMConnectorAccount.id == captured_item.account_id)  # type: ignore[arg-type]
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if live_account is None:
+                logger.info(
+                    "[IM worker] dropping queue item {} — account {} was deleted",
+                    captured_item.id,
+                    captured_item.account_id,
+                )
+                return False
+
+            candidate = await session.get(IMRunQueueItem, captured_item.id)
+            if candidate is None:
+                return False
+            if not live_account.enabled:
+                logger.info(
+                    "[IM worker] dropping queue item {} — account {} was disabled before start",
+                    captured_item.id,
+                    captured_item.account_id,
+                )
+                await mark_queue_item_completed(session, item_id=captured_item.id)
+                await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
+                await session.commit()
+                return True
+            if candidate.status != "started":
+                return False
+            if candidate.execution_admission_id is not None:
                 admission = await session.get(
                     ConversationExecutionAdmission,
-                    captured_item.execution_admission_id,
+                    candidate.execution_admission_id,
+                    with_for_update=True,
+                    populate_existing=True,
+                )
+                is_human = candidate.inbound_message_id is not None
+                source_matches = admission is not None and (
+                    (
+                        is_human
+                        and admission.source_kind == "user_message"
+                        and admission.source_id == f"im:{candidate.receipt_id}"
+                    )
+                    or (
+                        not is_human
+                        and admission.source_kind in ("schedule_occurrence", "trigger_occurrence")
+                    )
                 )
                 if (
                     admission is None
@@ -292,20 +311,19 @@ async def process_one_queue_item(
                     or admission.workspace_id != captured["workspace_id"]
                     or admission.conversation_id != captured["conversation_id"]
                     or admission.actor_user_id != captured["acting_user_id"]
-                    or admission.source_kind not in ("schedule_occurrence", "trigger_occurrence")
+                    or not source_matches
                     or admission.run_id is None
                     or admission.resolved_execution is None
                 ):
                     raise ExecutionConflictError(
-                        "IM handoff does not match its automatic execution admission"
+                        "IM handoff does not match its execution admission"
                     )
                 admitted = AdmittedExecution(
                     admission=admission,
                     execution=ResolvedExecution.model_validate(admission.resolved_execution),
                     created=False,
                 )
-        elif captured_item.inbound_message_id is not None:
-            async with session_maker() as session:
+            elif candidate.inbound_message_id is not None:
                 execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
                 admitted = await ConversationExecutionService(
                     session,
@@ -323,7 +341,17 @@ async def process_one_queue_item(
                     snapshot=execution_snapshot,
                     now=datetime.now(UTC),
                 )
-                await session.commit()
+                candidate.execution_admission_id = admitted.admission.id
+
+            live_item = await session.get(
+                IMRunQueueItem,
+                captured_item.id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            if live_item is None or live_item.status != "started":
+                return False
+            await session.commit()
 
         if admitted is not None:
             admission = admitted.admission

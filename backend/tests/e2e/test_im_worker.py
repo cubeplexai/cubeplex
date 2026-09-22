@@ -164,6 +164,7 @@ async def test_worker_processes_one_item_and_completes_receipt(
         on_run_started=on_started,
         lease_seconds=300,
         load_execution_snapshot=im_test_execution_snapshot,
+        deliverable_connection_ids=lambda: {account.id},
     )
 
     assert did_run is True
@@ -213,6 +214,7 @@ async def test_worker_processes_one_item_and_completes_receipt(
         assert admission.actor_user_id == account.acting_user_id
         assert admission.run_id == rm.calls[0]["run_id"]
         assert admission.id == rm.calls[0]["admission_id"]
+        assert item.execution_admission_id == admission.id
 
 
 async def test_reclaim_after_run_claim_reuses_admission_without_reexecution(
@@ -861,6 +863,13 @@ async def test_account_disabled_during_prestart_validation_never_starts_run(
         assert item.status == "completed"
         assert receipt is not None
         assert receipt.status == "failed"
+        admission = await session.scalar(
+            select(ConversationExecutionAdmission).where(
+                ConversationExecutionAdmission.source_kind == "user_message",
+                ConversationExecutionAdmission.source_id == f"im:{item.receipt_id}",
+            )
+        )
+        assert admission is None
 
 
 async def test_account_deleted_during_prestart_validation_never_starts_run(
