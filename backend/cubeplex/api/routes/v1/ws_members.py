@@ -1,13 +1,15 @@
 """Workspace member management routes: list / available / add / change-role / remove."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.api.schemas.execution import AccessRemovalResponse
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_admin, require_member
 from cubeplex.db import get_session
@@ -22,6 +24,8 @@ from cubeplex.models import (
 )
 from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
 from cubeplex.services.avatar_store import resolve_avatar_url
+from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/members", tags=["workspace-members"])
@@ -338,12 +342,13 @@ async def update_workspace_member_role(
     return ChangeWsRoleResponse(user_id=user_id, role=body.role)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}", response_model=AccessRemovalResponse)
 async def remove_workspace_member(
     user_id: str,
+    raw_request: Request,
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> None:
+) -> AccessRemovalResponse:
     if user_id == ctx.user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cannot remove yourself")
 
@@ -357,4 +362,17 @@ async def remove_workspace_member(
         Membership.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
     )
     await session.execute(stmt)
+    revoked = await ConversationExecutionService(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    ).revoke_actor_access(actor_user_id=user_id, now=datetime.now(UTC))
     await session.commit()
+    for conversation_id, run_ids in revoked.conversation_runs:
+        await signal_stopped_runs(
+            raw_request.app.state.run_manager,
+            conversation_id=conversation_id,
+            run_ids=run_ids,
+            user_id=user_id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+    return AccessRemovalResponse(removed=True, cleanup_pending=revoked.cleanup_pending)

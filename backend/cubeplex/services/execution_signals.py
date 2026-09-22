@@ -19,6 +19,8 @@ async def signal_stopped_runs(
     workspace_id: str,
 ) -> None:
     """Wake active workers without making delivery part of the durable contract."""
+    if not run_ids:
+        return
     try:
         async with asyncio.timeout(3):
             async with shared_checkpointer() as checkpointer:

@@ -1,4 +1,5 @@
 import { toApiError, type ApiClient } from './client'
+import type { AccessRemovalResult } from './execution'
 import type { SandboxStatusOut } from './sandboxPolicy'
 import type {
   Topic,
@@ -75,8 +76,10 @@ export async function removeTopicParticipant(
   client: ApiClient,
   topicId: string,
   userId: string,
-): Promise<void> {
-  await client.del(`/api/v1/topics/${topicId}/participants/${userId}`)
+): Promise<AccessRemovalResult> {
+  const res = await client.del(`/api/v1/topics/${topicId}/participants/${userId}`)
+  if (!res.ok) throw await toApiError(res)
+  return await res.json()
 }
 
 export async function updateParticipantRole(

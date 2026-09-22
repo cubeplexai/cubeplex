@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Conversation, Topic, TopicParticipant } from '../types'
 import type { ApiClient } from '../api'
+import type { AccessRemovalResult } from '../api/execution'
 import {
   type ArchiveTopicResult,
   listTopics,
@@ -41,7 +42,7 @@ export interface TopicStore {
   rename(client: ApiClient, topicId: string, title: string): Promise<void>
   setPin(client: ApiClient, topicId: string, isPinned: boolean): Promise<void>
   addMembers(client: ApiClient, topicId: string, userIds: string[]): Promise<void>
-  removeMember(client: ApiClient, topicId: string, userId: string): Promise<void>
+  removeMember(client: ApiClient, topicId: string, userId: string): Promise<AccessRemovalResult>
   updateParticipantRole(
     client: ApiClient,
     topicId: string,
@@ -211,13 +212,14 @@ export const useTopicStore = create<TopicStore>((set) => ({
   },
 
   async removeMember(client, topicId, userId) {
-    await removeTopicParticipant(client, topicId, userId)
+    const result = await removeTopicParticipant(client, topicId, userId)
     set((s) => ({
       topicParticipants: {
         ...s.topicParticipants,
         [topicId]: (s.topicParticipants[topicId] ?? []).filter((p) => p.user_id !== userId),
       },
     }))
+    return result
   },
 
   async updateParticipantRole(client, topicId, userId, role) {

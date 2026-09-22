@@ -1,16 +1,21 @@
 """Org member management routes: list / add / change-role / remove."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
+from cubeplex.api.schemas.execution import AccessRemovalResponse
 from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubeplex.db import get_session
-from cubeplex.models import OrgRole, User
+from cubeplex.models import Membership, OrgRole, User, Workspace
 from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/admin/members", tags=["admin-members"])
@@ -84,12 +89,13 @@ async def update_org_member_role(
     return ChangeOrgRoleResponse(user_id=user_id, role=body.role)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}", response_model=AccessRemovalResponse)
 async def remove_org_member(
     user_id: str,
+    raw_request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> None:
+) -> AccessRemovalResponse:
     org_id = await resolve_current_org_id(user, session)
 
     if user_id == user.id:
@@ -102,6 +108,43 @@ async def remove_org_member(
     if current == OrgRole.OWNER:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Cannot remove org owner")
 
+    workspace_ids = tuple(
+        await session.scalars(
+            select(col(Membership.workspace_id))
+            .join(Workspace, col(Workspace.id) == col(Membership.workspace_id))
+            .where(
+                col(Membership.user_id) == user_id,
+                col(Workspace.org_id) == org_id,
+            )
+            .order_by(col(Membership.workspace_id))
+        )
+    )
     mem_repo = MembershipRepository(session)
     await mem_repo.remove_user_from_org_workspaces(user_id=user_id, org_id=org_id)
+    now = datetime.now(UTC)
+    revocations = []
+    for workspace_id in workspace_ids:
+        revocations.append(
+            (
+                workspace_id,
+                await ConversationExecutionService(
+                    session, org_id=org_id, workspace_id=workspace_id
+                ).revoke_actor_access(actor_user_id=user_id, now=now),
+            )
+        )
     await om_repo.revoke(user_id=user_id, org_id=org_id)
+    await session.commit()
+    for workspace_id, revoked in revocations:
+        for conversation_id, run_ids in revoked.conversation_runs:
+            await signal_stopped_runs(
+                raw_request.app.state.run_manager,
+                conversation_id=conversation_id,
+                run_ids=run_ids,
+                user_id=user_id,
+                org_id=org_id,
+                workspace_id=workspace_id,
+            )
+    return AccessRemovalResponse(
+        removed=True,
+        cleanup_pending=any(revoked.cleanup_pending for _, revoked in revocations),
+    )
