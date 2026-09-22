@@ -92,6 +92,7 @@ async def enqueue_im_channel_run(
         account_id=account.id,
         receipt_id=receipt.id,
         conversation_id=conversation_id,
+        actor_user_id=owner_user_id,
         content=content,
         channel_id=channel_id,
         scope_key=scope_key,

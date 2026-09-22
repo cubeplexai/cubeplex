@@ -13,7 +13,7 @@ prefix in one file rather than scattered across model classes.
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, Column, DateTime, Index, text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, text
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
@@ -197,6 +197,17 @@ class IMRunQueueItem(CubeplexBase, OrgScopedMixin, table=True):
         ondelete="CASCADE",
     )
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
+    # Frozen when the queue row is created so identity-link changes cannot
+    # silently move a retried receipt onto another user's credentials.
+    # Nullable only for rows created before the execution-admission cutover.
+    actor_user_id: str | None = Field(
+        default=None,
+        sa_column=Column(
+            String(20),
+            ForeignKey("users.id", name="fk_im_run_queue_actor_user_id_users"),
+            nullable=True,
+        ),
+    )
     content: str
     channel_id: str = Field(max_length=128)
     scope_key: str = Field(max_length=255)
