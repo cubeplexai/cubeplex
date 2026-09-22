@@ -1,9 +1,41 @@
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis.aioredis
+import pytest
 
 from cubeplex.streams import recovery
 from cubeplex.streams.run_events import create_run
+from cubeplex.streams.run_manager import RunManager
+
+
+async def test_stop_recovery_start_is_single_flight_and_shutdown_joins_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = 0
+    ready, exited = asyncio.Event(), asyncio.Event()
+
+    async def scan_until_shutdown(_self: recovery.StoppedRunRecovery) -> None:
+        nonlocal started
+        started += 1
+        ready.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            exited.set()
+
+    monkeypatch.setattr(recovery.StoppedRunRecovery, "run", scan_until_shutdown)
+    manager = RunManager(
+        app=MagicMock(), redis=MagicMock(), key_prefix="stop", run_event_ttl_seconds=60
+    )
+    try:
+        manager.start_stop_recovery()
+        manager.start_stop_recovery()
+        await asyncio.wait_for(ready.wait(), timeout=1)
+        assert started == 1
+    finally:
+        await manager.stop_control_listeners()
+    assert exited.is_set()
 
 
 async def test_recovery_skips_cleanup_when_stale_cas_loses(monkeypatch) -> None:  # noqa: ANN001
