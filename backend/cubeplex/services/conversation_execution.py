@@ -689,6 +689,8 @@ class ConversationExecutionService:
         snapshot: LLMSnapshot,
         now: datetime,
         run_id: str | None = None,
+        expected_execution_generation: int | None = None,
+        expected_generation_closed: bool | None = None,
     ) -> AdmittedExecution:
         """Bind one frozen automatic occurrence to one conversation and run."""
         require_aware(now)
@@ -700,6 +702,8 @@ class ConversationExecutionService:
             raise ValueError("automatic execution requires an automated model snapshot")
         if not intent.content.strip() and not intent.attachment_ids:
             raise ValueError("automatic execution requires content or attachments")
+        if (expected_execution_generation is None) != (expected_generation_closed is None):
+            raise ValueError("automatic generation expectation must be complete")
 
         conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
         fingerprint = self._fingerprint(intent)
@@ -724,6 +728,13 @@ class ConversationExecutionService:
                 self._validate_models(execution, snapshot)
             return AdmittedExecution(previous, execution, False)
 
+        if expected_execution_generation is not None and (
+            conversation.execution_generation != expected_execution_generation
+            or (conversation.execution_closed_at is not None) != expected_generation_closed
+        ):
+            raise ExecutionRevokedError(
+                "automatic occurrence predates the current conversation generation"
+            )
         self._validate_models(execution, snapshot)
         await self._attach_files(conversation_id, actor_user_id, intent.attachment_ids, now)
         if conversation.execution_closed_at is not None:
@@ -749,6 +760,31 @@ class ConversationExecutionService:
         self.session.add(admission)
         await self.session.flush()
         return AdmittedExecution(admission, execution, True)
+
+    async def cancel_unstarted_automatic_run(
+        self,
+        *,
+        source_kind: Literal["schedule_occurrence", "trigger_occurrence"],
+        source_id: str,
+        now: datetime,
+    ) -> bool:
+        """Cancel an automatic occurrence only while no worker can own it."""
+        require_aware(now)
+        admission = await ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        ).get_source_locked(source_kind=source_kind, source_id=source_id)
+        if admission is None:
+            return True
+        if admission.run_start_token is not None or admission.run_started_at is not None:
+            return False
+        admission.revoked_at = admission.revoked_at or now
+        admission.run_stop_requested_at = admission.run_stop_requested_at or now
+        if admission.run_finished_at is None:
+            admission.run_finished_at = now
+            admission.run_terminal_status = "cancelled"
+            admission.run_terminal_at = now
+        await self.session.flush()
+        return True
 
     async def admit_direct_user_message(
         self,

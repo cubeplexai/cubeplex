@@ -208,6 +208,17 @@ class IMRunQueueItem(CubeplexBase, OrgScopedMixin, table=True):
             nullable=True,
         ),
     )
+    execution_admission_id: str | None = Field(
+        default=None,
+        sa_column=Column(
+            String(20),
+            ForeignKey(
+                "conversation_execution_admissions.id",
+                name="fk_im_run_queue_execution_admission_id",
+            ),
+            nullable=True,
+        ),
+    )
     content: str
     channel_id: str = Field(max_length=128)
     scope_key: str = Field(max_length=255)

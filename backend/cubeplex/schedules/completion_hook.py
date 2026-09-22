@@ -15,7 +15,7 @@ from cubeplex.db.engine import async_session_maker
 from cubeplex.models.scheduled_task import ScheduledTaskRun
 
 # RunManager status -> occurrence terminal state.
-_TERMINAL_MAP = {"completed": "succeeded", "failed": "failed", "cancelled": "failed"}
+_TERMINAL_MAP = {"completed": "succeeded", "failed": "failed", "cancelled": "cancelled"}
 
 # Non-terminal states the hook may overwrite. ``claimed`` is included because
 # the poller pre-stamps ``run_id`` on the row while it is still ``claimed``
@@ -25,7 +25,7 @@ _TERMINAL_MAP = {"completed": "succeeded", "failed": "failed", "cancelled": "fai
 # still flip it to terminal so history is not stuck. The poller's
 # post-dispatch UPDATE is conditional (only flips ``claimed`` → ``started``,
 # never re-flips a terminal row), so this and the poller don't fight.
-_NON_TERMINAL = ("claimed", "started")
+_NON_TERMINAL = ("claimed", "queued", "started")
 
 
 async def record_scheduled_run_terminal_state(*, run_id: str, run_status: str) -> None:

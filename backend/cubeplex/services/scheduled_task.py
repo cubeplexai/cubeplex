@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,8 @@ from cubeplex.api.schemas.ws_scheduled_tasks import (
     _validate_timezone,
 )
 from cubeplex.models import Role
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+from cubeplex.models.im_connector import IMRunQueueItem
 from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubeplex.repositories.conversation import ConversationRepository
 from cubeplex.schedules.compute import (
@@ -32,6 +34,7 @@ from cubeplex.schedules.compute import (
     latest_due_before,
     next_fire_after,
 )
+from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.services.schedule_destination import (
     ImLinkSnapshot,
     resolve_im_destination_for_conversation,
@@ -464,6 +467,7 @@ class ScheduledTaskService:
         task = await self._load_for_mutation(ctx, session, task_id)
         task.status = "paused"
         task.updated_at = datetime.now(UTC)
+        await self._cancel_pending_occurrences(session, task)
         await session.commit()
         await session.refresh(task)
         return task
@@ -489,8 +493,10 @@ class ScheduledTaskService:
         task_id: str,
     ) -> None:
         task = await self._load_for_mutation(ctx, session, task_id)
-        task.deleted_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        task.deleted_at = now
         task.next_fire_at = None
+        await self._cancel_pending_occurrences(session, task, now=now)
         await session.commit()
 
     # ------------------------------------------------------------------
@@ -521,10 +527,91 @@ class ScheduledTaskService:
         session: AsyncSession,
         task_id: str,
     ) -> ScheduledTask:
-        task = await self._load(ctx, session, task_id)
+        task = await session.scalar(
+            select(ScheduledTask)
+            .where(
+                ScheduledTask.org_id == ctx.org_id,  # type: ignore[arg-type]
+                ScheduledTask.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
+                ScheduledTask.id == task_id,  # type: ignore[arg-type]
+                cast(Any, ScheduledTask.deleted_at).is_(None),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if task is None:
+            raise ActionNotFound("Scheduled task not found")
         if task.owner_user_id != ctx.user_id and ctx.role != Role.ADMIN:
             raise ActionPermissionDenied("Owner or admin required")
         return task
+
+    async def _cancel_pending_occurrences(
+        self,
+        session: AsyncSession,
+        task: ScheduledTask,
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Cancel claimed or IM-enqueued occurrences before they start."""
+        cancelled_at = now or datetime.now(UTC)
+        rows = list(
+            await session.scalars(
+                select(ScheduledTaskRun)
+                .where(
+                    ScheduledTaskRun.scheduled_task_id == task.id,  # type: ignore[arg-type]
+                    or_(
+                        cast(Any, ScheduledTaskRun.state) == "claimed",
+                        and_(
+                            cast(Any, ScheduledTaskRun.state) == "queued",
+                            cast(Any, ScheduledTaskRun.detail) == "im_channel_queued",
+                        ),
+                    ),
+                )
+                .order_by(ScheduledTaskRun.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        cancelled_source_ids: list[str] = []
+        execution_service = ConversationExecutionService(
+            session,
+            org_id=task.org_id,
+            workspace_id=task.workspace_id,
+        )
+        for row in rows:
+            cancelled = await execution_service.cancel_unstarted_automatic_run(
+                source_kind="schedule_occurrence",
+                source_id=row.id,
+                now=cancelled_at,
+            )
+            if not cancelled:
+                if row.state == "claimed":
+                    row.state = "started"
+                    row.started_at = row.started_at or cancelled_at
+                continue
+            row.state = "cancelled"
+            row.next_retry_at = None
+            row.detail = "schedule disabled before run start"
+            cancelled_source_ids.append(row.id)
+
+        if not cancelled_source_ids:
+            return
+        admission_ids = select(cast(Any, ConversationExecutionAdmission.id)).where(
+            cast(Any, ConversationExecutionAdmission.org_id) == task.org_id,
+            cast(Any, ConversationExecutionAdmission.workspace_id) == task.workspace_id,
+            cast(Any, ConversationExecutionAdmission.source_kind) == "schedule_occurrence",
+            cast(Any, ConversationExecutionAdmission.source_id).in_(cancelled_source_ids),
+        )
+        await session.execute(
+            update(IMRunQueueItem)
+            .where(
+                cast(Any, IMRunQueueItem.execution_admission_id).in_(admission_ids),
+                cast(Any, IMRunQueueItem.status).in_(("pending", "started")),
+            )
+            .values(
+                status="completed",
+                claim_lease_expires_at=None,
+            )
+        )
 
     async def _check_conversation_ownership(
         self,

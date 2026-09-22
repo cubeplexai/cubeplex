@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, Integer, UniqueConstraint, text
+from sqlalchemy import JSON, Column, DateTime, Index, Integer, UniqueConstraint, text
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
@@ -111,8 +111,8 @@ class ScheduledTaskRun(CubeplexBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
-    # claimed | started | succeeded | failed | skipped_missed |
-    # skipped_busy_max_retries
+    # claimed | queued | started | succeeded | failed | cancelled | skipped_missed |
+    # skipped_paused | skipped_busy_max_retries
     state: str = Field(max_length=32)
     claim_count: int = Field(default=1)
     retry_count: int = Field(
@@ -125,6 +125,10 @@ class ScheduledTaskRun(CubeplexBase, OrgScopedMixin, table=True):
     )
     run_id: str | None = Field(default=None, max_length=64)
     conversation_id: str | None = Field(default=None, max_length=20)
+    execution_snapshot: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     detail: str | None = Field(default=None)
 
     def model_post_init(self, __context: Any) -> None:

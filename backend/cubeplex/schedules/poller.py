@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -17,9 +18,11 @@ from typing import Any, cast
 from loguru import logger
 from sqlalchemy import case, literal, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
 from cubeplex.db.engine import async_session_maker
+from cubeplex.llm.snapshot import LLMSnapshot
 from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubeplex.repositories.scheduled_task import (
     claim_busy_postponed_runs,
@@ -37,8 +40,16 @@ from cubeplex.schedules.compute import (
 from cubeplex.schedules.dispatch import (
     ConversationBusyError,
     ConversationPausedError,
+    OccurrenceRevokedError,
+    ScheduledOccurrenceSnapshot,
     TargetUnavailableError,
     dispatch_scheduled_run,
+    freeze_scheduled_occurrence,
+)
+from cubeplex.services.conversation_execution import (
+    ConversationExecutionService,
+    ExecutionConflictError,
+    ExecutionRevokedError,
 )
 from cubeplex.streams.run_manager import RunManager
 
@@ -48,6 +59,7 @@ class ScheduledTaskPoller:
         self,
         *,
         run_manager: RunManager,
+        load_execution_snapshot: Callable[[AsyncSession, str], Awaitable[LLMSnapshot]],
         poll_interval_seconds: float = 15.0,
         jitter_seconds: float = 5.0,
         misfire_grace_seconds: int = 300,
@@ -59,6 +71,7 @@ class ScheduledTaskPoller:
         batch_limit: int = 50,
     ) -> None:
         self._run_manager = run_manager
+        self._load_execution_snapshot = load_execution_snapshot
         self._poll_interval = poll_interval_seconds
         self._jitter = jitter_seconds
         self._grace = misfire_grace_seconds
@@ -101,7 +114,7 @@ class ScheduledTaskPoller:
         async with async_session_maker() as session:
             due = await claim_due_tasks(session, now=now, limit=self._batch_limit)
             for task in due:
-                row_id = self._claim_occurrence(session, task=task, now=now)
+                row_id = await self._claim_occurrence(session, task=task, now=now)
                 if row_id is not None:
                     to_dispatch.append(row_id)
 
@@ -113,17 +126,16 @@ class ScheduledTaskPoller:
             )
             for row in stale:
                 if row.claim_count >= self._max_claims:
-                    row.state = "failed"
-                    row.detail = "max re-claims exceeded"
+                    await self._finish_unstarted(
+                        session,
+                        row,
+                        state="failed",
+                        detail="max re-claims exceeded",
+                        now=now,
+                    )
                 else:
                     row.claimed_at = now
                     row.claim_count += 1
-                    # Drop any pre-stamped run_id from the prior dispatch
-                    # attempt; the next _dispatch_one pre-stamps a fresh
-                    # uuid, and the orphaned uuid's completion hook (if it
-                    # ever fires from a dead replica's leftover Redis run)
-                    # finds no matching row and becomes a no-op.
-                    row.run_id = None
                     to_dispatch.append(row.id)
 
             busy = await claim_busy_postponed_runs(session, now=now, limit=self._batch_limit)
@@ -147,7 +159,9 @@ class ScheduledTaskPoller:
         for row_id in to_dispatch:
             await self._dispatch_one(row_id)
 
-    def _claim_occurrence(self, session: Any, *, task: ScheduledTask, now: datetime) -> str | None:
+    async def _claim_occurrence(
+        self, session: AsyncSession, *, task: ScheduledTask, now: datetime
+    ) -> str | None:
         """Insert/handle the occurrence row + advance next_fire_at in the txn.
 
         Returns the new claimed-row id to dispatch after commit, or None
@@ -209,6 +223,8 @@ class ScheduledTaskPoller:
                     ),
                 )
             )
+        llm_snapshot = await self._load_execution_snapshot(session, task.org_id)
+        execution_snapshot = await freeze_scheduled_occurrence(session, task, llm_snapshot)
         row = ScheduledTaskRun(
             scheduled_task_id=task.id,
             org_id=task.org_id,
@@ -216,60 +232,137 @@ class ScheduledTaskPoller:
             scheduled_for=latest_due,
             claimed_at=now,
             state="claimed",
+            execution_snapshot=execution_snapshot.model_dump(mode="json"),
         )
         session.add(row)
         task.last_fired_at = now
         return row.id
 
+    @staticmethod
+    async def _finish_unstarted(
+        session: AsyncSession,
+        row: ScheduledTaskRun,
+        *,
+        state: str,
+        detail: str,
+        now: datetime | None = None,
+    ) -> None:
+        """Settle a terminal occurrence without revoking an accepted run."""
+        finished_at = now or datetime.now(UTC)
+        cancelled = await ConversationExecutionService(
+            session,
+            org_id=row.org_id,
+            workspace_id=row.workspace_id,
+        ).cancel_unstarted_automatic_run(
+            source_kind="schedule_occurrence",
+            source_id=row.id,
+            now=finished_at,
+        )
+        if not cancelled:
+            row.state = "started"
+            row.started_at = row.started_at or finished_at
+            row.detail = f"{detail}; run had already been accepted"
+            return
+        row.state = state
+        row.next_retry_at = None
+        row.detail = detail
+
     async def _dispatch_one(self, row_id: str) -> None:
         async with async_session_maker() as session:
-            row = await session.get(ScheduledTaskRun, row_id)
+            observed_row = await session.get(ScheduledTaskRun, row_id)
+            if observed_row is None:
+                return
+            task = await session.get(
+                ScheduledTask, observed_row.scheduled_task_id, with_for_update=True
+            )
+            row = await session.get(
+                ScheduledTaskRun,
+                row_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
             if row is None or row.state != "claimed":
                 return
-            task = await session.get(ScheduledTask, row.scheduled_task_id)
             if task is None:
-                row.state = "failed"
-                row.detail = "task gone"
+                await self._finish_unstarted(session, row, state="cancelled", detail="task gone")
                 await session.commit()
                 return
-            # Guard against stale-claim or busy-retry dispatching after end_at.
-            # claim_due_tasks already filters, but recovery sweeps do not join
-            # the parent task — this is the catch-all for those paths.
+            if row.execution_snapshot is None:
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="failed",
+                    detail="missing immutable occurrence snapshot",
+                )
+                await session.commit()
+                return
+            try:
+                occurrence = ScheduledOccurrenceSnapshot.model_validate(row.execution_snapshot)
+            except ValueError as exc:
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="failed",
+                    detail=f"invalid immutable occurrence snapshot: {exc}",
+                )
+                await session.commit()
+                return
+            llm_snapshot = await self._load_execution_snapshot(session, task.org_id)
+            if task.deleted_at is not None or task.status != "active":
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="cancelled",
+                    detail="schedule disabled before dispatch",
+                )
+                await session.commit()
+                return
             if task.end_at is not None and as_utc(task.end_at) <= datetime.now(UTC):
-                row.state = "skipped_missed"
-                row.detail = "task expired before dispatch"
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="skipped_missed",
+                    detail="task expired before dispatch",
+                )
                 await session.commit()
                 return
-            if task.target_mode == "im_channel":
-                # IM-mode dispatch owns the row's terminal state itself —
-                # the receipt + queue item + state flip commit in one tx.
-                # No pre-stamp because no run_id exists yet; the IM worker
-                # mints one when it drains the queue.
-                await dispatch_scheduled_run(
+            if occurrence.target_mode != "im_channel":
+                # Allocate once per occurrence. Busy/stale retries keep this
+                # ID; dispatch commits it with the admission before starting.
+                row.run_id = row.run_id or str(uuid7())
+            try:
+                result = await dispatch_scheduled_run(
                     task=task,
                     run_manager=self._run_manager,
+                    occurrence=occurrence,
+                    llm_snapshot=llm_snapshot,
                     session=session,
                     run_row=row,
                 )
-                return
-            # Pre-stamp run_id while the row is still 'claimed' so the
-            # completion hook can find the row by run_id even if the
-            # background run finishes faster than the post-dispatch UPDATE
-            # below. The hook's state filter accepts ('claimed', 'started').
-            pre_run_id = str(uuid7())
-            row.run_id = pre_run_id
-            await session.commit()
-            try:
-                result = await dispatch_scheduled_run(
-                    task=task, run_manager=self._run_manager, run_id=pre_run_id
-                )
             except TargetUnavailableError as exc:
-                # No run was started — clear the pre-stamped run_id so the
-                # hook never matches a phantom row, and mark the occurrence
-                # failed.
-                row.run_id = None
-                row.state = "failed"
-                row.detail = str(exc)
+                await self._finish_unstarted(session, row, state="failed", detail=str(exc))
+                await session.commit()
+                return
+            except OccurrenceRevokedError as exc:
+                await self._finish_unstarted(session, row, state="cancelled", detail=str(exc))
+                await session.commit()
+                return
+            except (ExecutionRevokedError, LookupError) as exc:
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="cancelled",
+                    detail=f"execution no longer authorized: {exc}",
+                )
+                await session.commit()
+                return
+            except ExecutionConflictError as exc:
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="failed",
+                    detail=f"immutable occurrence conflict: {exc}",
+                )
                 await session.commit()
                 return
             except ConversationPausedError as exc:
@@ -278,22 +371,25 @@ class ScheduledTaskPoller:
                 # user can clear, so terminate this occurrence cleanly and
                 # let the next scheduled fire decide on its own (the user
                 # may have answered by then).
-                row.run_id = None
-                row.state = "skipped_paused"
-                row.next_retry_at = None
-                row.detail = f"target conversation paused on pending HITL: {exc}"
+                await self._finish_unstarted(
+                    session,
+                    row,
+                    state="skipped_paused",
+                    detail=f"target conversation paused on pending HITL: {exc}",
+                )
                 await session.commit()
                 return
             except ConversationBusyError as exc:
-                # start_run rejected before launching any task; the
-                # pre-stamped run_id was never used. Clear it so future
-                # retries (which pre-stamp a new uuid) can't collide.
-                row.run_id = None
+                # start_run rejected before launching any task. Keep the same
+                # occurrence admission and run ID for the delayed retry.
                 if row.retry_count + 1 >= self._max_busy_retries:
-                    row.state = "skipped_busy_max_retries"
                     row.retry_count = row.retry_count + 1
-                    row.next_retry_at = None
-                    row.detail = f"target conversation busy after {row.retry_count} retries: {exc}"
+                    await self._finish_unstarted(
+                        session,
+                        row,
+                        state="skipped_busy_max_retries",
+                        detail=(f"target conversation busy after {row.retry_count} retries: {exc}"),
+                    )
                 else:
                     row.retry_count = row.retry_count + 1
                     row.next_retry_at = datetime.now(UTC) + self._busy_retry_delay
@@ -303,6 +399,9 @@ class ScheduledTaskPoller:
                         f"{row.next_retry_at.isoformat()}"
                     )
                 await session.commit()
+                return
+            if occurrence.target_mode == "im_channel":
+                # IM dispatch committed its admission, queue item, and row.
                 return
             # Backfill conversation_id + started_at unconditionally so the
             # run link survives the race where the completion hook flipped
