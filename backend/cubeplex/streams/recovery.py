@@ -1,16 +1,73 @@
-"""Startup recovery for runs stranded by a crashed / killed process.
-
-Called once during app lifespan, after Redis and DB are ready but before
-the app begins serving requests (before ``yield``).
-"""
+"""Startup repair of stranded Redis runs and recurring persisted Stop recovery."""
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
+
 from loguru import logger
 from redis.asyncio import Redis
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlmodel import col
 
 from cubeplex.config import config
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.streams.run_events import get_run_meta, is_stale_meta, mark_run_stale
+
+
+class StoppedRunRecovery:
+    """Retry durable Stop intents in bounded pages, including after Redis expiry."""
+
+    def __init__(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+        reconcile: Callable[[str], Awaitable[bool]],
+        *,
+        batch_size: int = 32,
+    ) -> None:
+        if batch_size < 1:
+            raise ValueError("stop recovery batch size must be positive")
+        self._session_maker = session_maker
+        self._reconcile = reconcile
+        self._batch_size = batch_size
+        self._after: str | None = None
+
+    async def reconcile_once(self) -> int:
+        query = select(col(ConversationExecutionAdmission.id)).where(
+            col(ConversationExecutionAdmission.run_id).is_not(None),
+            col(ConversationExecutionAdmission.run_finished_at).is_(None),
+            or_(
+                col(ConversationExecutionAdmission.run_stop_requested_at).is_not(None),
+                col(ConversationExecutionAdmission.revoked_at).is_not(None),
+            ),
+        )
+        if self._after is not None:
+            query = query.where(col(ConversationExecutionAdmission.id) > self._after)
+        async with self._session_maker() as session:
+            ids = list(
+                await session.scalars(
+                    query.order_by(col(ConversationExecutionAdmission.id)).limit(self._batch_size)
+                )
+            )
+        for admission_id in ids:
+            try:
+                async with asyncio.timeout(5):
+                    await self._reconcile(admission_id)
+            except Exception:
+                logger.opt(exception=True).warning("Stop recovery deferred for {}", admission_id)
+            self._after = admission_id
+        if len(ids) < self._batch_size:
+            self._after = None
+        return len(ids)
+
+    async def run(self) -> None:
+        while True:
+            try:
+                await self.reconcile_once()
+            except Exception:
+                logger.opt(exception=True).warning("Could not scan persisted Stop intents")
+            await asyncio.sleep(5)
 
 
 async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
