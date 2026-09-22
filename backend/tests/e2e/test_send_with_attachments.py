@@ -9,6 +9,8 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from tests.e2e.conftest import web_message_request
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -60,10 +62,11 @@ async def _drain_sse_to_done(
     """Send a message expecting SSE; collect events until 'done' or 'error'."""
     headers = {"accept": "text/event-stream"}
     events: list[dict[str, object]] = []
+    request_body = web_message_request(**body)
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json=body,
+        json=request_body,
         headers=headers,
     ) as resp:
         async for line in resp.aiter_lines():
@@ -114,7 +117,7 @@ async def test_send_rejects_attachment_from_other_conversation(
 
     resp = await client.post(
         f"/api/v1/ws/{ws}/conversations/{conv_b}/messages",
-        json={"content": "look", "attachments": [fid]},
+        json=web_message_request(content="look", attachments=[fid]),
     )
     assert resp.status_code == 400, resp.text
     assert resp.json()["error_code"] == "INVALID_ATTACHMENT_REFERENCE"
@@ -126,7 +129,7 @@ async def test_send_rejects_too_many_attachments(member_client_org_a, sample_png
     fids = [await _upload(client, ws, conv, sample_png_bytes) for _ in range(11)]
     resp = await client.post(
         f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json={"content": "look", "attachments": fids},
+        json=web_message_request(content="look", attachments=fids),
     )
     assert resp.status_code == 400
     assert resp.json()["error_code"] == "TOO_MANY_ATTACHMENTS"

@@ -626,6 +626,7 @@ class ConversationExecutionService:
             created_at=now,
             updated_at=now,
         )
+        conversation.has_messages = True
         conversation.model_key = intent.model_key
         conversation.reasoning = execution.reasoning.model_dump(mode="json")
         conversation.updated_at = now

@@ -4,10 +4,10 @@ These tests verify that LLMConfigError subclasses surface as HTTP errors
 (not as mid-stream SSE error events) when ``send_message`` validates the
 preset synchronously before scheduling the background run.
 
-Two error paths (an unknown ``model_key`` is NOT an error — it falls back to
-the workspace default; see ``test_unknown_model_key_falls_back_to_default`` in
-test_preset_switching_e2e.py):
+Three error paths:
 
+* ``unknown_preset`` (400) — the requested preset does not exist; requests are
+  never silently rebound to a different model.
 * ``broken_preset`` (400) — default preset's chain references a
   non-existent provider/model.
 * ``no_default_preset`` (500) — no ``model_presets`` row at all
@@ -42,6 +42,7 @@ from tests.e2e.conftest import (
     _ensure_default_user_and_membership,
     _lifespan_context,
     _login_and_attach,
+    web_message_request,
 )
 
 
@@ -193,7 +194,7 @@ async def test_broken_preset_400_lists_refs(preset_error_client: httpx.AsyncClie
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "hello"},
+        json=web_message_request(content="hello"),
     )
     assert resp.status_code == 400, resp.text
     body = resp.json()
@@ -220,7 +221,7 @@ async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> 
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "hello"},
+        json=web_message_request(content="hello"),
     )
     assert resp.status_code == 500, resp.text
     body = resp.json()
@@ -232,12 +233,10 @@ async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_unknown_key_with_no_default_still_500_before_mutation(
+async def test_unknown_key_is_rejected_before_default_lookup_or_mutation(
     preset_error_client: httpx.AsyncClient,
 ) -> None:
-    """An unknown model_key falls back to the default — but if there is no
-    default either, it must STILL fail synchronously (500 no_default_preset)
-    before any mutation, not slip into the stream after the row was changed."""
+    """An explicitly requested unknown model is rejected without fallback."""
     # Fixture already wiped all model_presets rows; no seeding here.
     client = preset_error_client
     ws_id = DEFAULT_WS_ID
@@ -246,10 +245,10 @@ async def test_unknown_key_with_no_default_still_500_before_mutation(
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "hello", "model_key": "ghost"},
+        json=web_message_request(content="hello", model_key="ghost"),
     )
-    assert resp.status_code == 500, resp.text
-    assert resp.json().get("error_code") == "no_default_preset", resp.text
+    assert resp.status_code == 400, resp.text
+    assert resp.json().get("error_code") == "unknown_preset", resp.text
 
     after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
     assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)

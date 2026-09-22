@@ -9,7 +9,7 @@ import httpx
 import pytest
 from redis.asyncio import Redis
 
-from tests.e2e.conftest import DEFAULT_WS_ID
+from tests.e2e.conftest import DEFAULT_WS_ID, web_message_request
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ async def test_user_message_install_command_installs_skill_and_replaces_message(
     # Send the install command.
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{cid}/messages",
-        json={"content": "install deep-research"},
+        json=web_message_request(content="install deep-research"),
     )
     assert resp.status_code in (200, 201)
 
@@ -77,7 +77,7 @@ async def test_install_command_unknown_skill_returns_note_not_agent_run(
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{cid}/messages",
-        json={"content": "install nonexistent-skill-xyz"},
+        json=web_message_request(content="install nonexistent-skill-xyz"),
     )
     assert resp.status_code in (200, 201)
     # Chat-fallback returns a one-shot SSE response (not the usual JSON+run_id pair)
@@ -134,7 +134,7 @@ async def test_install_command_409s_when_a_run_is_already_active(
     try:
         resp = await memory_client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{cid}/messages",
-            json={"content": "install deep-research"},
+            json=web_message_request(content="install deep-research"),
         )
         assert resp.status_code == 409, resp.text
 

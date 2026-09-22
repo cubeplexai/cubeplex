@@ -233,7 +233,7 @@ async def test_org_b_cannot_send_message_to_org_a_conversation(
     client_b, _ws_b = member_client_org_b
     resp = await client_b.post(
         f"/api/v1/ws/{ws_a}/conversations/{ids['conversation']}/messages",
-        json={"content": "leak this"},
+        json={"client_message_id": "cross-org-send", "content": "leak this"},
     )
     assert resp.status_code == 404, (
         f"expected 404 for cross-org POST, got {resp.status_code}: {resp.text[:200]}"

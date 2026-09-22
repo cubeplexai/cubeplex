@@ -74,7 +74,7 @@ async def test_send_to_nonexistent_conversation_returns_404(
 ) -> None:
     resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/nonexistent-id/messages",
-        json={"content": "hello"},
+        json={"client_message_id": "missing-conversation", "content": "hello"},
     )
     assert resp.status_code == 404
 
@@ -88,6 +88,6 @@ async def test_send_empty_content_returns_400(memory_client: httpx.AsyncClient) 
 
     resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
-        json={"content": ""},
+        json={"client_message_id": "empty-content", "content": ""},
     )
     assert resp.status_code == 400

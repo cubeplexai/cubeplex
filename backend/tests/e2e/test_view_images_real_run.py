@@ -9,6 +9,8 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from tests.e2e.conftest import web_message_request
+
 pytestmark = [pytest.mark.asyncio, pytest.mark.real_llm]
 
 
@@ -61,10 +63,11 @@ async def _stream_to_done(
 ) -> list[dict[str, object]]:
     headers = {"accept": "text/event-stream"}
     events: list[dict[str, object]] = []
+    request_body = web_message_request(**body)
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json=body,
+        json=request_body,
         headers=headers,
     ) as resp:
         async for line in resp.aiter_lines():

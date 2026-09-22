@@ -261,7 +261,7 @@ async def test_post_messages_returns_503_when_draining(
     try:
         resp = await memory_client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
-            json={"content": "hi"},
+            json={"client_message_id": "draining-send", "content": "hi"},
         )
         assert resp.status_code == 503
         assert resp.headers.get("retry-after") == "5"
