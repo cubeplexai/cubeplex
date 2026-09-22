@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import type { LeaveWorkspaceResult } from '../api/execution'
+import type { HardDeleteResult, LeaveWorkspaceResult } from '../api/execution'
 import {
   listWorkspaces,
   createWorkspace,
@@ -23,7 +23,7 @@ export interface WorkspaceStore {
   leave(client: ApiClient, wsId: string): Promise<LeaveWorkspaceResult>
   archive(client: ApiClient, wsId: string): Promise<void>
   unarchive(client: ApiClient, wsId: string): Promise<void>
-  deleteWs(client: ApiClient, wsId: string): Promise<void>
+  deleteWs(client: ApiClient, wsId: string): Promise<HardDeleteResult>
   reset(): void
 }
 
@@ -87,8 +87,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   async deleteWs(client, wsId) {
-    await deleteWorkspace(client, wsId)
-    set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
+    const result = await deleteWorkspace(client, wsId)
+    if (result.deleted) {
+      set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
+    }
+    return result
   },
 
   reset() {

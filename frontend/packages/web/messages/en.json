@@ -1494,6 +1494,7 @@
       "deleteButton": "Delete workspace",
       "deleteDescription": "Permanently delete this workspace and all its data. This cannot be undone.",
       "deleteSuccess": "Workspace deleted",
+      "deleteCleanupPending": "Background work is still stopping. Retry deletion in a moment.",
       "deleteConfirmTitle": "Delete workspace?",
       "deleteConfirmMessage": "This action is permanent and cannot be undone. Type the workspace name to confirm.",
       "deleteNamePlaceholder": "Type workspace name",
@@ -2466,6 +2467,7 @@
       "deleting": "Deleting…",
       "wrongPassword": "Incorrect password",
       "transferFirst": "Transfer org ownership before deleting your account",
+      "cleanupPending": "Background work is still stopping. Retry deletion in a moment.",
       "error": "Failed to delete account"
     }
   },

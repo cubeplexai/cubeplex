@@ -54,7 +54,11 @@ export function WorkspaceDangerZone({ wsId }: WorkspaceDangerZoneProps) {
     if (deleteNameInput !== workspaceName) return
     setDeleting(true)
     try {
-      await deleteWs(client(), wsId)
+      const result = await deleteWs(client(), wsId)
+      if (result.cleanup_pending) {
+        toast.info(t('deleteCleanupPending'))
+        return
+      }
       toast.success(t('deleteSuccess'))
       setDeleteOpen(false)
       router.push('/')

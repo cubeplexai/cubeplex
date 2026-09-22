@@ -2,6 +2,7 @@
 
 import secrets
 import time
+from datetime import UTC, datetime
 
 import httpx
 import jwt
@@ -10,7 +11,14 @@ from sqlalchemy import select
 
 import cubeplex.db as cubeplex_db
 from cubeplex.api.middleware.rate_limit import limiter
-from cubeplex.models import Conversation, Role, SteeringMessage, User, Workspace
+from cubeplex.models import (
+    Conversation,
+    ConversationExecutionAdmission,
+    Role,
+    SteeringMessage,
+    User,
+    Workspace,
+)
 from tests.e2e.conftest import (
     DEFAULT_TEST_EMAIL,
     _auth_cookie_name,
@@ -85,6 +93,72 @@ async def test_delete_account_removes_steering_sent_to_another_users_conversatio
                 assert persisted_conversation is not None
                 await session.delete(persisted_conversation)
                 await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_delete_account_waits_for_run_cleanup_and_completes_on_retry() -> None:
+    await _ensure_default_user_and_membership()
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    app.state.deployment_mode = "multi_tenant"
+
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            await _login_and_attach(client, email, password)
+            async with cubeplex_db.async_session_maker() as session:
+                deleting_user = (
+                    await session.execute(select(User).where(User.email == email))
+                ).scalar_one()
+                workspace = await session.get(Workspace, workspace_id)
+                assert workspace is not None
+                conversation = Conversation(
+                    org_id=workspace.org_id,
+                    workspace_id=workspace.id,
+                    creator_user_id=deleting_user.id,
+                    title="account cleanup run",
+                )
+                session.add(conversation)
+                await session.flush()
+                admission = ConversationExecutionAdmission(
+                    org_id=workspace.org_id,
+                    workspace_id=workspace.id,
+                    conversation_id=conversation.id,
+                    actor_user_id=deleting_user.id,
+                    execution_generation=0,
+                    source_kind="user_message",
+                    source_id=f"web:{secrets.token_hex(8)}",
+                    run_id=secrets.token_hex(16),
+                )
+                session.add(admission)
+                await session.commit()
+                user_id, admission_id = deleting_user.id, admission.id
+
+            first = await client.post(
+                "/api/v1/auth/delete-account",
+                json={"password": password},
+            )
+            assert first.status_code == 200, first.text
+            assert first.json() == {"deleted": False, "cleanup_pending": True}
+            async with cubeplex_db.async_session_maker() as session:
+                pending_user = await session.get(User, user_id)
+                admission = await session.get(ConversationExecutionAdmission, admission_id)
+                assert pending_user is not None and pending_user.deletion_pending_at is not None
+                assert admission is not None and admission.revoked_at is not None
+                now = datetime.now(UTC)
+                admission.run_finished_at = now
+                admission.run_terminal_at = now
+                admission.run_terminal_status = "cancelled"
+                await session.commit()
+
+            retry = await client.post(
+                "/api/v1/auth/delete-account",
+                json={"password": password},
+            )
+            assert retry.status_code == 200, retry.text
+            assert retry.json() == {"deleted": True, "cleanup_pending": False}
+            async with cubeplex_db.async_session_maker() as session:
+                assert await session.get(User, user_id) is None
+                assert await session.get(ConversationExecutionAdmission, admission_id) is None
 
 
 @pytest.fixture(autouse=True)

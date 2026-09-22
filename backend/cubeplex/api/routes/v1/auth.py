@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
+from cubeplex.api.schemas.execution import HardDeleteResponse
 from cubeplex.auth.dependencies import current_active_user
 from cubeplex.auth.jwt import auth_backend
 from cubeplex.auth.users import UserManager, fastapi_users, get_user_manager
@@ -31,8 +32,12 @@ from cubeplex.config import config
 from cubeplex.db import get_session
 from cubeplex.i18n import get_locale, get_translator
 from cubeplex.models import User
+from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.user import AvatarKind
 from cubeplex.services.avatar_store import resolve_avatar_url, save_avatar_png
+from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.execution_cleanup import purge_user_execution_state
+from cubeplex.services.execution_signals import signal_stopped_runs
 
 
 class UserRead(BaseUser[str]):
@@ -430,14 +435,15 @@ class DeleteAccountRequest(BaseModel):
     password: str
 
 
-@router.post("/delete-account")
+@router.post("/delete-account", response_model=HardDeleteResponse)
 async def delete_account(
     body: Annotated[DeleteAccountRequest, Body()],
     user: Annotated[User, Depends(current_active_user)],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
-) -> Response:
+    response: Response,
+) -> HardDeleteResponse:
     verified, _ = user_manager.password_helper.verify_and_update(
         body.password, user.hashed_password
     )
@@ -463,6 +469,76 @@ async def delete_account(
     if owner_rows:
         raise HTTPException(status_code=400, detail="transfer_ownership_first")
 
+    from sqlmodel import col
+
+    from cubeplex.models import ConversationExecutionAdmission
+    from cubeplex.models.conversation import Conversation
+
+    locked_user = await session.get(User, user.id, with_for_update=True)
+    if locked_user is None:
+        raise HTTPException(status_code=404, detail="account not found")
+    now = datetime.now(UTC)
+    locked_user.deletion_pending_at = locked_user.deletion_pending_at or now
+
+    owned_conversations = list(
+        await session.scalars(
+            select(Conversation)
+            .where(col(Conversation.creator_user_id) == user.id)
+            .order_by(
+                col(Conversation.org_id), col(Conversation.workspace_id), col(Conversation.id)
+            )
+        )
+    )
+    actor_scope_rows = (
+        await session.execute(
+            select(
+                col(ConversationExecutionAdmission.org_id),
+                col(ConversationExecutionAdmission.workspace_id),
+            )
+            .where(col(ConversationExecutionAdmission.actor_user_id) == user.id)
+            .distinct()
+        )
+    ).all()
+    actor_scopes = {(row.org_id, row.workspace_id) for row in actor_scope_rows}
+    creator_scopes = {(conv.org_id, conv.workspace_id) for conv in owned_conversations}
+    scopes = sorted(actor_scopes | creator_scopes)
+    runs_by_scope: list[tuple[str, str, str, tuple[str, ...]]] = []
+    cleanup_pending = False
+    for org_id, workspace_id in scopes:
+        controller = ConversationExecutionService(session, org_id=org_id, workspace_id=workspace_id)
+        creator_ids = tuple(
+            conv.id
+            for conv in owned_conversations
+            if conv.org_id == org_id and conv.workspace_id == workspace_id
+        )
+        closed = await controller.close_workspace_generations(
+            reason=TaskStopReason.conversation_deleted,
+            now=now,
+            conversation_ids=creator_ids,
+            mark_deleted=True,
+        )
+        revoked = await controller.revoke_actor_access(actor_user_id=user.id, now=now)
+        cleanup_pending = cleanup_pending or closed.cleanup_pending or revoked.cleanup_pending
+        merged: dict[str, set[str]] = {}
+        for conversation_id, run_ids in (*closed.conversation_runs, *revoked.conversation_runs):
+            merged.setdefault(conversation_id, set()).update(run_ids)
+        runs_by_scope.extend(
+            (org_id, workspace_id, conversation_id, tuple(sorted(run_ids)))
+            for conversation_id, run_ids in sorted(merged.items())
+        )
+    await session.commit()
+    for org_id, workspace_id, conversation_id, run_ids in runs_by_scope:
+        await signal_stopped_runs(
+            request.app.state.run_manager,
+            conversation_id=conversation_id,
+            run_ids=run_ids,
+            user_id=user.id,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+    if cleanup_pending:
+        return HardDeleteResponse(deleted=False, cleanup_pending=True)
+
     from cubeplex.plugins.audit import audit_log
 
     await audit_log(
@@ -481,7 +557,6 @@ async def delete_account(
     from cubeplex.models.artifact_version import ArtifactVersion
     from cubeplex.models.attachment import Attachment
     from cubeplex.models.billing import BillingEvent, LlmBillingEvent
-    from cubeplex.models.conversation import Conversation
     from cubeplex.models.credential import Credential
     from cubeplex.models.egress_ref import EgressRef
     from cubeplex.models.mcp import (
@@ -630,8 +705,6 @@ async def delete_account(
     # Preserve workspace ownership: for workspaces where the deleting user is the
     # sole member or last admin, archive sole-member workspaces and transfer admin
     # in shared ones before removing memberships.
-    from datetime import UTC, datetime
-
     from cubeplex.models import Role
     from cubeplex.repositories.membership import MembershipRepository
     from cubeplex.repositories.workspace import WorkspaceRepository
@@ -679,12 +752,14 @@ async def delete_account(
         sa_delete(IMIdentityLink).where(IMIdentityLink.user_id == user.id)  # type: ignore[arg-type]
     )
 
+    await purge_user_execution_state(session, user_id=user.id)
+
     # Delete user-owned rows (deepest FK dependents first).
     # NOTE: UserSandbox rows are deleted directly without calling the sandbox
     # manager's kill path. Provider sandboxes tied to these rows will be reaped
     # by the sandbox cleanup loop (cleanup_expired). A public sandbox-manager
     # kill-by-user API is the proper fix — tracked for follow-up.
-    for model, col in [
+    for model, user_col in [
         (EgressRef, EgressRef.user_id),
         (MemoryItem, MemoryItem.owner_user_id),
         (SandboxEnvVar, SandboxEnvVar.user_id),
@@ -700,7 +775,7 @@ async def delete_account(
         (OrganizationMembership, OrganizationMembership.user_id),
     ]:
         await session.execute(
-            sa_delete(model).where(col == user.id)  # type: ignore[arg-type]
+            sa_delete(model).where(user_col == user.id)  # type: ignore[arg-type]
         )
 
     await session.execute(
@@ -711,12 +786,8 @@ async def delete_account(
     from cubeplex.config import config
 
     cookie_name = config.get("auth.cookie_name", "cubeplex_auth")
-    response = Response(
-        content='{"deleted": true}',
-        media_type="application/json",
-    )
     response.delete_cookie(cookie_name)
-    return response
+    return HardDeleteResponse(deleted=True, cleanup_pending=False)
 
 
 # Include fastapi-users built-in auth routes for /logout. Must stay BELOW our

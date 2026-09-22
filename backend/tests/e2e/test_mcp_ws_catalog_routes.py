@@ -583,7 +583,8 @@ async def test_workspace_deletion_purges_unpromoted_ws_templates(
 
     # Delete the workspace
     del_resp = await client.delete(f"/api/v1/workspaces/{workspace_id}")
-    assert del_resp.status_code == 204, del_resp.text
+    assert del_resp.status_code == 200, del_resp.text
+    assert del_resp.json() == {"deleted": True, "cleanup_pending": False}
 
     # Verify template and connector are gone/deleted
     from cubeplex.models import MCPConnector, MCPConnectorTemplate
@@ -654,11 +655,12 @@ async def test_workspace_deletion_cascades_non_active_ws_templates(
         )
         await session.commit()
 
-    # Delete the workspace — must succeed (204) with no FK violation.
+    # Delete the workspace — must complete with no FK violation.
     del_resp = await client.delete(f"/api/v1/workspaces/{workspace_id}")
-    assert del_resp.status_code == 204, (
+    assert del_resp.status_code == 200, (
         f"workspace deletion must succeed even with non-active templates; got {del_resp.status_code}: {del_resp.text}"
     )
+    assert del_resp.json() == {"deleted": True, "cleanup_pending": False}
 
     # Confirm the template no longer references the deleted workspace.
     async with db_maker() as session:
