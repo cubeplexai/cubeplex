@@ -98,14 +98,7 @@ async def _poll_event_accepted(
     event_id: str,
     timeout: float = 8.0,
 ) -> dict[str, Any]:
-    """Poll events list until the event shows accepted + resulting_run_id set.
-
-    The event row is inserted as 'accepted' immediately; we wait for the
-    background pipeline.fire to set resulting_run_id (which happens after
-    start_run completes). If the pipeline fails (no model provider in tests),
-    the event may end up dead_lettered — we accept both outcomes; the caller
-    checks the specific assertion.
-    """
+    """Poll until the durable worker hands off the event or settles a failure."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         r = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trigger_id}/events")
@@ -113,8 +106,7 @@ async def _poll_event_accepted(
         events = r.json()["events"]
         for ev in events:
             if ev["id"] == event_id:
-                # Wait for resulting_run_id to be populated (pipeline ran start_run)
-                # or for the status to move to a terminal failure (dead_lettered).
+                # Wait for a stable execution binding or terminal failure.
                 if ev["resulting_run_id"] is not None:
                     return ev
                 if ev["status"] in ("dead_lettered", "failed"):
@@ -177,8 +169,7 @@ async def test_happy_path(authenticated_client: tuple[httpx.AsyncClient, str]) -
     event_id = data["event_id"]
     assert event_id.startswith("trev-")
 
-    # Poll until pipeline.fire finishes (sets resulting_run_id or moves to
-    # dead_lettered if model provider keys are missing in the test env).
+    # Poll until the durable worker binds a run or records a terminal failure.
     ev = await _poll_event_accepted(client, ws_id, trigger_id, event_id)
     # In a full environment: resulting_run_id is set and status=accepted.
     # In test env without provider keys: pipeline may fail → dead_lettered.
@@ -294,7 +285,7 @@ async def test_dedup(authenticated_client: tuple[httpx.AsyncClient, str]) -> Non
     event_id = r1.json()["event_id"]
     await _poll_event_accepted(client, ws_id, trigger_id, event_id)
 
-    # The counter bumps from pipeline.fire and from the dedup short-circuit
+    # The counter bumps from the durable worker and from the dedup short-circuit
     # are independent — poll until both have landed before asserting so a
     # slow pipeline run doesn't flake the dedup-counter assertion.
     deadline = time.monotonic() + 8.0

@@ -1954,7 +1954,7 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "deleteTitle": "Delete trigger",
-    "deleteConfirm": "Are you sure? This will permanently delete the trigger and all its event history.",
+    "deleteConfirm": "Are you sure? New events will stop. Runs already started continue, and event history is retained for recovery.",
     "loading": "Loading…",
     "notFound": "Trigger not found.",
     "backToList": "Back to triggers",

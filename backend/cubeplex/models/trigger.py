@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, BigInteger, Column, DateTime, Index
+from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, Integer, String
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
@@ -92,6 +92,10 @@ class Trigger(CubeplexBase, OrgScopedMixin, table=True):
     events_dedup_dropped: int = Field(
         default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
     )
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class TriggerEvent(CubeplexBase, OrgScopedMixin, table=True):
@@ -102,6 +106,7 @@ class TriggerEvent(CubeplexBase, OrgScopedMixin, table=True):
     __table_args__ = (
         org_scope_index("trigger_events"),
         Index("uq_trigger_event_dedup", "trigger_id", "dedup_key", unique=True),
+        Index("ix_trigger_events_status_next_attempt", "status", "next_attempt_at"),
     )
 
     trigger_id: str = Field(foreign_key="triggers.id", max_length=20, index=True)
@@ -118,11 +123,39 @@ class TriggerEvent(CubeplexBase, OrgScopedMixin, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
-    # Status: accepted|duplicate|filtered_out|rate_limited|failed|dead_lettered
+    # Status: pending|claimed|accepted|filtered_out|rate_limited|failed|cancelled|dead_lettered
     status: str = Field(max_length=16)
 
     attempts: int = Field(default=0)
     last_error: str | None = Field(default=None)
+    execution_revision: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+    execution_snapshot: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    execution_admission_id: str | None = Field(
+        default=None,
+        sa_column=Column(
+            String(20),
+            ForeignKey(
+                "conversation_execution_admissions.id",
+                name="fk_trigger_events_execution_admission_id",
+            ),
+            nullable=True,
+        ),
+    )
+    claim_owner: str | None = Field(default=None, max_length=64)
+    claim_lease_expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    next_attempt_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 

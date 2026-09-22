@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.schemas.trigger import (
@@ -24,6 +23,7 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_admin, require_member
 from cubeplex.credentials.dependencies import get_credential_service
 from cubeplex.db.session import get_session
+from cubeplex.llm.snapshot import load_llm_snapshot
 from cubeplex.models import Trigger, TriggerEvent
 from cubeplex.models.public_id import PREFIX_TRIGGER, generate_public_id
 from cubeplex.repositories import MembershipRepository, TriggerEventRepository, TriggerRepository
@@ -32,8 +32,7 @@ from cubeplex.services.schedule_target_spec import (
     ScheduleTargetError,
     validate_destination_scope,
 )
-from cubeplex.triggers.events import NormalizedEvent
-from cubeplex.triggers.pipeline import TriggerPipeline
+from cubeplex.triggers.pipeline import cancel_unstarted_trigger_events, freeze_trigger_event
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/triggers", tags=["triggers"])
@@ -262,7 +261,7 @@ async def update_trigger(
         )
 
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    trigger = await trig_repo.get(trigger_id)
+    trigger = await trig_repo.get_locked(trigger_id)
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
@@ -295,6 +294,8 @@ async def update_trigger(
         trigger.name = dumped["name"]
     if "enabled" in dumped and dumped["enabled"] is not None:
         trigger.enabled = dumped["enabled"]
+        if not trigger.enabled:
+            await cancel_unstarted_trigger_events(session, trigger)
     if "prompt_template" in dumped and dumped["prompt_template"] is not None:
         trigger.target_ref = dict(trigger.target_ref or {})
         trigger.target_ref["prompt_template"] = dumped["prompt_template"]
@@ -330,7 +331,7 @@ async def update_trigger(
 
 
 # ---------------------------------------------------------------------------
-# DELETE "/{id}" — cascade trigger_events + credentials + trigger
+# DELETE "/{id}" — stop new work and retain recovery proof
 # ---------------------------------------------------------------------------
 
 
@@ -340,43 +341,16 @@ async def delete_trigger(
     trigger_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
-    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
 ) -> None:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    trigger = await trig_repo.get(trigger_id)
+    trigger = await trig_repo.get_locked(trigger_id)
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
-    # Collect credential IDs to clean up AFTER trigger is deleted.
-    cred_ids_to_delete = [trigger.current_secret_cred_id]
-    if trigger.previous_secret_cred_id:
-        cred_ids_to_delete.append(trigger.previous_secret_cred_id)
-
-    # Cascade delete trigger_events first.
-    await session.execute(
-        delete(TriggerEvent).where(
-            TriggerEvent.trigger_id == trigger_id,  # type: ignore[arg-type]
-            TriggerEvent.org_id == ctx.org_id,  # type: ignore[arg-type]
-            TriggerEvent.workspace_id == workspace_id,  # type: ignore[arg-type]
-        )
-    )
-
-    # Delete the trigger row.
-    await session.delete(trigger)
-    await session.commit()
-
-    # Clean up credential vault (best-effort; only webhook_secret kind).
-    for cred_id in cred_ids_to_delete:
-        try:
-            from cubeplex.repositories.credential import CredentialRepository
-
-            cred_repo = CredentialRepository(session, org_id=ctx.org_id)
-            cred = await cred_repo.get(cred_id)
-            if cred is not None and cred.kind == "webhook_secret":
-                await session.delete(cred)
-        except Exception:  # noqa: BLE001
-            pass
-
+    now = datetime.now(UTC)
+    trigger.enabled = False
+    trigger.deleted_at = now
+    await cancel_unstarted_trigger_events(session, trigger, now=now)
     await session.commit()
 
 
@@ -395,7 +369,7 @@ async def rotate_secret(
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
 ) -> RotateSecretOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    trigger = await trig_repo.get(trigger_id)
+    trigger = await trig_repo.get_locked(trigger_id)
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
@@ -468,12 +442,16 @@ async def replay_event(
     ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> TriggerEventOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    trigger = await trig_repo.get(trigger_id)
+    trigger = await trig_repo.get_locked(trigger_id)
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
-    ev_repo = TriggerEventRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    event = await ev_repo.get(event_id)
+    event = await session.get(
+        TriggerEvent,
+        event_id,
+        with_for_update=True,
+        populate_existing=True,
+    )
     if event is None or event.trigger_id != trigger_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="event not found")
 
@@ -483,34 +461,37 @@ async def replay_event(
             detail="event not dead_lettered; only dead_lettered events can be replayed",
         )
 
-    # Reset event state for re-run.
-    event.status = "accepted"
+    if not trigger.enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="trigger is disabled")
+
+    event.execution_revision += 1
+    event.attempts = 0
     event.last_error = None
+    event.execution_admission_id = None
+    event.resulting_run_id = None
+    event.resulting_conversation_id = None
+    event.claim_owner = None
+    event.claim_lease_expires_at = None
+    event.next_attempt_at = datetime.now(UTC)
+    try:
+        llm_snapshot = await load_llm_snapshot(
+            session,
+            ctx.org_id,
+            request.app.state.encryption_backend,
+        )
+        execution_snapshot = await freeze_trigger_event(
+            session,
+            trigger=trigger,
+            event=event,
+            llm_snapshot=llm_snapshot,
+        )
+    except Exception as exc:
+        event.status = "failed"
+        event.last_error = f"replay admission failed: {exc}"
+        trigger.events_total += 1
+        trigger.events_failed += 1
+    else:
+        event.execution_snapshot = execution_snapshot.model_dump(mode="json")
+        event.status = "pending"
     await session.commit()
-    await session.refresh(event)
-
-    # Build normalized event from the stored row.
-    normalized = NormalizedEvent(
-        event_id=event.id,
-        source_type=event.source_type,
-        trigger_id=trigger_id,
-        event_type=event.event_type,
-        occurred_at=event.occurred_at,
-        subject=None,
-        payload=event.payload or {},
-        dedup_key=event.dedup_key,
-    )
-
-    # Fire via pipeline (reuses existing event row).
-    import cubeplex.db as _db
-
-    pipeline = TriggerPipeline(
-        run_manager=request.app.state.run_manager,
-        session_maker=_db.async_session_maker,
-    )
-    import asyncio
-
-    asyncio.create_task(pipeline.fire(trigger, normalized, event.id))
-
-    await session.refresh(event)
     return _event_out(event)
