@@ -378,6 +378,45 @@ async def test_steer_route_queues_durably_while_paused_hitl(
 
 
 @pytest.mark.asyncio
+async def test_steer_route_queues_durably_while_run_is_active(
+    member_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = member_client
+    created = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations",
+        params={"title": "active-steer"},
+    )
+    assert created.status_code == 201, created.text
+    conv_id = created.json()["id"]
+    await _ensure_creator_participant(conv_id)
+    run_id = f"r-{conv_id[:8]}"
+    app = client._transport.app  # type: ignore[attr-defined]
+    await create_run(
+        app.state.redis,
+        prefix=app.state.redis_key_prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at="2026-06-02T00:00:00+00:00",
+        user_message="hi",
+        ttl_seconds=3600,
+    )
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
+        json={"content": "persist this input", "steer_id": "active-steer-1"},
+    )
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "status": "queued",
+        "run_id": run_id,
+        "steer_id": "active-steer-1",
+    }
+    bootstrap = await client.get(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/bootstrap")
+    assert bootstrap.json()["pending_steers"][0]["steer_id"] == "active-steer-1"
+
+
+@pytest.mark.asyncio
 async def test_steer_route_queues_for_a_stale_but_resumable_hitl_run(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:

@@ -199,6 +199,22 @@ class ConversationExecutionService:
             admission, ResolvedExecution.model_validate(admission.resolved_execution), False
         )
 
+    async def require_run_input_actor(
+        self, *, conversation_id: str, run_id: str, actor_user_id: str
+    ) -> None:
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission).where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.run_id) == run_id,
+            )
+        )
+        if admission is None:
+            return
+        if admission.conversation_id != conversation_id or admission.actor_user_id != actor_user_id:
+            raise ExecutionConflictError("only the original execution actor may add input")
+        await self._lock_live_admission(admission.id)
+
     async def stop_run(
         self, *, conversation_id: str, run_id: str, actor_user_id: str, now: datetime
     ) -> StoppedRun:

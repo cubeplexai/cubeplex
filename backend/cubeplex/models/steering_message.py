@@ -58,7 +58,7 @@ class SteeringMessage(CubeplexBase, OrgScopedMixin, table=True):
     content: str = Field(sa_column=Column(Text, nullable=False))
     sender_user_id: str = Field(foreign_key="users.id", max_length=20)
     sender_display_name: str | None = Field(default=None, max_length=255)
-    hitl_question_id: str = Field(max_length=128)
+    hitl_question_id: str | None = Field(default=None, max_length=128)
     state: SteeringMessageState = Field(
         default=SteeringMessageState.queued,
         sa_column=Column(
