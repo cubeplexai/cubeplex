@@ -42,6 +42,12 @@ class BackgroundTaskEventState(StrEnum):
     discarded = "discarded"
 
 
+class TaskResultReadiness(StrEnum):
+    pending = "pending"
+    ready = "ready"
+    unavailable = "unavailable"
+
+
 class BackgroundTask(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = PREFIX_BACKGROUND_TASK
     __tablename__ = "background_tasks"
@@ -103,6 +109,12 @@ class BackgroundTask(CubeplexBase, OrgScopedMixin, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     result_ref: str | None = Field(default=None, max_length=512)
+    result_readiness: str = Field(
+        default=TaskResultReadiness.pending.value,
+        max_length=20,
+        sa_column_kwargs={"server_default": "pending"},
+    )
+    result_unavailable_reason: str | None = Field(default=None, max_length=512)
     result_summary: str = Field(default="", sa_column=Column(Text, nullable=False))
     revision: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
 

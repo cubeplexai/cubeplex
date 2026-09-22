@@ -62,7 +62,9 @@ The local subprocess driver is for development only. Its process handles belong 
 
 The new durable background-task runtime is being introduced in stages and is not enabled yet. Adding its storage and recovery services does not switch the existing command tools, notifications, or chat controls. Cross-run recovery and the new Stop interaction require the coordinated lifecycle cutover.
 
-In that runtime, monitor output notifications keep the existing rate limit (at most one every 15 seconds, up to eight per monitor). Repeated output can disable further line notifications; the final exit notification remains separate. Sustained flooding requests a stop, but only an observed process result confirms termination. Notification counters and confirmed log positions are persisted together, so replaying the same output after recovery does not create another notification.
+In that runtime, a monitor waits for one condition and produces at most one final result. Its script keeps checking until the condition is met, then exits with code 0; a nonzero exit reports failure. Output lines are logs, not notifications, and do not stop the listener merely because they are frequent. A deadline records a timeout before requesting cleanup; only observed process facts confirm that the listener has stopped. Persistent monitors may wait without a deadline, but still report only once. Stopping a listener does not stop the separate build or service it observes.
+
+Result delivery is separate from process exit: a command can have finished while its final output is still being recovered. The shared result state distinguishes pending output, a readable result, and output that is confirmed unavailable. Recovery retains the original result event instead of creating another notification; unavailable output is reported as incomplete. Foreground streaming and log collection do not depend on monitor notifications. The tool, delivery, and UI integrations remain part of the later coordinated cutover.
 
 ## Storage isolation
 
