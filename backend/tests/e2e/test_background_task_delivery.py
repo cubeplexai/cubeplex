@@ -910,7 +910,7 @@ async def test_uncommitted_append_returns_to_notice_queue_after_run_ends(
     )
 
 
-async def test_steering_maintenance_defers_background_settlement_to_fenced_recovery(
+async def test_steering_maintenance_defers_all_background_proof_to_fenced_recovery(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
     from cubeplex.db.engine import async_session_maker
@@ -939,7 +939,7 @@ async def test_steering_maintenance_defers_background_settlement_to_fenced_recov
     await db_session.commit()
     coordinator = DurableSteeringCoordinator(
         async_session_maker,
-        history_loader=AsyncMock(return_value=set()),
+        history_loader=AsyncMock(return_value={event.id}),
         redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
         redis_key_prefix="steering-defers-background",
     )
@@ -1539,6 +1539,81 @@ async def test_worker_restart_fences_inflight_appended_notice(
         if not reconciliation.done():
             reconciliation.cancel()
             await asyncio.gather(reconciliation, return_exceptions=True)
+        await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
+
+
+async def test_existing_checkpoint_proof_does_not_finish_live_run(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert admission is not None and admission.run_id is not None
+    admission.run_start_token = "live-attempt"
+    admission.run_started_at = NOW
+    service = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    claims = await service.claim_ready(
+        owner_token="delivery-worker",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    claim = next(item for item in claims if item.notice.notice_id == event.id)
+    steering_id = await service.enqueue_for_active_run(
+        notice_id=event.id,
+        owner_token="delivery-worker",
+        run_id=admission.run_id,
+    )
+    assert steering_id is not None
+    await db_session.commit()
+
+    async with session_factory() as checkpoint_session, checkpoint_session.begin():
+        await _stage_checkpoint_under_advisory_lock(
+            checkpoint_session,
+            conversation_id=event.conversation_id,
+            run_id=admission.run_id,
+            notice_id=event.id,
+            input_id=claim.input_id,
+        )
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    await create_run(
+        redis,
+        prefix="delivery-live-proof",
+        run_id=admission.run_id,
+        conversation_id=event.conversation_id,
+        status="running",
+        started_at=NOW.isoformat(),
+        ttl_seconds=300,
+        claim_token="live-attempt",
+    )
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=MagicMock(),
+        redis=redis,
+        redis_key_prefix="delivery-live-proof",
+    )
+    try:
+        assert await coordinator.reconcile_bound_once(now=NOW + timedelta(seconds=1)) == [event.id]
+
+        await db_session.refresh(event)
+        await db_session.refresh(admission)
+        assert event.state == "delivered"
+        assert event.checkpoint_input_id == claim.input_id
+        assert admission.run_finished_at is None
+        assert admission.run_terminal_status is None
+        assert (
+            await db_session.scalar(
+                select(SteeringMessage).where(SteeringMessage.id == steering_id)
+            )
+            is None
+        )
+    finally:
         await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
 
 
