@@ -22,3 +22,7 @@ class Workspace(CubeplexBase, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    deletion_pending_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

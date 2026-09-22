@@ -26,6 +26,7 @@ from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.membership import Membership
+from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.models.steering_message import SteeringMessage, SteeringMessageState
 from cubeplex.models.topic import Topic, TopicParticipant
 from cubeplex.models.user import User
@@ -127,6 +128,12 @@ class StoppedRun:
 
 @dataclass(frozen=True)
 class RevokedActorExecutions:
+    cleanup_pending: bool
+    conversation_runs: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True)
+class ClosedScopeExecutions:
     cleanup_pending: bool
     conversation_runs: tuple[tuple[str, tuple[str, ...]], ...]
 
@@ -280,7 +287,13 @@ class ConversationExecutionService:
         run_id: str | None = None,
         generation: int | None = None,
         sender_user_id: str | None = None,
+        all_generations: bool = False,
     ) -> bool:
+        selectors = sum(value is not None for value in (run_id, generation, sender_user_id)) + int(
+            all_generations
+        )
+        if selectors != 1:
+            raise ValueError("input cancellation requires exactly one scope selector")
         query = select(SteeringMessage).where(
             col(SteeringMessage.org_id) == self.org_id,
             col(SteeringMessage.workspace_id) == self.workspace_id,
@@ -301,8 +314,6 @@ class ConversationExecutionService:
             query = query.where(col(SteeringMessage.execution_generation) == generation)
         elif sender_user_id is not None:
             query = query.where(col(SteeringMessage.sender_user_id) == sender_user_id)
-        else:
-            raise ValueError("input cancellation requires a run, generation, or sender")
         rows = list(
             await self.session.scalars(
                 query.order_by(col(SteeringMessage.id))
@@ -389,7 +400,23 @@ class ConversationExecutionService:
             task.stop_reason = task.stop_reason or TaskStopReason.user_stop.value
             task.revision += 1
 
+        commands: list[SandboxCommand] = []
         task_ids = tuple(task.id for task in tasks)
+        if task_ids:
+            commands = list(
+                await self.session.scalars(
+                    select(SandboxCommand)
+                    .where(
+                        col(SandboxCommand.org_id) == self.org_id,
+                        col(SandboxCommand.workspace_id) == self.workspace_id,
+                        col(SandboxCommand.task_id).in_(task_ids),
+                    )
+                    .order_by(col(SandboxCommand.id))
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            )
+
         notices: list[BackgroundTaskEvent] = []
         if task_ids:
             notices = list(
@@ -448,6 +475,7 @@ class ConversationExecutionService:
             cleanup_pending=(
                 inputs_pending
                 or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
+                or any(command.log_state in ("pending", "retrying") for command in commands)
                 or any(notice.state in ("pending", "claimed") for notice in notices)
                 or any(run_ids for _, run_ids in conversation_runs)
                 or direct_pending
@@ -476,66 +504,150 @@ class ConversationExecutionService:
         if type(execution_generation) is not int or execution_generation < 0:
             raise ValueError("Stop requires a nonnegative execution_generation")
         conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
-        if execution_generation > conversation.execution_generation:
-            raise ExecutionConflictError("Stop cannot close a future execution generation")
-        if execution_generation == conversation.execution_generation:
-            conversation.execution_closed_at = conversation.execution_closed_at or now
-        admissions = list(
-            (
-                await self.session.scalars(
-                    select(ConversationExecutionAdmission)
-                    .where(
-                        col(ConversationExecutionAdmission.org_id) == self.org_id,
-                        col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
-                        col(ConversationExecutionAdmission.conversation_id) == conversation_id,
-                        col(ConversationExecutionAdmission.execution_generation)
-                        == execution_generation,
-                    )
-                    .order_by(col(ConversationExecutionAdmission.id))
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
+        return await self._close_locked_generation(
+            conversation,
+            execution_generation=execution_generation,
+            reason=reason,
+            now=now,
+        )
+
+    async def close_workspace_generations(
+        self,
+        *,
+        reason: TaskStopReason,
+        now: datetime,
+        conversation_ids: tuple[str, ...] | None = None,
+        mark_deleted: bool = False,
+    ) -> ClosedScopeExecutions:
+        """Close all generations in selected conversations without per-conversation ACL checks."""
+        require_aware(now)
+        query = select(Conversation).where(
+            col(Conversation.org_id) == self.org_id,
+            col(Conversation.workspace_id) == self.workspace_id,
+        )
+        if conversation_ids is not None:
+            if not conversation_ids:
+                return ClosedScopeExecutions(False, ())
+            query = query.where(col(Conversation.id).in_(conversation_ids))
+        conversations = list(
+            await self.session.scalars(
+                query.order_by(col(Conversation.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        results: list[tuple[str, ClosedExecution]] = []
+        for conversation in conversations:
+            if mark_deleted:
+                conversation.deleted_at = conversation.deleted_at or now
+            results.append(
+                (
+                    conversation.id,
+                    await self._close_locked_generation(
+                        conversation,
+                        execution_generation=None,
+                        reason=reason,
+                        now=now,
+                    ),
                 )
-            ).all()
+            )
+        return ClosedScopeExecutions(
+            cleanup_pending=any(closed.cleanup_pending for _, closed in results),
+            conversation_runs=tuple(
+                (conversation_id, closed.run_ids) for conversation_id, closed in results
+            ),
+        )
+
+    async def _close_locked_generation(
+        self,
+        conversation: Conversation,
+        *,
+        execution_generation: int | None,
+        reason: TaskStopReason,
+        now: datetime,
+    ) -> ClosedExecution:
+        conversation_id = conversation.id
+        if execution_generation is None:
+            close_all_generations = True
+            target_generation = conversation.execution_generation
+        else:
+            close_all_generations = False
+            target_generation = execution_generation
+        if target_generation > conversation.execution_generation:
+            raise ExecutionConflictError("Stop cannot close a future execution generation")
+        if close_all_generations or target_generation == conversation.execution_generation:
+            conversation.execution_closed_at = conversation.execution_closed_at or now
+        admissions_query = select(ConversationExecutionAdmission).where(
+            col(ConversationExecutionAdmission.org_id) == self.org_id,
+            col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            col(ConversationExecutionAdmission.conversation_id) == conversation_id,
+        )
+        if not close_all_generations:
+            admissions_query = admissions_query.where(
+                col(ConversationExecutionAdmission.execution_generation) == target_generation
+            )
+        admissions = list(
+            await self.session.scalars(
+                admissions_query.order_by(col(ConversationExecutionAdmission.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
         for admission in admissions:
             admission.revoked_at = admission.revoked_at or now
+        tasks_query = select(BackgroundTask).where(
+            col(BackgroundTask.org_id) == self.org_id,
+            col(BackgroundTask.workspace_id) == self.workspace_id,
+            col(BackgroundTask.conversation_id) == conversation_id,
+        )
+        if not close_all_generations:
+            tasks_query = tasks_query.where(
+                col(BackgroundTask.execution_generation) == target_generation
+            )
         tasks = list(
-            (
-                await self.session.scalars(
-                    select(BackgroundTask)
-                    .where(
-                        col(BackgroundTask.org_id) == self.org_id,
-                        col(BackgroundTask.workspace_id) == self.workspace_id,
-                        col(BackgroundTask.conversation_id) == conversation_id,
-                        col(BackgroundTask.execution_generation) == execution_generation,
-                    )
-                    .order_by(col(BackgroundTask.id))
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-            ).all()
+            await self.session.scalars(
+                tasks_query.order_by(col(BackgroundTask.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
         for task in tasks:
             task.stop_requested_at = task.stop_requested_at or now
             task.notifications_cancelled_at = task.notifications_cancelled_at or now
             task.stop_reason = reason.value
             task.revision += 1
-        notices = list(
-            (
+        task_ids = tuple(task.id for task in tasks)
+        commands: list[SandboxCommand] = []
+        if task_ids:
+            commands = list(
                 await self.session.scalars(
-                    select(BackgroundTaskEvent)
+                    select(SandboxCommand)
                     .where(
-                        col(BackgroundTaskEvent.org_id) == self.org_id,
-                        col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
-                        col(BackgroundTaskEvent.conversation_id) == conversation_id,
-                        col(BackgroundTaskEvent.execution_generation) == execution_generation,
-                        col(BackgroundTaskEvent.state).in_(("pending", "claimed")),
+                        col(SandboxCommand.org_id) == self.org_id,
+                        col(SandboxCommand.workspace_id) == self.workspace_id,
+                        col(SandboxCommand.task_id).in_(task_ids),
                     )
-                    .order_by(col(BackgroundTaskEvent.id))
+                    .order_by(col(SandboxCommand.id))
                     .with_for_update()
                     .execution_options(populate_existing=True)
                 )
-            ).all()
+            )
+        notices_query = select(BackgroundTaskEvent).where(
+            col(BackgroundTaskEvent.org_id) == self.org_id,
+            col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+            col(BackgroundTaskEvent.conversation_id) == conversation_id,
+            col(BackgroundTaskEvent.state).in_(("pending", "claimed")),
+        )
+        if not close_all_generations:
+            notices_query = notices_query.where(
+                col(BackgroundTaskEvent.execution_generation) == target_generation
+            )
+        notices = list(
+            await self.session.scalars(
+                notices_query.order_by(col(BackgroundTaskEvent.id))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
         for notice in notices:
             # Attempted inputs need checkpoint reconciliation, not a guessed discard.
@@ -544,7 +656,9 @@ class ConversationExecutionService:
                 notice.discard_reason = reason.value
                 notice.revision += 1
         inputs_pending = await self._cancel_user_inputs(
-            conversation_id, generation=execution_generation
+            conversation_id,
+            generation=None if close_all_generations else target_generation,
+            all_generations=close_all_generations,
         )
         await self.session.flush()
         run_ids = tuple(
@@ -565,11 +679,12 @@ class ConversationExecutionService:
         cleanup_pending = (
             inputs_pending
             or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
+            or any(command.log_state in ("pending", "retrying") for command in commands)
             or any(notice.state in ("pending", "claimed") for notice in notices)
             or bool(run_ids)
             or direct_pending
         )
-        return ClosedExecution(execution_generation, True, cleanup_pending, run_ids)
+        return ClosedExecution(target_generation, True, cleanup_pending, run_ids)
 
     async def claim_run_start(
         self,
@@ -1126,7 +1241,14 @@ class ConversationExecutionService:
             .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
-        if user is None or not user.is_active or workspace is None or member is None:
+        if (
+            user is None
+            or not user.is_active
+            or user.deletion_pending_at is not None
+            or workspace is None
+            or workspace.deletion_pending_at is not None
+            or member is None
+        ):
             raise LookupError("conversation not found")
         location = (
             await self.session.execute(
