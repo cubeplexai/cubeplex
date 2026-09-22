@@ -1779,6 +1779,7 @@ class RunManager:
         from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         conversation_id = ctx.conversation_id
+        terminal_cleanup = preserved_terminal_status is not None
         claim = await claim_resume(
             self._redis,
             prefix=self._key_prefix,
@@ -1786,7 +1787,7 @@ class RunManager:
             expected_run_id=run_id,
             started_at=started_at,
             ttl_seconds=self._run_event_ttl_seconds,
-            cleanup_only=question_id is None and not rebuild_missing_meta,
+            cleanup_only=(question_id is None or terminal_cleanup) and not rebuild_missing_meta,
         )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
             await self.notify_run_stop(run_id)
@@ -1914,12 +1915,14 @@ class RunManager:
                     observed_last_event_at=meta.last_event_at or meta.started_at,
                 ):
                     return False
-            elif pending is None and meta.status in (
+            elif meta.status in (
                 "completed",
                 "cancelled",
                 "errored",
                 "failed",
             ):
+                if pending is not None and durable_terminal_status is None:
+                    return False
                 if (
                     preserved_terminal_status is not None
                     and preserved_terminal_status != meta.status
@@ -2101,7 +2104,7 @@ class RunManager:
                     lease_seconds=max(
                         1, int(config.get("lifecycle.stale_run_threshold_seconds", 180))
                     ),
-                    cleanup_only=question_id is None,
+                    cleanup_only=question_id is None or preserved_terminal_status is not None,
                 ):
                     raise RunClaimLost("paused cleanup could not reserve finalization")
                 async with shared_checkpointer() as cp:
