@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.streams.run_events import (
     _CLEAR_ACTIVE_IF_MATCHES_LUA,
@@ -201,3 +202,73 @@ async def test_recovery_refuses_conflicting_durable_and_redis_outcomes(
     await db_session.refresh(paused.admitted.admission)
     assert paused.admitted.admission.run_terminal_status == "completed"
     assert paused.admitted.admission.run_finished_at is None
+
+
+async def test_stopped_cleanup_reclaims_terminal_resume_with_retained_pending(
+    db_session: AsyncSession,
+    run_manager: RunManager,
+    paused_execution: PausedExecution,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paused = paused_execution
+
+    async def fail_resume(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("resume failed before the pending answer was consumed")
+
+    monkeypatch.setattr(run_manager, "_build_agent_for_conversation", fail_resume)
+    await respond(run_manager, paused, "answer")
+    await run_manager.drain(timeout_seconds=15)
+
+    await db_session.refresh(paused.admitted.admission)
+    assert paused.admitted.admission.run_terminal_status == "errored"
+    assert paused.admitted.admission.run_finished_at is None
+    meta = await get_run_meta(
+        run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
+    )
+    assert meta is not None and meta.status == "errored"
+    async with shared_checkpointer() as cp:
+        pending = await cp.load_pending(paused.ctx.conversation_id)
+    assert pending is not None and pending[0].question_id == paused.question_id
+
+    await service(db_session).stop_run(
+        conversation_id=paused.ctx.conversation_id,
+        run_id=paused.run_id,
+        actor_user_id=paused.ctx.user_id,
+        now=datetime.now(UTC),
+    )
+    await db_session.commit()
+
+    assert await run_manager.recover_stopped_run(paused.admitted.admission.id)
+    await run_manager.drain(timeout_seconds=15)
+    await db_session.refresh(paused.admitted.admission)
+    assert paused.admitted.admission.run_terminal_status == "errored"
+    assert paused.admitted.admission.run_finished_at is not None
+    assert paused.provider.call_count == 1
+    async with shared_checkpointer() as cp:
+        assert await cp.load_pending(paused.ctx.conversation_id) is None
+
+
+async def test_terminal_resume_with_pending_requires_a_durable_outcome(
+    db_session: AsyncSession,
+    run_manager: RunManager,
+    paused_execution: PausedExecution,
+) -> None:
+    paused = paused_execution
+    await service(db_session).stop_run(
+        conversation_id=paused.ctx.conversation_id,
+        run_id=paused.run_id,
+        actor_user_id=paused.ctx.user_id,
+        now=datetime.now(UTC),
+    )
+    await db_session.commit()
+    await run_manager._redis.hset(
+        _run_meta_key(run_manager._key_prefix, paused.run_id), "status", "errored"
+    )
+
+    assert not await run_manager.recover_stopped_run(paused.admitted.admission.id)
+    await db_session.refresh(paused.admitted.admission)
+    assert paused.admitted.admission.run_terminal_status is None
+    assert paused.admitted.admission.run_finished_at is None
+    async with shared_checkpointer() as cp:
+        pending = await cp.load_pending(paused.ctx.conversation_id)
+    assert pending is not None and pending[0].question_id == paused.question_id
