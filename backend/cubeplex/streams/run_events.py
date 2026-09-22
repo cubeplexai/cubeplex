@@ -192,7 +192,11 @@ return eid
 """
 
 _CLAIM_MATCHES_LUA = """
-if redis.call('GET', KEYS[1]) ~= ARGV[1]
+local active = redis.call('GET', KEYS[1])
+local status = redis.call('HGET', KEYS[2], 'status')
+local terminal = status == 'completed' or status == 'cancelled' or status == 'errored'
+local released_cleanup = ARGV[3] == '1' and terminal and not active
+if (active ~= ARGV[1] and not released_cleanup)
     or redis.call('HGET', KEYS[2], 'claim_token') ~= ARGV[2] then
   return 0
 end
@@ -398,7 +402,13 @@ async def get_active_run(redis: Redis, *, prefix: str, conversation_id: str) -> 
 
 
 async def run_claim_matches(
-    redis: Redis, *, prefix: str, conversation_id: str, run_id: str, claim_token: str
+    redis: Redis,
+    *,
+    prefix: str,
+    conversation_id: str,
+    run_id: str,
+    claim_token: str,
+    cleanup_only: bool = False,
 ) -> bool:
     return bool(
         await redis.eval(  # type: ignore[misc]
@@ -408,6 +418,7 @@ async def run_claim_matches(
             _run_meta_key(prefix, run_id),
             run_id,
             claim_token,
+            "1" if cleanup_only else "0",
         )
     )
 
