@@ -1036,6 +1036,31 @@ class ConversationExecutionService:
         ).get_source_locked(source_kind=source_kind, source_id=source_id)
         if admission is None:
             return True
+        return await self._cancel_unstarted_admission(admission, now=now)
+
+    async def cancel_unstarted_admission(self, *, admission_id: str, now: datetime) -> bool:
+        """Cancel a queue handoff only while no worker can own its admission."""
+        require_aware(now)
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if admission is None:
+            return True
+        return await self._cancel_unstarted_admission(admission, now=now)
+
+    async def _cancel_unstarted_admission(
+        self,
+        admission: ConversationExecutionAdmission,
+        *,
+        now: datetime,
+    ) -> bool:
         if admission.run_start_token is not None or admission.run_started_at is not None:
             return False
         admission.revoked_at = admission.revoked_at or now
