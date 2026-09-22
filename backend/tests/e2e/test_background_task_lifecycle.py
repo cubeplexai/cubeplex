@@ -167,11 +167,12 @@ async def test_single_stop_includes_descendants_but_not_siblings(
         snapshot=ProcessSnapshot(status="exited", exit_code=0),
         log_state="complete",
     )
-    await service(db_session).handoff_task(
-        task_id=parent.task.id,
-        owner_token=parent.task.owner_token,
-        now=NOW,
-    )
+    with pytest.raises(ValueError, match="stopped foreground"):
+        await service(db_session).handoff_task(
+            task_id=parent.task.id,
+            owner_token=parent.task.owner_token,
+            now=NOW,
+        )
     await db_session.commit()
     assert parent.task.state == "succeeded"
     assert await events(db_session, parent.task.id) == []

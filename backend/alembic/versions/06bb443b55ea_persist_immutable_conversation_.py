@@ -1,7 +1,7 @@
 """persist immutable conversation execution admissions
 
 Revision ID: 06bb443b55ea
-Revises: 17410d02fbaf
+Revises: fe8cdb7b16d8
 Create Date: 2026-09-21 06:25:18.559358
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = '06bb443b55ea'
-down_revision: Union[str, Sequence[str], None] = '17410d02fbaf'
+down_revision: Union[str, Sequence[str], None] = 'fe8cdb7b16d8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

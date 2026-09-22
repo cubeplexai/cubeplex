@@ -184,7 +184,8 @@ async def test_resume_keeps_original_authority_and_model_after_redis_pause_expir
         await db_session.refresh(paused.admitted.admission)
         assert paused.admitted.admission.run_finished_at is not None
         if action == "cancel":
-            assert paused.admitted.admission.revoked_at is not None
+            assert paused.admitted.admission.run_stop_requested_at is not None
+            assert (paused.admitted.admission.revoked_at is not None) == stopped
     assert (
         await get_active_run(
             run_manager._redis, prefix=run_manager._key_prefix, conversation_id=conversation_id

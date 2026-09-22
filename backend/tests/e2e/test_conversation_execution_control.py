@@ -31,6 +31,9 @@ from tests.e2e.test_background_task_reservation import (
     ReservationContext,
     reserve,
 )
+from tests.e2e.test_background_task_reservation import (
+    service as task_service,
+)
 
 reservation_context = reservation_fixtures.reservation_context
 
@@ -72,6 +75,32 @@ async def actor_id(session: AsyncSession, context: ReservationContext) -> str:
     row = await session.get(ConversationExecutionAdmission, context.admission_id)
     assert row is not None
     return row.actor_user_id
+
+
+async def test_run_stop_preserves_handed_off_tasks_and_open_generation(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    foreground = await reserve(db_session, reservation_context)
+    background = await reserve(db_session, reservation_context)
+    await task_service(db_session).handoff_task(
+        task_id=background.task.id, owner_token=background.task.owner_token, now=NOW
+    )
+    await db_session.commit()
+    await service(db_session).stop_run(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        run_id=reservation_context.spec.originating_run_id,
+        now=NOW,
+    )
+    await db_session.commit()
+    conversation = await db_session.get(Conversation, reservation_context.conversation_id)
+    assert conversation is not None and conversation.execution_closed_at is None
+    assert conversation.execution_generation == 0
+    assert foreground.task.stop_requested_at == NOW
+    assert background.task.stop_requested_at is None
+    assert background.task.notifications_cancelled_at is None
 
 
 async def test_retry_keeps_first_run_snapshot_and_does_not_overwrite_later_selection(
