@@ -2250,7 +2250,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         },
       }))
     }
-    const streamOptions = { ...(options ?? {}), onRunId: handleRunId }
+    const streamOptions = {
+      ...(options ?? {}),
+      client_message_id: userMessage.id,
+      onRunId: handleRunId,
+    }
 
     let streamSource = streamMessages(
       client,

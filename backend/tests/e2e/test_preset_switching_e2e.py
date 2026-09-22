@@ -38,6 +38,7 @@ from tests.e2e.conftest import (
     _ensure_default_user_and_membership,
     _lifespan_context,
     _login_and_attach,
+    web_message_request,
 )
 
 
@@ -225,10 +226,11 @@ async def _stream_to_done(
     body: dict[str, Any],
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
+    request_body = web_message_request(**body)
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json=body,
+        json=request_body,
         headers={"accept": "text/event-stream"},
     ) as resp:
         assert resp.status_code == 200, resp.text
@@ -250,6 +252,22 @@ async def _create_conversation(client: httpx.AsyncClient, ws_id: str, title: str
     assert resp.status_code == 201, f"conversation creation failed: {resp.text}"
     conv_id: str = resp.json()["id"]
     return conv_id
+
+
+async def _read_conversation(conversation_id: str) -> Conversation:
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            return (
+                await session.execute(
+                    select(Conversation).where(  # type: ignore[arg-type]
+                        Conversation.id == conversation_id
+                    )
+                )
+            ).scalar_one()
+    finally:
+        await test_engine.dispose()
 
 
 def _collect_text(events: list[dict[str, Any]]) -> str:
@@ -325,46 +343,28 @@ async def test_explicit_preset_label_routes_to_small(
 
 
 @pytest.mark.asyncio
-async def test_unknown_model_key_falls_back_to_default(
+async def test_unknown_model_key_is_rejected_without_mutation(
     switching_client: httpx.AsyncClient,
 ) -> None:
-    """A model_key whose preset no longer exists (e.g. a custom preset deleted
-    after a conversation stored it) falls back to the workspace default instead
-    of 400, and the conversation's stored key is healed to null on send."""
+    """A deleted preset cannot silently redirect the request to another model."""
     client = switching_client
     ws_id = DEFAULT_WS_ID
     conv_id = await _create_conversation(client, ws_id, "switch-ghost")
+    before = await _read_conversation(conv_id)
 
-    events = await _stream_to_done(
-        client,
-        ws_id,
-        conv_id,
-        {
-            "content": "hi",
-            "model_key": "ghost",
-            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
-        },
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
+        json=web_message_request(
+            content="hi",
+            model_key="ghost",
+            reasoning={"mode": "on", "effort": "high", "summary": "none"},
+        ),
     )
+    assert response.status_code == 400, response.text
+    assert response.json().get("error_code") == "unknown_preset"
 
-    errors = [e for e in events if e.get("type") == "error"]
-    assert not errors, f"unexpected error events: {errors!r}"
-
-    # The stale key resolves to the default 'big' preset, not a 400.
-    text = _collect_text(events)
-    assert "big" in text.lower(), f"expected default 'big' answer; got: {text!r}"
-
-    # The conversation heals: the unknown key is persisted as null (default),
-    # not the stale 'ghost', so the next send no longer carries a dead key.
-    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
-    try:
-        maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-        async with maker() as session:
-            row = (
-                await session.execute(
-                    select(Conversation).where(Conversation.id == conv_id)  # type: ignore[arg-type]
-                )
-            ).scalar_one()
-            assert row.model_key is None, row.model_key
-            assert row.reasoning == {"mode": "on", "effort": "high", "summary": "none"}
-    finally:
-        await test_engine.dispose()
+    after = await _read_conversation(conv_id)
+    assert after.model_key == before.model_key
+    assert after.reasoning == before.reasoning
+    assert after.has_messages == before.has_messages
+    assert after.updated_at == before.updated_at

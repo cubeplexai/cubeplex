@@ -134,7 +134,7 @@ async def test_conversation_invisible_to_other_member_same_workspace(
     # Send message: 404 (same pre-check gate).
     r = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "sneaky"},
+        json={"client_message_id": "private-send", "content": "sneaky"},
         headers={"X-CSRF-Token": csrf_b},
     )
     assert r.status_code == 404, r.text

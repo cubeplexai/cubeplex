@@ -13,6 +13,7 @@ import { streamRun } from './runStreams'
  * request rather than only when it changes.
  */
 export interface SendMessageRequest {
+  client_message_id: string
   content: string
   attachments?: string[]
   model_key?: string | null
@@ -158,6 +159,7 @@ export async function* streamMessages(
   attachmentIds?: string[],
   signal?: AbortSignal,
   options?: {
+    client_message_id?: string
     model_key?: string | null
     reasoning?: ReasoningControl
     /**
@@ -181,7 +183,10 @@ export async function* streamMessages(
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)
-  const requestBody: SendMessageRequest = { content }
+  const requestBody: SendMessageRequest = {
+    client_message_id: options?.client_message_id ?? globalThis.crypto.randomUUID(),
+    content,
+  }
   if (attachmentIds && attachmentIds.length) requestBody.attachments = attachmentIds
   // ``null`` is intentional: backend treats it the same as a missing key
   // (workspace default), but sending it explicitly lets us round-trip the

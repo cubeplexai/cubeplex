@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 
+from tests.e2e.conftest import web_message_request
+
 
 async def _stream_events(
     client: httpx.AsyncClient,
@@ -24,7 +26,7 @@ async def _stream_events(
     async with client.stream(
         "POST",
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": content},
+        json=web_message_request(content=content),
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         response.raise_for_status()

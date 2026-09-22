@@ -33,6 +33,33 @@ describe('steer api', () => {
 })
 
 describe('message stream errors', () => {
+  it('sends the stable client message id supplied by the store', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'stop after request capture' }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    for await (const _event of streamMessages(
+      fakeClient(),
+      'conv-1',
+      'hello',
+      undefined,
+      undefined,
+      { client_message_id: 'user-temp-stable-1' },
+    )) {
+      void _event
+    }
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      client_message_id: 'user-temp-stable-1',
+      content: 'hello',
+    })
+  })
+
   it('classifies an active-run 409 for friendly composer recovery', async () => {
     vi.stubGlobal(
       'fetch',
