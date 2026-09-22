@@ -101,6 +101,9 @@ and user inputs; handoff and Stop serialize under the conversation/admission loc
 Already handed-off tasks retain their execution and result-notification authority.
 New reservations and late handoffs cannot escape a run Stop. Deadline expiry is
 different: its final result may still be handed to the background for delivery.
+Cancelled foreground tasks need only execution/log cleanup, not background handoff.
+The coordinator stops scanning them once execution and log recovery are settled;
+it does not invent foreground delivery evidence to make them disappear.
 Steering records carry source kind and generation for targeted cancellation;
 unsettled input claims retain their owner and require checkpoint reconciliation.
 Public control handlers, input-source assignment, and restart reconciliation still
