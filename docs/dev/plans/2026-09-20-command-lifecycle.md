@@ -124,6 +124,7 @@
 - topic／conversation／user_sandbox repositories、`streams/run_manager.py` 的 sandbox 选择和 manager 连接／revive／egress：账号删除原子转移共享资源归属，保留原实例及 volume，不改原 task actor；更新归属后的缓存／晚到写入不得写回旧 user。账号删除对话框和现有账号、topics、sandboxes 站点说明同步展示共享资源保留与个人 sandbox 依赖阻塞，不新增自动目录迁移。
 - `models/conversation_chunk.py`、`models/embedding_job.py`、对应 repositories、`services/conversation_search/{indexer,worker,service}.py` 及搜索入队／backfill 调用方：索引和所有 job 的归属与共享 conversation 同事务转移，领取标识和原子写入隔离迟到 worker，搜索仍检查真实访问权。新增领取字段经模型 autogenerate 迁移，不把索引 worker 改成新的公共 background task 类型。
 - `models/api_key.py`、`external_identity.py`、`org_invite_token.py`、相关 auth／邀请消费者及账号删除服务：撤销个人 API key 和未使用邀请、最终移除外部登录链接，补齐用户外键清单，不把这些凭据转给接任者。纯作者引用置空与业务 owner 转移分开。
+- `models/billing.py`、`repositories/billing.py`、`middleware/cost.py`／fallback 记账入口及账号／workspace／conversation 删除：已入账事件不是个人数据清理项，保留组织费用事实，删除目标引用置空。BillingEvent 自身的 user／conversation／workspace FK 改为 nullable，不放宽其他业务模型的 OrgScopedMixin；模型 autogenerate 迁移与所有聚合／CSV 的已删除维度展示同交付。
 - `services/artifact_share.py`、`api/routes/v1/{artifacts,artifact_share,attachments,public_artifacts,public_attachments,ws_sandbox,sandbox_share}.py`、`im/artifacts.py` 及各 platform 的 dispatcher 构造：Redis 分享／预览令牌的签发身份与原授权证明，公开页面／文件消费统一检查撤权；Web 和 IM 均接通，不只改 HTTP 签发。匹配的现有 artifacts／文件预览和 IM 站点页说明链接失效与旧令牌切换。
 - `models/{topic,conversation}.py` 的持久 sandbox 路由关闭标记／版本、sandbox scope resolver、manager、C1 reservation／迟到句柄及 C4 工具缓存／预览：管理员撤权立即隔离失效个人共享路由，停止其工作而不误删无关实例；topic／成员管理 UI 区分权限已撤销和环境清理中。不新增原 topic 换绑或文件迁移入口。
 - `repositories/org_invite_token.py`、`api/routes/v1/org_invites.py` 和 org 成员移除／角色更新：邀请原签发资格、初始撤销及消费／授予成员的单事务，不只在账号硬删清理邀请。
@@ -132,6 +133,8 @@
 - `api/routes/v1/{conversations,user_events,ws_sandbox,sandbox_share,admin_providers}.py` 的所有 StreamingResponse 及共享流包装器：replay／live／下载转发和空闲资格检查；`@cubeplex/core` SSE 消费、对应 Next 流代理及面板组件在失权后停止自动重连、展示权限变化，不把订阅失权写成 run 失败。保留现有 auth／CSRF／SSE 代理和禁压缩要求。
 - `backend/ee/src/cubeplex_ee/cost/routes.py` 的 `export_org_csv`／`export_workspace_csv`：两个 CSV StreamingResponse 同样接入共享租约，固定原 org admin 资格和 org／workspace 数据过滤。EE 调用 OSS 共用服务，不反向导入 EE；保留 license 注册和默认未安装时路由不存在的边界。
 - `services/provider_service.py` 的 saved liveness／single-model／all-model／stream 测试及 `repositories/{provider,model}.py`：原管理员资格进入每次 verdict 的最终写事务，repository 在该事务只 flush；流包装器不能代替服务内部落库授权。保留只读 system provider 的配置限制与既有观察元数据写入规则。
+- `models/{provider,credential}.py`、credential service／repository 和 `seeders/provider_seeder.py`：Provider／Model 的持久 config_revision 及 Credential 的 secret_revision，所有配置／密钥修改原子递增；autogenerate 迁移、旧行回填和探测快照匹配测试，不拿 updated_at 代替版本。
+- `frontend/packages/core/src/api/billing.ts`、`components/admin/insights/InsightsTopBar.tsx`、成本数据类型／图表标签、Next 下载代理及 en／zh：完整 CSV 校验后下载，取消／失权／不完整状态，以及已删除用户／workspace 费用分组；站点 `docs/site/docs/admin/cost-tracking.md` 同 PR 说明保留历史费用和导出限制。
 - `mcp/oauth/{state,callback,token_manager}.py`、OAuth start／DCR／callback 路由、`repositories/{credential,mcp}.py`、credential service 及 post-grant discovery：原签发授权、外部请求后最终事务校验、vault／grant 原子写入及迟到 refresh／discovery 隔离。OAuth return UI 明确失权错误；现有 MCP 站点页和 `backend/docs/mcp_oauth_staging_test_plan.md` 同交付更新，真实供应商 staging 仍是发布门槛。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。同文件定义凭证子记录，前缀 `delc`，只保存唯一 token 摘要、原操作人及 operation ID；可随操作回收，但操作与凭证均无目标级联 FK。账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务。
 - `services/deletion_receipt_cleanup.py`（新）及 `api/app.py` lifespan：启动和每小时执行有界回收，按 completed_at 保留终态 30 天，使用多 worker 安全的数据库批次锁；索引、期限拒绝和物理回收测试随 C2 交付。
@@ -200,7 +203,13 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 索引 enqueue 在 conversation 锁内读取当前 scope／creator／未删除状态，旧 caller 传入的 creator 不能成为新 FK；归属改变不等于重新授权旧模型 run。claim 事务仅锁 job 并立即提交，之后 worker 在读历史／调用 provider 前重查当前 conversation 和 token，provider I/O 不持数据库锁。结果提交重新按 conversation → job 取锁，只有当前 token／状态／归属仍匹配才可在一个事务 replace chunks 并 mark_done；repository 在该事务只 flush。失败／reap 更新也比较原 token，旧 attempt 的 mark_failed／mark_done 不得覆盖新领取；转移或独占删除已经先提交时丢弃迟到结果，不重试写旧 user。独占 conversation／workspace teardown 在同一门槛废止索引 claim，安全清理 job／chunk 后才能删除 FK 目标。搜索的 lexical／vector／hydrate 可见性查询排除撤销／删除中的权限，按真实访问权查询，不因索引 owner 更新而增权或让合法 B 丢失历史。
 
-硬删除使用完整用户 FK 处理清单并以实际 metadata 核对：Topic／Conversation／UserSandbox／Chunk／EmbeddingJob 保留者转移；共享 attached 附件和现有 nullable 的 created_by／updated_by／uploaded_by 等纯署名置空；个人 Memory、环境／MCP grant 及其 vault、egress、API key、外部登录映射、本人创建的分享／邀请按既定撤销语义清理；participant／membership、账单／事件、自动来源／IM／steering／执行证明按已定义依赖顺序清理。API key／未使用邀请在初始撤权时失效，外部登录仅允许受限删除状态直至最终移除；不删其他 actor 的来源或有效 token。每个用户 FK 必须归入转移、置空、清理或明确拒绝删除之一，新增模型未归类使契约测试失败；另用真实 FK 引用和实际 DELETE 验证，不能只靠静态清单声称无阻塞。
+硬删除使用完整用户 FK 处理清单并以实际 metadata 核对：Topic／Conversation／UserSandbox／Chunk／EmbeddingJob 保留者转移；共享 attached 附件和现有 nullable 的 created_by／updated_by／uploaded_by 等纯署名置空；个人 Memory、环境／MCP grant 及其 vault、egress、API key、外部登录映射、本人创建的分享／邀请按既定撤销语义清理；participant／membership、非账务事件、自动来源／IM／steering／执行证明按已定义依赖顺序清理。账单按下述保留规则解除被删维度的引用，不删除费用事件。API key／未使用邀请在初始撤权时失效，外部登录仅允许受限删除状态直至最终移除；不删其他 actor 的来源或有效 token。每个用户 FK 必须归入转移、置空、清理或明确拒绝删除之一，新增模型未归类使契约测试失败；另用真实 FK 引用和实际 DELETE 验证，不能只靠静态清单声称无阻塞。
+
+账务保留的是既已发生的组织费用：BillingEvent 与其 LlmBillingEvent 的 ID、金额、币种、时间、用量和价格快照均不因删除用户／会话／workspace 而删除或改记给接任者。账号硬删事务将相应 user_id 置空；只有实际硬删的 conversation／workspace 才在同一事务将各自引用置空，共享会话及尚存 workspace 的维度仍保留。org_id 始终非空，只有组织自身获准硬删除时才按子表 → 账单父表清理，不能跨 org 保留／重挂。移除 auth.py／workspaces.py 的对应账单 bulk-delete，不能仅修改 FK 后仍执行旧清理列表。
+
+成本 summary／timeseries／top-N／CSV 不得 inner-join 活用户、会话或 workspace 而丢失历史；null user／workspace 聚合为各自稳定的保留键 `__deleted_user`／`__deleted_workspace`，使用“已删除用户／工作区”标签，不能输出字符串 None、旧姓名／邮箱或可访问链接。CSV 相应 ID 留空，不保存明文身份副本；既有 org 过滤、workspace 过滤和管理权限不变，已删 workspace 的费用只留在 org 报表，不开放该 workspace 的旧入口。跨币种分别核对金额，不在删除时折算或重算价格。
+
+迟到账务写入同样不得复活 FK 或因目标已删丢掉已有费用事实：CostMiddleware 与 fallback 写入共用 repository，内部账务来源固定原 org／事件 ID，只记录已发生响应而不重新授权模型执行。事务按现有 User／org／workspace／conversation → billing 顺序检查并锁定仍存在的引用；已删除或进入删除中的维度写 null，不能换成新 owner；账号先硬删与账单先提交两个顺序均安全，父子账单同事务，同一事件 ID 的重试幂等。组织已删除不再新建其账单。这里不把记账变成公共接口或通用 background task，也不声称修复所有历史进程崩溃时的计费丢失；验收重点是已提交费用保留及删除竞争不制造新的损失。
 
 授权清单另覆盖非 FK 的 Redis `share`、`otk`、`otk:att`、`sandbox_otk`：新 payload 有明确 schema 版本、issuer_user_id、固定 scope／conversation／资源及原授权实例／版本；creator 隐式授权需可递增版本，participant／membership 用原实例，不能以重新加入代替。签发 service 从可信用户上下文或原 run admission 取得 actor；IMArtifactDispatcher 及 Feishu／DingTalk／Teams／Discord／WeCom／Slack 构造统一传递原身份，恢复不能读取后来编辑的 connector actor。签发在权限／资源锁内取得授权快照，Redis 写入即使晚于撤权，消费也必须按原证明拒绝；无可验证 actor 时不签发。
 
@@ -220,7 +229,15 @@ panel 令牌继续验 JWT 签名／issuer／expiry，另固定 actor、org／wor
 
 EE 成本导出也在这个连接清单内：org CSV 与按 workspace 筛选的 CSV 均绑定发起人的原 org admin 资格，保留 workspace 属于该 org 的校验，不能把后者降为普通 workspace 成员权限。每批 CSV 输出经过相同 lease gate，续租使用新的短只读 session，不复用导出 cursor 的长事务快照；账号 deleting、org 移除或管理员降级在最长 5 秒内关闭连接。watchdog 同时取消阻塞的生成器、释放 cursor／session，其他合法管理员的导出不受影响；不向 CSV 混入 SSE 错误事件，不把中断当成完整导出。
 
+两条 CSV 路由采用同一次请求内的完整文件暂存，不直接把未知长度查询生成器交给 `<a download>`：在受保护租约下将 CSV 逐批写入私有、关闭即删除的临时文件，生成完毕后计算确切 UTF-8 字节数和 SHA-256，重新检查当前原资格，再返回 CSV 和 `Content-Length`、`X-Export-Size`、`X-Export-SHA256`。传输期间仍受同一租约约束；失权关闭会留下可检测的长度／摘要不符，而不是合法完整 EOF。缓存设 no-store，Next 保留完整性头、传输字节语义和取消上游，不改写为成功空响应；校验以解码后的 CSV 字节及 X-Export-Size 为准，不假定代理压缩后的 Content-Length 等于 CSV 长度。
+
+InsightsTopBar 改为受控 fetch，下载前验证状态码、CSV 类型、合法完整性头、读取的实际字节数和摘要全部一致，才创建 Blob URL 并触发保存；任何中断、撤权、缺头／不符、网络错误或取消都丢弃缓冲，不产生成功下载。单次仅一个请求，可取消，组件卸载 abort，结束释放 Blob URL。每次导出最多 64 MiB CSV（后端暂存及客户端累计读取共同限制），超限在发文件前返回明确 export_too_large，提示缩小日期范围；服务端每进程最多 4 个暂存／传输任务，满额明确繁忙，临时文件创建失败也拒绝，不降级为未校验流。私有临时文件无公共 URL、不落业务持久存储；正常、异常、取消和进程退出均回收句柄及空间，不增加新的持久导出任务。UI 展示准备／下载／取消／失败，与 en／zh 和站点说明同交付。
+
 provider 测试分开传输许可和写许可：入口把原 actor／org 管理员证明传给 ProviderService，saved liveness、单模型、全部模型及 run_test_stream 在每次外部 probe 前检查当前资格，外部 I/O 不持 DB 锁。每次 `_persist_provider_liveness`／`_persist_model_test` 使用新的写事务，按 User → org 权限 → provider／model 锁序重新校验原资格及所测配置仍为当前版本，再只更新对应观察字段并提交；旧 ORM 对象不能整行覆盖并发配置。配置或目标变化就丢弃迟到结果，不能借重新授予管理员权限继续旧 flow。撤权已先提交则不写 verdict，即使连接尚有 5 秒租约也一样；写事务先持锁并合法提交则保留该既成结果，后续步骤重新检查。repo 在此模式只 flush，SSE 成功 verdict 只在对应提交成功后发出，失权不能伪装成 provider unhealthy。非流式 saved 测试同样覆盖；dry-run 仍不落库。既有内部 runtime 观察写入使用自身明确的执行授权，不通过可选 actor／空证明跳过用户测试授权，也不赋予 org 管理员修改 system provider 配置的能力。
+
+版本必须有实际持久字段：Provider／Model 各增加正整数 config_revision，Credential 增加 secret_revision，初始／存量为 1；不是 updated_at 或内容相等推测。配置编辑、enabled／auth／凭据引用变更在原行锁内原子递增 config_revision；原 credential 行替换密钥也递增 secret_revision。所有写路径包括 ProviderService、credential service／repository 和 system seeder；无实际变化的幂等 seed 不递增，探测结果等观察字段也不递增，恢复旧配置仍产生新版本。provider／model／credential 修改在调用方同一事务 flush 后统一提交，不能先独立提交 secret 再修改版本。
+
+每次探测在短事务中按权限 → provider → model（若用到）→ credential 锁序读取配置、解密凭据及三个原 ID／revision，构成内存快照后释放锁再发外部请求；liveness 也记录它实际使用的 model。最终 verdict 事务锁定同一组行并精确比较全部原版本和关联，任何删除、替换、编辑或 ABA 回改都丢弃；不能先取配置再单独查询一个较新的 revision。credential 独立修改只锁该 credential，不倒序锁引用者，provider 编辑／seed 遵守上述顺序。无 credential 的 auth=none 也捕获 provider 的原空引用。verdict 保存不含秘密的探测版本，测试覆盖密钥原地轮换、model 参数、base_url／enabled、seed、配置改回及两种提交顺序；旧无版本在途探测切换时丢弃。
 
 MCP OAuth state 增加原 actor 的权限实例／版本及固定 connector／grant_scope／workspace／user 证明，保留一次性 consume、PKCE 和 ticket，不把 state 签名当作当前授权。start／DCR 落库、callback 换 token 前均按对应 user／workspace／org 入口的原 RBAC 校验；provider exchange 在锁外，返回后最终写事务按 User → org／workspace 权限 → connector／grant → credential 固定顺序重查当前资格和原版本，再原子保存 vault 与 grant。credential／grant repo 在此模式只 flush，不允许 access token、refresh token 或 grant 分次 commit；失权整体回滚且返回明确 authorization_revoked，不创建孤立凭据或替换 B 的合法 grant。外部返回 token 不记日志，有供应商撤销接口可尽力释放，但不能因此延迟本地拒绝或保留可用 grant。
 
@@ -316,6 +333,8 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - ConversationShare 正文／artifact 在账号 cleanup_pending、成员撤权及复制后 activate 竞争时即不可读；public／org／workspace scope、旧无证明分享、B 的独立分享均覆盖。
 - 真实应用的面板 HTTP／WebSocket 和 SSE 连接测试：A 正在观看 B 的 run，撤销 A 后 replay／最后 coalescer flush／live 在最长 5 秒传播窗口内停止受理新批次，B run 继续；活跃及空闲双向 WS、token 到期、丢通知、DB 不可用、旧 token、新实例、重新连接、Next 取消上游和其他合法连接分别验证。外层 sandbox/provider 用可控端点，PG／Redis／鉴权与连接生命周期是真实服务；5 秒边界用可控时钟，不真等长 TTL。
 - 延伸 `backend/tests/e2e/licensed/test_cost_routes.py`：两种真实 CSV 导出在多批次及阻塞读取中遇到降级、org 移除或账号 deleting，最长 5 秒内停止输出并释放 cursor／session；普通 workspace 成员不能借筛选入口导出，其他 org／合法管理员不受影响。保留 `test_cost_routes_absent_by_default.py` 的未许可边界。
+- `frontend/packages/web/__tests__/e2e/admin-insights.spec.ts` 用实际下载按钮验证完整内容才产生下载，暂存期间撤权、多行传输后撤权、网络 EOF、摘要／长度缺失或不符、Next 透传、超限／繁忙／临时文件失败及取消均不生成成功文件；成功／失败后的临时空间、Blob URL 和连接释放均验证，不以 CSV 能解析或按钮存在代替完整性。
+- 真实账务保留 E2E：用户有本人及共享会话费用，删除账号和独占会话后实际 User 消失、各币种 org totals／tokens／call_count、timeseries 和两种合法 CSV 的既有金额不变；仅被删维度为空，接任者不背上旧费用。另删 workspace 后 org 历史仍在、旧 workspace 接口拒绝；并发迟到记账／fallback、事务回滚、事件重试、全部维度均删除的聚合／top-N 和跨 org 隔离分别验证。既有账单与 LLM 子行 ID 不变，不能用重新生成等额假行代替保留。
 - 延伸 `backend/tests/e2e/test_admin_providers_crud.py`：probe barrier 内撤权／降级／删除账号，在租约仍有效时也不写 liveness 或模型 verdict；用 PG barrier 覆盖写事务和撤权的两个顺序、单模型／全部／流式路径、配置修改／删除及后续模型步骤。断言不误写 unhealthy、不覆盖新配置、不发送未提交的成功事件；`test_provider_runtime_writeback_e2e.py` 保留合法内部观察写入回归。
 - OAuth user／workspace／org 三种 scope：旧 state 在 callback 前、exchange 等待中、vault／grant 最终事务前后遇到撤权／账号删除／角色降级，旧 flow 不写凭据或复活 FK；先合法提交时保留共享 grant，迟到 discovery／refresh 不覆盖替换结果。覆盖重新加入、旧 state、重复 callback、回滚与用户可见错误；发布前按现有 staging 计划补真实供应商验证记录。
 - 连接租约负载／安全回归：可控时钟内传输万帧 WS、HTTP chunks 和 SSE events，断言 DB 校验次数只随时间／连接及有界 scope 数增长，两向无重复续租；撤权通知、漏通知、慢查询、验证异常、空闲／阻塞 I/O、令牌提前到期和迟到续租不突破 5 秒上限。另验证 mutation 最终事务不复用连接许可。
@@ -556,9 +575,10 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 55 | C2：共享搜索索引及所有 job 原子转移，claim token 隔离迟到写入／失败，硬删用户不丢索引、不复活旧 FK 或扩大搜索权限 |
 | 56 | C2、C4：Redis 分享／预览绑定签发者和原授权，删除受理即失效，Web／IM／文件消费及旧令牌切换共同覆盖 |
 | 57 | C2：账号删除创建或接管全部 acting-user connector 分阶段清理，入队／handoff／创建编辑竞争不丢证明、不阻塞最终用户删除 |
-| 58 | C2、C4、C5：邀请／数据库分享、面板与 SSE／EE CSV 长连接、OAuth 及 provider 测试延迟写入共用原资格检查；数据转发与无宽限写事务、前端停止重连分别验收 |
+| 58 | C2、C4、C5：邀请／数据库分享、面板与 SSE／EE CSV 长连接、OAuth 及 provider 测试延迟写入共用原资格检查；CSV 校验完整性后保存，探测使用持久配置／密钥版本，写事务无租约宽限 |
 | 59 | C2、C4、C5：每连接最长 5 秒资格租约，校验成本与帧率解耦；慢查询／漏通知／到期 fail-closed，写事务无租约宽限 |
 | 60 | C2：登录 state 最终期限和无 User FK 的短期身份 fence，Google／SSO 不重建已删账号；企业原连接版本／状态在 identity 事务及发 cookie 前重查，单事务 bootstrap 及有界回收 |
 | 61 | C2、C4：独立删除恢复 worker 的启动／周期扫描、claim／lease／退避及各 kind handler，客户端退出后仍推进，不靠回执清理或 GET |
+| 62 | C2：已入账费用在用户／会话／workspace 删除后保留于原 org，解除目标 FK、稳定已删除维度及迟到写入串行；金额／用量／导出不因删除缩水 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
