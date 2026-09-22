@@ -2060,6 +2060,14 @@ class RunManager:
         await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
         return "published"
 
+    async def notify_run_stop(self, run_id: str) -> None:
+        """Wake cleanup after durable Stop; acceptance does not await worker teardown."""
+        task = self._tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
+            return
+        await self._publish_control(run_id, "cancel")
+
     async def dispatch_cancel(self, run_id: str, ack_timeout: float = 3.0) -> str:
         if run_id in self._tasks:
             await self.cancel_run(run_id)
