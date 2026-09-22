@@ -1843,6 +1843,14 @@ class RunManager:
                 conversation_id=admission.conversation_id,
             )
             run_id = admission.run_id
+        meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+        if meta is not None:
+            if meta.conversation_id != ctx.conversation_id:
+                return False
+            threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
+            if meta.status == "running" and not is_stale_meta(meta, threshold_seconds=threshold):
+                await self.notify_run_stop(run_id)
+                return False
         # Stop is immutable authorization to clean up, not to act as the former user.
         async with shared_checkpointer() as cp:
             loaded_pending = await cp.load_pending(ctx.conversation_id)
@@ -1859,15 +1867,8 @@ class RunManager:
             if completed is None:
                 return False
         preserved_terminal_status = None
-        meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
         if meta is not None:
-            if meta.conversation_id != ctx.conversation_id:
-                return False
             if meta.status == "running":
-                threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
-                if not is_stale_meta(meta, threshold_seconds=threshold):
-                    await self.notify_run_stop(run_id)
-                    return False
                 if not await mark_run_stale(
                     self._redis,
                     prefix=self._key_prefix,
@@ -1950,6 +1951,7 @@ class RunManager:
         from cubeplex.streams.steering_delivery import SteeringRunScope
 
         terminal_status = preserved_terminal_status or "cancelled"
+        cleanup_ready = False
 
         async def require_claim() -> None:
             if not await run_claim_matches(
@@ -1967,20 +1969,22 @@ class RunManager:
             async with shared_checkpointer() as cp:
                 if await cp.load_pending(conversation_id) is not None:
                     raise RuntimeError("paused cleanup still has a pending question")
-            await clear_active_run(
+            released = await clear_active_run(
                 self._redis,
                 prefix=self._key_prefix,
                 conversation_id=conversation_id,
                 run_id=run_id,
                 claim_token=claim_token,
             )
-            await expire_run_data(
+            expired = await expire_run_data(
                 self._redis,
                 prefix=self._key_prefix,
                 run_id=run_id,
                 ttl_seconds=self._run_event_ttl_seconds,
                 claim_token=claim_token,
             )
+            if not released or not expired:
+                raise RunClaimLost("cleanup release or expiry belongs to another attempt")
             if admission is not None and admission.run_start_token is not None:
                 async with async_session_maker() as session:
                     await ConversationExecutionService(
@@ -2046,6 +2050,7 @@ class RunManager:
                     scope=SteeringRunScope(ctx.org_id, ctx.workspace_id, conversation_id),
                     cancel_uncommitted=True,
                 )
+                cleanup_ready = True
                 if preserved_terminal_status is None:
                     await self._append_event(
                         run_id,
@@ -2075,7 +2080,7 @@ class RunManager:
             with suppress(Exception, RunClaimLost):
                 await require_claim()
                 meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
-                if meta is not None and meta.status == terminal_status:
+                if cleanup_ready and meta is not None and meta.status == terminal_status:
                     await finish_cancelled()
                     return
             logger.exception("Paused cleanup {} failed; leaving reconciliation pending", run_id)
@@ -5495,21 +5500,21 @@ class RunManager:
             # the lock when they terminate.
             if final_status != "paused_hitl" and not registration_replaced:
                 # Keep durable cleanup pending if release or expiry fails.
-                await clear_active_run(
+                released = await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
                     **claim_kwargs,
                 )
-                await expire_run_data(
+                expired = await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
                     ttl_seconds=self._run_event_ttl_seconds,
                     **claim_kwargs,
                 )
-                if ctx.execution is not None:
+                if ctx.execution is not None and released and expired:
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.db.engine import async_session_maker
                     from cubeplex.services.conversation_execution import (
@@ -6147,21 +6152,26 @@ class RunManager:
             # the pointer atomically). On "completed" the pointer must be
             # gone so the next start_run can allocate a fresh run.
             if not registration_replaced:
-                await clear_active_run(
+                released = await clear_active_run(
                     self._redis,
                     prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
                     **claim_kwargs,
                 )
-                await expire_run_data(
+                expired = await expire_run_data(
                     self._redis,
                     prefix=self._key_prefix,
                     run_id=run_id,
                     ttl_seconds=self._run_event_ttl_seconds,
                     **claim_kwargs,
                 )
-                if ctx.execution is not None and durable_final_status != "paused_hitl":
+                if (
+                    ctx.execution is not None
+                    and durable_final_status != "paused_hitl"
+                    and released
+                    and expired
+                ):
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.services.conversation_execution import (
                         ConversationExecutionService,
