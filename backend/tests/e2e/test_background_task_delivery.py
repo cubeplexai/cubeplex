@@ -1,15 +1,17 @@
 import asyncio
+import json
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import fakeredis.aioredis
+import msgpack
 import pytest
 import pytest_asyncio
-from cubeloop.providers.base import ReasoningControl
+from cubeloop.providers.base import ReasoningControl, TextContent, UserMessage
 from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text
 from cubeloop.session.input import InputReceipt
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.agents.checkpointer import shared_checkpointer
@@ -918,6 +920,70 @@ async def test_task_stop_discards_queued_append_without_touching_other_inputs(
     await db_session.commit()
 
 
+async def test_queued_notice_cancellation_commits_before_settlement(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    task = await db_session.get(BackgroundTask, event.task_id)
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert task is not None and admission is not None and admission.run_id is not None
+    admission.run_start_token = "attempt-1"
+    admission.run_started_at = NOW
+    service = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    await service.claim_ready(
+        owner_token="worker-1",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    steering_id = await service.enqueue_for_active_run(
+        notice_id=event.id,
+        owner_token="worker-1",
+        run_id=admission.run_id,
+    )
+    assert steering_id is not None
+    task.notifications_cancelled_at = NOW
+    task.stop_reason = "user_stop"
+    await db_session.commit()
+
+    original = BackgroundTaskDeliveryService.settle_uncommitted_attempt
+    settlement_started = asyncio.Event()
+
+    async def observe_unlocked_steering(self, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        async with session_factory() as probe, probe.begin():
+            row = await probe.scalar(
+                select(SteeringMessage)
+                .where(SteeringMessage.id == steering_id)
+                .with_for_update(nowait=True)
+            )
+            assert row is not None
+        settlement_started.set()
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(
+        BackgroundTaskDeliveryService,
+        "settle_uncommitted_attempt",
+        observe_unlocked_steering,
+    )
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=MagicMock(),
+        redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redis_key_prefix="delivery-cancel-order",
+    )
+
+    assert await coordinator.cancel_revoked_appends_once() == [event.id]
+    assert settlement_started.is_set()
+
+
 async def test_task_stop_requests_cancel_for_dispatched_append_then_reconciles(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
@@ -1216,6 +1282,123 @@ async def test_worker_restart_releases_uncheckpointed_initial_notice(
 
     await db_session.refresh(event)
     assert event.state == "delivered"
+
+
+async def test_worker_restart_fences_inflight_checkpoint_before_retirement(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    task = await db_session.get(BackgroundTask, event.task_id)
+    assert task is not None
+    service = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    [claim] = await service.claim_ready(
+        owner_token="dead-worker",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    admitted = await ConversationExecutionService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).admit_background_notice(
+        conversation_id=event.conversation_id,
+        actor_user_id=task.started_by_user_id,
+        notice_id=event.id,
+        owner_token="dead-worker",
+        execution_generation=event.execution_generation,
+        intent=UserMessageIntent(content="Background task result"),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    assert admitted.admission.run_id is not None
+    admitted.admission.run_start_token = "dead-attempt"
+    admitted.admission.run_started_at = NOW
+    assert await service.bind_initial_attempt(
+        notice_id=event.id,
+        owner_token="dead-worker",
+        run_id=admitted.admission.run_id,
+        attempt_id="dead-attempt",
+    )
+    await db_session.commit()
+
+    blocker = session_factory()
+    await blocker.begin()
+    await blocker.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
+        {"thread_id": event.conversation_id},
+    )
+    await blocker.execute(
+        text(
+            "INSERT INTO cubepi_threads (thread_id) VALUES (:thread_id) "
+            "ON CONFLICT (thread_id) DO NOTHING"
+        ),
+        {"thread_id": event.conversation_id},
+    )
+    await blocker.execute(
+        text(
+            "INSERT INTO cubepi_runs (thread_id, run_id) VALUES (:thread_id, :run_id) "
+            "ON CONFLICT (thread_id, run_id) DO NOTHING"
+        ),
+        {"thread_id": event.conversation_id, "run_id": admitted.admission.run_id},
+    )
+    last_seq = int(
+        await blocker.scalar(
+            text("SELECT COALESCE(MAX(seq), 0) FROM cubepi_messages WHERE thread_id = :thread_id"),
+            {"thread_id": event.conversation_id},
+        )
+        or 0
+    )
+    checkpoint_message = UserMessage(
+        content=[TextContent(text="Background task result")],
+        metadata={"notice_id": event.id, "input_id": claim.input_id},
+        run_id=admitted.admission.run_id,
+    )
+    await blocker.execute(
+        text(
+            "INSERT INTO cubepi_messages "
+            "(thread_id, seq, role, metadata, payload, run_id) "
+            "VALUES (:thread_id, :seq, 'user', CAST(:metadata AS jsonb), :payload, :run_id)"
+        ),
+        {
+            "thread_id": event.conversation_id,
+            "seq": last_seq + 1,
+            "metadata": json.dumps(checkpoint_message.metadata),
+            "payload": msgpack.packb(checkpoint_message.model_dump(mode="json"), use_bin_type=True),
+            "run_id": admitted.admission.run_id,
+        },
+    )
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=MagicMock(),
+        redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redis_key_prefix="delivery-checkpoint-race",
+    )
+    reconciliation = asyncio.create_task(
+        coordinator.reconcile_bound_once(now=NOW + timedelta(minutes=1))
+    )
+    try:
+        await asyncio.sleep(0.1)
+        assert not reconciliation.done()
+        await blocker.commit()
+        assert await asyncio.wait_for(reconciliation, timeout=2) == [event.id]
+
+        await db_session.refresh(event)
+        await db_session.refresh(admitted.admission)
+        assert event.state == "delivered"
+        assert event.checkpoint_input_id == claim.input_id
+        assert admitted.admission.run_finished_at is None
+    finally:
+        if blocker.in_transaction():
+            await blocker.rollback()
+        await blocker.close()
+        if not reconciliation.done():
+            reconciliation.cancel()
+            await asyncio.gather(reconciliation, return_exceptions=True)
+        await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
 
 
 async def test_retry_locks_existing_admission_before_notice(
