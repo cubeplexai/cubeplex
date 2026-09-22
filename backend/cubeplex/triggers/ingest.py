@@ -14,12 +14,11 @@ Pipeline order (implemented verbatim from the plan):
   10. Insert trigger_events row (dedup guard)
   11. Rate limit
   12. Filter
-  13. Enqueue pipeline.fire as background task → 202 accepted
+  13. Freeze execution inputs and commit a worker-consumable event → 202
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from datetime import UTC, datetime
@@ -33,13 +32,14 @@ import cubeplex.db as _db
 from cubeplex.cache import RedisHandle
 from cubeplex.credentials.dependencies import build_credential_service
 from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.llm.snapshot import load_llm_snapshot
 from cubeplex.models.trigger import TriggerEvent
 from cubeplex.repositories import TriggerEventRepository, TriggerRepository
 from cubeplex.repositories.workspace import WorkspaceRepository
 from cubeplex.triggers import rate_limit as rate_limit_mod
-from cubeplex.triggers.events import NormalizedEvent, derive_dedup_key
+from cubeplex.triggers.events import derive_dedup_key
 from cubeplex.triggers.filter import matches
-from cubeplex.triggers.pipeline import TriggerPipeline, _bump_counters
+from cubeplex.triggers.pipeline import _bump_counters, freeze_trigger_event
 from cubeplex.triggers.signature import timestamp_fresh, verify_with_rotation
 
 _GLOBAL_MAX_BODY = 2 * 1024 * 1024  # 2 MiB
@@ -183,7 +183,7 @@ async def handle_ingest(
         source_type="webhook",
         event_type=event_type,
         dedup_key=dedup_key,
-        status="accepted",
+        status="validating",
         payload=payload,
     )
     inserted = await events_repo.insert_dedup(event_row)
@@ -221,21 +221,24 @@ async def handle_ingest(
         await _bump_counters(session, trig_id, total=1)
         return JSONResponse(status_code=200, content={"status": "filtered_out"})
 
-    # Step 13: Enqueue pipeline.fire as background task → 202 accepted.
-    normalized = NormalizedEvent(
-        event_id=inserted_id,
-        source_type="webhook",
-        trigger_id=trig_id,
-        event_type=event_type,
-        occurred_at=None,
-        subject=None,
-        payload=payload,
-        dedup_key=dedup_key,
-    )
-
-    run_manager = request.app.state.run_manager
-    pipeline = TriggerPipeline(run_manager=run_manager, session_maker=_db.async_session_maker)
-    asyncio.create_task(pipeline.fire(trigger, normalized, inserted_id))
+    # Step 13: Freeze everything the worker may not re-resolve after 202.
+    try:
+        llm_snapshot = await load_llm_snapshot(session, org_id, backend)
+        execution_snapshot = await freeze_trigger_event(
+            session,
+            trigger=trigger,
+            event=inserted,
+            llm_snapshot=llm_snapshot,
+        )
+    except Exception as exc:  # deterministic validation/configuration failure
+        inserted.status = "failed"
+        inserted.last_error = f"execution admission failed: {exc}"
+        await _bump_counters(session, trig_id, total=1, failed=1)
+    else:
+        inserted.execution_snapshot = execution_snapshot.model_dump(mode="json")
+        inserted.status = "pending"
+        inserted.next_attempt_at = now
+        await session.commit()
 
     return JSONResponse(
         status_code=202,
