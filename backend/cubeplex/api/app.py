@@ -497,6 +497,9 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as exc:
         logger.warning("Shared checkpointer warmup failed (will retry lazily): {}", exc)
 
+    if run_manager is not None:
+        run_manager.start_stop_recovery()
+
     yield
 
     # ==================== Shutdown ====================
@@ -509,6 +512,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
         _app.state.drain_state.enter_draining()
 
     logger.info("Shutdown phase 2/5: stopping background services and connectors")
+    if run_manager is not None:
+        await run_manager.stop_stop_recovery()
     await _stop_sandbox_background_tasks(command_coord_task, cleanup_task)
     from cubeplex.services.conversation_search.startup import stop_search_subsystem
 

@@ -103,9 +103,9 @@ async def test_cancel_paused_cancels_a_resume_that_won_the_claim(
     _patch_claim_resume(monkeypatch, outcome=ClaimResumeOutcome.ALREADY_RUNNING)
     rm = _make_rm()
 
-    rm.dispatch_cancel = AsyncMock(return_value="published")
+    rm.notify_run_stop = AsyncMock()
     assert await rm.cancel_paused_run(conversation_id="c1", run_id="r1", ctx=_ctx()) == "r1"
-    rm.dispatch_cancel.assert_awaited_once_with("r1")
+    rm.notify_run_stop.assert_awaited_once_with("r1")
 
 
 async def test_cancel_paused_raises_resume_conflict_when_claim_conflict(
