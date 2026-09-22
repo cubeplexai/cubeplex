@@ -505,8 +505,11 @@ class BackgroundTaskDeliveryService:
         run_id: str,
         input_id: str,
         discard_cancelled_initial: bool,
+        retire_orphaned_initial_at: datetime | None = None,
     ) -> bool:
         """Release a lost append, or discard a cancelled initial notice."""
+        if retire_orphaned_initial_at is not None:
+            require_aware(retire_orphaned_initial_at)
         task_id = await self.session.scalar(
             select(col(BackgroundTaskEvent.task_id)).where(
                 col(BackgroundTaskEvent.id) == notice_id,
@@ -516,6 +519,18 @@ class BackgroundTaskDeliveryService:
         )
         if task_id is None:
             return False
+        # Stop locks admissions before tasks and events. Reconciliation can
+        # retire an orphaned initial admission, so it must use the same order.
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.run_id) == run_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         task = await self.session.get(
             BackgroundTask, task_id, with_for_update=True, populate_existing=True
         )
@@ -534,13 +549,6 @@ class BackgroundTaskDeliveryService:
             return False
         if task is None or event.task_id != task.id:
             return False
-        admission = await self.session.scalar(
-            select(ConversationExecutionAdmission).where(
-                col(ConversationExecutionAdmission.org_id) == self.org_id,
-                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
-                col(ConversationExecutionAdmission.run_id) == run_id,
-            )
-        )
         is_initial = bool(
             admission is not None
             and admission.source_kind == "background_task"
@@ -564,6 +572,19 @@ class BackgroundTaskDeliveryService:
             event.delivery_run_id = None
             event.delivery_attempt_id = None
             event.discard_reason = None
+        if (
+            retire_orphaned_initial_at is not None
+            and is_initial
+            and admission is not None
+            and admission.run_finished_at is None
+        ):
+            cancelled = discard_cancelled_initial or initial_was_stopped
+            admission.run_terminal_status = admission.run_terminal_status or (
+                "cancelled" if cancelled else "failed"
+            )
+            admission.run_terminal_at = admission.run_terminal_at or retire_orphaned_initial_at
+            admission.run_finished_at = retire_orphaned_initial_at
+            admission.updated_at = retire_orphaned_initial_at
         event.revision += 1
         await self.session.flush()
         return True
@@ -849,6 +870,7 @@ class BackgroundTaskDeliveryCoordinator:
                             discard_cancelled_initial=(
                                 meta is not None and meta.status == "cancelled"
                             ),
+                            retire_orphaned_initial_at=now,
                         )
                     await session.commit()
                 if changed:

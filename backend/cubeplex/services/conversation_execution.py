@@ -1065,6 +1065,15 @@ class ConversationExecutionService:
             or conversation.execution_generation != execution_generation
         ):
             raise ExecutionRevokedError("background notice generation is closed")
+        fingerprint = self._fingerprint(intent)
+        repository = ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        )
+        # Stop locks admissions before task events. Keep retries in that same
+        # order so Stop cannot hold the admission while delivery holds the event.
+        previous = await repository.get_source_locked(
+            source_kind="background_task", source_id=notice_id
+        )
         notice = await self.session.scalar(
             select(BackgroundTaskEvent)
             .where(
@@ -1085,13 +1094,6 @@ class ConversationExecutionService:
             or notice.delivery_attempt_id is not None
         ):
             raise ExecutionRevokedError("background notice is not an unbound owned claim")
-        fingerprint = self._fingerprint(intent)
-        repository = ConversationExecutionAdmissionRepository(
-            self.session, org_id=self.org_id, workspace_id=self.workspace_id
-        )
-        previous = await repository.get_source_locked(
-            source_kind="background_task", source_id=notice_id
-        )
         if previous is not None:
             if (
                 previous.conversation_id != conversation_id

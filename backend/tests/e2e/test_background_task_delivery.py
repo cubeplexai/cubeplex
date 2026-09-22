@@ -1,14 +1,16 @@
+import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import fakeredis.aioredis
+import pytest
 import pytest_asyncio
 from cubeloop.providers.base import ReasoningControl
 from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_text
 from cubeloop.session.input import InputReceipt
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.models import (
@@ -1141,6 +1143,7 @@ async def test_worker_restart_releases_uncheckpointed_initial_notice(
         now=NOW,
     )
     assert admitted.admission.run_id is not None
+    initial_run_id = admitted.admission.run_id
     admitted.admission.run_start_token = "dead-attempt"
     admitted.admission.run_started_at = NOW
     assert await service.bind_initial_attempt(
@@ -1164,3 +1167,140 @@ async def test_worker_restart_releases_uncheckpointed_initial_notice(
     assert event.delivery_run_id is None
     assert event.delivery_attempt_id is None
     assert event.delivery_input_id == claim.input_id
+
+    await db_session.refresh(admitted.admission)
+    assert admitted.admission.run_finished_at == NOW + timedelta(minutes=1)
+    assert admitted.admission.run_terminal_status == "failed"
+
+    [retry_claim] = await service.claim_ready(
+        owner_token="replacement-worker",
+        now=NOW + timedelta(minutes=1, seconds=1),
+        owner_until=NOW + timedelta(minutes=1, seconds=31),
+    )
+    retried = await ConversationExecutionService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).admit_background_notice(
+        conversation_id=event.conversation_id,
+        actor_user_id=task.started_by_user_id,
+        notice_id=event.id,
+        owner_token="replacement-worker",
+        execution_generation=event.execution_generation,
+        intent=UserMessageIntent(content="Background task result"),
+        snapshot=snapshot(),
+        now=NOW + timedelta(minutes=1, seconds=1),
+    )
+    assert retried.admission.id == admitted.admission.id
+    assert retried.admission.run_id != initial_run_id
+    assert retried.admission.run_id is not None
+    assert await ConversationExecutionService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).claim_run_start(
+        admission_id=retried.admission.id,
+        attempt_id="replacement-attempt",
+        now=NOW + timedelta(minutes=1, seconds=2),
+    )
+    assert await service.bind_initial_attempt(
+        notice_id=event.id,
+        owner_token="replacement-worker",
+        run_id=retried.admission.run_id,
+        attempt_id="replacement-attempt",
+    )
+    assert await service.acknowledge_checkpoint(
+        notice_id=event.id,
+        run_id=retried.admission.run_id,
+        attempt_id="replacement-attempt",
+        input_id=retry_claim.input_id,
+        now=NOW + timedelta(minutes=1, seconds=3),
+    )
+    await db_session.commit()
+
+    await db_session.refresh(event)
+    assert event.state == "delivered"
+
+
+async def test_retry_locks_existing_admission_before_notice(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    monkeypatch,
+) -> None:
+    event = await _event(db_session, reservation_context, readiness="ready")
+    task = await db_session.get(BackgroundTask, event.task_id)
+    assert task is not None
+    [claim] = await BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).claim_ready(
+        owner_token="retry-worker",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    admitted = await ConversationExecutionService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).admit_background_notice(
+        conversation_id=event.conversation_id,
+        actor_user_id=task.started_by_user_id,
+        notice_id=event.id,
+        owner_token="retry-worker",
+        execution_generation=event.execution_generation,
+        intent=UserMessageIntent(content="Background task result"),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    await db_session.commit()
+
+    from cubeplex.repositories.background_task import (
+        ConversationExecutionAdmissionRepository,
+    )
+
+    original = ConversationExecutionAdmissionRepository.get_source_locked
+    admission_locked = asyncio.Event()
+
+    async def observe_admission_lock(self, *, source_kind: str, source_id: str):  # noqa: ANN001
+        row = await original(self, source_kind=source_kind, source_id=source_id)
+        admission_locked.set()
+        return row
+
+    monkeypatch.setattr(
+        ConversationExecutionAdmissionRepository,
+        "get_source_locked",
+        observe_admission_lock,
+    )
+    blocker = session_factory()
+    await blocker.begin()
+    await blocker.scalar(
+        select(BackgroundTaskEvent).where(BackgroundTaskEvent.id == event.id).with_for_update()
+    )
+
+    async def retry():  # noqa: ANN202
+        async with session_factory() as session, session.begin():
+            return await ConversationExecutionService(
+                session, org_id=event.org_id, workspace_id=event.workspace_id
+            ).admit_background_notice(
+                conversation_id=event.conversation_id,
+                actor_user_id=task.started_by_user_id,
+                notice_id=event.id,
+                owner_token="retry-worker",
+                execution_generation=event.execution_generation,
+                intent=UserMessageIntent(content="Background task result"),
+                snapshot=snapshot(),
+                now=NOW + timedelta(seconds=1),
+            )
+
+    retry_task = asyncio.create_task(retry())
+    reached_lock = False
+    try:
+        await asyncio.wait_for(admission_locked.wait(), timeout=2)
+        reached_lock = True
+    except TimeoutError:
+        pass
+    finally:
+        await blocker.rollback()
+        await blocker.close()
+    if not reached_lock:
+        retry_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await retry_task
+    assert reached_lock, "retry blocked on the notice before locking its admission"
+    retried = await retry_task
+    assert retried.admission.id == admitted.admission.id
+    assert claim.input_id == event.id
