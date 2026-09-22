@@ -75,6 +75,26 @@ def _repo(session: AsyncSession) -> SteeringMessageRepository:
 
 
 @pytest.mark.asyncio
+async def test_enqueue_active_run_input_without_hitl_question(
+    db_session: AsyncSession,
+    steering_conversation: tuple[Conversation, User],
+) -> None:
+    conversation, user = steering_conversation
+    row, created = await _repo(db_session).enqueue(
+        conversation_id=conversation.id,
+        run_id="active-run",
+        client_steer_id="active-steer",
+        content="Use the new constraint",
+        sender_user_id=user.id,
+        sender_display_name="Test User",
+        hitl_question_id=None,
+    )
+    await db_session.commit()
+    assert created
+    assert row.hitl_question_id is None
+
+
+@pytest.mark.asyncio
 async def test_enqueue_is_idempotent_but_rejects_mismatched_retry(
     db_session: AsyncSession,
     steering_conversation: tuple[Conversation, User],
