@@ -12,12 +12,14 @@ from sqlmodel import col
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 from cubeplex.models import (
+    BackgroundTask,
     BackgroundTaskEvent,
     Conversation,
     ConversationExecutionAdmission,
     Membership,
     User,
 )
+from cubeplex.models.background_task import TaskStopReason
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
     DirectExecutionResult,
@@ -929,6 +931,31 @@ async def test_stop_rollback_preserves_execution_and_notification_authority(
     assert task.notifications_cancelled_at is None
     assert conv is not None and conv.execution_closed_at is None
     assert admission is not None and admission.revoked_at is None
+
+
+async def test_conversation_delete_closes_generation_with_delete_reason(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    reserved = await reserve(db_session, reservation_context)
+    closed = await service(db_session).close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=0,
+        reason=TaskStopReason.conversation_deleted,
+        now=NOW,
+    )
+    await db_session.commit()
+
+    task = await db_session.get(BackgroundTask, reserved.task.id)
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert closed.cleanup_pending
+    assert task is not None and task.stop_reason == "conversation_deleted"
+    assert task.notifications_cancelled_at == NOW
+    assert admission is not None and admission.revoked_at == NOW
 
 
 async def test_stop_keeps_claimed_notice_for_checkpoint_reconciliation(

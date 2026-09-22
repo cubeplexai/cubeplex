@@ -130,6 +130,7 @@
     "inviteMembers": "邀请成员",
     "removeMember": "移除",
     "leaveGroup": "退出群聊",
+    "cleanupPending": "话题已移除，后台任务仍在停止中。",
     "sandboxDedicated": "为话题新建独立沙盒",
     "sandboxDedicatedDescription": "为话题创建一个全新的沙盒。当前会话里的文件不会带过来。",
     "sandboxCreator": "沿用当前对话的沙盒",
@@ -1942,6 +1943,7 @@
     "deleteConversationCancel": "取消",
     "deleteConversationDeleting": "删除中\u2026",
     "deleteConversationFailed": "删除对话失败",
+    "deleteConversationCleanupPending": "对话已删除，后台任务仍在停止中。",
     "workspaceSettings": "工作区设置",
     "accountMenu": "账号菜单",
     "signOut": "退出登录"

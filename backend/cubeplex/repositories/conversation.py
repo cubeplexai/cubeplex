@@ -370,7 +370,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         )
         return await self.add(conv)
 
-    async def delete_conversation(self, conversation_id: str) -> bool:
+    async def delete_conversation(self, conversation_id: str, *, now: datetime) -> bool:
         """Soft-delete: stamp ``deleted_at`` so the row stays as a FK target.
 
         Child tables (billing_events for cost audit, artifacts, attachments)
@@ -395,6 +395,6 @@ class ConversationRepository(ScopedRepository[Conversation]):
             workspace_id=self.workspace_id,
         )
         await steering_repo.delete_for_conversation(conversation_id)
-        conv.deleted_at = datetime.now(UTC)
-        await self.session.commit()
+        conv.deleted_at = now
+        await self.session.flush()
         return True

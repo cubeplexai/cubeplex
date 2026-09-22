@@ -14,7 +14,14 @@ from sqlalchemy.pool import NullPool
 
 from cubeplex.auth.users import UserManager
 from cubeplex.db.engine import _build_database_url
-from cubeplex.models import OrgRole, Role, User, Workspace
+from cubeplex.models import (
+    Conversation,
+    ConversationExecutionAdmission,
+    OrgRole,
+    Role,
+    User,
+    Workspace,
+)
 from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
 from tests.e2e.helpers import csrf_cookie_name
 
@@ -308,7 +315,8 @@ class TestTopicCRUD:
         topic_id = create_resp.json()["topic"]["id"]
 
         del_resp = await admin_c.delete(f"/api/v1/ws/{ws_id}/topics/{topic_id}")
-        assert del_resp.status_code == 204, del_resp.text
+        assert del_resp.status_code == 200, del_resp.text
+        assert del_resp.json() == {"archived": True, "cleanup_pending": False}
 
         # Archived topic no longer visible in list
         list_resp = await admin_c.get(f"/api/v1/ws/{ws_id}/topics")
@@ -318,6 +326,42 @@ class TestTopicCRUD:
         # And the single-topic GET also hides it (consistent with list).
         get_resp = await admin_c.get(f"/api/v1/ws/{ws_id}/topics/{topic_id}")
         assert get_resp.status_code == 404, get_resp.text
+
+    @pytest.mark.anyio
+    async def test_delete_topic_revokes_child_conversation_execution(
+        self,
+        four_layer_admin_and_member: FourLayerFixture,
+        db_session: AsyncSession,
+    ) -> None:
+        (admin_c, ws_id, admin_uid), _ = four_layer_admin_and_member
+        create_resp = await admin_c.post(
+            f"/api/v1/ws/{ws_id}/topics",
+            json={"title": "Running topic"},
+        )
+        body = create_resp.json()
+        conversation_id = body["conversation"]["id"]
+        conversation = await db_session.get(Conversation, conversation_id)
+        assert conversation is not None
+        admission = ConversationExecutionAdmission(
+            org_id=conversation.org_id,
+            workspace_id=ws_id,
+            conversation_id=conversation_id,
+            actor_user_id=admin_uid,
+            execution_generation=conversation.execution_generation,
+            source_kind="user_message",
+            source_id=f"web:{secrets.token_hex(8)}",
+            run_id=secrets.token_hex(16),
+        )
+        db_session.add(admission)
+        await db_session.commit()
+
+        response = await admin_c.delete(f"/api/v1/ws/{ws_id}/topics/{body['topic']['id']}")
+        assert response.status_code == 200, response.text
+        assert response.json() == {"archived": True, "cleanup_pending": True}
+        await db_session.refresh(conversation)
+        await db_session.refresh(admission)
+        assert conversation.execution_closed_at is not None
+        assert admission.revoked_at is not None
 
 
 class TestTopicParticipants:

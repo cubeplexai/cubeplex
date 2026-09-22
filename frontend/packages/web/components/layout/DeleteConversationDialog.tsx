@@ -82,8 +82,11 @@ export function DeleteConversationDialog({
     if (deleting) return
     setDeleting(true)
     try {
-      await remove(buildClient(currentWsId), conversationId)
+      const result = await remove(buildClient(currentWsId), conversationId)
       onOpenChange(false)
+      if (result.cleanup_pending) {
+        toast.info(t('deleteConversationCleanupPending'))
+      }
       // Store clears activeId, but the chat route stays mounted unless we leave.
       if (currentWsId && isViewingConversation(pathnameRef.current, currentWsId, conversationId)) {
         router.replace(`/w/${currentWsId}`)

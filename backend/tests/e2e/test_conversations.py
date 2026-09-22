@@ -103,7 +103,8 @@ class TestConversationsCRUD:
         conversation_id = create_resp.json()["id"]
 
         delete_resp = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
-        assert delete_resp.status_code == 204
+        assert delete_resp.status_code == 200
+        assert delete_resp.json() == {"deleted": True, "cleanup_pending": False}
 
         get_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
         assert get_resp.status_code == 404
@@ -156,7 +157,7 @@ class TestConversationsCRUD:
         event_id = asyncio.get_event_loop().run_until_complete(_seed_and_check())
 
         delete_resp = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
-        assert delete_resp.status_code == 204
+        assert delete_resp.status_code == 200
 
         # Conversation hidden from API
         assert (
@@ -218,7 +219,7 @@ class TestConversationsCRUD:
 
         # Soft-delete the parent
         del_resp = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
-        assert del_resp.status_code == 204
+        assert del_resp.status_code == 200
 
         # Every artifact endpoint now refuses the request
         for url in (
