@@ -114,6 +114,13 @@ acknowledgement. An accepted run without a start receipt still requires reconcil
 Input-source assignment, durable restart reconciliation, and frontend callers remain
 staged integration work before the coordinated cutover; old bodyless Cancel calls
 are rejected rather than allowed to bypass the stable-target contract.
+Stop signals are idempotent within an execution attempt. The worker enters a
+cleanup-only phase before finalization awaits; repeated local or received signals
+leave that phase running, including a paused-run cancellation worker. This marker
+belongs to the concrete asyncio task, so an older attempt cannot protect a newer
+worker accidentally. A cancelled HTTP/control waiter does not propagate another
+cancellation into teardown. Forced process shutdown can still cancel cleanup;
+durable recovery remains necessary for that case.
 
 Automatic memory reflection for admitted work waits until its original worker has
 finished cleanup. It does not keep the run or active slot open. Each model/tool

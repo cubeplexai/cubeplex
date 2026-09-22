@@ -5,6 +5,7 @@ Real checkpoint, authority and Redis ownership are covered in admitted HITL E2E.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -169,3 +170,63 @@ async def test_cancel_paused_spawns_cleanup_without_a_model_answer(
     assert kw["reason"] == "cancelled by user"
     assert "answer" not in kw
     respond_mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize("interrupt", ["repeat_stop", "caller_cancelled"])
+async def test_stop_retry_or_caller_exit_does_not_cancel_teardown(interrupt: str) -> None:
+    manager = _make_rm()
+    entered, cleaning, release, finished = (asyncio.Event() for _ in range(4))
+
+    async def worker() -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await release.wait()
+            finished.set()
+
+    task = asyncio.create_task(worker())
+    manager._tasks["r1"] = task
+    await entered.wait()
+    caller = asyncio.create_task(manager.cancel_run("r1"))
+    try:
+        await cleaning.wait()
+        if interrupt == "repeat_stop":
+            await manager.notify_run_stop("r1")
+        else:
+            caller.cancel()
+            await asyncio.gather(caller, return_exceptions=True)
+        release.set()
+        await asyncio.gather(task, caller, return_exceptions=True)
+        assert finished.is_set(), "Stop interrupted the worker's cleanup"
+    finally:
+        release.set()
+        task.cancel()
+        caller.cancel()
+        await asyncio.gather(task, caller, return_exceptions=True)
+
+
+async def test_repeated_stop_leaves_paused_cleanup_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    pending = MagicMock(question_id="q1", created_at=1717200000.0)
+    _patch_checkpointer(monkeypatch, pending=pending)
+    _patch_claim_resume(monkeypatch, outcome=ClaimResumeOutcome.OK, token="cleanup")
+    manager = _make_rm()
+    entered, release, finished = (asyncio.Event() for _ in range(3))
+
+    async def cleanup(**kwargs: Any) -> None:
+        entered.set()
+        await release.wait()
+        finished.set()
+
+    monkeypatch.setattr(manager, "_execute_cancel_paused_run", cleanup)
+    await manager.cancel_paused_run(conversation_id="c1", run_id="r1", ctx=_ctx())
+    try:
+        await entered.wait()
+        await manager.notify_run_stop("r1")
+        release.set()
+        await manager.drain(timeout_seconds=1)
+        assert finished.is_set(), "Stop treated cancellation-only cleanup as active execution"
+    finally:
+        release.set()
+        await manager.cancel_all()
