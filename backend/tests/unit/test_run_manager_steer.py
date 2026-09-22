@@ -65,6 +65,7 @@ def _make_manager() -> RunManager:
     manager = RunManager.__new__(RunManager)  # type: ignore[call-arg]
     manager._redis = _FakeRedis()  # type: ignore[assignment]
     manager._key_prefix = "t"
+    manager._cleanup_tasks = set()
     manager._agent_claim_tokens = {}
     manager._resume_claim_tokens = {}
     manager._preparing_claim_tokens = {}
@@ -220,6 +221,7 @@ async def test_old_task_callback_preserves_replacement_registration() -> None:
     old_task = asyncio.create_task(_wait())
     replacement_task = asyncio.create_task(_wait())
     mgr._tasks = {"run-1": replacement_task}
+    mgr._cleanup_tasks.add(old_task)
     mgr._tasks_empty = asyncio.Event()
     mgr._preparing_runs = {"run-1"}
     mgr._pending_session_inputs = {"run-1": {"s1": ("keep", {})}}
@@ -229,6 +231,7 @@ async def test_old_task_callback_preserves_replacement_registration() -> None:
     assert mgr._tasks["run-1"] is replacement_task
     assert "run-1" in mgr._preparing_runs
     assert "run-1" in mgr._pending_session_inputs
+    assert not mgr._cleanup_tasks
     old_task.cancel()
     replacement_task.cancel()
     await asyncio.gather(old_task, replacement_task, return_exceptions=True)

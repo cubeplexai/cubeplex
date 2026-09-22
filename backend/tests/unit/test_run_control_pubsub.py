@@ -13,6 +13,7 @@ def _mgr(redis) -> RunManager:
     m._redis = redis
     m._key_prefix = "t"
     m._tasks = {}
+    m._cleanup_tasks = set()
     m._agents = {}
     m._agent_claim_tokens = {}
     m._resume_claim_tokens = {}

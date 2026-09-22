@@ -29,6 +29,7 @@ from cubeplex.services.conversation_execution import (
     UserMessageIntent,
 )
 from cubeplex.streams.run_events import (
+    _CLAIM_MATCHES_LUA,
     _active_run_key,
     _run_meta_key,
     create_run,
@@ -150,6 +151,8 @@ async def test_run_manager_rejects_changed_admitted_identity_before_claiming_red
         "terminal_reply_lost",
         "terminal_cancel",
         "next_send",
+        "stop_cleanup_local",
+        "stop_cleanup_remote",
     ],
 )
 async def test_model_runs_once_with_original_selection_after_default_changes_and_redis_expires(
@@ -277,6 +280,25 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
     }
     reply_lost = False
     next_send_claimed = False
+    cleanup_entered, release_cleanup = asyncio.Event(), asyncio.Event()
+    control_tasks: list[asyncio.Task[None]] = []
+    if scenario in ("stop_cleanup_local", "stop_cleanup_remote"):
+        original_eval = run_manager._redis.eval
+
+        async def hold_cleanup_claim_check(script: str, numkeys: int, *args: Any) -> Any:
+            result = await original_eval(script, numkeys, *args)
+            if script == _CLAIM_MATCHES_LUA and not cleanup_entered.is_set():
+                meta = await get_run_meta(
+                    run_manager._redis,
+                    prefix=run_manager._key_prefix,
+                    run_id=str(admitted.admission.run_id),
+                )
+                if meta is not None and meta.status == "completed":
+                    cleanup_entered.set()
+                    await release_cleanup.wait()
+            return result
+
+        monkeypatch.setattr(run_manager._redis, "eval", hold_cleanup_claim_check)
     if scenario in ("terminal_reply_lost", "terminal_cancel", "next_send"):
         original_eval = run_manager._redis.eval
 
@@ -322,7 +344,31 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
             assert duplicate_id == run_id
         else:
             run_id = await run_manager.start_run(**kwargs)
+        if scenario in ("stop_cleanup_local", "stop_cleanup_remote"):
+            async with asyncio.timeout(15):
+                await cleanup_entered.wait()
+            await service(db_session).stop_run(
+                conversation_id=reservation_context.conversation_id,
+                run_id=run_id,
+                actor_user_id=actor,
+                now=datetime.now(UTC),
+            )
+            await db_session.commit()
+            for _ in range(2):
+                if scenario == "stop_cleanup_local":
+                    await run_manager.notify_run_stop(run_id)
+                else:
+                    dispatched = asyncio.Event()
+
+                    async def deliver(started: asyncio.Event) -> None:
+                        started.set()
+                        await run_manager._handle_control({"run_id": run_id, "type": "cancel"})
+
+                    control_tasks.append(asyncio.create_task(deliver(dispatched)))
+                    await dispatched.wait()
+            release_cleanup.set()
         await run_manager.drain(timeout_seconds=30)
+        await asyncio.gather(*control_tasks)
         meta = await get_run_meta(run_manager._redis, prefix=run_manager._key_prefix, run_id=run_id)
         assert meta is not None
         expected_status = {
@@ -336,6 +382,12 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         assert meta.status == expected_status, meta
         if scenario in ("terminal_reply_lost", "terminal_cancel"):
             assert reply_lost
+        if scenario in (
+            "terminal_reply_lost",
+            "terminal_cancel",
+            "stop_cleanup_local",
+            "stop_cleanup_remote",
+        ):
             assert (
                 await get_active_run(
                     run_manager._redis,
@@ -344,6 +396,7 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
                 )
                 is None
             )
+            assert not run_manager._cleanup_tasks
         assert provider.call_count == 1
         if scenario == "foreign_pending":
             async with shared_checkpointer() as cp:
@@ -400,6 +453,10 @@ async def test_model_runs_once_with_original_selection_after_default_changes_and
         )
         assert retried.admission.run_id == run_id and not retried.created
     finally:
+        release_cleanup.set()
+        for control_task in control_tasks:
+            control_task.cancel()
+        await asyncio.gather(*control_tasks, return_exceptions=True)
         await run_manager.cancel_all()
         await cleanup_run_rows(db_session, reservation_context.conversation_id)
 
@@ -483,7 +540,10 @@ async def test_stop_before_worker_entry_finishes_cleanup_without_claiming_execut
             execution_generation=0,
             now=datetime.now(UTC),
         )
-        assert not closed.cleanup_pending
+        # The fixture also has an independent, never-started admitted run.
+        assert closed.cleanup_pending
+        assert closed.run_ids == (reservation_context.spec.originating_run_id,)
+        assert run_id not in closed.run_ids
     finally:
         await cleanup_run_rows(db_session, reservation_context.conversation_id)
 
