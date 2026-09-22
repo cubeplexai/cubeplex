@@ -6,12 +6,11 @@ Polls the ``im_run_queue`` table, claims pending or stale-leased rows via
 ``completed`` and fires the ``on_run_started`` hook so the app can spawn
 an outbound tailer for the run.
 
-Crash safety: if ``start_run`` raises, the row stays in ``status='started'``
-but with a finite ``claim_lease_expires_at``. After the lease expires, the
-next worker poll re-claims via the lease branch in
-``claim_pending_queue_item``. ``max_attempts`` caps the spin so a
-permanently-broken event eventually parks (a janitor pass beyond v1 will
-flip such rows to ``status='failed'``).
+Crash safety: transient failures rewind the row for bounded retry. Human
+messages first create a durable execution admission keyed by their webhook
+receipt, so reclaim after an uncertain start reuses the same run instead of
+executing it again. ``max_attempts`` parks a permanently broken event and
+marks its receipt failed.
 """
 
 from __future__ import annotations
@@ -19,12 +18,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from cubeloop.providers.base import ReasoningControl
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from cubeplex.llm.snapshot import LLMSnapshot
 from cubeplex.models.im_connector import IMConnectorAccount, IMIdentityLink, IMRunQueueItem
 from cubeplex.repositories.im_connector import (
     CONNECTION_DELIVERY_MODES,
@@ -34,6 +36,10 @@ from cubeplex.repositories.im_connector import (
     mark_receipt_completed,
     mark_receipt_failed,
     rewind_queue_item_no_attempt_charge,
+)
+from cubeplex.services.conversation_execution import (
+    ConversationExecutionService,
+    UserMessageIntent,
 )
 from cubeplex.streams.run_manager import RunContext
 
@@ -46,7 +52,12 @@ class _RunStarter(Protocol):
         content: str,
         attachments: list[str] | None,
         ctx: RunContext,
+        run_id: str | None = None,
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
         cancel_pending_hitl: bool = False,
+        llm_snapshot: Any | None = None,
+        admission_id: str | None = None,
     ) -> str: ...
 
 
@@ -55,6 +66,7 @@ RunStartedCallback = Callable[[str, IMRunQueueItem], Awaitable[None]]
 ResolveInboundAttachments = Callable[[IMRunQueueItem, str], Awaitable[tuple[list[str], list[str]]]]
 DeliverableConnectionIds = Callable[[], set[str]]
 ConnectionLeaseValidator = Callable[[str], Awaitable[bool]]
+LoadExecutionSnapshot = Callable[[AsyncSession, str], Awaitable[LLMSnapshot]]
 
 
 async def process_one_queue_item(
@@ -63,6 +75,7 @@ async def process_one_queue_item(
     run_manager: _RunStarter,
     on_run_started: RunStartedCallback | None,
     lease_seconds: int,
+    load_execution_snapshot: LoadExecutionSnapshot,
     resolve_inbound_attachments: ResolveInboundAttachments | None = None,
     deliverable_connection_ids: DeliverableConnectionIds | None = None,
     validate_connection_lease: ConnectionLeaseValidator | None = None,
@@ -103,8 +116,8 @@ async def process_one_queue_item(
         # Look up the sender → cubeplex user override. ``im_identity_links``
         # is populated by the inbound gate when sender resolves to a
         # workspace member; if missing we fall back to ``acting_user_id``.
-        effective_user_id: str = account.acting_user_id
-        if item.sender_im_user_id:
+        effective_user_id: str = item.actor_user_id or account.acting_user_id
+        if item.actor_user_id is None and item.sender_im_user_id:
             link = (
                 await session.execute(
                     select(IMIdentityLink).where(
@@ -257,6 +270,50 @@ async def process_one_queue_item(
             return True
 
     try:
+        # Human IM messages use the already-durable webhook receipt as their
+        # stable source identity. Synthetic schedule/trigger queue rows have no
+        # inbound_message_id and keep their occurrence identity for C2c instead
+        # of being misclassified as user input here.
+        admitted = None
+        execution_snapshot = None
+        if captured_item.inbound_message_id is not None:
+            async with session_maker() as session:
+                execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
+                admitted = await ConversationExecutionService(
+                    session,
+                    org_id=captured["org_id"],
+                    workspace_id=captured["workspace_id"],
+                ).admit_user_message(
+                    conversation_id=captured["conversation_id"],
+                    actor_user_id=captured["acting_user_id"],
+                    namespace="im",
+                    source_id=captured["receipt_id"],
+                    intent=UserMessageIntent(
+                        content=captured["content"],
+                        attachment_ids=tuple(attachment_ids or ()),
+                    ),
+                    snapshot=execution_snapshot,
+                    now=datetime.now(UTC),
+                )
+                await session.commit()
+
+            admission = admitted.admission
+            if admission.run_start_token is None and (
+                admission.revoked_at is not None
+                or admission.run_stop_requested_at is not None
+                or admission.run_finished_at is not None
+            ):
+                logger.info(
+                    "[IM worker] completing queue item {} without starting revoked run {}",
+                    captured_item.id,
+                    admission.run_id,
+                )
+                async with session_maker() as session:
+                    await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
+                    await mark_queue_item_completed(session, item_id=captured_item.id)
+                    await session.commit()
+                return True
+
         run_id = await run_manager.start_run(
             conversation_id=captured["conversation_id"],
             content=captured["content"],
@@ -273,7 +330,12 @@ async def process_one_queue_item(
                 topic_creator_user_id=(captured["topic_creator_user_id"]),
                 sender_display_name=captured["sender_display_name"],
             ),
-            cancel_pending_hitl=True,
+            run_id=admitted.admission.run_id if admitted is not None else None,
+            model_key=admitted.execution.model_key if admitted is not None else None,
+            reasoning=admitted.execution.reasoning if admitted is not None else None,
+            cancel_pending_hitl=admitted is None,
+            llm_snapshot=execution_snapshot,
+            admission_id=admitted.admission.id if admitted is not None else None,
         )
     except Exception as exc:
         # ``RunManager.start_run`` raises a plain RuntimeError when the
@@ -285,7 +347,9 @@ async def process_one_queue_item(
         # poll=1s, max_attempts=5, charging the attempt would park the
         # follow-up as ``failed`` in ~5s even though the conversation
         # just needed a few seconds to finish.
-        if isinstance(exc, RuntimeError) and "already has an active run" in str(exc):
+        if isinstance(exc, RuntimeError) and (
+            "already has an active run" in str(exc) or "pending HITL request" in str(exc)
+        ):
             logger.info(
                 "[IM worker] queue item {} waiting on active run (no attempt charge)",
                 captured_item.id,
@@ -355,6 +419,7 @@ class IMRunQueueWorker:
         session_maker: async_sessionmaker[Any],
         run_manager: _RunStarter,
         on_run_started: RunStartedCallback | None,
+        load_execution_snapshot: LoadExecutionSnapshot,
         resolve_inbound_attachments: ResolveInboundAttachments | None = None,
         deliverable_connection_ids: DeliverableConnectionIds | None = None,
         validate_connection_lease: ConnectionLeaseValidator | None = None,
@@ -364,6 +429,7 @@ class IMRunQueueWorker:
         self._session_maker = session_maker
         self._run_manager = run_manager
         self._on_run_started = on_run_started
+        self._load_execution_snapshot = load_execution_snapshot
         self._resolve_inbound_attachments = resolve_inbound_attachments
         self._deliverable_connection_ids = deliverable_connection_ids
         self._validate_connection_lease = validate_connection_lease
@@ -380,6 +446,7 @@ class IMRunQueueWorker:
                     run_manager=self._run_manager,
                     on_run_started=self._on_run_started,
                     lease_seconds=self._lease_seconds,
+                    load_execution_snapshot=self._load_execution_snapshot,
                     resolve_inbound_attachments=self._resolve_inbound_attachments,
                     deliverable_connection_ids=self._deliverable_connection_ids,
                     validate_connection_lease=self._validate_connection_lease,

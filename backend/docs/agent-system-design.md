@@ -85,10 +85,14 @@ the installation and result commit together, and stable checkpoint message IDs l
 retry repair a lost checkpoint acknowledgement without installing or appending twice.
 Web steering for both running and HITL-paused runs enters the durable steering queue;
 the run's original actor is rechecked before a new input can affect later model or tool
-work. IM, scheduler, and trigger entrances still need their corresponding durable
-admission and authority wiring. Those entrances must not be treated as protected merely
-because the Web paths are available. The new task coordinator stays inactive until all
-entrances and the data-migration gate are complete.
+work. Human IM messages use the durable webhook receipt as their stable source identity.
+The IM worker freezes the resolved actor, text, attachments, and model selection before
+calling RunManager; reclaiming the queue row therefore reuses the same admission and run
+instead of spending twice. Synthetic IM rows from schedules and triggers are not labeled
+as user input: they retain their schedule/trigger occurrence identity for the automation
+admission step. Scheduler and trigger entrances still need that durable admission and
+authority wiring. The new task coordinator stays inactive until those entrances and the
+data-migration gate are complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
 model. For admitted work it durably stops the named run, then claims

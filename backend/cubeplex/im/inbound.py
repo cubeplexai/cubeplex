@@ -254,6 +254,7 @@ async def ingest_inbound_event(
             account_id=account.id,
             receipt_id=receipt.id,
             conversation_id=resolved.conversation_id,
+            actor_user_id=effective_user_id,
             content=event.text,
             channel_id=event.channel_id,
             scope_key=event.scope_key,

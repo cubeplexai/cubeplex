@@ -24,12 +24,14 @@ from typing import Any
 from fastapi import FastAPI
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.config import config as _config
 from cubeplex.credentials.dependencies import build_credential_service
 from cubeplex.db.engine import async_session_maker
 from cubeplex.im.feishu.cardkit_client import CardKitClient
 from cubeplex.im.worker import IMRunQueueWorker
+from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
 from cubeplex.models.im_connector import IMConnectorAccount
 
 # ---------------------------------------------------------------------------
@@ -432,10 +434,14 @@ async def start(app: FastAPI, run_manager: Any) -> None:
         client_for=_client_for,
     )
 
+    async def _load_execution_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+        return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
     worker = IMRunQueueWorker(
         session_maker=async_session_maker,
         run_manager=run_manager,
         on_run_started=_on_run_started,
+        load_execution_snapshot=_load_execution_snapshot,
         resolve_inbound_attachments=resolve_inbound_attachments,
         poll_interval=1.0,
         lease_seconds=300,
