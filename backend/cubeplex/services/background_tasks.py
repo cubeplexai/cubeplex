@@ -146,10 +146,13 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
         ).scalar_one_or_none()
         if conversation is None:
             raise LookupError("conversation not found")
+        await self.session.refresh(admission, with_for_update=True)
         if (
             conversation.deleted_at is not None
             or conversation.execution_closed_at is not None
             or conversation.execution_generation != admission.execution_generation
+            or admission.revoked_at is not None
+            or admission.run_stop_requested_at is not None
         ):
             raise TaskExecutionRevokedError("execution admission is no longer valid")
         accessible = await self.session.scalar(

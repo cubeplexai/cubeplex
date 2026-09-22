@@ -18,6 +18,7 @@ from cubeplex.models.background_task import (
     TaskStopReason,
 )
 from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.membership import Membership
 from cubeplex.models.sandbox_command import MonitorOutcome, SandboxCommand
 from cubeplex.models.user_sandbox import UserSandbox
@@ -29,6 +30,7 @@ LogState = Literal["pending", "retrying", "complete", "unavailable"]
 USER_STOP_REASONS = frozenset(
     {
         TaskStopReason.user_stop,
+        TaskStopReason.run_stop,
         TaskStopReason.conversation_stop,
         TaskStopReason.conversation_deleted,
     }
@@ -85,7 +87,11 @@ class BackgroundTaskLifecycle:
     ) -> tuple[Conversation, UserSandbox, BackgroundTask, SandboxCommand]:
         header = (
             await self.session.execute(
-                select(col(BackgroundTask.conversation_id), col(SandboxCommand.user_sandbox_id))
+                select(
+                    col(BackgroundTask.conversation_id),
+                    col(BackgroundTask.admission_id),
+                    col(SandboxCommand.user_sandbox_id),
+                )
                 .join(SandboxCommand, col(SandboxCommand.task_id) == col(BackgroundTask.id))
                 .where(
                     col(BackgroundTask.id) == task_id,
@@ -111,6 +117,19 @@ class BackgroundTaskLifecycle:
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == header.admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.conversation_id) == header.conversation_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if admission is None:
+            raise LookupError("execution admission not found")
         sandbox = (
             await self.session.execute(
                 select(UserSandbox)
@@ -151,13 +170,22 @@ class BackgroundTaskLifecycle:
         ):
             raise TaskOwnerLostError("task owner lease is no longer valid")
 
-    @staticmethod
-    def _execution_open(conversation: Conversation, task: BackgroundTask) -> bool:
-        return (
-            conversation.deleted_at is None
-            and conversation.execution_closed_at is None
-            and conversation.execution_generation == task.execution_generation
-        )
+    async def _execution_stop_reason(
+        self, conversation: Conversation, task: BackgroundTask
+    ) -> TaskStopReason | None:
+        if conversation.deleted_at is not None:
+            return TaskStopReason.conversation_deleted
+        if (
+            conversation.execution_closed_at is not None
+            or conversation.execution_generation != task.execution_generation
+        ):
+            return TaskStopReason.conversation_stop
+        admission = await self.session.get(ConversationExecutionAdmission, task.admission_id)
+        if admission is None or admission.revoked_at is not None:
+            return TaskStopReason.user_stop
+        if task.backgrounded_at is None and admission.run_stop_requested_at is not None:
+            return TaskStopReason.run_stop
+        return None
 
     @staticmethod
     def needs_management(task: BackgroundTask, command: SandboxCommand) -> bool:
@@ -204,7 +232,7 @@ class BackgroundTaskLifecycle:
         conversation, sandbox, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
         if (
-            not self._execution_open(conversation, task)
+            await self._execution_stop_reason(conversation, task) is not None
             or task.stop_requested_at is not None
             or (task.deadline_at is not None and task.deadline_at <= now)
             or task.state not in INFLIGHT_TASK_STATES
@@ -279,12 +307,8 @@ class BackgroundTaskLifecycle:
     ) -> tuple[BackgroundTask, SandboxCommand]:
         conversation, _, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
-        reason: TaskStopReason | None = None
-        if conversation.deleted_at is not None:
-            reason = TaskStopReason.conversation_deleted
-        elif not self._execution_open(conversation, task):
-            reason = TaskStopReason.conversation_stop
-        elif (
+        reason = await self._execution_stop_reason(conversation, task)
+        if reason is None and (
             task.state in INFLIGHT_TASK_STATES
             and task.deadline_at is not None
             and task.deadline_at <= now
@@ -381,6 +405,11 @@ class BackgroundTaskLifecycle:
         if task.foreground_result_delivered_at is not None:
             raise ValueError("final result was already delivered in the foreground")
         if task.backgrounded_at is None:
+            if (
+                task.notifications_cancelled_at is not None
+                or await self._execution_stop_reason(conversation, task) is not None
+            ):
+                raise ValueError("stopped foreground work cannot be handed to the background")
             task.backgrounded_at = now
             task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
@@ -565,7 +594,7 @@ class BackgroundTaskLifecycle:
             or task.foreground_result_delivered_at is not None
             or not task.notify_on_complete
             or task.notifications_cancelled_at is not None
-            or not self._execution_open(conversation, task)
+            or await self._execution_stop_reason(conversation, task) is not None
         ):
             return
         reason = "monitor_result" if command.kind == "monitor" else "completion"

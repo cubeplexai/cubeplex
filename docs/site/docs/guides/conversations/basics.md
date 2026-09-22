@@ -102,6 +102,14 @@ already recorded in history stays there. This differs from answering or denying
 a confirmation, which can let the agent continue. A successful Stop request
 means cleanup was accepted; the composer waits for the server to confirm it is idle.
 
+The new background-task lifecycle is still being introduced and is not enabled yet.
+Its control service distinguishes stopping a named response from stopping all work
+in the conversation: work already handed to the background keeps running after that
+response is stopped, while unhanded foreground work cannot escape cancellation by
+moving to the background afterward. These storage and control changes do not yet
+provide the complete new buttons or restart recovery; those require the coordinated
+lifecycle cutover described in [Sandboxes](./sandboxes.md).
+
 ## Managing conversations
 
 Right-click (or click the three-dot menu) on any conversation in the sidebar to access these actions:
