@@ -7,9 +7,11 @@ by name (``id``, ``email``, ``hashed_password``, ``is_active``, ``is_superuser``
 ``is_verified``).
 """
 
+from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase
@@ -32,6 +34,10 @@ class User(CubeplexBase, table=True):
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
+    deletion_pending_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     language: str = Field(default="en", max_length=10)
     display_name: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=2048)

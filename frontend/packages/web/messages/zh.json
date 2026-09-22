@@ -1494,6 +1494,7 @@
       "deleteButton": "删除工作区",
       "deleteDescription": "永久删除此工作区及其所有数据，此操作不可撤销。",
       "deleteSuccess": "工作区已删除",
+      "deleteCleanupPending": "后台任务仍在停止中，请稍后重试删除。",
       "deleteConfirmTitle": "删除工作区？",
       "deleteConfirmMessage": "此操作不可撤销。请输入工作区名称以确认。",
       "deleteNamePlaceholder": "输入工作区名称",
@@ -2466,6 +2467,7 @@
       "deleting": "删除中…",
       "wrongPassword": "密码不正确",
       "transferFirst": "请先转让组织所有权，再删除账户",
+      "cleanupPending": "后台任务仍在停止中，请稍后重试删除。",
       "error": "删除账户失败"
     }
   },

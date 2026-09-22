@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
+import {
+  createApiClient,
+  useAuthStore,
+  useWorkspaceStore,
+  type HardDeleteResult,
+} from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -20,6 +25,7 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
   const router = useRouter()
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   const handleOpenChange = (next: boolean): void => {
@@ -27,11 +33,13 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
     if (!next) {
       setPassword('')
       setError(null)
+      setNotice(null)
     }
   }
 
   const handleDelete = async (): Promise<void> => {
     setError(null)
+    setNotice(null)
     setDeleting(true)
     try {
       const client = createApiClient('')
@@ -45,6 +53,11 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
         } else {
           setError(t('error'))
         }
+        return
+      }
+      const result = (await res.json()) as HardDeleteResult
+      if (result.cleanup_pending) {
+        setNotice(t('cleanupPending'))
         return
       }
       useAuthStore.getState().reset()
@@ -114,6 +127,7 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
             />
           </div>
           {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+          {notice && <p className="mt-2 text-sm text-muted-foreground">{notice}</p>}
           <div className="mt-4 flex items-center justify-end gap-2">
             <DialogPrimitive.Close
               render={

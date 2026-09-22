@@ -51,4 +51,26 @@ describe('workspaceStore', () => {
     useWorkspaceStore.getState().reset()
     expect(useWorkspaceStore.getState().workspaces).toEqual([])
   })
+
+  it('retains a workspace until hard-delete cleanup completes', async () => {
+    useWorkspaceStore.setState({
+      workspaces: [{ id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' }],
+    })
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deleted: false, cleanup_pending: true }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deleted: true, cleanup_pending: false }), { status: 200 }),
+      )
+    const client = createApiClient('')
+
+    const pending = await useWorkspaceStore.getState().deleteWs(client, 'w1')
+    expect(pending.cleanup_pending).toBe(true)
+    expect(useWorkspaceStore.getState().workspaces).toHaveLength(1)
+
+    const deleted = await useWorkspaceStore.getState().deleteWs(client, 'w1')
+    expect(deleted.deleted).toBe(true)
+    expect(useWorkspaceStore.getState().workspaces).toEqual([])
+  })
 })
