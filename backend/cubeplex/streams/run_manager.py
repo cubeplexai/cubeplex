@@ -1180,6 +1180,7 @@ class RunManager:
                 admitted.admission.run_start_token is not None
                 or admitted.admission.run_finished_at is not None
                 or admitted.admission.revoked_at is not None
+                or admitted.admission.run_stop_requested_at is not None
             ):
                 return run_id
             start_token = str(uuid7())
@@ -1734,7 +1735,7 @@ class RunManager:
         if pending_run_id != run_id:
             raise ResumeConflict("question belongs to another run")
         started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
-        admission = await self._close_paused_execution(ctx=ctx, run_id=run_id)
+        admission = await self._stop_paused_execution(ctx=ctx, run_id=run_id)
 
         # 2. Single-flight CAS — only one cancel/resume may own the slot.
         claim = await claim_resume(
@@ -1769,7 +1770,7 @@ class RunManager:
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
-    async def _close_paused_execution(
+    async def _stop_paused_execution(
         self, *, ctx: RunContext, run_id: str
     ) -> ConversationExecutionAdmission | None:
         from cubeplex.db.engine import async_session_maker
@@ -1780,16 +1781,16 @@ class RunManager:
 
         try:
             async with async_session_maker() as session:
-                admission = await ConversationExecutionService(
+                stopped = await ConversationExecutionService(
                     session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                ).close_run_generation(
+                ).stop_run(
                     conversation_id=ctx.conversation_id,
                     run_id=run_id,
                     actor_user_id=ctx.user_id,
                     now=datetime.now(UTC),
                 )
                 await session.commit()
-                return admission
+                return stopped.admission
         except (ExecutionConflictError, LookupError) as exc:
             raise ResumeConflict("original execution cannot be stopped") from exc
 

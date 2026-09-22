@@ -50,6 +50,9 @@ class ConversationExecutionAdmission(CubeplexBase, OrgScopedMixin, table=True):
     run_finished_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+    run_stop_requested_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
     revoked_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )

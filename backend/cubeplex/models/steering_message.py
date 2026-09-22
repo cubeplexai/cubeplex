@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar
 
-from sqlalchemy import Column, DateTime, Index, String, Text
+from sqlalchemy import BigInteger, Column, DateTime, Index, String, Text
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin, org_scope_index
@@ -48,6 +48,12 @@ class SteeringMessage(CubeplexBase, OrgScopedMixin, table=True):
         ondelete="CASCADE",
     )
     run_id: str = Field(max_length=64)
+    source_kind: str = Field(
+        default="user_message", max_length=32, sa_column_kwargs={"server_default": "user_message"}
+    )
+    execution_generation: int = Field(
+        default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )
     client_steer_id: str = Field(max_length=64)
     content: str = Field(sa_column=Column(Text, nullable=False))
     sender_user_id: str = Field(foreign_key="users.id", max_length=20)
