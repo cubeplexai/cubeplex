@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from cubeplex.models import Conversation, ConversationExecutionAdmission, User, Workspace
+from cubeplex.models.im_connector import IMRunQueueItem, IMWebhookReceipt
 
 
 def _unique_app_id(tag: str) -> str:
@@ -17,6 +21,126 @@ def _unique_app_id(tag: str) -> str:
 
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.mark.parametrize(
+    ("operation", "started"),
+    [("delete", False), ("disable", False), ("delete", True)],
+)
+async def test_connector_shutdown_reconciles_handoff_admission(
+    async_client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    operation: str,
+    started: bool,
+) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from tests.e2e.conftest import DEFAULT_TEST_EMAIL, DEFAULT_WS_ID
+
+    bot_id = _unique_app_id("delete-handoff")
+    with (
+        patch(
+            "cubeplex.im.wecom.gateway.probe_wecom_credentials",
+            new_callable=AsyncMock,
+        ),
+        patch("cubeplex.im.wecom.gateway.WecomGateway.start", new_callable=AsyncMock),
+        patch("cubeplex.im.wecom.gateway.WecomGateway.stop", new_callable=AsyncMock),
+    ):
+        created = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts",
+            json={
+                "platform": "wecom",
+                "bot_id": bot_id,
+                "bot_name": "Delete handoff",
+                "secret": "wecom-secret",
+            },
+        )
+        assert created.status_code == 201, created.text
+        account = created.json()
+
+        async with session_factory() as session:
+            actor = (
+                await session.execute(select(User).where(User.email == DEFAULT_TEST_EMAIL))
+            ).scalar_one()
+            workspace = await session.get(Workspace, DEFAULT_WS_ID)
+            assert workspace is not None
+            conversation = Conversation(
+                org_id=workspace.org_id,
+                workspace_id=DEFAULT_WS_ID,
+                creator_user_id=actor.id,
+                title="unstarted IM handoff",
+            )
+            session.add(conversation)
+            await session.flush()
+            admission = ConversationExecutionAdmission(
+                org_id=workspace.org_id,
+                workspace_id=DEFAULT_WS_ID,
+                conversation_id=conversation.id,
+                actor_user_id=actor.id,
+                execution_generation=0,
+                source_kind="schedule_occurrence",
+                source_id=f"occurrence:{_secrets.token_hex(8)}",
+                run_id=f"run-{_secrets.token_hex(8)}",
+                run_start_token="started-owner" if started else None,
+                run_start_requested_at=datetime.now(UTC) if started else None,
+                run_started_at=datetime.now(UTC) if started else None,
+            )
+            receipt = IMWebhookReceipt(
+                org_id=workspace.org_id,
+                workspace_id=DEFAULT_WS_ID,
+                account_id=account["id"],
+                platform_event_id=f"event-{_secrets.token_hex(8)}",
+            )
+            session.add_all([admission, receipt])
+            await session.flush()
+            queue_item = IMRunQueueItem(
+                org_id=workspace.org_id,
+                workspace_id=DEFAULT_WS_ID,
+                account_id=account["id"],
+                receipt_id=receipt.id,
+                conversation_id=conversation.id,
+                actor_user_id=actor.id,
+                execution_admission_id=admission.id,
+                content="scheduled delivery",
+                channel_id="channel-delete",
+                scope_key="scope-delete",
+                scope_kind="channel",
+            )
+            session.add(queue_item)
+            await session.commit()
+            admission_id = admission.id
+
+        if operation == "delete":
+            stopped = await async_client.delete(
+                f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}"
+            )
+            assert stopped.status_code == 204, stopped.text
+        else:
+            stopped = await async_client.post(
+                f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}/disable"
+            )
+            assert stopped.status_code == 200, stopped.text
+
+    async with session_factory() as session:
+        admission = await session.get(ConversationExecutionAdmission, admission_id)
+        assert admission is not None
+        if started:
+            assert admission.revoked_at is None
+            assert admission.run_stop_requested_at is None
+            assert admission.run_finished_at is None
+        else:
+            assert admission.revoked_at is not None
+            assert admission.run_stop_requested_at is not None
+            assert admission.run_finished_at is not None
+            assert admission.run_terminal_status == "cancelled"
+
+    if operation == "disable":
+        deleted = await async_client.delete(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account['id']}"
+        )
+        assert deleted.status_code == 204, deleted.text
 
 
 async def test_workspace_connect_list_delete_wecom_account(

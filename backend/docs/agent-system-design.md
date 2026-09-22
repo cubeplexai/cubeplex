@@ -90,7 +90,10 @@ The IM worker freezes the resolved actor, text, attachments, and model selection
 calling RunManager; reclaiming the queue row therefore reuses the same admission and run
 instead of spending twice. Synthetic IM rows from schedules and triggers are not labeled
 as user input: they retain their schedule/trigger occurrence identity for the automation
-admission step. The scheduler now freezes each occurrence when it is claimed, binds one
+admission step. The final IM handoff binds its admission while holding the connector
+account lock. Disabling or deleting that connector cancels queued admissions that have
+not acquired run ownership, while already-started runs keep their history. The scheduler
+now freezes each occurrence when it is claimed, binds one
 conversation, run ID, and automatic admission, and reuses those bindings across busy,
 IM, and stale-claim retries. A fixed target's generation is frozen at claim time, so an
 older occurrence cannot reopen a conversation after Stop All; an occurrence claimed
