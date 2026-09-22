@@ -156,7 +156,7 @@ return 1
 # ARGV[1] = expected run_id, ARGV[2] = optional expected claim token
 _CLEAR_ACTIVE_IF_MATCHES_LUA = """
 if ARGV[2] ~= '' and redis.call('HGET', KEYS[2], 'claim_token') ~= ARGV[2] then
-  return 0
+  return -1
 end
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   redis.call('HDEL', KEYS[2], 'resume_finalizing_token', 'resume_finalizing_until')
@@ -578,9 +578,9 @@ async def clear_active_run(
     conversation_id: str,
     run_id: str,
     claim_token: str | None = None,
-) -> None:
-    """Clear the active-run pointer iff it still points to the given run."""
-    await redis.eval(  # type: ignore[misc]
+) -> bool:
+    """Release this run's slot; false means the attempt lost ownership, not released."""
+    result = await redis.eval(  # type: ignore[misc]
         _CLEAR_ACTIVE_IF_MATCHES_LUA,
         2,
         _active_run_key(prefix, conversation_id),
@@ -588,6 +588,7 @@ async def clear_active_run(
         run_id,
         claim_token or "",
     )
+    return int(result) >= 0
 
 
 async def append_run_event(
@@ -724,10 +725,10 @@ async def expire_run_data(
     run_id: str,
     ttl_seconds: int,
     claim_token: str | None = None,
-) -> None:
-    """Expire run metadata and event log."""
+) -> bool:
+    """Expire run data, returning false if the attempt lost metadata ownership."""
     if claim_token is not None:
-        await redis.eval(  # type: ignore[misc]
+        applied = await redis.eval(  # type: ignore[misc]
             "if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then return 0 end "
             "redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2])) "
             "redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2])) return 1",
@@ -737,11 +738,12 @@ async def expire_run_data(
             claim_token,
             str(ttl_seconds),
         )
-        return
+        return bool(applied)
     pipe = redis.pipeline()
     pipe.expire(_run_meta_key(prefix, run_id), ttl_seconds)
     pipe.expire(_run_events_key(prefix, run_id), ttl_seconds)
     await pipe.execute()
+    return True
 
 
 async def mark_run_stale(
