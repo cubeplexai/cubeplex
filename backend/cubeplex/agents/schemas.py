@@ -188,6 +188,20 @@ class InjectedMessageEvent(AgentEvent):
     )
 
 
+class BackgroundTaskNotice(BaseModel):
+    """Durable internal input produced by one completed background task."""
+
+    source: Literal["background_task"] = "background_task"
+    notice_id: str
+    task_id: str
+    task_kind: str
+    originating_run_id: str
+    execution_generation: int = Field(ge=0)
+    reason: str
+    summary: str
+    result_ref: str | None = None
+
+
 class SandboxConfirmRequestEvent(AgentEvent):
     """A sandbox ``execute`` command matched a ``confirm`` rule and is paused
     awaiting human approval. The frontend renders an inline approve/deny card.

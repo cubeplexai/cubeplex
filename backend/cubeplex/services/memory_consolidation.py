@@ -254,6 +254,41 @@ def _render_history(messages: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def _is_background_input(message: Any) -> bool:
+    metadata = getattr(message, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("source") == "background_task":
+        return True
+    notice_id = metadata.get("notice_id")
+    return isinstance(notice_id, str) and notice_id.startswith(("bge-", "scmw-", "scmd-"))
+
+
+def _without_background_rounds(messages: list[Any]) -> list[Any]:
+    """Remove complete runs contaminated by internal task results."""
+    background_run_ids = {
+        run_id
+        for message in messages
+        if _is_background_input(message)
+        and isinstance((run_id := getattr(message, "metadata", {}).get("run_id")), str)
+    }
+    filtered: list[Any] = []
+    drop_segment = False
+    for message in messages:
+        metadata = getattr(message, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        role = getattr(message, "role", None)
+        if role == "user":
+            drop_segment = (
+                _is_background_input(message) or metadata.get("run_id") in background_run_ids
+            )
+        if metadata.get("run_id") in background_run_ids:
+            drop_segment = True
+        if not drop_segment:
+            filtered.append(message)
+    return filtered
+
+
 async def run_consolidation(
     *,
     redis: Redis,
@@ -295,7 +330,13 @@ async def run_consolidation(
                 redis, prefix, conversation_id, cutoff=cutoff, consumed=consumed
             )
             return
-        history_text = _render_history(data.messages[-HISTORY_MSG_CAP:])
+        memory_messages = _without_background_rounds(data.messages)
+        if not memory_messages:
+            await mark_consolidated(
+                redis, prefix, conversation_id, cutoff=cutoff, consumed=consumed
+            )
+            return
+        history_text = _render_history(memory_messages[-HISTORY_MSG_CAP:])
 
         async with session_maker() as s:
             if authorize_transaction is not None:
