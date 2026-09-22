@@ -150,7 +150,8 @@ class ConversationExecutionService:
             or admission.conversation_id != conversation_id
             or admission.actor_user_id != actor_user_id
             or admission.run_id != run_id
-            or admission.source_kind != "user_message"
+            or admission.source_kind
+            not in ("user_message", "schedule_occurrence", "trigger_occurrence")
             or admission.execution_kind != "run"
             or admission.request_fingerprint != self._fingerprint(intent)
             or admission.resolved_execution is None
@@ -671,6 +672,79 @@ class ConversationExecutionService:
         conversation.has_messages = True
         conversation.model_key = intent.model_key
         conversation.reasoning = execution.reasoning.model_dump(mode="json")
+        conversation.updated_at = now
+        self.session.add(admission)
+        await self.session.flush()
+        return AdmittedExecution(admission, execution, True)
+
+    async def admit_automatic_run(
+        self,
+        *,
+        conversation_id: str,
+        actor_user_id: str,
+        source_kind: Literal["schedule_occurrence", "trigger_occurrence"],
+        source_id: str,
+        intent: UserMessageIntent,
+        execution: ResolvedExecution,
+        snapshot: LLMSnapshot,
+        now: datetime,
+        run_id: str | None = None,
+    ) -> AdmittedExecution:
+        """Bind one frozen automatic occurrence to one conversation and run."""
+        require_aware(now)
+        if source_kind not in ("schedule_occurrence", "trigger_occurrence"):
+            raise ValueError("automatic execution requires a trusted source kind")
+        if not 0 < len(source_id) <= 255:
+            raise ValueError("automatic execution requires a stable source ID")
+        if execution.trigger != "automated":
+            raise ValueError("automatic execution requires an automated model snapshot")
+        if not intent.content.strip() and not intent.attachment_ids:
+            raise ValueError("automatic execution requires content or attachments")
+
+        conversation = await self._lock_authorized_conversation(conversation_id, actor_user_id)
+        fingerprint = self._fingerprint(intent)
+        repository = ConversationExecutionAdmissionRepository(
+            self.session, org_id=self.org_id, workspace_id=self.workspace_id
+        )
+        previous = await repository.get_source(source_kind=source_kind, source_id=source_id)
+        if previous is not None:
+            if (
+                previous.conversation_id != conversation_id
+                or previous.actor_user_id != actor_user_id
+                or previous.execution_kind != "run"
+                or previous.request_fingerprint != fingerprint
+                or previous.resolved_execution != execution.model_dump(mode="json")
+                or previous.run_id is None
+                or (run_id is not None and previous.run_id != run_id)
+            ):
+                raise ExecutionConflictError(
+                    "automatic source is already bound to different or unproven work"
+                )
+            if self._needs_run_start(previous):
+                self._validate_models(execution, snapshot)
+            return AdmittedExecution(previous, execution, False)
+
+        self._validate_models(execution, snapshot)
+        await self._attach_files(conversation_id, actor_user_id, intent.attachment_ids, now)
+        if conversation.execution_closed_at is not None:
+            conversation.execution_generation += 1
+            conversation.execution_closed_at = None
+        admission = ConversationExecutionAdmission(
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            source_kind=source_kind,
+            source_id=source_id,
+            execution_generation=conversation.execution_generation,
+            execution_kind="run",
+            request_fingerprint=fingerprint,
+            resolved_execution=execution.model_dump(mode="json"),
+            run_id=run_id or str(uuid4()),
+            created_at=now,
+            updated_at=now,
+        )
+        conversation.has_messages = True
         conversation.updated_at = now
         self.session.add(admission)
         await self.session.flush()
