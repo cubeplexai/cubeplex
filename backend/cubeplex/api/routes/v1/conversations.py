@@ -1,5 +1,6 @@
 """Conversations API routes."""
 
+import asyncio
 import json
 import logging
 import re
@@ -19,7 +20,13 @@ from sqlalchemy.pool import NullPool
 
 from cubeplex.agents.schemas import AgentEvent
 from cubeplex.api.exceptions import InvalidInputError
-from cubeplex.api.schemas.conversations import InviteToGroupRequest
+from cubeplex.api.schemas.conversations import (
+    InviteToGroupRequest,
+    StopAllRequest,
+    StopAllResponse,
+    StopRunRequest,
+    StopRunResponse,
+)
 from cubeplex.api.schemas.ws_topics import UpgradeToTopicRequest
 from cubeplex.api.serializers import serialize_conversation as _serialize_conversation
 from cubeplex.auth.context import RequestContext
@@ -51,6 +58,10 @@ from cubeplex.repositories.steering_message import (
     SteeringMessageQueueFullError,
 )
 from cubeplex.services.avatar_store import resolve_avatar_url
+from cubeplex.services.conversation_execution import (
+    ConversationExecutionService,
+    ExecutionConflictError,
+)
 from cubeplex.skills.cache import SkillCache
 from cubeplex.streams.replay_coalescer import ReplayCoalescer
 from cubeplex.streams.run_events import (
@@ -2043,82 +2054,101 @@ async def compact_conversation(
         )
 
 
-@router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def _signal_stopped_runs(
+    raw_request: Request, ctx: RequestContext, conversation_id: str, run_ids: tuple[str, ...]
+) -> None:
+    from cubeplex.agents.checkpointer import shared_checkpointer
+
+    manager = raw_request.app.state.run_manager
+    try:
+        # This is only a wakeup; the durable intent remains recoverable on failure.
+        async with asyncio.timeout(3):
+            async with shared_checkpointer() as cp:
+                pending_run_id = await cp.load_pending_run_id(conversation_id)
+            for run_id in run_ids:
+                if run_id == pending_run_id:
+                    await manager.cancel_paused_run(
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        ctx=RunContext(
+                            user_id=ctx.user.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                        ),
+                    )
+                else:
+                    await manager.notify_run_stop(run_id)
+    except Exception:
+        logger.warning("Stop signal deferred for conversation %s", conversation_id, exc_info=True)
+
+
+@router.post(
+    "/{conversation_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=StopRunResponse,
+)
 async def cancel_active_run(
     conversation_id: str,
+    body: StopRunRequest,
     raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
-    rds: Annotated[RedisHandle, Depends(redis_dep)],
-) -> dict[str, object]:
-    """Cancel the conversation's active run, if any."""
-    conv_repo = ConversationRepository(
-        session,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-        user_id=ctx.user.id,
-    )
-    conversation = await conv_repo.get_by_id(conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation {conversation_id} not found",
-        )
-
-    active_run = await get_active_run(
-        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
-    )
-
-    from cubeplex.agents.checkpointer import shared_checkpointer
-
-    run_manager = raw_request.app.state.run_manager
-
-    # Cancel-on-paused dispatch — covers both the live paused_hitl case
-    # AND the long-pause TTL-expired case where the Redis active-run row
-    # is gone but cubepi_threads.pending_request + run_id still exist.
-    # bootstrap + answer routes already fall back to the DB-persisted
-    # run_id in this case; cancel needs the same fallback or the user
-    # sees a card they can't cancel.
-    paused_run_id: str | None = None
-    if active_run is not None and active_run.status == "paused_hitl":
-        paused_run_id = active_run.run_id
-    elif active_run is None:
-        async with shared_checkpointer() as _cp:
-            persisted_run_id = await _cp.load_pending_run_id(conversation_id)
-        if persisted_run_id is not None:
-            paused_run_id = persisted_run_id
-
-    if paused_run_id is not None:
-        run_ctx = RunContext(
-            user_id=ctx.user.id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
+) -> StopRunResponse:
+    """Durably stop the named run without closing its conversation generation."""
+    try:
+        stopped = await ConversationExecutionService(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        ).stop_run(
             conversation_id=conversation_id,
-            conversation_creator_user_id=conversation.creator_user_id,
-            trigger=await _trigger_for_resume(rds, run_id=paused_run_id),
+            run_id=body.run_id,
+            actor_user_id=ctx.user.id,
+            now=datetime.now(UTC),
         )
-        try:
-            await run_manager.cancel_paused_run(
-                conversation_id=conversation_id,
-                run_id=paused_run_id,
-                reason="cancelled by user",
-                ctx=run_ctx,
-            )
-        except ResumeNoPending:
-            # Pending got cleared between our DB read and our claim —
-            # treat as already done.
-            return {"status": "no_active_run", "run_id": None}
-        except ResumeInFlight as exc:
-            raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
-        except ResumeConflict as exc:
-            raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
-        return {"status": "published", "run_id": paused_run_id}
+        await session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Execution not found") from exc
+    response = StopRunResponse(
+        run_id=stopped.run_id, accepted=stopped.accepted, cleanup_pending=stopped.cleanup_pending
+    )
+    await _signal_stopped_runs(raw_request, ctx, conversation_id, (stopped.run_id,))
+    return response
 
-    if active_run is None or active_run.status != "running":
-        return {"status": "no_active_run", "run_id": None}
 
-    dispatch_status = await run_manager.dispatch_cancel(active_run.run_id)
-    return {"status": dispatch_status, "run_id": active_run.run_id}
+@router.post(
+    "/{conversation_id}/stop-all",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=StopAllResponse,
+)
+async def stop_all_execution(
+    conversation_id: str,
+    body: StopAllRequest,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> StopAllResponse:
+    """Close only the requested generation, including work without an active run."""
+    try:
+        stopped = await ConversationExecutionService(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        ).close_generation(
+            conversation_id=conversation_id,
+            actor_user_id=ctx.user.id,
+            execution_generation=body.execution_generation,
+            now=datetime.now(UTC),
+        )
+        await session.commit()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Conversation not found") from exc
+    except ExecutionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = StopAllResponse(
+        execution_generation=stopped.execution_generation,
+        accepted=stopped.accepted,
+        cleanup_pending=stopped.cleanup_pending,
+    )
+    await _signal_stopped_runs(raw_request, ctx, conversation_id, stopped.run_ids)
+    return response
 
 
 @router.post("/{conversation_id}/steer", status_code=status.HTTP_202_ACCEPTED)
