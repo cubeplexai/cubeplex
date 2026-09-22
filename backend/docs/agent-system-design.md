@@ -90,9 +90,16 @@ The IM worker freezes the resolved actor, text, attachments, and model selection
 calling RunManager; reclaiming the queue row therefore reuses the same admission and run
 instead of spending twice. Synthetic IM rows from schedules and triggers are not labeled
 as user input: they retain their schedule/trigger occurrence identity for the automation
-admission step. Scheduler and trigger entrances still need that durable admission and
-authority wiring. The new task coordinator stays inactive until those entrances and the
-data-migration gate are complete.
+admission step. The scheduler now freezes each occurrence when it is claimed, binds one
+conversation, run ID, and automatic admission, and reuses those bindings across busy,
+IM, and stale-claim retries. A fixed target's generation is frozen at claim time, so an
+older occurrence cannot reopen a conversation after Stop All; an occurrence claimed
+after Stop All may open a new generation. IM handoff remains `queued` until the admitted
+run reports an outcome and is not treated as proof that execution started. Pausing or
+deleting the schedule cancels only occurrences that have not acquired a run start token;
+accepted runs keep their history. Trigger
+events still need the equivalent durable claim worker and admission wiring. The new task
+coordinator stays inactive until that entrance and the data-migration gate are complete.
 
 The paused-run branch of main Stop no longer synthesizes an answer or starts a
 model. For admitted work it durably stops the named run, then claims

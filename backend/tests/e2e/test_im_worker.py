@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from cubeloop.providers.base import ReasoningControl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -16,13 +17,18 @@ from sqlalchemy.pool import NullPool
 from cubeplex.im.inbound import ingest_inbound_event
 from cubeplex.im.types import InboundEvent
 from cubeplex.im.worker import process_one_queue_item
+from cubeplex.llm.snapshot import LLMSnapshot
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.conversation_execution import (
+    ConversationExecutionService,
+    ResolvedExecution,
+    UserMessageIntent,
+)
 from cubeplex.streams.run_manager import RunContext
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
@@ -451,6 +457,89 @@ async def test_revoked_queued_message_completes_without_starting_or_tailing(
         assert item.status == "completed"
         assert receipt is not None
         assert receipt.status == "completed"
+
+
+async def test_revoked_automatic_handoff_completes_without_starting(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-revoked-automatic",
+            channel_id="oc_chat",
+            scope_key="u:revoked-automatic",
+            scope_kind="participant",
+            reply_to_id=None,
+            inbound_message_id="ev-revoked-automatic",
+            sender_ref="revoked-automatic",
+            sender_open_id="revoked-automatic",
+            text="do not start automatic work",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        snapshot = await im_test_execution_snapshot(session, account.org_id)
+        execution_service = ConversationExecutionService(
+            session,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+        )
+        admitted = await execution_service.admit_automatic_run(
+            conversation_id=item.conversation_id,
+            actor_user_id=_USER_ID,
+            source_kind="schedule_occurrence",
+            source_id="stkrn-revoked-auto",
+            intent=UserMessageIntent(content=item.content),
+            execution=ResolvedExecution(
+                model_key="pro",
+                primary="provider/default",
+                reasoning=ReasoningControl(),
+                trigger="automated",
+            ),
+            snapshot=snapshot,
+            now=datetime.now(UTC),
+        )
+        item.execution_admission_id = admitted.admission.id
+        item.inbound_message_id = None
+        cancelled = await execution_service.cancel_unstarted_automatic_run(
+            source_kind="schedule_occurrence",
+            source_id="stkrn-revoked-auto",
+            now=datetime.now(UTC),
+        )
+        assert cancelled is True
+        await session.commit()
+
+    run_manager = _FakeRunManager()
+
+    async def unexpected_snapshot_load(_session: AsyncSession, _org_id: str) -> LLMSnapshot:
+        raise AssertionError("revoked automatic handoff must not resolve a model")
+
+    completed = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=run_manager,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=unexpected_snapshot_load,
+    )
+
+    assert completed is True
+    assert run_manager.calls == []
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        assert item.status == "completed"
 
 
 async def test_synthetic_im_queue_row_does_not_claim_user_message_identity(

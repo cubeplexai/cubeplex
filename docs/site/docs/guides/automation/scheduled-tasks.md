@@ -61,11 +61,11 @@ You control where each fire's agent run happens with the **Conversation target**
 
 A third mode, **IM channel**, posts results into a chat on a linked IM platform (and survives `/new` in that chat). From the web UI you usually get this mode by creating the task in IM, or by **editing** an existing task whose conversation or topic already has an IM binding and switching the destination to **IM channel**. There is no free-form channel picker — the server resolves the binding from that conversation/topic; if none is found, the change is rejected.
 
-You can change the destination later (fixed ↔ new conversation each run ↔ IM channel) without deleting the task. Name, prompt, and schedule remain independently editable.
+You can change the destination later (fixed ↔ new conversation each run ↔ IM channel) without deleting the task. Name, prompt, and schedule remain independently editable. An occurrence keeps the prompt, owner, destination, and model selection it had when the scheduler claimed it; edits apply to later occurrences and do not rewrite a retry already in progress.
 
 ## Pause, resume, and missed runs
 
-You can **pause** a task at any time from its detail panel or card menu. While paused, no fires occur and the status shows **Paused**. Click **Resume** to reactivate it.
+You can **pause** a task at any time from its detail panel or card menu. While paused, no fires occur and the status shows **Paused**. A claimed or IM-queued occurrence that has not started is cancelled; a run that has already started is allowed to finish and remains in history. Click **Resume** to reactivate the task. Deleting a task follows the same rule for work that was already claimed.
 
 When a task can't fire on time — because it was paused, or the scheduler was temporarily unavailable — missed occurrences are handled automatically; there is no per-task policy to configure:
 
@@ -79,10 +79,13 @@ Every occurrence is recorded in the task's run history, shown in the task detail
 - **Scheduled time** — when the occurrence was due to fire.
 - **State** — one of:
   - **Claimed** — the occurrence was picked up and is about to start.
+  - **Queued** — the occurrence was handed to an IM delivery queue but its agent run has not started yet.
   - **Running** — the agent run is in progress.
   - **Succeeded** — the run completed.
   - **Failed** — the run errored.
+  - **Cancelled** — the task was paused or deleted before the run started, or the accepted run was cancelled.
   - **Skipped (missed)** — the occurrence was missed and not run (see [missed runs](#pause-resume-and-missed-runs)).
+  - **Skipped (paused)** — the fixed conversation was waiting for a user answer, so the occurrence was not started.
   - **Skipped (busy)** — the conversation was busy and the occurrence exhausted its retries.
 - **Retry info** — if the occurrence was retried, the retry count and the next retry time.
 - **View conversation** — a link to the agent run's conversation, when one was created.

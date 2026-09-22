@@ -35,6 +35,10 @@ function StateBadge({ state }: StateBadgeProps): React.ReactElement {
       label: 'Claimed',
       className: 'bg-info-surface text-info-fg',
     },
+    queued: {
+      label: 'Queued',
+      className: 'bg-info-surface text-info-fg',
+    },
     started: {
       label: 'Running',
       className: 'bg-warning-surface text-warning-fg',
@@ -47,8 +51,16 @@ function StateBadge({ state }: StateBadgeProps): React.ReactElement {
       label: 'Failed',
       className: 'bg-danger-surface text-danger-fg',
     },
+    cancelled: {
+      label: 'Cancelled',
+      className: 'bg-muted text-muted-foreground',
+    },
     skipped_missed: {
       label: 'Skipped (missed)',
+      className: 'bg-muted text-muted-foreground',
+    },
+    skipped_paused: {
+      label: 'Skipped (paused)',
       className: 'bg-muted text-muted-foreground',
     },
     skipped_busy_max_retries: {

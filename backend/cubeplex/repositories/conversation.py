@@ -126,6 +126,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         *,
         draft: bool = False,
         topic_id: str | None = None,
+        commit: bool = True,
     ) -> Conversation:
         # Cross-workspace FK guard at the persistence boundary so any caller
         # (dispatch, REST routes, agent tools) that passes a topic_id from
@@ -152,7 +153,11 @@ class ConversationRepository(ScopedRepository[Conversation]):
             has_messages=not draft,
             topic_id=topic_id,
         )
-        return await self.add(conv)
+        if commit:
+            return await self.add(conv)
+        self.session.add(conv)
+        await self.session.flush()
+        return conv
 
     async def get_by_id(self, conversation_id: str) -> Conversation | None:
         return await self.get(conversation_id)

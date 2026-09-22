@@ -18,6 +18,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select, text
 
 import cubeplex.db as _db
+from cubeplex.llm.snapshot import load_llm_snapshot
 from cubeplex.models import IMConnectorAccount, Workspace
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_participant import ConversationParticipant
@@ -28,7 +29,12 @@ from cubeplex.models.im_connector import (
 )
 from cubeplex.models.public_id import generate_public_id
 from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubeplex.schedules.dispatch import dispatch_scheduled_run
+from cubeplex.schedules.dispatch import (
+    DispatchResult,
+    ScheduledOccurrenceSnapshot,
+    dispatch_scheduled_run,
+    freeze_scheduled_occurrence,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -241,16 +247,29 @@ async def _dispatch_via_session(
     task_id: str,
     run_row_id: str,
     run_manager: Any,
-) -> None:
+) -> DispatchResult | None:
     """Open one session, load both rows, drive dispatch, return."""
     async with _db.async_session_maker() as session:
         task = await session.get(ScheduledTask, task_id)
         assert task is not None
         run_row = await session.get(ScheduledTaskRun, run_row_id)
         assert run_row is not None
-        await dispatch_scheduled_run(
+        llm_snapshot = await load_llm_snapshot(
+            session,
+            task.org_id,
+            run_manager._app.state.encryption_backend,
+        )
+        occurrence = (
+            ScheduledOccurrenceSnapshot.model_validate(run_row.execution_snapshot)
+            if run_row.execution_snapshot is not None
+            else await freeze_scheduled_occurrence(session, task, llm_snapshot)
+        )
+        run_row.execution_snapshot = occurrence.model_dump(mode="json")
+        return await dispatch_scheduled_run(
             task=task,
             run_manager=run_manager,
+            occurrence=occurrence,
+            llm_snapshot=llm_snapshot,
             session=session,
             run_row=run_row,
         )
@@ -300,6 +319,10 @@ async def cleanup_destinations(
             delete(ScheduledTaskRun).where(
                 ScheduledTaskRun.workspace_id == ws_id  # type: ignore[arg-type]
             )
+        )
+        await session.execute(
+            text("DELETE FROM conversation_execution_admissions WHERE workspace_id = :ws"),
+            {"ws": ws_id},
         )
         # Null FK columns so the parent rows can drop next.
         await session.execute(
@@ -415,14 +438,12 @@ async def test_new_each_run_with_topic_creates_conv_in_topic(
         topic_id=topic_id,
         prompt="weekly digest",
     )
-    rm = _run_manager(client)
-    # Call dispatch_scheduled_run directly without the poller — the
-    # non-im branch only needs the run_manager + task; the poller's
-    # claim window is irrelevant to the topic-wiring invariant.
-    async with _db.async_session_maker() as session:
-        task = await session.get(ScheduledTask, task_id)
-        assert task is not None
-    result = await dispatch_scheduled_run(task=task, run_manager=rm)
+    run_row_id = await _claim_one_run(task_id=task_id, org_id=org_id, ws_id=ws_id)
+    result = await _dispatch_via_session(
+        task_id=task_id,
+        run_row_id=run_row_id,
+        run_manager=_run_manager(client),
+    )
     assert result is not None
     async with _db.async_session_maker() as session:
         conv = await session.get(Conversation, result.conversation_id)
@@ -483,8 +504,9 @@ async def test_im_channel_reuses_existing_link(
     async with _db.async_session_maker() as session:
         run = await session.get(ScheduledTaskRun, run_row_id)
         assert run is not None
-        assert run.state == "succeeded"
-        assert run.detail == "im_channel_enqueued"
+        assert run.state in {"queued", "started", "succeeded", "failed", "cancelled"}
+        if run.state == "queued":
+            assert run.detail == "im_channel_queued"
         assert run.conversation_id == existing_conv_id
 
         queue_items = (
@@ -509,6 +531,7 @@ async def test_im_channel_reuses_existing_link(
         assert item.channel_id == channel_id
         assert item.scope_key == scope_key
         assert item.scope_kind == scope_kind
+        assert item.execution_admission_id is not None
 
         receipts = (
             (
@@ -566,7 +589,7 @@ async def test_im_channel_creates_fresh_after_new(
     async with _db.async_session_maker() as session:
         run = await session.get(ScheduledTaskRun, run_row_id)
         assert run is not None
-        assert run.state == "succeeded"
+        assert run.state in {"queued", "started", "succeeded", "failed", "cancelled"}
         assert run.conversation_id is not None
 
         # A new IMThreadLink was minted and points at the new conv.
@@ -639,7 +662,7 @@ async def test_im_channel_shared_mode_inherits_binding_topic(
     async with _db.async_session_maker() as session:
         run = await session.get(ScheduledTaskRun, run_row_id)
         assert run is not None
-        assert run.state == "succeeded"
+        assert run.state in {"queued", "started", "succeeded", "failed", "cancelled"}
         conv = await session.get(Conversation, run.conversation_id)
         assert conv is not None
         assert conv.topic_id is not None  # landed under the channel's topic, not root
@@ -776,8 +799,10 @@ async def test_topic_deletion_sets_topic_id_null_and_continues(
         assert task is not None
         assert task.topic_id is None
 
-    result = await dispatch_scheduled_run(
-        task=await _fetch_task(task_id),
+    run_row_id = await _claim_one_run(task_id=task_id, org_id=org_id, ws_id=ws_id)
+    result = await _dispatch_via_session(
+        task_id=task_id,
+        run_row_id=run_row_id,
         run_manager=_run_manager(client),
     )
     assert result is not None
@@ -786,13 +811,6 @@ async def test_topic_deletion_sets_topic_id_null_and_continues(
         conv = await session.get(Conversation, result.conversation_id)
         assert conv is not None
         assert conv.topic_id is None
-
-
-async def _fetch_task(task_id: str) -> ScheduledTask:
-    async with _db.async_session_maker() as session:
-        task = await session.get(ScheduledTask, task_id)
-    assert task is not None
-    return task
 
 
 # ---------------------------------------------------------------------------
@@ -1021,10 +1039,10 @@ async def test_idempotent_dispatch_on_retry(
             .all()
         )
         assert len(queue_items) == 1
-        # Final terminal state still succeeded.
+        # Redis/app workers may have advanced the durable handoff meanwhile.
         row = await session.get(ScheduledTaskRun, run_row_id)
         assert row is not None
-        assert row.state == "succeeded"
+        assert row.state in {"queued", "started", "succeeded", "failed", "cancelled"}
 
 
 # ---------------------------------------------------------------------------

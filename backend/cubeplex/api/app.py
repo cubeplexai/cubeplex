@@ -269,11 +269,18 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
         _app.state.user_event_bus = UserEventBus()
         await run_manager.start_control_listeners()
+        from sqlalchemy.ext.asyncio import AsyncSession
+
         from cubeplex.config import config as _sched_cfg
+        from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
         from cubeplex.schedules.poller import ScheduledTaskPoller
+
+        async def _load_schedule_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+            return await load_llm_snapshot(session, org_id, _app.state.encryption_backend)
 
         poller = ScheduledTaskPoller(
             run_manager=run_manager,
+            load_execution_snapshot=_load_schedule_snapshot,
             poll_interval_seconds=float(
                 _sched_cfg.get("scheduled_tasks.poll_interval_seconds", 15.0)
             ),

@@ -40,3 +40,19 @@ class ConversationExecutionAdmissionRepository(ScopedRepository[ConversationExec
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_source_locked(
+        self, *, source_kind: str, source_id: str
+    ) -> ConversationExecutionAdmission | None:
+        result = await self.session.execute(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.source_kind) == source_kind,
+                col(ConversationExecutionAdmission.source_id) == source_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()

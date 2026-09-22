@@ -3,7 +3,15 @@ export type ScheduleKind = 'cron' | 'interval' | 'once'
 export type TargetMode = 'fixed' | 'new_each_run' | 'im_channel'
 
 export type ScheduledTaskRunState =
-  'claimed' | 'started' | 'succeeded' | 'failed' | 'skipped_missed' | 'skipped_busy_max_retries'
+  | 'claimed'
+  | 'queued'
+  | 'started'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped_missed'
+  | 'skipped_paused'
+  | 'skipped_busy_max_retries'
 
 export interface ScheduledTaskOut {
   id: string
