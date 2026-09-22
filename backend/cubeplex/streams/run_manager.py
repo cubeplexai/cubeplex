@@ -1094,6 +1094,7 @@ class RunManager:
         self._ack_channel = f"{key_prefix}:control:ack"
         self._control_stopping = False
         self._control_tasks: list[asyncio.Task[None]] = []
+        self._stop_recovery_task: asyncio.Task[None] | None = None
         self._tasks_empty: asyncio.Event = asyncio.Event()
         self._tasks_empty.set()
         from cubeplex.db.engine import async_session_maker
@@ -1743,7 +1744,6 @@ class RunManager:
     ) -> str:
         """Stop a paused run without interpreting Stop as another model input."""
         from cubeplex.agents.checkpointer import shared_checkpointer
-        from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         if ctx.conversation_id != conversation_id:
             raise ResumeConflict("resume context belongs to another conversation")
@@ -1754,20 +1754,39 @@ class RunManager:
         pending, pending_run_id = loaded_pending
         if pending_run_id != run_id:
             raise ResumeConflict("question belongs to another run")
-        started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
         admission = await self._stop_paused_execution(ctx=ctx, run_id=run_id)
+        return await self._start_paused_cleanup(
+            ctx=ctx,
+            run_id=run_id,
+            question_id=pending.question_id,
+            started_at=datetime.fromtimestamp(pending.created_at, UTC).isoformat(),
+            admission=admission,
+            reason=reason,
+        )
 
-        # 2. Single-flight CAS — only one cancel/resume may own the slot.
+    async def _start_paused_cleanup(
+        self,
+        *,
+        ctx: RunContext,
+        run_id: str,
+        question_id: str,
+        started_at: str,
+        admission: ConversationExecutionAdmission | None,
+        reason: str,
+    ) -> str:
+        from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
+
+        conversation_id = ctx.conversation_id
         claim = await claim_resume(
             self._redis,
             prefix=self._key_prefix,
             conversation_id=conversation_id,
             expected_run_id=run_id,
-            started_at=started_at_iso,
+            started_at=started_at,
             ttl_seconds=self._run_event_ttl_seconds,
         )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
-            await self.dispatch_cancel(run_id)
+            await self.notify_run_stop(run_id)
             return run_id
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
@@ -1777,7 +1796,7 @@ class RunManager:
             self._execute_cancel_paused_run(
                 run_id=run_id,
                 conversation_id=conversation_id,
-                question_id=pending.question_id,
+                question_id=question_id,
                 claim_token=claim.claim_token,
                 ctx=ctx,
                 admission=admission,
@@ -1790,6 +1809,67 @@ class RunManager:
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
+
+    async def recover_stopped_run(self, admission_id: str) -> bool:
+        """Wake no-model cleanup of an already-stopped, durably paused run."""
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.config import config
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+
+        async with async_session_maker() as session:
+            admission = await session.get(ConversationExecutionAdmission, admission_id)
+            if (
+                admission is None
+                or admission.run_id is None
+                or admission.run_finished_at is not None
+                or (admission.run_stop_requested_at is None and admission.revoked_at is None)
+            ):
+                return False
+            ctx = RunContext(
+                user_id=admission.actor_user_id,
+                org_id=admission.org_id,
+                workspace_id=admission.workspace_id,
+                conversation_id=admission.conversation_id,
+            )
+            run_id = admission.run_id
+        # Stop is immutable authorization to clean up, not to act as the former user.
+        async with shared_checkpointer() as cp:
+            loaded_pending = await cp.load_pending(ctx.conversation_id)
+        if loaded_pending is None or loaded_pending[1] != run_id:
+            return False
+        pending = loaded_pending[0]
+        meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+        if meta is not None:
+            if meta.conversation_id != ctx.conversation_id:
+                return False
+            if meta.status == "running":
+                threshold = int(config.get("lifecycle.stale_run_threshold_seconds", 180))
+                if not is_stale_meta(meta, threshold_seconds=threshold):
+                    await self.notify_run_stop(run_id)
+                    return False
+                if not await mark_run_stale(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    conversation_id=ctx.conversation_id,
+                    observed_last_event_at=meta.last_event_at or meta.started_at,
+                ):
+                    return False
+            elif meta.status not in ("paused_hitl", "stale"):
+                return False
+        try:
+            await self._start_paused_cleanup(
+                ctx=ctx,
+                run_id=run_id,
+                question_id=pending.question_id,
+                started_at=datetime.fromtimestamp(pending.created_at, UTC).isoformat(),
+                admission=admission,
+                reason="recovering persisted Stop",
+            )
+        except ResumeConflict:
+            return False
+        return True
 
     async def _stop_paused_execution(
         self, *, ctx: RunContext, run_id: str
@@ -2328,7 +2408,26 @@ class RunManager:
                 ready_timeout,
             )
 
+    def start_stop_recovery(self) -> None:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.streams.recovery import StoppedRunRecovery
+
+        if self._stop_recovery_task is not None and not self._stop_recovery_task.done():
+            return
+        self._stop_recovery_task = asyncio.create_task(
+            StoppedRunRecovery(async_session_maker, self.recover_stopped_run).run(),
+            name="persisted-stop-recovery",
+        )
+
+    async def stop_stop_recovery(self) -> None:
+        if self._stop_recovery_task is not None:
+            self._stop_recovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._stop_recovery_task
+            self._stop_recovery_task = None
+
     async def stop_control_listeners(self) -> None:
+        await self.stop_stop_recovery()
         self._control_stopping = True
         for t in self._control_tasks:
             t.cancel()

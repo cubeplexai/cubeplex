@@ -26,6 +26,7 @@ def _mgr(redis) -> RunManager:
     m._ack_channel = "t:control:ack"
     m._control_stopping = False
     m._control_tasks = []
+    m._stop_recovery_task = None
     return m
 
 

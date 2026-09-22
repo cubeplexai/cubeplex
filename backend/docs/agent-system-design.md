@@ -91,8 +91,14 @@ matching question, and emits a cancelled Done before terminal metadata. Queued
 guidance is cancelled; checkpoint-proven input stays injected. A lost terminal
 reply does not prevent the finish receipt and slot release. The 202 response confirms
 the persisted stop intent, not evidence that cleanup already finished.
-Restart reconciliation remains part of C2; this paused branch alone does not
-complete the Stop contract.
+The application starts a dedicated scan of persisted Stop/revocation intents
+in bounded pages and stops that scan before draining workers. The paused-run recovery branch
+can reclaim an expired Redis pause or a failed cleanup attempt after its lease
+expires. It uses the persisted Stop proof, not renewed execution authority from
+the original user, and never starts a model. Current owners and newer questions
+remain protected. Preparing runs, cleanup after the pending question was already
+cleared, and terminal-receipt reconciliation still need subsequent C2a work;
+this paused branch alone does not complete the Stop contract.
 
 The control service now separates `run_stop_requested_at` from admission revocation
 and generation closure. Run Stop cancels only that run's unhanded foreground tasks
@@ -111,7 +117,7 @@ Both return 202 with the same target, `accepted`, and `cleanup_pending` only aft
 committing the stop transaction. Signalling is best effort and bounded; it does not
 choose whichever run happens to be active or report cleanup complete from a publish
 acknowledgement. An accepted run without a start receipt still requires reconciliation.
-Input-source assignment, durable restart reconciliation, and frontend callers remain
+Input-source assignment, the remaining durable restart cases, and frontend callers remain
 staged integration work before the coordinated cutover; old bodyless Cancel calls
 are rejected rather than allowed to bypass the stable-target contract.
 Stop signals are idempotent within an execution attempt. The worker enters a
