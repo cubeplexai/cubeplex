@@ -1954,7 +1954,7 @@
     "cancel": "取消",
     "delete": "删除",
     "deleteTitle": "删除触发器",
-    "deleteConfirm": "确定要删除？此操作将永久删除该触发器及其所有事件记录。",
+    "deleteConfirm": "确定要删除？删除后不再接收新事件；已启动的运行会继续，事件记录将保留用于恢复。",
     "loading": "加载中…",
     "notFound": "触发器不存在。",
     "backToList": "返回触发器列表",

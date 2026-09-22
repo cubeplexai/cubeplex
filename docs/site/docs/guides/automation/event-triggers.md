@@ -16,7 +16,7 @@ CubePlex does **not** natively accept a third-party provider's signature format 
 1. You create a trigger in CubePlex and define what should happen when an event arrives.
 2. CubePlex generates a **webhook URL** and an **HMAC signing secret**.
 3. Your sender signs each request with that secret using CubePlex's scheme and POSTs it to the URL.
-4. When a request arrives, CubePlex verifies the signature and timestamp, applies your filter conditions, and starts an agent run with the event payload as context.
+4. When a request arrives, CubePlex verifies the signature and timestamp, applies your filter conditions, and durably queues an agent run with the event payload as context.
 
 ## Creating a trigger
 
@@ -68,7 +68,7 @@ Send `signature` in `X-Signature` and the same `<timestamp>` in `X-Timestamp`.
 
 ### What gets rejected
 
-CubePlex returns an opaque **`404 {"error":"not_found"}`** for *every* rejection — unknown workspace/trigger, missing `X-Signature` or `X-Timestamp`, bad signature, a timestamp outside the 5-minute window, or an oversized body (2 MiB cap). The 404 is deliberate: it does not reveal whether the trigger exists. A rejected request never reaches the [event log](#event-log) because rejection happens before any event row is created. A successful request returns `202 {"status":"accepted","event_id":"..."}`.
+CubePlex returns an opaque **`404 {"error":"not_found"}`** for *every* rejection — unknown workspace/trigger, missing `X-Signature` or `X-Timestamp`, bad signature, a timestamp outside the 5-minute window, or an oversized body (2 MiB cap). The 404 is deliberate: it does not reveal whether the trigger exists. A rejected request never reaches the [event log](#event-log) because rejection happens before any event row is created. A successful request returns `202 {"status":"accepted","event_id":"..."}` only after the validated event and its execution inputs are durable. A worker can therefore resume the same event after a process restart without creating a second run or conversation.
 
 ## Filtering events
 
@@ -90,9 +90,9 @@ If no filter conditions are set, every valid webhook delivery fires the trigger.
 
 CubePlex protects against accidental floods and duplicate deliveries:
 
-- **Rate limiting** — if a trigger receives events faster than the agent can process them, excess events are queued and processed in order. Sustained excessive volume is throttled.
+- **Rate limiting** — if a trigger exceeds its configured per-minute rate, excess events are recorded as rate limited and dropped. The trigger can return either `429` or an acknowledged `202`, depending on its configuration.
 - **Deduplication** — if the same event is delivered multiple times (common with webhook retry mechanisms), CubePlex detects the duplicate and processes it only once.
-- **Retry with backoff** — if an agent run fails (e.g., transient model error), CubePlex retries the run with exponential backoff before marking it as failed.
+- **Retry with backoff** — if the durable handoff fails before a run is accepted, CubePlex retries the same event, conversation, run ID, and execution admission with exponential backoff. Exhausted handoff attempts become dead-lettered; CubePlex does not rerun a model execution that was already accepted.
 
 ## Event log
 
@@ -100,17 +100,22 @@ Each trigger has an event log that shows every delivery that **passed signature 
 
 | Outcome | Meaning |
 |---|---|
-| **Accepted / processed** | Event matched filters and an agent run was started. |
+| **Pending / claimed** | The event is durably queued or temporarily leased by a worker. A worker crash is recovered after the lease expires. |
+| **Accepted / processed** | The event was handed to the run runtime or its IM queue. |
 | **Filtered out** | Event was received but did not match filter conditions. No agent run started. |
 | **Duplicate** | The event's `X-Event-Id` (or body hash) was already seen. Processed once; the retry was dropped. |
 | **Rate limited** | The trigger exceeded its per-minute rate; the event was dropped. |
-| **Failed** | An agent run started but failed. Check the linked conversation for details. |
+| **Cancelled** | The trigger was disabled or deleted before the admitted run started. |
+| **Failed** | Validation, authorization, target resolution, or execution admission failed before handoff. |
+| **Dead lettered** | Repeated transient handoff failures exhausted the retry budget. An administrator can replay it as a new revision. |
 
 :::note Signature failures are not logged
 Requests with a missing/invalid signature or a stale timestamp are rejected with a `404` **before** any event row is created, so they never appear in the event log. If you expect a delivery and see nothing here, suspect the signature or timestamp — not a filter.
 :::
 
 Use the event log to verify that your webhook integration is working, debug filter conditions, and monitor trigger health.
+
+Disabling or deleting a trigger stops new deliveries and cancels events that have not started. Runs already accepted keep running. Deleted triggers disappear from normal lists, while their event and admission records remain available to the recovery path so an interrupted delete cannot revive or duplicate work.
 
 ![Trigger event log with filtered and failed delivery outcomes](/img/automation/trigger-event-log.png)
 

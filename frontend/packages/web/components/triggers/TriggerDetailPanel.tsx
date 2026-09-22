@@ -119,7 +119,10 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
 
   const statusFilterOptions = [
     '',
+    'pending',
+    'claimed',
     'accepted',
+    'cancelled',
     'failed',
     'dead_lettered',
     'rate_limited',
@@ -354,7 +357,10 @@ function EventRow({ event, onReplay, formatDate, t }: EventRowProps) {
   }
 
   const statusColorMap: Record<string, string> = {
+    pending: 'text-warning-fg',
+    claimed: 'text-warning-fg',
     accepted: 'text-success-fg',
+    cancelled: 'text-muted-foreground',
     dead_lettered: 'text-destructive',
     failed: 'text-destructive',
     rate_limited: 'text-warning-fg',

@@ -5,7 +5,8 @@ TDD: tests written first; they fail with 404/500 until the routes are wired.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -443,6 +444,99 @@ async def test_replay_non_dead_lettered_event(
     r_replay = await client.post(f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events/{eid}/replay")
     assert r_replay.status_code == 409
     assert "dead_lettered" in r_replay.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_replay_dead_letter_creates_new_durable_occurrence(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    trigger = await _create_trigger(client, ws_id, name="replay-dead-letter")
+    trigger_id = trigger["id"]
+
+    from sqlalchemy import select
+
+    import cubeplex.db as _db
+    from cubeplex.models import TriggerEvent, Workspace
+
+    async with _db.async_session_maker() as session:
+        workspace = (
+            await session.execute(select(Workspace).where(Workspace.id == ws_id))
+        ).scalar_one()
+        event = TriggerEvent(
+            trigger_id=trigger_id,
+            org_id=workspace.org_id,
+            workspace_id=ws_id,
+            source_type="webhook",
+            dedup_key=f"replay-{secrets.token_hex(8)}",
+            status="dead_lettered",
+            attempts=4,
+            payload={"event": {"action": "opened"}},
+        )
+        session.add(event)
+        await session.commit()
+        event_id = event.id
+
+    response = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/{trigger_id}/events/{event_id}/replay"
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["attempts"] == 0
+
+    async with _db.async_session_maker() as session:
+        replayed = await session.get(TriggerEvent, event_id)
+        assert replayed is not None
+        assert replayed.execution_revision == 1
+        assert replayed.execution_snapshot is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_trigger_cancels_unstarted_event_and_retains_proof(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    trigger = await _create_trigger(client, ws_id, name="delete-with-pending-event")
+    trigger_id = trigger["id"]
+
+    from sqlalchemy import select
+
+    import cubeplex.db as _db
+    from cubeplex.models import Trigger, TriggerEvent, Workspace
+
+    async with _db.async_session_maker() as session:
+        workspace = (
+            await session.execute(select(Workspace).where(Workspace.id == ws_id))
+        ).scalar_one()
+        event = TriggerEvent(
+            trigger_id=trigger_id,
+            org_id=workspace.org_id,
+            workspace_id=ws_id,
+            source_type="webhook",
+            dedup_key=f"delete-{secrets.token_hex(8)}",
+            status="pending",
+            next_attempt_at=datetime.now(UTC) + timedelta(hours=1),
+            payload={"event": {"action": "opened"}},
+        )
+        session.add(event)
+        await session.commit()
+        event_id = event.id
+
+    response = await client.delete(f"/api/v1/ws/{ws_id}/triggers/{trigger_id}")
+    assert response.status_code == 204, response.text
+
+    async with _db.async_session_maker() as session:
+        deleted_trigger = await session.get(Trigger, trigger_id)
+        retained_event = await session.get(TriggerEvent, event_id)
+        assert deleted_trigger is not None
+        assert deleted_trigger.enabled is False
+        assert deleted_trigger.deleted_at is not None
+        assert deleted_trigger.events_total == 1
+        assert deleted_trigger.events_failed == 1
+        assert retained_event is not None
+        assert retained_event.status == "cancelled"
+
+    hidden = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trigger_id}")
+    assert hidden.status_code == 404
 
 
 # ---------------------------------------------------------------------------

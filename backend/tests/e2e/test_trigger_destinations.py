@@ -12,16 +12,18 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
-from typing import Any
 
 import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import cubeplex.db as _db
+from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
 from cubeplex.models import IMConnectorAccount, Workspace
 from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.credential import Credential
 from cubeplex.models.im_connector import (
@@ -232,6 +234,7 @@ async def _seed_event_row(
             )
         )
         assert inserted is not None, "dedup insert failed unexpectedly"
+        await session.commit()
         return inserted
 
 
@@ -248,9 +251,17 @@ def _make_event(trigger: Trigger, event_id: str, dedup_key: str) -> NormalizedEv
     )
 
 
-def _run_manager(client: httpx.AsyncClient) -> Any:
+def _pipeline(client: httpx.AsyncClient) -> TriggerPipeline:
     app = client._transport.app  # type: ignore[attr-defined]
-    return app.state.run_manager
+
+    async def load_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+        return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
+    return TriggerPipeline(
+        run_manager=app.state.run_manager,
+        session_maker=_db.async_session_maker,
+        load_execution_snapshot=load_snapshot,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +296,11 @@ async def cleanup_trigger_destinations(
         await session.execute(
             delete(TriggerEvent).where(
                 TriggerEvent.workspace_id == ws_id  # type: ignore[arg-type]
+            )
+        )
+        await session.execute(
+            delete(ConversationExecutionAdmission).where(
+                ConversationExecutionAdmission.workspace_id == ws_id  # type: ignore[arg-type]
             )
         )
         # Null topic_id + im_account_id so the parent rows can drop.
@@ -404,10 +420,7 @@ async def test_trigger_new_each_time_with_topic_creates_conv_in_topic(
     )
     event_row = await _seed_event_row(org_id=org_id, ws_id=ws_id, trigger_id=trigger.id)
 
-    pipeline = TriggerPipeline(
-        run_manager=_run_manager(client),
-        session_maker=_db.async_session_maker,
-    )
+    pipeline = _pipeline(client)
     await pipeline.fire(
         trigger, _make_event(trigger, event_row.id, event_row.dedup_key), event_row.id
     )
@@ -465,10 +478,7 @@ async def test_trigger_im_channel_reuses_existing_link(
     )
     event_row = await _seed_event_row(org_id=org_id, ws_id=ws_id, trigger_id=trigger.id)
 
-    pipeline = TriggerPipeline(
-        run_manager=_run_manager(client),
-        session_maker=_db.async_session_maker,
-    )
+    pipeline = _pipeline(client)
     await pipeline.fire(
         trigger, _make_event(trigger, event_row.id, event_row.dedup_key), event_row.id
     )
@@ -506,7 +516,7 @@ async def test_trigger_im_channel_reuses_existing_link(
             .all()
         )
         assert len(receipts) == 1
-        assert receipts[0].platform_event_id == f"trigger:{event_row.id}"
+        assert receipts[0].platform_event_id == f"trigger:{event_row.id}:0"
 
 
 @pytest.mark.asyncio
@@ -538,10 +548,7 @@ async def test_trigger_im_channel_creates_fresh_after_new(
     )
     event_row = await _seed_event_row(org_id=org_id, ws_id=ws_id, trigger_id=trigger.id)
 
-    pipeline = TriggerPipeline(
-        run_manager=_run_manager(client),
-        session_maker=_db.async_session_maker,
-    )
+    pipeline = _pipeline(client)
     await pipeline.fire(
         trigger, _make_event(trigger, event_row.id, event_row.dedup_key), event_row.id
     )
@@ -598,10 +605,7 @@ async def test_trigger_im_channel_shared_mode_lands_conv_in_topic(
         im_scope_kind=scope_kind,
     )
     event_row = await _seed_event_row(org_id=org_id, ws_id=ws_id, trigger_id=trigger.id)
-    pipeline = TriggerPipeline(
-        run_manager=_run_manager(client),
-        session_maker=_db.async_session_maker,
-    )
+    pipeline = _pipeline(client)
     await pipeline.fire(
         trigger, _make_event(trigger, event_row.id, event_row.dedup_key), event_row.id
     )
@@ -666,10 +670,7 @@ async def test_trigger_im_account_deletion_marks_event_failed(
     assert trigger.im_account_id is None
 
     event_row = await _seed_event_row(org_id=org_id, ws_id=ws_id, trigger_id=trigger.id)
-    pipeline = TriggerPipeline(
-        run_manager=_run_manager(client),
-        session_maker=_db.async_session_maker,
-    )
+    pipeline = _pipeline(client)
     await pipeline.fire(
         trigger, _make_event(trigger, event_row.id, event_row.dedup_key), event_row.id
     )

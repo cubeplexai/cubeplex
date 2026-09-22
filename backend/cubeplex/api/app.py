@@ -295,6 +295,22 @@ async def lifespan(_app: FastAPI):  # type: ignore
         poller.start()
         _app.state.scheduled_task_poller = poller
 
+        import cubeplex.db as _trigger_db
+        from cubeplex.triggers.pipeline import TriggerPipeline
+        from cubeplex.triggers.worker import TriggerEventWorker
+
+        _trigger_session_maker = _trigger_db.async_session_maker
+        trigger_worker = TriggerEventWorker(
+            session_maker=_trigger_session_maker,
+            pipeline=TriggerPipeline(
+                run_manager=run_manager,
+                session_maker=_trigger_session_maker,
+                load_execution_snapshot=_load_schedule_snapshot,
+            ),
+        )
+        trigger_worker.start()
+        _app.state.trigger_event_worker = trigger_worker
+
         # ---- IM connectors: queue worker + long-connection clients (#149) ----
         from cubeplex.im import runtime as _im_runtime
 
@@ -543,6 +559,13 @@ async def lifespan(_app: FastAPI):  # type: ignore
         )
         if _shutdown_poller is not None:
             await _shutdown_poller.stop()
+        from cubeplex.triggers.worker import TriggerEventWorker as _TriggerEventWorker
+
+        _trigger_worker: _TriggerEventWorker | None = getattr(
+            _app.state, "trigger_event_worker", None
+        )
+        if _trigger_worker is not None:
+            await _trigger_worker.stop()
         from cubeplex.im import runtime as _im_runtime_shutdown
 
         await _im_runtime_shutdown.stop(_app)
