@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.llm.snapshot import LLMSnapshot
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.im_connector import IMConnectorAccount, IMIdentityLink, IMRunQueueItem
 from cubeplex.repositories.im_connector import (
     CONNECTION_DELIVERY_MODES,
@@ -38,7 +39,10 @@ from cubeplex.repositories.im_connector import (
     rewind_queue_item_no_attempt_charge,
 )
 from cubeplex.services.conversation_execution import (
+    AdmittedExecution,
     ConversationExecutionService,
+    ExecutionConflictError,
+    ResolvedExecution,
     UserMessageIntent,
 )
 from cubeplex.streams.run_manager import RunContext
@@ -276,7 +280,31 @@ async def process_one_queue_item(
         # of being misclassified as user input here.
         admitted = None
         execution_snapshot = None
-        if captured_item.inbound_message_id is not None:
+        if captured_item.execution_admission_id is not None:
+            async with session_maker() as session:
+                admission = await session.get(
+                    ConversationExecutionAdmission,
+                    captured_item.execution_admission_id,
+                )
+                if (
+                    admission is None
+                    or admission.org_id != captured["org_id"]
+                    or admission.workspace_id != captured["workspace_id"]
+                    or admission.conversation_id != captured["conversation_id"]
+                    or admission.actor_user_id != captured["acting_user_id"]
+                    or admission.source_kind not in ("schedule_occurrence", "trigger_occurrence")
+                    or admission.run_id is None
+                    or admission.resolved_execution is None
+                ):
+                    raise ExecutionConflictError(
+                        "IM handoff does not match its automatic execution admission"
+                    )
+                admitted = AdmittedExecution(
+                    admission=admission,
+                    execution=ResolvedExecution.model_validate(admission.resolved_execution),
+                    created=False,
+                )
+        elif captured_item.inbound_message_id is not None:
             async with session_maker() as session:
                 execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
                 admitted = await ConversationExecutionService(
@@ -297,6 +325,7 @@ async def process_one_queue_item(
                 )
                 await session.commit()
 
+        if admitted is not None:
             admission = admitted.admission
             if admission.run_start_token is None and (
                 admission.revoked_at is not None
@@ -313,6 +342,10 @@ async def process_one_queue_item(
                     await mark_queue_item_completed(session, item_id=captured_item.id)
                     await session.commit()
                 return True
+
+            if execution_snapshot is None:
+                async with session_maker() as session:
+                    execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
 
         run_id = await run_manager.start_run(
             conversation_id=captured["conversation_id"],

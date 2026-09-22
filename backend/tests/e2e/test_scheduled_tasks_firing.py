@@ -6,10 +6,15 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.db.engine import async_session_maker
+from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubeplex.schedules.poller import ScheduledTaskPoller
+from cubeplex.streams.run_manager import RunContext
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
@@ -17,9 +22,61 @@ pytestmark = pytest.mark.e2e
 BASE = f"/api/v1/ws/{DEFAULT_WS_ID}/scheduled-tasks"
 
 
-def _run_manager(client: httpx.AsyncClient) -> object:
+def _poller(
+    client: httpx.AsyncClient,
+    *,
+    run_manager: object | None = None,
+    **kwargs: object,
+) -> ScheduledTaskPoller:
     app = client._transport.app  # type: ignore[attr-defined]
-    return app.state.run_manager
+
+    async def load_snapshot(session: AsyncSession, org_id: str) -> LLMSnapshot:
+        return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
+    return ScheduledTaskPoller(
+        run_manager=run_manager or app.state.run_manager,
+        load_execution_snapshot=load_snapshot,
+        **kwargs,
+    )
+
+
+class _RecordingRunManager:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def start_run(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        attachments: list[str] | None,
+        ctx: RunContext,
+        run_id: str | None = None,
+        model_key: str | None = None,
+        reasoning: object | None = None,
+        cancel_pending_hitl: bool = False,
+        llm_snapshot: object | None = None,
+        admission_id: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "conversation_id": conversation_id,
+                "content": content,
+                "actor_user_id": ctx.user_id,
+                "run_id": run_id,
+                "model_key": model_key,
+                "reasoning": reasoning,
+                "admission_id": admission_id,
+            }
+        )
+        assert run_id is not None
+        return run_id
+
+
+class _BusyRunManager(_RecordingRunManager):
+    async def start_run(self, **kwargs: object) -> str:
+        await super().start_run(**kwargs)  # type: ignore[arg-type]
+        raise RuntimeError("Conversation already has an active run")
 
 
 async def _create_due_once(client: httpx.AsyncClient) -> str:
@@ -57,7 +114,7 @@ async def _runs_for(task_id: str) -> list[ScheduledTaskRun]:
 @pytest.mark.asyncio
 async def test_once_task_fires_one_run(async_client: httpx.AsyncClient) -> None:
     tid = await _create_due_once(async_client)
-    poller = ScheduledTaskPoller(run_manager=_run_manager(async_client), misfire_grace_seconds=300)
+    poller = _poller(async_client, misfire_grace_seconds=300)
     await poller.poll_once()
     rows = await _runs_for(tid)
     assert len(rows) == 1
@@ -66,6 +123,185 @@ async def test_once_task_fires_one_run(async_client: httpx.AsyncClient) -> None:
     async with async_session_maker() as s:
         task = await s.get(ScheduledTask, tid)
         assert task is not None and task.next_fire_at is None
+
+
+@pytest.mark.asyncio
+async def test_claim_freezes_schedule_content_and_run_binding(
+    async_client: httpx.AsyncClient,
+) -> None:
+    run_at = datetime.now(UTC) + timedelta(days=1)
+    response = await async_client.post(
+        BASE,
+        json={
+            "name": "original title",
+            "prompt": "original prompt",
+            "schedule_kind": "once",
+            "run_at": run_at.isoformat(),
+            "target_mode": "new_each_run",
+        },
+    )
+    assert response.status_code == 201, response.text
+    task_id = response.json()["id"]
+    run_manager = _RecordingRunManager()
+    poller = _poller(async_client, run_manager=run_manager)
+
+    async with async_session_maker() as session:
+        task = await session.get(ScheduledTask, task_id)
+        assert task is not None
+        task.next_fire_at = datetime.now(UTC) - timedelta(seconds=1)
+        row_id = await poller._claim_occurrence(session, task=task, now=datetime.now(UTC))
+        assert row_id is not None
+        await session.commit()
+
+        task.prompt = "edited prompt"
+        task.name = "edited title"
+        await session.commit()
+
+    await poller._dispatch_one(row_id)
+
+    assert len(run_manager.calls) == 1
+    call = run_manager.calls[0]
+    assert call["content"] == "original prompt"
+    assert call["run_id"] is not None
+    assert call["admission_id"] is not None
+    async with async_session_maker() as session:
+        row = await session.get(ScheduledTaskRun, row_id)
+        admission = await session.get(ConversationExecutionAdmission, call["admission_id"])
+        conversation = await session.get(Conversation, call["conversation_id"])
+        assert row is not None
+        assert row.run_id == call["run_id"]
+        assert row.execution_snapshot is not None
+        assert row.execution_snapshot["content"] == "original prompt"
+        assert admission is not None
+        assert admission.source_kind == "schedule_occurrence"
+        assert admission.source_id == row_id
+        assert admission.actor_user_id == call["actor_user_id"]
+        assert conversation is not None
+        assert conversation.title == "original title"
+
+
+@pytest.mark.asyncio
+async def test_busy_retry_keeps_binding_and_delete_cancels_unstarted_run(
+    async_client: httpx.AsyncClient,
+) -> None:
+    conversation_response = await async_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+        params={"title": "busy schedule target"},
+    )
+    assert conversation_response.status_code == 201, conversation_response.text
+    conversation_id = conversation_response.json()["id"]
+    response = await async_client.post(
+        BASE,
+        json={
+            "name": "busy occurrence",
+            "prompt": "original prompt",
+            "schedule_kind": "once",
+            "run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            "target_mode": "fixed",
+            "target_conversation_id": conversation_id,
+        },
+    )
+    assert response.status_code == 201, response.text
+    task_id = response.json()["id"]
+    run_manager = _BusyRunManager()
+    poller = _poller(
+        async_client,
+        run_manager=run_manager,
+        busy_retry_delay_seconds=1,
+    )
+
+    async with async_session_maker() as session:
+        task = await session.get(ScheduledTask, task_id)
+        assert task is not None
+        task.next_fire_at = datetime.now(UTC) - timedelta(seconds=1)
+        row_id = await poller._claim_occurrence(session, task=task, now=datetime.now(UTC))
+        assert row_id is not None
+        await session.commit()
+
+    await poller._dispatch_one(row_id)
+    async with async_session_maker() as session:
+        row = await session.get(ScheduledTaskRun, row_id)
+        assert row is not None
+        assert row.state == "claimed"
+        assert row.run_id is not None
+        stable_run_id = row.run_id
+        row.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+
+    await poller.poll_once()
+    assert [call["run_id"] for call in run_manager.calls] == [stable_run_id, stable_run_id]
+
+    delete_response = await async_client.delete(f"{BASE}/{task_id}")
+    assert delete_response.status_code == 204, delete_response.text
+    async with async_session_maker() as session:
+        row = await session.get(ScheduledTaskRun, row_id)
+        admission = await session.scalar(
+            select(ConversationExecutionAdmission).where(
+                ConversationExecutionAdmission.source_kind == "schedule_occurrence",  # type: ignore[arg-type]
+                ConversationExecutionAdmission.source_id == row_id,  # type: ignore[arg-type]
+            )
+        )
+        assert row is not None
+        assert row.state == "cancelled"
+        assert admission is not None
+        assert admission.run_id == stable_run_id
+        assert admission.revoked_at is not None
+        assert admission.run_finished_at is not None
+        assert admission.run_terminal_status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_claimed_fixed_occurrence_cannot_cross_stop_all(
+    async_client: httpx.AsyncClient,
+) -> None:
+    conversation_response = await async_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+        params={"title": "generation-fenced schedule"},
+    )
+    assert conversation_response.status_code == 201, conversation_response.text
+    conversation_id = conversation_response.json()["id"]
+    response = await async_client.post(
+        BASE,
+        json={
+            "name": "old occurrence",
+            "prompt": "must not run after stop all",
+            "schedule_kind": "once",
+            "run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+            "target_mode": "fixed",
+            "target_conversation_id": conversation_id,
+        },
+    )
+    assert response.status_code == 201, response.text
+    task_id = response.json()["id"]
+    run_manager = _RecordingRunManager()
+    poller = _poller(async_client, run_manager=run_manager)
+
+    async with async_session_maker() as session:
+        task = await session.get(ScheduledTask, task_id)
+        conversation = await session.get(Conversation, conversation_id)
+        assert task is not None
+        assert conversation is not None
+        generation = conversation.execution_generation
+        task.next_fire_at = datetime.now(UTC) - timedelta(seconds=1)
+        row_id = await poller._claim_occurrence(session, task=task, now=datetime.now(UTC))
+        assert row_id is not None
+        await session.commit()
+
+    stop_response = await async_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/stop-all",
+        json={"execution_generation": generation},
+    )
+    assert stop_response.status_code == 202, stop_response.text
+
+    await poller._dispatch_one(row_id)
+
+    assert run_manager.calls == []
+    async with async_session_maker() as session:
+        row = await session.get(ScheduledTaskRun, row_id)
+        assert row is not None
+        assert row.state == "cancelled"
+        assert row.detail is not None
+        assert "predates the current conversation generation" in row.detail
 
 
 @pytest.mark.asyncio
@@ -89,7 +325,7 @@ async def test_missed_beyond_grace_skips_and_fast_forwards(
         assert task is not None
         task.next_fire_at = datetime.now(UTC) - timedelta(hours=3)
         await s.commit()
-    poller = ScheduledTaskPoller(run_manager=_run_manager(async_client), misfire_grace_seconds=1)
+    poller = _poller(async_client, misfire_grace_seconds=1)
     await poller.poll_once()
     rows = await _runs_for(tid)
     assert any(r.state == "skipped_missed" for r in rows)
@@ -104,7 +340,7 @@ async def test_missed_beyond_grace_skips_and_fast_forwards(
 async def test_stale_started_run_is_failed(async_client: httpx.AsyncClient) -> None:
     """A row stuck in 'started' past started_timeout must be marked failed."""
     tid = await _create_due_once(async_client)
-    poller = ScheduledTaskPoller(run_manager=_run_manager(async_client), started_timeout_seconds=1)
+    poller = _poller(async_client, started_timeout_seconds=1)
     await poller.poll_once()  # creates + dispatches -> state 'started'
     async with async_session_maker() as s:
         rows = await _runs_for(tid)
@@ -156,9 +392,8 @@ async def test_paused_stretch_records_skipped_missed_on_resume(
 @pytest.mark.asyncio
 async def test_concurrent_pollers_fire_once(async_client: httpx.AsyncClient) -> None:
     tid = await _create_due_once(async_client)
-    rm = _run_manager(async_client)
-    p1 = ScheduledTaskPoller(run_manager=rm)
-    p2 = ScheduledTaskPoller(run_manager=rm)
+    p1 = _poller(async_client)
+    p2 = _poller(async_client)
     await asyncio.gather(p1.poll_once(), p2.poll_once())
     rows = await _runs_for(tid)
     assert len(rows) == 1
@@ -179,9 +414,8 @@ async def test_busy_postponed_row_skipped_by_stale_sweep(
     from cubeplex.repositories.scheduled_task import claim_stale_runs
 
     tid = await _create_due_once(async_client)
-    # Seed a busy-postponed row: state='claimed', run_id IS NULL,
-    # claimed_at well past the 120s default claim_timeout, next_retry_at
-    # in the near future (per the 5-min busy retry policy).
+    # Seed a busy-postponed row with its durable run identity. claimed_at is
+    # past the stale timeout, while next_retry_at is still in the future.
     async with async_session_maker() as s:
         now = datetime.now(UTC)
         row = ScheduledTaskRun(
@@ -191,6 +425,7 @@ async def test_busy_postponed_row_skipped_by_stale_sweep(
             scheduled_for=now - _td(minutes=10),
             claimed_at=now - _td(minutes=5),
             state="claimed",
+            run_id="0192abcd-busy-postponed",
             retry_count=1,
             next_retry_at=now + _td(minutes=4),
         )
@@ -209,10 +444,10 @@ async def test_busy_postponed_row_skipped_by_stale_sweep(
 async def test_stale_pre_stamped_row_is_reclaimed(
     async_client: httpx.AsyncClient,
 ) -> None:
-    """Regression for codex round-2 P1: a row pre-stamped with run_id but
-    left in state='claimed' (e.g. the replica died after the pre-stamp
-    commit but before the post-dispatch UPDATE) must be re-claimable by
-    the stale sweep — otherwise the occurrence is permanently stuck.
+    """A durable run binding remains recoverable after a dispatch crash.
+
+    Recovery keeps this identity and uses the admission to decide whether
+    the exact run can start; it never replaces it with a new run.
     """
     from datetime import timedelta as _td
 
@@ -277,6 +512,41 @@ async def test_completion_hook_recovers_claimed_row_race(
         refreshed = await s.get(ScheduledTaskRun, row_id)
         assert refreshed is not None
         assert refreshed.state == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_completion_hook_records_cancelled_queued_handoff(
+    async_client: httpx.AsyncClient,
+) -> None:
+    from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
+
+    tid = await _create_due_once(async_client)
+    async with async_session_maker() as session:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now,
+            claimed_at=now,
+            state="queued",
+            run_id="0192abcd-queued-cancelled",
+            detail="im_channel_queued",
+        )
+        session.add(row)
+        await session.commit()
+        row_id = row.id
+
+    await record_scheduled_run_terminal_state(
+        run_id="0192abcd-queued-cancelled",
+        run_status="cancelled",
+    )
+
+    async with async_session_maker() as session:
+        refreshed = await session.get(ScheduledTaskRun, row_id)
+        assert refreshed is not None
+        assert refreshed.state == "cancelled"
+        assert refreshed.detail == "run cancelled"
 
 
 @pytest.mark.asyncio
@@ -361,6 +631,7 @@ async def test_busy_postponed_query_honors_above_default_retry_cap(
             scheduled_for=now - _td(minutes=20),
             claimed_at=now - _td(minutes=15),
             state="claimed",
+            run_id="0192abcd-configured-busy-retry",
             retry_count=4,  # above the historical literal cap
             next_retry_at=now - _td(seconds=1),
         )
