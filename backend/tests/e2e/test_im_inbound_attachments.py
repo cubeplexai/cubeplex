@@ -31,6 +31,7 @@ from tests.e2e.im_fixtures import (
     im_seed_account,
     im_seed_org_ws_user,
     im_seed_stub_credential,
+    im_test_execution_snapshot,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -104,7 +105,12 @@ class _RecordingRM:
         content: str,
         attachments: list[str] | None,
         ctx: RunContext,
+        run_id: str | None = None,
+        model_key: str | None = None,
+        reasoning: object | None = None,
         cancel_pending_hitl: bool = False,
+        llm_snapshot: object | None = None,
+        admission_id: str | None = None,
     ) -> str:
         self.calls.append({"content": content, "attachments": attachments})
         return f"run-{len(self.calls)}"
@@ -182,6 +188,7 @@ async def test_feishu_inbound_file_materializes_attachment_and_starts_run(
         run_manager=rm,
         on_run_started=None,
         lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=_resolver(maker),
     )
 
@@ -230,6 +237,7 @@ async def test_reclaim_reuses_persisted_ids_without_duplicate_upload(
         run_manager=_BusyRM(),
         on_run_started=None,
         lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
     )
     assert download_calls["n"] == 1
@@ -249,6 +257,7 @@ async def test_reclaim_reuses_persisted_ids_without_duplicate_upload(
         run_manager=rm,
         on_run_started=None,
         lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
     )
     assert download_calls["n"] == 1  # NOT re-downloaded
@@ -288,6 +297,7 @@ async def test_all_rejected_persists_empty_and_does_not_re_resolve(
         run_manager=_BusyRM(),
         on_run_started=None,
         lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
     )
     assert download_calls["n"] == 1
@@ -306,6 +316,7 @@ async def test_all_rejected_persists_empty_and_does_not_re_resolve(
         run_manager=rm,
         on_run_started=None,
         lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
     )
     assert download_calls["n"] == 1  # NOT re-downloaded

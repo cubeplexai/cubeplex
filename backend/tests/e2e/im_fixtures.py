@@ -20,6 +20,41 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+
+
+async def im_test_execution_snapshot(_session: AsyncSession, _org_id: str) -> LLMSnapshot:
+    """Small valid model catalog for IM admission tests."""
+    return LLMSnapshot(
+        providers={
+            "provider": ProviderConfig.model_validate(
+                {
+                    "base_url": "https://example.invalid",
+                    "api": "openai-completions",
+                    "models": [
+                        {
+                            "id": "default",
+                            "name": "default",
+                            "contextWindow": 1000,
+                            "maxTokens": 100,
+                        }
+                    ],
+                }
+            )
+        },
+        model_presets=(
+            ModelPreset(
+                key="pro",
+                primary="provider/default",
+                fallbacks=(),
+                kind="tier",
+                is_default=True,
+            ),
+        ),
+        task_routing={},
+    )
+
 
 async def im_seed_org_ws_user(
     session: AsyncSession,
@@ -52,6 +87,14 @@ async def im_seed_org_ws_user(
             " ON CONFLICT (id) DO NOTHING"
         ),
         {"id": user_id, "email": email or f"{user_id}@example.com"},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO memberships (user_id, workspace_id, role, created_at, updated_at)"
+            " VALUES (:uid, :ws, 'member', NOW(), NOW())"
+            " ON CONFLICT (user_id, workspace_id) DO NOTHING"
+        ),
+        {"uid": user_id, "ws": ws_id},
     )
 
 
@@ -153,6 +196,10 @@ async def im_cleanup(
         # Children of conversations first (real-run tests bill; topic-mode IM
         # ingest also seeds conversation_participants).
         await session.execute(
+            text("DELETE FROM conversation_execution_admissions WHERE workspace_id = ANY(:ids)"),
+            {"ids": ws_ids},
+        )
+        await session.execute(
             text(
                 "DELETE FROM billing_events WHERE conversation_id IN "
                 "(SELECT id FROM conversations WHERE workspace_id = ANY(:ids))"
@@ -193,6 +240,10 @@ async def im_cleanup(
         )
         await session.execute(
             text("DELETE FROM topics WHERE workspace_id = ANY(:ids)"),
+            {"ids": ws_ids},
+        )
+        await session.execute(
+            text("DELETE FROM memberships WHERE workspace_id = ANY(:ids)"),
             {"ids": ws_ids},
         )
         await session.execute(
