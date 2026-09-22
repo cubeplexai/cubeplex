@@ -5,7 +5,6 @@ import json
 import logging
 import re
 import secrets
-import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +59,7 @@ from cubeplex.repositories.steering_message import (
 from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
+    DirectExecutionResult,
     ExecutionConflictError,
     ExecutionRevokedError,
     UserMessageIntent,
@@ -323,6 +323,7 @@ async def _maybe_install_from_user_message(
     workspace_id: str,
     actor_user_id: str,
     text: str,
+    commit: bool = True,
 ) -> str | None:
     """If the user message is `install <canonical_name>`, install it and return
     a replacement assistant note. Otherwise return None and let the message flow.
@@ -370,7 +371,7 @@ async def _maybe_install_from_user_message(
         actor_user_id=actor_user_id,
     )
     try:
-        result = await install_svc.install(match_cand.candidate_id)
+        result = await install_svc.install(match_cand.candidate_id, commit=commit)
     except SkillInstallError as e:
         return f"Failed to install `{canonical}`: {e}"
     return (
@@ -1058,6 +1059,97 @@ class SendMessageResponse(BaseModel):
     run_id: str
 
 
+def _build_direct_result_response(result: DirectExecutionResult) -> StreamingResponse:
+    ts = utc_isoformat(result.timestamp)
+
+    async def event_stream() -> AsyncIterator[str]:
+        yield _format_sse_event(
+            "0-1",
+            {
+                "type": "text_delta",
+                "timestamp": ts,
+                "agent_id": None,
+                "agent_name": None,
+                "data": {"content": result.content},
+            },
+        )
+        yield _format_sse_event(
+            "0-2",
+            {
+                "type": "done",
+                "timestamp": ts,
+                "agent_id": None,
+                "agent_name": None,
+                "data": {},
+            },
+        )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _commit_direct_result_checkpoint(
+    *,
+    admission_id: str,
+    conversation_id: str,
+    org_id: str,
+    workspace_id: str,
+) -> tuple[DirectExecutionResult, bool]:
+    from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
+
+    from cubeplex.agents.checkpointer import shared_checkpointer
+
+    async with async_session_maker() as session:
+        service = ConversationExecutionService(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+        result, already_committed = await service.lock_direct_checkpoint_result(
+            admission_id=admission_id
+        )
+        if not already_committed:
+            user_message_id = f"{admission_id}:user"
+            assistant_message_id = f"{admission_id}:assistant"
+            async with shared_checkpointer() as checkpointer:
+                checkpoint = await checkpointer.load(conversation_id)
+                messages = checkpoint.messages if checkpoint is not None else []
+                existing_ids = {
+                    message_id
+                    for message in messages
+                    if isinstance((message_id := message.metadata.get("message_id")), str)
+                }
+                present = existing_ids.intersection((user_message_id, assistant_message_id))
+                if present and present != {user_message_id, assistant_message_id}:
+                    raise RuntimeError("direct result checkpoint is only partially committed")
+                if not present:
+                    timestamp = result.timestamp.timestamp()
+                    await checkpointer.append(
+                        conversation_id,
+                        [
+                            UserMessage(
+                                content=[TextContent(text=result.request_content)],
+                                timestamp=timestamp,
+                                metadata={"message_id": user_message_id},
+                            ),
+                            AssistantMessage(
+                                content=[TextContent(text=result.content)],
+                                timestamp=timestamp + 0.001,
+                                metadata={"message_id": assistant_message_id},
+                            ),
+                        ],
+                    )
+            await service.mark_direct_checkpoint_committed(
+                admission_id=admission_id,
+                now=datetime.now(UTC),
+            )
+        await session.commit()
+    return result, not already_committed
+
+
 def _build_run_streaming_response(
     *,
     raw_request: Request,
@@ -1329,19 +1421,45 @@ async def send_message(
         if refreshed is not None:
             conversation = refreshed
 
-    # Chat-fallback skill-install parser: `install <canonical_name>` short-circuits the
-    # agent loop — persists a user + assistant message pair directly to the checkpointer
-    # and returns early, so the agent never runs for this turn.
-    #
-    # We must claim the conversation's active-run slot BEFORE doing the install or
-    # touching history: the normal path serializes turns through
-    # run_manager.start_run, and a read-only check would still (a) let the catalog
-    # install happen before refusing, and (b) race a concurrent run starting between
-    # the check and the checkpointer append. create_run is an atomic CAS claim, so a
-    # conflicting active run makes it return None → 409 with no side effects.
+    # The install shortcut has no model run, but it still uses durable source admission.
+    # A retry replays the stored result and reconciles its stable checkpoint pair instead
+    # of repeating the installation.
     _install_cmd = request_obj.content and not request_obj.attachments
     if _install_cmd and _INSTALL_RE.match(request_obj.content.strip()):
-        fallback_run_id = f"install-fallback-{secrets.token_hex(6)}"
+        intent = UserMessageIntent(
+            content=request_obj.content,
+            model_key=request_obj.model_key,
+            reasoning=request_obj.reasoning,
+        )
+        try:
+            async with async_session_maker() as admission_session:
+                admitted_direct = await ConversationExecutionService(
+                    admission_session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                ).admit_direct_user_message(
+                    conversation_id=conversation_id,
+                    actor_user_id=ctx.user.id,
+                    namespace="web",
+                    source_id=request_obj.client_message_id,
+                    intent=intent,
+                    operation="skill_install",
+                    now=datetime.now(UTC),
+                )
+                await admission_session.commit()
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="Conversation not found") from exc
+        except ExecutionConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        admission_id = admitted_direct.admission.id
+        if (
+            admitted_direct.result is not None
+            and admitted_direct.admission.checkpoint_committed_at is not None
+        ):
+            return _build_direct_result_response(admitted_direct.result)
+
+        fallback_run_id = f"install-fallback:{admission_id}"
         ttl = int(_config.get("lifecycle.stale_run_threshold_seconds", 180))
         claimed = await create_run(
             rds.client,
@@ -1359,54 +1477,67 @@ async def send_message(
                 detail="A run is already active for this conversation",
             )
 
-        install_note: str | None = None
         try:
-            async with async_session_maker() as install_session:
-                from cubeplex.repositories.organization import OrganizationRepository as _OrgRepo
+            result = admitted_direct.result
+            if result is None:
+                try:
+                    async with async_session_maker() as claim_session:
+                        await ConversationExecutionService(
+                            claim_session,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        ).claim_direct_execution(
+                            admission_id=admission_id,
+                            conversation_id=conversation_id,
+                            actor_user_id=ctx.user.id,
+                            now=datetime.now(UTC),
+                        )
+                        await claim_session.commit()
+                except (ExecutionConflictError, ExecutionRevokedError) as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-                _org = await _OrgRepo(install_session).get(ctx.org_id)
-                _org_slug = _org.slug if _org else ctx.org_id
-                install_note = await _maybe_install_from_user_message(
-                    session=install_session,
-                    org_id=ctx.org_id,
-                    org_slug=_org_slug,
-                    workspace_id=ctx.workspace_id,
-                    actor_user_id=ctx.user.id,
-                    text=request_obj.content,
-                )
-            # _INSTALL_RE matched above, so the parser always returns a note here.
-            if install_note is not None:
-                from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
-
-                await _update_conversation_timestamp(
-                    conversation_id,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    user_id=ctx.user.id,
-                )
-                from cubeplex.agents.checkpointer import shared_checkpointer
-
-                now = time.time()
-                async with shared_checkpointer() as _cp:
-                    await _cp.append(
-                        conversation_id,
-                        [
-                            UserMessage(
-                                content=[TextContent(text=request_obj.content)],
-                                timestamp=now,
-                            ),
-                            AssistantMessage(
-                                content=[TextContent(text=install_note)],
-                                timestamp=now + 0.001,
-                            ),
-                        ],
+                async with async_session_maker() as install_session:
+                    from cubeplex.repositories.organization import (
+                        OrganizationRepository as _OrgRepo,
                     )
-                # Enqueue indexing AFTER the synthetic messages land in
-                # checkpointer storage. Doing it inside the timestamp hook
-                # (or before this append) would let the worker claim the
-                # job during the window when conversation history is still
-                # empty and index nothing — no subsequent run-completion
-                # hook covers this fallback path.
+
+                    org = await _OrgRepo(install_session).get(ctx.org_id)
+                    org_slug = org.slug if org else ctx.org_id
+                    install_note = await _maybe_install_from_user_message(
+                        session=install_session,
+                        org_id=ctx.org_id,
+                        org_slug=org_slug,
+                        workspace_id=ctx.workspace_id,
+                        actor_user_id=ctx.user.id,
+                        text=request_obj.content,
+                        commit=False,
+                    )
+                    if install_note is None:
+                        raise RuntimeError("matched install command produced no result")
+                    result = DirectExecutionResult(
+                        kind="skill_install",
+                        request_content=request_obj.content,
+                        content=install_note,
+                        timestamp=datetime.now(UTC),
+                    )
+                    await ConversationExecutionService(
+                        install_session,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    ).finish_direct_execution(
+                        admission_id=admission_id,
+                        result=result,
+                        now=datetime.now(UTC),
+                    )
+                    await install_session.commit()
+
+            result, checkpoint_added = await _commit_direct_result_checkpoint(
+                admission_id=admission_id,
+                conversation_id=conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            if checkpoint_added:
                 await _enqueue_search_index(
                     conversation_id,
                     org_id=ctx.org_id,
@@ -1414,50 +1545,13 @@ async def send_message(
                     user_id=ctx.user.id,
                 )
         finally:
-            # The fallback spawns no background run — release the slot now that
-            # the install + append (the only writes we needed to serialize) are done.
             await clear_active_run(
                 rds.client,
                 prefix=rds.key_prefix,
                 conversation_id=conversation_id,
                 run_id=fallback_run_id,
             )
-
-        if install_note is not None:
-            # Emit a one-shot SSE response so the frontend renders the assistant
-            # reply and finalizes via its normal text_delta/done handlers. Returning
-            # a fake run_id here would 404 the immediate GET /runs/{id}/stream the
-            # web client issues for non-SSE JSON responses.
-            note = install_note
-            ts = utc_isoformat(datetime.now(UTC))
-
-            async def _chat_install_fallback_stream() -> AsyncIterator[str]:
-                yield _format_sse_event(
-                    "0-1",
-                    {
-                        "type": "text_delta",
-                        "timestamp": ts,
-                        "agent_id": None,
-                        "agent_name": None,
-                        "data": {"content": note},
-                    },
-                )
-                yield _format_sse_event(
-                    "0-2",
-                    {
-                        "type": "done",
-                        "timestamp": ts,
-                        "agent_id": None,
-                        "agent_name": None,
-                        "data": {},
-                    },
-                )
-
-            return StreamingResponse(
-                _chat_install_fallback_stream(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
+        return _build_direct_result_response(result)
 
     from cubeplex.api.exceptions import (
         AttachmentReferenceInvalidError,
