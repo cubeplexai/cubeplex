@@ -78,10 +78,7 @@ def _tokens(text: str) -> set[str]:
 def _score(c: SkillCandidate, query: str) -> tuple[int, int, int, int]:
     q = query.lower().strip()
     name = c.name.lower()
-    haystack = (
-        f"{name} {c.description.lower()} "
-        f"{' '.join(k.lower() for k in c.keywords)}"
-    )
+    haystack = f"{name} {c.description.lower()} {' '.join(k.lower() for k in c.keywords)}"
     q_tokens = _tokens(query)
     name_tokens = _tokens(c.name)
     hay_tokens = _tokens(haystack)
@@ -192,16 +189,16 @@ class SkillInstallService:
         self._workspace_id = workspace_id
         self._actor = actor_user_id
 
-    async def install(self, candidate_id: str) -> InstallResult:
+    async def install(self, candidate_id: str, *, commit: bool = True) -> InstallResult:
         try:
             kind, source_id, source_ref = decode_candidate_id(candidate_id)
         except CandidateIdError as exc:
             raise SkillInstallError(str(exc)) from exc
         if kind == "local":
-            return await self._install_local(source_ref)
-        return await self._install_remote(source_id, source_ref)
+            return await self._install_local(source_ref, commit=commit)
+        return await self._install_remote(source_id, source_ref, commit=commit)
 
-    async def _install_local(self, skill_id: str) -> InstallResult:
+    async def _install_local(self, skill_id: str, *, commit: bool) -> InstallResult:
         skills = SkillRepository(self._session)
         skill = await skills.get(skill_id)
         # visible-to-org guard: preinstalled OR own-org uploaded only
@@ -218,9 +215,7 @@ class SkillInstallService:
                 self._org_id, skill.id
             )
             if tombstone is not None:
-                raise SkillInstallError(
-                    "preinstalled skill was uninstalled for this org"
-                )
+                raise SkillInstallError("preinstalled skill was uninstalled for this org")
         if self._workspace_id is not None:
             await OrgSkillInstallRepository(self._session).create_for_workspace(
                 org_id=self._org_id,
@@ -228,6 +223,7 @@ class SkillInstallService:
                 skill_id=skill.id,
                 installed_version=skill.current_version,
                 installed_by_user_id=self._actor,
+                commit=commit,
             )
         else:
             await OrgSkillInstallRepository(self._session).upsert(
@@ -236,6 +232,7 @@ class SkillInstallService:
                 installed_version=skill.current_version,
                 installed_by_user_id=self._actor,
                 auto_bind=False,
+                commit=commit,
             )
         return InstallResult(
             canonical_name=skill.name,
@@ -244,7 +241,7 @@ class SkillInstallService:
         )
 
     async def _install_remote(
-        self, source_id: str, source_ref: str
+        self, source_id: str, source_ref: str, *, commit: bool
     ) -> InstallResult:
         source = self._registry.adapter_by_id(source_id)
         if source is None:
@@ -261,9 +258,7 @@ class SkillInstallService:
         try:
             files = await source.fetch(source_ref)
         except httpx.HTTPStatusError as e:
-            raise SkillInstallError(
-                f"remote source fetch failed: {e.response.status_code}"
-            ) from e
+            raise SkillInstallError(f"remote source fetch failed: {e.response.status_code}") from e
         except (httpx.RequestError, ValueError) as e:
             raise SkillInstallError(f"remote source fetch failed: {e}") from e
         if "SKILL.md" not in files:
@@ -281,6 +276,7 @@ class SkillInstallService:
                 workspace_id=self._workspace_id,
                 imported_from_registry_id=source_id,
                 imported_from_source_ref=source_ref,
+                commit=commit,
             )
         except UnicodeDecodeError as e:
             raise SkillInstallError(str(e)) from e
@@ -297,21 +293,18 @@ class SkillInstallService:
 
                 raw_name = peek_skill_name(files["SKILL.md"].decode("utf-8"))
                 if raw_name is None:
-                    raise SkillInstallError(
-                        "cannot resolve canonical name from SKILL.md"
-                    ) from None
+                    raise SkillInstallError("cannot resolve canonical name from SKILL.md") from None
                 canonical = f"{self._org_slug}:{raw_name}"
             existing = await SkillRepository(self._session).find_by_name(canonical)
             if existing is None:
-                raise SkillInstallError(
-                    f"existing skill lookup failed for {canonical}"
-                ) from None
+                raise SkillInstallError(f"existing skill lookup failed for {canonical}") from None
             install_version = e.version or existing.current_version
             # Defend against a candidate whose version no longer exists in the
             # catalog (e.g. it was pruned) — fall back to current_version.
-            if await SkillVersionRepository(self._session).find(
-                existing.id, install_version
-            ) is None:
+            if (
+                await SkillVersionRepository(self._session).find(existing.id, install_version)
+                is None
+            ):
                 install_version = existing.current_version
             if self._workspace_id is not None:
                 await OrgSkillInstallRepository(self._session).create_for_workspace(
@@ -320,6 +313,7 @@ class SkillInstallService:
                     skill_id=existing.id,
                     installed_version=install_version,
                     installed_by_user_id=self._actor,
+                    commit=commit,
                 )
             else:
                 await OrgSkillInstallRepository(self._session).upsert(
@@ -328,6 +322,7 @@ class SkillInstallService:
                     installed_version=install_version,
                     installed_by_user_id=self._actor,
                     auto_bind=False,
+                    commit=commit,
                 )
             return InstallResult(
                 canonical_name=existing.name,

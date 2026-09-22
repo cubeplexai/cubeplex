@@ -20,6 +20,7 @@ from cubeplex.models import (
 )
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
+    DirectExecutionResult,
     ExecutionConflictError,
     ExecutionRevokedError,
     UserMessageIntent,
@@ -138,6 +139,144 @@ async def test_retry_keeps_first_run_snapshot_and_does_not_overwrite_later_selec
     assert retry.execution.primary == "provider/first"
     await db_session.refresh(conv)
     assert conv.model_key == "new-user-selection"
+
+
+async def test_direct_message_retry_reuses_admission_and_rejects_changed_content(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    source = str(uuid4())
+    first = await service(db_session).admit_direct_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=source,
+        intent=UserMessageIntent(content="install deep-research"),
+        operation="skill_install",
+        now=NOW,
+    )
+    await db_session.commit()
+
+    retry = await service(db_session).admit_direct_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=source,
+        intent=UserMessageIntent(content="install deep-research"),
+        operation="skill_install",
+        now=NOW + timedelta(seconds=1),
+    )
+    assert first.created
+    assert not retry.created
+    assert retry.admission.id == first.admission.id
+
+    with pytest.raises(ExecutionConflictError):
+        await service(db_session).admit_direct_user_message(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            namespace="web",
+            source_id=source,
+            intent=UserMessageIntent(content="install another-skill"),
+            operation="skill_install",
+            now=NOW + timedelta(seconds=2),
+        )
+
+
+async def test_stop_all_blocks_unstarted_direct_message_side_effect(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    fixture_admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert fixture_admission is not None
+    fixture_admission.run_finished_at = NOW
+    await db_session.commit()
+    admitted = await service(db_session).admit_direct_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="install deep-research"),
+        operation="skill_install",
+        now=NOW,
+    )
+    await db_session.commit()
+    await service(db_session).close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=admitted.admission.execution_generation,
+        now=NOW + timedelta(seconds=1),
+    )
+    await db_session.commit()
+
+    with pytest.raises(ExecutionRevokedError):
+        await service(db_session).claim_direct_execution(
+            admission_id=admitted.admission.id,
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            now=NOW + timedelta(seconds=2),
+        )
+
+
+async def test_stop_all_reports_started_direct_message_until_result_is_durable(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    fixture_admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert fixture_admission is not None
+    fixture_admission.run_finished_at = NOW
+    await db_session.commit()
+    admitted = await service(db_session).admit_direct_user_message(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        namespace="web",
+        source_id=str(uuid4()),
+        intent=UserMessageIntent(content="install deep-research"),
+        operation="skill_install",
+        now=NOW,
+    )
+    await db_session.commit()
+    await service(db_session).claim_direct_execution(
+        admission_id=admitted.admission.id,
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        now=NOW + timedelta(seconds=1),
+    )
+    await db_session.commit()
+
+    stopping = await service(db_session).close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=admitted.admission.execution_generation,
+        now=NOW + timedelta(seconds=2),
+    )
+    assert stopping.cleanup_pending
+    await db_session.commit()
+
+    await service(db_session).finish_direct_execution(
+        admission_id=admitted.admission.id,
+        result=DirectExecutionResult(
+            kind="skill_install",
+            request_content="install deep-research",
+            content="Installed `deep-research`.",
+            timestamp=NOW + timedelta(seconds=3),
+        ),
+        now=NOW + timedelta(seconds=3),
+    )
+    await db_session.commit()
+    finished = await service(db_session).close_generation(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        execution_generation=admitted.admission.execution_generation,
+        now=NOW + timedelta(seconds=4),
+    )
+    assert not finished.cleanup_pending
 
 
 @pytest.mark.parametrize("change", ["content", "attachment_ids", "model_key", "reasoning"])
