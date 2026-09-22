@@ -34,11 +34,20 @@ export async function getConversation(client: ApiClient, id: string): Promise<Co
   return res.json() as Promise<Conversation>
 }
 
-export async function deleteConversation(client: ApiClient, id: string): Promise<void> {
+export interface DeleteConversationResult {
+  deleted: boolean
+  cleanup_pending: boolean
+}
+
+export async function deleteConversation(
+  client: ApiClient,
+  id: string,
+): Promise<DeleteConversationResult> {
   // Backend route is `@router.delete("/{conversation_id}")`. There is no
   // method-override middleware, so we call DELETE directly.
   const res = await client.del(`/api/v1/conversations/${id}`)
   if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<DeleteConversationResult>
 }
 
 export async function renameConversation(

@@ -1,6 +1,5 @@
 """Conversations API routes."""
 
-import asyncio
 import json
 import logging
 import re
@@ -20,6 +19,7 @@ from sqlalchemy.pool import NullPool
 from cubeplex.agents.schemas import AgentEvent
 from cubeplex.api.exceptions import InvalidInputError
 from cubeplex.api.schemas.conversations import (
+    DeleteConversationResponse,
     InviteToGroupRequest,
     StopAllRequest,
     StopAllResponse,
@@ -35,6 +35,7 @@ from cubeplex.config import config as _config
 from cubeplex.db import get_session
 from cubeplex.db.engine import _build_database_url, async_session_maker
 from cubeplex.models import Conversation
+from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.repositories import (
     ConversationParticipantRepository,
@@ -64,6 +65,7 @@ from cubeplex.services.conversation_execution import (
     ExecutionRevokedError,
     UserMessageIntent,
 )
+from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.skills.cache import SkillCache
 from cubeplex.streams.replay_coalescer import ReplayCoalescer
 from cubeplex.streams.run_events import (
@@ -590,12 +592,13 @@ async def fork_conversation(
     return _serialize_conversation(new_conv)
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{conversation_id}", response_model=DeleteConversationResponse)
 async def delete_conversation(
     conversation_id: str,
+    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
-) -> None:
+) -> DeleteConversationResponse:
     """Soft-delete a conversation.
 
     Stamps ``deleted_at`` and hides the row from subsequent reads. Child
@@ -617,12 +620,32 @@ async def delete_conversation(
         )
     # Delete: C(conv) ∨ O(topic) per spec § Access matrix.
     await _require_topic_owner_or_creator_if_topic(session, ctx, existing)
-    deleted = await repo.delete_conversation(conversation_id)
+    now = datetime.now(UTC)
+    closed = await ConversationExecutionService(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    ).close_generation(
+        conversation_id=conversation_id,
+        actor_user_id=ctx.user.id,
+        execution_generation=existing.execution_generation,
+        reason=TaskStopReason.conversation_deleted,
+        now=now,
+    )
+    deleted = await repo.delete_conversation(conversation_id, now=now)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
+    await session.commit()
+    await signal_stopped_runs(
+        raw_request.app.state.run_manager,
+        conversation_id=conversation_id,
+        run_ids=closed.run_ids,
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    return DeleteConversationResponse(deleted=True, cleanup_pending=closed.cleanup_pending)
 
 
 async def _adopt_external_bindings(
@@ -2127,35 +2150,6 @@ async def compact_conversation(
         )
 
 
-async def _signal_stopped_runs(
-    raw_request: Request, ctx: RequestContext, conversation_id: str, run_ids: tuple[str, ...]
-) -> None:
-    from cubeplex.agents.checkpointer import shared_checkpointer
-
-    manager = raw_request.app.state.run_manager
-    try:
-        # This is only a wakeup; the durable intent remains recoverable on failure.
-        async with asyncio.timeout(3):
-            async with shared_checkpointer() as cp:
-                pending_run_id = await cp.load_pending_run_id(conversation_id)
-            for run_id in run_ids:
-                if run_id == pending_run_id:
-                    await manager.cancel_paused_run(
-                        conversation_id=conversation_id,
-                        run_id=run_id,
-                        ctx=RunContext(
-                            user_id=ctx.user.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            conversation_id=conversation_id,
-                        ),
-                    )
-                else:
-                    await manager.notify_run_stop(run_id)
-    except Exception:
-        logger.warning("Stop signal deferred for conversation %s", conversation_id, exc_info=True)
-
-
 @router.post(
     "/{conversation_id}/cancel",
     status_code=status.HTTP_202_ACCEPTED,
@@ -2184,7 +2178,14 @@ async def cancel_active_run(
     response = StopRunResponse(
         run_id=stopped.run_id, accepted=stopped.accepted, cleanup_pending=stopped.cleanup_pending
     )
-    await _signal_stopped_runs(raw_request, ctx, conversation_id, (stopped.run_id,))
+    await signal_stopped_runs(
+        raw_request.app.state.run_manager,
+        conversation_id=conversation_id,
+        run_ids=(stopped.run_id,),
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
     return response
 
 
@@ -2220,7 +2221,14 @@ async def stop_all_execution(
         accepted=stopped.accepted,
         cleanup_pending=stopped.cleanup_pending,
     )
-    await _signal_stopped_runs(raw_request, ctx, conversation_id, stopped.run_ids)
+    await signal_stopped_runs(
+        raw_request.app.state.run_manager,
+        conversation_id=conversation_id,
+        run_ids=stopped.run_ids,
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
     return response
 
 

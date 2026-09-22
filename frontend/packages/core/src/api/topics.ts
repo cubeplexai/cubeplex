@@ -38,8 +38,15 @@ export async function updateTopic(
   return await res.json()
 }
 
-export async function deleteTopic(client: ApiClient, topicId: string): Promise<void> {
-  await client.del(`/api/v1/topics/${topicId}`)
+export interface ArchiveTopicResult {
+  archived: boolean
+  cleanup_pending: boolean
+}
+
+export async function deleteTopic(client: ApiClient, topicId: string): Promise<ArchiveTopicResult> {
+  const res = await client.del(`/api/v1/topics/${topicId}`)
+  if (!res.ok) throw await toApiError(res)
+  return await res.json()
 }
 
 export async function setTopicPin(

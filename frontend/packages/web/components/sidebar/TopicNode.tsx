@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
+import { toast } from 'sonner'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
 import { topicDisplayTitle } from '@/lib/topicTitle'
@@ -340,9 +341,11 @@ export function TopicNode({
             <DropdownMenuItem
               variant="destructive"
               onClick={() => {
-                void remove(buildClient(currentWsId), topic.id).catch((err) =>
-                  console.error('Failed to delete topic:', err),
-                )
+                void remove(buildClient(currentWsId), topic.id)
+                  .then((result) => {
+                    if (result.cleanup_pending) toast.info(tTopics('cleanupPending'))
+                  })
+                  .catch((err) => console.error('Failed to delete topic:', err))
               }}
             >
               <Trash2 className="size-3.5" />
