@@ -141,6 +141,24 @@ async def test_retry_keeps_first_run_snapshot_and_does_not_overwrite_later_selec
     assert conv.model_key == "new-user-selection"
 
 
+async def test_run_input_cannot_borrow_original_actors_execution(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    await service(db_session).require_run_input_actor(
+        conversation_id=reservation_context.conversation_id,
+        run_id=reservation_context.spec.originating_run_id,
+        actor_user_id=actor,
+    )
+    with pytest.raises(ExecutionConflictError):
+        await service(db_session).require_run_input_actor(
+            conversation_id=reservation_context.conversation_id,
+            run_id=reservation_context.spec.originating_run_id,
+            actor_user_id="another-participant",
+        )
+
+
 async def test_direct_message_retry_reuses_admission_and_rejects_changed_content(
     db_session: AsyncSession,
     reservation_context: ReservationContext,
