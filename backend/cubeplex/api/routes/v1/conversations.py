@@ -2311,6 +2311,13 @@ async def steer_active_run(
     )
     if pending_request is not None and pending_run_id is not None and pending_is_deliverable:
         try:
+            await ConversationExecutionService(
+                session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            ).require_run_input_actor(
+                conversation_id=conversation_id,
+                run_id=pending_run_id,
+                actor_user_id=ctx.user.id,
+            )
             queued, _created = await steering_repo.enqueue(
                 conversation_id=conversation_id,
                 run_id=pending_run_id,
@@ -2340,6 +2347,8 @@ async def steer_active_run(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Conversation {conversation_id} not found",
             ) from exc
+        except (ExecutionConflictError, ExecutionRevokedError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         await session.commit()
         current_active_run = await get_active_run(
             rds.client,
@@ -2385,20 +2394,75 @@ async def steer_active_run(
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None, "steer_id": body.steer_id}
 
-    steer_metadata: dict[str, Any] = {}
-    if _sender_display_name:
-        steer_metadata["sender_user_id"] = ctx.user.id
-        steer_metadata["sender_display_name"] = _sender_display_name
+    try:
+        await ConversationExecutionService(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        ).require_run_input_actor(
+            conversation_id=conversation_id,
+            run_id=active_run.run_id,
+            actor_user_id=ctx.user.id,
+        )
+        queued, _created = await steering_repo.enqueue(
+            conversation_id=conversation_id,
+            run_id=active_run.run_id,
+            client_steer_id=body.steer_id,
+            content=body.content,
+            sender_user_id=ctx.user.id,
+            sender_display_name=_sender_display_name,
+            hitl_question_id=None,
+        )
+    except SteeringMessageContentTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"code": "steer_content_too_large"},
+        ) from exc
+    except SteeringMessageQueueFullError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "steer_queue_full"},
+        ) from exc
+    except SteeringMessageConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "steer_id_conflict"},
+        ) from exc
+    except SteeringConversationUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        ) from exc
+    except (ExecutionConflictError, ExecutionRevokedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+
+    current_active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    if (
+        current_active_run is None
+        or current_active_run.run_id != queued.run_id
+        or current_active_run.status != "running"
+    ):
+        await steering_repo.fail_queued(row_id=queued.id)
+        await session.commit()
+        return {
+            "status": "failed",
+            "run_id": queued.run_id,
+            "steer_id": queued.client_steer_id,
+        }
 
     run_manager = raw_request.app.state.run_manager
-    dispatch_status = await run_manager.dispatch_steer(
-        active_run.run_id,
-        body.content,
-        steer_id=body.steer_id,
-        metadata=steer_metadata or None,
-    )
+    try:
+        await run_manager.notify_durable_steer(active_run.run_id, queued.id)
+    except Exception:
+        logger.exception(
+            "Durable steer %s committed but run %s wake-up failed",
+            queued.id,
+            active_run.run_id,
+        )
+    await session.refresh(queued)
     return {
-        "status": dispatch_status,
+        "status": _durable_steer_status(queued.state),
         "run_id": active_run.run_id,
         "steer_id": body.steer_id,
     }

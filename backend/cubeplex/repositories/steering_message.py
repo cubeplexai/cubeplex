@@ -107,7 +107,7 @@ class SteeringMessageRepository(ScopedRepository[SteeringMessage]):
         content: str,
         sender_user_id: str,
         sender_display_name: str | None,
-        hitl_question_id: str,
+        hitl_question_id: str | None,
     ) -> tuple[SteeringMessage, bool]:
         """Lock a conversation, enforce bounds, and enqueue idempotently."""
         content_bytes = len(content.encode("utf-8"))
