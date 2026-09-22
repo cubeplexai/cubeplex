@@ -48,7 +48,7 @@ The owner's role cannot be changed from the members list — the owner appears w
 2. Find the member and click **Remove**.
 3. Confirm the removal.
 
-Removing a member revokes their access to all workspaces in the organization. Their past conversation history is preserved.
+Removing a member revokes their access to all workspaces in the organization and stops responses or background work admitted for that member. Work started by other members continues. Their past conversation history is preserved. If process cleanup is still running, the UI reports that removal succeeded and cleanup is continuing. Adding the member again does not revive previously stopped work.
 
 ## Workspace roles
 
@@ -60,6 +60,8 @@ Within each workspace, members can have one of two roles:
 | **Workspace Member** | Chat, use tools, and interact with the agent. |
 
 Workspace roles are managed from the workspace's own settings page, not the org-level admin panel. An org admin can access any workspace's settings.
+
+Removing a workspace member, or leaving a workspace, applies the same rule within that workspace: only that person's admitted work is stopped. Shared conversations and other members' work remain active.
 
 ## Common scenarios
 

@@ -647,6 +647,7 @@
     "joined": "Joined",
     "actions": "Actions",
     "remove": "Remove",
+    "cleanupPending": "The member was removed. Their background work is still stopping.",
     "owner": "owner",
     "admin": "admin",
     "member": "member",
@@ -1600,6 +1601,7 @@
     "leave": "Leave workspace",
     "leaveConfirm": "Leave {workspace}? You'll lose access to all conversations and files.",
     "leaveConfirmButton": "Leave",
+    "cleanupPending": "Access was removed. Background work is still stopping.",
     "accessDenied": "Only workspace admins can manage members.",
     "accessRequests": { "title": "Access requests", "approve": "Approve", "reject": "Reject" },
     "invite": {

@@ -647,6 +647,7 @@
     "joined": "加入时间",
     "actions": "操作",
     "remove": "移除",
+    "cleanupPending": "成员已移除，其后台任务仍在停止中。",
     "owner": "所有者",
     "admin": "管理员",
     "member": "成员",
@@ -1600,6 +1601,7 @@
     "leave": "退出工作区",
     "leaveConfirm": "退出 {workspace}？你将失去所有对话和文件的访问权限。",
     "leaveConfirmButton": "退出",
+    "cleanupPending": "访问权限已移除，后台任务仍在停止中。",
     "accessDenied": "仅工作区管理员可管理成员。",
     "accessRequests": { "title": "加入申请", "approve": "批准", "reject": "拒绝" },
     "invite": {

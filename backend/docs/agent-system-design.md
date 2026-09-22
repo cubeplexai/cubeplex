@@ -160,6 +160,17 @@ worker accidentally. A cancelled HTTP/control waiter does not propagate another
 cancellation into teardown. Forced process shutdown can still cancel cleanup;
 durable recovery remains necessary for that case.
 
+Resource removal uses the same durable control facts. Conversation deletion and
+topic archive close each current generation in the database transaction that hides
+the resource, with `conversation_deleted` as the task stop reason. Workspace,
+organization and topic-participant removal revoke only admissions owned by the actor
+who lost access; they do not close a shared conversation generation or stop another
+actor's work. Topic removal first recalculates conversation access, so an independent
+conversation-level grant is preserved. Re-granting access never clears an old
+admission's revocation. Routes commit these facts before bounded runtime signalling
+and return `cleanup_pending` when process, input or notification reconciliation
+remains.
+
 Automatic memory reflection for admitted work waits until its original worker has
 finished cleanup. It does not keep the run or active slot open. Each model/tool
 boundary requires the original attempt's completed Redis metadata, its finished
