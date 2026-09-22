@@ -23,6 +23,7 @@ from cubeplex.services.conversation_execution import (
     DirectExecutionResult,
     ExecutionConflictError,
     ExecutionRevokedError,
+    ResolvedExecution,
     UserMessageIntent,
 )
 from tests.e2e import test_background_task_reservation as reservation_fixtures
@@ -139,6 +140,62 @@ async def test_retry_keeps_first_run_snapshot_and_does_not_overwrite_later_selec
     assert retry.execution.primary == "provider/first"
     await db_session.refresh(conv)
     assert conv.model_key == "new-user-selection"
+
+
+async def test_automatic_source_reuses_frozen_execution_and_preallocated_run(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    intent = UserMessageIntent(content="scheduled prompt")
+    execution = ResolvedExecution(
+        model_key="pro",
+        primary="provider/first",
+        reasoning=intent.reasoning,
+        trigger="automated",
+    )
+    first = await service(db_session).admit_automatic_run(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        source_kind="schedule_occurrence",
+        source_id="occurrence-1",
+        intent=intent,
+        execution=execution,
+        snapshot=snapshot(),
+        now=NOW,
+        run_id="schedule-run-1",
+    )
+    assert first.created
+    await db_session.commit()
+
+    retry = await service(db_session).admit_automatic_run(
+        conversation_id=reservation_context.conversation_id,
+        actor_user_id=actor,
+        source_kind="schedule_occurrence",
+        source_id="occurrence-1",
+        intent=intent,
+        execution=execution,
+        snapshot=snapshot("next"),
+        now=NOW + timedelta(seconds=1),
+        run_id="schedule-run-1",
+    )
+    assert not retry.created
+    assert retry.admission.run_id == "schedule-run-1"
+    assert retry.execution.primary == "provider/first"
+
+    changed_execution = execution.model_copy(update={"primary": "provider/next"})
+    with pytest.raises(ExecutionConflictError):
+        await service(db_session).admit_automatic_run(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            source_kind="schedule_occurrence",
+            source_id="occurrence-1",
+            intent=intent,
+            execution=changed_execution,
+            snapshot=snapshot("next"),
+            now=NOW + timedelta(seconds=2),
+            run_id="schedule-run-1",
+        )
 
 
 async def test_run_input_cannot_borrow_original_actors_execution(
