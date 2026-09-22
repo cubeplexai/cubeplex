@@ -995,6 +995,66 @@ async def test_idle_notice_is_delivered_only_after_initial_checkpoint(
         await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
 
 
+async def test_failed_admission_finish_keeps_uncheckpointed_initial_binding(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = await _event(db_session, reservation_context, readiness="ready")
+    delivery = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    await delivery.claim_ready(
+        owner_token="worker-1",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    await db_session.commit()
+    monkeypatch.setattr(
+        "cubeplex.llm.snapshot.load_llm_snapshot",
+        AsyncMock(return_value=snapshot()),
+    )
+    monkeypatch.setattr(
+        "cubeplex.llm.builder.build_provider",
+        lambda *args, **kwargs: FauxProvider(provider_id="provider"),
+    )
+    monkeypatch.setattr(
+        "cubeplex.streams.execution_adapter.execute_session",
+        AsyncMock(side_effect=RuntimeError("failed before initial checkpoint")),
+    )
+    finish = AsyncMock(return_value=False)
+    monkeypatch.setattr(ConversationExecutionService, "record_run_finished", finish)
+
+    try:
+        assert await run_manager.start_background_notice(
+            notice_id=event.id,
+            owner_token="worker-1",
+            org_id=event.org_id,
+            workspace_id=event.workspace_id,
+        )
+        admission = await db_session.scalar(
+            select(ConversationExecutionAdmission).where(
+                ConversationExecutionAdmission.source_kind == "background_task",
+                ConversationExecutionAdmission.source_id == event.id,
+            )
+        )
+        assert admission is not None and admission.run_id is not None
+        execution_task = run_manager._tasks[admission.run_id]
+        [result] = await asyncio.gather(execution_task, return_exceptions=True)
+        assert result is None
+
+        await db_session.refresh(event)
+        await db_session.refresh(admission)
+        assert event.state == "claimed"
+        assert event.delivery_run_id == admission.run_id
+        assert event.delivery_attempt_id == admission.run_start_token
+        assert admission.run_finished_at is None
+        finish.assert_awaited_once()
+    finally:
+        await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)
+
+
 async def test_uncommitted_append_returns_to_notice_queue_after_run_ends(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:

@@ -5812,55 +5812,6 @@ class RunManager:
                         run_id,
                         cancel_uncommitted=final_status == "cancelled",
                     )
-                    if (
-                        input_metadata is not None
-                        and input_metadata.get("source") == "background_task"
-                        and ctx.execution is not None
-                    ):
-                        _notice_id = input_metadata.get("notice_id")
-                        _input_id = input_metadata.get("input_id")
-                        if isinstance(_notice_id, str) and isinstance(_input_id, str):
-                            from cubeplex.agents.checkpointer import (
-                                shared_checkpointer as _notice_checkpointer,
-                            )
-                            from cubeplex.db.engine import (
-                                async_session_maker as _notice_session_maker,
-                            )
-                            from cubeplex.services.background_task_delivery import (
-                                BackgroundTaskDeliveryService,
-                            )
-
-                            async with _notice_session_maker() as _notice_session:
-                                _notice_delivery = BackgroundTaskDeliveryService(
-                                    _notice_session,
-                                    org_id=ctx.org_id,
-                                    workspace_id=ctx.workspace_id,
-                                )
-                                async with _notice_checkpointer() as _notice_cp:
-                                    _notice_checkpoint = await _notice_cp.load(conversation_id)
-                                _notice_in_history = bool(
-                                    _notice_checkpoint is not None
-                                    and any(
-                                        getattr(message, "metadata", {}).get("notice_id")
-                                        == _notice_id
-                                        for message in _notice_checkpoint.messages
-                                    )
-                                )
-                                if _notice_in_history:
-                                    await _notice_delivery.acknowledge_history(
-                                        notice_id=_notice_id,
-                                        run_id=run_id,
-                                        input_id=_input_id,
-                                        now=datetime.now(UTC),
-                                    )
-                                else:
-                                    await _notice_delivery.settle_uncommitted_attempt(
-                                        notice_id=_notice_id,
-                                        run_id=run_id,
-                                        input_id=_input_id,
-                                        discard_cancelled_initial=final_status == "cancelled",
-                                    )
-                                await _notice_session.commit()
                 if steering_agent is not None:
                     await self._steering_delivery.unregister(
                         run_id,
@@ -5919,7 +5870,7 @@ class RunManager:
                         pending = await receipt_cp.load_pending(conversation_id)
                     if pending is None or pending[1] != run_id:
                         async with async_session_maker() as admission_session:
-                            await ConversationExecutionService(
+                            admission_finished = await ConversationExecutionService(
                                 admission_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
                             ).record_run_finished(
                                 admission_id=ctx.execution.admission_id,
@@ -5928,6 +5879,49 @@ class RunManager:
                                 now=datetime.now(UTC),
                             )
                             await admission_session.commit()
+                        if (
+                            admission_finished
+                            and input_metadata is not None
+                            and input_metadata.get("source") == "background_task"
+                        ):
+                            _notice_id = input_metadata.get("notice_id")
+                            _input_id = input_metadata.get("input_id")
+                            if isinstance(_notice_id, str) and isinstance(_input_id, str):
+                                from cubeplex.services.background_task_delivery import (
+                                    BackgroundTaskDeliveryService,
+                                )
+
+                                async with async_session_maker() as _notice_session:
+                                    _notice_delivery = BackgroundTaskDeliveryService(
+                                        _notice_session,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    )
+                                    async with shared_checkpointer() as _notice_cp:
+                                        _notice_checkpoint = await _notice_cp.load(conversation_id)
+                                    _notice_in_history = bool(
+                                        _notice_checkpoint is not None
+                                        and any(
+                                            getattr(message, "metadata", {}).get("notice_id")
+                                            == _notice_id
+                                            for message in _notice_checkpoint.messages
+                                        )
+                                    )
+                                    if _notice_in_history:
+                                        await _notice_delivery.acknowledge_history(
+                                            notice_id=_notice_id,
+                                            run_id=run_id,
+                                            input_id=_input_id,
+                                            now=datetime.now(UTC),
+                                        )
+                                    else:
+                                        await _notice_delivery.settle_uncommitted_attempt(
+                                            notice_id=_notice_id,
+                                            run_id=run_id,
+                                            input_id=_input_id,
+                                            discard_cancelled_initial=(final_status == "cancelled"),
+                                        )
+                                    await _notice_session.commit()
 
             if sandbox:
                 from cubeplex.sandbox.lazy import LazySandbox
