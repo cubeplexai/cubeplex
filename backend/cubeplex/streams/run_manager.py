@@ -1795,7 +1795,7 @@ class RunManager:
         if claim.outcome == ClaimResumeOutcome.CONFLICT:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
-        if question_id is None:
+        if question_id is None or preserved_terminal_status is not None:
             meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
             if meta is not None and meta.status in (
                 "completed",

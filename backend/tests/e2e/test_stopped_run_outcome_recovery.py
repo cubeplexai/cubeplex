@@ -204,11 +204,13 @@ async def test_recovery_refuses_conflicting_durable_and_redis_outcomes(
     assert paused.admitted.admission.run_finished_at is None
 
 
+@pytest.mark.parametrize("redis_expired", [False, True])
 async def test_stopped_cleanup_reclaims_terminal_resume_with_retained_pending(
     db_session: AsyncSession,
     run_manager: RunManager,
     paused_execution: PausedExecution,
     monkeypatch: pytest.MonkeyPatch,
+    redis_expired: bool,
 ) -> None:
     paused = paused_execution
 
@@ -229,6 +231,11 @@ async def test_stopped_cleanup_reclaims_terminal_resume_with_retained_pending(
     async with shared_checkpointer() as cp:
         pending = await cp.load_pending(paused.ctx.conversation_id)
     assert pending is not None and pending[0].question_id == paused.question_id
+    if redis_expired:
+        await run_manager._redis.delete(
+            _active_run_key(run_manager._key_prefix, paused.ctx.conversation_id),
+            _run_meta_key(run_manager._key_prefix, paused.run_id),
+        )
 
     await service(db_session).stop_run(
         conversation_id=paused.ctx.conversation_id,
@@ -244,6 +251,10 @@ async def test_stopped_cleanup_reclaims_terminal_resume_with_retained_pending(
     assert paused.admitted.admission.run_terminal_status == "errored"
     assert paused.admitted.admission.run_finished_at is not None
     assert paused.provider.call_count == 1
+    meta = await get_run_meta(
+        run_manager._redis, prefix=run_manager._key_prefix, run_id=paused.run_id
+    )
+    assert meta is not None and meta.status == "errored"
     async with shared_checkpointer() as cp:
         assert await cp.load_pending(paused.ctx.conversation_id) is None
 
