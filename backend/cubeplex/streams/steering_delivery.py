@@ -220,6 +220,20 @@ class DurableSteeringCoordinator:
                 return
             history_ids = await self._history_loader(scope.conversation_id)
             for row in rows:
+                if row.source_kind == "background_task" and row.notice_id:
+                    # Change only steering state while this transaction owns
+                    # the row. The background coordinator settles event then
+                    # steering after this lock is released.
+                    if _checkpoint_key(row) in history_ids:
+                        continue
+                    if row.state == SteeringMessageState.cancel_requested:
+                        await repo.reconcile_terminal(
+                            row_id=row.id,
+                            state=SteeringMessageState.cancelled,
+                        )
+                    else:
+                        await repo.return_claim_to_queue(row_id=row.id, owner=self._owner)
+                    continue
                 if _checkpoint_key(row) in history_ids:
                     await self._acknowledge_row_checkpoint(
                         session=session,
@@ -284,6 +298,33 @@ class DurableSteeringCoordinator:
             history_ids: set[str] | None = None
             for row in rows:
                 receipt = session.cancel_input(row.client_steer_id)
+                if row.source_kind == "background_task" and row.notice_id:
+                    # Session cleanup may requeue or cancel its own steering
+                    # row, but event proof belongs to the background
+                    # coordinator after this row lock is released.
+                    checkpointed = _is_checkpoint_committed(receipt) or (
+                        receipt.status == "committed"
+                    )
+                    if not checkpointed and receipt.status != "cancelled":
+                        if history_ids is None:
+                            history_ids = await self._history_loader(scope.conversation_id)
+                        checkpointed = _checkpoint_key(row) in history_ids
+                    if checkpointed:
+                        continue
+                    if row.state == SteeringMessageState.cancel_requested:
+                        if receipt.status == "cancelled":
+                            await repo.mark_owned_cancelled(
+                                row_id=row.id,
+                                owner=self._owner,
+                            )
+                        else:
+                            await repo.reconcile_terminal(
+                                row_id=row.id,
+                                state=SteeringMessageState.cancelled,
+                            )
+                    else:
+                        await repo.return_claim_to_queue(row_id=row.id, owner=self._owner)
+                    continue
                 if row.state == SteeringMessageState.cancel_requested:
                     if receipt.status == "cancelled":
                         await repo.mark_owned_cancelled(row_id=row.id, owner=self._owner)

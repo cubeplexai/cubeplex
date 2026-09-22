@@ -326,6 +326,65 @@ class BackgroundTaskDeliveryService:
         await self.session.flush()
         return True
 
+    async def discard_stopped_unbound_initial(
+        self,
+        *,
+        notice_id: str,
+        owner_token: str,
+        now: datetime,
+    ) -> bool:
+        """Discard an unbound notice whose exact idle-run admission was stopped."""
+        require_aware(now)
+        task_id = await self.session.scalar(
+            select(col(BackgroundTaskEvent.task_id)).where(
+                col(BackgroundTaskEvent.id) == notice_id,
+                col(BackgroundTaskEvent.org_id) == self.org_id,
+                col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+            )
+        )
+        if task_id is None:
+            return False
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.source_kind) == "background_task",
+                col(ConversationExecutionAdmission.source_id) == notice_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if admission is None or (
+            admission.run_stop_requested_at is None and admission.revoked_at is None
+        ):
+            return False
+        task = await self.session.get(
+            BackgroundTask, task_id, with_for_update=True, populate_existing=True
+        )
+        event = await self.session.get(
+            BackgroundTaskEvent, notice_id, with_for_update=True, populate_existing=True
+        )
+        if (
+            task is None
+            or event is None
+            or event.task_id != task.id
+            or event.org_id != self.org_id
+            or event.workspace_id != self.workspace_id
+            or event.state != BackgroundTaskEventState.claimed.value
+            or event.owner_token != owner_token
+            or event.delivery_attempt_id is not None
+        ):
+            return False
+        event.state = BackgroundTaskEventState.discarded.value
+        event.discard_reason = task.stop_reason or "run_stop"
+        event.owner_token = None
+        event.owner_until = None
+        event.revision += 1
+        self._finish_fenced_admission(admission, now=now)
+        await self.session.flush()
+        return True
+
     async def enqueue_for_active_run(
         self,
         *,
@@ -705,6 +764,7 @@ class BackgroundTaskDeliveryCoordinator:
                     ),
                 )
                 if active is None:
+                    revoked = False
                     try:
                         started = await self.run_manager.start_background_notice(
                             notice_id=claim.notice.notice_id,
@@ -712,16 +772,33 @@ class BackgroundTaskDeliveryCoordinator:
                             org_id=org_id,
                             workspace_id=workspace_id,
                         )
-                    except (ExecutionRevokedError, LookupError, RuntimeError):
+                    except ExecutionRevokedError:
+                        revoked = True
+                        started = False
+                    except (LookupError, RuntimeError):
                         started = False
                     if started:
                         routed.append(claim.notice.notice_id)
                     else:
-                        await self._release(
-                            claim.notice.notice_id,
-                            org_id=org_id,
-                            workspace_id=workspace_id,
-                        )
+                        settled = False
+                        if revoked:
+                            async with self.session_factory() as session:
+                                settled = await BackgroundTaskDeliveryService(
+                                    session,
+                                    org_id=org_id,
+                                    workspace_id=workspace_id,
+                                ).discard_stopped_unbound_initial(
+                                    notice_id=claim.notice.notice_id,
+                                    owner_token=self.owner_token,
+                                    now=now,
+                                )
+                                await session.commit()
+                        if not settled:
+                            await self._release(
+                                claim.notice.notice_id,
+                                org_id=org_id,
+                                workspace_id=workspace_id,
+                            )
                     continue
                 if active.status != "running":
                     await self._release(
