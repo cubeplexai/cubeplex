@@ -24,6 +24,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.agents.stream import unwrap_deferred_in_message_dicts
 
 
+def _is_internal_background_input(message: dict[str, Any]) -> bool:
+    if message.get("role") != "user":
+        return False
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("source") == "background_task":
+        return True
+    notice_id = metadata.get("notice_id")
+    return isinstance(notice_id, str) and notice_id.startswith(("bge-", "scmw-", "scmd-"))
+
+
 @dataclass(frozen=True)
 class HistoryWindow:
     """Result of a paginated history read.
@@ -84,7 +96,11 @@ async def load_history_window(
         data["seq"] = int(seq)
         decoded.append(data)
 
-    messages = unwrap_deferred_in_message_dicts(decoded)
+    messages = [
+        message
+        for message in unwrap_deferred_in_message_dicts(decoded)
+        if not _is_internal_background_input(message)
+    ]
     oldest_seq = int(rows[-1][0]) if rows else None
     return HistoryWindow(messages=messages, oldest_seq=oldest_seq, has_more=has_more)
 

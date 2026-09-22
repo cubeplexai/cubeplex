@@ -13,6 +13,8 @@ from cubeplex.streams.steering_delivery import (
 def test_wake_steer_attempt_keeps_canonical_notice_id() -> None:
     row = MagicMock(
         client_steer_id="scmw-123:run-attempt",
+        source_kind="user_message",
+        notice_id=None,
         sender_user_id="user-1",
         sender_display_name=None,
         content="wake",
@@ -24,6 +26,26 @@ def test_wake_steer_attempt_keeps_canonical_notice_id() -> None:
         "steer_id": "scmw-123:run-attempt",
         "sender_user_id": "user-1",
         "notice_id": "scmw-123",
+    }
+
+
+def test_background_notice_is_not_projected_as_user_steering() -> None:
+    row = MagicMock(
+        client_steer_id="btse-input-1",
+        source_kind="background_task",
+        notice_id="btse-123",
+        execution_generation=4,
+        sender_user_id="user-1",
+        sender_display_name=None,
+        content="background result",
+    )
+
+    message = steering_message_to_cubeloop(row)
+
+    assert message.metadata == {
+        "source": "background_task",
+        "notice_id": "btse-123",
+        "execution_generation": 4,
     }
 
 
@@ -114,3 +136,20 @@ async def test_drain_skips_session_after_registered_claim_is_replaced() -> None:
 
     session_maker.assert_not_called()
     registered_session.submit_input.assert_not_called()
+
+
+async def test_drain_waits_for_initial_background_checkpoint_gate() -> None:
+    session_maker = MagicMock()
+    coordinator = DurableSteeringCoordinator(session_maker)
+    coordinator._sessions["run-1"] = MagicMock()
+    coordinator._scopes["run-1"] = SteeringRunScope(
+        org_id="org-1",
+        workspace_id="workspace-1",
+        conversation_id="conversation-1",
+    )
+    coordinator._claim_tokens["run-1"] = None
+    coordinator._input_gates["run-1"] = False
+
+    await coordinator.drain("run-1")
+
+    session_maker.assert_not_called()

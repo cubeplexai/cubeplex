@@ -20,6 +20,7 @@ from uuid_utils import uuid7
 
 from cubeplex.agents.schemas import (
     AgentEvent,
+    BackgroundTaskNotice,
     DoneEvent,
     ErrorEvent,
     FailoverEvent,
@@ -1138,6 +1139,8 @@ class RunManager:
         llm_snapshot: Any | None = None,
         input_metadata: dict[str, Any] | None = None,
         admission_id: str | None = None,
+        background_notice_id: str | None = None,
+        background_notice_owner_token: str | None = None,
     ) -> str:
         """Create and start a new background run.
 
@@ -1146,12 +1149,17 @@ class RunManager:
         completion hook can find the row by ``run_id`` even if ``_execute_run``
         finishes faster than the poller's post-dispatch UPDATE.
         """
+        if (background_notice_id is None) != (background_notice_owner_token is None):
+            raise ValueError("background notice binding requires both identity and owner")
+        if background_notice_id is not None and admission_id is None:
+            raise ValueError("background notice run requires a durable admission")
         if admission_id is not None:
             from cubeplex.db.engine import async_session_maker
             from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
             from cubeplex.services.conversation_execution import (
                 ConversationExecutionService,
                 ExecutionConflictError,
+                ExecutionRevokedError,
                 RunExecutionBinding,
                 UserMessageIntent,
             )
@@ -1312,6 +1320,23 @@ class RunManager:
                         attempt_id=ctx.execution.attempt_id,
                         now=datetime.now(UTC),
                     )
+                    if claimed and background_notice_id is not None:
+                        from cubeplex.services.background_task_delivery import (
+                            BackgroundTaskDeliveryService,
+                        )
+
+                        bound = await BackgroundTaskDeliveryService(
+                            admission_session,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        ).bind_initial_attempt(
+                            notice_id=background_notice_id,
+                            owner_token=background_notice_owner_token or "",
+                            run_id=run_id,
+                            attempt_id=ctx.execution.attempt_id,
+                        )
+                        if not bound:
+                            raise ExecutionRevokedError("background notice lost delivery authority")
                     await admission_session.commit()
                 if not claimed:
                     await clear_active_run(
@@ -1369,6 +1394,116 @@ class RunManager:
     async def drain_durable_steering(self, run_id: str) -> None:
         """Prompt immediate delivery after an internal durable steer enqueue."""
         await self._steering_delivery.drain(run_id)
+
+    async def start_background_notice(
+        self,
+        *,
+        notice_id: str,
+        owner_token: str,
+        org_id: str,
+        workspace_id: str,
+    ) -> bool:
+        """Start an idle conversation from one claimed internal notice."""
+        from sqlalchemy import select
+        from sqlmodel import col
+
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.llm.snapshot import load_llm_snapshot
+        from cubeplex.models import BackgroundTask, BackgroundTaskEvent, Conversation, Topic
+        from cubeplex.services.background_task_delivery import (
+            render_background_task_notice,
+        )
+        from cubeplex.services.conversation_execution import (
+            ConversationExecutionService,
+            UserMessageIntent,
+        )
+
+        async with async_session_maker() as session:
+            row = (
+                await session.execute(
+                    select(BackgroundTaskEvent, BackgroundTask, Conversation)
+                    .join(
+                        BackgroundTask,
+                        col(BackgroundTask.id) == col(BackgroundTaskEvent.task_id),
+                    )
+                    .join(
+                        Conversation,
+                        col(Conversation.id) == col(BackgroundTaskEvent.conversation_id),
+                    )
+                    .where(
+                        col(BackgroundTaskEvent.id) == notice_id,
+                        col(BackgroundTaskEvent.org_id) == org_id,
+                        col(BackgroundTaskEvent.workspace_id) == workspace_id,
+                    )
+                )
+            ).one_or_none()
+            if row is None:
+                return False
+            event, task, conversation = row
+            if event.state != "claimed" or event.owner_token != owner_token:
+                return False
+            notice = BackgroundTaskNotice(
+                notice_id=event.id,
+                task_id=task.id,
+                task_kind=task.kind,
+                originating_run_id=task.originating_run_id,
+                execution_generation=event.execution_generation,
+                reason=event.reason,
+                summary=event.summary,
+                result_ref=event.result_ref,
+            )
+            content = render_background_task_notice(notice)
+            snapshot = await load_llm_snapshot(session, org_id, self._app.state.encryption_backend)
+            admitted = await ConversationExecutionService(
+                session, org_id=org_id, workspace_id=workspace_id
+            ).admit_background_notice(
+                conversation_id=conversation.id,
+                actor_user_id=task.started_by_user_id,
+                notice_id=event.id,
+                owner_token=owner_token,
+                execution_generation=event.execution_generation,
+                intent=UserMessageIntent(content=content),
+                snapshot=snapshot,
+                now=datetime.now(UTC),
+            )
+            topic = (
+                await session.get(Topic, conversation.topic_id)
+                if conversation.topic_id is not None
+                else None
+            )
+            await session.commit()
+
+        assert admitted.admission.run_id is not None
+        await self.start_run(
+            conversation_id=conversation.id,
+            content=content,
+            attachments=[],
+            ctx=RunContext(
+                user_id=task.started_by_user_id,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation.id,
+                trigger="automated",
+                topic_id=conversation.topic_id,
+                is_group_chat=conversation.is_group_chat,
+                sender_display_name=None,
+                sandbox_mode=topic.sandbox_mode if topic is not None else None,
+                topic_creator_user_id=topic.creator_user_id if topic is not None else None,
+                conversation_creator_user_id=conversation.creator_user_id,
+            ),
+            run_id=admitted.admission.run_id,
+            model_key=None,
+            reasoning=None,
+            llm_snapshot=snapshot,
+            input_metadata={
+                **notice.model_dump(mode="json"),
+                "input_id": event.delivery_input_id or event.id,
+            },
+            admission_id=admitted.admission.id,
+            background_notice_id=event.id,
+            background_notice_owner_token=owner_token,
+        )
+        return True
 
     async def cancel_all(self) -> None:
         """Cancel every in-flight run task. Forced shutdown path."""
@@ -2954,6 +3089,31 @@ class RunManager:
             from cubeloop.providers.base import UserMessage as _UserMsg
 
             _user_msg_seen = 0
+            _background_initial = bool(
+                input_metadata is not None and input_metadata.get("source") == "background_task"
+            )
+            from cubeplex.streams.steering_delivery import SteeringRunScope
+
+            steering_scope = SteeringRunScope(
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=conversation_id,
+            )
+
+            async def _on_checkpoint_input(input_id: str) -> None:
+                await self._steering_delivery.acknowledge_injected(
+                    run_id,
+                    input_id,
+                    scope=steering_scope,
+                )
+
+            await self._steering_delivery.register_and_drain(
+                run_id=run_id,
+                scope=steering_scope,
+                session=agent.session,
+                claim_token=ctx.execution.attempt_id if ctx.execution is not None else None,
+                input_gate_open=not _background_initial,
+            )
             auto_detach = _build_auto_detach_listener(agent)
             # One per-run StreamConverter so progressive `deferred_tool_call`
             # unwrap can stitch deltas across events; without persistent state
@@ -2975,7 +3135,9 @@ class RunManager:
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 if isinstance(evt, _AgentStartEvent):
-                    await self._drain_pre_execution_inputs(run_id, agent.session)
+                    if not _background_initial:
+                        await self._drain_pre_execution_inputs(run_id, agent.session)
+                        await self._steering_delivery.drain(run_id)
                 auto_detach(evt, _signal)
                 nonlocal _user_msg_seen
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
@@ -2984,6 +3146,32 @@ class RunManager:
                     if isinstance(notice_id, str) and notice_id.startswith("scmw-"):
                         await _mark_sandbox_wake_delivered(notice_id)
                     if _user_msg_seen == 1:
+                        if _background_initial and ctx.execution is not None:
+                            _initial_input_id = (evt.message.metadata or {}).get("input_id")
+                            if isinstance(notice_id, str) and isinstance(_initial_input_id, str):
+                                from cubeplex.db.engine import (
+                                    async_session_maker as _notice_session_maker,
+                                )
+                                from cubeplex.services.background_task_delivery import (
+                                    BackgroundTaskDeliveryService,
+                                )
+
+                                async with _notice_session_maker() as _notice_session:
+                                    committed = await BackgroundTaskDeliveryService(
+                                        _notice_session,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    ).acknowledge_checkpoint(
+                                        notice_id=notice_id,
+                                        run_id=run_id,
+                                        attempt_id=ctx.execution.attempt_id,
+                                        input_id=_initial_input_id,
+                                        now=datetime.now(UTC),
+                                    )
+                                    await _notice_session.commit()
+                                if committed:
+                                    await self._drain_pre_execution_inputs(run_id, agent.session)
+                                    await self._steering_delivery.open_input_gate(run_id)
                         return  # seed prompt — already shown optimistically
                     if isinstance(notice_id, str) and notice_id.startswith("scmd-"):
                         await _mark_sandbox_notice_delivered(notice_id)
@@ -3128,6 +3316,7 @@ class RunManager:
                                 message=_user_msg,
                             ),
                             on_agent_event=_on_event,
+                            on_checkpoint_input=_on_checkpoint_input,
                         )
                         projection_error = host_projection_error(result)
                         if projection_error is not None:
@@ -3137,6 +3326,34 @@ class RunManager:
                                 projection_error,
                             )
                         final_status = require_host_success(result)
+                        if (
+                            input_metadata is not None
+                            and input_metadata.get("source") == "background_task"
+                            and ctx.execution is not None
+                        ):
+                            _notice_id = input_metadata.get("notice_id")
+                            _input_id = input_metadata.get("input_id")
+                            if isinstance(_notice_id, str) and isinstance(_input_id, str):
+                                from cubeplex.db.engine import (
+                                    async_session_maker as _notice_session_maker,
+                                )
+                                from cubeplex.services.background_task_delivery import (
+                                    BackgroundTaskDeliveryService,
+                                )
+
+                                async with _notice_session_maker() as _notice_session:
+                                    await BackgroundTaskDeliveryService(
+                                        _notice_session,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    ).acknowledge_checkpoint(
+                                        notice_id=_notice_id,
+                                        run_id=run_id,
+                                        attempt_id=ctx.execution.attempt_id,
+                                        input_id=_input_id,
+                                        now=datetime.now(UTC),
+                                    )
+                                    await _notice_session.commit()
                         await self._require_execution_authority(ctx, run_id)
                         await self._begin_execution_finalization(ctx, run_id)
             except BaseException as _run_exc:
@@ -3201,6 +3418,7 @@ class RunManager:
                         ReflectionInput,
                         ReflectionRunner,
                         ReflectionTurn,
+                        turn_contains_background_notice,
                     )
                     from cubeplex.services.user_event import UserEventService
                     from cubeplex.tools.builtin.memory import create_memory_tools
@@ -3216,6 +3434,14 @@ class RunManager:
                     ):
                         logger.debug(
                             "skipping reflection for run_id={}: memory tools not available",
+                            run_id,
+                        )
+                    elif turn_contains_background_notice(
+                        agent.state.messages,
+                        _user_msg,
+                    ):
+                        logger.debug(
+                            "skipping reflection for run_id={}: background task input",
                             run_id,
                         )
                     elif _bus is not None:
@@ -5582,7 +5808,59 @@ class RunManager:
             )
             if not registration_replaced:
                 if final_status != "paused_hitl":
-                    await self._steering_delivery.finalize_run(run_id)
+                    await self._steering_delivery.finalize_run(
+                        run_id,
+                        cancel_uncommitted=final_status == "cancelled",
+                    )
+                    if (
+                        input_metadata is not None
+                        and input_metadata.get("source") == "background_task"
+                        and ctx.execution is not None
+                    ):
+                        _notice_id = input_metadata.get("notice_id")
+                        _input_id = input_metadata.get("input_id")
+                        if isinstance(_notice_id, str) and isinstance(_input_id, str):
+                            from cubeplex.agents.checkpointer import (
+                                shared_checkpointer as _notice_checkpointer,
+                            )
+                            from cubeplex.db.engine import (
+                                async_session_maker as _notice_session_maker,
+                            )
+                            from cubeplex.services.background_task_delivery import (
+                                BackgroundTaskDeliveryService,
+                            )
+
+                            async with _notice_session_maker() as _notice_session:
+                                _notice_delivery = BackgroundTaskDeliveryService(
+                                    _notice_session,
+                                    org_id=ctx.org_id,
+                                    workspace_id=ctx.workspace_id,
+                                )
+                                async with _notice_checkpointer() as _notice_cp:
+                                    _notice_checkpoint = await _notice_cp.load(conversation_id)
+                                _notice_in_history = bool(
+                                    _notice_checkpoint is not None
+                                    and any(
+                                        getattr(message, "metadata", {}).get("notice_id")
+                                        == _notice_id
+                                        for message in _notice_checkpoint.messages
+                                    )
+                                )
+                                if _notice_in_history:
+                                    await _notice_delivery.acknowledge_history(
+                                        notice_id=_notice_id,
+                                        run_id=run_id,
+                                        input_id=_input_id,
+                                        now=datetime.now(UTC),
+                                    )
+                                else:
+                                    await _notice_delivery.settle_uncommitted_attempt(
+                                        notice_id=_notice_id,
+                                        run_id=run_id,
+                                        input_id=_input_id,
+                                        discard_cancelled_initial=final_status == "cancelled",
+                                    )
+                                await _notice_session.commit()
                 if steering_agent is not None:
                     await self._steering_delivery.unregister(
                         run_id,

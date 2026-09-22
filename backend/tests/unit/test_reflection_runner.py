@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cubeloop.agent.types import AgentToolResult, ToolExecutionEndEvent
-from cubeloop.providers.base import TextContent
+from cubeloop.providers.base import AssistantMessage, TextContent, UserMessage
 
 from cubeplex.models.user_event import UserEventType
 from cubeplex.services.reflection_runner import (
@@ -20,7 +20,29 @@ from cubeplex.services.reflection_runner import (
     ReflectionInput,
     ReflectionRunner,
     ReflectionTurn,
+    turn_contains_background_notice,
 )
+
+
+def test_background_or_mixed_turn_skips_reflection() -> None:
+    user = UserMessage(
+        content=[TextContent(text="keep working")],
+        metadata={"run_id": "run-1"},
+    )
+    notice = UserMessage(
+        content=[TextContent(text="task completed")],
+        metadata={
+            "run_id": "run-1",
+            "source": "background_task",
+            "notice_id": "bge-1",
+        },
+    )
+    assistant = AssistantMessage(content=[TextContent(text="done")])
+
+    assert turn_contains_background_notice([user, notice, assistant], user)
+    assert turn_contains_background_notice([notice, assistant], notice)
+    assert not turn_contains_background_notice([user, assistant], user)
+
 
 # ---------------------------------------------------------------------------
 # Mock agent helpers
