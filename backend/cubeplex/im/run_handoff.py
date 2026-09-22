@@ -42,6 +42,7 @@ async def enqueue_im_channel_run(
     scope_kind: str,
     owner_user_id: str,
     platform_event_id: str,
+    execution_admission_id: str | None = None,
 ) -> None:
     """Enqueue a synthetic inbound row that the IMRunQueueWorker will drain.
 
@@ -93,6 +94,7 @@ async def enqueue_im_channel_run(
         receipt_id=receipt.id,
         conversation_id=conversation_id,
         actor_user_id=owner_user_id,
+        execution_admission_id=execution_admission_id,
         content=content,
         channel_id=channel_id,
         scope_key=scope_key,
