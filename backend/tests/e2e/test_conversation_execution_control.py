@@ -18,6 +18,7 @@ from cubeplex.models import (
     ConversationExecutionAdmission,
     Membership,
     User,
+    Workspace,
 )
 from cubeplex.models.background_task import TaskStopReason
 from cubeplex.services.conversation_execution import (
@@ -79,6 +80,34 @@ async def actor_id(session: AsyncSession, context: ReservationContext) -> str:
     row = await session.get(ConversationExecutionAdmission, context.admission_id)
     assert row is not None
     return row.actor_user_id
+
+
+@pytest.mark.parametrize("fence", ["user", "workspace"])
+async def test_pending_hard_delete_blocks_new_admission(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    fence: str,
+) -> None:
+    actor = await actor_id(db_session, reservation_context)
+    target = (
+        await db_session.get(User, actor)
+        if fence == "user"
+        else await db_session.get(Workspace, DEFAULT_WS_ID)
+    )
+    assert target is not None
+    target.deletion_pending_at = NOW
+    await db_session.flush()
+
+    with pytest.raises(LookupError, match="conversation not found"):
+        await service(db_session).admit_user_message(
+            conversation_id=reservation_context.conversation_id,
+            actor_user_id=actor,
+            namespace="web",
+            source_id=str(uuid4()),
+            intent=UserMessageIntent(content="must not start"),
+            snapshot=snapshot(),
+            now=NOW,
+        )
 
 
 async def test_run_stop_preserves_handed_off_tasks_and_open_generation(
@@ -1005,6 +1034,38 @@ async def test_actor_revocation_stops_only_that_actors_execution(
     )
     await db_session.execute(delete(User).where(col(User.id) == other.id))
     await db_session.commit()
+
+
+async def test_scope_cleanup_waits_for_terminal_command_log(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    reserved = await reserve(db_session, reservation_context)
+    reserved.task.state = "succeeded"
+    reserved.task.finished_at = NOW
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert admission is not None
+    admission.run_finished_at = NOW
+    admission.run_terminal_at = NOW
+    admission.run_terminal_status = "completed"
+    await db_session.commit()
+
+    pending = await service(db_session).close_workspace_generations(
+        reason=TaskStopReason.conversation_deleted,
+        now=NOW,
+        conversation_ids=(reservation_context.conversation_id,),
+    )
+    assert pending.cleanup_pending
+    reserved.command.log_state = "complete"
+    await db_session.commit()
+    complete = await service(db_session).close_workspace_generations(
+        reason=TaskStopReason.conversation_deleted,
+        now=NOW,
+        conversation_ids=(reservation_context.conversation_id,),
+    )
+    assert not complete.cleanup_pending
 
 
 async def test_stop_keeps_claimed_notice_for_checkpoint_reconciliation(

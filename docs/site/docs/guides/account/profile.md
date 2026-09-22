@@ -40,4 +40,4 @@ The rest of the profile page covers the other account fields:
 - **Display name** — the name other members see on your messages and in member lists.
 - **Password** — change your sign-in password.
 - **API keys** — create keys for programmatic access to the CubePlex API.
-- **Delete account** — permanently remove your account and personal data.
+- **Delete account** — permanently remove your account and personal data. CubePlex first stops work admitted by your account and work inside conversations that will be deleted. If process or log cleanup is still running, the dialog keeps you signed in and asks you to retry deletion; the final retry removes the account only after cleanup is confirmed.

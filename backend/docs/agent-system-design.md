@@ -171,6 +171,14 @@ admission's revocation. Routes commit these facts before bounded runtime signall
 and return `cleanup_pending` when process, input or notification reconciliation
 remains.
 
+Workspace and account hard deletion are two-phase. A durable
+`deletion_pending_at` fence blocks new admissions before stop facts are committed.
+The endpoint retains the workspace or user and returns `deleted=false` while any
+run, task, command log, input or notice is unsettled. The same endpoint is the retry
+surface; no coordinator deletes the resource on its own. Once cleanup is terminal,
+the retry removes wakes, source events, task events, command details, tasks and
+admissions before the original workspace, conversation or user rows.
+
 Automatic memory reflection for admitted work waits until its original worker has
 finished cleanup. It does not keep the run or active slot open. Each model/tool
 boundary requires the original attempt's completed Redis metadata, its finished

@@ -11,3 +11,8 @@ class AccessRemovalResponse(BaseModel):
 class LeaveWorkspaceResponse(BaseModel):
     left: bool
     cleanup_pending: bool
+
+
+class HardDeleteResponse(BaseModel):
+    deleted: bool
+    cleanup_pending: bool

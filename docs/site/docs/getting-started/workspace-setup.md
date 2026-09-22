@@ -102,6 +102,10 @@ If you want the agent to run tasks on a schedule or in response to events:
 
 See the [Automation guides](../guides/automation/scheduled-tasks.md) for details.
 
+## Archive or delete a workspace
+
+Workspace admins can archive or permanently delete a workspace from **Settings > Danger Zone**. Permanent deletion first blocks new execution and asks active responses and background tasks to stop. If process or log cleanup is still running, the workspace and its cleanup records are retained and the UI asks you to retry. A later retry completes deletion after cleanup is confirmed.
+
 ## Next steps
 
 Your workspace is ready. Here is where to go from here:

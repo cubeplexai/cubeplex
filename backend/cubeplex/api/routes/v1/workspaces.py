@@ -8,18 +8,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.api.schemas.execution import LeaveWorkspaceResponse
+from cubeplex.api.schemas.execution import HardDeleteResponse, LeaveWorkspaceResponse
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import current_active_user, require_admin
 from cubeplex.db import get_session
 from cubeplex.models import Conversation, Role, User, Workspace
 from cubeplex.models.agent_config import AgentConfig
+from cubeplex.models.background_task import TaskStopReason
 from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     WorkspaceRepository,
 )
 from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.services.execution_cleanup import purge_workspace_execution_state
 from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.utils.time import utc_isoformat
 
@@ -261,12 +263,13 @@ async def unarchive_workspace(
     return {"id": ws.id, "name": ws.name, "archived_at": None}
 
 
-@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{workspace_id}", response_model=HardDeleteResponse)
 async def delete_workspace(
     workspace_id: str,
+    request: Request,
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> None:
+) -> HardDeleteResponse:
     from sqlalchemy import delete as sa_delete
     from sqlalchemy import select as sa_select
 
@@ -308,6 +311,32 @@ async def delete_workspace(
             active_others += 1
     if active_others == 0:
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
+
+    workspace = await ws_repo.get(workspace_id)
+    if workspace is None or workspace.org_id != ctx.org_id:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    now = datetime.now(UTC)
+    workspace.deletion_pending_at = workspace.deletion_pending_at or now
+    workspace.archived_at = workspace.archived_at or now
+    closed = await ConversationExecutionService(
+        session, org_id=ctx.org_id, workspace_id=workspace_id
+    ).close_workspace_generations(
+        reason=TaskStopReason.conversation_deleted,
+        now=now,
+        mark_deleted=True,
+    )
+    await session.commit()
+    for conversation_id, run_ids in closed.conversation_runs:
+        await signal_stopped_runs(
+            request.app.state.run_manager,
+            conversation_id=conversation_id,
+            run_ids=run_ids,
+            user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=workspace_id,
+        )
+    if closed.cleanup_pending:
+        return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
     # Collect vault credential ids from workspace-scoped grants and sandbox env
     # vars before those rows are deleted, so we can remove the backing secrets.
@@ -440,6 +469,8 @@ async def delete_workspace(
         )
         await session.flush()
 
+    await purge_workspace_execution_state(session, workspace_id=workspace_id)
+
     # Delete child rows deepest-first to avoid FK violations.
     # NOTE: UserSandbox rows are deleted without calling the sandbox manager's
     # kill path. Provider sandboxes are reaped by cleanup_expired. A public
@@ -494,3 +525,4 @@ async def delete_workspace(
         sa_delete(Workspace).where(Workspace.id == workspace_id)  # type: ignore[arg-type]
     )
     await session.commit()
+    return HardDeleteResponse(deleted=True, cleanup_pending=False)
