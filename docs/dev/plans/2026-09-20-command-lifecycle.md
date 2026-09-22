@@ -123,6 +123,8 @@
 - topic／conversation／user_sandbox repositories、`streams/run_manager.py` 的 sandbox 选择和 manager 连接／revive／egress：账号删除原子转移共享资源归属，保留原实例及 volume，不改原 task actor；更新归属后的缓存／晚到写入不得写回旧 user。账号删除对话框和现有账号、topics、sandboxes 站点说明同步展示共享资源保留与个人 sandbox 依赖阻塞，不新增自动目录迁移。
 - `models/conversation_chunk.py`、`models/embedding_job.py`、对应 repositories、`services/conversation_search/{indexer,worker,service}.py` 及搜索入队／backfill 调用方：索引和所有 job 的归属与共享 conversation 同事务转移，领取标识和原子写入隔离迟到 worker，搜索仍检查真实访问权。新增领取字段经模型 autogenerate 迁移，不把索引 worker 改成新的公共 background task 类型。
 - `models/api_key.py`、`external_identity.py`、`org_invite_token.py`、相关 auth／邀请消费者及账号删除服务：撤销个人 API key 和未使用邀请、最终移除外部登录链接，补齐用户外键清单，不把这些凭据转给接任者。纯作者引用置空与业务 owner 转移分开。
+- `services/artifact_share.py`、`api/routes/v1/{artifacts,artifact_share,attachments,public_artifacts,public_attachments,ws_sandbox,sandbox_share}.py`、`im/artifacts.py` 及各 platform 的 dispatcher 构造：Redis 分享／预览令牌的签发身份与原授权证明，公开页面／文件消费统一检查撤权；Web 和 IM 均接通，不只改 HTTP 签发。匹配的现有 artifacts／文件预览和 IM 站点页说明链接失效与旧令牌切换。
+- `models/{topic,conversation}.py` 的持久 sandbox 路由关闭标记／版本、sandbox scope resolver、manager、C1 reservation／迟到句柄及 C4 工具缓存／预览：管理员撤权立即隔离失效个人共享路由，停止其工作而不误删无关实例；topic／成员管理 UI 区分权限已撤销和环境清理中。不新增原 topic 换绑或文件迁移入口。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。同文件定义凭证子记录，前缀 `delc`，只保存唯一 token 摘要、原操作人及 operation ID；可随操作回收，但操作与凭证均无目标级联 FK。账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务。
 - `services/deletion_receipt_cleanup.py`（新）及 `api/app.py` lifespan：启动和每小时执行有界回收，按 completed_at 保留终态 30 天，使用多 worker 安全的数据库批次锁；索引、期限拒绝和物理回收测试随 C2 交付。
 - 删除操作模型／repository 和账号、workspace teardown 共用服务：保存原父 scope／目标实例定位信息，父清理领取及隔离子操作旧 owner，原子写入父子终态；不能通过 bulk delete／级联绕过子操作回执与未决 handoff。
@@ -174,6 +176,8 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 父子删除共用受理边界：操作保存原 user／workspace／topic／目标实例，父删除按实际 teardown 目标集找到尚未完成的成员、IM、参与者、sandbox 子操作；不依赖目标行仍存在，不扩大到其他 actor 的共享资源。子受理先锁父权限／资源门槛再锁目标与操作，父提交 deleting 后拒绝尚未受理的新子请求，明确返回 parent_cleanup_pending 而非子操作已受理；子先受理则父必须纳入。父 worker 通过原操作的 owner token／lease 领取子清理并隔离旧 worker，外部 I/O 在锁外，迟到回执仍进入原记录；全部退出／交接事实未核对前不得级联删目标。子清理可独立完成，不依赖父 completed；不同父操作重叠时竞争同一子 claim 并继续处理可推进项，不能互等父完成。最终父 hard delete 与尚未终态的受影响子操作 completed 同事务，全部凭证保留且各自从完成时起保留 30 天；已完成子项复用，不重复删除或延后其过期时间。
 
+账号目标集明确包含跨 workspace 的全部 `IMConnectorAccount.acting_user_id=A`，不只包含已经有子删除操作的 connector：账号受理在 User／scope 权限 → connector → operation 锁序下停用并登记每个 connector 的分阶段清理，已有操作则接管。connector 创建／acting_user 修改、webhook 入队及派发都复查同一账号门槛，不能在枚举后挂上 A 或把待删 connector 改成 B 来恢复工作。先前已交接和响应丢失继续按原 actor／handoff 对账，原凭据仅供必要清理；未决时保留 connector、queue、receipt 及 user FK，最后子终态和删除按既定事务顺序完成。与 workspace 父删除重叠仍只用同一子 claim，不触碰 acting_user 为其他人的 connector；账号已删除后原子 token 仍可查完成。该分支必须由账号删除入口的真实测试验证，不拿单独 DELETE connector 测试代替。
+
 账号受理先区分独占与仍有其他有效访问者的资源，不沿用 `UserSandbox.user_id == A` 或 `Conversation.creator_user_id == A` 的 bulk-delete 范围。初始撤权事务同时转移保留资源的 topic／conversation creator 及共享 sandbox 的非空 user_id：topic 使用仍有效的 owner（离开者为最后 owner 时同步晋升），独立共享会话按 joined_at、participant ID 选择原有有效参与者。接任者须有当前 org／workspace／资源资格、账号不在删除中；只更新仍指向 A 的归属，不改其他合法 owner，不新增访问、不改原 admission／task actor。保留共享历史的 thread、artifact、attached 附件和对象；附件 uploader 置空，不伪造上传身份。转移在写入 A.deleting 的同一事务提交并记录事实，之后才在锁外停止 A 的工作，不能先删历史再补转移。
 
 候选先只读发现，再按 User ID 稳定排序 → org／workspace 权限行 → Topic／参与者 → conversation → sandbox 的顺序取锁并重查；候选变化回滚整轮重选，不持资源锁反向取新候选 User 锁。成员移除、账号删除、topic owner 变更、新共享关系和 sandbox rekey／reservation 遵守同一顺序。共享 sandbox 保持原行 ID、scope、provider 实例及已保存 volume 配置（包含历史 rekey 的 PVC），不能按新 user 生成替代 PVC；连接／revive 重新读取归属，旧缓存和迟到写入不得恢复 A，任务仍观察原实例。资源已有 teardown 则复用原停止事实，不能通过转移取消它。后续接任者也离开时重新按同一规则转移或在无人有效访问时清理；硬删除 A 前复查全部保留资源的 user FK，只有独占范围进入原有删除列表。若只有子会话 fallback 访问者而没有合法 topic 接任者，预检 409 shared_owner_transfer_required、无删除受理／deleting，由原权限允许的管理操作解决；前端明确提示而非 pending，不新增授权来绕过。覆盖此类无候选但仍共享的真实 DB 用例。
@@ -185,6 +189,10 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 索引 enqueue 在 conversation 锁内读取当前 scope／creator／未删除状态，旧 caller 传入的 creator 不能成为新 FK；归属改变不等于重新授权旧模型 run。claim 事务仅锁 job 并立即提交，之后 worker 在读历史／调用 provider 前重查当前 conversation 和 token，provider I/O 不持数据库锁。结果提交重新按 conversation → job 取锁，只有当前 token／状态／归属仍匹配才可在一个事务 replace chunks 并 mark_done；repository 在该事务只 flush。失败／reap 更新也比较原 token，旧 attempt 的 mark_failed／mark_done 不得覆盖新领取；转移或独占删除已经先提交时丢弃迟到结果，不重试写旧 user。独占 conversation／workspace teardown 在同一门槛废止索引 claim，安全清理 job／chunk 后才能删除 FK 目标。搜索的 lexical／vector／hydrate 可见性查询排除撤销／删除中的权限，按真实访问权查询，不因索引 owner 更新而增权或让合法 B 丢失历史。
 
 硬删除使用完整用户 FK 处理清单并以实际 metadata 核对：Topic／Conversation／UserSandbox／Chunk／EmbeddingJob 保留者转移；共享 attached 附件和现有 nullable 的 created_by／updated_by／uploaded_by 等纯署名置空；个人 Memory、环境／MCP grant 及其 vault、egress、API key、外部登录映射、本人创建的分享／邀请按既定撤销语义清理；participant／membership、账单／事件、自动来源／IM／steering／执行证明按已定义依赖顺序清理。API key／未使用邀请在初始撤权时失效，外部登录仅允许受限删除状态直至最终移除；不删其他 actor 的来源或有效 token。每个用户 FK 必须归入转移、置空、清理或明确拒绝删除之一，新增模型未归类使契约测试失败；另用真实 FK 引用和实际 DELETE 验证，不能只靠静态清单声称无阻塞。
+
+授权清单另覆盖非 FK 的 Redis `share`、`otk`、`otk:att`、`sandbox_otk`：新 payload 有明确 schema 版本、issuer_user_id、固定 scope／conversation／资源及原授权实例／版本；creator 隐式授权需可递增版本，participant／membership 用原实例，不能以重新加入代替。签发 service 从可信用户上下文或原 run admission 取得 actor；IMArtifactDispatcher 及 Feishu／DingTalk／Teams／Discord／WeCom／Slack 构造统一传递原身份，恢复不能读取后来编辑的 connector actor。签发在权限／资源锁内取得授权快照，Redis 写入即使晚于撤权，消费也必须按原证明拒绝；无可验证 actor 时不签发。
+
+公开 artifact 页面、每个子文件、Office artifact／attachment 下载及 sandbox 下载，都先查令牌，再用真实 DB 检查 issuer 未 deleting、原 org／workspace／资源授权仍有效、目标仍存在且未关闭；缺证明、失权和目标不匹配统一不可用，不回显身份资料。校验不能只放页面而让文件 URL 绕过，不信任 object_key 或新版 owner 填补旧令牌，也不只看 Redis TTL。账号初始 deleting 或成员 revoked 提交即使 Redis 删除失败也失效；缓存不绕过 DB 校验，公开响应使用 no-store。存储下载后、发送响应／开始流之前复查资格，已发出的字节不能收回；sandbox 令牌另绑定原实例和路由版本，消费不得为失效路由 ensure_running／revive 替代实例。个人信息硬删后原令牌继续拒绝，B 独立合法证明保留。旧 payload 缺 issuer／授权版本在统一切换后直接拒绝，保留原 TTL 自然回收，不新增双写兼容或要求 Redis 全量扫描成功；Office 仍可在有效 TTL 内多次合法读取。
 
 仍有其他有效参与者的 creator-mode topic（包括旧 null mode）依赖 A 的 user-scope 个人 sandbox 时，预检返回 409 `{code: shared_personal_sandbox_in_use, targets}`，无 deletion_operation、无 deleting 标记；targets 仅含本人可见目标 ID。保留既有 org owner 的 transfer_ownership_first 限制。用户须先结束这些共享关系并完成相关执行清理，或另行授权迁移；本轮不承诺新迁移接口、不自动复制个人目录。预检在上述锁序内，与新增共享关系／个人 sandbox 绑定串行；即使当前尚无 sandbox 行也按路由依赖检查，不能等容器出现才拒绝。前端按明确未受理错误展示解决提示，不进入不可撤销 pending、不自动无限重试；条件解除后沿用首次未受理 token 重新提交仍按新事实检查。
 
@@ -212,7 +220,11 @@ topic participant 移除按 User／Workspace → Topic／参与者 → conversat
 
 保留 `TopicRepository.remove_participant` 的 owner 接任不变量，但把接任提前到 revoked 生效的事务：没有其他有效 owner 时，按 `(joined_at, id)` 晋升最早的有效剩余参与者，排除 revoked、deleting 用户及失效 org／workspace membership；有效 owner 已存在则不晋升，无有效成员才允许无人接任。候选资格锁按上述权限优先顺序取得，Topic 锁串行化 owner 变更及并发离开，候选变化回滚重试；账号／上级成员撤销共用此逻辑。远端清理无需成功，接任者在首次 409 cleanup_pending 后即可行使 owner 权限。最后物理移除旧 participant 只做清理，不再次执行旧 remove_participant 的晋升逻辑；重新加入是新 member，不恢复旧 owner。
 
-共享资源的接任／依赖预检不是账号专用逻辑：topic creator 离开以及 workspace／org 离开、管理员移除，都按撤权后的资源资格裁决，即使 A 已把 owner 角色给 B，也要检查 creator-mode／旧 null mode 指向 A 的个人 sandbox。尚有其他人的共享路由依赖时，整个请求在 revoked／角色变更／operation 创建前返回 409 shared_personal_sandbox_in_use，保留原权限；上级批量路径先预检全部 scope，不允许半成功。用户先结束依赖关系并完成执行清理，或另行授权迁移再重试；本轮不新增自动个人目录转让。dedicated／conversation scope 在撤权事务复用归属转移服务，更新实际 creator／sandbox user 及相应索引，不仅晋升角色；保留其他 actor 原实例，不能让后续 get_or_create 继续以失权 A 解析个人环境。无合法接任者但仍共享时同样在受理前返回 shared_owner_transfer_required。MemberPanel、workspace leave／成员管理和 org-admin 客户端均区分依赖拒绝与已受理 cleanup_pending，展示可见依赖及解决提示，不伪报移除成功；受限 token 状态接口不泄露目标列表。
+共享资源裁决分开主动退出与管理员撤权。本人删账号／离开 topic、workspace、org，可因个人 sandbox 依赖或无合法接任者在受理前返回上述明确错误；UI 提示解决条件且无部分提交。管理员／安全移除不能返回这种阻塞：初始权限事务必须 revoked、使旧 admission 失权、选出有效 topic owner（如有），并持久关闭失效 sandbox 路由、登记其受影响任务停止及取消未提交通知；返回已有 authority_revoked 事实的 cleanup_pending。资源接任失败、远端停止失败或新建共享关系都不能保留／恢复 A 的成员权限，批量管理路径同样如此。
+
+路由关闭保存原 owner／scope／实例及单调版本，与新共享、reservation、provider start、get_or_create／ensure_running 和工具缓存使用串行门槛；旧版本迟到句柄只可登记原实例并清理。creator-mode／null mode 即使 A 已不是 owner 仍要裁决，B 不可借保留的 Topic.creator_user_id 继续连接 A 的个人环境。只中断依赖失效路由的 sandbox 工作，保留其他会话／实例及 B 不依赖该环境的工作；单 topic 撤权按任务取消，不能 kill 仍承载无关合法工作的整个个人实例，整实例均在撤权范围内时才可按 C4 teardown。未知退出持续对账，不延迟鉴权失效。dedicated／conversation scope 能安全接任则更新实际归属和索引，否则先禁用资源；此例外优先于主动账号删除时“保留 B 实例不受影响”的承诺。
+
+路由关闭后，B 的 UI 明确显示原共享环境不可用／相关任务正在停止，管理员 UI 分开展示“权限已撤销”和 cleanup_pending。原进程对账完成即可完成成员清理，无需等待选出资源接任者或迁移文件；路由继续关闭，重加成员或更换 owner 不自动复活。继续 sandbox 工作可用现有创建 dedicated topic 流程，或另行授权迁移；本轮不新增原 topic 换绑接口、不自动挂载 A／B 的个人 PVC。MemberPanel、workspace／org 成员管理及离开 UI、en／zh 和对应站点说明同 PR 更新；只读 token 回执不泄露依赖目标列表。
 
 `DELETE /api/v1/ws/{ws}/topics/{topic}/participants/{user}` 保留原 owner／本人权限边界，绑定原 participant ID 和预存 token；409 cleanup_pending 表示受理，200 completed 才确认清理完成并删除原行。`GET .../participants/{user}/removal-status` 按 token、原 scope／topic／user 查询独立回执，不要求原 topic grant 仍存在；旧 token 不得删除后来新加的 participant。前端保留清理进度、单请求退避／刷新恢复和手动重试，不把权限消失或 404 当成功；父删除接管时沿用同一回执。后台 actor 仅经 topic 授权、已有会话 fallback、其他 actor、重加、重启及迟到 provider_ref 均覆盖真实 DB 业务流。
 
@@ -245,12 +257,13 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 成员离开／移除：worker 在两次状态查询间删除 membership、完成响应丢失、刷新恢复，仍由独立回执确认 completed；旧 token／旧 membership ID 不得影响重新加入，其他 actor／scope 的凭据被拒绝。过期／凭证遗失明确不可确认。
 - 两条自动记忆路径的写事务：模型／工具检查后用真实 PG 锁控制 Stop 与提交顺序，验证 reflection save／update、consolidation 整批 extract／merge／archive、去重及容量清理的原子回滚；正常完成及 Stop 先胜时的既有回归保留。分别覆盖个人／workspace 记忆、topic 归档和两类 participant 撤销；模型前失权不调用模型，模型后失权不提交。
 - 删除不同 token 并发：同一账号／workspace／IM connector／membership 只受理一个清理操作，已授权的不同操作者凭证都能确认终态，未授权／跨目标 token 无法绑定；完成与新凭证绑定竞争、重新加入及响应丢失均不制造永久 pending。
-- 父子删除双向竞争：workspace 对 IM／membership／topic participant／sandbox、account 对其 membership／participant／sandbox 的实际删除范围，覆盖子先受理、父先关闭受理、子已完成、父子终态事务失败及重启、多父重叠、迟到 handoff／provider_ref；全部已受理 token 最终能查询同一事实，不删除未决证明，不误删无关共享资源。
+- 父子删除双向竞争：workspace 对 IM／membership／topic participant／sandbox、account 对其 acting-user IM connector／membership／participant／sandbox 的实际删除范围，覆盖子未受理而由父创建、子先受理、父先关闭受理、子已完成、父子终态事务失败及重启、多父重叠、迟到 handoff／provider_ref；全部已受理 token 最终能查询同一事实，不删除未决证明，不误删无关共享资源。账号入口另覆盖 IM enqueue／claim、start 响应丢失、并发创建／修改 acting_user、真实硬删 A 及其他 actor connector 不受影响。
 - topic-only 自动 actor 移除：受理／reservation 前后、start 已发出尚无句柄、停止失败、重新加入、原成员行已删后刷新；持久撤权且原进程持续清理。另验证 ConversationParticipant fallback 保留、其他 actor 不受影响、共享实例不被 kill、旧 attempt 的迟到参与者写入不能恢复权限。
 - 延伸 `test_last_owner_leaves_promotes_oldest_member`：远端停止失败保持 pending，但接任者已可调用 owner-only 操作；候选撤权／删除、两个 owner 并发离开、已有其他 owner、同时间稳定排序、最后成员退出、重启／最终清理／重加均验证，只晋升一次且不恢复旧权限。
 - 共享归属账号删除 E2E：A 创建或 rekey 的共享 sandbox 中 B 正在执行，删除 A 后 User 行真正消失、B 进程／原实例／原 PVC／共享文件、attached 附件／thread／artifact 可用，creator／sandbox user FK 无残留，task actor 不变。覆盖接任者同时删除／撤权、owner 先离开、rekey／revive／迟到缓存写回、事务回滚、重启及已有 teardown；A 私人凭据失效，B 原有合法引用不被批量撤销，新归属不自动授予私人凭据。个人 user-scope 共享依赖在受理前拒绝，新增依赖双向 barrier、尚无容器、前端非 pending 提示及解除后重试均覆盖。
 - 搜索归属业务流：共享 conversation 含 chunks 和 pending／running／done／dead jobs，转移后实际硬删 A，B 的词法／向量结果及消息跳转仍可用，未授权 C 不增权。用 provider／PG barrier 覆盖旧 enqueue、claim、embed 返回、replace／done、失败回调、reap 与转移／独占删除双向竞争，检查旧 user FK 零复活、新 token 不被覆盖、索引和 job 提交原子、重启继续且已有索引不因转移消失；无 embedding provider 的降级路径也覆盖。
-- creator-mode 退出／撤权业务流：topic creator 当前仍是 owner 或已非 owner、null mode、没有容器、存在活跃命令及 ConversationParticipant fallback，分别经 topic／workspace／org 入口验证依赖拒绝无角色／成员／回执部分提交；结束依赖并清理后可重试。dedicated 路径的接任、并发新共享／撤权与前端非 pending 提示同样验证。用户外键清单覆盖 API key、外部登录、邀请及 shared search／attachments 的实际删用户回归。
+- creator-mode 退出／撤权业务流：topic creator 仍是 owner 或已非 owner、null mode、无容器、活跃命令及 ConversationParticipant fallback，分别测试主动退出的依赖拒绝无部分提交，以及管理员 topic／workspace／org 撤权必定立即失权。模拟恶意 actor 并发新增依赖、无接任者、kill 失败、迟到 start、旧缓存／公开预览、重启／重加，旧个人路由不复活；B 的相关命令明确中断但其他独立工作保留，权限已撤销和清理中分别显示。dedicated 路径安全接任与禁用分支都验证，不靠阻塞管理员解决资源问题。
+- 用户 FK／公开授权回归：API key、外部登录、邀请及 shared search／attachments 的实际删用户；用真实 Redis／DB 对全部四类令牌验证 A 初始删除受理前后、Redis key 留存／删除失败、mint 响应丢失、下载在途、IM 原 actor、重新加入、缺证明旧 payload、B 合法链接及硬删 A。分享页面与直接文件 URL 都覆盖，sandbox 令牌不得复活已撤销路由／新实例；Office 合法重复读取仍可用。
 - 终态后立即发送：prompt、respond、暂停 Stop 的结束回执不丢，正常后处理可验证完成；租约释放后下一次发送成功，lease 到期后的崩溃恢复及连续 HITL 不回归。
 - 不同参与者回答／审批原 actor 的 HITL 被拒绝；原 actor 当前权限失效仍拒绝，主 Stop 不经过模型回答路径。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
@@ -481,7 +494,9 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 51 | C1、C4：自助 sandbox teardown 与 reservation／start 串行，保留迟到句柄，原实例未确认销毁不假报完成；接口／UI 同步 |
 | 52 | C2、C4：父删除纳入已受理子操作并保留 token 终态，未决证据不级联丢失，多父重叠及两种受理顺序均验证 |
 | 53 | C2、C4：共享资源原子转移 user／creator 归属，原实例／volume／历史与其他 actor 保留；个人 sandbox 依赖受理前明确拒绝，不暗转私人授权 |
-| 54 | C2、C4：最后 topic owner 撤权事务即晋升接任者；topic／workspace／org 撤权同时检查个人 sandbox 依赖或转移实际资源，不只改角色 |
+| 54 | C2、C4：即时 owner 接任；主动退出预检，管理员撤权不受依赖否决，持久关闭失效个人共享路由并清理，不只改角色 |
 | 55 | C2：共享搜索索引及所有 job 原子转移，claim token 隔离迟到写入／失败，硬删用户不丢索引、不复活旧 FK 或扩大搜索权限 |
+| 56 | C2、C4：Redis 分享／预览绑定签发者和原授权，删除受理即失效，Web／IM／文件消费及旧令牌切换共同覆盖 |
+| 57 | C2：账号删除创建或接管全部 acting-user connector 分阶段清理，入队／handoff／创建编辑竞争不丢证明、不阻塞最终用户删除 |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
