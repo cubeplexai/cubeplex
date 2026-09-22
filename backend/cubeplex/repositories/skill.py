@@ -62,6 +62,7 @@ class SkillRepository:
         current_version: str,
         imported_from_registry_id: str | None = None,
         imported_from_source_ref: str | None = None,
+        commit: bool = True,
     ) -> Skill:
         skill = Skill(
             name=canonical_name,
@@ -74,12 +75,21 @@ class SkillRepository:
             imported_from_source_ref=imported_from_source_ref,
         )
         self.session.add(skill)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         await self.session.refresh(skill)
         return skill
 
     async def update_current_version(
-        self, skill_id: str, version: str, description: str, keywords: list[str]
+        self,
+        skill_id: str,
+        version: str,
+        description: str,
+        keywords: list[str],
+        *,
+        commit: bool = True,
     ) -> None:
         skill = await self.get(skill_id)
         if skill is None:
@@ -88,7 +98,10 @@ class SkillRepository:
         skill.description = description
         skill.keywords = keywords
         skill.updated_at = datetime.now(UTC)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
 
     async def list_visible_for_org(self, org_id: str, *, source: str | None = None) -> list[Skill]:
         """Catalog visible to org_id: preinstalled (any) + uploaded (own org). Excludes deprecated."""
@@ -167,6 +180,7 @@ class SkillVersionRepository:
         entry_file: str,
         uploaded_by_user_id: str | None,
         content_hash: str,
+        commit: bool = True,
     ) -> SkillVersion:
         sv = SkillVersion(
             skill_id=skill_id,
@@ -180,7 +194,10 @@ class SkillVersionRepository:
             content_hash=content_hash,
         )
         self.session.add(sv)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         await self.session.refresh(sv)
         return sv
 
@@ -215,6 +232,7 @@ class OrgSkillInstallRepository:
         installed_version: str,
         installed_by_user_id: str,
         auto_bind: bool | None = None,
+        commit: bool = True,
     ) -> OrgSkillInstall:
         existing = await self.get(org_id, skill_id)
         if existing is not None:
@@ -224,7 +242,10 @@ class OrgSkillInstallRepository:
             # Only update auto_bind if explicitly provided (preserve user's setting on upgrade)
             if auto_bind is not None:
                 existing.auto_bind = auto_bind
-            await self.session.commit()
+            if commit:
+                await self.session.commit()
+            else:
+                await self.session.flush()
             await self.session.refresh(existing)
             return existing
         row = OrgSkillInstall(
@@ -235,7 +256,10 @@ class OrgSkillInstallRepository:
             auto_bind=auto_bind if auto_bind is not None else False,
         )
         self.session.add(row)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         await self.session.refresh(row)
         return row
 
@@ -333,6 +357,7 @@ class OrgSkillInstallRepository:
         skill_id: str,
         installed_version: str,
         installed_by_user_id: str,
+        commit: bool = True,
     ) -> OrgSkillInstall:
         existing = await self.get_workspace_private(org_id, workspace_id, skill_id)
         if existing is not None:
@@ -340,7 +365,10 @@ class OrgSkillInstallRepository:
             existing.installed_by_user_id = installed_by_user_id
             existing.installed_at = datetime.now(UTC)
             existing.auto_bind = True
-            await self.session.commit()
+            if commit:
+                await self.session.commit()
+            else:
+                await self.session.flush()
             await self.session.refresh(existing)
             return existing
         row = OrgSkillInstall(
@@ -352,7 +380,10 @@ class OrgSkillInstallRepository:
             auto_bind=True,
         )
         self.session.add(row)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         await self.session.refresh(row)
         return row
 
