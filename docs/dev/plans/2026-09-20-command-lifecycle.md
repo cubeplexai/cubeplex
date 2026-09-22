@@ -133,6 +133,9 @@
 - `mcp/oauth/{state,callback,token_manager}.py`、OAuth start／DCR／callback 路由、`repositories/{credential,mcp}.py`、credential service 及 post-grant discovery：原签发授权、外部请求后最终事务校验、vault／grant 原子写入及迟到 refresh／discovery 隔离。OAuth return UI 明确失权错误；现有 MCP 站点页和 `backend/docs/mcp_oauth_staging_test_plan.md` 同交付更新，真实供应商 staging 仍是发布门槛。
 - `models/deletion_operation.py`（新）、对应 repository／service、`models/public_id.py` 注册前缀值 `delo`：生成器自行添加分隔符，最终 ID 为 `delo-<body>`，并补前缀格式测试。同文件定义凭证子记录，前缀 `delc`，只保存唯一 token 摘要、原操作人及 operation ID；可随操作回收，但操作与凭证均无目标级联 FK。账号与 workspace 各自只读状态 handler，不共用 scope 参数分支。终态与硬删除同事务。
 - `services/deletion_receipt_cleanup.py`（新）及 `api/app.py` lifespan：启动和每小时执行有界回收，按 completed_at 保留终态 30 天，使用多 worker 安全的数据库批次锁；索引、期限拒绝和物理回收测试随 C2 交付。
+- `services/deletion_reconciler.py`（新）、deletion_operation 的 owner token／lease／next_attempt_at 与 `api/app.py` lifespan：启动及每 5 秒扫描未完成操作，领取、退避、父子处理器调度和真实硬删除；与仅回收终态的 receipt cleanup 分开注册。C4 将 sandbox restart／delete handler 接入同一注册表，所有 kind 有可恢复处理器后才允许切换。
+- `sso/{state,identity}.py`、`api/routes/v1/social_login.py`、所有企业 OIDC／SAML identity 调用方、`auth/{users,external_login}.py` 及用户／bootstrap repositories：登录 state 最终期限、身份隔离和不分段提交的绑定／创建，发 cookie 前重查；不能在 User 删除后靠自动注册复活旧流程。
+- `models/login_deletion_fence.py`（新）及 repository、`models/public_id.py` 前缀 `ldf`、metadata autogenerate migration：无目标 FK 的 HMAC 身份摘要、key 版本、pending／expires_at；账号初始／最终删除维护，receipt cleanup 的独立有界批次回收已到期记录。登录 UI 和现有账号／SSO 站点说明短期重新登录限制。
 - 删除操作模型／repository 和账号、workspace teardown 共用服务：保存原父 scope／目标实例定位信息，父清理领取及隔离子操作旧 owner，原子写入父子终态；不能通过 bulk delete／级联绕过子操作回执与未决 handoff。
 - `api/routes/v1/ws_members.py`、`workspaces.py` 的 leave、`admin_members.py`、membership models／repositories 及鉴权依赖：持久 revoked 标记、scope 内执行撤销和可恢复清理；成员管理及离开 UI 处理 cleanup_pending，站点 `admin/members.md` 同步。
 - workspace／org membership 当前是复合主键，增加不可变、唯一的 `instance_id`（UUID，保留原复合唯一性），存量回填、新插入重新生成；本计划的“原 membership ID”均指这个实例 ID，不拿 user/scope 或 created_at 代替。操作键及回执绑定该值，模型 autogenerate 结构迁移，回填与重加隔离测试同 C2 交付。
@@ -204,19 +207,35 @@ schedule 删除在源定义锁下设置 deleted_at、next_fire_at=None 并取消
 
 ConversationShare 在创建时保存原 issuer 资格证明，账号 deleting 或相关权限 revoked 的同一事务将其受影响分享 is_active=False，不等最后删行。读取正文、复制 artifact 和受限 scope 校验均先查 issuer 当前资格与原证明，public 仅表示不需查看者登录，不跳过签发资格。copy_artifacts_to_share 在锁外执行，最终 activate 必须在权限 → conversation → share 锁序内重查原证明及未撤销状态；停用后旧复制任务不得激活或重建行。已复制对象不因失权立刻删掉恢复证据，但全部下载路由即时拒绝，按既有物理清理处理；不撤销 B 独立合法分享。缺可靠原授权证明的历史分享在统一切换时停用，用户重新发布，不猜补权限。
 
-panel 令牌继续验 JWT 签名／issuer／expiry，另固定 actor、org／workspace／conversation 及原权限实例／版本、UserSandbox ID、provider instance、允许端口和路由版本。低层 OpenSandbox driver 不独立签出无 actor 的能力，宿主签发点以可信请求／admission 传入资格；不能因方法缺上下文回退旧 token 或 provider 原始地址。HTTP 在读取请求体后、转发前重查，响应按受校验包装器流出；WS 在连上游及 accept 前重查，两向 relay 每批发送前校验，过期／撤权／校验不可用立即取消 pending I/O 并关闭两端。不得向 sandbox 转发平台 session cookie／Authorization，令牌路径日志脱敏。旧缺证明令牌在统一切换后拒绝，前端只能以当前权限重新取 URL。
+panel 令牌继续验 JWT 签名／issuer／expiry，另固定 actor、org／workspace／conversation 及原权限实例／版本、UserSandbox ID、provider instance、允许端口和路由版本。低层 OpenSandbox driver 不独立签出无 actor 的能力，宿主签发点以可信请求／admission 传入资格；不能因方法缺上下文回退旧 token 或 provider 原始地址。HTTP 在读取请求体后、转发前做当前资格检查，响应按有界连接租约流出；WS 在连上游及 accept 前检查，两向 relay 共享租约，过期／撤权通知／验证失败即取消 pending I/O 并关闭两端。不得向 sandbox 转发平台 session cookie／Authorization，令牌路径日志脱敏。旧缺证明令牌在统一切换后拒绝，前端只能以当前权限重新取 URL。
 
-长连接统一采用短读事务的资格检查：活动流每批发送前（WS 两向、HTTP chunk、SSE replay／coalescer flush／live）校验，空闲最长每 5 秒且不晚于 token expiry 检查；检查超时／DB 不可用就停止发送并关闭。可用跨 worker 通知加速，但持久检查和独立 watchdog 必须在漏通知或 socket 阻塞时仍生效；不跨网络 I/O 持数据库锁，不保留长事务缓存的旧 ORM 权限。授权检查是该批转发的受理点，已受理／已发送的在途字节不承诺回收，撤权后不新受理下一批。所有临时读 session、订阅队列和上下游连接在退出时释放，重连从当前资格重新受理。
+长连接使用每连接最长 5 秒的内存资格租约：初始检查后每 2 秒至多发起一次短事务续租，同一连接／资格最多一个在途校验，WS 两向共享；事件、frame 和 chunk 到来只查本地 deadline／关闭标记，不各自查 DB。deadline 从本次查询开始的单调时钟计算，并取 JWT expiry 的更早者；慢查询返回时已过期就丢弃，不从返回时重新算 5 秒。独立 watchdog 在到期或验证错误时关闭两端并取消阻塞 I/O，不等待下一帧；通知可提前使租约永久失效，漏通知也不能使用超过 5 秒的旧资格。关闭的连接不能被迟到成功续租复活。
 
-`_build_run_streaming_response` 与首次 POST 返回的 SSE 均接收订阅者自己的证明，不用 run.actor 冒充查看者资格；检查覆盖 replay 每批、ReplayCoalescer 的最后 flush、live tail 和无数据 heartbeat。撤权只终止该订阅者，B 的 run／Redis stream 不改状态；如已发响应头，发送不含业务数据的订阅级 access_revoked 结束信号，不写入共享 run event、checkpoint 或 error/done。前端停止此连接自动重连并提示失权，Last-Event-ID 不能绕过重新鉴权。user_events 的历史和实时事件按每项 workspace 当前资格过滤，账号删除时关闭整条连接；admin provider SSE 按当前 admin 权限，sandbox 下载按原路由和实例执行同一规则。Next 代理透传结束并取消上游，不保留无人消费的后台连接。
+这明确采用有界传播：撤权持久提交后拒绝新请求／新租约，已开连接最多沿用原租约 5 秒；不再声称零延迟断流。SSE replay／coalescer flush／live、HTTP chunks 和 WS 两向都走本地 lease gate，令牌过期不额外宽限；失败不能以缓存兜底。跨 workspace user event 以 scope 分开缓存且有界淘汰，首次出现的 scope 必须先验证，不用其他 scope 租约；续租合并批量查询，DB 成本由活跃连接／scope 数及定时器决定而非帧数。普通 mutation／最终写事务仍逐次查当前资格，不使用连接租约。所有短读 session、队列、定时任务和上下游连接在退出时释放，重连重新受理。
+
+`_build_run_streaming_response` 与首次 POST 返回的 SSE 均接收订阅者自己的证明，不用 run.actor 冒充查看者资格；租约检查覆盖 replay 每批、ReplayCoalescer 的最后 flush、live tail 和无数据 heartbeat。撤权在上述传播上限内只终止该订阅者，B 的 run／Redis stream 不改状态；如已发响应头，发送不含业务数据的订阅级 access_revoked 结束信号，不写入共享 run event、checkpoint 或 error/done。前端停止此连接自动重连并提示失权，Last-Event-ID 不能绕过重新鉴权。user_events 的历史和实时事件按每项 workspace 资格租约过滤，账号删除时在相同上限内关闭整条连接；admin provider SSE 按当前 admin 权限，sandbox 下载按原路由和实例执行同一规则。Next 代理透传结束并取消上游，不保留无人消费的后台连接。
 
 MCP OAuth state 增加原 actor 的权限实例／版本及固定 connector／grant_scope／workspace／user 证明，保留一次性 consume、PKCE 和 ticket，不把 state 签名当作当前授权。start／DCR 落库、callback 换 token 前均按对应 user／workspace／org 入口的原 RBAC 校验；provider exchange 在锁外，返回后最终写事务按 User → org／workspace 权限 → connector／grant → credential 固定顺序重查当前资格和原版本，再原子保存 vault 与 grant。credential／grant repo 在此模式只 flush，不允许 access token、refresh token 或 grant 分次 commit；失权整体回滚且返回明确 authorization_revoked，不创建孤立凭据或替换 B 的合法 grant。外部返回 token 不记日志，有供应商撤销接口可尽力释放，但不能因此延迟本地拒绝或保留可用 grant。
 
 OAuth post-grant discovery 及 refresh 的迟到结果也校验当前 connector／grant 实例和版本，不能把已删除／替换的 grant 重新置 valid；原 actor 的交互流程不能换成新管理员身份继续。已经合法提交的 org／workspace 共享 grant 不因 created_by 被撤销就一概删除，自动维护按该资源当前资格处理，个人 grant 则受原 user 权限约束。旧 OAuth state 没有可靠原证明时切换后失效，重新发起流程；权限恢复也不能复用旧 state。最终写入与撤权的两个胜出顺序、凭据整笔回滚及 UI 错误都须验证；本地仅在外层供应商接口注入 barrier，不声称代替真实 consent／refresh 的 staging 发布验证。
 
+登录 OAuth／SSO 另有防重建门槛，不能只补 MCP callback。SSOStatePayload 固化并验证 issued_at／expires_at，服务端共用最长期限（当前 300 秒），Google、OIDC、SAML 的最终 identity 写入及 cookie 签发前再次检查绝对期限，即使 state 已在进入 callback 时消费也不能略过；缺期限的旧 state 切换后拒绝。原连接／协议／nonce／PKCE／SAML request 及 verified-email 检查保持，不能用新连接配置解释旧 flow。
+
+账号初始 deleting 事务为规范化邮箱和全部已知 `(provider_type, provider_id, external_id)` 写 login_deletion_fence，只有有版本的 HMAC 摘要／类别和期限，不存明文 subject、邮箱或目标级联 FK；匹配规则与现有 identity lookup 一致，覆盖已有 ExternalIdentity 和首次 verified-email 自动绑定两路。使用跨进程稳定密钥，相关 key 版本保留到旧 state／隔离记录过期；不使用可离线枚举邮箱的裸 SHA。pending 删除的记录不回收，硬删除同事务改为 completed_at＋最长登录 state TTL＋两倍时钟容差之后到期：共用 max TTL 当前 300 秒、单端容差 60 秒，覆盖签发和验证两端偏差；最终验证不再叠加额外宽限。期限常量和 state 签发共用，不能改登录 TTL 而忘记延长隔离；相关密钥缺失时拒绝放行，不能跳过仍有效的 fence。
+
+resolve_identity 在任何更新、绑定、UserManager.create／自动成员和 workspace bootstrap 前检查 fence，最终写事务也检查；命中有效 fence 或 deleting User 就统一拒绝 account_deletion_in_progress，不自动创建替代 user 或登录 cookie。短期隔离窗口内新发起的同身份自动登录也明确拒绝，窗口过后未过期的新 flow 按原注册策略运行，不永久禁止重新注册；旧 flow 最终已超期，即使 fence 物理回收也不能复活。过期 fence 在逻辑上立即失效，不必等小时级清理。清理服务按 expires_at 的独立索引、每轮最多 10×500 条、SKIP LOCKED 有界回收，失败回滚、pending 保留，不能借删除回执 30 天保留无限保留身份摘要。
+
+无现存 User 时也要串行：身份解析／绑定、修改账号邮箱或身份关联、账号受理及最终硬删除，在 User 锁之前按稳定顺序取得邮箱／外部身份摘要的事务级 advisory 锁，再取 User／权限／identity／fence 行；摘要预读变化则整体重试，不持 User 锁补取倒序身份锁。长 provider 请求在这些锁外。用户创建、identity link 和必要 bootstrap 数据使用同一受控 Session／事务，相关 manager／repository 只 flush；不能沿用内部 commit 提前释放身份锁，外部通知放提交后。最终发 cookie 重新查账号状态和 flow 期限；删除后迟到发出的旧 cookie 也不得通过业务鉴权。测试覆盖单租户和多租户既有 bootstrap 语义，不为此新建第二套注册流程。
+
 仍有其他有效参与者的 creator-mode topic（包括旧 null mode）依赖 A 的 user-scope 个人 sandbox 时，预检返回 409 `{code: shared_personal_sandbox_in_use, targets}`，无 deletion_operation、无 deleting 标记；targets 仅含本人可见目标 ID。保留既有 org owner 的 transfer_ownership_first 限制。用户须先结束这些共享关系并完成相关执行清理，或另行授权迁移；本轮不承诺新迁移接口、不自动复制个人目录。预检在上述锁序内，与新增共享关系／个人 sandbox 绑定串行；即使当前尚无 sandbox 行也按路由依赖检查，不能等容器出现才拒绝。前端按明确未受理错误展示解决提示，不进入不可撤销 pending、不自动无限重试；条件解除后沿用首次未受理 token 重新提交仍按新事实检查。
 
 回执清理任务在每个 app lifespan 注册，启动扫描一次、之后每小时扫描，每轮最多 10 批、每批最多 500 条；按 `(completed_at, id)` 索引查询 `state=completed AND completed_at <= now-30d`，事务内 `FOR UPDATE SKIP LOCKED` 领取并删除操作及凭证，失败回滚且下轮重试。只持有短 DB 事务，不调用外部服务；并发 worker 不重复处理同一批。pending 无论创建多久都保留，刚完成但很早创建的操作从 completed_at 起算；状态 handler 独立检查完成后期限，未扫到的过期行也不能继续查。测试用可控时钟验证 30 天边界、物理回收子凭证、跨批次上限、多 worker、回滚／重启及 pending 保留，不以只返回过期状态代替真实回收。
+
+pending 操作由 deletion_reconciler 独立推进：app 启动先扫一轮、之后每 5 秒按 `(state, next_attempt_at, id)` 索引领取到期或 lease 已过期的操作，短事务 SKIP LOCKED，每轮最多 50 个、同时最多 4 个处理器。每次 claim 新 owner token，租约 30 秒、活跃处理每 10 秒续期；领取事务提交后才进入按权限／资源固定顺序的清理阶段，不持 operation 锁反取 User 锁。一次处理只推进有界步骤，外部 I/O 有超时且在 DB 锁外；不能确定退出／handoff 时保留 pending，以 1 秒起、最多 60 秒的持久退避更新 next_attempt_at，不以重试次数耗尽伪造 completed。
+
+handler 覆盖 account、workspace、org／workspace membership、topic participant、IM connector 及 C4 sandbox restart／delete，使用同一 canonical operation、父子 claim 和终态事务。请求内尝试推进与 worker 用相同 claim，不各起一份清理；父遇到他人持有的子 lease 就让出并重试，子可独立完成，不等待父终态。task 退出由 C1 的唯一状态 service／coordinator 提供证据，reconciler 不另写 command 终态。目标关闭标记与操作在同一初始事务创建，恢复扫描校验两者一致；异常缺失操作只报警并保留原数据，不猜测硬删。status GET 纯只读，客户端关闭不影响恢复。
+
+所有阶段写入、续期、退避和最终 hard-delete／completed 都检查 owner token；失权 worker 不更新进度，已知迟到 provider／handoff 证据仍经原受限登记入口保存。app shutdown 停止领取并有界等待，未完成 lease 到期后由其他实例恢复；清理只使用原操作已授权的目标／凭据，不要求被删除 actor 的普通成员权限重新有效。提供 pending 数量／最老等待／失败与 lease 接管监测；持续 unknown 继续保留事实并告警，不阻塞其他操作，不需要用户重发 DELETE 才能唤醒。
 
 移除／离开 workspace 和 org 成员撤销复用 actor 清理服务而非 bulk-delete membership：先持久撤销资格，鉴权、受理、工具边界及输入边界立即拒绝，再停止 scope 内旧工作。权限锁先于 conversation／sandbox／task 锁，旧成员行和句柄留到对账完成；清理未知返回 cleanup_pending，管理员或本人受限离开状态可恢复查询。org 路径覆盖其所属 workspace，重加成员不得消除旧 admission 的撤销事实。对活跃命令、排队输入、IM 身份识别／转交、组织与 workspace 分享读取／创建、重启、并发重新加入分别做真实 DB 测试：成员行仍在且 cleanup_pending 时也不得通过授权，既有最后管理员／owner 保护仍成立。
 
@@ -286,8 +305,11 @@ workspace 删除先持久标记 deleting，串行关闭受理／调度并登记�
 - 用户 FK／公开授权回归：API key、外部登录、邀请及 shared search／attachments 的实际删用户；用真实 Redis／DB 对全部四类令牌验证 A 初始删除受理前后、Redis key 留存／删除失败、mint 响应丢失、下载在途、IM 原 actor、重新加入、缺证明旧 payload、B 合法链接及硬删 A。分享页面与直接文件 URL 都覆盖，sandbox 令牌不得复活已撤销路由／新实例；Office 合法重复读取仍可用。
 - org 邀请接受与 issuer 撤销／降级的双向 PG barrier：事务级唯一胜出、used_at 与成员授予一起回滚、旧邀请不因重新升级复活、其他 issuer 和先前合法受邀者不受影响。实际 endpoint 而非只测 repository 返回值。
 - ConversationShare 正文／artifact 在账号 cleanup_pending、成员撤权及复制后 activate 竞争时即不可读；public／org／workspace scope、旧无证明分享、B 的独立分享均覆盖。
-- 真实应用的面板 HTTP／WebSocket 和 SSE 连接测试：A 正在观看 B 的 run，撤销 A 后 replay／最后 coalescer flush／live 不再受理新批次，B run 继续；活跃及空闲双向 WS、token 到期、丢通知、DB 不可用、旧 token、新实例、重新连接、Next 取消上游和其他合法连接分别验证。外层 sandbox/provider 用可控端点，PG／Redis／鉴权与连接生命周期是真实服务；5 秒边界用可控时钟，不真等长 TTL。
+- 真实应用的面板 HTTP／WebSocket 和 SSE 连接测试：A 正在观看 B 的 run，撤销 A 后 replay／最后 coalescer flush／live 在最长 5 秒传播窗口内停止受理新批次，B run 继续；活跃及空闲双向 WS、token 到期、丢通知、DB 不可用、旧 token、新实例、重新连接、Next 取消上游和其他合法连接分别验证。外层 sandbox/provider 用可控端点，PG／Redis／鉴权与连接生命周期是真实服务；5 秒边界用可控时钟，不真等长 TTL。
 - OAuth user／workspace／org 三种 scope：旧 state 在 callback 前、exchange 等待中、vault／grant 最终事务前后遇到撤权／账号删除／角色降级，旧 flow 不写凭据或复活 FK；先合法提交时保留共享 grant，迟到 discovery／refresh 不覆盖替换结果。覆盖重新加入、旧 state、重复 callback、回滚与用户可见错误；发布前按现有 staging 计划补真实供应商验证记录。
+- 连接租约负载／安全回归：可控时钟内传输万帧 WS、HTTP chunks 和 SSE events，断言 DB 校验次数只随时间／连接及有界 scope 数增长，两向无重复续租；撤权通知、漏通知、慢查询、验证异常、空闲／阻塞 I/O、令牌提前到期和迟到续租不突破 5 秒上限。另验证 mutation 最终事务不复用连接许可。
+- Google／企业 identity 业务流：provider barrier 跨初始删除和真实 User hard delete，已有外部绑定、只有 verified-email 匹配、首次自动注册／bootstrap、邮箱或 identity 并发修改、事务失败均无旧账号重建；最终 state 过期、短期 fence 命中、新 flow 在 fence 到期后正常运行、物理回收及 worker 重启分别验证，不把虚拟供应商当真实 consent 测试。
+- deletion_reconciler E2E：DELETE 受理后不再发送任何 mutation 或 status GET，杀掉请求执行者、重启应用，仅启动／周期扫描即可完成；两个 worker 竞争、lease 过期接管、旧 owner 迟到写入、父子 kind 混合及 provider unknown 回退都验证。断言操作只终态一次、证据不丢、长失败不饿死其他目标；单测轮次／并发上限和持久退避，status 查询无写副作用。
 - 终态后立即发送：prompt、respond、暂停 Stop 的结束回执不丢，正常后处理可验证完成；租约释放后下一次发送成功，lease 到期后的崩溃恢复及连续 HITL 不回归。
 - 不同参与者回答／审批原 actor 的 HITL 被拒绝；原 actor 当前权限失效仍拒绝，主 Stop 不经过模型回答路径。
 - 调整 `backend/tests/e2e/test_scheduled_tasks_firing.py`、`test_scheduled_task_destinations.py`：fixed 新 occurrence 可运行；旧 busy／IM 重试不可换批；Stop 与首次领取竞争有唯一结果。
@@ -523,5 +545,8 @@ pending 与 has_pending 仅计算 state ∈ {pending, claimed}（包括这些状
 | 56 | C2、C4：Redis 分享／预览绑定签发者和原授权，删除受理即失效，Web／IM／文件消费及旧令牌切换共同覆盖 |
 | 57 | C2：账号删除创建或接管全部 acting-user connector 分阶段清理，入队／handoff／创建编辑竞争不丢证明、不阻塞最终用户删除 |
 | 58 | C2、C4、C5：邀请／数据库分享、面板与 SSE 长连接、OAuth 延迟写入共用原资格检查，撤权不只拦新 HTTP；数据转发与写事务、前端停止重连分别验收 |
+| 59 | C2、C4、C5：每连接最长 5 秒资格租约，校验成本与帧率解耦；慢查询／漏通知／到期 fail-closed，写事务无租约宽限 |
+| 60 | C2：登录 state 最终期限和无 User FK 的短期身份 fence，Google／SSO 不重建已删账号，单事务 identity／bootstrap 及有界回收 |
+| 61 | C2、C4：独立删除恢复 worker 的启动／周期扫描、claim／lease／退避及各 kind handler，客户端退出后仍推进，不靠回执清理或 GET |
 
 review 五项分别落到 C2（删除／调度）、C1（实例身份）、C3（独立输入）、C5（完整发现）。完成定义是这些不变量及业务流有实际验证证据，不是按五个 finding 各改一段文字，也不是通过静态 UI 数量检查。
