@@ -125,6 +125,7 @@ async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
         assert restored.log_cursor == "original-log-cursor"
         assert restored.task_id is None and restored.sandbox_instance_id is None
         assert restored.start_token is None and restored.start_requested_at is None
+        assert restored.monitor_outcome is None, "legacy output is not a one-shot result"
         assert restored_wake.state == "delivered"
         assert restored_wake.delivery_run_id == "notification-run"
         assert restored_wake.delivery_steer_id == "original-input-id"

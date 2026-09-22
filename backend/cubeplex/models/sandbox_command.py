@@ -40,6 +40,12 @@ class SandboxCommandKind(StrEnum):
     monitor = "monitor"
 
 
+class MonitorOutcome(StrEnum):
+    matched = "matched"
+    failed = "failed"
+    timed_out = "timed_out"
+
+
 class SandboxCommandLifetime(StrEnum):
     run = "run"
     conversation = "conversation"
@@ -140,6 +146,7 @@ class SandboxCommand(CubeplexBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    monitor_outcome: str | None = Field(default=None, max_length=20)
 
 
 class SandboxCommandWakeState(StrEnum):

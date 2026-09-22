@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import sha256
 from typing import Literal
 
 from sqlalchemy import select
@@ -15,11 +14,12 @@ from cubeplex.models.background_task import (
     BackgroundTask,
     BackgroundTaskEvent,
     BackgroundTaskState,
+    TaskResultReadiness,
     TaskStopReason,
 )
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.membership import Membership
-from cubeplex.models.sandbox_command import SandboxCommand
+from cubeplex.models.sandbox_command import MonitorOutcome, SandboxCommand
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.background_task import BackgroundTaskRepository
 from cubeplex.repositories.conversation import ConversationRepository
@@ -56,6 +56,16 @@ def command_state(snapshot: ProcessSnapshot) -> BackgroundTaskState:
     if snapshot.exit_code is None:
         return BackgroundTaskState.unknown
     return BackgroundTaskState.succeeded if snapshot.exit_code == 0 else BackgroundTaskState.failed
+
+
+def command_result_readiness(*, state: str, log_state: str) -> TaskResultReadiness:
+    if state not in TERMINAL_TASK_STATES:
+        return TaskResultReadiness.pending
+    if log_state == "complete":
+        return TaskResultReadiness.ready
+    if log_state == "unavailable":
+        return TaskResultReadiness.unavailable
+    return TaskResultReadiness.pending
 
 
 def require_aware(moment: datetime) -> None:
@@ -307,7 +317,8 @@ class BackgroundTaskLifecycle:
             task.state = "cancelled" if task.stop_requested_at is not None else "failed"
             command.status = "not_started"
             task.finished_at = command.finished_at = now
-            task.result_summary = "command was never submitted; it was not restarted"
+            if command.monitor_outcome is None:
+                task.result_summary = "command was never submitted; it was not restarted"
             command.log_state = "complete"
             task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
@@ -325,9 +336,13 @@ class BackgroundTaskLifecycle:
             task.finished_at = command.finished_at = now
             command.status = "killed"
             task.result_ref = command.log_path or None
-            task.result_summary = "original sandbox was destroyed; process exit code is unknown"
+            if command.monitor_outcome is None:
+                task.result_summary = "original sandbox was destroyed; process exit code is unknown"
         if command.log_state != "complete":
             command.log_state = "unavailable"
+            task.result_unavailable_reason = (
+                "original sandbox was destroyed before final output could be collected"
+            )
         task.last_observed_at = now
         task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
@@ -379,7 +394,7 @@ class BackgroundTaskLifecycle:
         if (
             task.backgrounded_at is not None
             or task.state not in TERMINAL_TASK_STATES
-            or command.log_state not in ("complete", "unavailable")
+            or task.result_readiness == TaskResultReadiness.pending
             or (task.originating_run_id, task.tool_call_id, task.agent_id)
             != (evidence.run_id, evidence.tool_call_id, evidence.agent_id)
         ):
@@ -441,6 +456,21 @@ class BackgroundTaskLifecycle:
                 notice.state = "discarded"
                 notice.discard_reason = reason.value
                 notice.revision += 1
+        commands = (
+            await self.session.execute(
+                select(SandboxCommand)
+                .where(
+                    col(SandboxCommand.org_id) == self.org_id,
+                    col(SandboxCommand.workspace_id) == self.workspace_id,
+                    col(SandboxCommand.task_id).in_(selected),
+                )
+                .with_for_update()
+            )
+        ).scalars()
+        by_task = {task.id: task for task in rows}
+        for command in commands:
+            assert command.task_id is not None
+            await self._ensure_completion(conversation, by_task[command.task_id], command, now)
         await self.session.flush()
         return sorted(selected)
 
@@ -469,108 +499,29 @@ class BackgroundTaskLifecycle:
                 task.finished_at = now
                 command.finished_at = now
                 task.result_ref = command.log_path or None
-                task.result_summary = (
-                    f"{command.kind} {task.state}; exit_code={snapshot.exit_code}"
-                    + (f"; stop_reason={task.stop_reason}" if task.stop_reason else "")
-                )
+                if command.monitor_outcome is None:
+                    task.result_summary = (
+                        f"{command.kind} {task.state}; exit_code={snapshot.exit_code}"
+                        + (f"; stop_reason={task.stop_reason}" if task.stop_reason else "")
+                    )
         task.last_observed_at = now
         if command.log_state not in ("complete", "unavailable"):
             command.log_state = log_state
         if confirmed_log_cursor is not None:
-            if command.kind == "monitor" and command.log_cursor != confirmed_log_cursor:
-                await self._record_monitor_output(
-                    conversation, task, command, snapshot.new_output, confirmed_log_cursor, now
-                )
-            elif command.kind == "monitor" and not snapshot.new_output.strip():
-                command.flood_started_at = None
             command.log_cursor = confirmed_log_cursor
         task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
 
-    async def _record_monitor_output(
-        self,
-        conversation: Conversation,
-        task: BackgroundTask,
-        command: SandboxCommand,
-        output: str,
-        cursor: str,
-        now: datetime,
-    ) -> None:
-        if (
-            task.state != BackgroundTaskState.running
-            or task.backgrounded_at is None
-            or task.stop_requested_at is not None
-            or task.notifications_cancelled_at is not None
-            or not task.notify_on_complete
-            or not self._execution_open(conversation, task)
-        ):
-            return
-        lines = [line for line in output.splitlines() if line.strip()]
-        if not lines:
-            command.flood_started_at = None
-            return
-        # Preserve the monitor policy: one notice per 15s, eight total, three drops
-        # disable line notices; sustained flooding for 30s requests process Stop.
-        flood = False
-        if not command.line_wakes_disabled:
-            last = await self.session.scalar(
-                select(col(BackgroundTaskEvent.created_at))
-                .where(
-                    col(BackgroundTaskEvent.org_id) == self.org_id,
-                    col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
-                    col(BackgroundTaskEvent.task_id) == task.id,
-                    col(BackgroundTaskEvent.reason) == "line",
-                )
-                .order_by(col(BackgroundTaskEvent.created_at).desc())
-                .limit(1)
-            )
-            if last is None or (now - last).total_seconds() >= 15:
-                self.session.add(
-                    BackgroundTaskEvent(
-                        org_id=self.org_id,
-                        workspace_id=self.workspace_id,
-                        task_id=task.id,
-                        conversation_id=task.conversation_id,
-                        execution_generation=task.execution_generation,
-                        reason="line",
-                        dedupe_key="line:" + sha256(cursor.encode()).hexdigest(),
-                        summary=lines[-1][-4000:],
-                        result_ref=command.log_path or None,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-                command.wake_count += 1
-                command.wake_drops = len(lines) - 1
-                command.flood_started_at = now if command.wake_drops else None
-                if command.wake_count >= 8 or command.wake_drops >= 3:
-                    command.line_wakes_disabled = True
-            else:
-                command.wake_drops += len(lines)
-                command.flood_started_at = command.flood_started_at or now
-                flood = (now - command.flood_started_at).total_seconds() >= 30
-                if command.wake_drops >= 3:
-                    command.line_wakes_disabled = True
-        elif len(lines) >= 3:
-            command.wake_drops += len(lines)
-            command.flood_started_at = command.flood_started_at or now
-            flood = (now - command.flood_started_at).total_seconds() >= 30
-        else:
-            command.flood_started_at = None
-        if flood:
-            await self.request_task_stop(
-                task_id=task.id, reason=TaskStopReason.output_flood, now=now
-            )
-
     async def record_observation_failure(
         self, *, task_id: str, owner_token: str, now: datetime, message: str
     ) -> None:
-        _, _, task, _ = await self._lock_command_task(task_id)
+        _, _, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
         if task.state not in TERMINAL_TASK_STATES:
             task.state = BackgroundTaskState.unknown.value
-            task.result_summary = message[:4000]
+            if command.monitor_outcome is None:
+                task.result_summary = message[:4000]
             task.revision += 1
         await self.session.flush()
 
@@ -581,8 +532,34 @@ class BackgroundTaskLifecycle:
         command: SandboxCommand,
         now: datetime,
     ) -> None:
+        task.result_readiness = command_result_readiness(
+            state=task.state, log_state=command.log_state
+        ).value
+        if task.result_readiness == TaskResultReadiness.unavailable:
+            task.result_unavailable_reason = (
+                task.result_unavailable_reason or "final command output could not be recovered"
+            )
+        if command.kind == "monitor" and command.monitor_outcome is None:
+            outcome: MonitorOutcome | None = None
+            if task.stop_reason == TaskStopReason.deadline:
+                outcome = MonitorOutcome.timed_out
+            elif task.state in TERMINAL_TASK_STATES:
+                outcome = (
+                    MonitorOutcome.matched
+                    if task.state == BackgroundTaskState.succeeded
+                    else MonitorOutcome.failed
+                )
+            if outcome is not None:
+                command.monitor_outcome = outcome.value
+                task.result_ref = command.log_path or None
+                task.result_summary = f"monitor {outcome.value}; {task.result_summary}".rstrip("; ")
+        has_result = (
+            command.monitor_outcome is not None
+            if command.kind == "monitor"
+            else task.state in TERMINAL_TASK_STATES
+        )
         if (
-            task.state not in TERMINAL_TASK_STATES
+            not has_result
             or task.backgrounded_at is None
             or task.foreground_result_delivered_at is not None
             or not task.notify_on_complete
@@ -590,7 +567,7 @@ class BackgroundTaskLifecycle:
             or not self._execution_open(conversation, task)
         ):
             return
-        reason = "exit" if command.kind == "monitor" else "completion"
+        reason = "monitor_result" if command.kind == "monitor" else "completion"
         existing = await self.session.scalar(
             select(col(BackgroundTaskEvent.id)).where(
                 col(BackgroundTaskEvent.task_id) == task.id,
