@@ -503,7 +503,6 @@ class BackgroundTaskDeliveryService:
             event is None
             or event.org_id != self.org_id
             or event.workspace_id != self.workspace_id
-            or event.state != BackgroundTaskEventState.claimed.value
             or event.delivery_run_id != run_id
             or event.delivery_attempt_id is None
             or event.delivery_input_id != input_id
@@ -512,6 +511,10 @@ class BackgroundTaskDeliveryService:
                 and (admission is None or admission.run_start_token != event.delivery_attempt_id)
             )
         ):
+            return False
+        if event.state == BackgroundTaskEventState.delivered.value:
+            return event.checkpoint_run_id == run_id and event.checkpoint_input_id == input_id
+        if event.state != BackgroundTaskEventState.claimed.value:
             return False
         event.state = BackgroundTaskEventState.delivered.value
         event.checkpoint_run_id = run_id
@@ -912,17 +915,20 @@ class BackgroundTaskDeliveryCoordinator:
                         for message in checkpoint.messages
                     )
                 )
-                if not in_history:
-                    meta = await get_run_meta(
-                        self.redis,
-                        prefix=self.redis_key_prefix,
-                        run_id=event.delivery_run_id,
-                    )
-                    pending_run_id = await checkpointer.load_pending_run_id(event.conversation_id)
-                    if (
-                        meta is not None and meta.status in ("running", "paused_hitl")
-                    ) or pending_run_id == event.delivery_run_id:
-                        continue
+                meta = await get_run_meta(
+                    self.redis,
+                    prefix=self.redis_key_prefix,
+                    run_id=event.delivery_run_id,
+                )
+                pending_run_id = await checkpointer.load_pending_run_id(event.conversation_id)
+                run_is_live = bool(
+                    (meta is not None and meta.status in ("running", "paused_hitl"))
+                    or pending_run_id == event.delivery_run_id
+                )
+                if not in_history and run_is_live:
+                    continue
+                fenced = False
+                if not run_is_live:
                     # Completion takes CubeLoop's per-conversation advisory
                     # lock. It waits for an in-flight append, then permanently
                     # rejects any later append from this fenced old run.
@@ -943,6 +949,7 @@ class BackgroundTaskDeliveryCoordinator:
                             event.conversation_id,
                             event.delivery_run_id,
                         )
+                    fenced = True
                     checkpoint = await checkpointer.load(event.conversation_id)
                     in_history = bool(
                         checkpoint is not None
@@ -963,7 +970,7 @@ class BackgroundTaskDeliveryCoordinator:
                             run_id=event.delivery_run_id,
                             input_id=event.delivery_input_id,
                             now=now,
-                            retire_fenced_run_at=now,
+                            retire_fenced_run_at=now if fenced else None,
                         )
                     else:
                         changed = await service.settle_uncommitted_attempt(
