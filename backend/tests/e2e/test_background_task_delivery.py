@@ -31,9 +31,11 @@ from cubeplex.repositories.steering_message import (
 from cubeplex.services.background_task_delivery import (
     BackgroundTaskDeliveryCoordinator,
     BackgroundTaskDeliveryService,
+    render_background_task_notice,
 )
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
+    ExecutionRevokedError,
     UserMessageIntent,
 )
 from cubeplex.streams.run_events import create_run, get_active_run
@@ -693,6 +695,140 @@ async def test_coordinator_starts_idle_notice_without_releasing_claim(
     await db_session.refresh(event)
     assert event.state == "claimed"
     assert event.owner_token == coordinator.owner_token
+
+
+async def test_stopped_idle_notice_is_discarded_instead_of_retried(
+    db_session: AsyncSession, reservation_context: ReservationContext
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    task = await db_session.get(BackgroundTask, event.task_id)
+    assert task is not None
+    run_manager_mock = MagicMock()
+    run_manager_mock.start_background_notice = AsyncMock(
+        side_effect=ExecutionRevokedError("background notice execution was stopped")
+    )
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=run_manager_mock,
+        redis=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redis_key_prefix="delivery-stopped-idle",
+    )
+    delivery = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    [claim] = await delivery.claim_ready(
+        owner_token=coordinator.owner_token,
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    admitted = await ConversationExecutionService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    ).admit_background_notice(
+        conversation_id=event.conversation_id,
+        actor_user_id=task.started_by_user_id,
+        notice_id=event.id,
+        owner_token=coordinator.owner_token,
+        execution_generation=event.execution_generation,
+        intent=UserMessageIntent(content=render_background_task_notice(claim.notice)),
+        snapshot=snapshot(),
+        now=NOW,
+    )
+    admitted.admission.run_stop_requested_at = NOW
+    admitted.admission.run_terminal_status = "cancelled"
+    admitted.admission.run_terminal_at = NOW
+    admitted.admission.run_finished_at = NOW
+    assert await delivery.release_unbound(
+        notice_id=event.id,
+        owner_token=coordinator.owner_token,
+    )
+    await db_session.commit()
+
+    assert (
+        await coordinator.deliver_once(
+            now=NOW + timedelta(seconds=1),
+            lease_until=NOW + timedelta(seconds=31),
+        )
+        == []
+    )
+
+    await db_session.refresh(event)
+    assert event.state == "discarded"
+    assert event.discard_reason == "run_stop"
+
+
+@pytest.mark.parametrize("recovery_path", ["registration", "pause"])
+@pytest.mark.parametrize("checkpointed", [False, True])
+async def test_session_recovery_defers_background_proof_to_delivery_coordinator(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    recovery_path: str,
+    checkpointed: bool,
+) -> None:
+    from cubeplex.db.engine import async_session_maker
+
+    event = await _event(db_session, reservation_context, readiness="ready")
+    admission = await db_session.get(
+        ConversationExecutionAdmission, reservation_context.admission_id
+    )
+    assert admission is not None and admission.run_id is not None
+    admission.run_start_token = "attempt-1"
+    admission.run_started_at = NOW
+    delivery = BackgroundTaskDeliveryService(
+        db_session, org_id=event.org_id, workspace_id=event.workspace_id
+    )
+    await delivery.claim_ready(
+        owner_token="worker-1",
+        now=NOW,
+        owner_until=NOW + timedelta(seconds=30),
+    )
+    steering_id = await delivery.enqueue_for_active_run(
+        notice_id=event.id,
+        owner_token="worker-1",
+        run_id=admission.run_id,
+    )
+    assert steering_id is not None
+    coordinator = DurableSteeringCoordinator(
+        async_session_maker,
+        history_loader=AsyncMock(return_value={event.id} if checkpointed else set()),
+    )
+    steering = await db_session.get(SteeringMessage, steering_id)
+    assert steering is not None
+    steering.state = SteeringMessageState.dispatched
+    steering.delivery_owner = coordinator._owner
+    steering.delivery_lease_until = NOW + timedelta(seconds=30)
+    await db_session.commit()
+    scope = SteeringRunScope(
+        org_id=event.org_id,
+        workspace_id=event.workspace_id,
+        conversation_id=event.conversation_id,
+    )
+
+    if recovery_path == "registration":
+        await coordinator._repair_checkpointed_owned_claims(
+            run_id=admission.run_id,
+            scope=scope,
+        )
+    else:
+        execution_session = MagicMock()
+        execution_session.cancel_input.return_value = InputReceipt(
+            input_id=event.id,
+            status="committed" if checkpointed else "cancelled",
+            durability="checkpoint" if checkpointed else None,
+        )
+        await coordinator._reconcile_owned_before_pause(
+            run_id=admission.run_id,
+            scope=scope,
+            session=execution_session,
+        )
+
+    await db_session.refresh(event)
+    await db_session.refresh(steering)
+    assert event.state == "claimed"
+    assert steering.state == (
+        SteeringMessageState.dispatched if checkpointed else SteeringMessageState.queued
+    )
 
 
 async def test_idle_run_binds_notice_before_execution_task_is_scheduled(
