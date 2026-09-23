@@ -190,6 +190,23 @@ describe('messageStore background task state', () => {
     expect(detailIds?.[0]).toBe('new-task')
   })
 
+  it('drops cached inflight rows missing from the authoritative inflight snapshot', async () => {
+    const staleTasks = Array.from({ length: 101 }, (_, index) =>
+      task({ id: `stale-${index}`, state: 'running', tool_call_id: `tool-${index}` }),
+    )
+    useMessageStore.setState({ backgroundTasks: { 'conv-1': staleTasks } })
+    vi.mocked(listBackgroundTasks).mockResolvedValueOnce([]).mockResolvedValueOnce([])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [],
+      next_cursor: null,
+      has_more: false,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
+  })
+
   it('does not reset event pagination when polling refreshes the newest page', async () => {
     const newest = event({ id: 'event-newest', revision: 2 })
     const older = event({ id: 'event-older', created_at: '2026-09-21T23:00:00+00:00' })

@@ -130,6 +130,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     summary?.has_inflight ||
     summary?.has_pending ||
     summary?.has_cleanup ||
+    stopAll?.cleanup_pending ||
     refreshError,
   )
   if (!hasBackground) return null
