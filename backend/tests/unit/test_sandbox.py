@@ -1614,7 +1614,7 @@ async def test_finalize_run_preserves_durable_tracking_when_kill_fails() -> None
 @pytest.mark.asyncio
 async def test_command_persistence_helpers_delegate_with_owner_and_notice_state() -> None:
     from cubeplex.models.sandbox_command import SandboxCommandNoticeState
-    from cubeplex.sandbox.base import ProcessHandle
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
 
     sandbox = _make_sandbox()
     repo = MagicMock()
@@ -1666,6 +1666,18 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
         notify=True,
         delivered=True,
     )
+    await mw._persist_background_terminal(
+        "scmd-killed",
+        ProcessSnapshot(status="killed"),
+        True,
+        True,
+    )
+    await mw._persist_background_terminal(
+        "scmd-unconfirmed",
+        ProcessSnapshot(status="exited", exit_code=0),
+        False,
+        True,
+    )
     await mw._renew_live_leases()
 
     repo.mark_running.assert_awaited_once_with(
@@ -1683,6 +1695,7 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
         SandboxCommandNoticeState.none.value,
         SandboxCommandNoticeState.pending.value,
         SandboxCommandNoticeState.delivered.value,
+        SandboxCommandNoticeState.none.value,
     ]
     repo.discard_reservation.assert_awaited_once_with(
         "scmd-discard",
@@ -1690,6 +1703,45 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
     )
     assert repo.renew_owner.await_args.kwargs["owner_id"] == "run:run-1"
     assert repo.renew_owner.await_args.args == (["scmd-live"],)
+
+
+@pytest.mark.asyncio
+async def test_repository_monitor_finalization_preserves_the_last_output_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.sandbox import command_coordinator
+    from cubeplex.sandbox.base import ProcessSnapshot
+
+    repo = MagicMock()
+    repo.get = AsyncMock(return_value=MagicMock())
+    repo.session = MagicMock()
+    terminalize = AsyncMock(return_value=True)
+    monkeypatch.setattr(command_coordinator, "_terminalize", terminalize)
+    mw = _make_middleware(session_factory=MagicMock())
+
+    @asynccontextmanager
+    async def _repo_ctx() -> Any:
+        yield repo
+
+    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
+    await mw._persist_monitor_observation(
+        "scmd-monitor",
+        ProcessSnapshot(
+            status="exited",
+            exit_code=0,
+            new_output="earlier\nfinal condition matched\n",
+        ),
+        True,
+    )
+
+    assert terminalize.await_args.kwargs["wake_text"] == "final condition matched"
+    terminalize.reset_mock()
+    await mw._persist_monitor_observation(
+        "scmd-monitor",
+        ProcessSnapshot(status="exited", exit_code=0, new_output="unconfirmed\n"),
+        False,
+    )
+    terminalize.assert_not_awaited()
 
 
 @pytest.mark.asyncio

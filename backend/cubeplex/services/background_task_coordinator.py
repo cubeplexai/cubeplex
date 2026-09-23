@@ -186,6 +186,8 @@ class BackgroundTaskCoordinator:
                             if observed.logs_read:
                                 data_written = True
                                 if snapshot.new_output or snapshot.status != "running":
+                                    # A crash after this write but before the cursor commit may
+                                    # repeat the tail. Never skip output whose DB ack is unknown.
                                     appended = await append_output(
                                         sandbox,
                                         command.log_path,
