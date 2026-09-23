@@ -20,8 +20,10 @@ from cubeplex.middleware.sandbox import (
 from cubeplex.models import BackgroundTask, SandboxCommand
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
+from cubeplex.sandbox.command_coordinator import kill_sandbox_commands
 from cubeplex.services.background_tasks import BackgroundTaskService
 from cubeplex.services.conversation_execution import ConversationExecutionService
+from cubeplex.streams.recovery import _kill_stranded_commands
 from tests.e2e import test_background_task_reservation as reservation_fixtures
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 from tests.e2e.test_background_task_reservation import ReservationContext
@@ -385,6 +387,70 @@ async def test_stop_winning_handoff_releases_owner_for_cleanup(
     assert task.owner_token is None
     assert task.owner_until is not None and task.owner_until <= datetime.now(UTC)
     assert reserved.command_id not in middleware._live_commands
+
+
+async def test_stranded_run_recovery_stops_task_without_legacy_command_write(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    admission = await db_session.get(
+        ConversationExecutionAdmission,
+        reservation_context.admission_id,
+    )
+    assert admission is not None and admission.run_id is not None
+    middleware = SandboxMiddleware(
+        sandbox=_sandbox(reservation_context),
+        conversation_id=reservation_context.conversation_id,
+        workspace_id=DEFAULT_WS_ID,
+        org_id=DEFAULT_ORG_ID,
+        user_id=admission.actor_user_id,
+        run_id=admission.run_id,
+        admission_id=admission.id,
+        owner_token="foreground-owner",
+        session_factory=session_factory,
+    )
+    reserved = await middleware._persist_reserve(
+        command_id="unused-proposed-id",
+        tool_call_id="tool-stranded-recovery",
+        command="build project",
+        description="Build project",
+        notify_on_complete=True,
+        log_path="/workspace/.cubeplex/stranded.log",
+        timeout_seconds=3600,
+    )
+    assert isinstance(reserved, _ReservedCommand)
+    await middleware._persist_running(reserved.command_id, "provider-process")
+    admission_id = admission.id
+    run_id = admission.run_id
+
+    await _kill_stranded_commands([run_id])
+
+    db_session.expire_all()
+    task = await db_session.get(BackgroundTask, reserved.task_id)
+    command = await db_session.get(SandboxCommand, reserved.command_id)
+    recovered_admission = await db_session.get(ConversationExecutionAdmission, admission_id)
+    assert task is not None and command is not None and recovered_admission is not None
+    assert recovered_admission.run_stop_requested_at is not None
+    assert task.stop_requested_at is not None
+    assert task.stop_reason == "run_stop"
+    assert command.status == "starting"
+    assert command.provider_ref == "provider-process"
+
+    async def _no_sandbox(_row: SandboxCommand) -> None:
+        return None
+
+    assert (
+        await kill_sandbox_commands(
+            db_session,
+            reservation_context.details.user_sandbox_id,
+            get_sandbox=_no_sandbox,
+        )
+        == []
+    )
+    await db_session.refresh(command)
+    assert command.status == "starting"
+    assert command.provider_ref == "provider-process"
 
 
 async def test_monitor_is_one_notifying_task_with_optional_deadline(
