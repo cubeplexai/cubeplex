@@ -17,7 +17,7 @@ from cubeloop.hitl import HitlChannel
 from cubeloop.middleware.base import Middleware
 from cubeloop.providers.base import ReasoningControl
 
-from cubeplex.middleware._compose import compose_after_tool_call
+from cubeplex.middleware._compose import compose_after_tool_call, compose_on_run_end
 
 
 def create_cubeplex_agent(
@@ -54,4 +54,5 @@ def create_cubeplex_agent(
         deferred_tool_groups=deferred_tool_groups,
         # See compose_after_tool_call for why we override the default.
         after_tool_call=compose_after_tool_call(mw_list),
+        on_run_end=compose_on_run_end(mw_list),
     )

@@ -8,6 +8,7 @@ from cubeloop.agent.types import (
     HitlRequestEvent,
     MessageEndEvent,
     ToolExecutionEndEvent,
+    ToolExecutionUpdateEvent,
 )
 from cubeloop.hitl.types import ApproveAnswer, ApproveRequest, HitlRequest
 from cubeloop.providers.base import (
@@ -200,6 +201,27 @@ def test_message_end_with_none_usage_is_dropped() -> None:
 # repr like ``content=[TextContent(text='{"foo":1}')] details=None ...``
 # which broke frontend JSON.parse and surfaced ``save_artifact`` as a regular
 # tool call card instead of an artifact card during live runs.
+
+
+def test_tool_execution_update_projects_running_tool_result() -> None:
+    payload = AgentToolResult(
+        content=[TextContent(text="partial out")],
+        details={"status": "running"},
+    )
+    evt = ToolExecutionUpdateEvent(
+        tool_call_id="tc-run",
+        tool_name="execute",
+        partial_result=payload,
+    )
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["type"] == "tool_result"
+    assert d["tool_call_id"] == "tc-run"
+    assert d["name"] == "execute"
+    assert d["result"] == "partial out"
+    assert d["details"] == {"status": "running"}
+    assert d["is_error"] is False
 
 
 def test_tool_result_extracts_text_from_agent_tool_result() -> None:

@@ -202,6 +202,30 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
+async def _mark_sandbox_notice_delivered(command_id: str) -> None:
+    """Mark a sandbox command notice delivered after it is checkpointed."""
+    try:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.sandbox_command import mark_notice_delivered
+
+        async with async_session_maker() as session:
+            await mark_notice_delivered(session, command_id)
+    except Exception:
+        logger.exception("failed to mark sandbox notice {} delivered", command_id)
+
+
+async def _mark_sandbox_wake_delivered(wake_id: str) -> None:
+    """Mark a durable sandbox wake delivered after its message is checkpointed."""
+    try:
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.sandbox_command import mark_wake_delivered
+
+        async with async_session_maker() as session:
+            await mark_wake_delivered(session, wake_id)
+    except Exception:
+        logger.exception("failed to mark sandbox wake {} delivered", wake_id)
+
+
 def _make_failover_publisher(
     run_id: str,
     publish: Callable[[str, dict[str, Any]], Awaitable[None]],
@@ -1113,6 +1137,7 @@ class RunManager:
         reasoning: ReasoningControl | None = None,
         cancel_pending_hitl: bool = False,
         llm_snapshot: Any | None = None,
+        input_metadata: dict[str, Any] | None = None,
     ) -> str:
         """Create and start a new background run.
 
@@ -1231,6 +1256,7 @@ class RunManager:
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
                 llm_snapshot=llm_snapshot,
+                input_metadata=input_metadata,
             ),
             name=f"run:{run_id}",
         )
@@ -1238,6 +1264,10 @@ class RunManager:
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
+
+    async def drain_durable_steering(self, run_id: str) -> None:
+        """Prompt immediate delivery after an internal durable steer enqueue."""
+        await self._steering_delivery.drain(run_id)
 
     async def cancel_all(self) -> None:
         """Cancel every in-flight run task. Forced shutdown path."""
@@ -2135,6 +2165,7 @@ class RunManager:
         extra_ref_holder: dict[str, Any] | None = None,
         model_key: str | None = None,
         reasoning: ReasoningControl | None = None,
+        input_metadata: dict[str, Any] | None = None,
     ) -> str:
         """Execute a single user turn through the cubeloop runtime.
 
@@ -2238,8 +2269,13 @@ class RunManager:
                 nonlocal _user_msg_seen
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     _user_msg_seen += 1
+                    notice_id = (evt.message.metadata or {}).get("notice_id")
+                    if isinstance(notice_id, str) and notice_id.startswith("scmw-"):
+                        await _mark_sandbox_wake_delivered(notice_id)
                     if _user_msg_seen == 1:
                         return  # seed prompt — already shown optimistically
+                    if isinstance(notice_id, str) and notice_id.startswith("scmd-"):
+                        await _mark_sandbox_notice_delivered(notice_id)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
                         d,
@@ -2261,7 +2297,7 @@ class RunManager:
 
             from cubeplex.middleware.memory import compute_relevance_snapshot as _compute_snap
 
-            _user_msg_metadata: dict[str, Any] = {}
+            _user_msg_metadata: dict[str, Any] = dict(input_metadata or {})
             if not ctx.is_group_chat:
                 try:
                     _mem_repo_factory = extra_ref_holder["mem_repo_factory"]
@@ -2752,6 +2788,9 @@ class RunManager:
             async def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Stop durable drains before scheduling detach so no steer can
                 # land in an Agent after its state has been persisted.
+                from cubeloop.agent.types import MessageEndEvent as _HitlMsgEnd
+                from cubeloop.providers.base import UserMessage as _HitlUserMsg
+
                 _log_tool_start(run_id, evt)
                 tool_heartbeat.observe(evt)
                 if isinstance(evt, _AgentStartEvent):
@@ -2760,6 +2799,12 @@ class RunManager:
                     # point at which public input admission is open.
                     await self._drain_pre_execution_inputs(run_id, agent.session)
                     await self._steering_delivery.drain(run_id)
+                if isinstance(evt, _HitlMsgEnd) and isinstance(evt.message, _HitlUserMsg):
+                    notice_id = (evt.message.metadata or {}).get("notice_id")
+                    if isinstance(notice_id, str) and notice_id.startswith("scmd-"):
+                        await _mark_sandbox_notice_delivered(notice_id)
+                    elif isinstance(notice_id, str) and notice_id.startswith("scmw-"):
+                        await _mark_sandbox_wake_delivered(notice_id)
                 await auto_detach.quiesce_then_schedule(evt)
                 for d in stream_converter.convert_agent_event(evt):
                     sse_event = cubeloop_dict_to_agent_event(
@@ -3745,6 +3790,16 @@ class RunManager:
                     user_id=ctx.user_id,
                     default_image=_sb_default_image,
                 )
+
+                async def _sandbox_heartbeat() -> None:
+                    await touch_run_heartbeat(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=run_id,
+                        conversation_id=conversation_id,
+                        ttl_seconds=self._run_event_ttl_seconds,
+                    )
+
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
@@ -3752,7 +3807,13 @@ class RunManager:
                     command_rules=_command_rules,
                     channel=sandbox_hitl_channel,
                     config_loader=_sb_config_loader,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    run_id=run_id,
+                    session_factory=async_session_maker,
+                    heartbeat=_sandbox_heartbeat,
                 )
+                extra_ref_holder["sandbox_middleware"] = sandbox_mw
                 cubeloop_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write, edit, read) collected for
                 # ordered merge below
@@ -4100,6 +4161,7 @@ class RunManager:
         model_key: str | None = None,
         reasoning: ReasoningControl | None = None,
         llm_snapshot: Any | None = None,
+        input_metadata: dict[str, Any] | None = None,
     ) -> None:
         from cubeplex.api.routes.v1.conversations import (
             _enqueue_search_index,
@@ -4405,6 +4467,7 @@ class RunManager:
                 extra_ref_holder=extra_ref_holder,
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
+                input_metadata=input_metadata,
             )
             # Kick the session-usage aggregate NOW so it overlaps the queue
             # drain below — both must finish before DoneEvent, so running
@@ -4562,6 +4625,11 @@ class RunManager:
                     params=_classify_params,
                 )
         finally:
+            sandbox_middleware = extra_ref_holder.get("sandbox_middleware")
+            if sandbox_middleware is not None:
+                with suppress(Exception):
+                    await sandbox_middleware.finalize_run()
+
             # If we got here via cancel/exception, the success path's
             # enqueue was skipped. Cubeloop may still have written partial
             # history (user message + any completed assistant/tool turns)
@@ -5127,6 +5195,11 @@ class RunManager:
                     params=_classify_params,
                 )
         finally:
+            sandbox_middleware = extra_ref_holder.get("sandbox_middleware")
+            if sandbox_middleware is not None:
+                with suppress(Exception):
+                    await sandbox_middleware.finalize_run()
+
             # Mirror the prompt-path safety net: cancel/exception bypassed
             # the success-path enqueue, but cubeloop may have written partial
             # history before the failure. Idempotent enqueue.

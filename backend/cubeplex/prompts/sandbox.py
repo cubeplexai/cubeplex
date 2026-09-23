@@ -76,12 +76,17 @@ call. Prefer this over `sed`/`awk`.
 - Pipes: `cat file.txt | grep pattern | wc -l`
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
-- Background: `cmd &`
+- Do not background with `&`, nohup, or disown. Long commands may omit \
+`background=true`; after 15 seconds they continue in the background and you \
+are told when they finish. Bare `sleep N` still blocks. Do not sleep to wait \
+on a job. Set `notify_on_complete=false` only for servers that should outlive \
+the turn. Use `monitor` for predicates (log lines), not builds. Use \
+`kill_execute` to stop a background command. The sandbox panel lists running \
+jobs and can Kill them.
 
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
 - Commands are killed after 120 seconds by default and return `[timeout]`. \
-For installs, downloads, or builds, pass `timeout_seconds` (max 1800). \
 If you still time out, split the work or raise `timeout_seconds` and retry.
 - Commands run in an isolated sandbox — safe to experiment"""

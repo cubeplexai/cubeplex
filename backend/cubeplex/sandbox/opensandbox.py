@@ -2,19 +2,28 @@
 
 import asyncio
 import base64
+import inspect
 import re
 import shlex
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
+from typing import Any
 
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxException as _ProviderError
-from opensandbox.models.execd import RunCommandOpts
+from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 
-from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox, SandboxError
+from cubeplex.sandbox.base import (
+    BrowserEndpoint,
+    ExecuteResult,
+    ProcessHandle,
+    ProcessSnapshot,
+    Sandbox,
+    SandboxError,
+)
 from cubeplex.sandbox.panel_token import (
     get_panel_base_url,
     get_panel_secret,
@@ -72,6 +81,7 @@ class OpenSandbox(Sandbox):
         self._run_uid = run_uid
         self._run_gid = run_gid
         self._run_user = run_user
+        self._log_cursors: dict[str, int | None] = {}
 
     @property
     def id(self) -> str:
@@ -92,6 +102,7 @@ class OpenSandbox(Sandbox):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         # Merge: run-level env (set by manager) is the base; per-call envs win.
         merged = {**self._run_env, **(envs or {})}
@@ -105,9 +116,24 @@ class OpenSandbox(Sandbox):
             gid=gid,
         )
 
+        async def _handle_output(msg: Any) -> None:
+            text = getattr(msg, "text", "") or ""
+            if not text or on_chunk is None:
+                return
+            try:
+                on_chunk(text)
+            except Exception:
+                logger.exception("OpenSandbox on_chunk failed")
+
+        handlers = (
+            ExecutionHandlers(on_stdout=_handle_output, on_stderr=_handle_output)
+            if on_chunk is not None
+            else None
+        )
+
         async def _run() -> ExecuteResult:
             with _as_sandbox_error():
-                execution = await self._sandbox.commands.run(command, opts=opts)
+                execution = await self._sandbox.commands.run(command, opts=opts, handlers=handlers)
 
                 output_lines: list[str] = []
                 for msg in execution.logs.stdout:
@@ -136,6 +162,92 @@ class OpenSandbox(Sandbox):
             if timeout is not None and _is_timeout_error(exc):
                 return ExecuteResult(output="[timeout]", exit_code=-1)
             raise
+
+    def supports_background(self) -> bool:
+        return True
+
+    async def start(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_started: Callable[[str], Any] | None = None,
+    ) -> ProcessHandle:
+        del timeout, on_chunk
+        merged = {**self._run_env, **(envs or {})}
+        uid: int | None = None if as_root else self._run_uid
+        gid: int | None = None if as_root or uid is None else self._run_gid
+        opts = RunCommandOpts(
+            working_directory=self._workdir,
+            envs=merged if merged else None,
+            timeout=None,
+            uid=uid,
+            gid=gid,
+            background=True,
+        )
+        started: list[str] = []
+
+        async def _on_init(msg: Any) -> None:
+            eid = getattr(msg, "execution_id", None) or getattr(msg, "id", None)
+            if eid is None:
+                return
+            ref = str(eid)
+            started.append(ref)
+            if on_started is not None:
+                maybe = on_started(ref)
+                if inspect.isawaitable(maybe):
+                    await maybe
+
+        with _as_sandbox_error():
+            execution = await self._sandbox.commands.run(
+                command,
+                opts=opts,
+                handlers=ExecutionHandlers(on_init=_on_init, skip_accumulation=True),
+            )
+        ref = started[0] if started else str(execution.id or "")
+        self._log_cursors[ref] = 0
+        if on_started is not None and not started and ref:
+            maybe = on_started(ref)
+            if inspect.isawaitable(maybe):
+                await maybe
+        return ProcessHandle(command_id="", provider_ref=ref)
+
+    async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        ref = handle.provider_ref
+        cursor = (
+            int(handle.log_cursor) if handle.log_cursor is not None else self._log_cursors.get(ref)
+        )
+        with _as_sandbox_error():
+            status = await self._sandbox.commands.get_command_status(ref)
+            logs = await self._sandbox.commands.get_background_command_logs(ref, cursor=cursor)
+        new_output = getattr(logs, "content", "") or ""
+        next_cursor = getattr(logs, "cursor", None)
+        if next_cursor is not None:
+            self._log_cursors[ref] = next_cursor
+        serialized_cursor = str(next_cursor) if next_cursor is not None else handle.log_cursor
+        running = bool(getattr(status, "running", True))
+        code = getattr(status, "exit_code", None)
+        if running:
+            st: ProcessSnapshot = ProcessSnapshot(
+                status="running",
+                exit_code=code,
+                new_output=new_output,
+                log_cursor=serialized_cursor,
+            )
+            return st
+        return ProcessSnapshot(
+            status="exited",
+            exit_code=code,
+            new_output=new_output,
+            log_cursor=serialized_cursor,
+        )
+
+    async def kill(self, handle: ProcessHandle) -> None:
+        with _as_sandbox_error():
+            await self._sandbox.commands.interrupt(handle.provider_ref)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         """Write files then chown by numeric uid so agent can edit them.

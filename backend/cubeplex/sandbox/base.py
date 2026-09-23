@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
@@ -33,6 +35,26 @@ class ExecuteResult:
 
     output: str
     exit_code: int | None = None
+
+
+@dataclass
+class ProcessHandle:
+    """CubePlex-owned command id plus a driver-private provider handle."""
+
+    command_id: str
+    provider_ref: str
+    log_cursor: str | None = None
+    deadline_at: datetime | None = None
+
+
+@dataclass
+class ProcessSnapshot:
+    """Incremental status from ``Sandbox.poll``."""
+
+    status: Literal["running", "exited", "killed"]
+    exit_code: int | None = None
+    new_output: str = ""
+    log_cursor: str | None = None
 
 
 @dataclass
@@ -69,6 +91,11 @@ class Sandbox(ABC):
         """Working directory for command execution."""
         ...
 
+    @property
+    def user_sandbox_id(self) -> str | None:
+        """CubePlex ``user_sandboxes.id`` once the instance is attached."""
+        return None
+
     @abstractmethod
     async def execute(
         self,
@@ -77,6 +104,7 @@ class Sandbox(ABC):
         timeout: int | None = None,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
         """Execute a shell command. Returns combined stdout+stderr and exit code.
 
@@ -90,6 +118,8 @@ class Sandbox(ABC):
                   instead of the sandbox agent user. Used for infra helpers
                   (browser stack, workspace chown). Ignored by drivers that
                   have no privilege separation.
+            on_chunk: Optional callback for stdout/stderr text as it arrives.
+                  Exceptions in the callback must not fail the command.
         """
         ...
 
@@ -103,6 +133,31 @@ class Sandbox(ABC):
         support it (OpenSandbox) override this.
         """
         return  # no-op default; OpenSandbox overrides
+
+    def supports_background(self) -> bool:
+        """Whether ``start`` / ``poll`` / ``kill`` are implemented."""
+        return False
+
+    async def start(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+        as_root: bool = False,
+        on_chunk: Callable[[str], None] | None = None,
+        on_started: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> ProcessHandle:
+        del command, timeout, envs, as_root, on_chunk, on_started
+        raise SandboxError("this sandbox driver does not support background commands")
+
+    async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        del handle
+        raise SandboxError("this sandbox driver does not support background commands")
+
+    async def kill(self, handle: ProcessHandle) -> None:
+        del handle
+        raise SandboxError("this sandbox driver does not support background commands")
 
     @abstractmethod
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
