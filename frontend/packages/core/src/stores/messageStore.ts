@@ -38,6 +38,7 @@ import {
   ApiError,
   cancelActiveRun,
   cancelSteer,
+  getAdmittedRunId,
   getConversationBootstrap,
   getConversationExecutionGeneration,
   getHistoryWindow,
@@ -225,6 +226,8 @@ export interface MessageStore {
   isStreaming: boolean
   streamingConversationId: string | null
   currentRunId: string | null
+  /** Client request identity used to recover only this tab's admitted run. */
+  pendingRunClientMessageId: string | null
   /** Live SSE pipe for the owned run. Null when no client is attached. */
   streamConnection: StreamConnection
   /** Set by the answer handlers to tell the next bootstrap "don't re-seed
@@ -466,6 +469,7 @@ async function waitForConversationIdle(
 
 function waitForPendingRunId(client: ApiClient, conversationId: string): Promise<string | null> {
   return new Promise((resolve) => {
+    const clientMessageId = useMessageStore.getState().pendingRunClientMessageId
     let settled = false
     let unsubscribe = (): void => undefined
     let probeTimer: ReturnType<typeof setTimeout> | null = null
@@ -483,6 +487,10 @@ function waitForPendingRunId(client: ApiClient, conversationId: string): Promise
         finish(null)
         return
       }
+      if (clientMessageId !== null && state.pendingRunClientMessageId !== clientMessageId) {
+        finish(null)
+        return
+      }
       if (state.currentRunId) {
         finish(state.currentRunId)
       }
@@ -490,9 +498,10 @@ function waitForPendingRunId(client: ApiClient, conversationId: string): Promise
     const probe = async (): Promise<void> => {
       if (settled) return
       try {
-        const bootstrap = await getConversationBootstrap(client, conversationId)
+        const runId = clientMessageId
+          ? await getAdmittedRunId(client, conversationId, clientMessageId)
+          : null
         if (settled) return
-        const runId = bootstrap.active_run?.run_id ?? bootstrap.pending_hitl?.run_id ?? null
         if (runId) {
           finish(runId)
           return
@@ -1519,6 +1528,7 @@ async function finalizeCompletedStream(
         pendingAsk: null,
         streamingConversationId: null,
         currentRunId: null,
+        pendingRunClientMessageId: null,
         statusPhase: null,
         pendingSteers: {
           ...state.pendingSteers,
@@ -1561,6 +1571,7 @@ async function finalizeCompletedStream(
       pendingAsk: null,
       streamingConversationId: null,
       currentRunId: null,
+      pendingRunClientMessageId: null,
       statusPhase: null,
       pendingSteers: {
         ...state.pendingSteers,
@@ -1745,6 +1756,7 @@ async function consumeRunStream(
                       pendingAsk: null,
                       streamingConversationId: null,
                       currentRunId: null,
+                      pendingRunClientMessageId: null,
                       statusPhase: null,
                       streamConnection: null,
                       runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
@@ -1900,6 +1912,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   isStreaming: false,
   streamingConversationId: null,
   currentRunId: null,
+  pendingRunClientMessageId: null,
   streamConnection: null,
   lastAnsweredAskQuestionId: null,
   lastResolvedSandboxQuestionId: null,
@@ -2291,6 +2304,21 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             current.messages[conversationId] ?? [],
             messages,
           )
+          const refreshed = get()
+          if (
+            options?.preserveOtherConversationStream &&
+            refreshed.streamingConversationId !== null &&
+            refreshed.streamingConversationId !== conversationId
+          ) {
+            return
+          }
+          if (
+            !force &&
+            refreshed.isStreaming &&
+            refreshed.streamingConversationId === conversationId
+          ) {
+            return
+          }
         }
 
         // Backend walks the full history (not just the tail) to pick the
@@ -2588,6 +2616,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             isStreaming: isStreamingActive,
             streamingConversationId: streamingActive ? conversationId : null,
             currentRunId: streamRunId,
+            pendingRunClientMessageId: null,
             lastAppliedEventId: streamCursor,
             statusPhase: null,
             turnUsage: newTurnUsage,
@@ -2776,6 +2805,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       runLifecycle: { ...state.runLifecycle, [conversationId]: 'running' },
       streamingConversationId: conversationId,
       currentRunId: null,
+      pendingRunClientMessageId: userMessage.id,
       lastAppliedEventId: null,
       statusPhase: null,
       streamConnection: 'connected',
@@ -2922,6 +2952,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                         pendingAsk: null,
                         streamingConversationId: null,
                         currentRunId: null,
+                        pendingRunClientMessageId: null,
                         statusPhase: null,
                       }
                     : {}),
@@ -2957,6 +2988,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                       pendingAsk: null,
                       streamingConversationId: null,
                       currentRunId: null,
+                      pendingRunClientMessageId: null,
                       statusPhase: null,
                       runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
                       lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
@@ -3075,6 +3107,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 pendingAsk: null,
                 streamingConversationId: null,
                 currentRunId: null,
+                pendingRunClientMessageId: null,
                 streamConnection: null,
                 runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
               }
@@ -3341,7 +3374,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             s.cancellingConversationIds,
             conversationId,
           ),
-          runLifecycle: { ...s.runLifecycle, [conversationId]: 'running' },
+          runLifecycle:
+            s.isStreaming && s.streamingConversationId === conversationId
+              ? { ...s.runLifecycle, [conversationId]: 'running' }
+              : s.runLifecycle,
         }))
         throw new Error('Could not identify the active run. Stop was not applied.')
       }
@@ -3433,6 +3469,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           pendingAsk: null,
           streamingConversationId: null,
           currentRunId: null,
+          pendingRunClientMessageId: null,
           statusPhase: null,
           pendingSteers: {
             ...s.pendingSteers,
@@ -3488,6 +3525,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       retryEvents: {},
       streamingConversationId: null,
       currentRunId: null,
+      pendingRunClientMessageId: null,
       lastAppliedEventId: null,
       statusPhase: null,
       todos: [],

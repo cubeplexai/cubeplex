@@ -197,6 +197,7 @@ async def test_list_is_read_only_and_terminal_rows_require_explicit_ids(
 ) -> None:
     client, workspace_id = authenticated_client
     inflight = await api_task_context.reserve(db_session)
+    inflight.command.provider_ref = "local-process"
     terminal = await api_task_context.reserve(db_session, command="true", description="Done")
     terminal.task.state = BackgroundTaskState.succeeded.value
     terminal.task.finished_at = NOW
@@ -227,6 +228,8 @@ async def test_list_is_read_only_and_terminal_rows_require_explicit_ids(
     }
     assert "provider_ref" not in response.text
     assert "owner_token" not in response.text
+    assert item["capabilities"]["remote_cancel_supported"] is False
+    assert item["capabilities"]["reconnect_supported"] is False
 
     response = await client.get(path, params=[("task_ids", terminal.task.id)])
     assert response.status_code == 200, response.text
@@ -265,6 +268,7 @@ async def test_stop_returns_unconfirmed_then_preserves_terminal_fact(
 ) -> None:
     client, workspace_id = authenticated_client
     item = await api_task_context.reserve(db_session)
+    item.command.provider = "opensandbox"
     item.command.provider_ref = "provider-process"
     item.task.backgrounded_at = NOW
     event = BackgroundTaskEvent(

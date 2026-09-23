@@ -104,6 +104,12 @@ describe('messageStore background task state', () => {
       runControl: {},
       refreshingBackground: {},
       backgroundRefreshError: {},
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      pendingRunClientMessageId: null,
+      runLifecycle: {},
+      streamAgents: {},
     })
   })
 
@@ -595,6 +601,84 @@ describe('messageStore background task state', () => {
     ])
     expect(useMessageStore.getState().oldestSeqByConv['conv-1']).toBe(1)
     expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(false)
+  })
+
+  it('does not apply an idle bootstrap after a stream starts during gap repair', async () => {
+    const previous = {
+      id: 'message-previous',
+      seq: 1,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'previous' }],
+    }
+    const newest = {
+      id: 'message-newest',
+      seq: 1001,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'newest' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [previous] },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [newest],
+      oldest_seq: 1001,
+      has_more: true,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+    let resolveGap: ((value: Awaited<ReturnType<typeof getHistoryWindow>>) => void) | null = null
+    vi.mocked(getHistoryWindow).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGap = resolve
+        }),
+    )
+
+    const loading = useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+      preserveOtherConversationStream: true,
+    })
+    await vi.waitFor(() => expect(getHistoryWindow).toHaveBeenCalledOnce())
+    const liveStream = {
+      main: {
+        text: 'live',
+        toolCalls: [],
+        toolResults: [],
+        thinking: '',
+        blocks: [{ type: 'text' as const, text: 'live' }],
+        name: null,
+      },
+    }
+    useMessageStore.setState({
+      isStreaming: true,
+      streamingConversationId: 'conv-1',
+      currentRunId: 'run-live',
+      runLifecycle: { 'conv-1': 'running' },
+      streamAgents: liveStream,
+    })
+    resolveGap?.({ messages: [previous], oldest_seq: 1, has_more: false })
+    await loading
+
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv-1',
+      currentRunId: 'run-live',
+      streamAgents: liveStream,
+    })
   })
 
   it('preserves tool results for history outside the refreshed tail', async () => {

@@ -27,6 +27,10 @@ class ExecutionGenerationResponse(BaseModel):
     execution_generation: int
 
 
+class AdmittedRunResponse(BaseModel):
+    run_id: str | None
+
+
 class StopRunResponse(BaseModel):
     run_id: str
     accepted: bool
