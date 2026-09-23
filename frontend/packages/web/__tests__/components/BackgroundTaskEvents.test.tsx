@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { BackgroundTaskEvents } from '@/components/chat/BackgroundTaskEvents'
+import {
+  BackgroundTaskEventItem,
+  BackgroundTaskEventsLoadMore,
+} from '@/components/chat/BackgroundTaskEvents'
 
 const mocks = vi.hoisted(() => ({
   events: [
@@ -60,9 +63,13 @@ describe('BackgroundTaskEvents', () => {
   })
 
   it('renders a compact system result and loads older results', async () => {
-    render(<BackgroundTaskEvents conversationId="conv-1" />)
+    render(
+      <>
+        <BackgroundTaskEventItem event={mocks.events[0] as never} />
+        <BackgroundTaskEventsLoadMore conversationId="conv-1" />
+      </>,
+    )
 
-    expect(screen.getByLabelText('Background results')).toBeInTheDocument()
     expect(screen.getByText('Build finished')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
 
@@ -73,7 +80,12 @@ describe('BackgroundTaskEvents', () => {
 
   it('reports pagination failures without removing the current result', async () => {
     mocks.loadMore.mockRejectedValue(new Error('network down'))
-    render(<BackgroundTaskEvents conversationId="conv-1" />)
+    render(
+      <>
+        <BackgroundTaskEventItem event={mocks.events[0] as never} />
+        <BackgroundTaskEventsLoadMore conversationId="conv-1" />
+      </>,
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier background results' }))
 

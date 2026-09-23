@@ -18,6 +18,7 @@ import {
 import type {
   AssistantMessage as AssistantMessageType,
   Message,
+  BackgroundTaskEvent,
   SubagentSummary,
   TurnUsage,
 } from '@cubeplex/core'
@@ -30,7 +31,7 @@ import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
 import { RetryBanner } from './RetryBanner'
 import { CompactionMarker } from './CompactionMarker'
-import { BackgroundTaskEvents } from './BackgroundTaskEvents'
+import { BackgroundTaskEventItem, BackgroundTaskEventsLoadMore } from './BackgroundTaskEvents'
 import { MessageAttachments } from './MessageAttachments'
 import type { FailoverEvent, RetryEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -49,6 +50,7 @@ interface MessageListProps {
 // Module-level stable empty array — avoids breaking Zustand's `===` selector
 // equality when the failover slice is missing/empty.
 const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
+const EMPTY_BACKGROUND_EVENTS: BackgroundTaskEvent[] = []
 
 function ModelChainBanners({
   retryEvent,
@@ -277,6 +279,9 @@ export function MessageList({ conversationId }: MessageListProps) {
   const retryEvent = useMessageStore(
     (s) => (s.retryEvents[conversationId] as RetryEvent | null | undefined) ?? null,
   )
+  const backgroundEvents = useMessageStore(
+    (s) => s.backgroundEvents[conversationId] ?? EMPTY_BACKGROUND_EVENTS,
+  )
   const { workspaceId } = useWorkspaceContext()
   // Fork action needs to know whether this is a group chat (the backend
   // rejects forks on group chats, and we render the disabled-state UI for
@@ -483,6 +488,32 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [messages])
 
+  const { backgroundEventsByMessageId, trailingBackgroundEvents } = useMemo(() => {
+    const orderedEvents = [...backgroundEvents].sort(
+      (left, right) =>
+        left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
+    )
+    const byMessageId = new Map<string, BackgroundTaskEvent[]>()
+    let eventIndex = 0
+    for (const message of messages ?? []) {
+      const messageTime = msgTimestampMs(message)
+      if (messageTime <= 0) continue
+      const before: BackgroundTaskEvent[] = []
+      while (eventIndex < orderedEvents.length) {
+        const event = orderedEvents[eventIndex]
+        const eventTime = Date.parse(event.created_at)
+        if (Number.isNaN(eventTime) || eventTime > messageTime) break
+        before.push(event)
+        eventIndex += 1
+      }
+      if (before.length > 0) byMessageId.set(message.id, before)
+    }
+    return {
+      backgroundEventsByMessageId: byMessageId,
+      trailingBackgroundEvents: orderedEvents.slice(eventIndex),
+    }
+  }, [backgroundEvents, messages])
+
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -643,6 +674,9 @@ export function MessageList({ conversationId }: MessageListProps) {
             // user bubble before the run is claimed — those are never search
             // targets, so we just skip the anchor.
             <Fragment key={msg.id}>
+              {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
+                <BackgroundTaskEventItem key={`background:${event.id}`} event={event} />
+              ))}
               {msg.id === bannersBeforeHistoryId && (
                 <ModelChainBanners
                   retryEvent={retryEvent}
@@ -720,7 +754,10 @@ export function MessageList({ conversationId }: MessageListProps) {
             </Fragment>
           ))}
 
-          <BackgroundTaskEvents conversationId={conversationId} />
+          {trailingBackgroundEvents.map((event) => (
+            <BackgroundTaskEventItem key={`background:${event.id}`} event={event} />
+          ))}
+          <BackgroundTaskEventsLoadMore conversationId={conversationId} />
 
           {bannersBeforeHistoryId == null && (
             <ModelChainBanners
