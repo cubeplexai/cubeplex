@@ -59,6 +59,16 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     let failureCount = 0
     let lastBaselineAt = Date.now()
 
+    const hasCurrentStopAllCleanup = () => {
+      const state = useMessageStore.getState()
+      const observedGeneration = (state.backgroundTasks[conversationId] ?? []).reduce(
+        (latest, task) => Math.max(latest, task.execution_generation),
+        state.executionGeneration[conversationId] ?? 0,
+      )
+      const status = state.stopAllStatus[conversationId]
+      return status?.execution_generation === observedGeneration && status.cleanup_pending
+    }
+
     const schedule = (delay: number) => {
       if (disposed) return
       if (timer) clearTimeout(timer)
@@ -74,11 +84,10 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
       try {
         await refreshBackground(client(), conversationId)
         failureCount = 0
-        const state = useMessageStore.getState()
-        const nextSummary = state.backgroundSummary[conversationId]
+        let state = useMessageStore.getState()
         const now = Date.now()
         if (
-          now - lastBaselineAt >= BASELINE_REFRESH_MS &&
+          (hasCurrentStopAllCleanup() || now - lastBaselineAt >= BASELINE_REFRESH_MS) &&
           state.streamingConversationId !== conversationId
         ) {
           await loadMessages(client(), conversationId, {
@@ -87,9 +96,14 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
             throwOnError: true,
           })
           lastBaselineAt = now
+          state = useMessageStore.getState()
         }
+        const nextSummary = state.backgroundSummary[conversationId]
         const hasWork = Boolean(
-          nextSummary?.has_inflight || nextSummary?.has_pending || nextSummary?.has_cleanup,
+          nextSummary?.has_inflight ||
+          nextSummary?.has_pending ||
+          nextSummary?.has_cleanup ||
+          hasCurrentStopAllCleanup(),
         )
         schedule(hasWork ? ACTIVE_REFRESH_MS : BASELINE_REFRESH_MS)
       } catch {
@@ -195,7 +209,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
                   <span className="text-muted-foreground">
                     {stopping
                       ? t('stopping')
-                      : task.cleanup_pending
+                      : task.cleanup_pending && !taskIsInflight(task.state)
                         ? t('finalizing')
                         : t(`states.${task.state}`)}
                   </span>
