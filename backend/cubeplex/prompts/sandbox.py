@@ -80,13 +80,16 @@ call. Prefer this over `sed`/`awk`.
 `background=true`; after 15 seconds they continue in the background and you \
 are told when they finish. Bare `sleep N` still blocks. Do not sleep to wait \
 on a job. Set `notify_on_complete=false` only for servers that should outlive \
-the turn. Use `monitor` for predicates (log lines), not builds. Use \
+the turn; it does not remove the command deadline. Use `monitor` for predicates, \
+not builds: its script must perform its own repeated checks and exit 0 once the \
+condition is met, or nonzero on failure. A monitor sends one final notice only; \
+stdout is a log and never wakes the agent repeatedly. Use \
 `kill_execute` to stop a background command. The sandbox panel lists running \
 jobs and can Kill them.
 
 **Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
-- Commands are killed after 120 seconds by default and return `[timeout]`. \
-If you still time out, split the work or raise `timeout_seconds` and retry.
+- Commands are killed after the configured execution deadline (one hour by default) and \
+return `[timeout]`. If you still time out, split the work or raise `timeout_seconds` and retry.
 - Commands run in an isolated sandbox — safe to experiment"""
