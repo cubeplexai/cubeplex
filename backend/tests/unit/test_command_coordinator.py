@@ -305,6 +305,7 @@ async def test_kill_command_persists_final_output_cursor_and_monitor_wake(
             log_cursor="9",
         )
     )
+    sandbox.acknowledge_output = AsyncMock()
     sandbox.upload = AsyncMock()
     sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
 
@@ -322,6 +323,7 @@ async def test_kill_command_persists_final_output_cursor_and_monitor_wake(
     assert handle.log_cursor == "4"
     await session.refresh(row)
     assert row.log_cursor == "9"
+    sandbox.acknowledge_output.assert_awaited_once_with(handle, "9")
     uploaded = sandbox.upload.await_args.args[0]
     assert uploaded[0][1] == b"final buffered line\n"
     wake = (
@@ -536,6 +538,9 @@ async def test_monitor_rate_limit_promotes_to_exit_only(session: AsyncSession) -
                 new_output=f"line-{self.cursor}\\n",
                 log_cursor=str(self.cursor),
             )
+
+        async def acknowledge_output(self, handle: ProcessHandle, cursor: str) -> None:
+            handle.log_cursor = cursor
 
     chatty = _ChattySandbox()
 

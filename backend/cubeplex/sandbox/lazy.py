@@ -530,6 +530,10 @@ class LazySandbox(Sandbox):
         sandbox = await self._ensure_with_retry()
         return await sandbox.poll(handle)
 
+    async def acknowledge_output(self, handle: ProcessHandle, cursor: str) -> None:
+        sandbox = await self._ensure_with_retry()
+        await sandbox.acknowledge_output(handle, cursor)
+
     async def kill(self, handle: ProcessHandle) -> None:
         sandbox = await self._ensure_with_retry()
         await sandbox.kill(handle)
