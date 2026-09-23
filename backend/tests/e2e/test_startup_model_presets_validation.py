@@ -10,8 +10,12 @@ Also covers the follow-up relaxation: `tiers` only needs at least one entry
 (missing tiers default to disabled downstream), not all four by name.
 """
 
+from collections.abc import AsyncIterator
+from copy import deepcopy
+
 import pytest
-from sqlalchemy import delete
+import pytest_asyncio
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -20,6 +24,43 @@ from cubeplex.db.engine import _build_database_url
 from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 pytestmark = pytest.mark.e2e
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _restore_system_model_presets() -> AsyncIterator[None]:
+    """Keep a test's startup seed from changing the next app's default preset."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            existing = await session.scalar(
+                select(OrgSettings).where(
+                    OrgSettings.org_id.is_(None),
+                    OrgSettings.key == MODEL_PRESETS_KEY,
+                )
+            )
+            original = (existing.id, deepcopy(existing.value)) if existing else None
+        try:
+            yield
+        finally:
+            async with maker() as session:
+                await session.execute(
+                    delete(OrgSettings).where(
+                        OrgSettings.org_id.is_(None),
+                        OrgSettings.key == MODEL_PRESETS_KEY,
+                    )
+                )
+                if original is not None:
+                    session.add(
+                        OrgSettings(
+                            id=original[0],
+                            key=MODEL_PRESETS_KEY,
+                            value=original[1],
+                        )
+                    )
+                await session.commit()
+    finally:
+        await test_engine.dispose()
 
 
 async def _wipe_system_model_presets() -> None:
@@ -31,7 +72,10 @@ async def _wipe_system_model_presets() -> None:
     try:
         async with maker() as session:
             await session.execute(
-                delete(OrgSettings).where(OrgSettings.key == MODEL_PRESETS_KEY)  # type: ignore[arg-type]
+                delete(OrgSettings).where(
+                    OrgSettings.org_id.is_(None),
+                    OrgSettings.key == MODEL_PRESETS_KEY,
+                )
             )
             await session.commit()
     finally:

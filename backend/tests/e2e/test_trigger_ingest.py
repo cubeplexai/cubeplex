@@ -106,10 +106,8 @@ async def _poll_event_accepted(
         events = r.json()["events"]
         for ev in events:
             if ev["id"] == event_id:
-                # Wait for a stable execution binding or terminal failure.
-                if ev["resulting_run_id"] is not None:
-                    return ev
-                if ev["status"] in ("dead_lettered", "failed"):
+                # The run binding is committed while status is still claimed.
+                if ev["status"] in ("accepted", "dead_lettered", "failed"):
                     return ev
         await asyncio.sleep(0.15)
     # Return the last known state — caller handles assertion.
