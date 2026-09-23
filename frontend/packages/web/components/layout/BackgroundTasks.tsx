@@ -5,6 +5,7 @@ import { CircleStop, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { useShallow } from 'zustand/react/shallow'
 import { createApiClient, useMessageStore } from '@cubeplex/core'
+import type { BackgroundTask } from '@cubeplex/core'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 const ACTIVE_REFRESH_MS = 5_000
 const BASELINE_REFRESH_MS = 30_000
 const MAX_RETRY_MS = 120_000
+const EMPTY_BACKGROUND_TASKS: BackgroundTask[] = []
 
 interface BackgroundTasksProps {
   conversationId: string
@@ -27,7 +29,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const t = useTranslations('backgroundTasks')
   const { tasks, summary, stopAll, runControl, refreshError } = useMessageStore(
     useShallow((state) => ({
-      tasks: state.backgroundTasks?.[conversationId] ?? [],
+      tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
       summary: state.backgroundSummary?.[conversationId],
       stopAll: state.stopAllStatus?.[conversationId],
       runControl: state.runControl?.[conversationId],
