@@ -214,6 +214,55 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundEvents['conv-1']).toHaveLength(2)
   })
 
+  it('restarts pagination from the newest page when an event gap is detected', async () => {
+    const cached = event({ id: 'event-cached' })
+    const newest = event({ id: 'event-newest', revision: 2 })
+    useMessageStore.setState({
+      backgroundEvents: { 'conv-1': [cached] },
+      backgroundEventCursor: { 'conv-1': 'deep-cursor' },
+      backgroundEventsHasMore: { 'conv-1': true },
+    })
+    vi.mocked(listBackgroundTasks).mockResolvedValue([])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [newest],
+      next_cursor: 'gap-cursor',
+      has_more: true,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundEventCursor['conv-1']).toBe('gap-cursor')
+    expect(useMessageStore.getState().backgroundEventsHasMore['conv-1']).toBe(true)
+  })
+
+  it('does not let an older page response overwrite a refreshed gap cursor', async () => {
+    const cached = event({ id: 'event-cached' })
+    useMessageStore.setState({
+      backgroundEvents: { 'conv-1': [cached] },
+      backgroundEventCursor: { 'conv-1': 'old-cursor' },
+      backgroundEventsHasMore: { 'conv-1': true },
+    })
+    let resolvePage: ((page: Awaited<ReturnType<typeof listBackgroundTaskEvents>>) => void) | null =
+      null
+    vi.mocked(listBackgroundTaskEvents).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePage = resolve
+        }),
+    )
+    vi.mocked(listBackgroundTasks).mockResolvedValue([])
+
+    const loading = useMessageStore.getState().loadMoreBackgroundEvents(fakeClient, 'conv-1')
+    useMessageStore.setState({
+      backgroundEventCursor: { 'conv-1': 'gap-cursor' },
+      backgroundEventsHasMore: { 'conv-1': true },
+    })
+    resolvePage?.({ items: [], next_cursor: 'older-cursor', has_more: true })
+    await loading
+
+    expect(useMessageStore.getState().backgroundEventCursor['conv-1']).toBe('gap-cursor')
+  })
+
   it('keeps fully loaded event history across a bootstrap baseline refresh', async () => {
     const newest = event({ id: 'event-newest', revision: 2 })
     const older = event({ id: 'event-older', created_at: '2026-09-21T23:00:00+00:00' })
