@@ -159,7 +159,25 @@ class BackgroundTaskQueryService:
     ) -> list[TaskProjection]:
         query = self._task_query(conversation_id)
         if task_ids is None:
-            query = query.where(col(BackgroundTask.state).in_(INFLIGHT_TASK_STATES))
+            claimed_event = exists(
+                select(col(BackgroundTaskEvent.id)).where(
+                    col(BackgroundTaskEvent.org_id) == self.org_id,
+                    col(BackgroundTaskEvent.workspace_id) == self.workspace_id,
+                    col(BackgroundTaskEvent.conversation_id) == conversation_id,
+                    col(BackgroundTaskEvent.task_id) == col(BackgroundTask.id),
+                    col(BackgroundTaskEvent.state) == BackgroundTaskEventState.claimed.value,
+                )
+            )
+            query = query.where(
+                or_(
+                    col(BackgroundTask.state).in_(INFLIGHT_TASK_STATES),
+                    col(SandboxCommand.log_state).in_(("pending", "retrying")),
+                    and_(
+                        col(BackgroundTask.notifications_cancelled_at).is_not(None),
+                        claimed_event,
+                    ),
+                )
+            )
         else:
             query = query.where(col(BackgroundTask.id).in_(task_ids))
         rows = (
