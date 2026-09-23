@@ -622,6 +622,7 @@ const loadMessagesInFlight = new Map<string, Promise<void>>()
  *  the in-flight promise lets the loop ``await`` the click's fetch instead
  *  of short-circuiting without progress. */
 const loadOlderInFlight = new Map<string, Promise<void>>()
+const HISTORY_GAP_PAGE_SIZE = 500
 
 const MAIN_AGENT_KEY = 'main'
 
@@ -717,6 +718,35 @@ function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
     persistedCounterparts.set(key, remaining - 1)
   }
   return sortHistoryMessages([...retained.reverse(), ...tail])
+}
+
+async function fillHistoryGap(
+  client: ApiClient,
+  conversationId: string,
+  current: Message[],
+  tail: Message[],
+): Promise<Message[]> {
+  const currentSeqs = current.flatMap((message) => (message.seq === undefined ? [] : [message.seq]))
+  const tailSeqs = tail.flatMap((message) => (message.seq === undefined ? [] : [message.seq]))
+  if (currentSeqs.length === 0 || tailSeqs.length === 0) return tail
+
+  const currentNewest = Math.max(...currentSeqs)
+  let cursor = Math.min(...tailSeqs)
+  if (cursor <= currentNewest) return tail
+
+  let bridge: Message[] = []
+  const visitedCursors = new Set<number>()
+  while (cursor > currentNewest && !visitedCursors.has(cursor)) {
+    visitedCursors.add(cursor)
+    const page = await getHistoryWindow(client, conversationId, {
+      beforeSeq: cursor,
+      limit: HISTORY_GAP_PAGE_SIZE,
+    })
+    bridge = [...normalizeMessages(page.messages), ...bridge]
+    if (page.oldest_seq === null || page.oldest_seq >= cursor || !page.has_more) break
+    cursor = page.oldest_seq
+  }
+  return [...bridge, ...tail]
 }
 
 function historyCounterpartKey(message: Message): string | null {
@@ -2253,6 +2283,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             bootstrap.active_run.started_at ?? null,
           )
         }
+        const preserveHistory = options?.preserveLoadedHistory === true
+        if (preserveHistory) {
+          messages = await fillHistoryGap(
+            client,
+            conversationId,
+            current.messages[conversationId] ?? [],
+            messages,
+          )
+        }
 
         // Backend walks the full history (not just the tail) to pick the
         // latest ``write_todos`` state — see ``find_latest_todos`` in
@@ -2451,7 +2490,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             s.backgroundEventsHasMore[conversationId],
             backgroundPage,
           )
-          const preserveHistory = options?.preserveLoadedHistory === true
           const nextMessages = preserveHistory
             ? mergeHistoryTail(s.messages[conversationId] ?? [], messages)
             : messages
