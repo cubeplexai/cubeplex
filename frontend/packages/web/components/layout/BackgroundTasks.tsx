@@ -55,16 +55,22 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     if (!refreshBackground || !loadMessages) return
     let disposed = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let tickInFlight = false
     let failureCount = 0
     let lastBaselineAt = Date.now()
 
     const schedule = (delay: number) => {
       if (disposed) return
-      timer = setTimeout(() => void tick(), delay)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void tick()
+      }, delay)
     }
     const tick = async () => {
-      if (disposed) return
+      if (disposed || tickInFlight) return
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      tickInFlight = true
       try {
         await refreshBackground(client(), conversationId)
         failureCount = 0
@@ -89,11 +95,15 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
       } catch {
         failureCount += 1
         schedule(Math.min(ACTIVE_REFRESH_MS * 2 ** failureCount, MAX_RETRY_MS))
+      } finally {
+        tickInFlight = false
       }
     }
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return
       if (timer) clearTimeout(timer)
+      timer = null
+      if (tickInFlight) return
       void tick()
     }
     document.addEventListener('visibilitychange', onVisibility)
