@@ -915,7 +915,7 @@ async def test_deadline_task_persists_exit_observed_before_interrupt(
     command_id = str(result.details["command_id"])  # type: ignore[index]
     assert exits == [(command_id, 7, True)]
     assert command_id not in live
-    sandbox.kill.assert_not_awaited()
+    sandbox.kill.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1110,6 +1110,52 @@ async def test_background_deadline_persists_final_output_cursor_and_timeout(
     assert cursors == ["1", "2"]
     assert timeout_notices == [True]
     sandbox.kill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_background_deadline_keeps_repository_completion_finalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="exited", exit_code=0, log_cursor="1")
+    )
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
+    completed = asyncio.Event()
+    background_terminal = AsyncMock(side_effect=lambda *_args: completed.set())
+    foreground = AsyncMock(side_effect=AssertionError("must not discard repository command"))
+
+    tool = _make_execute_tool(
+        sandbox,
+        live={},
+        persist_reserve=AsyncMock(return_value=True),
+        persist_running=AsyncMock(),
+        persist_foreground=foreground,
+        persist_background_terminal=background_terminal,
+    )
+    await tool.execute(
+        "tc-background-natural-exit",
+        _ExecuteArgs(
+            command="long command",
+            description="Long command",
+            background=True,
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=1)
+
+    background_terminal.assert_awaited_once()
+    foreground.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1455,6 +1501,49 @@ async def test_monitor_deadline_persists_timeout_after_confirmed_kill(
     await asyncio.wait_for(persisted.wait(), timeout=1)
 
     sandbox.kill.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_monitor_deadline_keeps_repository_terminal_finalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="exited", exit_code=0, log_cursor="1")
+    )
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
+    completed = asyncio.Event()
+    terminal = AsyncMock(side_effect=lambda *_args: completed.set())
+
+    tool = _make_monitor_tool(
+        sandbox,
+        live={},
+        persist_reserve=AsyncMock(return_value=True),
+        persist_running=AsyncMock(),
+        persist_monitor_observation=terminal,
+    )
+    await tool.execute(
+        "tc-monitor-natural-exit",
+        _MonitorArgs(
+            command="monitor command",
+            description="Monitor command",
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=1)
+
+    terminal.assert_awaited_once()
+    sandbox.kill.assert_not_called()
 
 
 @pytest.mark.asyncio

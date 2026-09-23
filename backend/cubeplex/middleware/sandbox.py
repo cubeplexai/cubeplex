@@ -350,6 +350,9 @@ def _make_execute_tool(
     persist_exited: Callable[[str, int | None, bool], Awaitable[None]] | None = None,
     persist_discard: Callable[[str], Awaitable[None]] | None = None,
     persist_foreground: Callable[[str, ProcessSnapshot, bool], Awaitable[None]] | None = None,
+    persist_background_terminal: (
+        Callable[[str, ProcessSnapshot, bool, bool], Awaitable[None]] | None
+    ) = None,
     persist_timed_out: (
         Callable[[str, bool, ProcessSnapshot, bool], Awaitable[None]] | None
     ) = None,
@@ -374,7 +377,7 @@ def _make_execute_tool(
         log_path: str,
         snapshot: ProcessSnapshot,
     ) -> bool:
-        if snapshot.new_output:
+        if snapshot.new_output or snapshot.status != "running":
             appended = await _append_sandbox_log(sandbox, log_path, snapshot.new_output)
             if not appended.data_written:
                 return False
@@ -419,11 +422,12 @@ def _make_execute_tool(
                         )
                         if deadline_snapshot.status != "running":
                             live_commands.pop(command_id, None)
-                            if persist_foreground is not None:
-                                await persist_foreground(
+                            if persist_background_terminal is not None:
+                                await persist_background_terminal(
                                     command_id,
                                     deadline_snapshot,
                                     logs_confirmed,
+                                    current[1],
                                 )
                             elif (
                                 deadline_snapshot.status == "killed" and persist_killed is not None
@@ -1043,8 +1047,10 @@ def _make_monitor_tool(
     persist_killed: Callable[[str], Awaitable[None]] | None = None,
     persist_start_failed: Callable[[str, str], Awaitable[None]] | None = None,
     persist_monitor_timed_out: Callable[[str], Awaitable[None]] | None = None,
-    persist_observation: Callable[[str, ProcessSnapshot, bool], Awaitable[None]] | None = None,
-    persist_timed_out: (
+    persist_monitor_observation: (
+        Callable[[str, ProcessSnapshot, bool], Awaitable[None]] | None
+    ) = None,
+    persist_monitor_timeout: (
         Callable[[str, bool, ProcessSnapshot, bool], Awaitable[None]] | None
     ) = None,
     deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
@@ -1199,8 +1205,8 @@ def _make_monitor_tool(
                             handle.log_cursor = deadline_snapshot.log_cursor
                         if deadline_snapshot.status != "running":
                             live.pop(command_id, None)
-                            if persist_observation is not None:
-                                await persist_observation(
+                            if persist_monitor_observation is not None:
+                                await persist_monitor_observation(
                                     command_id,
                                     deadline_snapshot,
                                     logs_confirmed,
@@ -1222,8 +1228,8 @@ def _make_monitor_tool(
                                     await persist_cursor(command_id, confirmed.log_cursor)
                                 handle.log_cursor = confirmed.log_cursor
                             live.pop(command_id, None)
-                            if persist_timed_out is not None:
-                                await persist_timed_out(
+                            if persist_monitor_timeout is not None:
+                                await persist_monitor_timeout(
                                     command_id,
                                     True,
                                     confirmed,
@@ -1885,6 +1891,7 @@ class SandboxMiddleware(Middleware):
                 persist_exited=self._persist_exited,
                 persist_discard=self._persist_discard,
                 persist_foreground=self._persist_foreground,
+                persist_background_terminal=self._persist_background_terminal,
                 persist_timed_out=self._persist_timed_out,
                 load_persisted_status=self._persisted_command_status,
                 deadline_tasks=self._command_deadline_tasks,
@@ -1911,8 +1918,8 @@ class SandboxMiddleware(Middleware):
                 persist_killed=self._persist_killed,
                 persist_start_failed=self._persist_start_failed,
                 persist_monitor_timed_out=self._persist_monitor_timed_out,
-                persist_observation=self._persist_foreground,
-                persist_timed_out=self._persist_timed_out,
+                persist_monitor_observation=self._persist_monitor_observation,
+                persist_monitor_timeout=self._persist_monitor_timeout,
                 deadline_tasks=self._command_deadline_tasks,
                 on_live=self._ensure_lease_task,
                 handoff=self._handoff_conversation_command,
@@ -2305,6 +2312,56 @@ class SandboxMiddleware(Middleware):
                 wake_text="monitor timeout reached",
             )
 
+    async def _persist_monitor_observation(
+        self,
+        command_id: str,
+        snapshot: ProcessSnapshot,
+        logs_confirmed: bool,
+    ) -> None:
+        if await self._persist_task_observation(
+            command_id,
+            snapshot,
+            log_state="complete" if logs_confirmed else "retrying",
+            logs_confirmed=logs_confirmed,
+        ):
+            return
+        async with self._command_repo_ctx() as repo:
+            if repo is None:
+                return
+            row = await repo.get(command_id)
+            if row is None:
+                return
+            from cubeplex.sandbox.command_coordinator import _terminalize
+
+            await _terminalize(
+                repo.session,
+                row,
+                status=snapshot.status,
+                exit_code=snapshot.exit_code,
+                now=datetime.now(UTC),
+                sandbox=None,
+                interrupt=False,
+                wake_text=f"monitor {snapshot.status}",
+            )
+
+    async def _persist_monitor_timeout(
+        self,
+        command_id: str,
+        notify: bool,
+        snapshot: ProcessSnapshot,
+        logs_confirmed: bool,
+    ) -> None:
+        del notify
+        if await self._persist_task_observation(
+            command_id,
+            snapshot,
+            log_state="complete" if logs_confirmed else "retrying",
+            stop_reason=TaskStopReason.deadline,
+            logs_confirmed=logs_confirmed,
+        ):
+            return
+        await self._persist_monitor_timed_out(command_id)
+
     async def _persisted_command_status(self, command_id: str) -> str | None:
         if command_id in self._task_bindings and self._session_factory is not None:
             from cubeplex.models import SandboxCommand
@@ -2388,6 +2445,27 @@ class SandboxMiddleware(Middleware):
         ):
             return
         await self._persist_discard(command_id)
+
+    async def _persist_background_terminal(
+        self,
+        command_id: str,
+        snapshot: ProcessSnapshot,
+        logs_confirmed: bool,
+        notify: bool,
+    ) -> None:
+        if await self._persist_task_observation(
+            command_id,
+            snapshot,
+            log_state="complete" if logs_confirmed else "retrying",
+            logs_confirmed=logs_confirmed,
+        ):
+            return
+        await self._persist_terminal(
+            command_id,
+            status=snapshot.status,
+            exit_code=snapshot.exit_code,
+            notify=notify,
+        )
 
     async def _kill_persisted_command(self, command_id: str) -> bool:
         if self.conversation_id is None:
