@@ -2387,10 +2387,7 @@ class SandboxMiddleware(Middleware):
             return row.status if row is not None else None
 
     async def _persist_discard(self, command_id: str) -> None:
-        async with self._command_repo_ctx() as repo:
-            if repo is None:
-                return
-            await repo.discard_reservation(command_id, owner_id=self._owner_id)
+        del command_id
 
     async def _persist_task_observation(
         self,
