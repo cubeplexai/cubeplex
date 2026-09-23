@@ -120,6 +120,31 @@ describe('BackgroundTasks', () => {
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
 
+  it('keeps Stop-all cleanup visible after every task becomes terminal', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+      stopAllStatus: {
+        'conv-1': {
+          requested_at: '2026-09-22T00:00:00+00:00',
+          cleanup_pending: true,
+        },
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByText('正在停止全部工作')).toBeInTheDocument()
+  })
+
   it('does not force a baseline bootstrap over a stream that starts during polling', async () => {
     render(<BackgroundTasks conversationId="conv-1" />)
 
