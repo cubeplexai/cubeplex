@@ -1,13 +1,18 @@
 """UserSandbox repository."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from sqlalchemy import CursorResult, select, text, update
+from sqlalchemy import CursorResult, case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.base import ScopedRepository
+
+
+class SandboxCleanupRequestedError(ValueError):
+    """A provisioner lost the row to a committed cleanup request."""
 
 
 class UserSandboxRepository(ScopedRepository[UserSandbox]):
@@ -89,23 +94,74 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     async def set_sandbox_id(self, record_id: str, sandbox_id: str) -> None:
         """Persist the provider sandbox_id while still in provisioning status."""
-        record = await self.get(record_id)
-        if record is None:
-            raise ValueError(f"sandbox record {record_id} vanished mid-create")
-        record.sandbox_id = sandbox_id
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status == "provisioning",  # type: ignore[arg-type]
+                UserSandbox.cleanup_action.is_(None),  # type: ignore[union-attr]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+            .values(sandbox_id=sandbox_id)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount == 1:
+            await self.session.commit()
+            return
+        late_stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
+                UserSandbox.cleanup_action.is_not(None),  # type: ignore[union-attr]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+            .values(sandbox_id=sandbox_id)
+        )
+        late = cast(CursorResult[Any], await self.session.execute(late_stmt))
         await self.session.commit()
+        if late.rowcount == 1:
+            raise SandboxCleanupRequestedError("sandbox cleanup requested during provisioning")
+        raise ValueError(f"sandbox record {record_id} cannot accept a provider instance")
 
     async def promote_to_running(
         self, record_id: str, *, sandbox_id: str, image: str | None = None
     ) -> None:
-        record = await self.get(record_id)
-        if record is None:
-            raise ValueError(f"sandbox record {record_id} vanished mid-create")
-        record.sandbox_id = sandbox_id
-        record.status = "running"
-        record.last_activity_at = datetime.now(UTC)
+        values: dict[str, Any] = {
+            "sandbox_id": sandbox_id,
+            "status": "running",
+            "last_activity_at": datetime.now(UTC),
+        }
         if image is not None:
-            record.image = image
+            values["image"] = image
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status == "provisioning",  # type: ignore[arg-type]
+                UserSandbox.cleanup_action.is_(None),  # type: ignore[union-attr]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+            .values(**values)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            action = await self.session.scalar(
+                select(col(UserSandbox.cleanup_action)).where(
+                    col(UserSandbox.id) == record_id,
+                    col(UserSandbox.org_id) == self.org_id,
+                    col(UserSandbox.workspace_id) == self.workspace_id,
+                )
+            )
+            if action is not None:
+                raise SandboxCleanupRequestedError("sandbox cleanup requested during provisioning")
+            raise ValueError(f"sandbox record {record_id} cannot be promoted")
         await self.session.commit()
 
     async def delete_record(self, record_id: str) -> None:
@@ -284,6 +340,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         record = await self.get(record_id)
         if record:
             record.status = "terminated"
+            record.cleanup_action = None
+            record.cleanup_requested_at = None
             if clear_sandbox_id:
                 record.sandbox_id = None
             await self.session.commit()
@@ -500,30 +558,63 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         await self.session.commit()
         return bool(result.rowcount == 1)
 
-    async def claim_for_kill(self, record_id: str) -> bool:
-        """Atomic claim for restart: transition to 'kill_pending' only if
-        currently running/paused/pausing/resuming. Prevents double-kill."""
+    async def request_cleanup(
+        self,
+        record_id: str,
+        *,
+        action: Literal["restart", "delete"],
+        requested_at: datetime,
+    ) -> bool:
+        """Fence new work and persist a retryable user cleanup request."""
+        if requested_at.tzinfo is None or requested_at.utcoffset() is None:
+            raise ValueError("cleanup_requested_at must be timezone-aware")
+        if action == "restart":
+            allowed = or_(
+                UserSandbox.status.in_(  # type: ignore[attr-defined]
+                    ("provisioning", "running", "paused", "pausing", "resuming")
+                ),
+                (
+                    (UserSandbox.status == "kill_pending")  # type: ignore[arg-type]
+                    & (UserSandbox.cleanup_action == "restart")
+                ),
+            )
+        else:
+            allowed = UserSandbox.status.in_(  # type: ignore[attr-defined]
+                (
+                    "provisioning",
+                    "running",
+                    "paused",
+                    "pausing",
+                    "resuming",
+                    "terminated",
+                    "failed",
+                    "kill_pending",
+                )
+            )
         stmt = (
             update(UserSandbox)
             .where(
                 UserSandbox.id == record_id,  # type: ignore[arg-type]
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
-                UserSandbox.status.in_(  # type: ignore[attr-defined]
-                    ("running", "paused", "pausing", "resuming")
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+                allowed,
+            )
+            .values(
+                status="kill_pending",
+                cleanup_action=action,
+                cleanup_requested_at=case(
+                    (
+                        col(UserSandbox.cleanup_action) == action,
+                        func.coalesce(col(UserSandbox.cleanup_requested_at), requested_at),
+                    ),
+                    else_=requested_at,
                 ),
             )
-            .values(status="kill_pending")
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()
         return bool(result.rowcount == 1)
-
-    async def claim_for_soft_delete(self, record_id: str) -> bool:
-        """Alias for soft_delete's conditional UPDATE, used by
-        delete_user_sandbox to guard double-click. Kept as a separate name
-        for call-site clarity."""
-        return await self.soft_delete(record_id)
 
     async def acquire_in_use(self, record_id: str, lease_seconds: int) -> None:
         """Set ``in_use_until`` to now+lease_seconds, blocking auto-pause."""

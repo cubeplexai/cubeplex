@@ -20,6 +20,8 @@ class MySandboxOut(BaseModel):
     scope_id: str
     scope_title: str | None
     status: str
+    cleanup_action: str | None
+    cleanup_requested_at: datetime | None
     image: str
     last_activity_at: datetime | None
     created_at: datetime

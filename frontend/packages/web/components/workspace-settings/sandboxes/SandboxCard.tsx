@@ -28,8 +28,8 @@ interface SandboxCardProps {
 /**
  * One sandbox row in the settings list: status badge, scope label, last
  * active time, and Restart / Delete actions guarded by confirm dialogs.
- * Restart = stop the container, keep the row + files (spec §7.3).
- * Delete = soft-delete the row + stop the container; files left for operator.
+ * Restart and Delete first block new work. The row stays visible while the
+ * provider stop is unconfirmed; Delete hides it only after confirmation.
  */
 export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const t = useTranslations('wsSandboxes')
@@ -37,12 +37,15 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const tSidebar = useTranslations('sidebar')
   const tTime = useTranslations('time')
   // `mutate` is bound to the same SWR key the panel reads, so a restart/
-  // delete revalidates the whole list (status flips to "Off", row disappears).
+  // delete revalidates the whole list (pending stays visible; confirmed disappears).
   const { mutate } = useMySandboxes(wsId)
 
   const [restartOpen, setRestartOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [busy, setBusy] = useState<'restart' | 'delete' | null>(null)
+  const cleanupPending = sandbox.status === 'kill_pending'
+  const deletePending = cleanupPending && sandbox.cleanup_action === 'delete'
+  const restartPending = cleanupPending && sandbox.cleanup_action === 'restart'
 
   // scope → human label (spec §7.4). conversation/topic fall back to
   // "(deleted)" when the backing row is gone (scope_title null). Empty
@@ -82,7 +85,7 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
     setBusy('restart')
     try {
       await restartMySandbox(wsId, sandbox.id)
-      toast.success(t('restartSuccess'))
+      toast.success(t('restartAccepted'))
       setRestartOpen(false)
       await mutate()
       onMutated()
@@ -97,7 +100,7 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
     setBusy('delete')
     try {
       await deleteMySandbox(wsId, sandbox.id)
-      toast.success(t('deleteSuccess'))
+      toast.success(t('deleteAccepted'))
       setDeleteOpen(false)
       await mutate()
       onMutated()
@@ -116,13 +119,28 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
           <span className="truncate text-sm font-medium">{label}</span>
         </div>
         <p className="text-xs text-muted-foreground">{lastActive}</p>
+        {cleanupPending ? (
+          <p className="text-xs text-warning-fg">
+            {deletePending ? t('deletePending') : t('restartPending')}
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 gap-2">
-        <Button variant="outline" size="sm" onClick={() => setRestartOpen(true)}>
-          {t('restart')}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={deletePending || busy !== null}
+          onClick={() => setRestartOpen(true)}
+        >
+          {restartPending ? t('retryRestart') : t('restart')}
         </Button>
-        <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
-          {t('delete')}
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() => setDeleteOpen(true)}
+        >
+          {deletePending ? t('retryDelete') : t('delete')}
         </Button>
       </div>
 
