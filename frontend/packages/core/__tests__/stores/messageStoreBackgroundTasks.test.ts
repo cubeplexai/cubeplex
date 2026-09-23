@@ -10,6 +10,7 @@ vi.mock('../../src/api', async (importOriginal) => {
     listBackgroundTaskEvents: vi.fn(),
     getConversationBootstrap: vi.fn(),
     getConversationExecutionGeneration: vi.fn(),
+    getHistoryWindow: vi.fn(),
     stopBackgroundTask: vi.fn(),
     stopAllConversationWork: vi.fn(),
   }
@@ -18,6 +19,7 @@ vi.mock('../../src/api', async (importOriginal) => {
 import {
   getConversationBootstrap,
   getConversationExecutionGeneration,
+  getHistoryWindow,
   listBackgroundTaskEvents,
   listBackgroundTasks,
   stopAllConversationWork,
@@ -86,6 +88,11 @@ function event(overrides: Partial<BackgroundTaskEvent> = {}): BackgroundTaskEven
 describe('messageStore background task state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getHistoryWindow).mockReset().mockResolvedValue({
+      messages: [],
+      oldest_seq: null,
+      has_more: false,
+    })
     useMessageStore.setState({
       backgroundTasks: {},
       backgroundEvents: {},
@@ -498,6 +505,96 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().messages['conv-1']).toEqual([older, newest])
     expect(useMessageStore.getState().oldestSeqByConv['conv-1']).toBe(1)
     expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(true)
+  })
+
+  it('fills a history gap before retaining the expanded window cursor', async () => {
+    const oldest = {
+      id: 'message-oldest',
+      seq: 1,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'oldest' }],
+    }
+    const previousNewest = {
+      id: 'message-previous-newest',
+      seq: 100,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'previous newest' }],
+    }
+    const middle = {
+      id: 'message-middle',
+      seq: 300,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'middle' }],
+    }
+    const laterMiddle = {
+      id: 'message-later-middle',
+      seq: 700,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'later middle' }],
+    }
+    const newest = {
+      id: 'message-newest',
+      seq: 1001,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'newest' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [oldest, previousNewest] },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [newest],
+      oldest_seq: 1001,
+      has_more: true,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+    vi.mocked(getHistoryWindow)
+      .mockResolvedValueOnce({
+        messages: [laterMiddle],
+        oldest_seq: 501,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [previousNewest, middle],
+        oldest_seq: 100,
+        has_more: true,
+      })
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(getHistoryWindow).toHaveBeenNthCalledWith(1, fakeClient, 'conv-1', {
+      beforeSeq: 1001,
+      limit: 500,
+    })
+    expect(getHistoryWindow).toHaveBeenNthCalledWith(2, fakeClient, 'conv-1', {
+      beforeSeq: 501,
+      limit: 500,
+    })
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([
+      oldest,
+      previousNewest,
+      middle,
+      laterMiddle,
+      newest,
+    ])
+    expect(useMessageStore.getState().oldestSeqByConv['conv-1']).toBe(1)
+    expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(false)
   })
 
   it('preserves tool results for history outside the refreshed tail', async () => {
