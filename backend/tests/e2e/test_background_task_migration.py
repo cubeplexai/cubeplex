@@ -211,6 +211,22 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         notice_state="pending",
         notify_on_complete=True,
     )
+    checkpointed_completed = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-checkpointed-run",
+        tool_call_id="legacy-checkpointed",
+        started_by_user_id=user.id,
+        command="already reported build",
+        kind="execute",
+        lifetime="conversation",
+        status="exited",
+        exit_code=0,
+        notice_state="pending",
+        notify_on_complete=True,
+    )
     monitor = SandboxCommand(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -230,6 +246,35 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         notice_state="delivered",
         notify_on_complete=True,
     )
+    killed = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-killed-run",
+        tool_call_id="legacy-killed",
+        started_by_user_id=user.id,
+        command="cancelled build",
+        kind="execute",
+        lifetime="conversation",
+        status="killed",
+        notice_state="pending",
+        notify_on_complete=True,
+    )
+    uncertain_start = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-uncertain-run",
+        tool_call_id="legacy-uncertain",
+        started_by_user_id=user.id,
+        command="possibly started server",
+        kind="execute",
+        lifetime="conversation",
+        status="starting",
+        notify_on_complete=True,
+    )
     blocked = SandboxCommand(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -243,7 +288,9 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         lifetime="run",
         status="running",
     )
-    db_session.add_all((completed, monitor, blocked))
+    db_session.add_all(
+        (completed, checkpointed_completed, monitor, killed, uncertain_start, blocked)
+    )
     await db_session.flush()
     delivered = SandboxCommandWake(
         org_id=DEFAULT_ORG_ID,
@@ -266,29 +313,44 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         reason="exit",
         dedupe_key=f"{monitor.id}:exit",
         text_tail="later exit",
-        state="pending",
+        state="claimed",
         started_by_user_id=user.id,
     )
     db_session.add_all((delivered, pending))
     await db_session.flush()
 
-    command_ids = (completed.id, monitor.id, blocked.id)
+    command_ids = (
+        completed.id,
+        checkpointed_completed.id,
+        monitor.id,
+        killed.id,
+        uncertain_start.id,
+        blocked.id,
+    )
+    checkpointed_notice_ids = {conv.id: frozenset({pending.id, checkpointed_completed.id})}
     dry_run = await migrate_legacy_commands(
         db_session,
         apply=False,
         command_ids=command_ids,
     )
     assert {item.command_id for item in dry_run.blockers} == {blocked.id}
-    assert {item.command_id for item in dry_run.migratable} == {completed.id, monitor.id}
+    assert {item.command_id for item in dry_run.migratable} == {
+        completed.id,
+        checkpointed_completed.id,
+        monitor.id,
+        killed.id,
+        uncertain_start.id,
+    }
     assert completed.task_id is None and monitor.task_id is None
 
     first = await migrate_legacy_commands(
         db_session,
         apply=True,
         command_ids=command_ids,
+        checkpointed_notice_ids=checkpointed_notice_ids,
     )
     await db_session.flush()
-    assert first.migrated == 2
+    assert first.migrated == 5
     assert blocked.task_id is None
     await db_session.refresh(completed)
     await db_session.refresh(monitor)
@@ -296,18 +358,46 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     assert completed.sandbox_instance_id is None
 
     completed_task = await db_session.get(BackgroundTask, completed.task_id)
+    checkpointed_task = await db_session.get(BackgroundTask, checkpointed_completed.task_id)
     monitor_task = await db_session.get(BackgroundTask, monitor.task_id)
-    assert completed_task is not None and monitor_task is not None
+    killed_task = await db_session.get(BackgroundTask, killed.task_id)
+    uncertain_task = await db_session.get(BackgroundTask, uncertain_start.task_id)
+    assert all(
+        task is not None
+        for task in (
+            completed_task,
+            checkpointed_task,
+            monitor_task,
+            killed_task,
+            uncertain_task,
+        )
+    )
+    assert completed_task is not None
+    assert checkpointed_task is not None
+    assert monitor_task is not None
+    assert killed_task is not None
+    assert uncertain_task is not None
     assert completed_task.state == "succeeded"
     assert completed_task.result_readiness == "unavailable"
     assert completed_task.backgrounded_at is not None
     assert monitor_task.notifications_cancelled_at is not None
+    assert killed_task.state == "cancelled"
+    assert uncertain_task.state == "unknown"
+    await db_session.refresh(uncertain_start)
+    assert uncertain_start.start_requested_at == uncertain_start.created_at
 
     events = list(
         (
             await db_session.execute(
                 select(BackgroundTaskEvent).where(
-                    col(BackgroundTaskEvent.task_id).in_((completed_task.id, monitor_task.id))
+                    col(BackgroundTaskEvent.task_id).in_(
+                        (
+                            completed_task.id,
+                            checkpointed_task.id,
+                            monitor_task.id,
+                            killed_task.id,
+                        )
+                    )
                 )
             )
         )
@@ -317,11 +407,18 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     by_id = {event.id: event for event in events}
     assert by_id[delivered.id].state == "delivered"
     assert by_id[delivered.id].checkpoint_input_id == "legacy-input"
-    assert by_id[pending.id].state == "discarded"
-    assert by_id[pending.id].discard_reason == "legacy_monitor_subscription"
+    assert by_id[pending.id].state == "delivered"
+    assert by_id[pending.id].discard_reason is None
     completion_events = [event for event in events if event.task_id == completed_task.id]
     assert len(completion_events) == 1
     assert completion_events[0].state == "pending"
+    checkpointed_events = [event for event in events if event.task_id == checkpointed_task.id]
+    assert len(checkpointed_events) == 1
+    assert checkpointed_events[0].state == "delivered"
+    killed_events = [event for event in events if event.task_id == killed_task.id]
+    assert len(killed_events) == 1
+    assert killed_events[0].state == "discarded"
+    assert killed_events[0].discard_reason == "legacy_notification_revoked"
 
     blocked_status = await inspect_background_task_cutover(db_session)
     assert not blocked_status.ready
@@ -334,6 +431,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         db_session,
         apply=True,
         command_ids=(blocked.id,),
+        checkpointed_notice_ids=checkpointed_notice_ids,
     )
     assert final.migrated == 1
     ready_status = await inspect_background_task_cutover(db_session)
@@ -347,6 +445,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         db_session,
         apply=True,
         command_ids=command_ids,
+        checkpointed_notice_ids=checkpointed_notice_ids,
     )
     await db_session.flush()
     assert second.migrated == 0

@@ -93,11 +93,19 @@ def _contains_cutover(script: ScriptDirectory, revision: str) -> bool:
 
 async def _backfill() -> None:
     from cubeplex.db.engine import async_session_maker, engine
-    from cubeplex.scripts.dev.migrate_background_tasks import migrate_legacy_commands
+    from cubeplex.scripts.dev.migrate_background_tasks import (
+        load_checkpointed_notice_ids,
+        migrate_legacy_commands,
+    )
 
     try:
         async with async_session_maker() as session:
-            report = await migrate_legacy_commands(session, apply=True)
+            checkpointed_notice_ids = await load_checkpointed_notice_ids(session)
+            report = await migrate_legacy_commands(
+                session,
+                apply=True,
+                checkpointed_notice_ids=checkpointed_notice_ids,
+            )
             if report.blockers:
                 await session.rollback()
                 details = ", ".join(f"{item.command_id}: {item.reason}" for item in report.blockers)
