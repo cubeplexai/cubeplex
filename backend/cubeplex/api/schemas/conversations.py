@@ -23,6 +23,10 @@ class StopAllRequest(BaseModel):
     execution_generation: int = Field(strict=True, ge=0)
 
 
+class ExecutionGenerationResponse(BaseModel):
+    execution_generation: int
+
+
 class StopRunResponse(BaseModel):
     run_id: str
     accepted: bool
