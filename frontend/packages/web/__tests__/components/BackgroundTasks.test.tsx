@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   refreshBackground: vi.fn(),
   loadMessages: vi.fn(),
   setWorkspaceId: vi.fn(),
+  toastError: vi.fn(),
   state: {} as Record<string, unknown>,
   selectorSnapshots: [] as unknown[],
 }))
@@ -27,6 +28,8 @@ vi.mock('@cubeplex/core', () => {
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
+
+vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock('next-intl', () => ({
   useTranslations: () => (key: string) =>
@@ -68,6 +71,7 @@ describe('BackgroundTasks', () => {
     mocks.stopTask.mockResolvedValue(undefined)
     mocks.stopAllWork.mockResolvedValue(undefined)
     mocks.refreshBackground.mockResolvedValue(undefined)
+    mocks.toastError.mockReset()
     mocks.state = {
       backgroundTasks: { 'conv-1': [runningTask()] },
       backgroundSummary: {
@@ -103,6 +107,17 @@ describe('BackgroundTasks', () => {
 
     expect(mocks.stopTask).toHaveBeenCalledWith(expect.anything(), 'conv-1', 'bgt-1')
     expect(mocks.stopAllWork).toHaveBeenCalledWith(expect.anything(), 'conv-1')
+  })
+
+  it('does not report an accepted Stop all as failed when its refresh fails', async () => {
+    mocks.refreshBackground.mockRejectedValueOnce(new Error('refresh unavailable'))
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: '全部停止' }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(mocks.stopAllWork).toHaveBeenCalledWith(expect.anything(), 'conv-1')
+    expect(mocks.toastError).not.toHaveBeenCalled()
   })
 
   it('keeps the cold-load task selector snapshot stable', () => {

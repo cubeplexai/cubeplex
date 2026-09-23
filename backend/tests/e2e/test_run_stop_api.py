@@ -82,6 +82,34 @@ async def test_stop_requires_an_explicit_valid_target(
     assert response.status_code == 422, response.text
 
 
+async def test_execution_generation_read_uses_authoritative_conversation_row(
+    member_client: tuple[httpx.AsyncClient, str], db_session: AsyncSession
+) -> None:
+    client, workspace_id = member_client
+    conversation_id = await create_conversation(client, workspace_id)
+    first = await admit(db_session, conversation_id)
+    path = f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}"
+
+    response = await client.get(f"{path}/execution-generation")
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "execution_generation": first.admission.execution_generation,
+    }
+
+    stopped = await client.post(
+        f"{path}/stop-all",
+        json={"execution_generation": first.admission.execution_generation},
+    )
+    assert stopped.status_code == 202, stopped.text
+    second = await admit(db_session, conversation_id)
+
+    response = await client.get(f"{path}/execution-generation")
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "execution_generation": second.admission.execution_generation,
+    }
+
+
 async def test_stop_retry_never_selects_the_new_active_run(
     member_client: tuple[httpx.AsyncClient, str], db_session: AsyncSession
 ) -> None:

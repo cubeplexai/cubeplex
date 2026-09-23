@@ -39,6 +39,7 @@ import {
   cancelActiveRun,
   cancelSteer,
   getConversationBootstrap,
+  getConversationExecutionGeneration,
   getHistoryWindow,
   listBackgroundTaskEvents,
   listBackgroundTasks,
@@ -2185,8 +2186,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     // A new admission reopens a closed conversation by advancing its generation.
     // Re-read the authoritative value at click time so a long-open tab never
     // submits a harmless-but-misleading Stop-all against an older generation.
-    const bootstrap = await getConversationBootstrap(client, conversationId)
-    const generation = bootstrap.execution_generation
+    const generation = await getConversationExecutionGeneration(client, conversationId)
     const result = await stopAllConversationWork(client, conversationId, generation)
     set((state) => ({
       executionGeneration: {

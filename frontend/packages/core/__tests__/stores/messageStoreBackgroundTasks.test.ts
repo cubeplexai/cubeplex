@@ -9,6 +9,7 @@ vi.mock('../../src/api', async (importOriginal) => {
     listBackgroundTasks: vi.fn(),
     listBackgroundTaskEvents: vi.fn(),
     getConversationBootstrap: vi.fn(),
+    getConversationExecutionGeneration: vi.fn(),
     stopBackgroundTask: vi.fn(),
     stopAllConversationWork: vi.fn(),
   }
@@ -16,6 +17,7 @@ vi.mock('../../src/api', async (importOriginal) => {
 
 import {
   getConversationBootstrap,
+  getConversationExecutionGeneration,
   listBackgroundTaskEvents,
   listBackgroundTasks,
   stopAllConversationWork,
@@ -797,7 +799,7 @@ describe('messageStore background task state', () => {
       accepted: true,
       cleanup_pending: true,
     })
-    vi.mocked(getConversationBootstrap).mockResolvedValue({ execution_generation: 4 } as never)
+    vi.mocked(getConversationExecutionGeneration).mockResolvedValue(4)
     useMessageStore.setState({
       backgroundTasks: { 'conv-1': [task()] },
       executionGeneration: { 'conv-1': 4 },
@@ -808,6 +810,7 @@ describe('messageStore background task state', () => {
 
     expect(stopBackgroundTask).toHaveBeenCalledWith(fakeClient, 'conv-1', 'bgt-1')
     expect(stopAllConversationWork).toHaveBeenCalledWith(fakeClient, 'conv-1', 4)
+    expect(getConversationBootstrap).not.toHaveBeenCalled()
     expect(useMessageStore.getState().backgroundTasks['conv-1'][0]).toEqual(stopped)
     expect(useMessageStore.getState().stopAllStatus['conv-1']).toEqual({
       execution_generation: 4,
@@ -816,8 +819,8 @@ describe('messageStore background task state', () => {
     })
   })
 
-  it('refreshes the execution generation before Stop all', async () => {
-    vi.mocked(getConversationBootstrap).mockResolvedValue({ execution_generation: 5 } as never)
+  it('reads the DB execution generation before Stop all', async () => {
+    vi.mocked(getConversationExecutionGeneration).mockResolvedValue(5)
     vi.mocked(stopAllConversationWork).mockResolvedValue({
       execution_generation: 5,
       accepted: true,
@@ -828,6 +831,7 @@ describe('messageStore background task state', () => {
     await useMessageStore.getState().stopAllWork(fakeClient, 'conv-1')
 
     expect(stopAllConversationWork).toHaveBeenCalledWith(fakeClient, 'conv-1', 5)
+    expect(getConversationBootstrap).not.toHaveBeenCalled()
     expect(useMessageStore.getState().executionGeneration['conv-1']).toBe(5)
   })
 })
