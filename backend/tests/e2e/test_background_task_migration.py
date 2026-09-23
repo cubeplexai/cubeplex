@@ -20,10 +20,14 @@ from cubeplex.models import (
     ConversationExecutionAdmission,
     SandboxCommand,
     SandboxCommandWake,
+    SteeringMessage,
     User,
     UserSandbox,
 )
-from cubeplex.scripts.dev.migrate_background_tasks import migrate_legacy_commands
+from cubeplex.scripts.dev.migrate_background_tasks import (
+    _load_injected_notice_ids,
+    migrate_legacy_commands,
+)
 from cubeplex.services.background_task_cutover import inspect_background_task_cutover
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
@@ -275,6 +279,21 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         status="starting",
         notify_on_complete=True,
     )
+    proven_start = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        sandbox_instance_id="legacy-instance-proof",
+        conversation_id=conv.id,
+        run_id="legacy-proven-run",
+        tool_call_id="legacy-proven",
+        started_by_user_id=user.id,
+        command="known legacy server",
+        kind="execute",
+        lifetime="conversation",
+        status="starting",
+        notify_on_complete=True,
+    )
     blocked = SandboxCommand(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -289,7 +308,15 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         status="running",
     )
     db_session.add_all(
-        (completed, checkpointed_completed, monitor, killed, uncertain_start, blocked)
+        (
+            completed,
+            checkpointed_completed,
+            monitor,
+            killed,
+            uncertain_start,
+            proven_start,
+            blocked,
+        )
     )
     await db_session.flush()
     delivered = SandboxCommandWake(
@@ -314,10 +341,25 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         dedupe_key=f"{monitor.id}:exit",
         text_tail="later exit",
         state="claimed",
+        delivery_steer_id="legacy-injected-steer",
         started_by_user_id=user.id,
     )
-    db_session.add_all((delivered, pending))
+    injected = SteeringMessage(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        conversation_id=conv.id,
+        run_id="legacy-notice-run",
+        source_kind="background_task",
+        client_steer_id="legacy-injected-steer",
+        content="legacy task result",
+        sender_user_id=user.id,
+        state="injected",
+    )
+    db_session.add_all((delivered, pending, injected))
     await db_session.flush()
+
+    injected_notice_ids = await _load_injected_notice_ids(db_session)
+    assert injected_notice_ids == {conv.id: frozenset({pending.id})}
 
     command_ids = (
         completed.id,
@@ -325,21 +367,27 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         monitor.id,
         killed.id,
         uncertain_start.id,
+        proven_start.id,
         blocked.id,
     )
-    checkpointed_notice_ids = {conv.id: frozenset({pending.id, checkpointed_completed.id})}
+    checkpointed_notice_ids = {
+        conv.id: frozenset((*injected_notice_ids[conv.id], checkpointed_completed.id))
+    }
     dry_run = await migrate_legacy_commands(
         db_session,
         apply=False,
         command_ids=command_ids,
     )
-    assert {item.command_id for item in dry_run.blockers} == {blocked.id}
+    assert {item.command_id for item in dry_run.blockers} == {
+        uncertain_start.id,
+        blocked.id,
+    }
     assert {item.command_id for item in dry_run.migratable} == {
         completed.id,
         checkpointed_completed.id,
         monitor.id,
         killed.id,
-        uncertain_start.id,
+        proven_start.id,
     }
     assert completed.task_id is None and monitor.task_id is None
 
@@ -351,7 +399,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     )
     await db_session.flush()
     assert first.migrated == 5
-    assert blocked.task_id is None
+    assert blocked.task_id is None and uncertain_start.task_id is None
     await db_session.refresh(completed)
     await db_session.refresh(monitor)
     assert completed.task_id is not None and monitor.task_id is not None
@@ -361,7 +409,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     checkpointed_task = await db_session.get(BackgroundTask, checkpointed_completed.task_id)
     monitor_task = await db_session.get(BackgroundTask, monitor.task_id)
     killed_task = await db_session.get(BackgroundTask, killed.task_id)
-    uncertain_task = await db_session.get(BackgroundTask, uncertain_start.task_id)
+    proven_task = await db_session.get(BackgroundTask, proven_start.task_id)
     assert all(
         task is not None
         for task in (
@@ -369,22 +417,22 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
             checkpointed_task,
             monitor_task,
             killed_task,
-            uncertain_task,
+            proven_task,
         )
     )
     assert completed_task is not None
     assert checkpointed_task is not None
     assert monitor_task is not None
     assert killed_task is not None
-    assert uncertain_task is not None
+    assert proven_task is not None
     assert completed_task.state == "succeeded"
     assert completed_task.result_readiness == "unavailable"
     assert completed_task.backgrounded_at is not None
     assert monitor_task.notifications_cancelled_at is not None
     assert killed_task.state == "cancelled"
-    assert uncertain_task.state == "unknown"
-    await db_session.refresh(uncertain_start)
-    assert uncertain_start.start_requested_at == uncertain_start.created_at
+    assert proven_task.state == "unknown"
+    await db_session.refresh(proven_start)
+    assert proven_start.start_requested_at == proven_start.created_at
 
     events = list(
         (
@@ -422,22 +470,29 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
 
     blocked_status = await inspect_background_task_cutover(db_session)
     assert not blocked_status.ready
-    assert blocked_status.unmigrated_commands == baseline_status.unmigrated_commands + 1
+    assert blocked_status.unmigrated_commands == baseline_status.unmigrated_commands + 2
 
     blocked.status = "killed"
     blocked.finished_at = blocked.updated_at
+    uncertain_start.status = "killed"
+    uncertain_start.finished_at = uncertain_start.updated_at
     await db_session.flush()
     final = await migrate_legacy_commands(
         db_session,
         apply=True,
-        command_ids=(blocked.id,),
+        command_ids=(blocked.id, uncertain_start.id),
         checkpointed_notice_ids=checkpointed_notice_ids,
     )
-    assert final.migrated == 1
+    assert final.migrated == 2
     ready_status = await inspect_background_task_cutover(db_session)
     assert ready_status == baseline_status
 
-    await db_session.delete(by_id[pending.id])
+    by_id[pending.id].state = "pending"
+    by_id[pending.id].delivered_at = None
+    checkpointed_events[0].state = "pending"
+    checkpointed_events[0].delivered_at = None
+    killed_events[0].state = "pending"
+    killed_events[0].discard_reason = None
     await db_session.delete(completion_events[0])
     await db_session.flush()
 
@@ -449,7 +504,11 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     )
     await db_session.flush()
     assert second.migrated == 0
-    assert second.events_migrated == 2
+    assert second.events_migrated == 4
+    assert by_id[pending.id].state == "delivered"
+    assert checkpointed_events[0].state == "delivered"
+    assert killed_events[0].state == "discarded"
+    assert killed_events[0].discard_reason == "legacy_notification_revoked"
     assert (
         await db_session.scalar(
             select(func.count())
