@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -697,4 +698,124 @@ async def test_legacy_backfill_preserves_original_execution_generation(
     )
     assert len(events) == 2
     assert {event.state for event in events} == {"discarded"}
+    await db_session.rollback()
+
+
+async def test_legacy_backfill_keeps_command_cancellation_evidence_local(
+    db_session: AsyncSession,
+    expanded_lifecycle_schema: None,
+) -> None:
+    del expanded_lifecycle_schema
+    await _ensure_default_user_and_membership()
+    user = (
+        await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
+    ).scalar_one()
+    conv = Conversation(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        creator_user_id=user.id,
+        title="legacy command-local cancellation",
+    )
+    db_session.add(conv)
+    await db_session.flush()
+    sandbox = UserSandbox(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_id=user.id,
+        scope_type="conversation",
+        scope_id=conv.id,
+        sandbox_id="legacy-command-local-instance",
+        image="test",
+    )
+    db_session.add(sandbox)
+    await db_session.flush()
+    started = datetime.now(UTC)
+    silent = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        sandbox_instance_id="legacy-command-local-instance",
+        conversation_id=conv.id,
+        run_id="shared-pre-admission-run",
+        tool_call_id="silent-command",
+        started_by_user_id=user.id,
+        command="silent work",
+        provider_ref="silent-process-handle",
+        kind="execute",
+        lifetime="conversation",
+        status="running",
+        notice_state="none",
+        notify_on_complete=False,
+        created_at=started,
+        updated_at=started,
+    )
+    notifying = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="shared-pre-admission-run",
+        tool_call_id="notifying-command",
+        started_by_user_id=user.id,
+        command="notify when done",
+        kind="execute",
+        lifetime="conversation",
+        status="exited",
+        exit_code=0,
+        notice_state="pending",
+        notify_on_complete=True,
+        created_at=started + timedelta(seconds=1),
+        updated_at=started + timedelta(seconds=1),
+    )
+    run_lifetime = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="terminal-run-lifetime-command",
+        tool_call_id="run-lifetime-command",
+        started_by_user_id=user.id,
+        command="legacy default background work",
+        kind="execute",
+        lifetime="run",
+        status="exited",
+        exit_code=0,
+        notice_state="pending",
+        notify_on_complete=True,
+        created_at=started + timedelta(seconds=2),
+        updated_at=started + timedelta(seconds=2),
+    )
+    db_session.add_all((silent, notifying, run_lifetime))
+    await db_session.flush()
+
+    report = await migrate_legacy_commands(
+        db_session,
+        apply=True,
+        command_ids=(silent.id, notifying.id, run_lifetime.id),
+        checkpointed_notice_ids={},
+    )
+    assert report.migrated == 3
+    silent_task = await db_session.get(BackgroundTask, silent.task_id)
+    notifying_task = await db_session.get(BackgroundTask, notifying.task_id)
+    run_lifetime_task = await db_session.get(BackgroundTask, run_lifetime.task_id)
+    assert silent_task is not None
+    assert notifying_task is not None
+    assert run_lifetime_task is not None
+    assert silent_task.admission_id != notifying_task.admission_id
+    silent_admission = await db_session.get(
+        ConversationExecutionAdmission, silent_task.admission_id
+    )
+    assert silent_admission is not None
+    assert silent_admission.revoked_at is None
+    assert notifying_task.notifications_cancelled_at is None
+    assert run_lifetime_task.notifications_cancelled_at is None
+    events = list(
+        await db_session.scalars(
+            select(BackgroundTaskEvent).where(
+                col(BackgroundTaskEvent.task_id).in_((notifying_task.id, run_lifetime_task.id))
+            )
+        )
+    )
+    assert len(events) == 2
+    assert {event.state for event in events} == {"pending"}
     await db_session.rollback()
