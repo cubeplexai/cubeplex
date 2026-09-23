@@ -249,6 +249,50 @@ async def test_terminal_process_fact_survives_a_temporary_log_read_failure(
     assert command.log_state == "retrying" and command.log_cursor is None
 
 
+async def test_empty_terminal_output_recreates_the_log_before_becoming_ready(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    remote: tuple[MagicMock, MagicMock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task, command = await started_task(db_session, reservation_context)
+    _, raw, _ = remote
+    raw.id = command.sandbox_instance_id
+    raw.renew = AsyncMock()
+    raw.commands.get_command_status = AsyncMock(
+        return_value=SimpleNamespace(running=False, exit_code=0)
+    )
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=SimpleNamespace(content="", cursor=None)
+    )
+    append = AsyncMock(
+        side_effect=(
+            AppendOutputResult(data_written=False, cleanup_done=True),
+            AppendOutputResult(data_written=True, cleanup_done=True),
+        )
+    )
+    monkeypatch.setattr("cubeplex.services.background_task_coordinator.append_output", append)
+
+    for seconds in (31, 61):
+        coordinator = BackgroundTaskCoordinator(
+            session_factory,
+            SandboxManager(session_factory, mock_encryption_backend),
+            resolve_foreground=already_handed_off,
+            clock=lambda seconds=seconds: NOW + timedelta(seconds=seconds),
+        )
+        await coordinator.reconcile_once()
+        await db_session.refresh(task)
+        await db_session.refresh(command)
+        if seconds == 31:
+            assert task.result_readiness == "pending" and command.log_state == "retrying"
+
+    assert task.result_readiness == "ready" and command.log_state == "complete"
+    assert append.await_count == 2
+    assert all(call.args[2] == "" for call in append.await_args_list)
+
+
 @pytest.mark.parametrize("status_failure", [False, True])
 async def test_cancel_error_cannot_finish_task_or_free_capacity(
     db_session: AsyncSession,
