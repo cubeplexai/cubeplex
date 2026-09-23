@@ -361,6 +361,19 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         delivery_steer_id="legacy-injected-steer",
         started_by_user_id=user.id,
     )
+    abandoned = SandboxCommandWake(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        command_id=completed.id,
+        conversation_id=conv.id,
+        reason="completion",
+        dedupe_key="completion",
+        text_tail="legacy completion retry",
+        state="claimed",
+        delivery_run_id="legacy-abandoned-run",
+        delivery_steer_id="legacy-abandoned-steer",
+        started_by_user_id=user.id,
+    )
     injected = SteeringMessage(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -372,7 +385,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         sender_user_id=user.id,
         state="injected",
     )
-    db_session.add_all((delivered, pending, injected))
+    db_session.add_all((delivered, pending, abandoned, injected))
     await db_session.flush()
 
     injected_notice_ids = await _load_injected_notice_ids(db_session)
@@ -483,6 +496,9 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     completion_events = [event for event in events if event.task_id == completed_task.id]
     assert len(completion_events) == 1
     assert completion_events[0].state == "pending"
+    assert completion_events[0].id == abandoned.id
+    assert completion_events[0].delivery_run_id is None
+    assert completion_events[0].delivery_input_id is None
     checkpointed_events = [event for event in events if event.task_id == checkpointed_task.id]
     assert len(checkpointed_events) == 1
     assert checkpointed_events[0].state == "delivered"
@@ -518,7 +534,9 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     checkpointed_events[0].delivered_at = None
     killed_events[0].state = "pending"
     killed_events[0].discard_reason = None
-    await db_session.delete(completion_events[0])
+    completion_events[0].delivery_run_id = "legacy-abandoned-run"
+    completion_events[0].delivery_input_id = "legacy-abandoned-steer"
+    await db_session.delete(by_id[delivered.id])
     await db_session.flush()
 
     second = await migrate_legacy_commands(
@@ -529,11 +547,14 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     )
     await db_session.flush()
     assert second.migrated == 0
-    assert second.events_migrated == 4
+    assert second.events_migrated == 5
     assert by_id[pending.id].state == "delivered"
     assert checkpointed_events[0].state == "delivered"
     assert killed_events[0].state == "discarded"
     assert killed_events[0].discard_reason == "legacy_notification_revoked"
+    assert completion_events[0].state == "pending"
+    assert completion_events[0].delivery_run_id is None
+    assert completion_events[0].delivery_input_id is None
     assert (
         await db_session.scalar(
             select(func.count())

@@ -127,6 +127,32 @@ async def test_only_instance_info_404_proves_environment_gone(
     control.close.assert_awaited_once()
 
 
+@pytest.mark.parametrize("state", ["Failed", "Terminated", "Succeed"])
+async def test_terminal_provider_state_proves_environment_gone(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    remote: tuple[MagicMock, MagicMock, AsyncMock],
+    state: str,
+) -> None:
+    command_id = await remote_command(db_session, reservation_context)
+    control, _, connection = remote
+    control.get_sandbox_info.return_value = SimpleNamespace(status=SimpleNamespace(state=state))
+    manager = SandboxManager(session_factory, mock_encryption_backend)
+
+    with pytest.raises(SandboxInstanceGoneError):
+        async with manager.connect_command_instance(
+            command_id=command_id,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+        ):
+            pytest.fail("terminal instance cannot be attached")
+
+    connection.assert_not_awaited()
+    control.close.assert_awaited_once()
+
+
 async def test_cross_scope_recovery_never_contacts_provider(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
