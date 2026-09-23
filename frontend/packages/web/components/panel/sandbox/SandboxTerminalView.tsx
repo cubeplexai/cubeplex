@@ -20,15 +20,6 @@ const INFLIGHT_TASK_STATES = new Set<BackgroundTask['state']>([
   'unknown',
 ])
 
-interface LegacyCommand {
-  id: string
-  description: string
-  started_at: string
-}
-
-type RunningWork =
-  { source: 'task'; task: BackgroundTask } | { source: 'legacy'; command: LegacyCommand }
-
 interface SandboxTerminalViewProps {
   workspaceId: string
   conversationId?: string | null
@@ -131,39 +122,18 @@ function RunningCommandList({
   conversationId: string
 }) {
   const t = useTranslations('backgroundTasks')
-  const [rows, setRows] = useState<RunningWork[]>([])
+  const [rows, setRows] = useState<BackgroundTask[]>([])
   const [stopping, setStopping] = useState<string | null>(null)
   const load = useCallback(async () => {
     const client = createApiClient('')
     client.setWorkspaceId(workspaceId)
-    let taskRows: RunningWork[] | null = null
-    let legacyRows: RunningWork[] | null = null
     try {
       const tasks = await listBackgroundTasks(client, conversationId)
-      taskRows = tasks
-        .filter((task) => task.kind === 'command' && INFLIGHT_TASK_STATES.has(task.state))
-        .map((task) => ({ source: 'task' as const, task }))
+      setRows(
+        tasks.filter((task) => task.kind === 'command' && INFLIGHT_TASK_STATES.has(task.state)),
+      )
     } catch {
       // Keep the last durable snapshot visible through a transient refresh failure.
-    }
-    try {
-      const response = await fetch(
-        `/api/v1/ws/${workspaceId}/conversations/${conversationId}/sandbox-commands`,
-        { credentials: 'include' },
-      )
-      if (response.ok) {
-        const body: unknown = await response.json()
-        const legacy = Array.isArray(body) ? (body as LegacyCommand[]) : []
-        legacyRows = legacy.map((command) => ({ source: 'legacy' as const, command }))
-      }
-    } catch {
-      // The migration-only endpoint disappears after cutover; managed tasks stay available.
-    }
-    if (taskRows !== null || legacyRows !== null) {
-      setRows((current) => [
-        ...(taskRows ?? current.filter((row) => row.source === 'task')),
-        ...(legacyRows ?? current.filter((row) => row.source === 'legacy')),
-      ])
     }
   }, [workspaceId, conversationId])
 
@@ -176,22 +146,12 @@ function RunningCommandList({
     }
   }, [load])
 
-  const stop = async (row: RunningWork) => {
-    const id = row.source === 'task' ? row.task.id : row.command.id
-    setStopping(id)
+  const stop = async (task: BackgroundTask) => {
+    setStopping(task.id)
     try {
-      if (row.source === 'task') {
-        const client = createApiClient('')
-        client.setWorkspaceId(workspaceId)
-        await stopBackgroundTask(client, conversationId, row.task.id)
-      } else {
-        const response = await fetch(
-          `/api/v1/ws/${workspaceId}/conversations/${conversationId}` +
-            `/sandbox-commands/${row.command.id}/kill`,
-          { method: 'POST', credentials: 'include', headers: csrfHeaders() },
-        )
-        if (!response.ok) throw new Error(`Legacy stop failed (${response.status})`)
-      }
+      const client = createApiClient('')
+      client.setWorkspaceId(workspaceId)
+      await stopBackgroundTask(client, conversationId, task.id)
       await load()
     } catch {
       toast.error(t('stopFailed'))
@@ -204,22 +164,13 @@ function RunningCommandList({
   return (
     <ul className="border-b border-border bg-muted/40 px-3 py-2 text-xs">
       {rows.map((row) => {
-        const item = row.source === 'task' ? row.task : row.command
-        const stopRequested = row.source === 'task' && row.task.stop_requested_at !== null
-        const canStop = row.source === 'legacy' || row.task.capabilities.can_stop
+        const stopRequested = row.stop_requested_at !== null
+        const canStop = row.capabilities.can_stop
         return (
-          <li
-            key={`${row.source}:${item.id}`}
-            className="flex items-center justify-between gap-2 py-0.5"
-          >
+          <li key={row.id} className="flex items-center justify-between gap-2 py-0.5">
             <span className="min-w-0 truncate">
-              {item.description || item.id}
-              <span className="ml-1 text-muted-foreground">
-                ·{' '}
-                {formatElapsed(
-                  row.source === 'task' ? row.task.created_at : row.command.started_at,
-                )}
-              </span>
+              {row.description || row.id}
+              <span className="ml-1 text-muted-foreground">· {formatElapsed(row.created_at)}</span>
             </span>
             {canStop || stopRequested ? (
               <Button
@@ -227,11 +178,11 @@ function RunningCommandList({
                 className="shrink-0"
                 variant="destructive"
                 size="xs"
-                aria-label={`Stop ${item.description || item.id}`}
-                disabled={stopping === item.id || stopRequested}
+                aria-label={`Stop ${row.description || row.id}`}
+                disabled={stopping === row.id || stopRequested}
                 onClick={() => void stop(row)}
               >
-                {stopping === item.id || stopRequested ? 'Stopping…' : 'Stop'}
+                {stopping === row.id || stopRequested ? 'Stopping…' : 'Stop'}
               </Button>
             ) : null}
           </li>
