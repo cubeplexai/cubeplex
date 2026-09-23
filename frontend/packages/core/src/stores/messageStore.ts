@@ -2604,10 +2604,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             // optimistic-clear used to produce.
             pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
             pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
-            cancellingConversationIds:
-              !bootstrap.active_run &&
-              !bootstrap.pending_hitl &&
-              !bootstrap.run_control?.cleanup_pending
+            cancellingConversationIds: bootstrap.run_control?.cleanup_pending
+              ? { ...s.cancellingConversationIds, [conversationId]: true }
+              : !bootstrap.active_run && !bootstrap.pending_hitl
                 ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
                 : s.cancellingConversationIds,
             isStreaming: isStreamingActive,
