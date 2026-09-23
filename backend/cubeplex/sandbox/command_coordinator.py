@@ -358,6 +358,9 @@ async def _reconcile_row(
             return False
     if snap.log_cursor is not None:
         row.log_cursor = snap.log_cursor
+        session.add(row)
+        await session.commit()
+        await sandbox.acknowledge_output(handle, snap.log_cursor)
     deadline_hit = row.monitor_deadline_at is not None and _as_utc(row.monitor_deadline_at) <= now
     if snap.status == "running" and deadline_hit:
         return await _terminalize(
@@ -603,15 +606,16 @@ async def _terminalize(
 ) -> bool:
     final_output = output
     confirmed_cursor: str | None = None
+    interrupt_handle: ProcessHandle | None = None
     if interrupt and sandbox is not None and row.provider_ref:
-        handle = ProcessHandle(
+        interrupt_handle = ProcessHandle(
             command_id=row.id,
             provider_ref=row.provider_ref,
             log_cursor=row.log_cursor or "0",
         )
         try:
-            await sandbox.kill(handle)
-            snap = await sandbox.poll(handle)
+            await sandbox.kill(interrupt_handle)
+            snap = await sandbox.poll(interrupt_handle)
         except Exception:
             logger.exception("interrupt failed for sandbox command {}", row.id)
             return False
@@ -645,6 +649,8 @@ async def _terminalize(
         )
     session.add(row)
     await session.commit()
+    if confirmed_cursor is not None and sandbox is not None and interrupt_handle is not None:
+        await sandbox.acknowledge_output(interrupt_handle, confirmed_cursor)
     return True
 
 

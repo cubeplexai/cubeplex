@@ -159,18 +159,20 @@ class BackgroundTaskCoordinator:
                     if command.provider_ref is None:
                         raise SandboxError("start was submitted but its receipt is still unknown")
                     assert command.sandbox_instance_id is not None
+                    handle = ProcessHandle(
+                        command.id,
+                        command.provider_ref,
+                        log_cursor=command.log_cursor,
+                        deadline_at=task.deadline_at,
+                    )
                     observed = await CommandAdapter(
                         sandbox, sandbox_instance_id=command.sandbox_instance_id
                     ).observe_and_stop(
-                        ProcessHandle(
-                            command.id,
-                            command.provider_ref,
-                            log_cursor=command.log_cursor,
-                            deadline_at=task.deadline_at,
-                        ),
+                        handle,
                         stop_requested=task.stop_requested_at is not None,
                         check_owner=check_owner,
                     )
+                    confirmed_log_cursor: str | None = None
                     async with self.session_factory() as session:
                         if observed.snapshot is None:
                             await service(session).record_observation_failure(
@@ -182,7 +184,6 @@ class BackgroundTaskCoordinator:
                         else:
                             snapshot = observed.snapshot
                             log_state: LogState = cast(LogState, command.log_state)
-                            confirmed_log_cursor: str | None = None
                             if observed.logs_read:
                                 data_written = True
                                 if snapshot.new_output or snapshot.status != "running":
@@ -218,6 +219,8 @@ class BackgroundTaskCoordinator:
                                 confirmed_log_cursor=confirmed_log_cursor,
                             )
                         await session.commit()
+                    if confirmed_log_cursor is not None:
+                        await sandbox.acknowledge_output(handle, confirmed_log_cursor)
         except TaskOwnerLostError:
             return False
         except SandboxInstanceGoneError as exc:

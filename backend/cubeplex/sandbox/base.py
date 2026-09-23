@@ -189,6 +189,11 @@ class Sandbox(ABC):
             log_cursor=snapshot.log_cursor,
         )
 
+    async def acknowledge_output(self, handle: ProcessHandle, cursor: str) -> None:
+        """Advance driver-local output state after the durable cursor commits."""
+
+        handle.log_cursor = cursor
+
     async def kill(self, handle: ProcessHandle) -> None:
         del handle
         raise SandboxError("this sandbox driver does not support background commands")

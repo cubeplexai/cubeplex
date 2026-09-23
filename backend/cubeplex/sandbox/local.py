@@ -27,6 +27,7 @@ class _LocalBgProc:
         self.killed = False
         self.pump_task: asyncio.Task[None] | None = None
         self._buf = bytearray()
+        self._base_cursor = 0
         self._lock = asyncio.Lock()
 
     async def pump(self) -> None:
@@ -40,10 +41,25 @@ class _LocalBgProc:
 
     async def read_from(self, cursor: int) -> tuple[str, int]:
         async with self._lock:
-            if cursor < 0 or cursor > len(self._buf):
+            end_cursor = self._base_cursor + len(self._buf)
+            if cursor < self._base_cursor or cursor > end_cursor:
                 raise SandboxError("local process output cursor is invalid")
-            text = bytes(self._buf[cursor:]).decode(errors="replace")
-            return text, len(self._buf)
+            confirmed = cursor - self._base_cursor
+            if confirmed:
+                del self._buf[:confirmed]
+                self._base_cursor = cursor
+            text = bytes(self._buf).decode(errors="replace")
+            return text, self._base_cursor + len(self._buf)
+
+    async def acknowledge(self, cursor: int) -> None:
+        async with self._lock:
+            end_cursor = self._base_cursor + len(self._buf)
+            if cursor < self._base_cursor or cursor > end_cursor:
+                raise SandboxError("local process output cursor is invalid")
+            confirmed = cursor - self._base_cursor
+            if confirmed:
+                del self._buf[:confirmed]
+                self._base_cursor = cursor
 
 
 def _emit_chunk(on_chunk: Callable[[str], None] | None, text: str) -> None:
@@ -186,6 +202,17 @@ class LocalSandbox(Sandbox):
             raise SandboxError("local process output cursor is invalid") from exc
         new_output, next_cursor = await rec.read_from(cursor)
         return ProcessOutput(new_output=new_output, log_cursor=str(next_cursor))
+
+    async def acknowledge_output(self, handle: ProcessHandle, cursor: str) -> None:
+        rec = self._bg.get(handle.provider_ref)
+        if rec is None:
+            raise SandboxError("local process reference is not available on this worker")
+        try:
+            parsed_cursor = int(cursor)
+        except ValueError as exc:
+            raise SandboxError("local process output cursor is invalid") from exc
+        await rec.acknowledge(parsed_cursor)
+        handle.log_cursor = cursor
 
     async def kill(self, handle: ProcessHandle) -> None:
         rec = self._bg.get(handle.provider_ref)

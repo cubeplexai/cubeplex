@@ -395,7 +395,7 @@ def _make_execute_tool(
         if snapshot.log_cursor is not None:
             if persist_cursor is not None:
                 await persist_cursor(command_id, snapshot.log_cursor)
-            handle.log_cursor = snapshot.log_cursor
+            await sandbox.acknowledge_output(handle, snapshot.log_cursor)
         return True
 
     async def _execute(
@@ -1096,7 +1096,7 @@ def _make_monitor_tool(
         if snapshot.log_cursor is not None:
             if persist_cursor is not None:
                 await persist_cursor(command_id, snapshot.log_cursor)
-            handle.log_cursor = snapshot.log_cursor
+            await sandbox.acknowledge_output(handle, snapshot.log_cursor)
         return True
 
     async def _monitor(
