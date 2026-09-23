@@ -145,7 +145,7 @@ async def test_compose_terminate_and_is_error_propagation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compose_on_run_end_runs_sandbox_before_others() -> None:
+async def test_compose_on_run_end_preserves_middleware_order() -> None:
     order: list[str] = []
 
     class _Waiter(Middleware):
@@ -169,7 +169,7 @@ async def test_compose_on_run_end_runs_sandbox_before_others() -> None:
     ctx = AgentContext(system_prompt="", messages=[])
     out = await composed(ctx)
     assert out is not None
-    assert order == ["sandbox", "sandbox-done", "other"]
+    assert order == ["other", "sandbox", "sandbox-done"]
 
 
 def test_compose_on_run_end_none_when_empty() -> None:
