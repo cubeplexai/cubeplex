@@ -207,7 +207,7 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
   })
 
-  it('does not clear authoritative cleanup controls from a partial refresh', async () => {
+  it('clears authoritative cleanup while preserving pending controls from a partial event page', async () => {
     useMessageStore.setState({
       backgroundSummary: {
         'conv-1': {
@@ -230,8 +230,49 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundSummary['conv-1']).toEqual({
       has_inflight: false,
       has_pending: true,
-      has_cleanup: true,
+      has_cleanup: false,
       can_stop: true,
+    })
+  })
+
+  it('clears cleanup and stopability after the known task settles', async () => {
+    const cleaning = task({
+      state: 'running',
+      revision: 2,
+      cleanup_pending: true,
+      capabilities: { ...task().capabilities, can_stop: true },
+    })
+    const settled = task({
+      state: 'succeeded',
+      revision: 3,
+      cleanup_pending: false,
+      capabilities: { ...task().capabilities, can_stop: false },
+    })
+    useMessageStore.setState({
+      backgroundTasks: { 'conv-1': [cleaning] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: true,
+          has_pending: false,
+          has_cleanup: true,
+          can_stop: true,
+        },
+      },
+    })
+    vi.mocked(listBackgroundTasks).mockResolvedValueOnce([]).mockResolvedValueOnce([settled])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [],
+      next_cursor: null,
+      has_more: false,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundSummary['conv-1']).toEqual({
+      has_inflight: false,
+      has_pending: false,
+      has_cleanup: false,
+      can_stop: false,
     })
   })
 
@@ -395,6 +436,65 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().messages['conv-1']).toEqual([older, newest])
     expect(useMessageStore.getState().oldestSeqByConv['conv-1']).toBe(1)
     expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(true)
+  })
+
+  it('replaces optimistic turn messages with their persisted history rows', async () => {
+    const older = {
+      id: 'message-older',
+      seq: 1,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'older' }],
+    }
+    const optimisticAssistant = {
+      id: 'assistant-temp',
+      role: 'assistant' as const,
+      run_id: 'run-1',
+      content: [{ type: 'text' as const, text: 'done' }],
+    }
+    const optimisticTool = {
+      id: 'tool-temp',
+      role: 'tool_result' as const,
+      run_id: 'run-1',
+      tool_call_id: 'tool-1',
+      tool_name: 'sandbox',
+      content: [{ type: 'text' as const, text: 'output' }],
+    }
+    const persistedAssistant = { ...optimisticAssistant, id: 'message-assistant', seq: 10 }
+    const persistedTool = { ...optimisticTool, id: 'message-tool', seq: 11 }
+    useMessageStore.setState({
+      messages: { 'conv-1': [older, optimisticAssistant, optimisticTool] },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [persistedAssistant, persistedTool],
+      oldest_seq: 10,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([
+      older,
+      persistedAssistant,
+      persistedTool,
+    ])
   })
 
   it('does not let an older Stop response overwrite a newer task revision', async () => {
