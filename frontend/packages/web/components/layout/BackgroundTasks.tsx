@@ -27,17 +27,27 @@ function taskIsInflight(state: string): boolean {
 export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const { workspaceId } = useWorkspaceContext()
   const t = useTranslations('backgroundTasks')
-  const { tasks, summary, stopAll, runControl, refreshError, executionGeneration } =
-    useMessageStore(
-      useShallow((state) => ({
-        tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
-        summary: state.backgroundSummary?.[conversationId],
-        stopAll: state.stopAllStatus?.[conversationId],
-        runControl: state.runControl?.[conversationId],
-        refreshError: state.backgroundRefreshError?.[conversationId],
-        executionGeneration: state.executionGeneration?.[conversationId] ?? 0,
-      })),
-    )
+  const {
+    tasks,
+    summary,
+    stopAll,
+    runControl,
+    refreshError,
+    executionGeneration,
+    streamingConversationId,
+    currentRunId,
+  } = useMessageStore(
+    useShallow((state) => ({
+      tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
+      summary: state.backgroundSummary?.[conversationId],
+      stopAll: state.stopAllStatus?.[conversationId],
+      runControl: state.runControl?.[conversationId],
+      refreshError: state.backgroundRefreshError?.[conversationId],
+      executionGeneration: state.executionGeneration?.[conversationId] ?? 0,
+      streamingConversationId: state.streamingConversationId,
+      currentRunId: state.currentRunId,
+    })),
+  )
   const refreshBackground = useMessageStore((state) => state.refreshBackground)
   const loadMessages = useMessageStore((state) => state.loadMessages)
   const stopTask = useMessageStore((state) => state.stopTask)
@@ -69,6 +79,9 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
       return status?.execution_generation === observedGeneration && status.cleanup_pending
     }
 
+    const hasCurrentRunCleanup = () =>
+      useMessageStore.getState().runControl[conversationId]?.cleanup_pending === true
+
     const schedule = (delay: number) => {
       if (disposed) return
       if (timer) clearTimeout(timer)
@@ -87,7 +100,9 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
         let state = useMessageStore.getState()
         const now = Date.now()
         if (
-          (hasCurrentStopAllCleanup() || now - lastBaselineAt >= BASELINE_REFRESH_MS) &&
+          (hasCurrentStopAllCleanup() ||
+            hasCurrentRunCleanup() ||
+            now - lastBaselineAt >= BASELINE_REFRESH_MS) &&
           state.streamingConversationId !== conversationId
         ) {
           await loadMessages(client(), conversationId, {
@@ -103,6 +118,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
           nextSummary?.has_inflight ||
           nextSummary?.has_pending ||
           nextSummary?.has_cleanup ||
+          hasCurrentRunCleanup() ||
           hasCurrentStopAllCleanup(),
         )
         schedule(hasWork ? ACTIVE_REFRESH_MS : BASELINE_REFRESH_MS)
@@ -166,25 +182,32 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     executionGeneration,
   )
   const currentStopAll = stopAll?.execution_generation === observedGeneration ? stopAll : null
+  const hasLocalForegroundRun = streamingConversationId === conversationId && currentRunId !== null
   const hasBackground = Boolean(
     visibleTasks.length > 0 ||
     summary?.has_inflight ||
     summary?.has_pending ||
     summary?.has_cleanup ||
     runControl?.can_stop ||
+    runControl?.cleanup_pending ||
+    hasLocalForegroundRun ||
     currentStopAll?.cleanup_pending ||
     refreshError,
   )
   if (!hasBackground) return null
 
-  const canStopAll = Boolean(summary?.can_stop || runControl?.can_stop)
+  const canStopAll = Boolean(summary?.can_stop || runControl?.can_stop || hasLocalForegroundRun)
   return (
     <section className="mb-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="font-medium text-foreground">{t('title')}</p>
           <p className="truncate text-muted-foreground">
-            {currentStopAll?.cleanup_pending ? t('stoppingAll') : t('description')}
+            {currentStopAll?.cleanup_pending
+              ? t('stoppingAll')
+              : runControl?.cleanup_pending
+                ? t('stopping')
+                : t('description')}
           </p>
         </div>
         {canStopAll && !currentStopAll?.cleanup_pending ? (
