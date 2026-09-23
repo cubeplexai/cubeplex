@@ -761,6 +761,10 @@ async function fillHistoryGap(
 function historyCounterpartKey(message: Message): string | null {
   const steerId = message.role === 'user' ? message.metadata?.steer_id : undefined
   if (typeof steerId === 'string') return JSON.stringify(['steer', steerId])
+  const clientMessageId = message.role === 'user' ? message.metadata?.client_message_id : undefined
+  if (typeof clientMessageId === 'string') {
+    return JSON.stringify(['client-message', clientMessageId])
+  }
   if (typeof message.run_id !== 'string') return null
   if (message.role === 'tool_result') {
     return JSON.stringify([message.run_id, message.role, message.tool_call_id])
@@ -2780,12 +2784,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const senderMeta =
       me != null ? { sender_user_id: me.id, sender_display_name: me.display_name ?? me.email } : {}
 
+    const userMessageId = nextMessageId('user-temp')
     const userMessage: UserMessageType = {
-      id: nextMessageId('user-temp'),
+      id: userMessageId,
       role: 'user',
       content: [{ type: 'text', text: content }],
       timestamp: Date.now() / 1000,
       metadata: {
+        client_message_id: userMessageId,
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
         ...senderMeta,
       },

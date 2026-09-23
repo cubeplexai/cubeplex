@@ -76,6 +76,9 @@ interface MessageBase {
     subagent_events?: SubagentSummary
     // Set on a steer user message committed mid-run; used for replay idempotency.
     steer_id?: string
+    // Stable browser request identity used to reconcile an optimistic user
+    // bubble when the POST response carrying its run_id is lost.
+    client_message_id?: string
     // Framework-injected user-role message (cubeloop synthetic_user_message):
     // model-facing scaffolding like todo-guard nudges or goal continuations.
     // Never rendered as a user bubble. ``synthetic_source === 'compaction'``
