@@ -2285,6 +2285,8 @@ class SandboxMiddleware(Middleware):
             logs_confirmed=logs_confirmed,
         ):
             return
+        if not logs_confirmed:
+            return
         await self._persist_terminal(
             command_id,
             status="killed",
@@ -2325,6 +2327,8 @@ class SandboxMiddleware(Middleware):
             logs_confirmed=logs_confirmed,
         ):
             return
+        if not logs_confirmed:
+            return
         async with self._command_repo_ctx() as repo:
             if repo is None:
                 return
@@ -2332,6 +2336,8 @@ class SandboxMiddleware(Middleware):
             if row is None:
                 return
             from cubeplex.sandbox.command_coordinator import _terminalize
+
+            lines = [line for line in snapshot.new_output.splitlines() if line.strip()]
 
             await _terminalize(
                 repo.session,
@@ -2341,7 +2347,7 @@ class SandboxMiddleware(Middleware):
                 now=datetime.now(UTC),
                 sandbox=None,
                 interrupt=False,
-                wake_text=f"monitor {snapshot.status}",
+                wake_text=lines[-1][-4000:] if lines else f"monitor {snapshot.status}",
             )
 
     async def _persist_monitor_timeout(
@@ -2359,6 +2365,8 @@ class SandboxMiddleware(Middleware):
             stop_reason=TaskStopReason.deadline,
             logs_confirmed=logs_confirmed,
         ):
+            return
+        if not logs_confirmed:
             return
         await self._persist_monitor_timed_out(command_id)
 
@@ -2460,11 +2468,13 @@ class SandboxMiddleware(Middleware):
             logs_confirmed=logs_confirmed,
         ):
             return
+        if not logs_confirmed:
+            return
         await self._persist_terminal(
             command_id,
             status=snapshot.status,
             exit_code=snapshot.exit_code,
-            notify=notify,
+            notify=notify and snapshot.status != "killed",
         )
 
     async def _kill_persisted_command(self, command_id: str) -> bool:

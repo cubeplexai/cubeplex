@@ -38,13 +38,12 @@ class _LocalBgProc:
             async with self._lock:
                 self._buf.extend(data)
 
-    async def take(self) -> str:
+    async def read_from(self, cursor: int) -> tuple[str, int]:
         async with self._lock:
-            if not self._buf:
-                return ""
-            text = bytes(self._buf).decode(errors="replace")
-            self._buf.clear()
-            return text
+            if cursor < 0 or cursor > len(self._buf):
+                raise SandboxError("local process output cursor is invalid")
+            text = bytes(self._buf[cursor:]).decode(errors="replace")
+            return text, len(self._buf)
 
 
 def _emit_chunk(on_chunk: Callable[[str], None] | None, text: str) -> None:
@@ -181,8 +180,12 @@ class LocalSandbox(Sandbox):
         code = rec.proc.returncode
         if code is not None and rec.pump_task is not None:
             await rec.pump_task
-        new_output = await rec.take()
-        return ProcessOutput(new_output=new_output)
+        try:
+            cursor = int(handle.log_cursor) if handle.log_cursor is not None else 0
+        except ValueError as exc:
+            raise SandboxError("local process output cursor is invalid") from exc
+        new_output, next_cursor = await rec.read_from(cursor)
+        return ProcessOutput(new_output=new_output, log_cursor=str(next_cursor))
 
     async def kill(self, handle: ProcessHandle) -> None:
         rec = self._bg.get(handle.provider_ref)
