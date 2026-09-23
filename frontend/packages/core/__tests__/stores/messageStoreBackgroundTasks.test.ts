@@ -498,6 +498,67 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(true)
   })
 
+  it('preserves tool results for history outside the refreshed tail', async () => {
+    const olderTool = {
+      id: 'message-tool-older',
+      seq: 1,
+      role: 'tool_result' as const,
+      tool_call_id: 'tool-older',
+      tool_name: 'read_file',
+      content: [{ type: 'text' as const, text: 'older output' }],
+      timestamp: 1,
+      details: { path: '/workspace/older.txt' },
+    }
+    const newest = {
+      id: 'message-newest',
+      seq: 400,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'newest' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [olderTool, newest] },
+      toolResultMap: {
+        'tool-older': {
+          content: 'older output',
+          receivedAt: 1000,
+          details: olderTool.details,
+        },
+      },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': true },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [newest],
+      oldest_seq: 350,
+      has_more: true,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().toolResultMap['tool-older']).toEqual({
+      content: 'older output',
+      receivedAt: 1000,
+      startedAt: undefined,
+      details: olderTool.details,
+    })
+  })
+
   it('replaces optimistic turn messages with their persisted history rows', async () => {
     const older = {
       id: 'message-older',

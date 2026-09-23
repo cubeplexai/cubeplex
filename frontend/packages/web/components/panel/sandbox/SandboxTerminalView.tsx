@@ -13,6 +13,12 @@ import { csrfHeaders } from '@/lib/csrf'
 import { cn } from '@/lib/utils'
 
 const KEEPALIVE_MS = 30_000
+const INFLIGHT_TASK_STATES = new Set<BackgroundTask['state']>([
+  'starting',
+  'running',
+  'waiting_input',
+  'unknown',
+])
 
 interface LegacyCommand {
   id: string
@@ -134,7 +140,9 @@ function RunningCommandList({
     let legacyRows: RunningWork[] | null = null
     try {
       const tasks = await listBackgroundTasks(client, conversationId)
-      taskRows = tasks.map((task) => ({ source: 'task' as const, task }))
+      taskRows = tasks
+        .filter((task) => task.kind === 'command' && INFLIGHT_TASK_STATES.has(task.state))
+        .map((task) => ({ source: 'task' as const, task }))
     } catch {
       // Keep the last durable snapshot visible through a transient refresh failure.
     }
