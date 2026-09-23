@@ -9,11 +9,12 @@ vi.mock('../../src/api', async (importOriginal) => {
     cancelActiveRun: vi
       .fn()
       .mockResolvedValue({ run_id: 'r1', accepted: true, cleanup_pending: true }),
+    getAdmittedRunId: vi.fn(),
     getConversationBootstrap: vi.fn(),
   }
 })
 
-import { cancelActiveRun, getConversationBootstrap } from '../../src/api'
+import { cancelActiveRun, getAdmittedRunId, getConversationBootstrap } from '../../src/api'
 
 const fakeClient = { resolvePath: (s: string) => s, post: vi.fn() } as never
 
@@ -62,6 +63,7 @@ function idleBootstrap() {
 describe('messageStore.cancelStream', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getAdmittedRunId).mockResolvedValue(null)
     vi.mocked(getConversationBootstrap).mockResolvedValue(idleBootstrap())
     useMessageStore.setState({
       messages: {},
@@ -69,6 +71,7 @@ describe('messageStore.cancelStream', () => {
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,
+      pendingRunClientMessageId: null,
       pendingConfirmMap: {},
       pendingAsk: null,
     })
@@ -234,24 +237,25 @@ describe('messageStore.cancelStream', () => {
 
   it('recovers the persisted run id when the start response is lost', async () => {
     seedStreaming('conv1', {})
-    useMessageStore.setState({ currentRunId: null })
-    vi.mocked(getConversationBootstrap)
-      .mockResolvedValueOnce({
-        ...idleBootstrap(),
-        active_run: { run_id: 'server-run', status: 'running' },
-      })
-      .mockResolvedValue(idleBootstrap())
+    useMessageStore.setState({
+      currentRunId: null,
+      pendingRunClientMessageId: 'client-message-1',
+    })
+    vi.mocked(getAdmittedRunId).mockResolvedValue('server-run')
 
     await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
 
+    expect(getAdmittedRunId).toHaveBeenCalledWith(fakeClient, 'conv1', 'client-message-1')
     expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'server-run')
   })
 
   it('bounds run-id recovery when no admitted run appears', async () => {
     vi.useFakeTimers()
     seedStreaming('conv1', {})
-    useMessageStore.setState({ currentRunId: null })
-    vi.mocked(getConversationBootstrap).mockResolvedValue(idleBootstrap())
+    useMessageStore.setState({
+      currentRunId: null,
+      pendingRunClientMessageId: 'client-message-1',
+    })
 
     const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
     const rejected = expect(cancelling).rejects.toThrow('Could not identify the active run')
@@ -262,6 +266,29 @@ describe('messageStore.cancelStream', () => {
     expect(useMessageStore.getState()).toMatchObject({
       cancellingConversationIds: {},
       runLifecycle: { conv1: 'running' },
+    })
+  })
+
+  it('does not revive an idle lifecycle when run-id recovery loses its send', async () => {
+    vi.useFakeTimers()
+    seedStreaming('conv1', {})
+    useMessageStore.setState({
+      currentRunId: null,
+      pendingRunClientMessageId: 'client-message-1',
+    })
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    const rejected = expect(cancelling).rejects.toThrow('Could not identify the active run')
+    useMessageStore.setState({
+      isStreaming: false,
+      streamingConversationId: null,
+      runLifecycle: { conv1: 'idle' },
+    })
+    await rejected
+
+    expect(useMessageStore.getState()).toMatchObject({
+      cancellingConversationIds: {},
+      runLifecycle: { conv1: 'idle' },
     })
   })
 

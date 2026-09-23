@@ -46,6 +46,19 @@ export interface StopAllResponse {
   cleanup_pending: boolean
 }
 
+export async function getAdmittedRunId(
+  client: ApiClient,
+  conversationId: string,
+  clientMessageId: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ client_message_id: clientMessageId })
+  const res = await client.get(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}/admitted-run?${params.toString()}`,
+  )
+  if (!res.ok) throw await toApiError(res)
+  return ((await res.json()) as { run_id: string | null }).run_id
+}
+
 export async function getConversationExecutionGeneration(
   client: ApiClient,
   conversationId: string,
