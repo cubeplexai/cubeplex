@@ -675,7 +675,7 @@ function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
     persistedCounterparts.set(key, remaining - 1)
     return false
   })
-  return [...retained, ...tail]
+  return sortHistoryMessages([...retained, ...tail])
 }
 
 function historyCounterpartKey(message: Message): string | null {
@@ -684,6 +684,22 @@ function historyCounterpartKey(message: Message): string | null {
     return JSON.stringify([message.run_id, message.role, message.tool_call_id])
   }
   return JSON.stringify([message.run_id, message.role, message.content])
+}
+
+function sortHistoryMessages(messages: Message[]): Message[] {
+  if (messages.every((message) => message.seq !== undefined)) {
+    return messages.sort((left, right) => (left.seq as number) - (right.seq as number))
+  }
+  if (messages.every((message) => message.timestamp != null)) {
+    return messages.sort((left, right) => (left.timestamp as number) - (right.timestamp as number))
+  }
+  const sequenced = messages
+    .filter((message) => message.seq !== undefined)
+    .sort((left, right) => (left.seq as number) - (right.seq as number))
+  const unsequenced = messages
+    .filter((message) => message.seq === undefined)
+    .sort((left, right) => (left.timestamp ?? Infinity) - (right.timestamp ?? Infinity))
+  return [...sequenced, ...unsequenced]
 }
 
 /** Finalize the last thinking block's duration if switching to a different block type */
@@ -2073,6 +2089,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       stopAllStatus: {
         ...state.stopAllStatus,
         [conversationId]: {
+          execution_generation: result.execution_generation,
           requested_at: new Date().toISOString(),
           cleanup_pending: result.cleanup_pending,
         },
@@ -2666,6 +2683,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const handleRunId = (runId: string) => {
       set((s) => ({
         currentRunId: runId,
+        stopAllStatus: { ...s.stopAllStatus, [conversationId]: null },
         messages: {
           ...s.messages,
           [conversationId]: (s.messages[conversationId] ?? []).map((m) =>
