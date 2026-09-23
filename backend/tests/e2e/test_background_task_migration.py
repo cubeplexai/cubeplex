@@ -21,6 +21,7 @@ from cubeplex.models import (
     UserSandbox,
 )
 from cubeplex.scripts.dev.migrate_background_tasks import migrate_legacy_commands
+from cubeplex.services.background_task_cutover import inspect_background_task_cutover
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -149,6 +150,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     db_session: AsyncSession,
 ) -> None:
     await _ensure_default_user_and_membership()
+    baseline_status = await inspect_background_task_cutover(db_session)
     user = (
         await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
     ).scalar_one()
@@ -302,6 +304,22 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     completion_events = [event for event in events if event.task_id == completed_task.id]
     assert len(completion_events) == 1
     assert completion_events[0].state == "pending"
+
+    blocked_status = await inspect_background_task_cutover(db_session)
+    assert not blocked_status.ready
+    assert blocked_status.unmigrated_commands == baseline_status.unmigrated_commands + 1
+
+    blocked.status = "killed"
+    blocked.finished_at = blocked.updated_at
+    await db_session.flush()
+    final = await migrate_legacy_commands(
+        db_session,
+        apply=True,
+        command_ids=(blocked.id,),
+    )
+    assert final.migrated == 1
+    ready_status = await inspect_background_task_cutover(db_session)
+    assert ready_status == baseline_status
 
     second = await migrate_legacy_commands(
         db_session,
