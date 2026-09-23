@@ -46,6 +46,17 @@ export interface StopAllResponse {
   cleanup_pending: boolean
 }
 
+export async function getConversationExecutionGeneration(
+  client: ApiClient,
+  conversationId: string,
+): Promise<number> {
+  const res = await client.get(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}/execution-generation`,
+  )
+  if (!res.ok) throw await toApiError(res)
+  return ((await res.json()) as { execution_generation: number }).execution_generation
+}
+
 export async function stopAllConversationWork(
   client: ApiClient,
   conversationId: string,
