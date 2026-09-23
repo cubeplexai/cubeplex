@@ -30,7 +30,7 @@ class SandboxConflictError(SandboxError):
 
 
 class SandboxInstanceGoneError(SandboxError):
-    """The provider's instance-info endpoint confirms this exact instance is gone."""
+    """The provider confirms this exact instance is absent or terminal."""
 
     def __init__(self, sandbox_instance_id: str) -> None:
         self.sandbox_instance_id = sandbox_instance_id
