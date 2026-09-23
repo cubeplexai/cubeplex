@@ -4,26 +4,31 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
-import pytest
 import pytest_asyncio
 from alembic.config import Config
-from sqlalchemy import delete, func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import create_engine, delete, func, select, text
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlmodel import col
 
 from alembic import command as alembic_command
 from cubeplex.config import config
+from cubeplex.db.engine import _build_database_url
 from cubeplex.models import (
     BackgroundTask,
     BackgroundTaskEvent,
     Conversation,
     ConversationExecutionAdmission,
+    Organization,
     SandboxCommand,
     SandboxCommandWake,
     SteeringMessage,
     User,
     UserSandbox,
+    Workspace,
 )
 from cubeplex.scripts.dev.migrate_background_tasks import (
     _load_injected_notice_ids,
@@ -48,6 +53,43 @@ def _migrate(target: str, *, downgrade: bool = False) -> None:
         alembic_command.upgrade(settings, target)
 
 
+def _isolated_database_ddl(admin_url: URL, database_name: str, *, drop: bool) -> None:
+    if (
+        not database_name.startswith("cubeplex_test_lifecycle_")
+        or not database_name.replace("_", "").isalnum()
+    ):
+        raise ValueError("invalid isolated lifecycle database name")
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        with engine.connect() as connection:
+            operation = "DROP" if drop else "CREATE"
+            connection.execute(text(f'{operation} DATABASE "{database_name}"'))
+    finally:
+        engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def isolated_lifecycle_db() -> AsyncIterator[AsyncSession]:
+    original_name = str(config.get("database.name"))
+    assert original_name.startswith("cubeplex_test")
+    database_name = f"cubeplex_test_lifecycle_{uuid4().hex[:12]}"
+    admin_url = make_url(_build_database_url()).set(database="postgres")
+    await asyncio.to_thread(_isolated_database_ddl, admin_url, database_name, drop=False)
+    try:
+        config.set("database.name", database_name)
+        await asyncio.to_thread(_migrate, "76a2d219d682")
+        engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+        maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with maker() as session:
+                yield session
+        finally:
+            await engine.dispose()
+    finally:
+        config.set("database.name", original_name)
+        await asyncio.to_thread(_isolated_database_ddl, admin_url, database_name, drop=True)
+
+
 @pytest_asyncio.fixture
 async def expanded_lifecycle_schema(db_session: AsyncSession) -> AsyncIterator[None]:
     await db_session.commit()
@@ -60,17 +102,21 @@ async def expanded_lifecycle_schema(db_session: AsyncSession) -> AsyncIterator[N
 
 
 async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
-    db_session: AsyncSession,
+    isolated_lifecycle_db: AsyncSession,
 ) -> None:
+    db_session = isolated_lifecycle_db
     assert str(config.get("database.name")).startswith("cubeplex_test")
-    for model in (BackgroundTask, ConversationExecutionAdmission):
-        if await db_session.scalar(select(func.count()).select_from(model)) != 0:
-            pytest.skip("expand round-trip requires empty lifecycle tables")
-    await db_session.commit()
-    await _ensure_default_user_and_membership()
-    user = (
-        await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
-    ).scalar_one()
+    user = User(email=DEFAULT_TEST_EMAIL, hashed_password="test")
+    db_session.add_all(
+        [
+            Organization(
+                id=DEFAULT_ORG_ID, name="Lifecycle Migration Org", slug="lifecycle-migration"
+            ),
+            Workspace(id=DEFAULT_WS_ID, org_id=DEFAULT_ORG_ID, name="Lifecycle Migration WS"),
+            user,
+        ]
+    )
+    await db_session.flush()
     conv = Conversation(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -164,7 +210,6 @@ async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
         ):
             await db_session.execute(delete(model).where(col(model.id) == record_id))
         await db_session.commit()
-        await asyncio.to_thread(_migrate, "head")
 
 
 async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(

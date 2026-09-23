@@ -71,7 +71,8 @@ async def test_delete_conversation_cascades_attachments(
 
     # Delete the conversation
     resp = await client.delete(f"/api/v1/ws/{ws}/conversations/{conv}")
-    assert resp.status_code == 204, resp.text
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": True, "cleanup_pending": False}
 
     # Subsequent listing should 404
     resp2 = await client.get(f"/api/v1/ws/{ws}/conversations/{conv}/attachments")

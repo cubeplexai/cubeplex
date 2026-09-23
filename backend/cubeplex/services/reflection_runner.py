@@ -26,15 +26,14 @@ from cubeplex.services.reflection_context import set_reflection_source
 from cubeplex.services.user_event import PublishUserEventInput, UserEventService
 
 
-def turn_contains_background_notice(messages: list[Any], initial_message: Any) -> bool:
+def turn_contains_background_notice(messages: list[Any], run_id: str) -> bool:
     """Return whether the current turn contains an internal task-result input."""
-    start = next(
-        (index for index, message in enumerate(messages) if message is initial_message),
-        None,
-    )
-    if start is None:
-        return True
-    for message in messages[start:]:
+    saw_user_message = False
+    for message in messages:
+        if getattr(message, "run_id", None) != run_id:
+            continue
+        if getattr(message, "role", None) == "user":
+            saw_user_message = True
         metadata = getattr(message, "metadata", None)
         if not isinstance(metadata, dict):
             continue
@@ -43,7 +42,7 @@ def turn_contains_background_notice(messages: list[Any], initial_message: Any) -
         notice_id = metadata.get("notice_id")
         if isinstance(notice_id, str) and notice_id.startswith(("bge-", "scmw-", "scmd-")):
             return True
-    return False
+    return not saw_user_message
 
 
 logger = logging.getLogger(__name__)

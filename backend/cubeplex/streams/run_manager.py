@@ -3438,7 +3438,7 @@ class RunManager:
                         )
                     elif turn_contains_background_notice(
                         agent.state.messages,
-                        _user_msg,
+                        run_id,
                     ):
                         logger.debug(
                             "skipping reflection for run_id={}: background task input",
