@@ -147,6 +147,20 @@ describe('BackgroundTasks', () => {
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
 
+  it('shows an inflight command as running while its log is still open', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [{ ...runningTask(), cleanup_pending: true }],
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByText('运行中')).toBeInTheDocument()
+    expect(screen.queryByText('正在整理结果')).not.toBeInTheDocument()
+  })
+
   it('keeps Stop-all cleanup visible after every task becomes terminal', () => {
     mocks.state = {
       ...mocks.state,
@@ -198,6 +212,37 @@ describe('BackgroundTasks', () => {
     render(<BackgroundTasks conversationId="conv-1" />)
 
     await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      preserveLoadedHistory: true,
+      preserveOtherConversationStream: true,
+      throwOnError: true,
+    })
+  })
+
+  it('refreshes control status immediately while Stop-all cleanup is pending', async () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+      stopAllStatus: {
+        'conv-1': {
+          execution_generation: 4,
+          requested_at: '2026-09-22T00:00:00+00:00',
+          cleanup_pending: true,
+        },
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+    await vi.advanceTimersByTimeAsync(0)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
       preserveLoadedHistory: true,
