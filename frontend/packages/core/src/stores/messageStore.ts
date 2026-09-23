@@ -435,6 +435,7 @@ function mergeBackgroundEventPage(
 }
 
 const CANCEL_POLL_INTERVAL_MS = 500
+const CANCEL_RUN_ID_WAIT_MS = 5_000
 const CANCEL_STEER_MAX_ATTEMPTS = 10
 
 async function waitForConversationIdle(
@@ -462,22 +463,48 @@ async function waitForConversationIdle(
   return false
 }
 
-function waitForPendingRunId(conversationId: string): Promise<string | null> {
+function waitForPendingRunId(client: ApiClient, conversationId: string): Promise<string | null> {
   return new Promise((resolve) => {
+    let settled = false
     let unsubscribe = (): void => undefined
+    let probeTimer: ReturnType<typeof setTimeout> | null = null
+    const deadlineTimer = setTimeout(() => finish(null), CANCEL_RUN_ID_WAIT_MS)
+    const finish = (runId: string | null): void => {
+      if (settled) return
+      settled = true
+      if (probeTimer) clearTimeout(probeTimer)
+      clearTimeout(deadlineTimer)
+      unsubscribe()
+      resolve(runId)
+    }
     const inspect = (state: MessageStore): void => {
       if (state.streamingConversationId !== conversationId || !state.isStreaming) {
-        unsubscribe()
-        resolve(null)
+        finish(null)
         return
       }
       if (state.currentRunId) {
-        unsubscribe()
-        resolve(state.currentRunId)
+        finish(state.currentRunId)
       }
+    }
+    const probe = async (): Promise<void> => {
+      if (settled) return
+      try {
+        const bootstrap = await getConversationBootstrap(client, conversationId)
+        if (settled) return
+        const runId = bootstrap.active_run?.run_id ?? bootstrap.pending_hitl?.run_id ?? null
+        if (runId) {
+          finish(runId)
+          return
+        }
+      } catch {
+        // The local subscription can still provide the run ID. Retry the
+        // persisted lookup until the bounded deadline expires.
+      }
+      if (!settled) probeTimer = setTimeout(() => void probe(), CANCEL_POLL_INTERVAL_MS)
     }
     unsubscribe = useMessageStore.subscribe(inspect)
     inspect(useMessageStore.getState())
+    if (!settled) void probe()
   })
 }
 
@@ -1896,7 +1923,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         boundedIds.length > 0
           ? await listBackgroundTasks(client, conversationId, boundedIds)
           : inflight
-      const inflightIds = new Set(inflight.map((task) => task.id))
+      const actionableIds = new Set(inflight.map((task) => task.id))
       const byId = new Map(tasks.map((task) => [task.id, task]))
       for (const task of inflight) {
         const current = byId.get(task.id)
@@ -1925,8 +1952,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 ...mergedTasks,
                 ...(state.backgroundTasks[conversationId] ?? []).filter(
                   (task) =>
-                    !['starting', 'running', 'waiting_input', 'unknown'].includes(task.state) ||
-                    inflightIds.has(task.id),
+                    !(
+                      ['starting', 'running', 'waiting_input', 'unknown'].includes(task.state) ||
+                      task.cleanup_pending ||
+                      task.notification.has_pending ||
+                      task.capabilities.can_stop
+                    ) || actionableIds.has(task.id),
                 ),
               ]
                 .sort((left, right) => left.revision - right.revision)
@@ -3203,13 +3234,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }))
 
     if (!targetRunId) {
-      targetRunId = await waitForPendingRunId(conversationId)
+      targetRunId = await waitForPendingRunId(client, conversationId)
       if (!targetRunId) {
         set((s) => ({
           cancellingConversationIds: withoutConversationFlag(
             s.cancellingConversationIds,
             conversationId,
           ),
+          runLifecycle: { ...s.runLifecycle, [conversationId]: 'running' },
         }))
         return
       }

@@ -207,6 +207,28 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
   })
 
+  it('prunes stale actionable controls beyond the task detail query limit', async () => {
+    const staleTasks = Array.from({ length: 101 }, (_, index) =>
+      task({
+        id: `stale-${index}`,
+        tool_call_id: `tool-${index}`,
+        capabilities: { ...task().capabilities, can_stop: true },
+        notification: { enabled: true, has_pending: true, cancelled_at: null },
+      }),
+    )
+    useMessageStore.setState({ backgroundTasks: { 'conv-1': staleTasks } })
+    vi.mocked(listBackgroundTasks).mockResolvedValueOnce([]).mockResolvedValueOnce([])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [],
+      next_cursor: null,
+      has_more: false,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
+  })
+
   it('clears authoritative cleanup while preserving pending controls from a partial event page', async () => {
     useMessageStore.setState({
       backgroundSummary: {

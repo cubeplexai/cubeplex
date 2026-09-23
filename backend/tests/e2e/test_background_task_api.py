@@ -333,6 +333,11 @@ async def test_terminal_task_with_pending_event_remains_stoppable(
     db_session.add(event)
     await db_session.commit()
 
+    listed = await client.get(task_path(workspace_id, item.task.conversation_id))
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()["items"]] == [item.task.id]
+    assert listed.json()["items"][0]["capabilities"]["can_stop"] is True
+
     detail = await client.get(
         f"{task_path(workspace_id, item.task.conversation_id)}/{item.task.id}"
     )
