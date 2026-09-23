@@ -118,6 +118,7 @@ async def kill_run_commands(
 
     stmt = select(SandboxCommand).where(
         col(SandboxCommand.run_id) == run_id,
+        col(SandboxCommand.task_id).is_(None),
         col(SandboxCommand.lifetime) == SandboxCommandLifetime.run.value,
         col(SandboxCommand.status).in_(
             (
@@ -156,6 +157,7 @@ async def kill_sandbox_commands(
 
     stmt = select(SandboxCommand).where(
         col(SandboxCommand.user_sandbox_id) == user_sandbox_id,
+        col(SandboxCommand.task_id).is_(None),
         col(SandboxCommand.status).in_(
             (
                 SandboxCommandStatus.starting.value,

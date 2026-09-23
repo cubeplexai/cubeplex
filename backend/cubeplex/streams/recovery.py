@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from loguru import logger
 from redis.asyncio import Redis
@@ -122,6 +123,7 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
 async def _kill_stranded_commands(run_ids: list[str]) -> None:
     if not run_ids:
         return
+    await _stop_managed_stranded_runs(run_ids)
     try:
         from cubeplex.db.engine import async_session_maker
         from cubeplex.sandbox.command_coordinator import kill_run_commands, sandbox_from_row
@@ -141,6 +143,50 @@ async def _kill_stranded_commands(run_ids: list[str]) -> None:
                     logger.warning("Failed to kill commands for stranded run {}: {}", run_id, exc)
     except Exception as exc:
         logger.warning("Could not kill leftover sandbox commands on recovery: {}", exc)
+
+
+async def _stop_managed_stranded_runs(run_ids: list[str]) -> None:
+    """Persist task-lifecycle Stop intents before legacy command cleanup."""
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.services.conversation_execution import ConversationExecutionService
+
+    async with async_session_maker() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(
+                        col(ConversationExecutionAdmission.id),
+                        col(ConversationExecutionAdmission.org_id),
+                        col(ConversationExecutionAdmission.workspace_id),
+                        col(ConversationExecutionAdmission.run_id),
+                    )
+                    .where(col(ConversationExecutionAdmission.run_id).in_(run_ids))
+                    .order_by(
+                        col(ConversationExecutionAdmission.org_id),
+                        col(ConversationExecutionAdmission.workspace_id),
+                        col(ConversationExecutionAdmission.conversation_id),
+                        col(ConversationExecutionAdmission.id),
+                    )
+                )
+            ).all()
+        )
+    for admission_id, org_id, workspace_id, run_id in rows:
+        if run_id is None:
+            continue
+        try:
+            async with async_session_maker() as session:
+                await ConversationExecutionService(
+                    session,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                ).stop_recovered_run(
+                    admission_id=admission_id,
+                    run_id=run_id,
+                    now=datetime.now(UTC),
+                )
+                await session.commit()
+        except Exception as exc:
+            logger.warning("Failed to stop managed tasks for stranded run {}: {}", run_id, exc)
 
 
 async def _stamp_cubeloop_runs(pairs: list[tuple[str, str]]) -> None:
