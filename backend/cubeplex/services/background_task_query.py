@@ -66,8 +66,18 @@ class TaskProjection:
     def remote_cancel_supported(self) -> bool:
         return (
             self.command is not None
+            and self.command.provider != "local"
             and self.command.provider_ref is not None
             and self.task.state in INFLIGHT_TASK_STATES
+        )
+
+    @property
+    def reconnect_supported(self) -> bool:
+        return (
+            self.command is not None
+            and self.command.provider != "local"
+            and self.command.provider_ref is not None
+            and self.command.sandbox_instance_id is not None
         )
 
 

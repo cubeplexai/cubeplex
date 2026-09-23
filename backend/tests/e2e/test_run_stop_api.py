@@ -110,6 +110,23 @@ async def test_execution_generation_read_uses_authoritative_conversation_row(
     }
 
 
+async def test_admitted_run_lookup_is_bound_to_the_client_message(
+    member_client: tuple[httpx.AsyncClient, str], db_session: AsyncSession
+) -> None:
+    client, workspace_id = member_client
+    conversation_id = await create_conversation(client, workspace_id)
+    admitted = await admit(db_session, conversation_id, source_id="client-message-1")
+    path = f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/admitted-run"
+
+    response = await client.get(path, params={"client_message_id": "client-message-1"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"run_id": admitted.admission.run_id}
+
+    missing = await client.get(path, params={"client_message_id": "another-message"})
+    assert missing.status_code == 200, missing.text
+    assert missing.json() == {"run_id": None}
+
+
 async def test_stop_retry_never_selects_the_new_active_run(
     member_client: tuple[httpx.AsyncClient, str], db_session: AsyncSession
 ) -> None:
