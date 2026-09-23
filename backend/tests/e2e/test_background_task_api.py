@@ -498,6 +498,9 @@ async def test_bootstrap_stop_all_progress_includes_unfinished_run(
         f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/bootstrap"
     )
     assert bootstrap.status_code == 200, bootstrap.text
+    assert bootstrap.json()["stop_all"]["execution_generation"] == (
+        api_task_context.conversation.execution_generation
+    )
     assert bootstrap.json()["stop_all"]["cleanup_pending"] is True
 
     await db_session.refresh(api_task_context.admission)

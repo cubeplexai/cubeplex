@@ -27,15 +27,17 @@ function taskIsInflight(state: string): boolean {
 export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const { workspaceId } = useWorkspaceContext()
   const t = useTranslations('backgroundTasks')
-  const { tasks, summary, stopAll, runControl, refreshError } = useMessageStore(
-    useShallow((state) => ({
-      tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
-      summary: state.backgroundSummary?.[conversationId],
-      stopAll: state.stopAllStatus?.[conversationId],
-      runControl: state.runControl?.[conversationId],
-      refreshError: state.backgroundRefreshError?.[conversationId],
-    })),
-  )
+  const { tasks, summary, stopAll, runControl, refreshError, executionGeneration } =
+    useMessageStore(
+      useShallow((state) => ({
+        tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
+        summary: state.backgroundSummary?.[conversationId],
+        stopAll: state.stopAllStatus?.[conversationId],
+        runControl: state.runControl?.[conversationId],
+        refreshError: state.backgroundRefreshError?.[conversationId],
+        executionGeneration: state.executionGeneration?.[conversationId] ?? 0,
+      })),
+    )
   const refreshBackground = useMessageStore((state) => state.refreshBackground)
   const loadMessages = useMessageStore((state) => state.loadMessages)
   const stopTask = useMessageStore((state) => state.stopTask)
@@ -128,12 +130,17 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const visibleTasks = tasks.filter(
     (task) => taskIsInflight(task.state) || task.cleanup_pending || task.notification.has_pending,
   )
+  const observedGeneration = tasks.reduce(
+    (latest, task) => Math.max(latest, task.execution_generation),
+    executionGeneration,
+  )
+  const currentStopAll = stopAll?.execution_generation === observedGeneration ? stopAll : null
   const hasBackground = Boolean(
     visibleTasks.length > 0 ||
     summary?.has_inflight ||
     summary?.has_pending ||
     summary?.has_cleanup ||
-    stopAll?.cleanup_pending ||
+    currentStopAll?.cleanup_pending ||
     refreshError,
   )
   if (!hasBackground) return null
@@ -145,10 +152,10 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
         <div className="min-w-0">
           <p className="font-medium text-foreground">{t('title')}</p>
           <p className="truncate text-muted-foreground">
-            {stopAll?.cleanup_pending ? t('stoppingAll') : t('description')}
+            {currentStopAll?.cleanup_pending ? t('stoppingAll') : t('description')}
           </p>
         </div>
-        {canStopAll && !stopAll?.cleanup_pending ? (
+        {canStopAll && !currentStopAll?.cleanup_pending ? (
           <Button
             type="button"
             variant="outline"

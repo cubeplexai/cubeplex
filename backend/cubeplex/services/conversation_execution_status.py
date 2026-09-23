@@ -20,6 +20,7 @@ from cubeplex.models.steering_message import SteeringMessage, SteeringMessageSta
 
 @dataclass(frozen=True)
 class StopAllStatus:
+    execution_generation: int
     requested_at: datetime
     cleanup_pending: bool
 
@@ -107,7 +108,7 @@ class ConversationExecutionStatusService:
         pending = await self.session.scalar(
             select(or_(admission_pending, task_pending, log_pending, event_pending, input_pending))
         )
-        return StopAllStatus(conversation.execution_closed_at, bool(pending))
+        return StopAllStatus(generation, conversation.execution_closed_at, bool(pending))
 
     async def run_status(self, *, conversation_id: str, run_id: str) -> RunControlStatus | None:
         admission = await self.session.scalar(
