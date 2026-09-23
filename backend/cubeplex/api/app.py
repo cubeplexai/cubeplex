@@ -103,12 +103,13 @@ def _build_mcp_user_token_signer() -> Any:
 
 
 async def _stop_sandbox_background_tasks(
-    command_coord_task: asyncio.Task[None] | None,
+    background_task_coordinator: Any | None,
+    delivery_task: asyncio.Task[None] | None,
     cleanup_task: asyncio.Task[None] | None,
 ) -> None:
     """Stop lease renewal and cleanup together before draining agent runs."""
     tasks = (
-        (command_coord_task, "Sandbox command coordinator"),
+        (delivery_task, "Background task delivery coordinator"),
         (cleanup_task, "Sandbox cleanup loop"),
     )
     for task, _label in tasks:
@@ -122,6 +123,9 @@ async def _stop_sandbox_background_tasks(
         except asyncio.CancelledError:
             pass
         logger.info("{} stopped", label)
+    if background_task_coordinator is not None:
+        await background_task_coordinator.stop()
+        logger.info("Background task coordinator stopped")
 
 
 @asynccontextmanager
@@ -215,6 +219,15 @@ async def lifespan(_app: FastAPI):  # type: ignore
             _pkg = type(_route_ext).__module__.split(".")[0]
             _app.include_router(_route_ext_router, prefix=f"/api/v1/_extensions/{_pkg}")
     logger.info("Mounted {} RouteExtension(s)", len(_reg.get_route_extensions()))
+
+    # No worker or queue consumer may start until every legacy lifecycle row
+    # has a public task/event identity. This is the single-writer cutover gate.
+    from cubeplex.db.engine import async_session_maker as _cutover_session_maker
+    from cubeplex.services.background_task_cutover import require_background_task_cutover
+
+    async with _cutover_session_maker() as _cutover_session:
+        await require_background_task_cutover(_cutover_session)
+    logger.info("Background task lifecycle cutover verified")
 
     # MCP tools are assembled per agent run from DB-backed catalog/installs;
     # the legacy global registry loader was removed in M2.
@@ -349,18 +362,51 @@ async def lifespan(_app: FastAPI):  # type: ignore
     cleanup_interval = config.get("sandbox.cleanup_interval", 60)
     cleanup_task = asyncio.create_task(sandbox_cleanup_loop(manager, interval=cleanup_interval))
     logger.info("Sandbox cleanup loop started")
-    command_coord_task = None
-    from cubeplex.sandbox.command_coordinator import command_coordinator_loop
+    from cubeplex.services.background_task_coordinator import (
+        BackgroundTaskCoordinator,
+        resolve_foreground_checkpoint,
+    )
+    from cubeplex.services.background_task_delivery import BackgroundTaskDeliveryCoordinator
 
-    command_coord_task = asyncio.create_task(
-        command_coordinator_loop(
-            async_session_maker,
-            run_manager=run_manager,
+    assert run_manager is not None and redis_client is not None
+
+    async def _resolve_foreground(task: Any) -> Any:
+        return await resolve_foreground_checkpoint(
+            task,
             redis=redis_client,
             redis_key_prefix=_app.state.redis_key_prefix,
         )
+
+    background_task_coordinator = BackgroundTaskCoordinator(
+        async_session_maker,
+        manager,
+        resolve_foreground=_resolve_foreground,
     )
-    logger.info("Sandbox command coordinator started")
+
+    delivery_coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=run_manager,
+        redis=redis_client,
+        redis_key_prefix=_app.state.redis_key_prefix,
+    )
+
+    async def _deliver_background_tasks() -> None:
+        from datetime import UTC, datetime, timedelta
+
+        while True:
+            try:
+                now = datetime.now(UTC)
+                await delivery_coordinator.deliver_once(
+                    now=now,
+                    lease_until=now + timedelta(seconds=15),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("background task delivery tick failed")
+            await asyncio.sleep(5)
+
+    delivery_task: asyncio.Task[None] | None = None
 
     # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).
     try:
@@ -520,6 +566,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as exc:
         logger.warning("Shared checkpointer warmup failed (will retry lazily): {}", exc)
 
+    background_task_coordinator.start()
+    logger.info("Background task coordinator started")
+    delivery_task = asyncio.create_task(
+        _deliver_background_tasks(),
+        name="background-task-delivery",
+    )
+    logger.info("Background task delivery coordinator started")
+
     if run_manager is not None:
         run_manager.start_stop_recovery()
 
@@ -537,7 +591,11 @@ async def lifespan(_app: FastAPI):  # type: ignore
     logger.info("Shutdown phase 2/5: stopping background services and connectors")
     if run_manager is not None:
         await run_manager.stop_stop_recovery()
-    await _stop_sandbox_background_tasks(command_coord_task, cleanup_task)
+    await _stop_sandbox_background_tasks(
+        background_task_coordinator,
+        delivery_task,
+        cleanup_task,
+    )
     from cubeplex.services.conversation_search.startup import stop_search_subsystem
 
     await stop_search_subsystem(_app)

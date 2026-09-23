@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -33,6 +33,116 @@ POLL_INTERVAL = 15
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class ForegroundCheckpointer(Protocol):
+    async def load(self, thread_id: str) -> Any: ...
+
+    async def load_pending_run_id(self, thread_id: str) -> str | None: ...
+
+    async def claim_run(self, thread_id: str, run_id: str) -> None: ...
+
+    async def mark_run_complete(self, thread_id: str, run_id: str) -> None: ...
+
+
+def _has_checkpointed_result(task: BackgroundTask, checkpoint: Any) -> bool:
+    from cubeloop.providers.base import ToolResultMessage
+
+    if checkpoint is None:
+        return False
+    return any(
+        isinstance(message, ToolResultMessage)
+        and message.run_id == task.originating_run_id
+        and message.tool_call_id == task.tool_call_id
+        for message in checkpoint.messages
+    )
+
+
+async def _resolve_with_checkpointer(
+    task: BackgroundTask,
+    *,
+    checkpointer: ForegroundCheckpointer,
+    redis: Any,
+    redis_key_prefix: str,
+    load_run_meta: Callable[..., Awaitable[Any]],
+) -> ForegroundRecovery:
+    from cubeloop.checkpointer.exceptions import (
+        RunAlreadyClaimedError,
+        RunAlreadyCompletedError,
+        RunNotClaimedError,
+    )
+
+    checkpoint = await checkpointer.load(task.conversation_id)
+    if _has_checkpointed_result(task, checkpoint):
+        return ForegroundResultEvidence(
+            run_id=task.originating_run_id,
+            tool_call_id=task.tool_call_id,
+            agent_id=task.agent_id,
+        )
+    pending_run_id = await checkpointer.load_pending_run_id(task.conversation_id)
+    meta = await load_run_meta(
+        redis,
+        prefix=redis_key_prefix,
+        run_id=task.originating_run_id,
+    )
+    if pending_run_id == task.originating_run_id or (
+        meta is not None and meta.status in ("running", "paused_hitl")
+    ):
+        return "pending"
+    try:
+        await checkpointer.mark_run_complete(task.conversation_id, task.originating_run_id)
+    except RunNotClaimedError:
+        try:
+            await checkpointer.claim_run(task.conversation_id, task.originating_run_id)
+        except (RunAlreadyClaimedError, RunAlreadyCompletedError):
+            pass
+        try:
+            await checkpointer.mark_run_complete(task.conversation_id, task.originating_run_id)
+        except RunAlreadyCompletedError:
+            pass
+    except RunAlreadyCompletedError:
+        pass
+    checkpoint = await checkpointer.load(task.conversation_id)
+    if _has_checkpointed_result(task, checkpoint):
+        return ForegroundResultEvidence(
+            run_id=task.originating_run_id,
+            tool_call_id=task.tool_call_id,
+            agent_id=task.agent_id,
+        )
+    return "not_delivered"
+
+
+async def resolve_foreground_checkpoint(
+    task: BackgroundTask,
+    *,
+    redis: Any,
+    redis_key_prefix: str,
+    checkpointer: ForegroundCheckpointer | None = None,
+    load_run_meta: Callable[..., Awaitable[Any]] | None = None,
+) -> ForegroundRecovery:
+    """Fence an abandoned run before deciding whether its result was delivered."""
+    if load_run_meta is None:
+        from cubeplex.streams.run_events import get_run_meta
+
+        load_run_meta = get_run_meta
+    if checkpointer is not None:
+        return await _resolve_with_checkpointer(
+            task,
+            checkpointer=checkpointer,
+            redis=redis,
+            redis_key_prefix=redis_key_prefix,
+            load_run_meta=load_run_meta,
+        )
+    from cubeplex.agents.checkpointer import shared_checkpointer
+
+    async with shared_checkpointer() as shared:
+        return await _resolve_with_checkpointer(
+            task,
+            checkpointer=shared,
+            redis=redis,
+            redis_key_prefix=redis_key_prefix,
+            load_run_meta=load_run_meta,
+        )
 
 
 class BackgroundTaskCoordinator:
