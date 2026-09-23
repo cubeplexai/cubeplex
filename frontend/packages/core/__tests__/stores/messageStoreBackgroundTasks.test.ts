@@ -322,6 +322,44 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundEvents['conv-1']).toHaveLength(2)
   })
 
+  it('refreshes a loaded older event until its terminal revision arrives', async () => {
+    const newest = event({ id: 'event-newest', state: 'delivered', revision: 2 })
+    const olderPending = event({
+      id: 'event-older',
+      state: 'pending',
+      created_at: '2026-09-21T23:00:00+00:00',
+    })
+    const olderDelivered = event({ ...olderPending, state: 'delivered', revision: 3 })
+    useMessageStore.setState({
+      backgroundEvents: { 'conv-1': [newest, olderPending] },
+      backgroundEventCursor: { 'conv-1': null },
+      backgroundEventsHasMore: { 'conv-1': false },
+    })
+    vi.mocked(listBackgroundTasks).mockResolvedValue([])
+    vi.mocked(listBackgroundTaskEvents)
+      .mockResolvedValueOnce({
+        items: [newest],
+        next_cursor: 'older-page',
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        items: [olderDelivered],
+        next_cursor: null,
+        has_more: false,
+      })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(listBackgroundTaskEvents).toHaveBeenLastCalledWith(fakeClient, 'conv-1', {
+      delivery: 'all',
+      cursor: 'older-page',
+      limit: 50,
+    })
+    expect(
+      useMessageStore.getState().backgroundEvents['conv-1'].find(({ id }) => id === 'event-older'),
+    ).toEqual(olderDelivered)
+  })
+
   it('restarts pagination from the newest page when an event gap is detected', async () => {
     const cached = event({ id: 'event-cached' })
     const newest = event({ id: 'event-newest', revision: 2 })
