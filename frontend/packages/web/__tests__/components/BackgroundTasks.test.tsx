@@ -205,4 +205,23 @@ describe('BackgroundTasks', () => {
       throwOnError: true,
     })
   })
+
+  it('keeps visibility refreshes in the existing polling loop', async () => {
+    let resolveRefresh: (() => void) | null = null
+    mocks.refreshBackground.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+    render(<BackgroundTasks conversationId="conv-1" />)
+    await vi.advanceTimersByTimeAsync(0)
+
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    expect(mocks.refreshBackground).toHaveBeenCalledTimes(1)
+    resolveRefresh?.()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(mocks.refreshBackground).toHaveBeenCalledTimes(2)
+  })
 })
