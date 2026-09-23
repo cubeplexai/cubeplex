@@ -27,21 +27,36 @@ from cubeplex.services.reflection_runner import (
 def test_background_or_mixed_turn_skips_reflection() -> None:
     user = UserMessage(
         content=[TextContent(text="keep working")],
-        metadata={"run_id": "run-1"},
+        run_id="run-1",
     )
     notice = UserMessage(
         content=[TextContent(text="task completed")],
         metadata={
-            "run_id": "run-1",
             "source": "background_task",
             "notice_id": "bge-1",
         },
+        run_id="run-1",
     )
     assistant = AssistantMessage(content=[TextContent(text="done")])
 
-    assert turn_contains_background_notice([user, notice, assistant], user)
-    assert turn_contains_background_notice([notice, assistant], notice)
-    assert not turn_contains_background_notice([user, assistant], user)
+    assert turn_contains_background_notice([user, notice, assistant], "run-1")
+    assert turn_contains_background_notice([notice, assistant], "run-1")
+    assert not turn_contains_background_notice([user, assistant], "run-1")
+
+
+def test_copied_current_turn_ignores_earlier_background_notice() -> None:
+    earlier_notice = UserMessage(
+        content=[TextContent(text="earlier task completed")],
+        metadata={"source": "background_task", "notice_id": "bge-earlier"},
+        run_id="earlier-run",
+    )
+    current = UserMessage(
+        content=[TextContent(text="remember my preference")],
+        run_id="current-run",
+    )
+    copied_current = current.model_copy(deep=True)
+
+    assert not turn_contains_background_notice([earlier_notice, copied_current], "current-run")
 
 
 # ---------------------------------------------------------------------------

@@ -413,7 +413,7 @@ async def test_p_conv_can_answer_hitl_after_first_send(
     assert isinstance(detail, dict) and detail.get("code") == "no_pending", body
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_topic_participant_can_subscribe_sse_without_sending(
     four_layer_admin_and_member: FourLayerFixture,
 ) -> None:
