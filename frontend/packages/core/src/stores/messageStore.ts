@@ -658,13 +658,32 @@ function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
   const tailSeqs = new Set(
     tail.flatMap((message) => (message.seq === undefined ? [] : [message.seq])),
   )
-  return [
-    ...current.filter(
-      (message) =>
-        !tailIds.has(message.id) && (message.seq === undefined || !tailSeqs.has(message.seq)),
-    ),
-    ...tail,
-  ]
+  const persistedCounterparts = new Map<string, number>()
+  for (const message of tail) {
+    const key = historyCounterpartKey(message)
+    if (key !== null) persistedCounterparts.set(key, (persistedCounterparts.get(key) ?? 0) + 1)
+  }
+  const retained = current.filter((message) => {
+    if (tailIds.has(message.id) || (message.seq !== undefined && tailSeqs.has(message.seq))) {
+      return false
+    }
+    if (message.seq !== undefined) return true
+    const key = historyCounterpartKey(message)
+    if (key === null) return true
+    const remaining = persistedCounterparts.get(key) ?? 0
+    if (remaining === 0) return true
+    persistedCounterparts.set(key, remaining - 1)
+    return false
+  })
+  return [...retained, ...tail]
+}
+
+function historyCounterpartKey(message: Message): string | null {
+  if (typeof message.run_id !== 'string') return null
+  if (message.role === 'tool_result') {
+    return JSON.stringify([message.run_id, message.role, message.tool_call_id])
+  }
+  return JSON.stringify([message.run_id, message.role, message.content])
 }
 
 /** Finalize the last thinking block's duration if switching to a different block type */
@@ -1951,8 +1970,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                     derivedSummary.has_pending ||
                     (eventPage.has_more &&
                       Boolean(state.backgroundSummary[conversationId]?.has_pending)),
-                  has_cleanup: derivedSummary.has_cleanup || Boolean(startingSummary?.has_cleanup),
-                  can_stop: derivedSummary.can_stop || Boolean(startingSummary?.can_stop),
+                  has_cleanup: derivedSummary.has_cleanup,
+                  can_stop:
+                    derivedSummary.can_stop ||
+                    (eventPage.has_more && Boolean(startingSummary?.can_stop)),
                 },
         },
         refreshingBackground: withoutConversationFlag(state.refreshingBackground, conversationId),
