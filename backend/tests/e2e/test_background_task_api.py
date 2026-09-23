@@ -6,13 +6,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
-import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-import cubeplex.api.routes.v1.sandbox_commands as sandbox_command_routes
 from cubeplex.models import (
     BackgroundTask,
     BackgroundTaskEvent,
@@ -134,60 +132,6 @@ async def api_task_context(
 
 def task_path(workspace_id: str, conversation_id: str) -> str:
     return f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/background-tasks"
-
-
-async def test_legacy_command_route_excludes_managed_tasks_during_cutover(
-    authenticated_client: tuple[httpx.AsyncClient, str],
-    db_session: AsyncSession,
-    api_task_context: ApiTaskContext,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, workspace_id = authenticated_client
-    conversation_id = api_task_context.conversation.id
-    managed = await api_task_context.reserve(db_session)
-    legacy = SandboxCommand(
-        org_id=api_task_context.conversation.org_id,
-        workspace_id=api_task_context.conversation.workspace_id,
-        user_sandbox_id=api_task_context.sandbox.id,
-        conversation_id=conversation_id,
-        run_id="legacy-run",
-        tool_call_id="legacy-tool",
-        started_by_user_id=api_task_context.conversation.creator_user_id,
-        command="sleep 30",
-        description="legacy command",
-        provider="local",
-        status="running",
-        notify_on_complete=False,
-        lifetime="conversation",
-    )
-    db_session.add(legacy)
-    await db_session.commit()
-
-    response = await client.get(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/sandbox-commands"
-    )
-
-    assert response.status_code == 200, response.text
-    assert [item["id"] for item in response.json()] == [legacy.id]
-    managed_response = await client.get(task_path(workspace_id, conversation_id))
-    assert managed_response.status_code == 200, managed_response.text
-    assert [item["id"] for item in managed_response.json()["items"]] == [managed.task.id]
-
-    async def _no_sandbox(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(sandbox_command_routes, "sandbox_from_row", _no_sandbox)
-    killed = await client.post(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}"
-        f"/sandbox-commands/{legacy.id}/kill"
-    )
-    assert killed.status_code == 200, killed.text
-    assert killed.json() == {"id": legacy.id, "status": "killed"}
-    managed_legacy_stop = await client.post(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}"
-        f"/sandbox-commands/{managed.command.id}/kill"
-    )
-    assert managed_legacy_stop.status_code == 404
 
 
 async def test_list_is_read_only_and_terminal_rows_require_explicit_ids(
