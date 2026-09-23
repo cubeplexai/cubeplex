@@ -3,7 +3,7 @@
 import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from opensandbox.exceptions import SandboxApiException
@@ -14,6 +14,7 @@ from sqlmodel import col
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.models import BackgroundTask, BackgroundTaskEvent, SandboxCommand, UserSandbox
 from cubeplex.models.background_task import TaskStopReason
+from cubeplex.sandbox.log_io import AppendOutputResult
 from cubeplex.sandbox.manager import SandboxManager
 from cubeplex.services.background_task_coordinator import (
     BackgroundTaskCoordinator,
@@ -122,6 +123,7 @@ async def test_restarted_workers_preserve_one_completion_and_never_restart_comma
     reservation_context: ReservationContext,
     mock_encryption_backend: EncryptionBackend,
     remote: tuple[MagicMock, MagicMock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task, command = await started_task(db_session, reservation_context)
     _, raw, _ = remote
@@ -130,7 +132,12 @@ async def test_restarted_workers_preserve_one_completion_and_never_restart_comma
     raw.commands.get_command_status = AsyncMock(
         return_value=SimpleNamespace(running=False, exit_code=0)
     )
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=SimpleNamespace(content="final output\n", cursor=7)
+    )
     raw.commands.run = AsyncMock(side_effect=AssertionError("must not restart command"))
+    append = AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True))
+    monkeypatch.setattr("cubeplex.services.background_task_coordinator.append_output", append)
     for seconds in (31, 61):
         restarted = BackgroundTaskCoordinator(
             session_factory,
@@ -150,9 +157,96 @@ async def test_restarted_workers_preserve_one_completion_and_never_restart_comma
     )
     assert task.state == "succeeded" and command.exit_code == 0
     assert command.provider_ref == "original-process"
-    assert len(notices) == 1 and notices[0].state == "pending"
-    assert command.log_state == "pending", "completion stays pending until C6 confirms logs"
+    assert len(notices) == 1 and notices[0].state in ("pending", "claimed")
+    assert command.log_state == "complete" and command.log_cursor == "7"
+    assert task.result_readiness == "ready"
+    append.assert_awaited_once_with(ANY, command.log_path, "final output\n")
     raw.commands.run.assert_not_awaited()
+
+
+async def test_terminal_log_write_retries_without_advancing_the_cursor(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    remote: tuple[MagicMock, MagicMock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task, command = await started_task(db_session, reservation_context)
+    _, raw, _ = remote
+    raw.id = command.sandbox_instance_id
+    raw.renew = AsyncMock()
+    raw.commands.get_command_status = AsyncMock(
+        return_value=SimpleNamespace(running=False, exit_code=0)
+    )
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=SimpleNamespace(content="tail\n", cursor=11)
+    )
+    append = AsyncMock(
+        side_effect=(
+            AppendOutputResult(data_written=False, cleanup_done=True),
+            AppendOutputResult(data_written=True, cleanup_done=False),
+        )
+    )
+    monkeypatch.setattr("cubeplex.services.background_task_coordinator.append_output", append)
+
+    for seconds in (31, 61):
+        coordinator = BackgroundTaskCoordinator(
+            session_factory,
+            SandboxManager(session_factory, mock_encryption_backend),
+            resolve_foreground=already_handed_off,
+            clock=lambda seconds=seconds: NOW + timedelta(seconds=seconds),
+        )
+        await coordinator.reconcile_once()
+        await db_session.refresh(task)
+        await db_session.refresh(command)
+        if seconds == 31:
+            assert task.state == "succeeded" and task.result_readiness == "pending"
+            assert command.log_state == "retrying" and command.log_cursor is None
+
+    assert task.result_readiness == "ready"
+    assert command.log_state == "complete" and command.log_cursor == "11"
+    notices = list(
+        (
+            await db_session.execute(
+                select(BackgroundTaskEvent).where(col(BackgroundTaskEvent.task_id) == task.id)
+            )
+        ).scalars()
+    )
+    assert len(notices) == 1
+
+
+async def test_terminal_process_fact_survives_a_temporary_log_read_failure(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    remote: tuple[MagicMock, MagicMock, AsyncMock],
+) -> None:
+    task, command = await started_task(db_session, reservation_context)
+    _, raw, _ = remote
+    raw.id = command.sandbox_instance_id
+    raw.renew = AsyncMock()
+    raw.commands.get_command_status = AsyncMock(
+        return_value=SimpleNamespace(running=False, exit_code=0)
+    )
+    raw.commands.get_background_command_logs = AsyncMock(
+        side_effect=SandboxApiException("temporarily unavailable", status_code=503)
+    )
+    coordinator = BackgroundTaskCoordinator(
+        session_factory,
+        SandboxManager(session_factory, mock_encryption_backend),
+        resolve_foreground=already_handed_off,
+        clock=lambda: NOW + timedelta(seconds=31),
+    )
+
+    await coordinator.reconcile_once()
+    await db_session.refresh(task)
+    await db_session.refresh(command)
+
+    assert task.state == "succeeded" and task.result_readiness == "pending"
+    assert command.status == "exited" and command.exit_code == 0
+    assert command.log_state == "retrying" and command.log_cursor is None
 
 
 @pytest.mark.parametrize("status_failure", [False, True])

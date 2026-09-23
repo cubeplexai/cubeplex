@@ -14,6 +14,7 @@ from cubeplex.sandbox.base import (
     BrowserEndpoint,
     ExecuteResult,
     ProcessHandle,
+    ProcessOutput,
     ProcessSnapshot,
     Sandbox,
     SandboxError,
@@ -164,6 +165,16 @@ class LocalSandbox(Sandbox):
         return ProcessHandle(command_id="", provider_ref=ref)
 
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
+        status = await self.observe(handle)
+        output = await self.read_output(handle)
+        return ProcessSnapshot(
+            status=status.status,
+            exit_code=status.exit_code,
+            new_output=output.new_output,
+            log_cursor=output.log_cursor,
+        )
+
+    async def read_output(self, handle: ProcessHandle) -> ProcessOutput:
         rec = self._bg.get(handle.provider_ref)
         if rec is None:
             raise SandboxError("local process reference is not available on this worker")
@@ -171,11 +182,7 @@ class LocalSandbox(Sandbox):
         if code is not None and rec.pump_task is not None:
             await rec.pump_task
         new_output = await rec.take()
-        if rec.killed and code is not None and code < 0:
-            return ProcessSnapshot(status="killed", exit_code=code, new_output=new_output)
-        if code is not None:
-            return ProcessSnapshot(status="exited", exit_code=code, new_output=new_output)
-        return ProcessSnapshot(status="running", new_output=new_output)
+        return ProcessOutput(new_output=new_output)
 
     async def kill(self, handle: ProcessHandle) -> None:
         rec = self._bg.get(handle.provider_ref)

@@ -17,6 +17,7 @@ from cubeplex.models.background_task import INFLIGHT_TASK_STATES, BackgroundTask
 from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.sandbox.base import ProcessHandle, SandboxError, SandboxInstanceGoneError
 from cubeplex.sandbox.command_adapter import CommandAdapter
+from cubeplex.sandbox.log_io import append_output
 from cubeplex.sandbox.manager import SandboxManager
 from cubeplex.services.background_task_lifecycle import (
     ForegroundResultEvidence,
@@ -179,13 +180,40 @@ class BackgroundTaskCoordinator:
                                 message=observed.error or "process state is unknown",
                             )
                         else:
+                            snapshot = observed.snapshot
+                            log_state: LogState = cast(LogState, command.log_state)
+                            confirmed_log_cursor: str | None = None
+                            if observed.logs_read:
+                                data_written = True
+                                if snapshot.new_output:
+                                    appended = await append_output(
+                                        sandbox,
+                                        command.log_path,
+                                        snapshot.new_output,
+                                    )
+                                    data_written = appended.data_written
+                                    if data_written and not appended.cleanup_done:
+                                        logger.warning(
+                                            "command log chunk cleanup remains for task {}",
+                                            task_id,
+                                        )
+                                if data_written:
+                                    confirmed_log_cursor = snapshot.log_cursor
+                                    log_state = (
+                                        "pending" if snapshot.status == "running" else "complete"
+                                    )
+                                else:
+                                    log_state = "retrying"
+                            elif command.log_state not in ("complete", "unavailable"):
+                                log_state = "retrying"
                             await service(session).record_observation(
                                 task_id=task_id,
                                 owner_token=token,
                                 now=self.clock(),
-                                snapshot=observed.snapshot,
-                                log_state=cast(LogState, command.log_state),
+                                snapshot=snapshot,
+                                log_state=log_state,
                                 expected_log_cursor=command.log_cursor,
+                                confirmed_log_cursor=confirmed_log_cursor,
                             )
                         await session.commit()
         except TaskOwnerLostError:
