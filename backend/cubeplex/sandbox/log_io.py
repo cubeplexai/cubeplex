@@ -71,7 +71,7 @@ async def _cleanup_chunk(sandbox: Sandbox, chunk_path: str) -> bool:
     except Exception:
         logger.exception("failed to clean command log chunk {}", chunk_path)
         return False
-    if result.exit_code not in (0, None):
+    if result.exit_code != 0:
         logger.warning(
             "command log chunk cleanup exited {} for {}",
             result.exit_code,
@@ -95,7 +95,7 @@ async def append_output(sandbox: Sandbox, path: str, data: str | bytes) -> Appen
     except Exception:
         logger.exception("failed to prepare command log directory {}", parent)
         return AppendOutputResult(data_written=False, cleanup_done=True)
-    if prepared.exit_code not in (0, None):
+    if prepared.exit_code != 0:
         logger.warning("unsafe command log directory rejected: {}", parent)
         return AppendOutputResult(data_written=False, cleanup_done=True)
 
@@ -112,7 +112,7 @@ async def append_output(sandbox: Sandbox, path: str, data: str | bytes) -> Appen
             )
         )
         written = await sandbox.execute(command, timeout=30)
-        data_written = written.exit_code in (0, None)
+        data_written = written.exit_code == 0
         if not data_written:
             logger.warning("command log append exited {} for {}", written.exit_code, path)
     except Exception:
