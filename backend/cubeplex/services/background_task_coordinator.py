@@ -185,7 +185,7 @@ class BackgroundTaskCoordinator:
                             confirmed_log_cursor: str | None = None
                             if observed.logs_read:
                                 data_written = True
-                                if snapshot.new_output:
+                                if snapshot.new_output or snapshot.status != "running":
                                     appended = await append_output(
                                         sandbox,
                                         command.log_path,
