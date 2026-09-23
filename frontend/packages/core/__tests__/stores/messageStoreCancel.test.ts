@@ -232,6 +232,38 @@ describe('messageStore.cancelStream', () => {
     expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'r1')
   })
 
+  it('recovers the persisted run id when the start response is lost', async () => {
+    seedStreaming('conv1', {})
+    useMessageStore.setState({ currentRunId: null })
+    vi.mocked(getConversationBootstrap)
+      .mockResolvedValueOnce({
+        ...idleBootstrap(),
+        active_run: { run_id: 'server-run', status: 'running' },
+      })
+      .mockResolvedValue(idleBootstrap())
+
+    await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+
+    expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'server-run')
+  })
+
+  it('bounds run-id recovery when no admitted run appears', async () => {
+    vi.useFakeTimers()
+    seedStreaming('conv1', {})
+    useMessageStore.setState({ currentRunId: null })
+    vi.mocked(getConversationBootstrap).mockResolvedValue(idleBootstrap())
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await cancelling
+
+    expect(cancelActiveRun).not.toHaveBeenCalled()
+    expect(useMessageStore.getState()).toMatchObject({
+      cancellingConversationIds: {},
+      runLifecycle: { conv1: 'running' },
+    })
+  })
+
   it('does not clear a replacement conversation after cancellation returns', async () => {
     let resolveCancel: (() => void) | undefined
     vi.mocked(cancelActiveRun).mockReturnValueOnce(
