@@ -26,7 +26,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
-        # Wait for postgres + run alembic migrations before the API boots.
+        # Wait for postgres + run the lock-guarded schema gate before API boot.
         # Done in-pod (not as a helm pre-upgrade hook) so postgres is
         # already reachable when this fires — a hook would race against
         # the postgres StatefulSet on a fresh install.
@@ -42,8 +42,8 @@ spec:
               until python -c "import socket, sys; s=socket.socket(); s.settimeout(2); s.connect(('{{ include "cubeplex.postgresql.host" . }}', 5432)); s.close()" 2>/dev/null; do
                 sleep 2
               done
-              echo "postgres reachable; running alembic upgrade head"
-              alembic upgrade head
+              echo "postgres reachable; verifying the CubePlex schema gate"
+              python -m cubeplex.scripts.lifecycle_upgrade
           env:
             {{- range $k, $v := .Values.backend.env }}
             - name: {{ $k }}

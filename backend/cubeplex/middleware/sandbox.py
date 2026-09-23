@@ -2080,6 +2080,8 @@ class SandboxMiddleware(Middleware):
     ) -> bool | _ReservedCommand:
         if self._session_factory is None:
             return False
+        if self.admission_id is None or self._task_owner_token is None:
+            raise RuntimeError("managed commands require a durable execution admission")
         ensure = getattr(self.sandbox, "ensure_created", None)
         if callable(ensure):
             maybe = ensure()
@@ -2094,90 +2096,64 @@ class SandboxMiddleware(Middleware):
             or self.user_id is None
         ):
             return False
-        if self.admission_id is not None and self._task_owner_token is not None:
-            from cubeplex.models import UserSandbox
-            from cubeplex.models.sandbox_command import SandboxCommandKind
-            from cubeplex.services.background_tasks import (
-                BackgroundTaskService,
-                CommandExecutionDetails,
-                TaskSpec,
-            )
+        from cubeplex.models import UserSandbox
+        from cubeplex.models.sandbox_command import SandboxCommandKind
+        from cubeplex.services.background_tasks import (
+            BackgroundTaskService,
+            CommandExecutionDetails,
+            TaskSpec,
+        )
 
-            now = datetime.now(UTC)
-            async with self._session_factory() as session:
-                sandbox_row = await session.get(UserSandbox, user_sandbox_id)
-                if sandbox_row is None or sandbox_row.sandbox_id is None:
-                    raise LookupError("sandbox attachment is unavailable")
-                service = BackgroundTaskService(
-                    session,
-                    org_id=self.org_id,
-                    workspace_id=self.workspace_id,
-                )
-                reservation = await service.reserve_task(
-                    admission_id=self.admission_id,
-                    task_spec=TaskSpec(
-                        originating_run_id=self.run_id or "",
-                        tool_call_id=tool_call_id,
-                        description=description,
-                        notify_on_complete=notify_on_complete,
-                    ),
-                    execution_details=CommandExecutionDetails(
-                        user_sandbox_id=user_sandbox_id,
-                        sandbox_instance_id=sandbox_row.sandbox_id,
-                        provider=sandbox_row.provider,
-                        command=command,
-                        log_path=log_path,
-                        kind=SandboxCommandKind(kind),
-                        timeout_seconds=timeout_seconds,
-                        monitor_deadline_at=monitor_deadline_at,
-                    ),
-                    owner_token=self._task_owner_token,
-                    owner_until=now + timedelta(seconds=_TASK_OWNER_LEASE_SECONDS),
-                    now=now,
-                )
-                start_allowed = reservation.created and await service.begin_start(
-                    task_id=reservation.task.id,
-                    owner_token=self._task_owner_token,
-                    now=now,
-                )
-                await session.commit()
-            self._task_bindings[reservation.command.id] = _TaskCommandBinding(
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            sandbox_row = await session.get(UserSandbox, user_sandbox_id)
+            if sandbox_row is None or sandbox_row.sandbox_id is None:
+                raise LookupError("sandbox attachment is unavailable")
+            service = BackgroundTaskService(
+                session,
+                org_id=self.org_id,
+                workspace_id=self.workspace_id,
+            )
+            reservation = await service.reserve_task(
+                admission_id=self.admission_id,
+                task_spec=TaskSpec(
+                    originating_run_id=self.run_id or "",
+                    tool_call_id=tool_call_id,
+                    description=description,
+                    notify_on_complete=notify_on_complete,
+                ),
+                execution_details=CommandExecutionDetails(
+                    user_sandbox_id=user_sandbox_id,
+                    sandbox_instance_id=sandbox_row.sandbox_id,
+                    provider=sandbox_row.provider,
+                    command=command,
+                    log_path=log_path,
+                    kind=SandboxCommandKind(kind),
+                    timeout_seconds=timeout_seconds,
+                    monitor_deadline_at=monitor_deadline_at,
+                ),
+                owner_token=self._task_owner_token,
+                owner_until=now + timedelta(seconds=_TASK_OWNER_LEASE_SECONDS),
+                now=now,
+            )
+            start_allowed = reservation.created and await service.begin_start(
                 task_id=reservation.task.id,
                 owner_token=self._task_owner_token,
-                sandbox_instance_id=reservation.command.sandbox_instance_id or "",
+                now=now,
             )
-            return _ReservedCommand(
-                command_id=reservation.command.id,
-                task_id=reservation.task.id,
-                start_allowed=start_allowed,
-                log_path=reservation.command.log_path,
-                deadline_at=reservation.task.deadline_at,
-            )
-        from cubeplex.sandbox.command_coordinator import COMMAND_LEASE_SECONDS
-
-        async with self._command_repo_ctx() as repo:
-            if repo is None:
-                return False
-            await repo.reserve(
-                user_sandbox_id=user_sandbox_id,
-                conversation_id=self.conversation_id,
-                run_id=self.run_id or "",
-                tool_call_id=tool_call_id,
-                started_by_user_id=self.user_id,
-                command=command,
-                description=description,
-                notify_on_complete=notify_on_complete,
-                owner_id=self._owner_id,
-                owner_until=datetime.now(UTC) + timedelta(seconds=COMMAND_LEASE_SECONDS),
-                log_path=log_path,
-                command_id=command_id,
-                kind=kind,
-                lifetime=lifetime
-                if lifetime is not None
-                else ("conversation" if not notify_on_complete else "run"),
-                monitor_deadline_at=monitor_deadline_at,
-            )
-        return True
+            await session.commit()
+        self._task_bindings[reservation.command.id] = _TaskCommandBinding(
+            task_id=reservation.task.id,
+            owner_token=self._task_owner_token,
+            sandbox_instance_id=reservation.command.sandbox_instance_id or "",
+        )
+        return _ReservedCommand(
+            command_id=reservation.command.id,
+            task_id=reservation.task.id,
+            start_allowed=start_allowed,
+            log_path=reservation.command.log_path,
+            deadline_at=reservation.task.deadline_at,
+        )
 
     async def _persist_running(self, command_id: str, provider_ref: str) -> None:
         binding = self._task_bindings.get(command_id)
@@ -2585,18 +2561,33 @@ class SandboxMiddleware(Middleware):
             )
 
     async def _renew_live_leases(self) -> None:
-        if not self._live_commands:
+        if not self._live_commands or self._session_factory is None:
             return
-        from cubeplex.sandbox.command_coordinator import COMMAND_LEASE_SECONDS
+        from cubeplex.services.background_tasks import BackgroundTaskService
 
-        async with self._command_repo_ctx() as repo:
-            if repo is None:
-                return
-            await repo.renew_owner(
-                list(self._live_commands),
-                owner_id=self._owner_id,
-                owner_until=datetime.now(UTC) + timedelta(seconds=COMMAND_LEASE_SECONDS),
+        bindings = {
+            command_id: binding
+            for command_id, binding in self._task_bindings.items()
+            if command_id in self._live_commands
+        }
+        if not bindings:
+            return
+        now = datetime.now(UTC)
+        org_id, workspace_id = self._task_scope()
+        async with self._session_factory() as session:
+            service = BackgroundTaskService(
+                session,
+                org_id=org_id,
+                workspace_id=workspace_id,
             )
+            for binding in bindings.values():
+                await service.renew_owner(
+                    task_id=binding.task_id,
+                    owner_token=binding.owner_token,
+                    now=now,
+                    owner_until=now + timedelta(seconds=_TASK_OWNER_LEASE_SECONDS),
+                )
+            await session.commit()
 
     def _ensure_lease_task(self) -> None:
         if self._lease_task is None or self._lease_task.done():

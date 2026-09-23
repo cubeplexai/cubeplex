@@ -107,7 +107,8 @@ services:
         echo "bucket $$BUCKET ready"
     restart: "no"
 
-  # Alembic migrate. Runs to completion before backend starts.
+  # Lock-guarded schema gate. Existing pre-cutover databases require the
+  # documented maintenance command after every old writer has stopped.
   backend-migrate:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_REPO:-cubeplexai}/cubeplex-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
     depends_on:
@@ -118,7 +119,7 @@ services:
     volumes:
       - ./config/config.production.local.yaml:/app/config.production.local.yaml:ro
       - ./config/config.production.secrets.yaml:/app/config.production.secrets.yaml:ro
-    command: ["alembic", "upgrade", "head"]
+    command: ["python", "-m", "cubeplex.scripts.lifecycle_upgrade"]
     restart: "no"
 
   backend:

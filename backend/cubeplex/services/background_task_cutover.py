@@ -7,13 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from cubeplex.models.background_task import BackgroundTask, BackgroundTaskEvent
-from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandWake
+from cubeplex.models.sandbox_command import (
+    SandboxCommand,
+    SandboxCommandKind,
+    SandboxCommandNoticeState,
+    SandboxCommandStatus,
+    SandboxCommandWake,
+)
 
 
 @dataclass(frozen=True)
 class BackgroundTaskCutoverStatus:
     unmigrated_commands: int
     unmapped_wakes: int
+    missing_completion_events: int
     command_tasks_without_details: int
 
     @property
@@ -22,6 +29,7 @@ class BackgroundTaskCutoverStatus:
             (
                 self.unmigrated_commands,
                 self.unmapped_wakes,
+                self.missing_completion_events,
                 self.command_tasks_without_details,
             )
         )
@@ -57,6 +65,29 @@ async def inspect_background_task_cutover(
         )
         or 0
     )
+    missing_completion_events = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(SandboxCommand)
+            .join(BackgroundTask, col(BackgroundTask.id) == col(SandboxCommand.task_id))
+            .outerjoin(
+                BackgroundTaskEvent,
+                col(BackgroundTaskEvent.task_id) == col(BackgroundTask.id),
+            )
+            .where(
+                col(SandboxCommand.kind) == SandboxCommandKind.execute.value,
+                col(SandboxCommand.notice_state) == SandboxCommandNoticeState.pending.value,
+                col(SandboxCommand.status).not_in(
+                    (
+                        SandboxCommandStatus.starting.value,
+                        SandboxCommandStatus.running.value,
+                    )
+                ),
+                col(BackgroundTaskEvent.id).is_(None),
+            )
+        )
+        or 0
+    )
     command_tasks_without_details = int(
         await session.scalar(
             select(func.count())
@@ -72,6 +103,7 @@ async def inspect_background_task_cutover(
     return BackgroundTaskCutoverStatus(
         unmigrated_commands=unmigrated_commands,
         unmapped_wakes=unmapped_wakes,
+        missing_completion_events=missing_completion_events,
         command_tasks_without_details=command_tasks_without_details,
     )
 
@@ -84,6 +116,8 @@ async def require_background_task_cutover(session: AsyncSession) -> None:
         "background-task lifecycle cutover is incomplete "
         f"(unmigrated_commands={status.unmigrated_commands}, "
         f"unmapped_wakes={status.unmapped_wakes}, "
+        f"missing_completion_events={status.missing_completion_events}, "
         f"command_tasks_without_details={status.command_tasks_without_details}); "
-        "stop old writers and run scripts/dev/migrate_background_tasks.py --apply"
+        "stop old writers and run `python -m "
+        "cubeplex.scripts.lifecycle_upgrade --maintenance`"
     )

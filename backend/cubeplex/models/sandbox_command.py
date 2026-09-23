@@ -69,13 +69,11 @@ class SandboxCommand(CubeplexBase, OrgScopedMixin, table=True):
         max_length=20,
         index=True,
     )
-    # Nullable during expand/backfill; never infer an old instance from the current row.
-    task_id: str | None = Field(
-        default=None,
+    task_id: str = Field(
         sa_column=Column(
             String(20),
             ForeignKey("background_tasks.id", name="fk_sandbox_commands_task_id"),
-            nullable=True,
+            nullable=False,
         ),
     )
     sandbox_instance_id: str | None = Field(default=None, max_length=255)
