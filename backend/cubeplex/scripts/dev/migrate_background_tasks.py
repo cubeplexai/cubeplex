@@ -39,6 +39,7 @@ from cubeplex.models.sandbox_command import (
     SandboxCommandWake,
     SandboxCommandWakeState,
 )
+from cubeplex.models.steering_message import SteeringMessage, SteeringMessageState
 
 _ACTIVE = frozenset((SandboxCommandStatus.starting.value, SandboxCommandStatus.running.value))
 
@@ -82,7 +83,33 @@ async def load_checkpointed_notice_ids(
                     if isinstance(notice_id, str):
                         notice_ids.add(notice_id)
             result[conversation_id] = frozenset(notice_ids)
-    return result
+    injected_notice_ids = await _load_injected_notice_ids(session)
+    mutable = {conversation_id: set(ids) for conversation_id, ids in result.items()}
+    for conversation_id, injected_ids in injected_notice_ids.items():
+        mutable.setdefault(conversation_id, set()).update(injected_ids)
+    return {conversation_id: frozenset(ids) for conversation_id, ids in mutable.items()}
+
+
+async def _load_injected_notice_ids(
+    session: AsyncSession,
+) -> dict[str, frozenset[str]]:
+    """Read durable steering rows that prove a legacy wake was injected."""
+    injected_wakes = await session.execute(
+        select(
+            col(SandboxCommandWake.conversation_id),
+            col(SandboxCommandWake.id),
+        )
+        .join(
+            SteeringMessage,
+            (col(SteeringMessage.conversation_id) == col(SandboxCommandWake.conversation_id))
+            & (col(SteeringMessage.client_steer_id) == col(SandboxCommandWake.delivery_steer_id)),
+        )
+        .where(col(SteeringMessage.state) == SteeringMessageState.injected.value)
+    )
+    mutable: dict[str, set[str]] = {}
+    for conversation_id, wake_id in injected_wakes:
+        mutable.setdefault(conversation_id, set()).add(wake_id)
+    return {conversation_id: frozenset(ids) for conversation_id, ids in mutable.items()}
 
 
 def _plan(command: SandboxCommand) -> LegacyCommandPlan:
@@ -98,11 +125,17 @@ def _plan(command: SandboxCommand) -> LegacyCommandPlan:
             action="block",
             reason="active run-lifetime command must finish or be explicitly stopped",
         )
+    if command.status in _ACTIVE and not command.sandbox_instance_id:
+        return LegacyCommandPlan(
+            command_id=command.id,
+            action="block",
+            reason="active legacy command lacks original sandbox instance evidence",
+        )
     return LegacyCommandPlan(
         command_id=command.id,
         action="migrate",
         reason=(
-            "active command will remain unknown without original instance evidence"
+            "active command will remain unknown with its original instance evidence preserved"
             if command.status in _ACTIVE
             else "terminal command evidence can be preserved"
         ),
@@ -224,6 +257,37 @@ def _event_state(
     return BackgroundTaskEventState.pending, None
 
 
+def _reconcile_event_state(
+    event: BackgroundTaskEvent,
+    *,
+    state: BackgroundTaskEventState,
+    discard_reason: str | None,
+) -> bool:
+    if state == BackgroundTaskEventState.delivered:
+        if event.state == BackgroundTaskEventState.delivered.value:
+            return False
+        event.state = BackgroundTaskEventState.delivered.value
+        event.discard_reason = None
+        event.owner_token = None
+        event.owner_until = None
+        event.delivery_attempt_id = None
+        event.delivered_at = event.delivered_at or event.updated_at
+        event.revision += 1
+        return True
+    if state == BackgroundTaskEventState.discarded and event.state in (
+        BackgroundTaskEventState.pending.value,
+        BackgroundTaskEventState.claimed.value,
+    ):
+        event.state = BackgroundTaskEventState.discarded.value
+        event.discard_reason = discard_reason
+        event.owner_token = None
+        event.owner_until = None
+        event.delivery_attempt_id = None
+        event.revision += 1
+        return True
+    return False
+
+
 async def _copy_wakes(
     session: AsyncSession,
     *,
@@ -245,17 +309,24 @@ async def _copy_wakes(
     )
     copied = 0
     for wake in wakes:
-        existing = await session.get(BackgroundTaskEvent, wake.id)
-        if existing is not None:
-            if existing.task_id != task.id:
-                raise RuntimeError(f"legacy notice id collision: {wake.id}")
-            continue
         state, discard_reason = _event_state(
             command,
             wake,
             cancelled=cancelled,
             checkpointed_notice_ids=checkpointed_notice_ids,
         )
+        existing = await session.get(BackgroundTaskEvent, wake.id)
+        if existing is not None:
+            if existing.task_id != task.id:
+                raise RuntimeError(f"legacy notice id collision: {wake.id}")
+            copied += int(
+                _reconcile_event_state(
+                    existing,
+                    state=state,
+                    discard_reason=discard_reason,
+                )
+            )
+            continue
         delivered = state == BackgroundTaskEventState.delivered
         session.add(
             BackgroundTaskEvent(
@@ -303,6 +374,16 @@ async def _copy_missing_completion(
     )
     if wake_id is not None:
         return 0
+    delivered = command.id in checkpointed_notice_ids
+    if delivered:
+        state = BackgroundTaskEventState.delivered
+        discard_reason = None
+    elif cancelled:
+        state = BackgroundTaskEventState.discarded
+        discard_reason = "legacy_notification_revoked"
+    else:
+        state = BackgroundTaskEventState.pending
+        discard_reason = None
     existing = await session.scalar(
         select(col(BackgroundTaskEvent.id)).where(
             col(BackgroundTaskEvent.task_id) == task.id,
@@ -310,14 +391,15 @@ async def _copy_missing_completion(
         )
     )
     if existing is not None:
-        return 0
-    delivered = command.id in checkpointed_notice_ids
-    if delivered:
-        state = BackgroundTaskEventState.delivered
-    elif cancelled:
-        state = BackgroundTaskEventState.discarded
-    else:
-        state = BackgroundTaskEventState.pending
+        event = await session.get(BackgroundTaskEvent, existing)
+        assert event is not None
+        return int(
+            _reconcile_event_state(
+                event,
+                state=state,
+                discard_reason=discard_reason,
+            )
+        )
     session.add(
         BackgroundTaskEvent(
             org_id=command.org_id,
@@ -330,7 +412,7 @@ async def _copy_missing_completion(
             summary=task.result_summary,
             result_ref=task.result_ref,
             state=state.value,
-            discard_reason=("legacy_notification_revoked" if cancelled and not delivered else None),
+            discard_reason=discard_reason,
             delivered_at=command.updated_at if delivered else None,
             created_at=command.updated_at,
             updated_at=command.updated_at,
