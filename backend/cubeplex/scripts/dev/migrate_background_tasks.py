@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from typing import Literal
 
@@ -60,6 +61,30 @@ class LegacyMigrationReport:
 _MIGRATION_LOCK_ID = 0x435042475441534B
 
 
+async def load_checkpointed_notice_ids(
+    session: AsyncSession,
+) -> dict[str, frozenset[str]]:
+    """Read legacy delivery proof before deciding whether an event is claimable."""
+    from cubeplex.agents.checkpointer import init_checkpointer
+
+    conversation_ids = set(
+        await session.scalars(select(col(SandboxCommand.conversation_id)).distinct())
+    )
+    result: dict[str, frozenset[str]] = {}
+    async with init_checkpointer(min_pool_size=1, max_pool_size=1) as checkpointer:
+        for conversation_id in conversation_ids:
+            checkpoint = await checkpointer.load(conversation_id)
+            notice_ids: set[str] = set()
+            if checkpoint is not None:
+                for message in checkpoint.messages:
+                    metadata = getattr(message, "metadata", None)
+                    notice_id = metadata.get("notice_id") if isinstance(metadata, dict) else None
+                    if isinstance(notice_id, str):
+                        notice_ids.add(notice_id)
+            result[conversation_id] = frozenset(notice_ids)
+    return result
+
+
 def _plan(command: SandboxCommand) -> LegacyCommandPlan:
     if command.status in _ACTIVE and command.kind == SandboxCommandKind.monitor.value:
         return LegacyCommandPlan(
@@ -104,7 +129,11 @@ def _notifications_cancelled(
         not command.notify_on_complete
         or command.kind == SandboxCommandKind.monitor.value
         or command.lifetime == SandboxCommandLifetime.run.value
-        or command.status == SandboxCommandStatus.killed.value
+        or command.status
+        in (
+            SandboxCommandStatus.killed.value,
+            SandboxCommandStatus.not_started.value,
+        )
         or conversation.deleted_at is not None
         or conversation.execution_closed_at is not None
     )
@@ -180,8 +209,13 @@ def _event_state(
     wake: SandboxCommandWake,
     *,
     cancelled: bool,
+    checkpointed_notice_ids: Collection[str],
 ) -> tuple[BackgroundTaskEventState, str | None]:
-    if wake.state == SandboxCommandWakeState.delivered.value:
+    if (
+        wake.state == SandboxCommandWakeState.delivered.value
+        or wake.id in checkpointed_notice_ids
+        or (wake.reason == "completion" and command.id in checkpointed_notice_ids)
+    ):
         return BackgroundTaskEventState.delivered, None
     if command.kind == SandboxCommandKind.monitor.value:
         return BackgroundTaskEventState.discarded, "legacy_monitor_subscription"
@@ -196,6 +230,7 @@ async def _copy_wakes(
     command: SandboxCommand,
     task: BackgroundTask,
     cancelled: bool,
+    checkpointed_notice_ids: Collection[str],
 ) -> int:
     wakes = list(
         (
@@ -215,7 +250,12 @@ async def _copy_wakes(
             if existing.task_id != task.id:
                 raise RuntimeError(f"legacy notice id collision: {wake.id}")
             continue
-        state, discard_reason = _event_state(command, wake, cancelled=cancelled)
+        state, discard_reason = _event_state(
+            command,
+            wake,
+            cancelled=cancelled,
+            checkpointed_notice_ids=checkpointed_notice_ids,
+        )
         delivered = state == BackgroundTaskEventState.delivered
         session.add(
             BackgroundTaskEvent(
@@ -250,10 +290,11 @@ async def _copy_missing_completion(
     command: SandboxCommand,
     task: BackgroundTask,
     cancelled: bool,
+    checkpointed_notice_ids: Collection[str],
 ) -> int:
     if (
         command.kind != SandboxCommandKind.execute.value
-        or command.status != SandboxCommandStatus.exited.value
+        or command.status in _ACTIVE
         or command.notice_state != SandboxCommandNoticeState.pending.value
     ):
         return 0
@@ -270,7 +311,13 @@ async def _copy_missing_completion(
     )
     if existing is not None:
         return 0
-    state = BackgroundTaskEventState.discarded if cancelled else BackgroundTaskEventState.pending
+    delivered = command.id in checkpointed_notice_ids
+    if delivered:
+        state = BackgroundTaskEventState.delivered
+    elif cancelled:
+        state = BackgroundTaskEventState.discarded
+    else:
+        state = BackgroundTaskEventState.pending
     session.add(
         BackgroundTaskEvent(
             org_id=command.org_id,
@@ -283,7 +330,8 @@ async def _copy_missing_completion(
             summary=task.result_summary,
             result_ref=task.result_ref,
             state=state.value,
-            discard_reason="legacy_notification_revoked" if cancelled else None,
+            discard_reason=("legacy_notification_revoked" if cancelled and not delivered else None),
+            delivered_at=command.updated_at if delivered else None,
             created_at=command.updated_at,
             updated_at=command.updated_at,
         )
@@ -295,6 +343,7 @@ async def _migrate_one(
     session: AsyncSession,
     command: SandboxCommand,
     conversation: Conversation,
+    checkpointed_notice_ids: Collection[str],
 ) -> int:
     admission = await _admission_for(session, command, conversation)
     state = _task_state(command)
@@ -353,13 +402,17 @@ async def _migrate_one(
         command=command,
         task=task,
         cancelled=cancelled,
+        checkpointed_notice_ids=checkpointed_notice_ids,
     )
     completion = await _copy_missing_completion(
         session,
         command=command,
         task=task,
         cancelled=cancelled,
+        checkpointed_notice_ids=checkpointed_notice_ids,
     )
+    if command.status in _ACTIVE and command.start_requested_at is None:
+        command.start_requested_at = command.created_at
     command.task_id = task.id
     command.owner_id = None
     command.owner_until = None
@@ -373,6 +426,7 @@ async def migrate_legacy_commands(
     apply: bool,
     command_ids: tuple[str, ...] | None = None,
     limit: int | None = None,
+    checkpointed_notice_ids: Mapping[str, Collection[str]] | None = None,
 ) -> LegacyMigrationReport:
     """Plan or backfill legacy rows without committing the caller's transaction."""
     statement = (
@@ -396,10 +450,16 @@ async def migrate_legacy_commands(
     migrated = 0
     events_migrated = 0
     if apply:
+        checkpointed = checkpointed_notice_ids or {}
         by_id = {command.id: (command, conversation) for command, conversation in rows}
         for item in migratable:
             command, conversation = by_id[item.command_id]
-            events_migrated += await _migrate_one(session, command, conversation)
+            events_migrated += await _migrate_one(
+                session,
+                command,
+                conversation,
+                checkpointed.get(command.conversation_id, frozenset()),
+            )
             migrated += 1
         managed_statement = (
             select(SandboxCommand, Conversation, BackgroundTask)
@@ -417,6 +477,7 @@ async def migrate_legacy_commands(
                 command=command,
                 task=task,
                 cancelled=cancelled,
+                checkpointed_notice_ids=checkpointed.get(command.conversation_id, frozenset()),
             )
             events_migrated += copied
             events_migrated += await _copy_missing_completion(
@@ -424,6 +485,7 @@ async def migrate_legacy_commands(
                 command=command,
                 task=task,
                 cancelled=cancelled,
+                checkpointed_notice_ids=checkpointed.get(command.conversation_id, frozenset()),
             )
         await session.flush()
     return LegacyMigrationReport(
@@ -450,7 +512,12 @@ async def _main_async(*, apply: bool) -> int:
             if not acquired:
                 print("another background-task migration owns the database lock")
                 return 2
-        report = await migrate_legacy_commands(session, apply=apply)
+        checkpointed_notice_ids = await load_checkpointed_notice_ids(session) if apply else None
+        report = await migrate_legacy_commands(
+            session,
+            apply=apply,
+            checkpointed_notice_ids=checkpointed_notice_ids,
+        )
         output = {
             "mode": "apply" if apply else "dry-run",
             "migrated": report.migrated,
