@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox, SandboxError
 
@@ -10,6 +10,7 @@ from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox, Sandb
 @dataclass(frozen=True)
 class CommandObservation:
     snapshot: ProcessSnapshot | None
+    logs_read: bool = False
     error: str | None = None
 
 
@@ -34,21 +35,38 @@ class CommandAdapter:
                 snapshot = await self.sandbox.observe(handle)
         except (SandboxError, TimeoutError) as exc:
             errors.append(f"observe: {exc}")
-        if not stop_requested or (snapshot is not None and snapshot.status != "running"):
-            return CommandObservation(snapshot=snapshot, error="; ".join(errors) or None)
+        if stop_requested and (snapshot is None or snapshot.status == "running"):
+            await check_owner()
+            try:
+                async with asyncio.timeout(10):
+                    await self.sandbox.kill(handle)
+            except (SandboxError, TimeoutError) as exc:
+                errors.append(f"cancel: {exc}")
+            # Neither an interrupt receipt nor its failure proves the process exited.
+            await check_owner()
+            try:
+                async with asyncio.timeout(10):
+                    snapshot = await self.sandbox.observe(handle)
+            except (SandboxError, TimeoutError) as exc:
+                snapshot = None
+                errors.append(f"observe after cancel: {exc}")
+
+        if snapshot is None:
+            return CommandObservation(snapshot=None, error="; ".join(errors) or None)
 
         await check_owner()
         try:
             async with asyncio.timeout(10):
-                await self.sandbox.kill(handle)
+                output = await self.sandbox.read_output(handle)
+            return CommandObservation(
+                snapshot=replace(
+                    snapshot,
+                    new_output=output.new_output,
+                    log_cursor=output.log_cursor,
+                ),
+                logs_read=True,
+                error="; ".join(errors) or None,
+            )
         except (SandboxError, TimeoutError) as exc:
-            errors.append(f"cancel: {exc}")
-        # Neither an interrupt receipt nor its failure proves the process exited.
-        await check_owner()
-        try:
-            async with asyncio.timeout(10):
-                snapshot = await self.sandbox.observe(handle)
-        except (SandboxError, TimeoutError) as exc:
-            snapshot = None
-            errors.append(f"observe after cancel: {exc}")
-        return CommandObservation(snapshot=snapshot, error="; ".join(errors) or None)
+            errors.append(f"logs: {exc}")
+            return CommandObservation(snapshot=snapshot, error="; ".join(errors))

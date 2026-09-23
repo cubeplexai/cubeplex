@@ -50,6 +50,9 @@ def remote(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock, Async
     control.close = AsyncMock()
     raw = MagicMock()
     raw.close = AsyncMock()
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=SimpleNamespace(content="", cursor=None)
+    )
     connection = AsyncMock(return_value=raw)
     monkeypatch.setattr(opensandbox.SandboxManager, "create", AsyncMock(return_value=control))
     monkeypatch.setattr(opensandbox.Sandbox, "connect", connection)

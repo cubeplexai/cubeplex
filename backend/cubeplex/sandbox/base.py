@@ -66,6 +66,14 @@ class ProcessSnapshot:
 
 
 @dataclass
+class ProcessOutput:
+    """Unacknowledged output returned from a provider cursor."""
+
+    new_output: str = ""
+    log_cursor: str | None = None
+
+
+@dataclass
 class BrowserEndpoint:
     """Reachable endpoint for the sandbox's Neko browser live view.
 
@@ -171,6 +179,15 @@ class Sandbox(ABC):
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
         del handle
         raise SandboxError("this sandbox driver does not support background commands")
+
+    async def read_output(self, handle: ProcessHandle) -> ProcessOutput:
+        """Read output after ``handle.log_cursor`` without acknowledging it."""
+
+        snapshot = await self.poll(handle)
+        return ProcessOutput(
+            new_output=snapshot.new_output,
+            log_cursor=snapshot.log_cursor,
+        )
 
     async def kill(self, handle: ProcessHandle) -> None:
         del handle

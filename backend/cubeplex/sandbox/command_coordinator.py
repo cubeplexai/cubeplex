@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shlex
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -30,6 +29,7 @@ from cubeplex.models.sandbox_command import (
 )
 from cubeplex.repositories.sandbox_command import claim_expired_inflight
 from cubeplex.sandbox.base import ProcessHandle, Sandbox
+from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -353,7 +353,9 @@ async def _reconcile_row(
     )
     snap = await sandbox.poll(handle)
     if snap.new_output and row.log_path:
-        await _append_log(sandbox, row.log_path, snap.new_output)
+        appended = await _append_log(sandbox, row.log_path, snap.new_output)
+        if not appended.data_written:
+            return False
     if snap.log_cursor is not None:
         row.log_cursor = snap.log_cursor
     deadline_hit = row.monitor_deadline_at is not None and _as_utc(row.monitor_deadline_at) <= now
@@ -600,6 +602,7 @@ async def _terminalize(
     wake_text: str | None = None,
 ) -> bool:
     final_output = output
+    confirmed_cursor: str | None = None
     if interrupt and sandbox is not None and row.provider_ref:
         handle = ProcessHandle(
             command_id=row.id,
@@ -616,10 +619,13 @@ async def _terminalize(
             logger.warning("interrupt did not stop sandbox command {}", row.id)
             return False
         final_output += snap.new_output
-        if snap.log_cursor is not None:
-            row.log_cursor = snap.log_cursor
+        confirmed_cursor = snap.log_cursor
     if final_output and sandbox is not None and row.log_path:
-        await _append_log(sandbox, row.log_path, final_output)
+        appended = await _append_log(sandbox, row.log_path, final_output)
+        if not appended.data_written:
+            return False
+    if confirmed_cursor is not None:
+        row.log_cursor = confirmed_cursor
     row.status = status
     row.exit_code = exit_code
     row.finished_at = now
@@ -1071,24 +1077,7 @@ async def _finish_wake(
         await session.commit()
 
 
-async def _append_log(sandbox: Sandbox, path: str, text: str) -> None:
+async def _append_log(sandbox: Sandbox, path: str, text: str) -> AppendOutputResult:
     if not text:
-        return
-    chunk_path = f"{path}.append-{uuid.uuid4().hex}"
-    try:
-        parent = path.rsplit("/", 1)[0] or "."
-        await sandbox.upload([(chunk_path, text.encode())])
-        result = await sandbox.execute(
-            f"mkdir -p {shlex.quote(parent)} && "
-            f"cat {shlex.quote(chunk_path)} >> {shlex.quote(path)} && "
-            f"rm -f {shlex.quote(chunk_path)}",
-            timeout=30,
-        )
-        if result.exit_code not in (0, None):
-            raise RuntimeError(f"append exited with {result.exit_code}")
-    except Exception:
-        logger.exception("failed to append sandbox command log {}", path)
-        try:
-            await sandbox.execute(f"rm -f {shlex.quote(chunk_path)}", timeout=30)
-        except Exception:
-            logger.debug("failed to clean sandbox command log chunk {}", chunk_path)
+        return AppendOutputResult(data_written=True, cleanup_done=True)
+    return await append_output(sandbox, path, text)

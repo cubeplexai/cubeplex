@@ -191,14 +191,14 @@ async def test_pending_execute_notice_is_moved_to_wake_outbox(
 
 @pytest.mark.asyncio
 async def test_log_append_does_not_put_large_output_in_shell_command(tmp_path: Path) -> None:
-    path = tmp_path / "large.log"
+    path = tmp_path / ".cubeplex" / "execute-large.log"
     sandbox = LocalSandbox(workdir=str(tmp_path))
     output = "x" * 1_000_000
 
     await _append_log(sandbox, str(path), output)
 
     assert path.read_text() == output
-    assert list(path.parent.glob("large.log.append-*")) == []
+    assert list(path.parent.glob("*.append-*")) == []
 
 
 @pytest.mark.asyncio
@@ -292,10 +292,11 @@ async def test_kill_command_persists_final_output_cursor_and_monitor_wake(
     provider_ref = row.provider_ref
     assert provider_ref is not None
     row.log_cursor = "4"
-    row.log_path = "/tmp/monitor.log"
+    row.log_path = "/work/.cubeplex/execute-monitor.log"
     session.add(row)
     await session.commit()
     sandbox = MagicMock()
+    sandbox.workdir = "/work"
     sandbox.kill = AsyncMock()
     sandbox.poll = AsyncMock(
         return_value=ProcessSnapshot(

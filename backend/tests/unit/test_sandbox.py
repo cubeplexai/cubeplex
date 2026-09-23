@@ -971,7 +971,7 @@ async def test_auto_background_persists_consumed_log_cursor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
-    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+    from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
     sandbox = _make_sandbox()
@@ -985,7 +985,7 @@ async def test_auto_background_persists_consumed_log_cursor(
         )
     )
     sandbox.upload = AsyncMock()
-    sandbox.execute = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=ExecuteResult(output="", exit_code=0))
     persisted_cursors: list[tuple[str, str]] = []
 
     async def _persist_cursor(command_id: str, cursor: str) -> None:
@@ -1005,6 +1005,50 @@ async def test_auto_background_persists_consumed_log_cursor(
 
     assert isinstance(result.details, dict)
     assert persisted_cursors == [(result.details["command_id"], "17")]
+
+
+@pytest.mark.asyncio
+async def test_auto_background_does_not_ack_output_when_log_append_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+    from cubeplex.sandbox.log_io import AppendOutputResult
+
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
+    monkeypatch.setattr(
+        sandbox_mod,
+        "append_output",
+        AsyncMock(return_value=AppendOutputResult(data_written=False, cleanup_done=True)),
+    )
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(
+            status="running",
+            new_output="not durable yet\n",
+            log_cursor="17",
+        )
+    )
+    persisted_cursors: list[str] = []
+
+    async def _persist_cursor(_command_id: str, cursor: str) -> None:
+        persisted_cursors.append(cursor)
+
+    tool = _make_execute_tool(
+        sandbox,
+        live={},
+        persist_reserve=AsyncMock(return_value=True),
+        persist_running=AsyncMock(),
+        persist_cursor=_persist_cursor,
+    )
+    await tool.execute(
+        "tc-cursor-write-failure",
+        _ExecuteArgs(command="long command", description="Long command"),
+    )
+
+    assert persisted_cursors == []
 
 
 @pytest.mark.asyncio
@@ -1037,7 +1081,12 @@ async def test_background_deadline_persists_final_output_cursor_and_timeout(
     async def _persist_cursor(_command_id: str, cursor: str) -> None:
         cursors.append(cursor)
 
-    async def _persist_timed_out(_command_id: str, notify: bool) -> None:
+    async def _persist_timed_out(
+        _command_id: str,
+        notify: bool,
+        _snapshot: ProcessSnapshot,
+        _logs_confirmed: bool,
+    ) -> None:
         timeout_notices.append(notify)
         timed_out.set()
 
@@ -1089,7 +1138,12 @@ async def test_background_deadline_preserves_completion_notice_opt_out(
     timeout_notices: list[bool] = []
     persisted = asyncio.Event()
 
-    async def _persist_timed_out(_command_id: str, notify: bool) -> None:
+    async def _persist_timed_out(
+        _command_id: str,
+        notify: bool,
+        _snapshot: ProcessSnapshot,
+        _logs_confirmed: bool,
+    ) -> None:
         timeout_notices.append(notify)
         persisted.set()
 
@@ -1283,13 +1337,13 @@ async def test_log_append_does_not_put_large_output_in_shell_command(tmp_path: A
     from cubeplex.sandbox.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
-    path = tmp_path / "large.log"
+    path = tmp_path / ".cubeplex" / "execute-large.log"
     output = "x" * 1_000_000
 
     await _append_sandbox_log(sandbox, str(path), output)
 
     assert path.read_text() == output
-    assert list(tmp_path.glob("large.log.append-*")) == []
+    assert list((tmp_path / ".cubeplex").glob("*.append-*")) == []
 
 
 @pytest.mark.asyncio
