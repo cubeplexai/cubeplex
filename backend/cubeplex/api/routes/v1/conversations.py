@@ -20,6 +20,7 @@ from cubeplex.agents.schemas import AgentEvent
 from cubeplex.api.exceptions import InvalidInputError
 from cubeplex.api.schemas.conversations import (
     DeleteConversationResponse,
+    ExecutionGenerationResponse,
     InviteToGroupRequest,
     StopAllRequest,
     StopAllResponse,
@@ -1763,6 +1764,27 @@ async def list_messages(
         "oldest_seq": window.oldest_seq,
         "has_more": window.has_more,
     }
+
+
+@router.get(
+    "/{conversation_id}/execution-generation",
+    response_model=ExecutionGenerationResponse,
+)
+async def get_conversation_execution_generation(
+    conversation_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> ExecutionGenerationResponse:
+    """Read the durable Stop-all target without Redis or checkpointer dependencies."""
+    conversation = await ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    ).get_by_id(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return ExecutionGenerationResponse(execution_generation=conversation.execution_generation)
 
 
 @router.get("/{conversation_id}/bootstrap")

@@ -144,11 +144,17 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     setStoppingAll(true)
     try {
       await stopAllWork(client(), conversationId)
-      await refreshBackground(client(), conversationId)
     } catch {
       toast.error(t('stopAllFailed'))
+      return
     } finally {
       setStoppingAll(false)
+    }
+    try {
+      await refreshBackground(client(), conversationId)
+    } catch {
+      // The durable Stop-all request already succeeded. The polling loop will
+      // retry this display-only refresh without misreporting the stop itself.
     }
   }
 
