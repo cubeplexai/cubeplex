@@ -58,12 +58,16 @@ from cubeplex.repositories.steering_message import (
     SteeringMessageQueueFullError,
 )
 from cubeplex.services.avatar_store import resolve_avatar_url
+from cubeplex.services.background_task_query import BackgroundTaskQueryService
 from cubeplex.services.conversation_execution import (
     ConversationExecutionService,
     DirectExecutionResult,
     ExecutionConflictError,
     ExecutionRevokedError,
     UserMessageIntent,
+)
+from cubeplex.services.conversation_execution_status import (
+    ConversationExecutionStatusService,
 )
 from cubeplex.services.execution_signals import signal_stopped_runs
 from cubeplex.skills.cache import SkillCache
@@ -1838,6 +1842,7 @@ async def get_conversation_bootstrap(
 
     pending_req, persisted_run_id = pending_pair
     pending_hitl: dict[str, Any] | None = None
+    pending_run_id_for_bootstrap: str | None = None
     if pending_req is not None:
         # Run_id resolution order: Redis active-run (cheapest, hot path) first,
         # DB-persisted fallback for long-pause TTL recovery. When the stage-A
@@ -1868,6 +1873,7 @@ async def get_conversation_bootstrap(
             )
         else:
             pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
+            pending_run_id_for_bootstrap = run_id_for_pending
 
     last_run_error_payload: dict[str, Any] | None = None
     if last_run_error_raw is not None:
@@ -1906,6 +1912,37 @@ async def get_conversation_bootstrap(
         workspace_id=ctx.workspace_id,
     )
     pending_steering = await steering_repo.list_for_bootstrap(conversation_id)
+    background_query = BackgroundTaskQueryService(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    background_summary = await background_query.summary(conversation_id=conversation_id)
+    background_events = await background_query.list_events(
+        conversation_id=conversation_id,
+        delivery="pending",
+        cursor=None,
+        limit=50,
+    )
+    execution_status = ConversationExecutionStatusService(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    stop_all_status = await execution_status.stop_all_status(conversation=conversation)
+    control_run_id = active_run.run_id if active_run is not None else pending_run_id_for_bootstrap
+    if control_run_id is None:
+        control_run_id = await execution_status.latest_stopping_run_id(
+            conversation_id=conversation_id
+        )
+    run_control = (
+        await execution_status.run_status(
+            conversation_id=conversation_id,
+            run_id=control_run_id,
+        )
+        if control_run_id is not None
+        else None
+    )
 
     return {
         "messages": history.messages,
@@ -1917,6 +1954,61 @@ async def get_conversation_bootstrap(
         "last_run_error": last_run_error_payload,
         "usage_summary": usage_summary,
         "pending_hitl": pending_hitl,
+        "execution_generation": conversation.execution_generation,
+        "stop_all": (
+            None
+            if stop_all_status is None
+            else {
+                "requested_at": utc_isoformat(stop_all_status.requested_at),
+                "cleanup_pending": stop_all_status.cleanup_pending,
+            }
+        ),
+        "run_control": (
+            None
+            if run_control is None
+            else {
+                "run_id": run_control.run_id,
+                "stop_requested_at": (
+                    utc_isoformat(run_control.stop_requested_at)
+                    if run_control.stop_requested_at is not None
+                    else None
+                ),
+                "cleanup_pending": run_control.cleanup_pending,
+                "can_stop": run_control.can_stop,
+            }
+        ),
+        "background_summary": {
+            "has_inflight": background_summary.has_inflight,
+            "has_pending": background_summary.has_pending,
+            "has_cleanup": background_summary.has_cleanup,
+            "can_stop": background_summary.can_stop,
+        },
+        "background_events": {
+            "items": [
+                {
+                    "id": item.event.id,
+                    "task_id": item.event.task_id,
+                    "task_kind": item.task_kind,
+                    "execution_generation": item.event.execution_generation,
+                    "reason": item.event.reason,
+                    "summary": item.event.summary,
+                    "result_ref": item.event.result_ref,
+                    "state": item.event.state,
+                    "discard_reason": item.event.discard_reason,
+                    "revision": item.event.revision,
+                    "created_at": utc_isoformat(item.event.created_at),
+                    "updated_at": utc_isoformat(item.event.updated_at),
+                    "delivered_at": (
+                        utc_isoformat(item.event.delivered_at)
+                        if item.event.delivered_at is not None
+                        else None
+                    ),
+                }
+                for item in background_events.items
+            ],
+            "next_cursor": background_events.next_cursor,
+            "has_more": background_events.has_more,
+        },
         "pending_steers": [
             {
                 "steer_id": row.client_steer_id,
