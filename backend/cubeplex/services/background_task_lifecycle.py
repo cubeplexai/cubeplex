@@ -439,6 +439,37 @@ class BackgroundTaskLifecycle:
     async def request_task_stop(
         self, *, task_id: str, reason: TaskStopReason, now: datetime
     ) -> list[str]:
+        return await self._request_task_stop(
+            task_id=task_id,
+            reason=reason,
+            now=now,
+            include_descendants=True,
+        )
+
+    async def request_tasks_stop(
+        self, *, task_ids: list[str], reason: TaskStopReason, now: datetime
+    ) -> list[str]:
+        """Stop only the selected tasks, without crossing an environment boundary."""
+        selected: set[str] = set()
+        for task_id in dict.fromkeys(task_ids):
+            selected.update(
+                await self._request_task_stop(
+                    task_id=task_id,
+                    reason=reason,
+                    now=now,
+                    include_descendants=False,
+                )
+            )
+        return sorted(selected)
+
+    async def _request_task_stop(
+        self,
+        *,
+        task_id: str,
+        reason: TaskStopReason,
+        now: datetime,
+        include_descendants: bool,
+    ) -> list[str]:
         require_aware(now)
         conversation, _, _, _ = await self._lock_command_task(task_id)
         rows = list(
@@ -457,11 +488,12 @@ class BackgroundTaskLifecycle:
             ).scalars()
         )
         selected = {task_id}
-        while True:
-            children = {row.id for row in rows if row.parent_task_id in selected}
-            if children <= selected:
-                break
-            selected.update(children)
+        if include_descendants:
+            while True:
+                children = {row.id for row in rows if row.parent_task_id in selected}
+                if children <= selected:
+                    break
+                selected.update(children)
         for task in rows:
             if task.id not in selected:
                 continue

@@ -26,7 +26,10 @@ from sqlalchemy.pool import NullPool
 
 from cubeplex.db.engine import _build_database_url
 from cubeplex.models.user_sandbox import UserSandbox
-from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.repositories.user_sandbox import (
+    SandboxCleanupRequestedError,
+    UserSandboxRepository,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -493,6 +496,65 @@ async def test_claim_for_provisioning_does_not_look_expired_to_reaper(
     assert all(r.id != row.id for r in expired_after), (
         "in-flight revive must not be reaped as an expired orphan"
     )
+
+
+async def test_cleanup_request_fences_provisioning_and_keeps_late_instance_id(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    repo = _mk_repo(db_session, scope)
+    row = await _mk(
+        repo,
+        scope,
+        status="provisioning",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
+    requested_at = datetime.now(UTC)
+
+    assert await repo.request_cleanup(
+        row.id,
+        action="delete",
+        requested_at=requested_at,
+    )
+    await db_session.refresh(row)
+    assert row.status == "kill_pending"
+    assert row.cleanup_action == "delete"
+    assert row.cleanup_requested_at == requested_at
+
+    late_instance_id = f"late-{secrets.token_hex(8)}"
+    with pytest.raises(SandboxCleanupRequestedError, match="cleanup requested"):
+        await repo.set_sandbox_id(row.id, late_instance_id)
+    await db_session.refresh(row)
+    assert row.sandbox_id == late_instance_id
+    assert row.status == "kill_pending"
+
+    with pytest.raises(SandboxCleanupRequestedError, match="cleanup requested"):
+        await repo.promote_to_running(
+            row.id,
+            sandbox_id=late_instance_id,
+            image="img:new",
+        )
+    await db_session.refresh(row)
+    assert row.status == "kill_pending"
+    assert row.image == "img:latest"
+
+
+async def test_delete_request_upgrades_pending_restart_but_restart_cannot_reverse_delete(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    repo = _mk_repo(db_session, scope)
+    row = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
+    first = datetime.now(UTC)
+    second = first + timedelta(seconds=1)
+
+    assert await repo.request_cleanup(row.id, action="restart", requested_at=first)
+    assert await repo.request_cleanup(row.id, action="delete", requested_at=second)
+    assert not await repo.request_cleanup(row.id, action="restart", requested_at=second)
+
+    await db_session.refresh(row)
+    assert row.status == "kill_pending"
+    assert row.cleanup_action == "delete"
+    assert row.cleanup_requested_at == second
 
 
 async def test_list_expired_system_still_reaps_stuck_provisioning(

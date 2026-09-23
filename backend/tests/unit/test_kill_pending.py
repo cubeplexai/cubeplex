@@ -52,6 +52,7 @@ def _make_record(
     workspace_id: str = "ws-1",
     status: str = "running",
     last_activity_at: datetime | None = None,
+    cleanup_action: str | None = None,
 ) -> MagicMock:
     record = MagicMock()
     record.id = record_id
@@ -59,6 +60,9 @@ def _make_record(
     record.org_id = org_id
     record.workspace_id = workspace_id
     record.status = status
+    record.scope_type = "user"
+    record.scope_id = "user-1"
+    record.cleanup_action = cleanup_action
     record.last_activity_at = last_activity_at or datetime.now(UTC)
     return record
 
@@ -123,6 +127,40 @@ async def test_kill_connect_failure_marks_kill_pending() -> None:
 
     repo.mark_kill_pending.assert_called_once_with(record.id)
     repo.mark_terminated.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_is_finalized_only_after_provider_kill_succeeds() -> None:
+    mgr = _make_manager()
+    session = MagicMock()
+    repo = AsyncMock()
+    record = _make_record(cleanup_action="delete")
+    raw = AsyncMock()
+    raw.kill = AsyncMock()
+    raw.close = AsyncMock()
+
+    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
+        await mgr._kill_record(session, repo, record, mgr._build_connection_config())
+
+    repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
+    repo.soft_delete.assert_awaited_once_with(record.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_stays_visible_when_provider_kill_is_unconfirmed() -> None:
+    mgr = _make_manager()
+    session = MagicMock()
+    repo = AsyncMock()
+    record = _make_record(cleanup_action="delete")
+
+    with patch(
+        "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
+        side_effect=RuntimeError("provider unavailable"),
+    ):
+        await mgr._kill_record(session, repo, record, mgr._build_connection_config())
+
+    repo.mark_kill_pending.assert_awaited_once_with(record.id)
+    repo.soft_delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
