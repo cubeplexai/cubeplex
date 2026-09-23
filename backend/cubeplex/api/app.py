@@ -695,6 +695,7 @@ def create_app(
         admin_traces,
         artifacts_router,
         attachments_router,
+        background_tasks_router,
         conversation_search_router,
         conversations_router,
         mcp_oauth,
@@ -741,6 +742,7 @@ def create_app(
     # would otherwise swallow the literal `search` segment as an ID and 404.
     app.include_router(conversation_search_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
+    app.include_router(background_tasks_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(ws_artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
