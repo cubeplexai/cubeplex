@@ -92,6 +92,7 @@ export interface RunControlStatus {
 }
 
 export interface StopAllStatus {
+  execution_generation: number
   requested_at: string
   cleanup_pending: boolean
 }

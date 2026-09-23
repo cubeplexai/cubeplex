@@ -1959,6 +1959,7 @@ async def get_conversation_bootstrap(
             None
             if stop_all_status is None
             else {
+                "execution_generation": stop_all_status.execution_generation,
                 "requested_at": utc_isoformat(stop_all_status.requested_at),
                 "cleanup_pending": stop_all_status.cleanup_pending,
             }

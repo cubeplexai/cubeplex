@@ -51,6 +51,7 @@ function runningTask() {
   return {
     id: 'bgt-1',
     description: 'Build project',
+    execution_generation: 4,
     state: 'running',
     stop_requested_at: null,
     cleanup_pending: false,
@@ -80,6 +81,7 @@ describe('BackgroundTasks', () => {
       stopAllStatus: { 'conv-1': null },
       runControl: { 'conv-1': null },
       backgroundRefreshError: { 'conv-1': null },
+      executionGeneration: { 'conv-1': 4 },
       refreshBackground: mocks.refreshBackground,
       loadMessages: mocks.loadMessages,
       stopTask: mocks.stopTask,
@@ -159,6 +161,7 @@ describe('BackgroundTasks', () => {
       },
       stopAllStatus: {
         'conv-1': {
+          execution_generation: 4,
           requested_at: '2026-09-22T00:00:00+00:00',
           cleanup_pending: true,
         },
@@ -168,6 +171,27 @@ describe('BackgroundTasks', () => {
     render(<BackgroundTasks conversationId="conv-1" />)
 
     expect(screen.getByText('正在停止全部工作')).toBeInTheDocument()
+  })
+
+  it('does not let an older generation hide Stop all for newly admitted work', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [runningTask(), { ...runningTask(), id: 'bgt-new', execution_generation: 5 }],
+      },
+      stopAllStatus: {
+        'conv-1': {
+          execution_generation: 4,
+          requested_at: '2026-09-22T00:00:00+00:00',
+          cleanup_pending: true,
+        },
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
+    expect(screen.queryByText('正在停止全部工作')).not.toBeInTheDocument()
   })
 
   it('does not force a baseline bootstrap over a stream that starts during polling', async () => {

@@ -497,6 +497,66 @@ describe('messageStore background task state', () => {
     ])
   })
 
+  it('keeps a message appended during bootstrap after the persisted tail', async () => {
+    const older = {
+      id: 'message-older',
+      seq: 1,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'older' }],
+    }
+    const persisted = {
+      id: 'message-persisted',
+      seq: 10,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'persisted' }],
+    }
+    const appended = {
+      id: 'message-appended',
+      seq: 11,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'appended while loading' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [older] },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    let resolveBootstrap: ((value: unknown) => void) | null = null
+    vi.mocked(getConversationBootstrap).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveBootstrap = resolve
+        }) as never,
+    )
+
+    const loading = useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+    useMessageStore.setState({ messages: { 'conv-1': [older, appended] } })
+    resolveBootstrap?.({
+      messages: [persisted],
+      oldest_seq: 10,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    })
+    await loading
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([older, persisted, appended])
+  })
+
   it('does not let an older Stop response overwrite a newer task revision', async () => {
     const terminal = task({ revision: 8, state: 'cancelled' })
     const staleStop = task({ revision: 7, state: 'running', cleanup_pending: true })
@@ -538,7 +598,11 @@ describe('messageStore background task state', () => {
     expect(stopBackgroundTask).toHaveBeenCalledWith(fakeClient, 'conv-1', 'bgt-1')
     expect(stopAllConversationWork).toHaveBeenCalledWith(fakeClient, 'conv-1', 4)
     expect(useMessageStore.getState().backgroundTasks['conv-1'][0]).toEqual(stopped)
-    expect(useMessageStore.getState().stopAllStatus['conv-1']?.cleanup_pending).toBe(true)
+    expect(useMessageStore.getState().stopAllStatus['conv-1']).toEqual({
+      execution_generation: 4,
+      requested_at: expect.any(String),
+      cleanup_pending: true,
+    })
   })
 
   it('refreshes the execution generation before Stop all', async () => {
