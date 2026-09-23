@@ -131,6 +131,12 @@ def _plan(command: SandboxCommand) -> LegacyCommandPlan:
             action="block",
             reason="active legacy command lacks original sandbox instance evidence",
         )
+    if command.status in _ACTIVE and not command.provider_ref:
+        return LegacyCommandPlan(
+            command_id=command.id,
+            action="block",
+            reason="active legacy command lacks a recoverable provider process handle",
+        )
     return LegacyCommandPlan(
         command_id=command.id,
         action="migrate",

@@ -754,11 +754,11 @@ helm upgrade cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
 ```
 
 The maintenance Job stops on active legacy run-lifetime commands, monitors, or
-commands whose original sandbox instance was not recorded. Resolve or stop
-those items and rerun the same command. It preserves unknown provider handles
-instead of polling or killing the current sandbox by guesswork. Fresh installs
-and databases that already passed this cutover continue to use the normal
-one-command install/upgrade flow.
+commands whose original sandbox instance or provider process handle was not
+recorded. Resolve or stop those items and rerun the same command. It preserves
+unknown provider handles instead of polling or killing the current sandbox by
+guesswork. Fresh installs and databases that already passed this cutover
+continue to use the normal one-command install/upgrade flow.
 
 ### Uninstall
 

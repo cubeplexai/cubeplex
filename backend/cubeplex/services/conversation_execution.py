@@ -269,6 +269,65 @@ class ConversationExecutionService:
         )
         if admission is None:
             raise LookupError("execution admission not found")
+        return await self._stop_locked_admission(admission, now=now)
+
+    async def stop_recovered_run(
+        self,
+        *,
+        admission_id: str,
+        run_id: str,
+        now: datetime,
+    ) -> StoppedRun | None:
+        """Persist Stop for a stale run without reviving its former actor authority."""
+        require_aware(now)
+        location = (
+            await self.session.execute(
+                select(
+                    col(ConversationExecutionAdmission.conversation_id),
+                    col(ConversationExecutionAdmission.run_id),
+                ).where(
+                    col(ConversationExecutionAdmission.id) == admission_id,
+                    col(ConversationExecutionAdmission.org_id) == self.org_id,
+                    col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                )
+            )
+        ).one_or_none()
+        if location is None or location.run_id != run_id:
+            return None
+        conversation = await self.session.scalar(
+            select(Conversation)
+            .where(
+                col(Conversation.id) == location.conversation_id,
+                col(Conversation.org_id) == self.org_id,
+                col(Conversation.workspace_id) == self.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if conversation is None:
+            return None
+        admission = await self.session.scalar(
+            select(ConversationExecutionAdmission)
+            .where(
+                col(ConversationExecutionAdmission.id) == admission_id,
+                col(ConversationExecutionAdmission.org_id) == self.org_id,
+                col(ConversationExecutionAdmission.workspace_id) == self.workspace_id,
+                col(ConversationExecutionAdmission.conversation_id) == conversation.id,
+                col(ConversationExecutionAdmission.run_id) == run_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if admission is None:
+            return None
+        return await self._stop_locked_admission(admission, now=now)
+
+    async def _stop_locked_admission(
+        self,
+        admission: ConversationExecutionAdmission,
+        *,
+        now: datetime,
+    ) -> StoppedRun:
         admission.run_stop_requested_at = admission.run_stop_requested_at or now
         tasks = list(
             await self.session.scalars(
@@ -276,8 +335,8 @@ class ConversationExecutionService:
                 .where(
                     col(BackgroundTask.org_id) == self.org_id,
                     col(BackgroundTask.workspace_id) == self.workspace_id,
-                    col(BackgroundTask.conversation_id) == conversation_id,
-                    col(BackgroundTask.originating_run_id) == run_id,
+                    col(BackgroundTask.conversation_id) == admission.conversation_id,
+                    col(BackgroundTask.originating_run_id) == admission.run_id,
                     col(BackgroundTask.backgrounded_at).is_(None),
                 )
                 .order_by(col(BackgroundTask.id))
@@ -290,10 +349,14 @@ class ConversationExecutionService:
             task.notifications_cancelled_at = task.notifications_cancelled_at or now
             task.stop_reason = task.stop_reason or TaskStopReason.run_stop.value
             task.revision += 1
-        inputs_pending = await self._cancel_user_inputs(conversation_id, run_id=run_id)
+        assert admission.run_id is not None
+        inputs_pending = await self._cancel_user_inputs(
+            admission.conversation_id,
+            run_id=admission.run_id,
+        )
         await self.session.flush()
         return StoppedRun(
-            run_id,
+            admission.run_id,
             True,
             admission.run_finished_at is None
             or any(task.state in INFLIGHT_TASK_STATES for task in tasks)
