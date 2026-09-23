@@ -236,6 +236,28 @@ async def test_list_is_read_only_and_terminal_rows_require_explicit_ids(
     assert inflight.task.owner_token == original_owner
 
 
+async def test_list_discovers_terminal_tasks_while_log_cleanup_is_pending(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+) -> None:
+    client, workspace_id = authenticated_client
+    item = await api_task_context.reserve(db_session)
+    item.task.state = BackgroundTaskState.succeeded.value
+    item.task.finished_at = NOW
+    item.command.status = "exited"
+    item.command.exit_code = 0
+    item.command.log_state = "retrying"
+    item.command.finished_at = NOW
+    await db_session.commit()
+
+    response = await client.get(task_path(workspace_id, item.task.conversation_id))
+
+    assert response.status_code == 200, response.text
+    assert [row["id"] for row in response.json()["items"]] == [item.task.id]
+    assert response.json()["items"][0]["cleanup_pending"] is True
+
+
 async def test_stop_returns_unconfirmed_then_preserves_terminal_fact(
     authenticated_client: tuple[httpx.AsyncClient, str],
     db_session: AsyncSession,
