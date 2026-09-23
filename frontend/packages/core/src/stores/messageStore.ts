@@ -2047,12 +2047,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
       )
       const derivedSummary: BackgroundTaskSummary = {
+        // The unfiltered task query is the authoritative actionable set: it
+        // includes every in-flight task, pending notification, and cleanup
+        // row even when that task's event is older than the first event page.
+        // Fresh event/detail reads also cover work created between the two
+        // concurrent snapshot requests.
         has_inflight: mergedTasks.some((task) =>
           ['starting', 'running', 'waiting_input', 'unknown'].includes(task.state),
         ),
-        has_pending: refreshedEvents.some(
-          (event) => event.state === 'pending' || event.state === 'claimed',
-        ),
+        has_pending:
+          inflight.some((task) => task.notification.has_pending) ||
+          refreshedEvents.some((event) => event.state === 'pending' || event.state === 'claimed'),
         has_cleanup: mergedTasks.some((task) => task.cleanup_pending),
         can_stop: mergedTasks.some((task) => task.capabilities.can_stop),
       }
@@ -2129,18 +2134,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                     Boolean(state.backgroundSummary[conversationId]?.can_stop),
                 }
               : {
-                  has_inflight:
-                    derivedSummary.has_inflight ||
-                    (boundedIds.length >= 100 &&
-                      Boolean(state.backgroundSummary[conversationId]?.has_inflight)),
-                  has_pending:
-                    derivedSummary.has_pending ||
-                    (eventPage.has_more &&
-                      Boolean(state.backgroundSummary[conversationId]?.has_pending)),
+                  has_inflight: derivedSummary.has_inflight,
+                  has_pending: derivedSummary.has_pending,
                   has_cleanup: derivedSummary.has_cleanup,
-                  can_stop:
-                    derivedSummary.can_stop ||
-                    (eventPage.has_more && Boolean(startingSummary?.can_stop)),
+                  can_stop: derivedSummary.can_stop,
                 },
         },
         refreshingBackground: withoutConversationFlag(state.refreshingBackground, conversationId),
