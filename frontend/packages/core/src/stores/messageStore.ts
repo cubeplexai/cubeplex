@@ -919,6 +919,24 @@ function hydrateCitationsFromHistory(conversationId: string, messages: Message[]
   }
 }
 
+function toolResultsFromHistory(messages: Message[]): MessageStore['toolResultMap'] {
+  const results: MessageStore['toolResultMap'] = {}
+  for (const message of messages) {
+    if (message.role !== 'tool_result' || !message.tool_call_id) continue
+    const timing = toolTimingFromDetails(message.details)
+    results[message.tool_call_id] = {
+      content: message.content
+        .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+        .map((block) => block.text)
+        .join(''),
+      receivedAt: timing.receivedAt ?? (message.timestamp ?? 0) * 1000,
+      startedAt: timing.startedAt,
+      details: message.details,
+    }
+  }
+  return results
+}
+
 /**
  * Batched state updater: collects multiple set() calls within a single microtask
  * and flushes them as one Zustand update. This prevents N SSE events arriving in
@@ -2394,23 +2412,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const nextError =
           seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
 
-        // Restore toolResultMap from history so tool preview panels remain
-        // interactive on reload (e.g. edit diff, write completed state).
-        const restoredToolResultMap: MessageStore['toolResultMap'] = {}
-        for (const msg of messages) {
-          if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
-          const timing = toolTimingFromDetails(msg.details)
-          restoredToolResultMap[msg.tool_call_id] = {
-            content: msg.content
-              .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
-              .map((b) => b.text)
-              .join(''),
-            receivedAt: timing.receivedAt ?? (msg.timestamp ?? 0) * 1000,
-            startedAt: timing.startedAt,
-            details: msg.details,
-          }
-        }
-
         const injectedHistorySteerIds = new Set(
           messages.flatMap((message) => {
             const steerId = message.role === 'user' ? message.metadata?.steer_id : undefined
@@ -2528,7 +2529,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             },
             runLifecycle: { ...s.runLifecycle, [conversationId]: lifecycle },
             toolStartedMap: {},
-            toolResultMap: restoredToolResultMap,
+            // A periodic baseline refresh returns only the newest page. Build
+            // this map from the merged history so older loaded tool cards keep
+            // their result state and previews.
+            toolResultMap: toolResultsFromHistory(nextMessages),
             // When `skipSeed` fired (we just answered this exact question),
             // preserve the current pendingAsk / pendingConfirmMap
             // instead of clearing them. The form stays mounted in its
