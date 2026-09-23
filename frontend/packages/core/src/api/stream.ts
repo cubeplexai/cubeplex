@@ -21,19 +21,41 @@ export interface SendMessageRequest {
 }
 
 export interface CancelRunResponse {
-  status: 'cancelled' | 'published' | 'no_active_run'
-  run_id: string | null
+  run_id: string
+  accepted: boolean
+  cleanup_pending: boolean
 }
 
 export async function cancelActiveRun(
   client: ApiClient,
   conversationId: string,
+  runId: string,
 ): Promise<CancelRunResponse> {
-  const res = await client.post(`/api/v1/conversations/${conversationId}/cancel`, {})
+  const res = await client.post(`/api/v1/conversations/${conversationId}/cancel`, {
+    run_id: runId,
+  })
   if (!res.ok) {
     throw await toApiError(res)
   }
   return (await res.json()) as CancelRunResponse
+}
+
+export interface StopAllResponse {
+  execution_generation: number
+  accepted: boolean
+  cleanup_pending: boolean
+}
+
+export async function stopAllConversationWork(
+  client: ApiClient,
+  conversationId: string,
+  executionGeneration: number,
+): Promise<StopAllResponse> {
+  const res = await client.post(`/api/v1/conversations/${conversationId}/stop-all`, {
+    execution_generation: executionGeneration,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as StopAllResponse
 }
 
 export interface SteerRunResponse {

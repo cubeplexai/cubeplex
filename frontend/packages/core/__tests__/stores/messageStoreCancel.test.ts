@@ -6,7 +6,9 @@ vi.mock('../../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/api')>()
   return {
     ...actual,
-    cancelActiveRun: vi.fn().mockResolvedValue({ status: 'cancelled', run_id: 'r1' }),
+    cancelActiveRun: vi
+      .fn()
+      .mockResolvedValue({ run_id: 'r1', accepted: true, cleanup_pending: true }),
     getConversationBootstrap: vi.fn(),
   }
 })
@@ -44,6 +46,16 @@ function idleBootstrap() {
     active_run: null,
     pending_hitl: null,
     last_run_status: null,
+    execution_generation: 0,
+    stop_all: null,
+    run_control: null,
+    background_summary: {
+      has_inflight: false,
+      has_pending: false,
+      has_cleanup: false,
+      can_stop: false,
+    },
+    background_events: { items: [], next_cursor: null, has_more: false },
   }
 }
 
@@ -93,6 +105,7 @@ describe('messageStore.cancelStream', () => {
     expect(msgs[0].stop_reason).toBe('aborted')
     expect(msgs[0].content).toEqual([{ type: 'text', text: 'partial answer' }])
     expect(cancelActiveRun).toHaveBeenCalledOnce()
+    expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'r1')
   })
 
   it('does not append an empty bubble when nothing was streamed', async () => {
@@ -197,7 +210,7 @@ describe('messageStore.cancelStream', () => {
     let resolveCancel: (() => void) | undefined
     vi.mocked(cancelActiveRun).mockReturnValueOnce(
       new Promise((resolve) => {
-        resolveCancel = () => resolve({ status: 'cancelled', run_id: 'r1' })
+        resolveCancel = () => resolve({ run_id: 'r1', accepted: true, cleanup_pending: true })
       }),
     )
     seedStreaming('conv-a', {})

@@ -102,21 +102,22 @@ already recorded in history stays there. This differs from answering or denying
 a confirmation, which can let the agent continue. A successful Stop request
 means cleanup was accepted; the composer waits for the server to confirm it is idle.
 
-The new background-task lifecycle is still being introduced and is not enabled yet.
-Its control service distinguishes stopping a named response from stopping all work
-in the conversation: work already handed to the background keeps running after that
-response is stopped, while unhanded foreground work cannot escape cancellation by
-moving to the background afterward. The staged API requires the response's run ID
-for Stop and the execution generation for Stop all, so retrying an old request cannot
-stop newer work. A 202 response confirms durable acceptance, not completed cleanup.
-For an admitted response paused on a question, a persisted Stop is retried after a
-worker restart or temporary control-channel failure, even if its Redis pause record
-expires. Recovery only finishes cleanup; it never asks the model to continue.
-When a question is already cleared and its run is checkpointed as finished,
-recovery can also retry interrupted cleanup while preserving an existing success,
-failure or cancellation result. A failed release keeps cleanup marked pending.
-The complete new buttons and recovery for other interruption states still require
-the coordinated lifecycle cutover described in [Sandboxes](./sandboxes.md).
+Stopping the current response and stopping background work are separate actions.
+The main **Stop** button targets only the response whose Run ID is shown in the
+conversation. Work that was already handed to the background continues, and its
+status appears in the **Background work** area above the composer. Use **Stop task**
+for one item, or **Stop all** when you intend to stop the current response and all
+background work that belongs to the conversation.
+
+A successful Stop request means CubePlex durably accepted it; remote cleanup may
+still be in progress. The UI keeps showing **Stopping** until the execution provider
+confirms the result. Stop requests carry the run ID or conversation execution
+generation, so retrying an old request cannot stop work that started later.
+
+Background results appear as compact system events in the timeline, separate from
+messages you send while steering a response. A task or monitor produces at most one
+final event: success, failure, cancellation, or timeout. See
+[Sandboxes](./sandboxes.md) for command deadlines and recovery behavior.
 
 ## Managing conversations
 

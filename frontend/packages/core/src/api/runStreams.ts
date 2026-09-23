@@ -1,4 +1,10 @@
 import type { AgentEvent, Message, PendingHitl, TodoItem } from '../types'
+import type {
+  BackgroundTaskEventPage,
+  BackgroundTaskSummary,
+  RunControlStatus,
+  StopAllStatus,
+} from '../types/background-task'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 
@@ -70,6 +76,11 @@ export interface ConversationBootstrap extends HistoryWindowPage {
     state: 'queued' | 'dispatched' | 'failed'
     created_at: string
   }>
+  execution_generation: number
+  stop_all: StopAllStatus | null
+  run_control: RunControlStatus | null
+  background_summary: BackgroundTaskSummary
+  background_events: BackgroundTaskEventPage
 }
 
 export interface StartRunResponse {

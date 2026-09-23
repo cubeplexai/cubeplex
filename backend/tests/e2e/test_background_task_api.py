@@ -134,6 +134,20 @@ def task_path(workspace_id: str, conversation_id: str) -> str:
     return f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/background-tasks"
 
 
+async def test_legacy_sandbox_command_control_route_is_removed(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    api_task_context: ApiTaskContext,
+) -> None:
+    client, workspace_id = authenticated_client
+    conversation_id = api_task_context.conversation.id
+
+    response = await client.get(
+        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/sandbox-commands"
+    )
+
+    assert response.status_code == 404
+
+
 async def test_list_is_read_only_and_terminal_rows_require_explicit_ids(
     authenticated_client: tuple[httpx.AsyncClient, str],
     db_session: AsyncSession,
@@ -299,20 +313,20 @@ async def test_event_cursor_is_stable_filtered_and_bound_to_conversation(
 
     first = await client.get(path, params={"limit": 1})
     assert first.status_code == 200, first.text
-    assert [event["summary"] for event in first.json()["items"]] == ["result 0"]
+    assert [event["summary"] for event in first.json()["items"]] == ["result 2"]
     assert first.json()["has_more"] is True
     cursor = first.json()["next_cursor"]
     second = await client.get(path, params={"limit": 1, "cursor": cursor})
     assert second.status_code == 200, second.text
-    assert [event["summary"] for event in second.json()["items"]] == ["result 2"]
+    assert [event["summary"] for event in second.json()["items"]] == ["result 0"]
     assert second.json()["has_more"] is False
 
     all_events = await client.get(path, params={"delivery": "all"})
     assert all_events.status_code == 200, all_events.text
     assert [event["summary"] for event in all_events.json()["items"]] == [
-        "result 0",
-        "result 1",
         "result 2",
+        "result 1",
+        "result 0",
     ]
     mismatched_filter = await client.get(path, params={"delivery": "all", "cursor": cursor})
     assert mismatched_filter.status_code == 422
