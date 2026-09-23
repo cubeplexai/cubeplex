@@ -153,7 +153,7 @@ def _task_state(command: SandboxCommand) -> BackgroundTaskState:
         return BackgroundTaskState.cancelled
     if command.status == SandboxCommandStatus.exited.value:
         if command.exit_code is None:
-            return BackgroundTaskState.unknown
+            return BackgroundTaskState.failed
         return (
             BackgroundTaskState.succeeded if command.exit_code == 0 else BackgroundTaskState.failed
         )
@@ -163,18 +163,18 @@ def _task_state(command: SandboxCommand) -> BackgroundTaskState:
 def _notifications_cancelled(
     command: SandboxCommand,
     conversation: Conversation,
+    admission: ConversationExecutionAdmission,
 ) -> bool:
     return bool(
         not command.notify_on_complete
         or command.kind == SandboxCommandKind.monitor.value
         or command.lifetime == SandboxCommandLifetime.run.value
-        or command.status
-        in (
-            SandboxCommandStatus.killed.value,
-            SandboxCommandStatus.not_started.value,
-        )
+        or command.status in (SandboxCommandStatus.not_started.value,)
         or conversation.deleted_at is not None
         or conversation.execution_closed_at is not None
+        or admission.execution_generation != conversation.execution_generation
+        or admission.revoked_at is not None
+        or admission.run_stop_requested_at is not None
     )
 
 
@@ -194,6 +194,8 @@ def _summary(command: SandboxCommand, state: BackgroundTaskState) -> str:
     if state == BackgroundTaskState.succeeded:
         return "Legacy command completed successfully."
     if state == BackgroundTaskState.failed:
+        if command.exit_code is None:
+            return "Legacy command exited, but its status was unavailable."
         return f"Legacy command exited with status {command.exit_code}."
     if state == BackgroundTaskState.cancelled:
         return "Legacy command was stopped."
@@ -219,6 +221,20 @@ async def _admission_for(
     ).scalar_one_or_none()
     if existing is not None:
         return existing
+    run_admission = await session.scalar(
+        select(ConversationExecutionAdmission)
+        .where(
+            col(ConversationExecutionAdmission.org_id) == command.org_id,
+            col(ConversationExecutionAdmission.workspace_id) == command.workspace_id,
+            col(ConversationExecutionAdmission.conversation_id) == command.conversation_id,
+            col(ConversationExecutionAdmission.actor_user_id) == command.started_by_user_id,
+            col(ConversationExecutionAdmission.run_id) == command.run_id,
+        )
+        .order_by(col(ConversationExecutionAdmission.id))
+        .limit(1)
+    )
+    if run_admission is not None:
+        return run_admission
     terminal = command.finished_at or command.updated_at
     admission = ConversationExecutionAdmission(
         org_id=command.org_id,
@@ -227,17 +243,18 @@ async def _admission_for(
         actor_user_id=command.started_by_user_id,
         source_kind=ExecutionSourceKind.background_task.value,
         source_id=source_id,
-        execution_generation=conversation.execution_generation,
+        execution_generation=0,
         run_id=command.run_id,
         run_start_requested_at=command.created_at,
         run_started_at=command.created_at,
         run_finished_at=terminal if command.status not in _ACTIVE else None,
         run_terminal_status=("completed" if command.status not in _ACTIVE else None),
         run_terminal_at=terminal if command.status not in _ACTIVE else None,
-        revoked_at=(terminal if _notifications_cancelled(command, conversation) else None),
         created_at=command.created_at,
         updated_at=command.updated_at,
     )
+    if _notifications_cancelled(command, conversation, admission):
+        admission.revoked_at = terminal
     session.add(admission)
     await session.flush()
     return admission
@@ -474,7 +491,7 @@ async def _migrate_one(
 ) -> int:
     admission = await _admission_for(session, command, conversation)
     state = _task_state(command)
-    cancelled = _notifications_cancelled(command, conversation)
+    cancelled = _notifications_cancelled(command, conversation, admission)
     terminal = command.finished_at or command.updated_at
     readiness = _result_readiness(command, state)
     stopped = (
@@ -491,7 +508,7 @@ async def _migrate_one(
         tool_call_id=command.tool_call_id or f"legacy:{command.id}",
         agent_id=command.agent_id,
         started_by_user_id=command.started_by_user_id,
-        execution_generation=conversation.execution_generation,
+        execution_generation=admission.execution_generation,
         state=state.value,
         notify_on_complete=command.notify_on_complete,
         deadline_at=command.monitor_deadline_at,
@@ -598,7 +615,10 @@ async def migrate_legacy_commands(
             managed_statement = managed_statement.where(col(SandboxCommand.id).in_(command_ids))
         managed_rows = list((await session.execute(managed_statement)).all())
         for command, conversation, task in managed_rows:
-            cancelled = _notifications_cancelled(command, conversation)
+            admission = await session.get(ConversationExecutionAdmission, task.admission_id)
+            if admission is None:
+                raise RuntimeError(f"background task admission is missing: {task.id}")
+            cancelled = _notifications_cancelled(command, conversation, admission)
             copied = await _copy_wakes(
                 session,
                 command=command,
