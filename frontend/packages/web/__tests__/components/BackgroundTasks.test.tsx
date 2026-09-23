@@ -151,6 +151,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(30_000)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
     })
   })

@@ -350,6 +350,53 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundEventCursor['conv-1']).toBeNull()
   })
 
+  it('preserves an expanded message window during a bootstrap baseline refresh', async () => {
+    const older = {
+      id: 'message-older',
+      seq: 1,
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'older' }],
+    }
+    const newest = {
+      id: 'message-newest',
+      seq: 400,
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'newest' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [older, newest] },
+      oldestSeqByConv: { 'conv-1': 1 },
+      hasMoreByConv: { 'conv-1': true },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [newest],
+      oldest_seq: 350,
+      has_more: true,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([older, newest])
+    expect(useMessageStore.getState().oldestSeqByConv['conv-1']).toBe(1)
+    expect(useMessageStore.getState().hasMoreByConv['conv-1']).toBe(true)
+  })
+
   it('does not let an older Stop response overwrite a newer task revision', async () => {
     const terminal = task({ revision: 8, state: 'cancelled' })
     const staleStop = task({ revision: 7, state: 'running', cleanup_pending: true })
