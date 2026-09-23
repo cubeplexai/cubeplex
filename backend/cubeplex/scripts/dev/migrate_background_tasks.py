@@ -269,6 +269,44 @@ def _reconcile_event_state(
     state: BackgroundTaskEventState,
     discard_reason: str | None,
 ) -> bool:
+    if (
+        state == BackgroundTaskEventState.pending
+        and event.state
+        in (
+            BackgroundTaskEventState.pending.value,
+            BackgroundTaskEventState.claimed.value,
+        )
+        and event.delivery_attempt_id is None
+    ):
+        changed = (
+            any(
+                value is not None
+                for value in (
+                    event.discard_reason,
+                    event.owner_token,
+                    event.owner_until,
+                    event.delivery_run_id,
+                    event.delivery_input_id,
+                    event.checkpoint_run_id,
+                    event.checkpoint_input_id,
+                    event.delivered_at,
+                )
+            )
+            or event.state != BackgroundTaskEventState.pending.value
+        )
+        if not changed:
+            return False
+        event.state = BackgroundTaskEventState.pending.value
+        event.discard_reason = None
+        event.owner_token = None
+        event.owner_until = None
+        event.delivery_run_id = None
+        event.delivery_input_id = None
+        event.checkpoint_run_id = None
+        event.checkpoint_input_id = None
+        event.delivered_at = None
+        event.revision += 1
+        return True
     if state == BackgroundTaskEventState.delivered:
         if event.state == BackgroundTaskEventState.delivered.value:
             return False
@@ -334,6 +372,7 @@ async def _copy_wakes(
             )
             continue
         delivered = state == BackgroundTaskEventState.delivered
+        claimable = state == BackgroundTaskEventState.pending
         session.add(
             BackgroundTaskEvent(
                 id=wake.id,
@@ -348,8 +387,8 @@ async def _copy_wakes(
                 result_ref=task.result_ref,
                 state=state.value,
                 discard_reason=discard_reason,
-                delivery_run_id=wake.delivery_run_id,
-                delivery_input_id=wake.delivery_steer_id,
+                delivery_run_id=None if claimable else wake.delivery_run_id,
+                delivery_input_id=None if claimable else wake.delivery_steer_id,
                 checkpoint_run_id=wake.delivery_run_id if delivered else None,
                 checkpoint_input_id=wake.delivery_steer_id if delivered else None,
                 delivered_at=wake.updated_at if delivered else None,
