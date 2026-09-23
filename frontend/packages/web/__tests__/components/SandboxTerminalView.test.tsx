@@ -105,9 +105,14 @@ describe('SandboxTerminalView', () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ accepted: true, cleanup_pending: true }),
+        json: async () => [],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, cleanup_pending: true, task: {} }),
       } as Response)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as Response)
 
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Stop dev server' }))
@@ -115,6 +120,37 @@ describe('SandboxTerminalView', () => {
     await vi.waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         '/api/v1/ws/ws-1/conversations/conv-1/background-tasks/btask-1/stop',
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+  })
+
+  it('keeps pre-cutover commands visible and stoppable through the legacy route', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            id: 'legacy-1',
+            description: 'legacy server',
+            started_at: new Date().toISOString(),
+          },
+        ],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 'legacy-1', status: 'killed' }),
+      } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as Response)
+
+    render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop legacy server' }))
+
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/ws/ws-1/conversations/conv-1/sandbox-commands/legacy-1/kill',
         expect.objectContaining({ method: 'POST' }),
       )
     })

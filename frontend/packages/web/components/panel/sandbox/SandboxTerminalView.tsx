@@ -12,6 +12,15 @@ import { cn } from '@/lib/utils'
 
 const KEEPALIVE_MS = 30_000
 
+interface LegacyCommand {
+  id: string
+  description: string
+  started_at: string
+}
+
+type RunningWork =
+  { source: 'task'; task: BackgroundTask } | { source: 'legacy'; command: LegacyCommand }
+
 interface SandboxTerminalViewProps {
   workspaceId: string
   conversationId?: string | null
@@ -113,16 +122,35 @@ function RunningCommandList({
   workspaceId: string
   conversationId: string
 }) {
-  const [rows, setRows] = useState<BackgroundTask[]>([])
+  const [rows, setRows] = useState<RunningWork[]>([])
   const [stopping, setStopping] = useState<string | null>(null)
   const load = useCallback(async () => {
     const client = createApiClient('')
     client.setWorkspaceId(workspaceId)
+    const next: RunningWork[] = []
+    let loaded = false
     try {
-      setRows(await listBackgroundTasks(client, conversationId))
+      const tasks = await listBackgroundTasks(client, conversationId)
+      next.push(...tasks.map((task) => ({ source: 'task' as const, task })))
+      loaded = true
     } catch {
       // Keep the last durable snapshot visible through a transient refresh failure.
     }
+    try {
+      const response = await fetch(
+        `/api/v1/ws/${workspaceId}/conversations/${conversationId}/sandbox-commands`,
+        { credentials: 'include' },
+      )
+      if (response.ok) {
+        const body: unknown = await response.json()
+        const legacy = Array.isArray(body) ? (body as LegacyCommand[]) : []
+        next.push(...legacy.map((command) => ({ source: 'legacy' as const, command })))
+        loaded = true
+      }
+    } catch {
+      // The migration-only endpoint disappears after cutover; managed tasks stay available.
+    }
+    if (loaded) setRows(next)
   }, [workspaceId, conversationId])
 
   useEffect(() => {
@@ -134,12 +162,22 @@ function RunningCommandList({
     }
   }, [load])
 
-  const stop = async (taskId: string) => {
-    setStopping(taskId)
+  const stop = async (row: RunningWork) => {
+    const id = row.source === 'task' ? row.task.id : row.command.id
+    setStopping(id)
     try {
-      const client = createApiClient('')
-      client.setWorkspaceId(workspaceId)
-      await stopBackgroundTask(client, conversationId, taskId)
+      if (row.source === 'task') {
+        const client = createApiClient('')
+        client.setWorkspaceId(workspaceId)
+        await stopBackgroundTask(client, conversationId, row.task.id)
+      } else {
+        const response = await fetch(
+          `/api/v1/ws/${workspaceId}/conversations/${conversationId}` +
+            `/sandbox-commands/${row.command.id}/kill`,
+          { method: 'POST', credentials: 'include', headers: csrfHeaders() },
+        )
+        if (!response.ok) return
+      }
       await load()
     } finally {
       setStopping(null)
@@ -149,25 +187,37 @@ function RunningCommandList({
   if (rows.length === 0) return null
   return (
     <ul className="border-b border-border bg-muted/40 px-3 py-2 text-xs">
-      {rows.map((row) => (
-        <li key={row.id} className="flex items-center justify-between gap-2 py-0.5">
-          <span className="min-w-0 truncate">
-            {row.description || row.id}
-            <span className="ml-1 text-muted-foreground">· {formatElapsed(row.created_at)}</span>
-          </span>
-          <Button
-            type="button"
-            className="shrink-0"
-            variant="destructive"
-            size="xs"
-            aria-label={`Stop ${row.description || row.id}`}
-            disabled={stopping === row.id || row.stop_requested_at !== null}
-            onClick={() => void stop(row.id)}
+      {rows.map((row) => {
+        const item = row.source === 'task' ? row.task : row.command
+        const stopRequested = row.source === 'task' && row.task.stop_requested_at !== null
+        return (
+          <li
+            key={`${row.source}:${item.id}`}
+            className="flex items-center justify-between gap-2 py-0.5"
           >
-            {stopping === row.id || row.stop_requested_at !== null ? 'Stopping…' : 'Stop'}
-          </Button>
-        </li>
-      ))}
+            <span className="min-w-0 truncate">
+              {item.description || item.id}
+              <span className="ml-1 text-muted-foreground">
+                ·{' '}
+                {formatElapsed(
+                  row.source === 'task' ? row.task.created_at : row.command.started_at,
+                )}
+              </span>
+            </span>
+            <Button
+              type="button"
+              className="shrink-0"
+              variant="destructive"
+              size="xs"
+              aria-label={`Stop ${item.description || item.id}`}
+              disabled={stopping === item.id || stopRequested}
+              onClick={() => void stop(row)}
+            >
+              {stopping === item.id || stopRequested ? 'Stopping…' : 'Stop'}
+            </Button>
+          </li>
+        )
+      })}
     </ul>
   )
 }

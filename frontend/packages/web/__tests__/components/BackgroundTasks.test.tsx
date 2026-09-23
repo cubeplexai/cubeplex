@@ -119,4 +119,14 @@ describe('BackgroundTasks', () => {
     expect(screen.getByText('正在停止')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
+
+  it('does not force a baseline bootstrap over a stream that starts during polling', async () => {
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      preserveOtherConversationStream: true,
+    })
+  })
 })
