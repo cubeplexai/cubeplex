@@ -353,8 +353,11 @@ class SandboxManager:
                     if exc.status_code == 404:
                         raise SandboxInstanceGoneError(instance_id) from exc
                     raise
-                if info.status.state != "Running":
-                    raise SandboxError(f"original sandbox instance is {info.status.state}")
+                provider_state = info.status.state
+                if provider_state in ("Failed", "Terminated", "Succeed"):
+                    raise SandboxInstanceGoneError(instance_id)
+                if provider_state != "Running":
+                    raise SandboxError(f"original sandbox instance is {provider_state}")
             # An endpoint/command 404 is not proof the instance itself is gone.
             async with asyncio.timeout(10):
                 raw = await opensandbox.Sandbox.connect(
