@@ -49,7 +49,7 @@ Namespace: cubeplex
 │    /*                → frontend Service:3000                 │
 ├───────────────────────────────────────────────────────────────┤
 │  backend Deployment (1 replica)                               │
-│    initContainer: wait for postgres, run `alembic upgrade`    │
+│    initContainer: wait for postgres, verify schema cutover    │
 │    container:     uvicorn (cubeplex.api.app:create_app)        │
 │    mounts: ConfigMap (non-secret) + Secret (secret)           │
 ├───────────────────────────────────────────────────────────────┤
@@ -726,6 +726,38 @@ helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
   --wait --timeout 10m
 ```
+
+### Upgrading a database from before the task-lifecycle cutover
+
+The backend init container will refuse this one transition instead of trying
+to migrate underneath old pods during a rolling update. Run a two-step
+maintenance upgrade:
+
+```bash
+# Stop every old API/worker first and wait until no backend pod remains.
+kubectl -n cubeplex scale deployment/cubeplex-backend --replicas=0
+kubectl -n cubeplex wait --for=delete pod \
+  -l app.kubernetes.io/component=backend --timeout=5m
+
+# Upgrade with the one-shot, lock-guarded maintenance hook. Keep replicas at 0.
+helm upgrade cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version <new-version> --namespace cubeplex --values values.local.yaml \
+  --set backend.replicaCount=0 \
+  --set backend.lifecycleMaintenance.enabled=true \
+  --wait --timeout 20m
+
+# After the hook succeeds, disable it and restore the intended replica count.
+helm upgrade cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version <new-version> --namespace cubeplex --values values.local.yaml \
+  --set backend.lifecycleMaintenance.enabled=false \
+  --wait --timeout 10m
+```
+
+The maintenance Job stops on active legacy run-lifetime commands or monitors;
+resolve those items and rerun the same command. It preserves unknown provider
+handles instead of polling or killing the current sandbox by guesswork. Fresh
+installs and databases that already passed this cutover continue to use the
+normal one-command install/upgrade flow.
 
 ### Uninstall
 
