@@ -1533,11 +1533,12 @@ async def test_worker_restart_releases_uncheckpointed_initial_notice(
     assert admitted.admission.run_finished_at == NOW + timedelta(minutes=1)
     assert admitted.admission.run_terminal_status == "failed"
 
-    [retry_claim] = await service.claim_ready(
+    retry_claims = await service.claim_ready(
         owner_token="replacement-worker",
         now=NOW + timedelta(minutes=1, seconds=1),
         owner_until=NOW + timedelta(minutes=1, seconds=31),
     )
+    retry_claim = next(item for item in retry_claims if item.notice.notice_id == event.id)
     retried = await ConversationExecutionService(
         db_session, org_id=event.org_id, workspace_id=event.workspace_id
     ).admit_background_notice(

@@ -109,20 +109,11 @@ def _overrides_on_run_end(mw: Middleware) -> bool:
 def compose_on_run_end(
     middlewares: list[Middleware],
 ) -> Callable[..., Awaitable[list[Any] | None]] | None:
-    """Run sandbox wait+heartbeat first, then other ``on_run_end`` hooks.
-
-    Cubeloop concatenates ``on_run_end`` in middleware order. Waiting inside
-    that default chain would stall later hooks (e.g. Goal) for the whole
-    notify window. SandboxMiddleware must finish (or inject) before Goal
-    evaluates.
-    """
+    """Compose ``on_run_end`` hooks in stable middleware order."""
 
     chain = [m for m in middlewares if _overrides_on_run_end(m)]
     if not chain:
         return None
-
-    sandbox_first = [m for m in chain if type(m).__name__ == "SandboxMiddleware"]
-    rest = [m for m in chain if type(m).__name__ != "SandboxMiddleware"]
 
     async def composed(
         ctx: Any,
@@ -130,7 +121,7 @@ def compose_on_run_end(
         signal: asyncio.Event | None = None,
     ) -> list[Any] | None:
         inject: list[Any] = []
-        for mw in sandbox_first + rest:
+        for mw in chain:
             result = await mw.on_run_end(ctx, signal=signal)
             if result:
                 inject.extend(result)

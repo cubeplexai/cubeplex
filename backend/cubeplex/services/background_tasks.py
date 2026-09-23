@@ -204,7 +204,6 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
                 or previous_command.sandbox_instance_id != execution_details.sandbox_instance_id
                 or previous_command.command != execution_details.command
                 or previous_command.provider != execution_details.provider
-                or previous_command.log_path != execution_details.log_path
                 or previous_command.kind != execution_details.kind.value
                 or previous_task.parent_task_id != task_spec.parent_task_id
                 or previous_task.notify_on_complete != task_spec.notify_on_complete
