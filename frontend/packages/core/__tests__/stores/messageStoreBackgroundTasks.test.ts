@@ -207,6 +207,34 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
   })
 
+  it('does not clear authoritative cleanup controls from a partial refresh', async () => {
+    useMessageStore.setState({
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: true,
+          has_cleanup: true,
+          can_stop: true,
+        },
+      },
+    })
+    vi.mocked(listBackgroundTasks).mockResolvedValue([])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [],
+      next_cursor: 'older-events',
+      has_more: true,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundSummary['conv-1']).toEqual({
+      has_inflight: false,
+      has_pending: true,
+      has_cleanup: true,
+      can_stop: true,
+    })
+  })
+
   it('does not reset event pagination when polling refreshes the newest page', async () => {
     const newest = event({ id: 'event-newest', revision: 2 })
     const older = event({ id: 'event-older', created_at: '2026-09-21T23:00:00+00:00' })

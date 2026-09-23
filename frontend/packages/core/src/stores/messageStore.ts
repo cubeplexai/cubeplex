@@ -1936,14 +1936,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                     derivedSummary.has_pending ||
                     (eventPage.has_more &&
                       Boolean(state.backgroundSummary[conversationId]?.has_pending)),
-                  has_cleanup:
-                    derivedSummary.has_cleanup ||
-                    (boundedIds.length >= 100 &&
-                      Boolean(state.backgroundSummary[conversationId]?.has_cleanup)),
-                  can_stop:
-                    derivedSummary.can_stop ||
-                    (boundedIds.length >= 100 &&
-                      Boolean(state.backgroundSummary[conversationId]?.can_stop)),
+                  has_cleanup: derivedSummary.has_cleanup || Boolean(startingSummary?.has_cleanup),
+                  can_stop: derivedSummary.can_stop || Boolean(startingSummary?.can_stop),
                 },
         },
         refreshingBackground: withoutConversationFlag(state.refreshingBackground, conversationId),
