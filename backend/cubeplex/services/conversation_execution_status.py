@@ -151,6 +151,26 @@ class ConversationExecutionStatusService:
 
     async def latest_stopping_run_id(self, *, conversation_id: str) -> str | None:
         """Keep an accepted run Stop visible after its Redis active key clears."""
+        foreground_task_pending = exists(
+            select(col(BackgroundTask.id)).where(
+                col(BackgroundTask.org_id) == self.org_id,
+                col(BackgroundTask.workspace_id) == self.workspace_id,
+                col(BackgroundTask.conversation_id) == conversation_id,
+                col(BackgroundTask.originating_run_id)
+                == col(ConversationExecutionAdmission.run_id),
+                col(BackgroundTask.backgrounded_at).is_(None),
+                col(BackgroundTask.state).in_(INFLIGHT_TASK_STATES),
+            )
+        )
+        input_pending = exists(
+            select(col(SteeringMessage.id)).where(
+                col(SteeringMessage.org_id) == self.org_id,
+                col(SteeringMessage.workspace_id) == self.workspace_id,
+                col(SteeringMessage.conversation_id) == conversation_id,
+                col(SteeringMessage.run_id) == col(ConversationExecutionAdmission.run_id),
+                col(SteeringMessage.state) == SteeringMessageState.cancel_requested,
+            )
+        )
         return await self.session.scalar(
             select(col(ConversationExecutionAdmission.run_id))
             .where(
@@ -159,7 +179,11 @@ class ConversationExecutionStatusService:
                 col(ConversationExecutionAdmission.conversation_id) == conversation_id,
                 col(ConversationExecutionAdmission.run_id).is_not(None),
                 col(ConversationExecutionAdmission.run_stop_requested_at).is_not(None),
-                col(ConversationExecutionAdmission.run_finished_at).is_(None),
+                or_(
+                    col(ConversationExecutionAdmission.run_finished_at).is_(None),
+                    foreground_task_pending,
+                    input_pending,
+                ),
             )
             .order_by(
                 col(ConversationExecutionAdmission.run_stop_requested_at).desc(),

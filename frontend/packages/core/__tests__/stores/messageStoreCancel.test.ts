@@ -206,6 +206,32 @@ describe('messageStore.cancelStream', () => {
     expect(cancelActiveRun).not.toHaveBeenCalled()
   })
 
+  it('honors Stop once the pending send receives its run id', async () => {
+    seedStreaming('conv1', {})
+    useMessageStore.setState({ currentRunId: null })
+
+    let settled = false
+    const cancelling = useMessageStore
+      .getState()
+      .cancelStream(fakeClient, 'conv1')
+      .finally(() => {
+        settled = true
+      })
+    await Promise.resolve()
+
+    expect(settled).toBe(false)
+    expect(cancelActiveRun).not.toHaveBeenCalled()
+    expect(useMessageStore.getState()).toMatchObject({
+      cancellingConversationIds: { conv1: true },
+      runLifecycle: { conv1: 'stopping' },
+    })
+
+    useMessageStore.setState({ currentRunId: 'r1' })
+    await cancelling
+
+    expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'r1')
+  })
+
   it('does not clear a replacement conversation after cancellation returns', async () => {
     let resolveCancel: (() => void) | undefined
     vi.mocked(cancelActiveRun).mockReturnValueOnce(
