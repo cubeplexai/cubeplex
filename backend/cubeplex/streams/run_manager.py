@@ -4940,7 +4940,24 @@ class RunManager:
         try:
             from cubeloop.middleware.todo import TodoListMiddleware
 
-            todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
+            from cubeplex.services.background_task_wait import BackgroundTaskWaitValidator
+
+            validate_task_wait = (
+                BackgroundTaskWaitValidator(
+                    async_session_maker,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                    execution_generation=ctx.execution.execution_generation,
+                    run_id=run_id,
+                )
+                if ctx.execution is not None
+                else None
+            )
+            todo_mw = TodoListMiddleware(
+                extra_ref=_extra_ref,
+                validate_task_wait=validate_task_wait,
+            )
             cubeloop_middleware.append(todo_mw)
             _todo_tools.extend(todo_mw.tools)
         except Exception as _exc:
