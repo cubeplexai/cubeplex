@@ -335,6 +335,18 @@ async def _append_sandbox_log(sandbox: Sandbox, path: str, text: str) -> AppendO
     return await append_output(sandbox, path, text)
 
 
+async def _append_snapshot_output(
+    sandbox: Sandbox,
+    path: str,
+    snapshot: ProcessSnapshot,
+) -> AppendOutputResult:
+    if snapshot.new_output:
+        return await _append_sandbox_log(sandbox, path, snapshot.new_output)
+    if snapshot.status != "running":
+        return await _write_sandbox_log(sandbox, path, b"")
+    return AppendOutputResult(data_written=True, cleanup_done=True)
+
+
 def _make_execute_tool(
     sandbox: Sandbox,
     *,
@@ -377,10 +389,9 @@ def _make_execute_tool(
         log_path: str,
         snapshot: ProcessSnapshot,
     ) -> bool:
-        if snapshot.new_output or snapshot.status != "running":
-            appended = await _append_sandbox_log(sandbox, log_path, snapshot.new_output)
-            if not appended.data_written:
-                return False
+        appended = await _append_snapshot_output(sandbox, log_path, snapshot)
+        if not appended.data_written:
+            return False
         if snapshot.log_cursor is not None:
             if persist_cursor is not None:
                 await persist_cursor(command_id, snapshot.log_cursor)
@@ -633,6 +644,7 @@ def _make_execute_tool(
                 },
             )
         pieces: list[str] = []
+        displayed_unconfirmed_output = ""
         pending: list[asyncio.Task[None]] = []
         last_emit = 0.0
         trail_task: asyncio.Task[None] | None = None
@@ -686,6 +698,17 @@ def _make_execute_tool(
             _cancel_trail()
             last_emit = now
             _emit_snapshot()
+
+        def _on_snapshot_output(snapshot: ProcessSnapshot) -> None:
+            nonlocal displayed_unconfirmed_output
+            output = snapshot.new_output
+            if not output:
+                return
+            unseen = output
+            if displayed_unconfirmed_output and output.startswith(displayed_unconfirmed_output):
+                unseen = output[len(displayed_unconfirmed_output) :]
+            displayed_unconfirmed_output = output
+            _on_chunk(unseen)
 
         async def _drain_updates() -> None:
             _cancel_trail()
@@ -819,14 +842,15 @@ def _make_execute_tool(
                     )
                     while True:
                         snap = await sandbox.poll(handle)
-                        if snap.new_output:
-                            _on_chunk(snap.new_output)
+                        _on_snapshot_output(snap)
                         logs_confirmed = await _ack_snapshot_output(
                             command_id,
                             handle,
                             log_path,
                             snap,
                         )
+                        if logs_confirmed:
+                            displayed_unconfirmed_output = ""
                         if snap.status != "running":
                             durable_status = (
                                 await load_persisted_status(command_id)
@@ -1060,6 +1084,21 @@ def _make_monitor_tool(
     lock = live_lock if live_lock is not None else asyncio.Lock()
     timeout_tasks = deadline_tasks if deadline_tasks is not None else {}
 
+    async def _ack_snapshot_output(
+        command_id: str,
+        handle: ProcessHandle,
+        log_path: str,
+        snapshot: ProcessSnapshot,
+    ) -> bool:
+        appended = await _append_snapshot_output(sandbox, log_path, snapshot)
+        if not appended.data_written:
+            return False
+        if snapshot.log_cursor is not None:
+            if persist_cursor is not None:
+                await persist_cursor(command_id, snapshot.log_cursor)
+            handle.log_cursor = snapshot.log_cursor
+        return True
+
     async def _monitor(
         tool_call_id: str,
         args: _MonitorArgs,
@@ -1191,18 +1230,12 @@ def _make_monitor_tool(
                         if current is None or current[0] is not handle:
                             return
                         deadline_snapshot = await sandbox.poll(handle)
-                        logs_confirmed = True
-                        if deadline_snapshot.new_output:
-                            appended = await _append_sandbox_log(
-                                sandbox,
-                                log_path,
-                                deadline_snapshot.new_output,
-                            )
-                            logs_confirmed = appended.data_written
-                        if logs_confirmed and deadline_snapshot.log_cursor is not None:
-                            if persist_cursor is not None:
-                                await persist_cursor(command_id, deadline_snapshot.log_cursor)
-                            handle.log_cursor = deadline_snapshot.log_cursor
+                        logs_confirmed = await _ack_snapshot_output(
+                            command_id,
+                            handle,
+                            log_path,
+                            deadline_snapshot,
+                        )
                         if deadline_snapshot.status != "running":
                             live.pop(command_id, None)
                             if persist_monitor_observation is not None:
@@ -1215,18 +1248,12 @@ def _make_monitor_tool(
                         if deadline_snapshot.status == "running":
                             await sandbox.kill(handle)
                             confirmed = await sandbox.poll(handle)
-                            confirmed_logs = True
-                            if confirmed.new_output:
-                                appended = await _append_sandbox_log(
-                                    sandbox,
-                                    log_path,
-                                    confirmed.new_output,
-                                )
-                                confirmed_logs = appended.data_written
-                            if confirmed_logs and confirmed.log_cursor is not None:
-                                if persist_cursor is not None:
-                                    await persist_cursor(command_id, confirmed.log_cursor)
-                                handle.log_cursor = confirmed.log_cursor
+                            confirmed_logs = await _ack_snapshot_output(
+                                command_id,
+                                handle,
+                                log_path,
+                                confirmed,
+                            )
                             live.pop(command_id, None)
                             if persist_monitor_timeout is not None:
                                 await persist_monitor_timeout(
