@@ -706,6 +706,7 @@ def create_app(
         presented_files_router,
         public_artifacts,
         public_attachments,
+        sandbox_commands_router,
         shares,
         system,
         trigger_ingest,
@@ -760,6 +761,7 @@ def create_app(
     app.include_router(im_link.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(presented_files_router, prefix="/api/v1")
+    app.include_router(sandbox_commands_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(me_api_keys_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")

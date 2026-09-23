@@ -423,7 +423,9 @@ function mergeBackgroundEventPage(
     return { items, cursor: page.next_cursor, hasMore: page.has_more }
   }
   if (currentHasMore) {
-    return { items, cursor: currentCursor ?? page.next_cursor, hasMore: true }
+    return pageOverlapsCurrent
+      ? { items, cursor: currentCursor ?? page.next_cursor, hasMore: true }
+      : { items, cursor: page.next_cursor, hasMore: page.has_more }
   }
   if (page.has_more && !pageOverlapsCurrent) {
     return { items, cursor: page.next_cursor, hasMore: true }
@@ -1956,6 +1958,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           .sort((left, right) => left.revision - right.revision)
           .map((task) => [task.id, task]),
       )
+      const cursorStillCurrent = state.backgroundEventCursor[conversationId] === cursor
       return {
         backgroundEvents: {
           ...state.backgroundEvents,
@@ -1963,11 +1966,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         },
         backgroundEventCursor: {
           ...state.backgroundEventCursor,
-          [conversationId]: page.next_cursor,
+          [conversationId]: cursorStillCurrent
+            ? page.next_cursor
+            : state.backgroundEventCursor[conversationId],
         },
         backgroundEventsHasMore: {
           ...state.backgroundEventsHasMore,
-          [conversationId]: page.has_more,
+          [conversationId]: cursorStillCurrent
+            ? page.has_more
+            : state.backgroundEventsHasMore[conversationId],
         },
         backgroundTasks: {
           ...state.backgroundTasks,
