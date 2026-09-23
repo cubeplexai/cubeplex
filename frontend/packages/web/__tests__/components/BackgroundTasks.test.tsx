@@ -202,6 +202,7 @@ describe('BackgroundTasks', () => {
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
+      throwOnError: true,
     })
   })
 })
