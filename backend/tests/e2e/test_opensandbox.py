@@ -9,8 +9,10 @@ Run with: pytest -m sandbox
 
 import pytest
 import pytest_asyncio
+from uuid_utils import uuid7
 
 from cubeplex.config import config
+from cubeplex.sandbox.log_io import append_output
 
 pytestmark = pytest.mark.e2e
 
@@ -170,6 +172,34 @@ async def test_opensandbox_upload_with_parent_dirs(sandbox) -> None:
     assert len(results) == 1
     _, downloaded_content = results[0]
     assert b"Content in nested dir" in downloaded_content
+
+
+@pytest.mark.sandbox
+@pytest.mark.asyncio
+async def test_opensandbox_command_log_append_and_symlink_rejection(sandbox) -> None:
+    """The real provider confirms writes without following a log-file symlink."""
+
+    suffix = str(uuid7())
+    log_path = f"{sandbox.workdir}/.cubeplex/execute-{suffix}.log"
+    symlink_path = f"{sandbox.workdir}/.cubeplex/execute-{suffix}-link.log"
+    outside_path = f"/tmp/cubeplex-log-outside-{suffix}"
+    cleanup = f"rm -f -- {log_path} {symlink_path} {outside_path}"
+    await sandbox.execute(cleanup)
+    try:
+        first = await append_output(sandbox, log_path, "first\n")
+        second = await append_output(sandbox, log_path, "second\n")
+        assert first.data_written and second.data_written
+        assert (await sandbox.download([log_path]))[0][1] == b"first\nsecond\n"
+
+        linked = await sandbox.execute(
+            f"printf untouched > {outside_path} && ln -s {outside_path} {symlink_path}"
+        )
+        assert linked.exit_code == 0
+        rejected = await append_output(sandbox, symlink_path, "escaped\n")
+        assert rejected.data_written is False
+        assert (await sandbox.download([outside_path]))[0][1] == b"untouched"
+    finally:
+        await sandbox.execute(cleanup)
 
 
 @pytest.mark.sandbox

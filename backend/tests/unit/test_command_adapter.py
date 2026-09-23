@@ -34,8 +34,30 @@ async def test_natural_exit_ignores_log_outage_and_is_not_killed(exit_code: int)
     )
     assert result.snapshot is not None
     assert (result.snapshot.status, result.snapshot.exit_code) == ("exited", exit_code)
+    assert result.logs_read is False
     raw.commands.interrupt.assert_not_awaited()
-    raw.commands.get_background_command_logs.assert_not_awaited()
+    raw.commands.get_background_command_logs.assert_awaited_once_with("proc", cursor=None)
+
+
+async def test_poll_returns_output_with_a_candidate_cursor() -> None:
+    raw = provider()
+    raw.commands.get_command_status.return_value = SimpleNamespace(running=False, exit_code=0)
+    raw.commands.get_background_command_logs.side_effect = None
+    raw.commands.get_background_command_logs.return_value = SimpleNamespace(
+        content="complete output\n", cursor=7
+    )
+    adapter = CommandAdapter(OpenSandbox(sandbox=raw), sandbox_instance_id=raw.id)
+
+    result = await adapter.observe_and_stop(
+        ProcessHandle("cmd", "proc", log_cursor="3"),
+        stop_requested=False,
+        check_owner=AsyncMock(),
+    )
+
+    assert result.logs_read is True
+    assert result.snapshot is not None
+    assert result.snapshot.new_output == "complete output\n"
+    assert result.snapshot.log_cursor == "7"
 
 
 async def test_cancel_error_followed_by_running_remains_running() -> None:
