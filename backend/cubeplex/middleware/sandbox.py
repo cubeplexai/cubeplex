@@ -23,7 +23,6 @@ import re
 import shlex
 import time
 import unicodedata
-import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
@@ -56,6 +55,7 @@ from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
+from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.background_task_lifecycle import LogState
 from cubeplex.services.sandbox_runtime_config import POLICY_DENY_NUDGE
@@ -325,34 +325,14 @@ async def _maybe_await(result: Any) -> Any:
     return result
 
 
-async def _write_sandbox_log(sandbox: Sandbox, path: str, data: bytes) -> None:
-    try:
-        await _maybe_await(sandbox.upload([(path, data)]))
-    except Exception:
-        logger.exception("failed to write execute log {}", path)
+async def _write_sandbox_log(sandbox: Sandbox, path: str, data: bytes) -> AppendOutputResult:
+    return await append_output(sandbox, path, data)
 
 
-async def _append_sandbox_log(sandbox: Sandbox, path: str, text: str) -> None:
+async def _append_sandbox_log(sandbox: Sandbox, path: str, text: str) -> AppendOutputResult:
     if not text:
-        return
-    chunk_path = f"{path}.append-{uuid.uuid4().hex}"
-    try:
-        parent = path.rsplit("/", 1)[0] or "."
-        await _maybe_await(sandbox.upload([(chunk_path, text.encode())]))
-        result = await sandbox.execute(
-            f"mkdir -p {shlex.quote(parent)} && "
-            f"cat {shlex.quote(chunk_path)} >> {shlex.quote(path)} && "
-            f"rm -f {shlex.quote(chunk_path)}",
-            timeout=30,
-        )
-        if result.exit_code not in (0, None):
-            raise RuntimeError(f"append exited with {result.exit_code}")
-    except Exception:
-        logger.exception("failed to append execute log {}", path)
-        try:
-            await sandbox.execute(f"rm -f {shlex.quote(chunk_path)}", timeout=30)
-        except Exception:
-            logger.debug("failed to clean execute log chunk {}", chunk_path)
+        return AppendOutputResult(data_written=True, cleanup_done=True)
+    return await append_output(sandbox, path, text)
 
 
 def _make_execute_tool(
@@ -369,8 +349,10 @@ def _make_execute_tool(
     persist_start_failed: Callable[[str, str], Awaitable[None]] | None = None,
     persist_exited: Callable[[str, int | None, bool], Awaitable[None]] | None = None,
     persist_discard: Callable[[str], Awaitable[None]] | None = None,
-    persist_foreground: Callable[[str, ProcessSnapshot], Awaitable[None]] | None = None,
-    persist_timed_out: Callable[[str, bool], Awaitable[None]] | None = None,
+    persist_foreground: Callable[[str, ProcessSnapshot, bool], Awaitable[None]] | None = None,
+    persist_timed_out: (
+        Callable[[str, bool, ProcessSnapshot, bool], Awaitable[None]] | None
+    ) = None,
     load_persisted_status: Callable[[str], Awaitable[str | None]] | None = None,
     deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
     on_live: Callable[[], None] | None = None,
@@ -385,6 +367,22 @@ def _make_execute_tool(
     live_commands = live if live is not None else {}
     timeout_tasks = deadline_tasks if deadline_tasks is not None else {}
     lock = live_lock if live_lock is not None else asyncio.Lock()
+
+    async def _ack_snapshot_output(
+        command_id: str,
+        handle: ProcessHandle,
+        log_path: str,
+        snapshot: ProcessSnapshot,
+    ) -> bool:
+        if snapshot.new_output:
+            appended = await _append_sandbox_log(sandbox, log_path, snapshot.new_output)
+            if not appended.data_written:
+                return False
+        if snapshot.log_cursor is not None:
+            if persist_cursor is not None:
+                await persist_cursor(command_id, snapshot.log_cursor)
+            handle.log_cursor = snapshot.log_cursor
+        return True
 
     async def _execute(
         tool_call_id: str,
@@ -413,17 +411,23 @@ def _make_execute_tool(
                         if current is None or current[0] is not handle:
                             return
                         deadline_snapshot = await sandbox.poll(handle)
-                        if deadline_snapshot.new_output:
-                            await _append_sandbox_log(
-                                sandbox,
-                                log_path,
-                                deadline_snapshot.new_output,
-                            )
-                        if deadline_snapshot.log_cursor is not None and persist_cursor is not None:
-                            await persist_cursor(command_id, deadline_snapshot.log_cursor)
+                        logs_confirmed = await _ack_snapshot_output(
+                            command_id,
+                            handle,
+                            log_path,
+                            deadline_snapshot,
+                        )
                         if deadline_snapshot.status != "running":
                             live_commands.pop(command_id, None)
-                            if deadline_snapshot.status == "killed" and persist_killed is not None:
+                            if persist_foreground is not None:
+                                await persist_foreground(
+                                    command_id,
+                                    deadline_snapshot,
+                                    logs_confirmed,
+                                )
+                            elif (
+                                deadline_snapshot.status == "killed" and persist_killed is not None
+                            ):
                                 await persist_killed(command_id)
                             elif persist_exited is not None:
                                 await persist_exited(
@@ -434,10 +438,12 @@ def _make_execute_tool(
                             return
                         await sandbox.kill(handle)
                         confirmed = await sandbox.poll(handle)
-                        if confirmed.new_output:
-                            await _append_sandbox_log(sandbox, log_path, confirmed.new_output)
-                        if confirmed.log_cursor is not None and persist_cursor is not None:
-                            await persist_cursor(command_id, confirmed.log_cursor)
+                        logs_confirmed = await _ack_snapshot_output(
+                            command_id,
+                            handle,
+                            log_path,
+                            confirmed,
+                        )
                         if confirmed.status == "running":
                             logger.warning(
                                 "sandbox command {} still running after deadline interrupt",
@@ -445,7 +451,12 @@ def _make_execute_tool(
                             )
                             return
                         if persist_timed_out is not None:
-                            await persist_timed_out(command_id, current[1])
+                            await persist_timed_out(
+                                command_id,
+                                current[1],
+                                confirmed,
+                                logs_confirmed,
+                            )
                 except Exception:
                     logger.exception(
                         "failed to enforce sandbox command deadline {}",
@@ -806,10 +817,12 @@ def _make_execute_tool(
                         snap = await sandbox.poll(handle)
                         if snap.new_output:
                             _on_chunk(snap.new_output)
-                            await _append_sandbox_log(sandbox, log_path, snap.new_output)
-                        if snap.log_cursor is not None and persist_cursor is not None:
-                            handle.log_cursor = snap.log_cursor
-                            await persist_cursor(command_id, snap.log_cursor)
+                        logs_confirmed = await _ack_snapshot_output(
+                            command_id,
+                            handle,
+                            log_path,
+                            snap,
+                        )
                         if snap.status != "running":
                             durable_status = (
                                 await load_persisted_status(command_id)
@@ -822,7 +835,7 @@ def _make_execute_tool(
                             if snap.status == "killed" and persist_killed is not None:
                                 await persist_killed(command_id)
                             elif persist_foreground is not None:
-                                await persist_foreground(command_id, snap)
+                                await persist_foreground(command_id, snap, logs_confirmed)
                             elif persist_discard is not None:
                                 await persist_discard(command_id)
                             if snap.status == "killed":
@@ -854,8 +867,12 @@ def _make_execute_tool(
                         if kill_at is not None and now >= kill_at:
                             await sandbox.kill(handle)
                             confirmed = await sandbox.poll(handle)
-                            if confirmed.new_output:
-                                await _append_sandbox_log(sandbox, log_path, confirmed.new_output)
+                            confirmed_logs = await _ack_snapshot_output(
+                                command_id,
+                                handle,
+                                log_path,
+                                confirmed,
+                            )
                             if confirmed.status == "running":
                                 return AgentToolResult(
                                     content=[
@@ -870,7 +887,14 @@ def _make_execute_tool(
                                     is_error=True,
                                 )
                             live_commands.pop(command_id, None)
-                            if persist_killed is not None:
+                            if persist_timed_out is not None:
+                                await persist_timed_out(
+                                    command_id,
+                                    args.notify_on_complete,
+                                    confirmed,
+                                    confirmed_logs,
+                                )
+                            elif persist_killed is not None:
                                 await persist_killed(command_id)
                             return AgentToolResult(
                                 content=[TextContent(text=_timeout_tool_message(timeout))],
@@ -1015,9 +1039,14 @@ def _make_monitor_tool(
     live_lock: asyncio.Lock | None = None,
     persist_reserve: Callable[..., Awaitable[bool | _ReservedCommand]] | None = None,
     persist_running: Callable[[str, str], Awaitable[None]] | None = None,
+    persist_cursor: Callable[[str, str], Awaitable[None]] | None = None,
     persist_killed: Callable[[str], Awaitable[None]] | None = None,
     persist_start_failed: Callable[[str, str], Awaitable[None]] | None = None,
     persist_monitor_timed_out: Callable[[str], Awaitable[None]] | None = None,
+    persist_observation: Callable[[str, ProcessSnapshot, bool], Awaitable[None]] | None = None,
+    persist_timed_out: (
+        Callable[[str, bool, ProcessSnapshot, bool], Awaitable[None]] | None
+    ) = None,
     deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
     on_live: Callable[[], None] | None = None,
     handoff: Callable[[str], Awaitable[bool]] | None = None,
@@ -1156,16 +1185,51 @@ def _make_monitor_tool(
                         if current is None or current[0] is not handle:
                             return
                         deadline_snapshot = await sandbox.poll(handle)
+                        logs_confirmed = True
                         if deadline_snapshot.new_output:
-                            await _append_sandbox_log(
+                            appended = await _append_sandbox_log(
                                 sandbox,
                                 log_path,
                                 deadline_snapshot.new_output,
                             )
+                            logs_confirmed = appended.data_written
+                        if logs_confirmed and deadline_snapshot.log_cursor is not None:
+                            if persist_cursor is not None:
+                                await persist_cursor(command_id, deadline_snapshot.log_cursor)
+                            handle.log_cursor = deadline_snapshot.log_cursor
+                        if deadline_snapshot.status != "running":
+                            live.pop(command_id, None)
+                            if persist_observation is not None:
+                                await persist_observation(
+                                    command_id,
+                                    deadline_snapshot,
+                                    logs_confirmed,
+                                )
+                            return
                         if deadline_snapshot.status == "running":
                             await sandbox.kill(handle)
+                            confirmed = await sandbox.poll(handle)
+                            confirmed_logs = True
+                            if confirmed.new_output:
+                                appended = await _append_sandbox_log(
+                                    sandbox,
+                                    log_path,
+                                    confirmed.new_output,
+                                )
+                                confirmed_logs = appended.data_written
+                            if confirmed_logs and confirmed.log_cursor is not None:
+                                if persist_cursor is not None:
+                                    await persist_cursor(command_id, confirmed.log_cursor)
+                                handle.log_cursor = confirmed.log_cursor
                             live.pop(command_id, None)
-                            if persist_monitor_timed_out is not None:
+                            if persist_timed_out is not None:
+                                await persist_timed_out(
+                                    command_id,
+                                    True,
+                                    confirmed,
+                                    confirmed_logs,
+                                )
+                            elif persist_monitor_timed_out is not None:
                                 await persist_monitor_timed_out(command_id)
                 except Exception:
                     logger.exception("failed to enforce monitor deadline {}", command_id)
@@ -1843,9 +1907,12 @@ class SandboxMiddleware(Middleware):
                 live_lock=self._live_lock,
                 persist_reserve=self._persist_reserve,
                 persist_running=self._persist_running,
+                persist_cursor=self._persist_cursor,
                 persist_killed=self._persist_killed,
                 persist_start_failed=self._persist_start_failed,
                 persist_monitor_timed_out=self._persist_monitor_timed_out,
+                persist_observation=self._persist_foreground,
+                persist_timed_out=self._persist_timed_out,
                 deadline_tasks=self._command_deadline_tasks,
                 on_live=self._ensure_lease_task,
                 handoff=self._handoff_conversation_command,
@@ -2195,12 +2262,20 @@ class SandboxMiddleware(Middleware):
             notify=notify,
         )
 
-    async def _persist_timed_out(self, command_id: str, notify: bool = True) -> None:
+    async def _persist_timed_out(
+        self,
+        command_id: str,
+        notify: bool = True,
+        snapshot: ProcessSnapshot | None = None,
+        logs_confirmed: bool = True,
+    ) -> None:
+        terminal = snapshot or ProcessSnapshot(status="killed")
         if await self._persist_task_observation(
             command_id,
-            ProcessSnapshot(status="killed"),
-            log_state="complete",
+            terminal,
+            log_state="complete" if logs_confirmed else "retrying",
             stop_reason=TaskStopReason.deadline,
+            logs_confirmed=logs_confirmed,
         ):
             return
         await self._persist_terminal(
@@ -2256,6 +2331,7 @@ class SandboxMiddleware(Middleware):
         *,
         log_state: LogState,
         stop_reason: TaskStopReason | None = None,
+        logs_confirmed: bool = True,
     ) -> bool:
         binding = self._task_bindings.get(command_id)
         if binding is None or self._session_factory is None:
@@ -2286,7 +2362,7 @@ class SandboxMiddleware(Middleware):
                 snapshot=snapshot,
                 log_state=log_state,
                 expected_log_cursor=command.log_cursor,
-                confirmed_log_cursor=snapshot.log_cursor,
+                confirmed_log_cursor=snapshot.log_cursor if logs_confirmed else None,
                 now=now,
             )
             await service.defer_owner(
@@ -2298,11 +2374,17 @@ class SandboxMiddleware(Middleware):
             await session.commit()
         return True
 
-    async def _persist_foreground(self, command_id: str, snapshot: ProcessSnapshot) -> None:
+    async def _persist_foreground(
+        self,
+        command_id: str,
+        snapshot: ProcessSnapshot,
+        logs_confirmed: bool,
+    ) -> None:
         if await self._persist_task_observation(
             command_id,
             snapshot,
-            log_state="complete",
+            log_state="complete" if logs_confirmed else "retrying",
+            logs_confirmed=logs_confirmed,
         ):
             return
         await self._persist_discard(command_id)
