@@ -289,6 +289,7 @@ export interface MessageStore {
     options?: {
       force?: boolean
       throwOnError?: boolean
+      preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
     },
   ): Promise<void>
@@ -650,6 +651,20 @@ function normalizeMessages(messages: Message[]): Message[] {
     }
     return withId
   })
+}
+
+function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
+  const tailIds = new Set(tail.map((message) => message.id))
+  const tailSeqs = new Set(
+    tail.flatMap((message) => (message.seq === undefined ? [] : [message.seq])),
+  )
+  return [
+    ...current.filter(
+      (message) =>
+        !tailIds.has(message.id) && (message.seq === undefined || !tailSeqs.has(message.seq)),
+    ),
+    ...tail,
+  ]
 }
 
 /** Finalize the last thinking block's duration if switching to a different block type */
@@ -2050,6 +2065,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     options?: {
       force?: boolean
       throwOnError?: boolean
+      preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
     },
   ) {
@@ -2307,10 +2323,34 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             s.backgroundEventsHasMore[conversationId],
             backgroundPage,
           )
+          const preserveHistory = options?.preserveLoadedHistory === true
+          const nextMessages = preserveHistory
+            ? mergeHistoryTail(s.messages[conversationId] ?? [], messages)
+            : messages
+          const hasExistingCursor = Object.prototype.hasOwnProperty.call(
+            s.oldestSeqByConv,
+            conversationId,
+          )
+          const hasExistingMore = Object.prototype.hasOwnProperty.call(
+            s.hasMoreByConv,
+            conversationId,
+          )
           return {
-            messages: { ...s.messages, [conversationId]: messages },
-            oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
-            hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
+            messages: { ...s.messages, [conversationId]: nextMessages },
+            oldestSeqByConv: {
+              ...s.oldestSeqByConv,
+              [conversationId]:
+                preserveHistory && hasExistingCursor
+                  ? s.oldestSeqByConv[conversationId]
+                  : bootstrap.oldest_seq,
+            },
+            hasMoreByConv: {
+              ...s.hasMoreByConv,
+              [conversationId]:
+                preserveHistory && hasExistingMore
+                  ? s.hasMoreByConv[conversationId]
+                  : bootstrap.has_more,
+            },
             todos: restoredTodos,
             // Clear only when bootstrap has authoritative error state or persisted
             // assistant history; otherwise keep a live error visible through the

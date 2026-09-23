@@ -55,6 +55,7 @@ describe('SandboxTerminalView', () => {
             created_at: '2026-09-18T00:00:00+00:00',
             kind: 'execute',
             stop_requested_at: null,
+            capabilities: { can_stop: true },
           },
         ],
       }),
@@ -62,6 +63,31 @@ describe('SandboxTerminalView', () => {
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
     expect(await screen.findByText('dev server')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stop dev server' })).toBeInTheDocument()
+  })
+
+  it('does not offer Stop for a terminal task that is only finalizing logs', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: 'btask-1',
+            description: 'finished build',
+            state: 'succeeded',
+            created_at: '2026-09-18T00:00:00+00:00',
+            kind: 'execute',
+            stop_requested_at: null,
+            cleanup_pending: true,
+            capabilities: { can_stop: false },
+          },
+        ],
+      }),
+    } as Response)
+
+    render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
+
+    expect(await screen.findByText('finished build')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop finished build' })).not.toBeInTheDocument()
   })
 
   it('keeps command controls available when terminal startup fails', async () => {
@@ -82,6 +108,7 @@ describe('SandboxTerminalView', () => {
             created_at: '2026-09-18T00:00:00+00:00',
             kind: 'execute',
             stop_requested_at: null,
+            capabilities: { can_stop: true },
           },
         ],
       }),
@@ -106,6 +133,7 @@ describe('SandboxTerminalView', () => {
               created_at: new Date().toISOString(),
               kind: 'execute',
               stop_requested_at: null,
+              capabilities: { can_stop: true },
             },
           ],
         }),

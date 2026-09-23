@@ -198,6 +198,7 @@ function RunningCommandList({
       {rows.map((row) => {
         const item = row.source === 'task' ? row.task : row.command
         const stopRequested = row.source === 'task' && row.task.stop_requested_at !== null
+        const canStop = row.source === 'legacy' || row.task.capabilities.can_stop
         return (
           <li
             key={`${row.source}:${item.id}`}
@@ -212,17 +213,19 @@ function RunningCommandList({
                 )}
               </span>
             </span>
-            <Button
-              type="button"
-              className="shrink-0"
-              variant="destructive"
-              size="xs"
-              aria-label={`Stop ${item.description || item.id}`}
-              disabled={stopping === item.id || stopRequested}
-              onClick={() => void stop(row)}
-            >
-              {stopping === item.id || stopRequested ? 'Stopping…' : 'Stop'}
-            </Button>
+            {canStop || stopRequested ? (
+              <Button
+                type="button"
+                className="shrink-0"
+                variant="destructive"
+                size="xs"
+                aria-label={`Stop ${item.description || item.id}`}
+                disabled={stopping === item.id || stopRequested}
+                onClick={() => void stop(row)}
+              >
+                {stopping === item.id || stopRequested ? 'Stopping…' : 'Stop'}
+              </Button>
+            ) : null}
           </li>
         )
       })}
