@@ -21,6 +21,9 @@ from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
 from cubeplex.models import Membership, Role, User
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.credential import Credential
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model as ProviderModel
+from cubeplex.models.provider import Provider
 from cubeplex.models.trigger import Trigger, TriggerEvent
 from cubeplex.repositories import (
     MembershipRepository,
@@ -85,6 +88,29 @@ async def _seed_context(
             value_encrypted=b"s3cr3t",
         )
         session.add(cred)
+        model_ref = (
+            await session.execute(
+                select(Provider.slug, ProviderModel.model_id)
+                .join(ProviderModel, ProviderModel.provider_id == Provider.id)
+                .where(Provider.slug == "e2e", Provider.enabled, ProviderModel.enabled)
+                .limit(1)
+            )
+        ).one()
+        session.add(
+            OrgSettings(
+                org_id=org.id,
+                key=MODEL_PRESETS_KEY,
+                value={
+                    "tiers": {
+                        "flash": {
+                            "enabled": True,
+                            "primary": f"{model_ref.slug}/{model_ref.model_id}",
+                        }
+                    },
+                    "default_preset": "flash",
+                },
+            )
+        )
         await session.commit()
 
         await MembershipRepository(session).grant(
