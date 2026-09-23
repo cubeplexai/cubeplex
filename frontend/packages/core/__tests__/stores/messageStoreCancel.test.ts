@@ -254,8 +254,9 @@ describe('messageStore.cancelStream', () => {
     vi.mocked(getConversationBootstrap).mockResolvedValue(idleBootstrap())
 
     const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    const rejected = expect(cancelling).rejects.toThrow('Could not identify the active run')
     await vi.advanceTimersByTimeAsync(5_000)
-    await cancelling
+    await rejected
 
     expect(cancelActiveRun).not.toHaveBeenCalled()
     expect(useMessageStore.getState()).toMatchObject({

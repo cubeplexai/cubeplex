@@ -1914,9 +1914,42 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         listBackgroundTasks(client, conversationId),
         listBackgroundTaskEvents(client, conversationId, { delivery: 'all' }),
       ])
+      const cachedEvents = get().backgroundEvents[conversationId] ?? []
+      const newestEventIds = new Set(eventPage.items.map((event) => event.id))
+      const unresolvedEventIds = new Set(
+        cachedEvents
+          .filter(
+            (event) =>
+              (event.state === 'pending' || event.state === 'claimed') &&
+              !newestEventIds.has(event.id),
+          )
+          .map((event) => event.id),
+      )
+      const refreshedOlderEvents: BackgroundTaskEvent[] = []
+      const visitedCursors = new Set<string>()
+      let refreshCursor = eventPage.next_cursor
+      let remainingPages = Math.ceil(cachedEvents.length / 50) + 1
+      while (
+        unresolvedEventIds.size > 0 &&
+        refreshCursor !== null &&
+        !visitedCursors.has(refreshCursor) &&
+        remainingPages > 0
+      ) {
+        visitedCursors.add(refreshCursor)
+        const olderPage = await listBackgroundTaskEvents(client, conversationId, {
+          delivery: 'all',
+          cursor: refreshCursor,
+          limit: 50,
+        })
+        refreshedOlderEvents.push(...olderPage.items)
+        for (const event of olderPage.items) unresolvedEventIds.delete(event.id)
+        refreshCursor = olderPage.has_more ? olderPage.next_cursor : null
+        remainingPages -= 1
+      }
+      const refreshedEvents = [...eventPage.items, ...refreshedOlderEvents]
       const knownIds = new Set<string>()
       for (const task of inflight) knownIds.add(task.id)
-      for (const event of eventPage.items) knownIds.add(event.task_id)
+      for (const event of refreshedEvents) knownIds.add(event.task_id)
       for (const task of get().backgroundTasks[conversationId] ?? []) knownIds.add(task.id)
       const boundedIds = [...knownIds].slice(0, 100)
       const tasks =
@@ -1937,7 +1970,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         has_inflight: mergedTasks.some((task) =>
           ['starting', 'running', 'waiting_input', 'unknown'].includes(task.state),
         ),
-        has_pending: eventPage.items.some(
+        has_pending: refreshedEvents.some(
           (event) => event.state === 'pending' || event.state === 'claimed',
         ),
         has_cleanup: mergedTasks.some((task) => task.cleanup_pending),
@@ -1975,10 +2008,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             state.backgroundEventsHasMore[conversationId],
             eventPage,
           )
+          const items = [
+            ...new Map(
+              [...merged.items, ...refreshedOlderEvents]
+                .sort((left, right) => left.revision - right.revision)
+                .map((event) => [event.id, event]),
+            ).values(),
+          ]
           return {
             backgroundEvents: {
               ...state.backgroundEvents,
-              [conversationId]: merged.items,
+              [conversationId]: items,
             },
             backgroundEventCursor: {
               ...state.backgroundEventCursor,
@@ -3243,7 +3283,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           ),
           runLifecycle: { ...s.runLifecycle, [conversationId]: 'running' },
         }))
-        return
+        throw new Error('Could not identify the active run. Stop was not applied.')
       }
     }
 
