@@ -244,7 +244,7 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([])
   })
 
-  it('clears authoritative cleanup while preserving pending controls from a partial event page', async () => {
+  it('does not treat historical event pagination as pending work', async () => {
     useMessageStore.setState({
       backgroundSummary: {
         'conv-1': {
@@ -258,6 +258,29 @@ describe('messageStore background task state', () => {
     vi.mocked(listBackgroundTasks).mockResolvedValue([])
     vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
       items: [],
+      next_cursor: 'older-events',
+      has_more: true,
+    })
+
+    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
+
+    expect(useMessageStore.getState().backgroundSummary['conv-1']).toEqual({
+      has_inflight: false,
+      has_pending: false,
+      has_cleanup: false,
+      can_stop: false,
+    })
+  })
+
+  it('keeps an older pending event actionable through the authoritative task query', async () => {
+    const pending = task({
+      state: 'succeeded',
+      capabilities: { ...task().capabilities, can_stop: true },
+      notification: { enabled: true, has_pending: true, cancelled_at: null },
+    })
+    vi.mocked(listBackgroundTasks).mockResolvedValue([pending])
+    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
+      items: [event({ id: 'newer-delivered', state: 'delivered' })],
       next_cursor: 'older-events',
       has_more: true,
     })
