@@ -34,6 +34,7 @@ from cubeplex.api.routes.v1.admin import router as admin_router
 from cubeplex.api.routes.v1.artifacts import router as artifacts_router
 from cubeplex.api.routes.v1.attachments import router as attachments_router
 from cubeplex.api.routes.v1.auth import router as auth_router
+from cubeplex.api.routes.v1.background_tasks import router as background_tasks_router
 from cubeplex.api.routes.v1.conversation_search import router as conversation_search_router
 from cubeplex.api.routes.v1.conversations import router as conversations_router
 from cubeplex.api.routes.v1.me_api_keys import router as me_api_keys_router
@@ -58,6 +59,7 @@ __all__ = [
     "artifacts_router",
     "ws_artifacts_router",
     "attachments_router",
+    "background_tasks_router",
     "presented_files_router",
     "sandbox_commands_router",
     "auth_router",
