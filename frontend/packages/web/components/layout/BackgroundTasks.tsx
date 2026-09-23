@@ -171,6 +171,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     summary?.has_inflight ||
     summary?.has_pending ||
     summary?.has_cleanup ||
+    runControl?.can_stop ||
     currentStopAll?.cleanup_pending ||
     refreshError,
   )

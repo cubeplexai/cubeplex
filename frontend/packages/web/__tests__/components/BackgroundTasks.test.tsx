@@ -202,6 +202,33 @@ describe('BackgroundTasks', () => {
     expect(screen.getByText('正在停止全部工作')).toBeInTheDocument()
   })
 
+  it('shows Stop all when the foreground run is the only active work', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+      runControl: {
+        'conv-1': {
+          run_id: 'run-1',
+          stop_requested_at: null,
+          cleanup_pending: false,
+          can_stop: true,
+        },
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
+  })
+
   it('does not let an older generation hide Stop all for newly admitted work', () => {
     mocks.state = {
       ...mocks.state,
