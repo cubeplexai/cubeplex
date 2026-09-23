@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
 from cubeloop.providers.base import ReasoningControl
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool
 from cubeplex.agents.schemas import AgentEvent
 from cubeplex.api.exceptions import InvalidInputError
 from cubeplex.api.schemas.conversations import (
+    AdmittedRunResponse,
     DeleteConversationResponse,
     ExecutionGenerationResponse,
     InviteToGroupRequest,
@@ -45,6 +46,7 @@ from cubeplex.repositories import (
     SteeringMessageRepository,
     UserSandboxRepository,
 )
+from cubeplex.repositories.background_task import ConversationExecutionAdmissionRepository
 from cubeplex.repositories.conversation import (
     ForkGroupChatError,
     ForkNewThreadExistsError,
@@ -1785,6 +1787,35 @@ async def get_conversation_execution_generation(
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ExecutionGenerationResponse(execution_generation=conversation.execution_generation)
+
+
+@router.get("/{conversation_id}/admitted-run", response_model=AdmittedRunResponse)
+async def get_admitted_run(
+    conversation_id: str,
+    client_message_id: Annotated[str, Query(min_length=1, max_length=200)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> AdmittedRunResponse:
+    """Resolve only the run durably bound to this browser message request."""
+    conversation = await ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    ).get_by_id(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    admission = await ConversationExecutionAdmissionRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    ).get_source(source_kind="user_message", source_id=f"web:{client_message_id}")
+    if (
+        admission is None
+        or admission.conversation_id != conversation_id
+        or admission.actor_user_id != ctx.user.id
+        or admission.execution_kind != "run"
+    ):
+        return AdmittedRunResponse(run_id=None)
+    return AdmittedRunResponse(run_id=admission.run_id)
 
 
 @router.get("/{conversation_id}/bootstrap")

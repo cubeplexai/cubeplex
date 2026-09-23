@@ -81,9 +81,7 @@ def serialize_task(item: TaskProjection) -> BackgroundTaskOut:
         capabilities=BackgroundTaskCapabilities(
             can_stop=item.can_stop,
             remote_cancel_supported=item.remote_cancel_supported,
-            reconnect_supported=command is not None
-            and command.provider_ref is not None
-            and command.sandbox_instance_id is not None,
+            reconnect_supported=item.reconnect_supported,
             logs_supported=command is not None and bool(command.log_path),
             input_supported=False,
         ),
