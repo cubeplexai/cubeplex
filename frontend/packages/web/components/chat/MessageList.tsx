@@ -30,6 +30,7 @@ import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
 import { RetryBanner } from './RetryBanner'
 import { CompactionMarker } from './CompactionMarker'
+import { BackgroundTaskEvents } from './BackgroundTaskEvents'
 import { MessageAttachments } from './MessageAttachments'
 import type { FailoverEvent, RetryEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -371,7 +372,7 @@ export function MessageList({ conversationId }: MessageListProps) {
       runLifecycle: { ...state.runLifecycle, [convId]: 'resuming_hitl' },
     }))
     try {
-      await cancelActiveRun(client, convId)
+      await cancelActiveRun(client, convId, pendingAsk.run_id)
       useMessageStore.setState({ lastAnsweredAskQuestionId: questionId })
       await loadMessages(client, convId)
     } catch (err) {
@@ -718,6 +719,8 @@ export function MessageList({ conversationId }: MessageListProps) {
               </div>
             </Fragment>
           ))}
+
+          <BackgroundTaskEvents conversationId={conversationId} />
 
           {bannersBeforeHistoryId == null && (
             <ModelChainBanners

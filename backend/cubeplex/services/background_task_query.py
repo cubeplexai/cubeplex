@@ -212,17 +212,18 @@ class BackgroundTaskQueryService:
         if after is not None:
             query = query.where(
                 or_(
-                    col(BackgroundTaskEvent.created_at) > after.created_at,
+                    col(BackgroundTaskEvent.created_at) < after.created_at,
                     and_(
                         col(BackgroundTaskEvent.created_at) == after.created_at,
-                        col(BackgroundTaskEvent.id) > after.event_id,
+                        col(BackgroundTaskEvent.id) < after.event_id,
                     ),
                 )
             )
         rows = (
             await self.session.execute(
                 query.order_by(
-                    col(BackgroundTaskEvent.created_at), col(BackgroundTaskEvent.id)
+                    col(BackgroundTaskEvent.created_at).desc(),
+                    col(BackgroundTaskEvent.id).desc(),
                 ).limit(limit + 1)
             )
         ).all()

@@ -211,6 +211,40 @@
     "activeRunConflict": "Previous turn is still finishing. Try again shortly.",
     "cancelFailed": "Could not cancel the current run. Try again."
   },
+  "backgroundTasks": {
+    "title": "Background work",
+    "description": "These tasks continue independently of the current reply.",
+    "unnamed": "Background task",
+    "stopTask": "Stop task",
+    "stopAll": "Stop all",
+    "stopFailed": "Could not stop this task. Try again.",
+    "stopAllFailed": "Could not stop all work. Try again.",
+    "submittingStop": "Submitting…",
+    "stopping": "Stopping — waiting for confirmation",
+    "stoppingAll": "Stopping all work — cleanup is still in progress",
+    "finalizing": "Finished — finalizing result",
+    "refreshFailed": "Could not refresh background work. Showing the last known state.",
+    "results": "Background results",
+    "resultLabel": "Background result",
+    "noResultDetails": "No additional result details.",
+    "loadOlderResults": "Load earlier background results",
+    "loadMoreFailed": "Could not load earlier background results. Try again.",
+    "states": {
+      "starting": "Starting",
+      "running": "Running",
+      "waiting_input": "Waiting for input",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "unknown": "Status unknown"
+    },
+    "events": {
+      "pending": "Pending delivery",
+      "claimed": "Delivery in progress",
+      "delivered": "Delivered",
+      "discarded": "Cancelled"
+    }
+  },
   "slashCommands": {
     "listAria": "Composer commands",
     "noMatches": "No matching commands",
@@ -1937,7 +1971,7 @@
   },
   "shellLayout": {
     "inputBarAttach": "Attach files",
-    "inputBarStop": "Stop generating",
+    "inputBarStop": "Stop current response",
     "sidebar": "Sidebar",
     "deleteConversation": "Delete",
     "deleteConversationTitle": "Delete conversation?",
