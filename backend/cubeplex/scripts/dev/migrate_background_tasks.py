@@ -54,6 +54,7 @@ class LegacyMigrationReport:
     migratable: tuple[LegacyCommandPlan, ...]
     blockers: tuple[LegacyCommandPlan, ...]
     migrated: int = 0
+    events_migrated: int = 0
 
 
 _MIGRATION_LOCK_ID = 0x435042475441534B
@@ -248,16 +249,27 @@ async def _copy_missing_completion(
     *,
     command: SandboxCommand,
     task: BackgroundTask,
-    copied_wakes: int,
     cancelled: bool,
-) -> None:
+) -> int:
     if (
-        copied_wakes != 0
-        or command.kind != SandboxCommandKind.execute.value
+        command.kind != SandboxCommandKind.execute.value
         or command.status != SandboxCommandStatus.exited.value
         or command.notice_state != SandboxCommandNoticeState.pending.value
     ):
-        return
+        return 0
+    wake_id = await session.scalar(
+        select(col(SandboxCommandWake.id)).where(col(SandboxCommandWake.command_id) == command.id)
+    )
+    if wake_id is not None:
+        return 0
+    existing = await session.scalar(
+        select(col(BackgroundTaskEvent.id)).where(
+            col(BackgroundTaskEvent.task_id) == task.id,
+            col(BackgroundTaskEvent.dedupe_key) == "completion",
+        )
+    )
+    if existing is not None:
+        return 0
     state = BackgroundTaskEventState.discarded if cancelled else BackgroundTaskEventState.pending
     session.add(
         BackgroundTaskEvent(
@@ -276,13 +288,14 @@ async def _copy_missing_completion(
             updated_at=command.updated_at,
         )
     )
+    return 1
 
 
 async def _migrate_one(
     session: AsyncSession,
     command: SandboxCommand,
     conversation: Conversation,
-) -> None:
+) -> int:
     admission = await _admission_for(session, command, conversation)
     state = _task_state(command)
     cancelled = _notifications_cancelled(command, conversation)
@@ -341,17 +354,17 @@ async def _migrate_one(
         task=task,
         cancelled=cancelled,
     )
-    await _copy_missing_completion(
+    completion = await _copy_missing_completion(
         session,
         command=command,
         task=task,
-        copied_wakes=copied_wakes,
         cancelled=cancelled,
     )
     command.task_id = task.id
     command.owner_id = None
     command.owner_until = None
     await session.flush()
+    return copied_wakes + completion
 
 
 async def migrate_legacy_commands(
@@ -381,16 +394,43 @@ async def migrate_legacy_commands(
     migratable = tuple(item for item in plans if item.action == "migrate")
     blockers = tuple(item for item in plans if item.action == "block")
     migrated = 0
+    events_migrated = 0
     if apply:
         by_id = {command.id: (command, conversation) for command, conversation in rows}
         for item in migratable:
             command, conversation = by_id[item.command_id]
-            await _migrate_one(session, command, conversation)
+            events_migrated += await _migrate_one(session, command, conversation)
             migrated += 1
+        managed_statement = (
+            select(SandboxCommand, Conversation, BackgroundTask)
+            .join(Conversation, col(Conversation.id) == col(SandboxCommand.conversation_id))
+            .join(BackgroundTask, col(BackgroundTask.id) == col(SandboxCommand.task_id))
+            .order_by(col(SandboxCommand.created_at), col(SandboxCommand.id))
+        )
+        if command_ids is not None:
+            managed_statement = managed_statement.where(col(SandboxCommand.id).in_(command_ids))
+        managed_rows = list((await session.execute(managed_statement)).all())
+        for command, conversation, task in managed_rows:
+            cancelled = _notifications_cancelled(command, conversation)
+            copied = await _copy_wakes(
+                session,
+                command=command,
+                task=task,
+                cancelled=cancelled,
+            )
+            events_migrated += copied
+            events_migrated += await _copy_missing_completion(
+                session,
+                command=command,
+                task=task,
+                cancelled=cancelled,
+            )
+        await session.flush()
     return LegacyMigrationReport(
         migratable=migratable,
         blockers=blockers,
         migrated=migrated,
+        events_migrated=events_migrated,
     )
 
 
@@ -414,6 +454,7 @@ async def _main_async(*, apply: bool) -> int:
         output = {
             "mode": "apply" if apply else "dry-run",
             "migrated": report.migrated,
+            "events_migrated": report.events_migrated,
             "migratable": [asdict(item) for item in report.migratable],
             "blockers": [asdict(item) for item in report.blockers],
         }

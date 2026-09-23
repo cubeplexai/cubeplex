@@ -31,6 +31,7 @@ from cubeplex.middleware.sandbox import (
     _make_write_file_tool,
     _MonitorArgs,
     _normalize_for_fuzzy,
+    _TaskCommandBinding,
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
@@ -1724,7 +1725,6 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
     repo.update_log_cursor = AsyncMock(return_value=True)
     repo.mark_terminal = AsyncMock(return_value=True)
     repo.discard_reservation = AsyncMock(return_value=True)
-    repo.renew_owner = AsyncMock()
     row = MagicMock(status="running")
     repo.get = AsyncMock(return_value=row)
     mw = _make_middleware(
@@ -1803,8 +1803,6 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
         "scmd-discard",
         owner_id="run:run-1",
     )
-    assert repo.renew_owner.await_args.kwargs["owner_id"] == "run:run-1"
-    assert repo.renew_owner.await_args.args == (["scmd-live"],)
 
 
 @pytest.mark.asyncio
@@ -1871,12 +1869,10 @@ async def test_command_persistence_cas_miss_is_not_silently_accepted(method: str
 
 
 @pytest.mark.asyncio
-async def test_persist_reserve_ensures_sandbox_and_records_lifetime() -> None:
+async def test_persist_reserve_rejects_unadmitted_database_execution() -> None:
     sandbox = _make_sandbox()
     sandbox.user_sandbox_id = "usb-1"
     sandbox.ensure_created = AsyncMock()
-    repo = MagicMock()
-    repo.reserve = AsyncMock()
     mw = _make_middleware(
         sandbox=sandbox,
         org_id="org-1",
@@ -1885,25 +1881,17 @@ async def test_persist_reserve_ensures_sandbox_and_records_lifetime() -> None:
         session_factory=MagicMock(),
     )
 
-    @asynccontextmanager
-    async def _repo_ctx() -> Any:
-        yield repo
+    with pytest.raises(RuntimeError, match="durable execution admission"):
+        await mw._persist_reserve(
+            command_id="scmd-1",
+            tool_call_id="tc-1",
+            command="serve",
+            description="Development server",
+            notify_on_complete=False,
+            log_path="/workspace/server.log",
+        )
 
-    mw._command_repo_ctx = _repo_ctx  # type: ignore[method-assign]
-    reserved = await mw._persist_reserve(
-        command_id="scmd-1",
-        tool_call_id="tc-1",
-        command="serve",
-        description="Development server",
-        notify_on_complete=False,
-        log_path="/workspace/server.log",
-    )
-
-    assert reserved is True
-    sandbox.ensure_created.assert_awaited_once()
-    assert repo.reserve.await_args.kwargs["lifetime"] == "conversation"
-    assert repo.reserve.await_args.kwargs["owner_id"] == "run:run-1"
-    assert repo.reserve.await_args.kwargs["user_sandbox_id"] == "usb-1"
+    sandbox.ensure_created.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1938,6 +1926,51 @@ async def test_handoff_releases_owner_and_cancels_local_deadline() -> None:
     )
     assert "scmd-monitor" not in mw._live_commands
     assert deadline.cancelled() or deadline.cancelling()
+
+
+@pytest.mark.asyncio
+async def test_live_task_lease_renews_the_background_task_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.sandbox.base import ProcessHandle
+    from cubeplex.services import background_tasks
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+
+    @asynccontextmanager
+    async def _sessions() -> Any:
+        yield session
+
+    service = MagicMock()
+    service.renew_owner = AsyncMock()
+    monkeypatch.setattr(
+        background_tasks,
+        "BackgroundTaskService",
+        lambda *_args, **_kwargs: service,
+    )
+    mw = _make_middleware(
+        org_id="org-1",
+        user_id="user-1",
+        run_id="run-1",
+        session_factory=_sessions,
+    )
+    mw._task_bindings["scmd-live"] = _TaskCommandBinding(
+        task_id="bgt-live",
+        owner_token="owner-live",
+        sandbox_instance_id="sandbox-live",
+    )
+    mw._live_commands["scmd-live"] = (
+        ProcessHandle(command_id="scmd-live", provider_ref="provider-live"),
+        True,
+    )
+
+    await mw._renew_live_leases()
+
+    service.renew_owner.assert_awaited_once()
+    assert service.renew_owner.await_args.kwargs["task_id"] == "bgt-live"
+    assert service.renew_owner.await_args.kwargs["owner_token"] == "owner-live"
+    session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
