@@ -295,23 +295,12 @@ async def test_stopped_ancestor_blocks_new_descendants(
         )
 
 
-async def test_unknown_and_legacy_commands_count_toward_shared_cap(
+async def test_unknown_tasks_count_toward_shared_cap(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:
-    for _ in range(7):
+    for _ in range(8):
         result = await reserve(db_session, reservation_context)
         result.task.state = "unknown"
-    legacy = SandboxCommand(
-        org_id=DEFAULT_ORG_ID,
-        workspace_id=DEFAULT_WS_ID,
-        user_sandbox_id=reservation_context.details.user_sandbox_id,
-        conversation_id=reservation_context.conversation_id,
-        run_id=reservation_context.spec.originating_run_id,
-        started_by_user_id=result.task.started_by_user_id,
-        command="legacy server",
-        status="running",
-    )
-    db_session.add(legacy)
     await db_session.commit()
     with pytest.raises(SandboxCommandCapError):
         await reserve(db_session, reservation_context)

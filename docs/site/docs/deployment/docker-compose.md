@@ -35,7 +35,7 @@ Host
                     └─ tempo on internal `tracing` network (no host port)
 
 Bootstrap services (run-to-completion):
-  backend-migrate  alembic upgrade head (gates backend boot)
+  backend-migrate  lock + schema/cutover verification (gates backend boot)
   bucket-init      mc mb (idempotent rustfs bucket create)
 ```
 
@@ -208,6 +208,32 @@ to wipe the deployment.
 
 `up.sh` refuses to start if `.env`, either YAML config file, or
 `config/opensandbox.toml` is missing.
+
+### Upgrading a database from before the task-lifecycle cutover
+
+The normal `backend-migrate` container deliberately refuses to change an
+existing pre-cutover database. The backfill must run while no old backend can
+create commands or notifications:
+
+```bash
+# Use the new BACKEND_TAG, then stop every old API/worker in this stack.
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml stop backend frontend
+
+# One process holds the database migration lock, backfills and verifies, then
+# applies the final constraint. The command is safe to rerun after a failure.
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml run --rm backend-migrate \
+  python -m cubeplex.scripts.lifecycle_upgrade --maintenance
+
+# Normal startup now performs a read-only cutover check and starts the backend.
+deploy/docker-compose/scripts/up.sh
+```
+
+Do not use `--maintenance` while an old backend is running. A reported active
+run-lifetime command or legacy monitor must finish or be explicitly stopped;
+the migrator does not guess that it ended and does not attach it to a replacement
+sandbox.
 
 ## 6. Verification
 

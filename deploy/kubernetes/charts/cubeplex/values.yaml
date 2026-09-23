@@ -29,6 +29,11 @@ image:
 
 backend:
   replicaCount: 1
+  lifecycleMaintenance:
+    # One release transition needs an explicit, single-writer data backfill.
+    # Keep false for installs and ordinary upgrades; follow the upgrade guide.
+    enabled: false
+    activeDeadlineSeconds: 3600
   service:
     port: 8000
   # Sandbox execution is required. Use an external OpenSandbox endpoint by
