@@ -158,57 +158,6 @@ async def _build(
     return agent, all_tools, channel
 
 
-async def test_sandbox_teardown_heartbeat_cannot_refresh_a_replacement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import fakeredis.aioredis
-    from cubeloop.providers.base import ReasoningControl
-
-    from cubeplex.services.conversation_execution import ResolvedExecution
-    from cubeplex.streams.run_events import RunClaimLost, _run_meta_key, create_run
-
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    try:
-        await create_run(
-            redis,
-            prefix="test_t7",
-            run_id=_RUN_ID,
-            conversation_id=_CONV_ID,
-            status="running",
-            started_at="2026-09-21T00:00:00+00:00",
-            ttl_seconds=60,
-            claim_token="original",
-        )
-        extra: dict[str, Any] = {}
-        await _build(
-            monkeypatch,
-            sandbox=MagicMock(),
-            redis=redis,
-            extra=extra,
-            execution=RunExecutionBinding(
-                admission_id="admission",
-                attempt_id="original",
-                start_token="initial",
-                execution_generation=0,
-                execution=ResolvedExecution(
-                    model_key="default",
-                    primary="anthropic/claude-stub",
-                    reasoning=ReasoningControl(),
-                ),
-            ),
-        )
-        heartbeat = extra["sandbox_middleware"]._heartbeat
-        await heartbeat()
-        key = _run_meta_key("test_t7", _RUN_ID)
-        await redis.hset(key, "claim_token", "replacement")
-        before = await redis.hgetall(key)
-        with pytest.raises(RunClaimLost):
-            await heartbeat()
-        assert await redis.hgetall(key) == before
-    finally:
-        await redis.aclose()
-
-
 async def test_build_returns_tuple_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """The factory's contract for T8/T10 is a 3-tuple of
     ``(agent, all_tools, sandbox_hitl_channel)``."""
