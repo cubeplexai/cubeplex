@@ -1724,7 +1724,6 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
     repo.mark_running = AsyncMock(return_value=True)
     repo.update_log_cursor = AsyncMock(return_value=True)
     repo.mark_terminal = AsyncMock(return_value=True)
-    repo.discard_reservation = AsyncMock(return_value=True)
     row = MagicMock(status="running")
     repo.get = AsyncMock(return_value=row)
     mw = _make_middleware(
@@ -1748,7 +1747,6 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
     await mw._persist_running("scmd-live", "provider-1")
     await mw._persist_cursor("scmd-live", "17")
     assert await mw._persisted_command_status("scmd-live") == "running"
-    await mw._persist_discard("scmd-discard")
     await mw._persist_terminal(
         "scmd-none",
         status="killed",
@@ -1799,10 +1797,6 @@ async def test_command_persistence_helpers_delegate_with_owner_and_notice_state(
         SandboxCommandNoticeState.delivered.value,
         SandboxCommandNoticeState.none.value,
     ]
-    repo.discard_reservation.assert_awaited_once_with(
-        "scmd-discard",
-        owner_id="run:run-1",
-    )
 
 
 @pytest.mark.asyncio
