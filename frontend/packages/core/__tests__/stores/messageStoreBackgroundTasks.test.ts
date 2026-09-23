@@ -489,6 +489,46 @@ describe('messageStore background task state', () => {
     expect(useMessageStore.getState().backgroundEventCursor['conv-1']).toBeNull()
   })
 
+  it('restores and clears the send lock from persisted run cleanup', async () => {
+    const bootstrap = {
+      messages: [],
+      oldest_seq: null,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: {
+        run_id: 'run-stopping',
+        stop_requested_at: '2026-09-22T00:00:00+00:00',
+        cleanup_pending: true,
+        can_stop: false,
+      },
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    }
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce(bootstrap as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', { force: true })
+
+    expect(useMessageStore.getState().cancellingConversationIds).toEqual({ 'conv-1': true })
+
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      ...bootstrap,
+      run_control: { ...bootstrap.run_control, cleanup_pending: false },
+    } as never)
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', { force: true })
+
+    expect(useMessageStore.getState().cancellingConversationIds).toEqual({})
+  })
+
   it('preserves an expanded message window during a bootstrap baseline refresh', async () => {
     const older = {
       id: 'message-older',
