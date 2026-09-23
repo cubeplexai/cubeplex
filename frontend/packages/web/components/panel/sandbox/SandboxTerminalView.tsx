@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { createApiClient, listBackgroundTasks, stopBackgroundTask } from '@cubeplex/core'
 import type { BackgroundTask } from '@cubeplex/core'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { useSandboxTerminal } from '@/hooks/useSandboxTerminal'
@@ -122,17 +124,17 @@ function RunningCommandList({
   workspaceId: string
   conversationId: string
 }) {
+  const t = useTranslations('backgroundTasks')
   const [rows, setRows] = useState<RunningWork[]>([])
   const [stopping, setStopping] = useState<string | null>(null)
   const load = useCallback(async () => {
     const client = createApiClient('')
     client.setWorkspaceId(workspaceId)
-    const next: RunningWork[] = []
-    let loaded = false
+    let taskRows: RunningWork[] | null = null
+    let legacyRows: RunningWork[] | null = null
     try {
       const tasks = await listBackgroundTasks(client, conversationId)
-      next.push(...tasks.map((task) => ({ source: 'task' as const, task })))
-      loaded = true
+      taskRows = tasks.map((task) => ({ source: 'task' as const, task }))
     } catch {
       // Keep the last durable snapshot visible through a transient refresh failure.
     }
@@ -144,13 +146,17 @@ function RunningCommandList({
       if (response.ok) {
         const body: unknown = await response.json()
         const legacy = Array.isArray(body) ? (body as LegacyCommand[]) : []
-        next.push(...legacy.map((command) => ({ source: 'legacy' as const, command })))
-        loaded = true
+        legacyRows = legacy.map((command) => ({ source: 'legacy' as const, command }))
       }
     } catch {
       // The migration-only endpoint disappears after cutover; managed tasks stay available.
     }
-    if (loaded) setRows(next)
+    if (taskRows !== null || legacyRows !== null) {
+      setRows((current) => [
+        ...(taskRows ?? current.filter((row) => row.source === 'task')),
+        ...(legacyRows ?? current.filter((row) => row.source === 'legacy')),
+      ])
+    }
   }, [workspaceId, conversationId])
 
   useEffect(() => {
@@ -176,9 +182,11 @@ function RunningCommandList({
             `/sandbox-commands/${row.command.id}/kill`,
           { method: 'POST', credentials: 'include', headers: csrfHeaders() },
         )
-        if (!response.ok) return
+        if (!response.ok) throw new Error(`Legacy stop failed (${response.status})`)
       }
       await load()
+    } catch {
+      toast.error(t('stopFailed'))
     } finally {
       setStopping(null)
     }
