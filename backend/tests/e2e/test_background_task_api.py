@@ -497,6 +497,8 @@ async def test_bootstrap_run_control_tracks_explicit_run_stop(
     conversation_id = api_task_context.conversation.id
     run_id = api_task_context.admission.run_id
     assert run_id is not None
+    foreground = await api_task_context.reserve(db_session)
+    await db_session.commit()
     app = client._transport.app  # type: ignore[attr-defined]
     await create_run(
         app.state.redis,
@@ -525,6 +527,20 @@ async def test_bootstrap_run_control_tracks_explicit_run_stop(
 
     await db_session.refresh(api_task_context.admission)
     api_task_context.admission.run_finished_at = NOW
+    await db_session.commit()
+    bootstrap = await client.get(
+        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/bootstrap"
+    )
+    assert bootstrap.status_code == 200, bootstrap.text
+    control = bootstrap.json()["run_control"]
+    assert control["run_id"] == run_id
+    assert control["cleanup_pending"] is True
+
+    foreground.task.state = BackgroundTaskState.cancelled.value
+    foreground.task.finished_at = NOW
+    foreground.command.status = "killed"
+    foreground.command.finished_at = NOW
+    foreground.command.log_state = "complete"
     await db_session.commit()
     bootstrap = await client.get(
         f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/bootstrap"

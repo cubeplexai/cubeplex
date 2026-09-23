@@ -2,10 +2,16 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseSandboxTerminal = vi.hoisted(() => vi.fn())
+const mockToastError = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/useSandboxTerminal', () => ({
   useSandboxTerminal: mockUseSandboxTerminal,
 }))
+vi.mock('next-intl', () => ({
+  useTranslations: () => (key: string) =>
+    key === 'stopFailed' ? 'Could not stop this task. Try again.' : key,
+}))
+vi.mock('sonner', () => ({ toast: { error: mockToastError } }))
 
 vi.stubGlobal('fetch', vi.fn())
 
@@ -19,6 +25,7 @@ describe('SandboxTerminalView', () => {
       error: undefined,
       refresh: vi.fn(),
     })
+    mockToastError.mockReset()
     vi.mocked(fetch).mockReset()
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ items: [] }) } as Response)
   })
@@ -153,6 +160,29 @@ describe('SandboxTerminalView', () => {
         '/api/v1/ws/ws-1/conversations/conv-1/sandbox-commands/legacy-1/kill',
         expect.objectContaining({ method: 'POST' }),
       )
+    })
+  })
+
+  it('reports a legacy stop rejection instead of silently ignoring it', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            id: 'legacy-1',
+            description: 'legacy server',
+            started_at: new Date().toISOString(),
+          },
+        ],
+      } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 503 } as Response)
+
+    render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop legacy server' }))
+
+    await vi.waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith('Could not stop this task. Try again.')
     })
   })
 })

@@ -461,6 +461,25 @@ async function waitForConversationIdle(
   return false
 }
 
+function waitForPendingRunId(conversationId: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let unsubscribe = (): void => undefined
+    const inspect = (state: MessageStore): void => {
+      if (state.streamingConversationId !== conversationId || !state.isStreaming) {
+        unsubscribe()
+        resolve(null)
+        return
+      }
+      if (state.currentRunId) {
+        unsubscribe()
+        resolve(state.currentRunId)
+      }
+    }
+    unsubscribe = useMessageStore.subscribe(inspect)
+    inspect(useMessageStore.getState())
+  })
+}
+
 async function reconcileAfterStop(
   client: ApiClient,
   conversationId: string,
@@ -3093,14 +3112,27 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const ownsConversation = state.streamingConversationId === conversationId
     const pendingRunId =
       state.pendingAsk?.run_id ?? Object.values(state.pendingConfirmMap)[0]?.run_id ?? null
-    const targetRunId = state.currentRunId ?? pendingRunId
+    let targetRunId: string | null = state.currentRunId ?? pendingRunId
     if (state.cancellingConversationIds[conversationId]) return
-    if (!ownsConversation || !targetRunId || (!state.isStreaming && !hasPendingHitl)) return
+    if (!ownsConversation || (!state.isStreaming && !hasPendingHitl)) return
 
     set((s) => ({
       cancellingConversationIds: { ...s.cancellingConversationIds, [conversationId]: true },
       runLifecycle: { ...s.runLifecycle, [conversationId]: 'stopping' },
     }))
+
+    if (!targetRunId) {
+      targetRunId = await waitForPendingRunId(conversationId)
+      if (!targetRunId) {
+        set((s) => ({
+          cancellingConversationIds: withoutConversationFlag(
+            s.cancellingConversationIds,
+            conversationId,
+          ),
+        }))
+        return
+      }
+    }
 
     try {
       await cancelActiveRun(client, conversationId, targetRunId)
