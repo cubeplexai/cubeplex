@@ -54,6 +54,14 @@ async def test_web_retry_reuses_durable_run_after_redis_expires(
         await asyncio.gather(*postprocessing)
     calls_after_first_run = provider.call_count
     assert calls_after_first_run >= 1
+    history = await memory_client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/messages"
+    )
+    assert history.status_code == 200, history.text
+    user_message = next(
+        message for message in history.json()["messages"] if message["role"] == "user"
+    )
+    assert user_message["metadata"]["client_message_id"] == client_message_id
 
     async with cubeplex_db.async_session_maker() as session:
         admission = await session.scalar(

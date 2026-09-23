@@ -864,6 +864,51 @@ describe('messageStore background task state', () => {
     ])
   })
 
+  it('replaces an admitted optimistic user message when its run response was lost', async () => {
+    const optimistic = {
+      id: 'user-temp-1',
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'run exactly once' }],
+      metadata: { client_message_id: 'user-temp-1' },
+    }
+    const persisted = {
+      ...optimistic,
+      id: 'message-user',
+      seq: 10,
+      run_id: 'run-1',
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [optimistic] },
+      oldestSeqByConv: { 'conv-1': null },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [persisted],
+      oldest_seq: 10,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([persisted])
+  })
+
   it('replaces an injected steer with its persisted history row', async () => {
     const optimisticSteer = {
       id: 'user-steer-temp',
