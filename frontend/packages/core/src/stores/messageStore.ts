@@ -690,25 +690,43 @@ function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
     const key = historyCounterpartKey(message)
     if (key !== null) persistedCounterparts.set(key, (persistedCounterparts.get(key) ?? 0) + 1)
   }
-  const retained = current.filter((message) => {
+  const retained: Message[] = []
+  // Bootstrap returns the newest history page. Match repeated identities from
+  // the end so a partial tail page replaces the latest local turn, not an
+  // earlier turn from the same run.
+  for (let index = current.length - 1; index >= 0; index -= 1) {
+    const message = current[index]
     if (tailIds.has(message.id) || (message.seq !== undefined && tailSeqs.has(message.seq))) {
-      return false
+      continue
     }
-    if (message.seq !== undefined) return true
+    if (message.seq !== undefined) {
+      retained.push(message)
+      continue
+    }
     const key = historyCounterpartKey(message)
-    if (key === null) return true
+    if (key === null) {
+      retained.push(message)
+      continue
+    }
     const remaining = persistedCounterparts.get(key) ?? 0
-    if (remaining === 0) return true
+    if (remaining === 0) {
+      retained.push(message)
+      continue
+    }
     persistedCounterparts.set(key, remaining - 1)
-    return false
-  })
-  return sortHistoryMessages([...retained, ...tail])
+  }
+  return sortHistoryMessages([...retained.reverse(), ...tail])
 }
 
 function historyCounterpartKey(message: Message): string | null {
+  const steerId = message.role === 'user' ? message.metadata?.steer_id : undefined
+  if (typeof steerId === 'string') return JSON.stringify(['steer', steerId])
   if (typeof message.run_id !== 'string') return null
   if (message.role === 'tool_result') {
     return JSON.stringify([message.run_id, message.role, message.tool_call_id])
+  }
+  if (message.role === 'assistant') {
+    return JSON.stringify([message.run_id, message.role])
   }
   return JSON.stringify([message.run_id, message.role, message.content])
 }
