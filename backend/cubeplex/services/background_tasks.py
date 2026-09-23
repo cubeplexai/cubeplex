@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from cubeplex.config import MAX_COMMAND_TIMEOUT_SECONDS, get_command_default_timeout_seconds
-from cubeplex.models.background_task import INFLIGHT_TASK_STATES, BackgroundTask
+from cubeplex.models.background_task import (
+    INFLIGHT_TASK_STATES,
+    BackgroundTask,
+    TaskStopReason,
+)
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.membership import Membership
 from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandKind
@@ -96,6 +100,40 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
         self.admissions = ConversationExecutionAdmissionRepository(
             session, org_id=org_id, workspace_id=workspace_id
         )
+
+    async def request_environment_stop(
+        self,
+        *,
+        user_sandbox_id: str,
+        sandbox_instance_id: str,
+        reason: TaskStopReason,
+        now: datetime,
+    ) -> list[str]:
+        """Stop tasks bound to one immutable sandbox instance.
+
+        The sandbox lifecycle caller first closes new reservations on the
+        ``UserSandbox`` row and commits. This second transaction then reuses
+        the task stop state machine in conversation order, so a replacement
+        instance can never inherit the old instance's stop request.
+        """
+        if not user_sandbox_id or not sandbox_instance_id:
+            return []
+        task_ids = list(
+            await self.session.scalars(
+                select(col(BackgroundTask.id))
+                .join(SandboxCommand, col(SandboxCommand.task_id) == col(BackgroundTask.id))
+                .where(
+                    col(BackgroundTask.org_id) == self.org_id,
+                    col(BackgroundTask.workspace_id) == self.workspace_id,
+                    col(SandboxCommand.org_id) == self.org_id,
+                    col(SandboxCommand.workspace_id) == self.workspace_id,
+                    col(SandboxCommand.user_sandbox_id) == user_sandbox_id,
+                    col(SandboxCommand.sandbox_instance_id) == sandbox_instance_id,
+                )
+                .order_by(col(BackgroundTask.conversation_id), col(BackgroundTask.id))
+            )
+        )
+        return await self.request_tasks_stop(task_ids=task_ids, reason=reason, now=now)
 
     async def reserve_task(
         self,

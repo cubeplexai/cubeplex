@@ -26,7 +26,7 @@ export function useMySandboxes(wsId: string | null) {
   return { data, error, isLoading, mutate }
 }
 
-/** Soft restart: kill the container, keep the row + PVC. */
+/** Request a soft restart. A successful response may still require cleanup retries. */
 export async function restartMySandbox(wsId: string, sandboxId: string): Promise<void> {
   const client = createApiClient('')
   const res = await client.post(`/api/v1/ws/${wsId}/sandboxes/${sandboxId}/restart`, {})
@@ -35,8 +35,7 @@ export async function restartMySandbox(wsId: string, sandboxId: string): Promise
   }
 }
 
-/** Hard delete: soft-delete the row + kill the container. PVC is left as an
- * orphan for operator cleanup. */
+/** Request deletion. The row remains visible until provider cleanup is confirmed. */
 export async function deleteMySandbox(wsId: string, sandboxId: string): Promise<void> {
   const client = createApiClient('')
   const res = await client.del(`/api/v1/ws/${wsId}/sandboxes/${sandboxId}`)
