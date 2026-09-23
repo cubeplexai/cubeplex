@@ -35,6 +35,63 @@ async def events(session: AsyncSession, task_id: str) -> list[BackgroundTaskEven
     )
 
 
+async def test_environment_stop_is_fenced_to_original_sandbox_instance(
+    db_session: AsyncSession, reservation_context: ReservationContext
+) -> None:
+    item = await reserve(db_session, reservation_context)
+    notice = BackgroundTaskEvent(
+        org_id=item.task.org_id,
+        workspace_id=item.task.workspace_id,
+        conversation_id=item.task.conversation_id,
+        task_id=item.task.id,
+        execution_generation=item.task.execution_generation,
+        reason="completion",
+        dedupe_key="completion",
+    )
+    db_session.add(notice)
+    await db_session.commit()
+
+    assert (
+        await service(db_session).request_environment_stop(
+            user_sandbox_id=reservation_context.details.user_sandbox_id,
+            sandbox_instance_id="replacement-instance",
+            reason=TaskStopReason.user_stop,
+            now=NOW,
+        )
+        == []
+    )
+    await db_session.refresh(item.task)
+    await db_session.refresh(notice)
+    assert item.task.stop_requested_at is None
+    assert notice.state == "pending"
+
+    child = await reserve(
+        db_session,
+        reservation_context,
+        spec=replace(reservation_context.spec, parent_task_id=item.task.id),
+    )
+    child.command.sandbox_instance_id = "replacement-instance"
+    await db_session.commit()
+
+    stopped = await service(db_session).request_environment_stop(
+        user_sandbox_id=reservation_context.details.user_sandbox_id,
+        sandbox_instance_id=reservation_context.details.sandbox_instance_id,
+        reason=TaskStopReason.user_stop,
+        now=NOW,
+    )
+    await db_session.commit()
+
+    assert stopped == [item.task.id]
+    await db_session.refresh(item.task)
+    await db_session.refresh(child.task)
+    await db_session.refresh(notice)
+    assert item.task.stop_requested_at == NOW
+    assert item.task.stop_reason == "user_stop"
+    assert item.task.notifications_cancelled_at == NOW
+    assert child.task.stop_requested_at is None
+    assert notice.state == "discarded"
+
+
 async def test_expired_owner_cannot_replace_new_observation(
     db_session: AsyncSession, reservation_context: ReservationContext
 ) -> None:

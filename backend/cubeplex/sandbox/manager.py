@@ -42,14 +42,17 @@ from sqlmodel import col
 from cubeplex.config import config
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.models import EgressRef
-from cubeplex.models.background_task import BackgroundTask
+from cubeplex.models.background_task import BackgroundTask, TaskStopReason
 from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.credential import CredentialRepository
 from cubeplex.repositories.egress_ref import EgressRefRepository
 from cubeplex.repositories.sandbox_env import SandboxEnvRepository
 from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
-from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.repositories.user_sandbox import (
+    SandboxCleanupRequestedError,
+    UserSandboxRepository,
+)
 from cubeplex.sandbox.base import (
     Sandbox,
     SandboxConflictError,
@@ -59,6 +62,7 @@ from cubeplex.sandbox.base import (
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubeplex.sandbox_policy.rules import build_network_policy
+from cubeplex.services.background_tasks import BackgroundTaskService
 from cubeplex.services.credential import CredentialService
 from cubeplex.services.sandbox_env import SANDBOX_ENV_KIND, ResolvedEnv, SandboxEnvResolver
 from cubeplex.services.sandbox_policy import EffectivePolicy, SandboxPolicyResolver
@@ -898,6 +902,14 @@ class SandboxManager:
                 else:
                     await self._release_failed_provisioning(repo, record.id, is_revive)
             raise SandboxError(str(exc)) from exc
+        except SandboxCleanupRequestedError as exc:
+            if sandbox_id:
+                logger.warning(
+                    "Sandbox {} finished creating after cleanup was requested; "
+                    "the cleanup path owns that recorded instance",
+                    sandbox_id,
+                )
+            raise SandboxConflictError(str(exc)) from exc
         except Exception:
             if not promoted:
                 if sandbox_id:
@@ -1200,75 +1212,129 @@ class SandboxManager:
                 await repo.release_in_use(record.id)
 
     async def restart_user_sandbox(self, user_sandbox_id: str) -> None:
-        """User-initiated soft restart: kill the current container, keep the
-        row + PVC so the next ``get_or_create`` revives it in place.
-
-        Per-status semantics (spec §4.6):
-        - ``provisioning``                       -> ``SandboxConflictError``
-        - running / paused / pausing / resuming  -> atomic ``claim_for_kill``
-          (guards double-click) then ``_kill_record``
-        - terminated / failed / kill_pending     -> no-op (idempotent)
-
-        ``get_by_id_system`` is a cross-scope PK lookup (no org/ws context at
-        the call site); the row's own org/ws re-scope the repo for ``_kill_record``.
-        """
-        conn_config = self._build_connection_config()
-        async with self._session_factory() as session:
-            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
-            if row is None or row.deleted_at is not None:
-                return
-            if row.status == "provisioning":
-                raise SandboxConflictError("sandbox is provisioning; retry shortly")
-            if row.status in ("running", "paused", "pausing", "resuming"):
-                repo = UserSandboxRepository(
-                    session, org_id=row.org_id, workspace_id=row.workspace_id
-                )
-                claimed = await repo.claim_for_kill(row.id)
-                if not claimed:
-                    return  # another restart already killing
-                await self._kill_record(session, repo, row, conn_config)
-            # terminated / failed / kill_pending: no-op (idempotent)
-            await session.commit()
-
-    async def delete_user_sandbox(self, user_sandbox_id: str) -> None:
-        """User-initiated hard delete: kill the container, soft-delete the row.
-        PVC is left as an orphan for operator cleanup. Kill failure does NOT
-        block soft-delete — user intent is clear and the row should disappear
-        regardless (spec §5.3).
-
-        ``claim_for_soft_delete`` is the atomic double-click guard and also
-        performs the soft-delete (it aliases ``soft_delete``); on a failed
-        claim we return idempotently.
-        """
+        """Request restart, fence new work, then stop the original instance."""
         conn_config = self._build_connection_config()
         async with self._session_factory() as session:
             row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
             if row is None or row.deleted_at is not None:
                 return
             repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
-            claimed = await repo.claim_for_soft_delete(row.id)
-            if not claimed:
-                return  # another delete already soft-deleted
-            if row.sandbox_id:
-                try:
-                    await self._kill_record(session, repo, row, conn_config)
-                except Exception:
-                    logger.exception(
-                        "kill failed during delete of {}; soft-deleting anyway",
-                        user_sandbox_id,
-                    )
-            await session.commit()
-            logger.warning(
-                "UserSandbox {} soft-deleted; PVC {} is now orphan — operator "
-                "must `kubectl delete pvc` to reclaim storage",
-                user_sandbox_id,
-                build_sandbox_pvc_name(
-                    self._volume_pvc_prefix,
-                    row.workspace_id,
-                    row.scope_type,
-                    row.scope_id,
-                ),
+            requested_at = datetime.now(UTC)
+            if not await repo.request_cleanup(
+                row.id,
+                action="restart",
+                requested_at=requested_at,
+            ):
+                if row.status == "kill_pending" and row.cleanup_action == "delete":
+                    raise SandboxConflictError("sandbox deletion is already pending")
+                return
+            instance_id = self._cleanup_instance_id(row.sandbox_id)
+            if instance_id is None:
+                await self._finalize_cleanup_without_instance(
+                    repo,
+                    row,
+                    action="restart",
+                    now=requested_at,
+                )
+                return
+            await self._request_managed_task_stop(
+                row,
+                sandbox_instance_id=instance_id,
+                now=requested_at,
             )
+            await self._kill_record(
+                session,
+                repo,
+                row,
+                conn_config,
+                delete_on_success=False,
+            )
+
+    async def delete_user_sandbox(self, user_sandbox_id: str) -> None:
+        """Request deletion and hide the row only after provider cleanup."""
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+            if row is None or row.deleted_at is not None:
+                return
+            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
+            requested_at = datetime.now(UTC)
+            if not await repo.request_cleanup(
+                row.id,
+                action="delete",
+                requested_at=requested_at,
+            ):
+                return
+            instance_id = self._cleanup_instance_id(row.sandbox_id)
+            if instance_id is None:
+                await self._finalize_cleanup_without_instance(
+                    repo,
+                    row,
+                    action="delete",
+                    now=requested_at,
+                )
+                return
+            await self._request_managed_task_stop(
+                row,
+                sandbox_instance_id=instance_id,
+                now=requested_at,
+            )
+            await self._kill_record(
+                session,
+                repo,
+                row,
+                conn_config,
+                delete_on_success=True,
+            )
+
+    @staticmethod
+    def _cleanup_instance_id(sandbox_id: str | None) -> str | None:
+        if not sandbox_id or sandbox_id.startswith("pending-"):
+            return None
+        return sandbox_id
+
+    async def _finalize_cleanup_without_instance(
+        self,
+        repo: UserSandboxRepository,
+        row: UserSandbox,
+        *,
+        action: str,
+        now: datetime,
+    ) -> bool:
+        safe_without_provider = row.status in ("terminated", "failed")
+        if row.status == "kill_pending" and row.cleanup_requested_at is not None:
+            requested_at = row.cleanup_requested_at
+            if requested_at.tzinfo is None:
+                requested_at = requested_at.replace(tzinfo=UTC)
+            safe_without_provider = (now - requested_at).total_seconds() >= (
+                self._create_timeout + self._ready_timeout
+            )
+        if not safe_without_provider:
+            return False
+        await repo.mark_terminated(row.id, clear_sandbox_id=True)
+        if action == "delete":
+            await repo.soft_delete(row.id)
+        return True
+
+    async def _request_managed_task_stop(
+        self,
+        row: UserSandbox,
+        *,
+        sandbox_instance_id: str,
+        now: datetime,
+    ) -> None:
+        async with self._session_factory() as session:
+            await BackgroundTaskService(
+                session,
+                org_id=row.org_id,
+                workspace_id=row.workspace_id,
+            ).request_environment_stop(
+                user_sandbox_id=row.id,
+                sandbox_instance_id=sandbox_instance_id,
+                reason=TaskStopReason.user_stop,
+                now=now,
+            )
+            await session.commit()
 
     async def cleanup_expired(self) -> None:
         """Find and terminate sandboxes that exceeded their TTL.
@@ -1308,6 +1374,17 @@ class SandboxManager:
                     if current is None:
                         continue
                     record = current
+                    if (
+                        record.cleanup_action is not None
+                        and self._cleanup_instance_id(record.sandbox_id) is None
+                    ):
+                        await self._finalize_cleanup_without_instance(
+                            scoped_repo,
+                            record,
+                            action=record.cleanup_action,
+                            now=datetime.now(UTC),
+                        )
+                        continue
                     # A live create (fresh reserve or revive) is `provisioning`
                     # through Sandbox.create + check_ready. If ttl is shorter
                     # than that budget, the TTL filter still matches mid-create;
@@ -1843,6 +1920,8 @@ class SandboxManager:
         scoped_repo: UserSandboxRepository,
         record: UserSandbox,
         conn_config: ConnectionConfig,
+        *,
+        delete_on_success: bool = False,
     ) -> None:
         """Kill + revoke egress + mark terminated. Shared by cleanup_expired,
         pause_idle fallback, and reconciler paths.
@@ -1900,6 +1979,19 @@ class SandboxManager:
             # sandbox_id=None); the in-memory ``record.sandbox_id`` used for
             # revoke below is unaffected (mark_terminated mutates a fresh row).
             await scoped_repo.mark_terminated(record.id, clear_sandbox_id=True)
+            if delete_on_success or record.cleanup_action == "delete":
+                await scoped_repo.soft_delete(record.id)
+                logger.warning(
+                    "UserSandbox {} soft-deleted after provider cleanup; PVC {} is now "
+                    "orphaned for operator reclamation",
+                    record.id,
+                    build_sandbox_pvc_name(
+                        self._volume_pvc_prefix,
+                        record.workspace_id,
+                        record.scope_type,
+                        record.scope_id,
+                    ),
+                )
             if self._exchange_host and record.sandbox_id:
                 await self._revoke_egress(session, record.sandbox_id)
         else:

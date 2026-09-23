@@ -9,6 +9,8 @@ export interface MySandboxOut {
   scope_id: string
   scope_title: string | null
   status: string
+  cleanup_action: 'restart' | 'delete' | null
+  cleanup_requested_at: string | null
   image: string
   last_activity_at: string | null
   created_at: string

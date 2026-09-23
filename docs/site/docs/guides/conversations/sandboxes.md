@@ -72,6 +72,8 @@ Final task results are internal conversation events. They are delivered under th
 
 The local subprocess driver is for development only. Its process handles belong to the backend worker that started them; another worker cannot reconnect to them after a restart. An unavailable handle is an unknown process state, not confirmation that the command stopped. Repeated status checks or Stop requests preserve a command's observed exit code, including a command that finished before Stop arrived.
 
+Restart and Delete first block new work on the recorded sandbox instance and request its managed tasks to stop. A successful HTTP response means the request was accepted, not that the provider has confirmed termination. Unconfirmed cleanup remains visible as **Stopping** and can be retried. Delete hides the sandbox only after reliable provider evidence says the original instance is gone; a replacement instance never inherits the old stop request.
+
 ## Storage isolation
 
 Each sandbox gets its own isolated storage — files in one sandbox are never visible to another. This holds for the [shared sandboxes in topics](./topics.md) too: a topic with the **Dedicated topic sandbox** mode gets a fresh sandbox with its own storage, separate from the creator's personal sandbox and from every other topic. Files from the conversation you upgraded are **not** carried over into a dedicated topic sandbox.

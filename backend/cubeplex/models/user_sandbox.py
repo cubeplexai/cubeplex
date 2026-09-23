@@ -71,6 +71,11 @@ class UserSandbox(CubeplexBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
     )
+    cleanup_action: str | None = Field(default=None, max_length=16, nullable=True)
+    cleanup_requested_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     last_provider_check: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True, index=True),

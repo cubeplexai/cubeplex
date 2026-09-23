@@ -1,8 +1,8 @@
 """Workspace-scope user sandbox routes.
 
 - ``GET    /sandboxes``                   — list the caller's own sandbox entities.
-- ``POST   /sandboxes/{id}/restart``      — soft restart: kill container, keep row + PVC.
-- ``DELETE /sandboxes/{id}``              — hard delete: soft-delete row + kill container.
+- ``POST   /sandboxes/{id}/restart``      — request restart; keep row + PVC.
+- ``DELETE /sandboxes/{id}``              — request delete; hide after confirmed cleanup.
 
 Scope-isolated: no admin counterpart. Admins see fleet-wide info via
 ``/api/v1/admin/sandboxes/*`` (``require_org_admin``). Reuse goes one layer
@@ -90,6 +90,8 @@ async def list_my_sandboxes(
             scope_id=r.scope_id,
             scope_title=title_for(r),
             status=r.status,
+            cleanup_action=r.cleanup_action,
+            cleanup_requested_at=r.cleanup_requested_at,
             image=r.image,
             last_activity_at=r.last_activity_at,
             created_at=r.created_at,
@@ -105,7 +107,7 @@ async def restart_my_sandbox(
     actor: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Soft restart: kill the container, keep the row + PVC."""
+    """Request a restart; provider cleanup may still be pending on return."""
     await _verify_ownership(ctx, actor, user_sandbox_id, session)
     manager = get_sandbox_manager()
     try:
@@ -117,17 +119,14 @@ async def restart_my_sandbox(
         ) from exc
 
 
-@router.delete("/{user_sandbox_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_sandbox_id}", status_code=status.HTTP_202_ACCEPTED)
 async def delete_my_sandbox(
     user_sandbox_id: str,
     ctx: Annotated[RequestContext, Depends(require_member)],
     actor: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Hard delete: soft-delete the row + kill the container.
-
-    PVC is left as an orphan for operator cleanup.
-    """
+    """Request deletion; hide the row only after provider cleanup is confirmed."""
     await _verify_ownership(ctx, actor, user_sandbox_id, session)
     manager = get_sandbox_manager()
     await manager.delete_user_sandbox(user_sandbox_id)
