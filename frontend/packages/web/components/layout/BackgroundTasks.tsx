@@ -72,6 +72,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
           state.streamingConversationId !== conversationId
         ) {
           await loadMessages(client(), conversationId, {
+            preserveLoadedHistory: true,
             preserveOtherConversationStream: true,
           })
           lastBaselineAt = now
