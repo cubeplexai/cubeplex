@@ -289,6 +289,22 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         tool_call_id="legacy-proven",
         started_by_user_id=user.id,
         command="known legacy server",
+        provider_ref="legacy-process-proof",
+        kind="execute",
+        lifetime="conversation",
+        status="starting",
+        notify_on_complete=True,
+    )
+    handleless_start = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        sandbox_instance_id="legacy-instance-without-handle",
+        conversation_id=conv.id,
+        run_id="legacy-handleless-run",
+        tool_call_id="legacy-handleless",
+        started_by_user_id=user.id,
+        command="possibly submitted server",
         kind="execute",
         lifetime="conversation",
         status="starting",
@@ -315,6 +331,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
             killed,
             uncertain_start,
             proven_start,
+            handleless_start,
             blocked,
         )
     )
@@ -368,6 +385,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
         killed.id,
         uncertain_start.id,
         proven_start.id,
+        handleless_start.id,
         blocked.id,
     )
     checkpointed_notice_ids = {
@@ -380,6 +398,7 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     )
     assert {item.command_id for item in dry_run.blockers} == {
         uncertain_start.id,
+        handleless_start.id,
         blocked.id,
     }
     assert {item.command_id for item in dry_run.migratable} == {
@@ -399,7 +418,11 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     )
     await db_session.flush()
     assert first.migrated == 5
-    assert blocked.task_id is None and uncertain_start.task_id is None
+    assert (
+        blocked.task_id is None
+        and uncertain_start.task_id is None
+        and handleless_start.task_id is None
+    )
     await db_session.refresh(completed)
     await db_session.refresh(monitor)
     assert completed.task_id is not None and monitor.task_id is not None
@@ -470,20 +493,22 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
 
     blocked_status = await inspect_background_task_cutover(db_session)
     assert not blocked_status.ready
-    assert blocked_status.unmigrated_commands == baseline_status.unmigrated_commands + 2
+    assert blocked_status.unmigrated_commands == baseline_status.unmigrated_commands + 3
 
     blocked.status = "killed"
     blocked.finished_at = blocked.updated_at
     uncertain_start.status = "killed"
     uncertain_start.finished_at = uncertain_start.updated_at
+    handleless_start.status = "killed"
+    handleless_start.finished_at = handleless_start.updated_at
     await db_session.flush()
     final = await migrate_legacy_commands(
         db_session,
         apply=True,
-        command_ids=(blocked.id, uncertain_start.id),
+        command_ids=(blocked.id, uncertain_start.id, handleless_start.id),
         checkpointed_notice_ids=checkpointed_notice_ids,
     )
-    assert final.migrated == 2
+    assert final.migrated == 3
     ready_status = await inspect_background_task_cutover(db_session)
     assert ready_status == baseline_status
 
