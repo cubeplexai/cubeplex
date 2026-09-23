@@ -8,11 +8,15 @@ const mocks = vi.hoisted(() => ({
   loadMessages: vi.fn(),
   setWorkspaceId: vi.fn(),
   state: {} as Record<string, unknown>,
+  selectorSnapshots: [] as unknown[],
 }))
 
 vi.mock('@cubeplex/core', () => {
-  const useMessageStore = (selector: (state: Record<string, unknown>) => unknown) =>
-    selector(mocks.state)
+  const useMessageStore = (selector: (state: Record<string, unknown>) => unknown) => {
+    const selected = selector(mocks.state)
+    mocks.selectorSnapshots.push(selected, selector(mocks.state))
+    return selected
+  }
   useMessageStore.getState = () => mocks.state
   return {
     createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
@@ -59,6 +63,7 @@ describe('BackgroundTasks', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mocks.selectorSnapshots = []
     mocks.stopTask.mockResolvedValue(undefined)
     mocks.stopAllWork.mockResolvedValue(undefined)
     mocks.refreshBackground.mockResolvedValue(undefined)
@@ -96,6 +101,26 @@ describe('BackgroundTasks', () => {
 
     expect(mocks.stopTask).toHaveBeenCalledWith(expect.anything(), 'conv-1', 'bgt-1')
     expect(mocks.stopAllWork).toHaveBeenCalledWith(expect.anything(), 'conv-1')
+  })
+
+  it('keeps the cold-load task selector snapshot stable', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {},
+      backgroundSummary: {},
+      stopAllStatus: {},
+      runControl: {},
+      backgroundRefreshError: {},
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    const taskSnapshots = mocks.selectorSnapshots.filter(
+      (snapshot): snapshot is { tasks: unknown[] } =>
+        typeof snapshot === 'object' && snapshot !== null && 'tasks' in snapshot,
+    )
+    expect(taskSnapshots).toHaveLength(2)
+    expect(taskSnapshots[1]).toBe(taskSnapshots[0])
   })
 
   it('shows accepted Stop as pending confirmation instead of hiding the task', () => {
