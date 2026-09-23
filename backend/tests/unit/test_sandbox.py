@@ -1052,6 +1052,48 @@ async def test_auto_background_does_not_ack_output_when_log_append_fails(
 
 
 @pytest.mark.asyncio
+async def test_auto_background_does_not_repeat_streamed_output_during_log_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+    from cubeplex.sandbox.log_io import AppendOutputResult
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    async def _append(_sandbox: Any, _path: str, data: str | bytes) -> AppendOutputResult:
+        return AppendOutputResult(
+            data_written=data != "first\n",
+            cleanup_done=True,
+        )
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    monkeypatch.setattr(sandbox_mod, "append_output", _append)
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        side_effect=(
+            ProcessSnapshot(status="running", new_output="first\n", log_cursor="1"),
+            ProcessSnapshot(
+                status="exited",
+                exit_code=0,
+                new_output="first\nsecond\n",
+                log_cursor="2",
+            ),
+        )
+    )
+
+    result = await _make_execute_tool(sandbox).execute(
+        "tc-display-cursor",
+        _ExecuteArgs(command="long command", description="Long command"),
+    )
+
+    assert _text(result) == "first\nsecond\n"
+
+
+@pytest.mark.asyncio
 async def test_background_deadline_persists_final_output_cursor_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1509,11 +1551,17 @@ async def test_monitor_deadline_keeps_repository_terminal_finalization(
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
     from cubeplex.sandbox.base import ExecuteResult, ProcessHandle, ProcessSnapshot
+    from cubeplex.sandbox.log_io import AppendOutputResult
 
     async def _immediate_sleep(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    monkeypatch.setattr(
+        sandbox_mod,
+        "append_output",
+        AsyncMock(return_value=AppendOutputResult(data_written=False, cleanup_done=True)),
+    )
     sandbox = _make_sandbox()
     sandbox.supports_background = MagicMock(return_value=True)
     sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
@@ -1543,7 +1591,56 @@ async def test_monitor_deadline_keeps_repository_terminal_finalization(
     await asyncio.wait_for(completed.wait(), timeout=1)
 
     terminal.assert_awaited_once()
+    assert terminal.await_args.args[2] is False
     sandbox.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_monitor_timeout_does_not_confirm_an_unwritten_empty_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+    from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+    from cubeplex.sandbox.log_io import AppendOutputResult
+
+    async def _immediate_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(sandbox_mod.asyncio, "sleep", _immediate_sleep)
+    monkeypatch.setattr(
+        sandbox_mod,
+        "append_output",
+        AsyncMock(return_value=AppendOutputResult(data_written=False, cleanup_done=True)),
+    )
+    sandbox = _make_sandbox()
+    sandbox.supports_background = MagicMock(return_value=True)
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p1"))
+    sandbox.poll = AsyncMock(
+        side_effect=(
+            ProcessSnapshot(status="running"),
+            ProcessSnapshot(status="killed"),
+        )
+    )
+    sandbox.kill = AsyncMock()
+    persisted = asyncio.Event()
+    timeout = AsyncMock(side_effect=lambda *_args: persisted.set())
+
+    tool = _make_monitor_tool(
+        sandbox,
+        live={},
+        persist_monitor_timeout=timeout,
+    )
+    await tool.execute(
+        "tc-monitor-empty-timeout",
+        _MonitorArgs(
+            command="monitor command",
+            description="Monitor command",
+            timeout_seconds=1,
+        ),
+    )
+    await asyncio.wait_for(persisted.wait(), timeout=1)
+
+    assert timeout.await_args.args[3] is False
 
 
 @pytest.mark.asyncio
