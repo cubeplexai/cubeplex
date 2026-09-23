@@ -13,7 +13,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -168,7 +168,6 @@ def _notifications_cancelled(
     return bool(
         not command.notify_on_complete
         or command.kind == SandboxCommandKind.monitor.value
-        or command.lifetime == SandboxCommandLifetime.run.value
         or command.status in (SandboxCommandStatus.not_started.value,)
         or conversation.deleted_at is not None
         or conversation.execution_closed_at is not None
@@ -229,6 +228,11 @@ async def _admission_for(
             col(ConversationExecutionAdmission.conversation_id) == command.conversation_id,
             col(ConversationExecutionAdmission.actor_user_id) == command.started_by_user_id,
             col(ConversationExecutionAdmission.run_id) == command.run_id,
+            or_(
+                col(ConversationExecutionAdmission.source_kind)
+                != ExecutionSourceKind.background_task.value,
+                col(ConversationExecutionAdmission.source_id).not_like("legacy-command:%"),
+            ),
         )
         .order_by(col(ConversationExecutionAdmission.id))
         .limit(1)
@@ -253,8 +257,6 @@ async def _admission_for(
         created_at=command.created_at,
         updated_at=command.updated_at,
     )
-    if _notifications_cancelled(command, conversation, admission):
-        admission.revoked_at = terminal
     session.add(admission)
     await session.flush()
     return admission
