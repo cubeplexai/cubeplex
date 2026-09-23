@@ -70,6 +70,7 @@ async def test_user_message_install_command_installs_skill_and_replaces_message(
     data = msgs_resp.json()
     messages = data["messages"]
     assert len(messages) == 2, messages
+    assert messages[0]["metadata"]["client_message_id"] == body["client_message_id"]
 
     # The assistant message should contain the install-result note.
     def _extract_text(msg: dict) -> str:
