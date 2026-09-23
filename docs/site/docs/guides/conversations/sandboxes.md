@@ -68,6 +68,8 @@ Result delivery is separate from process exit. The shared result state distingui
 
 Final task results are internal conversation events. They are delivered under the identity that started the task: a result may join that user's active run or start a new run when the conversation is idle, but waits while another participant owns the active run or while a confirmation is pending. An event is marked delivered only after its input is present in the durable checkpoint.
 
+The conversation shows active items in a separate **Background work** area above the composer. **Stop task** targets one item. **Stop all** stops the current response and every task in the current execution generation; an old retry cannot stop work created after that request. Accepted stops remain visible as **Stopping** until the execution provider confirms termination. Completed results appear as compact system events in the timeline, not as steering messages or user bubbles.
+
 ### Local development limitation
 
 The local subprocess driver is for development only. Its process handles belong to the backend worker that started them; another worker cannot reconnect to them after a restart. An unavailable handle is an unknown process state, not confirmation that the command stopped. Repeated status checks or Stop requests preserve a command's observed exit code, including a command that finished before Stop arrived.

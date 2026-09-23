@@ -1,4 +1,4 @@
-"""Workspace sandbox-command list and kill contracts."""
+"""Legacy sandbox-command wake delivery contracts."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -9,10 +9,9 @@ import httpx
 import pytest
 import pytest_asyncio
 from cubeloop.providers.base import TextContent, UserMessage
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-import cubeplex.api.routes.v1.sandbox_commands as sandbox_command_routes
 from cubeplex.agents.checkpointer import _build_dsn, init_checkpointer
 from cubeplex.models import (
     Conversation,
@@ -21,7 +20,6 @@ from cubeplex.models import (
     SteeringMessage,
     User,
     UserSandbox,
-    Workspace,
 )
 from cubeplex.models.sandbox_command import SandboxCommandWakeState
 from cubeplex.sandbox.command_coordinator import _claim_wakes, deliver_wakes_once
@@ -103,6 +101,17 @@ async def seeded_wake(
     try:
         yield command, wake, conversation
     finally:
+        # Updating the conversation may enqueue search-index work while the
+        # delivery app is running. Remove those derived rows before their
+        # parent conversation so this fixture stays repeatable.
+        await db_session.execute(
+            text("DELETE FROM embedding_jobs WHERE conversation_id = :conversation_id"),
+            {"conversation_id": conversation.id},
+        )
+        await db_session.execute(
+            text("DELETE FROM conversation_chunks WHERE conversation_id = :conversation_id"),
+            {"conversation_id": conversation.id},
+        )
         await db_session.execute(
             delete(SteeringMessage).where(
                 SteeringMessage.conversation_id == conversation.id  # type: ignore[arg-type]
@@ -133,111 +142,6 @@ async def _delete_checkpoint_thread(thread_id: str) -> None:
         await connection.execute("DELETE FROM cubepi_threads WHERE thread_id = $1", thread_id)
     finally:
         await connection.close()
-
-
-@pytest.mark.asyncio
-async def test_member_lists_and_kills_own_conversation_command(
-    admin_client_with_user_id: tuple[httpx.AsyncClient, str, str],
-    session_factory: async_sessionmaker[AsyncSession],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, workspace_id, user_id = admin_client_with_user_id
-    first = await client.post(f"/api/v1/ws/{workspace_id}/conversations")
-    second = await client.post(f"/api/v1/ws/{workspace_id}/conversations")
-    assert first.status_code == 201, first.text
-    assert second.status_code == 201, second.text
-    conversation_id = first.json()["id"]
-    other_conversation_id = second.json()["id"]
-
-    async with session_factory() as session:
-        workspace = await session.get(Workspace, workspace_id)
-        assert workspace is not None
-        sandbox = UserSandbox(
-            org_id=workspace.org_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            scope_type="user",
-            scope_id=user_id,
-            status="running",
-            image="test",
-            provider="local",
-        )
-        session.add(sandbox)
-        await session.flush()
-        command = SandboxCommand(
-            org_id=workspace.org_id,
-            workspace_id=workspace_id,
-            user_sandbox_id=sandbox.id,
-            conversation_id=conversation_id,
-            run_id="run-route-test",
-            tool_call_id="tc-route-test",
-            started_by_user_id=user_id,
-            command="sleep 30",
-            description="development server",
-            provider="local",
-            status="running",
-            notify_on_complete=False,
-            lifetime="conversation",
-            owner_id="route-test",
-            owner_until=datetime.now(UTC) + timedelta(hours=1),
-        )
-        session.add(command)
-        exited_command = SandboxCommand(
-            org_id=workspace.org_id,
-            workspace_id=workspace_id,
-            user_sandbox_id=sandbox.id,
-            conversation_id=conversation_id,
-            run_id="run-route-exited",
-            tool_call_id="tc-route-exited",
-            started_by_user_id=user_id,
-            command="true",
-            description="completed command",
-            provider="local",
-            status="exited",
-            exit_code=0,
-            finished_at=datetime.now(UTC),
-        )
-        session.add(exited_command)
-        await session.commit()
-        command_id = command.id
-        exited_command_id = exited_command.id
-
-    listing = await client.get(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/sandbox-commands"
-    )
-    assert listing.status_code == 200, listing.text
-    assert [(row["id"], row["description"]) for row in listing.json()] == [
-        (command_id, "development server")
-    ]
-
-    wrong_conversation = await client.post(
-        f"/api/v1/ws/{workspace_id}/conversations/{other_conversation_id}"
-        f"/sandbox-commands/{command_id}/kill"
-    )
-    assert wrong_conversation.status_code == 404
-
-    async def _no_sandbox(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(sandbox_command_routes, "sandbox_from_row", _no_sandbox)
-    killed = await client.post(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}"
-        f"/sandbox-commands/{command_id}/kill"
-    )
-    assert killed.status_code == 200, killed.text
-    assert killed.json() == {"id": command_id, "status": "killed"}
-
-    completed = await client.post(
-        f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}"
-        f"/sandbox-commands/{exited_command_id}/kill"
-    )
-    assert completed.status_code == 200, completed.text
-    assert completed.json() == {"id": exited_command_id, "status": "exited"}
-
-    async with session_factory() as session:
-        persisted = await session.get(SandboxCommand, command_id)
-        assert persisted is not None
-        assert persisted.status == "killed"
 
 
 @pytest.mark.asyncio

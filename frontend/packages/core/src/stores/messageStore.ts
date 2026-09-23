@@ -10,13 +10,19 @@ import type {
   AgentEvent,
   ArtifactEventData,
   AssistantMessage as AssistantMessageType,
+  BackgroundTask,
+  BackgroundTaskEvent,
+  BackgroundTaskEventPage,
+  BackgroundTaskSummary,
   ContentBlock,
   ErrorEventData,
   FailoverEvent,
   RetryEvent,
+  RunControlStatus,
   Message,
   ReasoningEvent,
   TextDeltaEvent,
+  StopAllStatus,
   ReasoningControl,
   TodoItem,
   ToolCallDeltaEvent,
@@ -34,6 +40,10 @@ import {
   cancelSteer,
   getConversationBootstrap,
   getHistoryWindow,
+  listBackgroundTaskEvents,
+  listBackgroundTasks,
+  stopAllConversationWork,
+  stopBackgroundTask as requestBackgroundTaskStop,
   steerRun,
   streamMessages,
   streamRun,
@@ -199,6 +209,16 @@ export interface MessageStore {
   /** Per-conversation bootstrap state for the initial history window. */
   loadingMessagesByConv: Record<string, boolean>
   pendingSteers: Record<string, PendingSteer[]>
+  backgroundTasks: Record<string, BackgroundTask[]>
+  backgroundEvents: Record<string, BackgroundTaskEvent[]>
+  backgroundEventCursor: Record<string, string | null>
+  backgroundEventsHasMore: Record<string, boolean>
+  backgroundSummary: Record<string, BackgroundTaskSummary>
+  executionGeneration: Record<string, number>
+  stopAllStatus: Record<string, StopAllStatus | null>
+  runControl: Record<string, RunControlStatus | null>
+  refreshingBackground: Record<string, true>
+  backgroundRefreshError: Record<string, string | null>
   runLifecycle: Record<string, RunLifecycle>
   streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
   isStreaming: boolean
@@ -308,6 +328,10 @@ export interface MessageStore {
    * without starting a run. Idempotent when the same ``id`` already exists.
    */
   appendHistoryMessage(conversationId: string, message: Message): void
+  refreshBackground(client: ApiClient, conversationId: string): Promise<void>
+  loadMoreBackgroundEvents(client: ApiClient, conversationId: string): Promise<void>
+  stopTask(client: ApiClient, conversationId: string, taskId: string): Promise<void>
+  stopAllWork(client: ApiClient, conversationId: string): Promise<void>
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<boolean>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<boolean>
@@ -375,6 +399,38 @@ function withoutConversationFlag(
   return next
 }
 
+function mergeBackgroundEventPage(
+  currentItems: BackgroundTaskEvent[],
+  currentCursor: string | null | undefined,
+  currentHasMore: boolean | undefined,
+  page: BackgroundTaskEventPage,
+): {
+  items: BackgroundTaskEvent[]
+  cursor: string | null
+  hasMore: boolean
+} {
+  const currentIds = new Set(currentItems.map((event) => event.id))
+  const pageOverlapsCurrent = page.items.some((event) => currentIds.has(event.id))
+  const items = [
+    ...new Map(
+      [...currentItems, ...page.items]
+        .sort((left, right) => left.revision - right.revision)
+        .map((event) => [event.id, event]),
+    ).values(),
+  ]
+
+  if (currentHasMore === undefined) {
+    return { items, cursor: page.next_cursor, hasMore: page.has_more }
+  }
+  if (currentHasMore) {
+    return { items, cursor: currentCursor ?? page.next_cursor, hasMore: true }
+  }
+  if (page.has_more && !pageOverlapsCurrent) {
+    return { items, cursor: page.next_cursor, hasMore: true }
+  }
+  return { items, cursor: null, hasMore: false }
+}
+
 const CANCEL_POLL_INTERVAL_MS = 500
 const CANCEL_STEER_MAX_ATTEMPTS = 10
 
@@ -386,7 +442,12 @@ async function waitForConversationIdle(
   while (get().cancellingConversationIds[conversationId]) {
     try {
       const bootstrap = await getConversationBootstrap(client, conversationId)
-      if (!bootstrap.active_run && !bootstrap.pending_hitl) return true
+      if (
+        !bootstrap.active_run &&
+        !bootstrap.pending_hitl &&
+        !bootstrap.run_control?.cleanup_pending
+      )
+        return true
     } catch (err) {
       // Deleted/inaccessible conversations cannot accept another send. Other
       // failures are usually transient; retain the lock and retry instead of
@@ -1659,6 +1720,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   loadingMessagesByConv: {},
   pendingSteers: {},
+  backgroundTasks: {},
+  backgroundEvents: {},
+  backgroundEventCursor: {},
+  backgroundEventsHasMore: {},
+  backgroundSummary: {},
+  executionGeneration: {},
+  stopAllStatus: {},
+  runControl: {},
+  refreshingBackground: {},
+  backgroundRefreshError: {},
   runLifecycle: {},
   streamAgents: {},
   isStreaming: false,
@@ -1729,6 +1800,220 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         },
       }
     })
+  },
+
+  async refreshBackground(client, conversationId) {
+    if (get().refreshingBackground[conversationId]) return
+    const startingSummary = get().backgroundSummary[conversationId]
+    set((state) => ({
+      refreshingBackground: {
+        ...state.refreshingBackground,
+        [conversationId]: true,
+      },
+    }))
+    try {
+      const [inflight, eventPage] = await Promise.all([
+        listBackgroundTasks(client, conversationId),
+        listBackgroundTaskEvents(client, conversationId, { delivery: 'all' }),
+      ])
+      const knownIds = new Set<string>()
+      for (const task of inflight) knownIds.add(task.id)
+      for (const event of eventPage.items) knownIds.add(event.task_id)
+      for (const task of get().backgroundTasks[conversationId] ?? []) knownIds.add(task.id)
+      const boundedIds = [...knownIds].slice(0, 100)
+      const tasks =
+        boundedIds.length > 0
+          ? await listBackgroundTasks(client, conversationId, boundedIds)
+          : inflight
+      const byId = new Map(tasks.map((task) => [task.id, task]))
+      for (const task of inflight) {
+        const current = byId.get(task.id)
+        if (!current || task.revision > current.revision) byId.set(task.id, task)
+      }
+      const mergedTasks = [...byId.values()].sort(
+        (left, right) =>
+          left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
+      )
+      const derivedSummary: BackgroundTaskSummary = {
+        has_inflight: mergedTasks.some((task) =>
+          ['starting', 'running', 'waiting_input', 'unknown'].includes(task.state),
+        ),
+        has_pending: eventPage.items.some(
+          (event) => event.state === 'pending' || event.state === 'claimed',
+        ),
+        has_cleanup: mergedTasks.some((task) => task.cleanup_pending),
+        can_stop: mergedTasks.some((task) => task.capabilities.can_stop),
+      }
+      set((state) => ({
+        backgroundTasks: {
+          ...state.backgroundTasks,
+          [conversationId]: [
+            ...new Map(
+              [...mergedTasks, ...(state.backgroundTasks[conversationId] ?? [])]
+                .sort((left, right) => left.revision - right.revision)
+                .map((task) => [task.id, task]),
+            ).values(),
+          ].sort(
+            (left, right) =>
+              left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
+          ),
+        },
+        ...(() => {
+          const merged = mergeBackgroundEventPage(
+            state.backgroundEvents[conversationId] ?? [],
+            state.backgroundEventCursor[conversationId],
+            state.backgroundEventsHasMore[conversationId],
+            eventPage,
+          )
+          return {
+            backgroundEvents: {
+              ...state.backgroundEvents,
+              [conversationId]: merged.items,
+            },
+            backgroundEventCursor: {
+              ...state.backgroundEventCursor,
+              [conversationId]: merged.cursor,
+            },
+            backgroundEventsHasMore: {
+              ...state.backgroundEventsHasMore,
+              [conversationId]: merged.hasMore,
+            },
+          }
+        })(),
+        backgroundSummary: {
+          ...state.backgroundSummary,
+          [conversationId]:
+            state.backgroundSummary[conversationId] !== startingSummary
+              ? {
+                  has_inflight:
+                    derivedSummary.has_inflight ||
+                    Boolean(state.backgroundSummary[conversationId]?.has_inflight),
+                  has_pending:
+                    derivedSummary.has_pending ||
+                    Boolean(state.backgroundSummary[conversationId]?.has_pending),
+                  has_cleanup:
+                    derivedSummary.has_cleanup ||
+                    Boolean(state.backgroundSummary[conversationId]?.has_cleanup),
+                  can_stop:
+                    derivedSummary.can_stop ||
+                    Boolean(state.backgroundSummary[conversationId]?.can_stop),
+                }
+              : {
+                  has_inflight:
+                    derivedSummary.has_inflight ||
+                    (boundedIds.length >= 100 &&
+                      Boolean(state.backgroundSummary[conversationId]?.has_inflight)),
+                  has_pending:
+                    derivedSummary.has_pending ||
+                    (eventPage.has_more &&
+                      Boolean(state.backgroundSummary[conversationId]?.has_pending)),
+                  has_cleanup:
+                    derivedSummary.has_cleanup ||
+                    (boundedIds.length >= 100 &&
+                      Boolean(state.backgroundSummary[conversationId]?.has_cleanup)),
+                  can_stop:
+                    derivedSummary.can_stop ||
+                    (boundedIds.length >= 100 &&
+                      Boolean(state.backgroundSummary[conversationId]?.can_stop)),
+                },
+        },
+        refreshingBackground: withoutConversationFlag(state.refreshingBackground, conversationId),
+        backgroundRefreshError: {
+          ...state.backgroundRefreshError,
+          [conversationId]: null,
+        },
+      }))
+    } catch (error) {
+      set((state) => ({
+        refreshingBackground: withoutConversationFlag(state.refreshingBackground, conversationId),
+        backgroundRefreshError: {
+          ...state.backgroundRefreshError,
+          [conversationId]: error instanceof Error ? error.message : String(error),
+        },
+      }))
+      throw error
+    }
+  },
+
+  async loadMoreBackgroundEvents(client, conversationId) {
+    const cursor = get().backgroundEventCursor[conversationId]
+    if (!cursor || !get().backgroundEventsHasMore[conversationId]) return
+    const page = await listBackgroundTaskEvents(client, conversationId, {
+      delivery: 'all',
+      cursor,
+    })
+    const taskIds = [...new Set(page.items.map((event) => event.task_id))].slice(0, 100)
+    const tasks =
+      taskIds.length > 0 ? await listBackgroundTasks(client, conversationId, taskIds) : []
+    set((state) => {
+      const events = new Map(
+        [...(state.backgroundEvents[conversationId] ?? []), ...page.items]
+          .sort((left, right) => left.revision - right.revision)
+          .map((event) => [event.id, event]),
+      )
+      const taskMap = new Map(
+        [...(state.backgroundTasks[conversationId] ?? []), ...tasks]
+          .sort((left, right) => left.revision - right.revision)
+          .map((task) => [task.id, task]),
+      )
+      return {
+        backgroundEvents: {
+          ...state.backgroundEvents,
+          [conversationId]: [...events.values()],
+        },
+        backgroundEventCursor: {
+          ...state.backgroundEventCursor,
+          [conversationId]: page.next_cursor,
+        },
+        backgroundEventsHasMore: {
+          ...state.backgroundEventsHasMore,
+          [conversationId]: page.has_more,
+        },
+        backgroundTasks: {
+          ...state.backgroundTasks,
+          [conversationId]: [...taskMap.values()],
+        },
+      }
+    })
+  },
+
+  async stopTask(client, conversationId, taskId) {
+    const result = await requestBackgroundTaskStop(client, conversationId, taskId)
+    set((state) => {
+      const current = state.backgroundTasks[conversationId] ?? []
+      const next = current.some((task) => task.id === result.task.id)
+        ? current.map((task) =>
+            task.id === result.task.id && result.task.revision >= task.revision
+              ? result.task
+              : task,
+          )
+        : [...current, result.task]
+      return {
+        backgroundTasks: { ...state.backgroundTasks, [conversationId]: next },
+      }
+    })
+  },
+
+  async stopAllWork(client, conversationId) {
+    // A new admission reopens a closed conversation by advancing its generation.
+    // Re-read the authoritative value at click time so a long-open tab never
+    // submits a harmless-but-misleading Stop-all against an older generation.
+    const bootstrap = await getConversationBootstrap(client, conversationId)
+    const generation = bootstrap.execution_generation
+    const result = await stopAllConversationWork(client, conversationId, generation)
+    set((state) => ({
+      executionGeneration: {
+        ...state.executionGeneration,
+        [conversationId]: generation,
+      },
+      stopAllStatus: {
+        ...state.stopAllStatus,
+        [conversationId]: {
+          requested_at: new Date().toISOString(),
+          cleanup_pending: result.cleanup_pending,
+        },
+      },
+    }))
   },
 
   async loadMessages(
@@ -1983,6 +2268,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               left.createdAt.localeCompare(right.createdAt) ||
               left.steerId.localeCompare(right.steerId),
           )
+          const backgroundPage = bootstrap.background_events ?? {
+            items: [],
+            next_cursor: null,
+            has_more: false,
+          }
+          const mergedBackgroundEvents = mergeBackgroundEventPage(
+            s.backgroundEvents[conversationId] ?? [],
+            s.backgroundEventCursor[conversationId],
+            s.backgroundEventsHasMore[conversationId],
+            backgroundPage,
+          )
           return {
             messages: { ...s.messages, [conversationId]: messages },
             oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
@@ -1998,6 +2294,43 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               ...s.pendingSteers,
               [conversationId]: hydratedPending,
             },
+            backgroundTasks: {
+              ...s.backgroundTasks,
+              [conversationId]: s.backgroundTasks[conversationId] ?? [],
+            },
+            backgroundEvents: {
+              ...s.backgroundEvents,
+              [conversationId]: mergedBackgroundEvents.items,
+            },
+            backgroundEventCursor: {
+              ...s.backgroundEventCursor,
+              [conversationId]: mergedBackgroundEvents.cursor,
+            },
+            backgroundEventsHasMore: {
+              ...s.backgroundEventsHasMore,
+              [conversationId]: mergedBackgroundEvents.hasMore,
+            },
+            backgroundSummary: {
+              ...s.backgroundSummary,
+              [conversationId]: bootstrap.background_summary ?? {
+                has_inflight: false,
+                has_pending: false,
+                has_cleanup: false,
+                can_stop: false,
+              },
+            },
+            executionGeneration: {
+              ...s.executionGeneration,
+              [conversationId]: bootstrap.execution_generation ?? 0,
+            },
+            stopAllStatus: {
+              ...s.stopAllStatus,
+              [conversationId]: bootstrap.stop_all ?? null,
+            },
+            runControl: {
+              ...s.runControl,
+              [conversationId]: bootstrap.run_control ?? null,
+            },
             runLifecycle: { ...s.runLifecycle, [conversationId]: lifecycle },
             toolStartedMap: {},
             toolResultMap: restoredToolResultMap,
@@ -2010,7 +2343,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
             pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
             cancellingConversationIds:
-              !bootstrap.active_run && !bootstrap.pending_hitl
+              !bootstrap.active_run &&
+              !bootstrap.pending_hitl &&
+              !bootstrap.run_control?.cleanup_pending
                 ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
                 : s.cancellingConversationIds,
             isStreaming: isStreamingActive,
@@ -2749,8 +3084,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const hasPendingHitl =
       state.pendingAsk !== null || Object.keys(state.pendingConfirmMap).length > 0
     const ownsConversation = state.streamingConversationId === conversationId
+    const pendingRunId =
+      state.pendingAsk?.run_id ?? Object.values(state.pendingConfirmMap)[0]?.run_id ?? null
+    const targetRunId = state.currentRunId ?? pendingRunId
     if (state.cancellingConversationIds[conversationId]) return
-    if (!ownsConversation || (!state.isStreaming && !hasPendingHitl)) return
+    if (!ownsConversation || !targetRunId || (!state.isStreaming && !hasPendingHitl)) return
 
     set((s) => ({
       cancellingConversationIds: { ...s.cancellingConversationIds, [conversationId]: true },
@@ -2758,7 +3096,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }))
 
     try {
-      await cancelActiveRun(client, conversationId)
+      await cancelActiveRun(client, conversationId, targetRunId)
     } catch (err) {
       set((s) => ({
         cancellingConversationIds: withoutConversationFlag(
@@ -2879,6 +3217,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     set({
       streamAgents: {},
       pendingSteers: {},
+      backgroundTasks: {},
+      backgroundEvents: {},
+      backgroundEventCursor: {},
+      backgroundEventsHasMore: {},
+      backgroundSummary: {},
+      executionGeneration: {},
+      stopAllStatus: {},
+      runControl: {},
+      refreshingBackground: {},
+      backgroundRefreshError: {},
       runLifecycle: {},
       streamConnection: null,
       isStreaming: false,

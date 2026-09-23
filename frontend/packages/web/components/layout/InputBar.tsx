@@ -21,6 +21,7 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
+import { BackgroundTasks } from '@/components/layout/BackgroundTasks'
 import { ModelPicker } from '@/components/chat/ModelPicker'
 import { CommandPopover } from '@/components/chat/CommandPopover'
 import { ComposerAddMenu } from '@/components/chat/ComposerAddMenu'
@@ -560,8 +561,13 @@ export function InputBar({
     Boolean(conversationId || onSubmit) && !isSubmitting && !shouldSteer && !isCancelling
   // Show Stop only while streaming AND the box is empty; once the user types
   // (or pins a skill chip), the button becomes Send (which steers the live run).
+  const hasControllableRun =
+    messageIsStreaming ||
+    hasPendingHitl ||
+    runLifecycle === 'running' ||
+    runLifecycle === 'resuming_hitl'
   const showStop =
-    messageIsStreaming && Boolean(conversationId) && !hasText && !hasSkillChips && !isCancelling
+    hasControllableRun && Boolean(conversationId) && !hasText && !hasSkillChips && !isCancelling
 
   const handleCancel = async (): Promise<void> => {
     if (!conversationId) return
@@ -597,6 +603,7 @@ export function InputBar({
 
   return (
     <div className={cn(CHAT_COLUMN_CLASS, 'pb-[env(safe-area-inset-bottom)]')}>
+      {conversationId && <BackgroundTasks conversationId={conversationId} />}
       {conversationId && <PendingSteers conversationId={conversationId} />}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}

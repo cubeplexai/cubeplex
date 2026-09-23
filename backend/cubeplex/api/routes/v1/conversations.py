@@ -1920,7 +1920,7 @@ async def get_conversation_bootstrap(
     background_summary = await background_query.summary(conversation_id=conversation_id)
     background_events = await background_query.list_events(
         conversation_id=conversation_id,
-        delivery="pending",
+        delivery="all",
         cursor=None,
         limit=50,
     )

@@ -20,7 +20,7 @@ describe('SandboxTerminalView', () => {
       refresh: vi.fn(),
     })
     vi.mocked(fetch).mockReset()
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => [] } as Response)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ items: [] }) } as Response)
   })
 
   it('keeps the terminal loading surface visible until the iframe loads', () => {
@@ -36,23 +36,25 @@ describe('SandboxTerminalView', () => {
     expect(iframe).not.toHaveClass('opacity-0')
   })
 
-  it('renders a Kill button for a running sandbox command', async () => {
+  it('renders a Stop button for a running background command', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => [
-        {
-          id: 'scmd-1',
-          description: 'dev server',
-          status: 'running',
-          started_at: '2026-09-18T00:00:00+00:00',
-          kind: 'execute',
-          lifetime: 'conversation',
-        },
-      ],
+      json: async () => ({
+        items: [
+          {
+            id: 'btask-1',
+            description: 'dev server',
+            state: 'running',
+            created_at: '2026-09-18T00:00:00+00:00',
+            kind: 'execute',
+            stop_requested_at: null,
+          },
+        ],
+      }),
     } as Response)
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
     expect(await screen.findByText('dev server')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Kill dev server' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stop dev server' })).toBeInTheDocument()
   })
 
   it('keeps command controls available when terminal startup fails', async () => {
@@ -64,48 +66,55 @@ describe('SandboxTerminalView', () => {
     })
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => [
-        {
-          id: 'scmd-1',
-          description: 'dev server',
-          status: 'running',
-          started_at: '2026-09-18T00:00:00+00:00',
-          kind: 'execute',
-          lifetime: 'conversation',
-        },
-      ],
+      json: async () => ({
+        items: [
+          {
+            id: 'btask-1',
+            description: 'dev server',
+            state: 'running',
+            created_at: '2026-09-18T00:00:00+00:00',
+            kind: 'execute',
+            stop_requested_at: null,
+          },
+        ],
+      }),
     } as Response)
 
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
 
-    expect(await screen.findByRole('button', { name: 'Kill dev server' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Stop dev server' })).toBeInTheDocument()
     expect(screen.getByText(/Could not start terminal/)).toBeInTheDocument()
   })
 
-  it('kills a running command and refreshes the durable list', async () => {
+  it('stops a running command through the public task API and refreshes', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => [
-          {
-            id: 'scmd-1',
-            description: 'dev server',
-            status: 'running',
-            started_at: new Date().toISOString(),
-            kind: 'execute',
-            lifetime: 'conversation',
-          },
-        ],
+        json: async () => ({
+          items: [
+            {
+              id: 'btask-1',
+              description: 'dev server',
+              state: 'running',
+              created_at: new Date().toISOString(),
+              kind: 'execute',
+              stop_requested_at: null,
+            },
+          ],
+        }),
       } as Response)
-      .mockResolvedValueOnce({ ok: true } as Response)
-      .mockResolvedValueOnce({ ok: true, json: async () => [] } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, cleanup_pending: true }),
+      } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) } as Response)
 
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Kill dev server' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop dev server' }))
 
     await vi.waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        '/api/v1/ws/ws-1/conversations/conv-1/sandbox-commands/scmd-1/kill',
+        '/api/v1/ws/ws-1/conversations/conv-1/background-tasks/btask-1/stop',
         expect.objectContaining({ method: 'POST' }),
       )
     })
