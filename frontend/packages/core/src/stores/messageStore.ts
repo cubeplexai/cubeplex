@@ -1846,6 +1846,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         boundedIds.length > 0
           ? await listBackgroundTasks(client, conversationId, boundedIds)
           : inflight
+      const inflightIds = new Set(inflight.map((task) => task.id))
       const byId = new Map(tasks.map((task) => [task.id, task]))
       for (const task of inflight) {
         const current = byId.get(task.id)
@@ -1870,7 +1871,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           ...state.backgroundTasks,
           [conversationId]: [
             ...new Map(
-              [...mergedTasks, ...(state.backgroundTasks[conversationId] ?? [])]
+              [
+                ...mergedTasks,
+                ...(state.backgroundTasks[conversationId] ?? []).filter(
+                  (task) =>
+                    !['starting', 'running', 'waiting_input', 'unknown'].includes(task.state) ||
+                    inflightIds.has(task.id),
+                ),
+              ]
                 .sort((left, right) => left.revision - right.revision)
                 .map((task) => [task.id, task]),
             ).values(),
