@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -12,7 +12,6 @@ from cubeplex.models.sandbox_command import (
     SandboxCommandWake,
     SandboxCommandWakeState,
 )
-from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.base import ScopedRepository
 
 MAX_INFLIGHT_COMMANDS = 8
@@ -28,70 +27,6 @@ class SandboxCommandCapError(Exception):
 
 class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
     model = SandboxCommand
-
-    async def reserve(
-        self,
-        *,
-        user_sandbox_id: str,
-        conversation_id: str,
-        run_id: str,
-        tool_call_id: str,
-        started_by_user_id: str,
-        command: str,
-        description: str,
-        notify_on_complete: bool,
-        owner_id: str,
-        owner_until: datetime,
-        log_path: str,
-        agent_id: str | None = None,
-        provider: str = "opensandbox",
-        command_id: str | None = None,
-        kind: str = "execute",
-        lifetime: str = "run",
-        monitor_deadline_at: datetime | None = None,
-    ) -> SandboxCommand:
-        locked = await self.session.execute(
-            select(UserSandbox).where(col(UserSandbox.id) == user_sandbox_id).with_for_update()
-        )
-        if locked.scalar_one_or_none() is None:
-            await self.session.rollback()
-            raise LookupError(f"user sandbox not found: {user_sandbox_id}")
-        count_stmt = (
-            select(func.count())
-            .select_from(SandboxCommand)
-            .where(
-                col(SandboxCommand.user_sandbox_id) == user_sandbox_id,
-                col(SandboxCommand.status).in_(_INFLIGHT),
-            )
-        )
-        n = int((await self.session.execute(count_stmt)).scalar_one())
-        if n >= MAX_INFLIGHT_COMMANDS:
-            await self.session.rollback()
-            raise SandboxCommandCapError(
-                f"at most {MAX_INFLIGHT_COMMANDS} running commands per sandbox"
-            )
-        row = SandboxCommand(
-            user_sandbox_id=user_sandbox_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            tool_call_id=tool_call_id,
-            started_by_user_id=started_by_user_id,
-            agent_id=agent_id,
-            command=command,
-            description=description,
-            notify_on_complete=notify_on_complete,
-            owner_id=owner_id,
-            owner_until=owner_until,
-            log_path=log_path,
-            provider=provider,
-            status=SandboxCommandStatus.starting.value,
-            kind=kind,
-            lifetime=lifetime,
-            monitor_deadline_at=monitor_deadline_at,
-        )
-        if command_id:
-            row.id = command_id
-        return await self.add(row)
 
     async def mark_running(
         self,
@@ -174,19 +109,6 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
         await self.session.commit()
         return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
 
-    async def discard_reservation(self, command_id: str, *, owner_id: str) -> bool:
-        """Delete a short foreground command that never became background work."""
-        stmt = delete(SandboxCommand).where(
-            col(SandboxCommand.id) == command_id,
-            col(SandboxCommand.org_id) == self.org_id,
-            col(SandboxCommand.workspace_id) == self.workspace_id,
-            col(SandboxCommand.owner_id) == owner_id,
-            col(SandboxCommand.status).in_(_INFLIGHT),
-        )
-        result = await self.session.execute(stmt)
-        await self.session.commit()
-        return int(result.rowcount or 0) == 1  # type: ignore[attr-defined]
-
     async def renew_owner(
         self,
         command_ids: list[str],
@@ -226,22 +148,6 @@ class SandboxCommandRepository(ScopedRepository[SandboxCommand]):
         )
         await self.session.execute(stmt)
         await self.session.commit()
-
-    async def list_inflight_for_conversation(self, conversation_id: str) -> list[SandboxCommand]:
-        stmt = self._scoped_select().where(
-            col(SandboxCommand.conversation_id) == conversation_id,
-            col(SandboxCommand.status).in_(_INFLIGHT),
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
-
-    async def list_inflight_for_run(self, run_id: str) -> list[SandboxCommand]:
-        stmt = self._scoped_select().where(
-            col(SandboxCommand.run_id) == run_id,
-            col(SandboxCommand.status).in_(_INFLIGHT),
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
 
 
 async def claim_expired_inflight(
