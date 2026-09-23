@@ -91,6 +91,7 @@ describe('BackgroundTasks', () => {
       stopTask: mocks.stopTask,
       stopAllWork: mocks.stopAllWork,
       streamingConversationId: null,
+      currentRunId: null,
     }
   })
 
@@ -229,6 +230,28 @@ describe('BackgroundTasks', () => {
     expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
   })
 
+  it('shows Stop all for the locally admitted foreground run before bootstrap refreshes', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+      runControl: { 'conv-1': null },
+      streamingConversationId: 'conv-1',
+      currentRunId: 'run-local',
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
+  })
+
   it('does not let an older generation hide Stop all for newly admitted work', () => {
     mocks.state = {
       ...mocks.state,
@@ -286,6 +309,39 @@ describe('BackgroundTasks', () => {
     render(<BackgroundTasks conversationId="conv-1" />)
     await vi.advanceTimersByTimeAsync(0)
 
+    expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      preserveLoadedHistory: true,
+      preserveOtherConversationStream: true,
+      throwOnError: true,
+    })
+  })
+
+  it('refreshes control status immediately while foreground Stop cleanup is pending', async () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+      runControl: {
+        'conv-1': {
+          run_id: 'run-stopping',
+          stop_requested_at: '2026-09-22T00:00:00+00:00',
+          cleanup_pending: true,
+          can_stop: false,
+        },
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(screen.getByText('正在停止')).toBeInTheDocument()
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
