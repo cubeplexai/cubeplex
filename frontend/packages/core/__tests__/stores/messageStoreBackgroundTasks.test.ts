@@ -557,6 +557,96 @@ describe('messageStore background task state', () => {
     ])
   })
 
+  it('replaces an injected steer with its persisted history row', async () => {
+    const optimisticSteer = {
+      id: 'user-steer-temp',
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'take another route' }],
+      metadata: { steer_id: 'steer-1' },
+    }
+    const persistedSteer = {
+      ...optimisticSteer,
+      id: 'message-steer',
+      seq: 10,
+      run_id: 'run-1',
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [optimisticSteer] },
+      oldestSeqByConv: { 'conv-1': null },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [persistedSteer],
+      oldest_seq: 10,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([persistedSteer])
+  })
+
+  it('replaces a partial assistant turn with the persisted final turn', async () => {
+    const optimisticAssistant = {
+      id: 'assistant-temp',
+      role: 'assistant' as const,
+      run_id: 'run-1',
+      content: [{ type: 'text' as const, text: 'partial answer' }],
+    }
+    const persistedAssistant = {
+      ...optimisticAssistant,
+      id: 'message-assistant',
+      seq: 10,
+      content: [{ type: 'text' as const, text: 'complete answer from storage' }],
+    }
+    useMessageStore.setState({
+      messages: { 'conv-1': [optimisticAssistant] },
+      oldestSeqByConv: { 'conv-1': null },
+      hasMoreByConv: { 'conv-1': false },
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      messages: [persistedAssistant],
+      oldest_seq: 10,
+      has_more: false,
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      todos: [],
+      execution_generation: 4,
+      stop_all: null,
+      run_control: null,
+      background_summary: {
+        has_inflight: false,
+        has_pending: false,
+        has_cleanup: false,
+        can_stop: false,
+      },
+      background_events: { items: [], next_cursor: null, has_more: false },
+    } as never)
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
+      preserveLoadedHistory: true,
+    })
+
+    expect(useMessageStore.getState().messages['conv-1']).toEqual([persistedAssistant])
+  })
+
   it('keeps a message appended during bootstrap after the persisted tail', async () => {
     const older = {
       id: 'message-older',
