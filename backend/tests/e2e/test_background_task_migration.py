@@ -12,6 +12,7 @@ from alembic import command as alembic_command
 from cubeplex.config import config
 from cubeplex.models import (
     BackgroundTask,
+    BackgroundTaskEvent,
     Conversation,
     ConversationExecutionAdmission,
     SandboxCommand,
@@ -19,6 +20,7 @@ from cubeplex.models import (
     User,
     UserSandbox,
 )
+from cubeplex.scripts.dev.migrate_background_tasks import migrate_legacy_commands
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -141,3 +143,187 @@ async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
         ):
             await db_session.execute(delete(model).where(col(model.id) == record_id))
         await db_session.commit()
+
+
+async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
+    db_session: AsyncSession,
+) -> None:
+    await _ensure_default_user_and_membership()
+    user = (
+        await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
+    ).scalar_one()
+    conv = Conversation(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        creator_user_id=user.id,
+        title="legacy task backfill",
+    )
+    db_session.add(conv)
+    await db_session.flush()
+    sandbox = UserSandbox(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_id=user.id,
+        scope_type="conversation",
+        scope_id=conv.id,
+        sandbox_id="current-instance-is-not-legacy-proof",
+        image="test",
+    )
+    db_session.add(sandbox)
+    await db_session.flush()
+
+    completed = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-completed-run",
+        tool_call_id="legacy-execute",
+        started_by_user_id=user.id,
+        command="build project",
+        description="old background build",
+        provider_ref="old-process",
+        log_path=".cubeplex/legacy-build.log",
+        kind="execute",
+        lifetime="conversation",
+        status="exited",
+        exit_code=0,
+        notice_state="pending",
+        notify_on_complete=True,
+    )
+    monitor = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-monitor-run",
+        tool_call_id="legacy-monitor",
+        started_by_user_id=user.id,
+        command="until healthy",
+        description="old repeating monitor",
+        provider_ref="old-monitor-process",
+        log_path=".cubeplex/legacy-monitor.log",
+        kind="monitor",
+        lifetime="conversation",
+        status="exited",
+        exit_code=0,
+        notice_state="delivered",
+        notify_on_complete=True,
+    )
+    blocked = SandboxCommand(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        user_sandbox_id=sandbox.id,
+        conversation_id=conv.id,
+        run_id="legacy-live-run",
+        tool_call_id="legacy-live",
+        started_by_user_id=user.id,
+        command="still running",
+        kind="execute",
+        lifetime="run",
+        status="running",
+    )
+    db_session.add_all((completed, monitor, blocked))
+    await db_session.flush()
+    delivered = SandboxCommandWake(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        command_id=monitor.id,
+        conversation_id=conv.id,
+        reason="line",
+        dedupe_key=f"{monitor.id}:line:1",
+        text_tail="first match",
+        state="delivered",
+        delivery_run_id="legacy-notice-run",
+        delivery_steer_id="legacy-input",
+        started_by_user_id=user.id,
+    )
+    pending = SandboxCommandWake(
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
+        command_id=monitor.id,
+        conversation_id=conv.id,
+        reason="exit",
+        dedupe_key=f"{monitor.id}:exit",
+        text_tail="later exit",
+        state="pending",
+        started_by_user_id=user.id,
+    )
+    db_session.add_all((delivered, pending))
+    await db_session.flush()
+
+    command_ids = (completed.id, monitor.id, blocked.id)
+    dry_run = await migrate_legacy_commands(
+        db_session,
+        apply=False,
+        command_ids=command_ids,
+    )
+    assert {item.command_id for item in dry_run.blockers} == {blocked.id}
+    assert {item.command_id for item in dry_run.migratable} == {completed.id, monitor.id}
+    assert completed.task_id is None and monitor.task_id is None
+
+    first = await migrate_legacy_commands(
+        db_session,
+        apply=True,
+        command_ids=command_ids,
+    )
+    await db_session.flush()
+    assert first.migrated == 2
+    assert blocked.task_id is None
+    await db_session.refresh(completed)
+    await db_session.refresh(monitor)
+    assert completed.task_id is not None and monitor.task_id is not None
+    assert completed.sandbox_instance_id is None
+
+    completed_task = await db_session.get(BackgroundTask, completed.task_id)
+    monitor_task = await db_session.get(BackgroundTask, monitor.task_id)
+    assert completed_task is not None and monitor_task is not None
+    assert completed_task.state == "succeeded"
+    assert completed_task.result_readiness == "unavailable"
+    assert completed_task.backgrounded_at is not None
+    assert monitor_task.notifications_cancelled_at is not None
+
+    events = list(
+        (
+            await db_session.execute(
+                select(BackgroundTaskEvent).where(
+                    col(BackgroundTaskEvent.task_id).in_((completed_task.id, monitor_task.id))
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {event.id: event for event in events}
+    assert by_id[delivered.id].state == "delivered"
+    assert by_id[delivered.id].checkpoint_input_id == "legacy-input"
+    assert by_id[pending.id].state == "discarded"
+    assert by_id[pending.id].discard_reason == "legacy_monitor_subscription"
+    completion_events = [event for event in events if event.task_id == completed_task.id]
+    assert len(completion_events) == 1
+    assert completion_events[0].state == "pending"
+
+    second = await migrate_legacy_commands(
+        db_session,
+        apply=True,
+        command_ids=command_ids,
+    )
+    await db_session.flush()
+    assert second.migrated == 0
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(BackgroundTask)
+            .where(col(BackgroundTask.id).in_((completed_task.id, monitor_task.id)))
+        )
+        == 2
+    )
+    assert (
+        await db_session.scalar(
+            select(func.count())
+            .select_from(BackgroundTaskEvent)
+            .where(col(BackgroundTaskEvent.task_id) == completed_task.id)
+        )
+        == 1
+    )
+    await db_session.rollback()
