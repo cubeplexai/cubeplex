@@ -95,6 +95,28 @@ async def test_write_failure_is_distinct_from_successful_chunk_cleanup() -> None
     assert result.cleanup_done is True
 
 
+async def test_unknown_append_exit_does_not_acknowledge_output() -> None:
+    sandbox = MagicMock()
+    sandbox.workdir = "/workspace"
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(
+        side_effect=(
+            ExecuteResult(output="", exit_code=0),
+            ExecuteResult(output="", exit_code=None),
+            ExecuteResult(output="", exit_code=0),
+        )
+    )
+
+    result = await append_output(
+        sandbox,
+        "/workspace/.cubeplex/execute-scmd_1.log",
+        "unknown write\n",
+    )
+
+    assert result.data_written is False
+    assert result.cleanup_done is True
+
+
 async def test_local_output_repeats_until_its_candidate_cursor_is_accepted(
     tmp_path: Path,
 ) -> None:
@@ -113,7 +135,9 @@ async def test_local_output_repeats_until_its_candidate_cursor_is_accepted(
     assert first.new_output == repeated.new_output == "retryable"
     assert first.log_cursor == repeated.log_cursor
 
-    handle.log_cursor = first.log_cursor
+    assert first.log_cursor is not None
+    await sandbox.acknowledge_output(handle, first.log_cursor)
+    assert sandbox._bg[handle.provider_ref]._buf == b""
     acknowledged = await sandbox.read_output(handle)
     assert acknowledged.new_output == ""
     assert acknowledged.log_cursor == first.log_cursor

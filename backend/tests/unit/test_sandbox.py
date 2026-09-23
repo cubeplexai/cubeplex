@@ -46,6 +46,11 @@ def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
     """Return a minimal sandbox mock."""
     sandbox = MagicMock()
     sandbox.workdir = workdir
+
+    async def _acknowledge(handle: Any, cursor: str) -> None:
+        handle.log_cursor = cursor
+
+    sandbox.acknowledge_output = AsyncMock(side_effect=_acknowledge)
     return sandbox
 
 
