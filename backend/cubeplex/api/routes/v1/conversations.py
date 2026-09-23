@@ -1124,6 +1124,7 @@ def _build_direct_result_response(result: DirectExecutionResult) -> StreamingRes
 async def _commit_direct_result_checkpoint(
     *,
     admission_id: str,
+    client_message_id: str,
     conversation_id: str,
     org_id: str,
     workspace_id: str,
@@ -1163,7 +1164,10 @@ async def _commit_direct_result_checkpoint(
                             UserMessage(
                                 content=[TextContent(text=result.request_content)],
                                 timestamp=timestamp,
-                                metadata={"message_id": user_message_id},
+                                metadata={
+                                    "message_id": user_message_id,
+                                    "client_message_id": client_message_id,
+                                },
                             ),
                             AssistantMessage(
                                 content=[TextContent(text=result.content)],
@@ -1563,6 +1567,7 @@ async def send_message(
 
             result, checkpoint_added = await _commit_direct_result_checkpoint(
                 admission_id=admission_id,
+                client_message_id=request_obj.client_message_id,
                 conversation_id=conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
@@ -1687,6 +1692,7 @@ async def send_message(
             model_key=request_obj.model_key,
             reasoning=request_obj.reasoning,
             llm_snapshot=_snap,
+            input_metadata={"client_message_id": request_obj.client_message_id},
             admission_id=admitted.admission.id,
         )
     except (ExecutionConflictError, ExecutionRevokedError, RuntimeError) as exc:
