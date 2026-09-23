@@ -2,20 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { createApiClient, listBackgroundTasks, stopBackgroundTask } from '@cubeplex/core'
+import type { BackgroundTask } from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { useSandboxTerminal } from '@/hooks/useSandboxTerminal'
 import { csrfHeaders } from '@/lib/csrf'
 import { cn } from '@/lib/utils'
-
-interface RunningCommand {
-  id: string
-  description: string
-  status: string
-  started_at: string
-  kind: string
-  lifetime: string
-}
 
 const KEEPALIVE_MS = 30_000
 
@@ -120,16 +113,16 @@ function RunningCommandList({
   workspaceId: string
   conversationId: string
 }) {
-  const [rows, setRows] = useState<RunningCommand[]>([])
-  const [killing, setKilling] = useState<string | null>(null)
+  const [rows, setRows] = useState<BackgroundTask[]>([])
+  const [stopping, setStopping] = useState<string | null>(null)
   const load = useCallback(async () => {
-    const res = await fetch(
-      `/api/v1/ws/${workspaceId}/conversations/${conversationId}/sandbox-commands`,
-      { credentials: 'include' },
-    )
-    if (!res.ok) return
-    const data: unknown = await res.json()
-    if (Array.isArray(data)) setRows(data as RunningCommand[])
+    const client = createApiClient('')
+    client.setWorkspaceId(workspaceId)
+    try {
+      setRows(await listBackgroundTasks(client, conversationId))
+    } catch {
+      // Keep the last durable snapshot visible through a transient refresh failure.
+    }
   }, [workspaceId, conversationId])
 
   useEffect(() => {
@@ -141,16 +134,15 @@ function RunningCommandList({
     }
   }, [load])
 
-  const kill = async (commandId: string) => {
-    setKilling(commandId)
+  const stop = async (taskId: string) => {
+    setStopping(taskId)
     try {
-      const res = await fetch(
-        `/api/v1/ws/${workspaceId}/conversations/${conversationId}/sandbox-commands/${commandId}/kill`,
-        { method: 'POST', credentials: 'include', headers: csrfHeaders() },
-      )
-      if (res.ok) await load()
+      const client = createApiClient('')
+      client.setWorkspaceId(workspaceId)
+      await stopBackgroundTask(client, conversationId, taskId)
+      await load()
     } finally {
-      setKilling(null)
+      setStopping(null)
     }
   }
 
@@ -161,18 +153,18 @@ function RunningCommandList({
         <li key={row.id} className="flex items-center justify-between gap-2 py-0.5">
           <span className="min-w-0 truncate">
             {row.description || row.id}
-            <span className="ml-1 text-muted-foreground">· {formatElapsed(row.started_at)}</span>
+            <span className="ml-1 text-muted-foreground">· {formatElapsed(row.created_at)}</span>
           </span>
           <Button
             type="button"
             className="shrink-0"
             variant="destructive"
             size="xs"
-            aria-label={`Kill ${row.description || row.id}`}
-            disabled={killing === row.id}
-            onClick={() => void kill(row.id)}
+            aria-label={`Stop ${row.description || row.id}`}
+            disabled={stopping === row.id || row.stop_requested_at !== null}
+            onClick={() => void stop(row.id)}
           >
-            {killing === row.id ? 'Killing…' : 'Kill'}
+            {stopping === row.id || row.stop_requested_at !== null ? 'Stopping…' : 'Stop'}
           </Button>
         </li>
       ))}
