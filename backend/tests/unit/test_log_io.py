@@ -1,5 +1,6 @@
 """Command output is acknowledged only after a safe append."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -92,3 +93,27 @@ async def test_write_failure_is_distinct_from_successful_chunk_cleanup() -> None
 
     assert result.data_written is False
     assert result.cleanup_done is True
+
+
+async def test_local_output_repeats_until_its_candidate_cursor_is_accepted(
+    tmp_path: Path,
+) -> None:
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    handle = await sandbox.start("printf retryable")
+    for _ in range(100):
+        status = await sandbox.observe(handle)
+        if status.status != "running":
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("local command did not finish")
+
+    first = await sandbox.read_output(handle)
+    repeated = await sandbox.read_output(handle)
+    assert first.new_output == repeated.new_output == "retryable"
+    assert first.log_cursor == repeated.log_cursor
+
+    handle.log_cursor = first.log_cursor
+    acknowledged = await sandbox.read_output(handle)
+    assert acknowledged.new_output == ""
+    assert acknowledged.log_cursor == first.log_cursor
