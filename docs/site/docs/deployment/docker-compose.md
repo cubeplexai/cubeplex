@@ -231,9 +231,10 @@ deploy/docker-compose/scripts/up.sh
 ```
 
 Do not use `--maintenance` while an old backend is running. A reported active
-run-lifetime command or legacy monitor must finish or be explicitly stopped;
-the migrator does not guess that it ended and does not attach it to a replacement
-sandbox.
+run-lifetime command or legacy monitor must finish or be explicitly stopped.
+The same applies to an active command whose original sandbox instance was not
+recorded: resolve or stop it before retrying. The migrator does not guess that
+it ended and does not attach it to a replacement sandbox.
 
 ## 6. Verification
 
