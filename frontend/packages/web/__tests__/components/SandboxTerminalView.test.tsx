@@ -53,7 +53,7 @@ describe('SandboxTerminalView', () => {
             description: 'dev server',
             state: 'running',
             created_at: '2026-09-18T00:00:00+00:00',
-            kind: 'execute',
+            kind: 'command',
             stop_requested_at: null,
             capabilities: { can_stop: true },
           },
@@ -65,7 +65,7 @@ describe('SandboxTerminalView', () => {
     expect(screen.getByRole('button', { name: 'Stop dev server' })).toBeInTheDocument()
   })
 
-  it('does not offer Stop for a terminal task that is only finalizing logs', async () => {
+  it('hides a terminal task that is only finalizing logs', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -75,7 +75,7 @@ describe('SandboxTerminalView', () => {
             description: 'finished build',
             state: 'succeeded',
             created_at: '2026-09-18T00:00:00+00:00',
-            kind: 'execute',
+            kind: 'command',
             stop_requested_at: null,
             cleanup_pending: true,
             capabilities: { can_stop: false },
@@ -86,8 +86,13 @@ describe('SandboxTerminalView', () => {
 
     render(<SandboxTerminalView workspaceId="ws-1" conversationId="conv-1" />)
 
-    expect(await screen.findByText('finished build')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Stop finished build' })).not.toBeInTheDocument()
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/ws/ws-1/conversations/conv-1/background-tasks',
+        expect.anything(),
+      )
+    })
+    expect(screen.queryByText('finished build')).not.toBeInTheDocument()
   })
 
   it('keeps command controls available when terminal startup fails', async () => {
@@ -106,7 +111,7 @@ describe('SandboxTerminalView', () => {
             description: 'dev server',
             state: 'running',
             created_at: '2026-09-18T00:00:00+00:00',
-            kind: 'execute',
+            kind: 'command',
             stop_requested_at: null,
             capabilities: { can_stop: true },
           },
@@ -131,7 +136,7 @@ describe('SandboxTerminalView', () => {
               description: 'dev server',
               state: 'running',
               created_at: new Date().toISOString(),
-              kind: 'execute',
+              kind: 'command',
               stop_requested_at: null,
               capabilities: { can_stop: true },
             },
