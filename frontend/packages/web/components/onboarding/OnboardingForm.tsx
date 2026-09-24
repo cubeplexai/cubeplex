@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { completeOnboarding, createApiClient, useAuthStore } from '@cubeplex/core'
+import { completeOnboarding, useAuthStore, type ApiClient } from '@cubeplex/core'
 import {
   SLUG_MAX,
   SLUG_MIN,
@@ -14,8 +14,10 @@ import {
 } from '@/lib/slugRules'
 
 export function OnboardingForm({
+  client,
   onCompletionChange,
 }: {
+  client: ApiClient
   onCompletionChange?: (completing: boolean) => void
 }) {
   const t = useTranslations('onboarding')
@@ -62,8 +64,8 @@ export function OnboardingForm({
     if (!canSubmit) return
     setSubmitting(true)
     setError(null)
+    onCompletionChange?.(true)
     try {
-      const client = createApiClient('')
       const body = fullMode
         ? {
             org_name: orgName.trim(),
@@ -72,7 +74,6 @@ export function OnboardingForm({
           }
         : { workspace_name: workspaceName.trim() }
       const result = await completeOnboarding(client, body)
-      onCompletionChange?.(true)
       await useAuthStore.getState().loadMe(client)
       const refreshed = useAuthStore.getState()
       if (refreshed.user?.needs_onboarding !== false) {
