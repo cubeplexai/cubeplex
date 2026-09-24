@@ -42,8 +42,8 @@ vi.mock('next-intl', () => ({
     ({
       title: '后台任务',
       description: '独立继续执行',
-      open: '打开后台任务',
-      openWithCount: `打开后台任务（${values?.count} 项进行中）`,
+      open: '后台任务',
+      openWithCount: `后台任务（${values?.count} 项进行中）`,
       empty: '暂无后台任务',
       stopTask: '停止任务',
       stopAll: '全部停止',
@@ -55,6 +55,7 @@ vi.mock('next-intl', () => ({
       unnamed: '后台任务',
       'states.running': '运行中',
       'states.succeeded': '已成功',
+      'states.cancelled': '已取消',
     })[key] ?? key,
 }))
 
@@ -180,6 +181,27 @@ describe('BackgroundTasks', () => {
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument()
   })
 
+  it('shows the terminal state after a stopped task has finished', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [
+          {
+            ...runningTask(),
+            state: 'cancelled',
+            stop_requested_at: '2026-09-22T00:00:00+00:00',
+            capabilities: { can_stop: false },
+          },
+        ],
+      },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByText('已取消')).toBeInTheDocument()
+    expect(screen.queryByText('正在停止')).not.toBeInTheDocument()
+  })
+
   it('shows an inflight command as running while its log is still open', () => {
     mocks.state = {
       ...mocks.state,
@@ -244,7 +266,7 @@ describe('BackgroundTasks', () => {
 
     render(<BackgroundTasksButton conversationId="conv-1" />)
 
-    expect(screen.getByRole('button', { name: '打开后台任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '后台任务' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '全部停止' })).not.toBeInTheDocument()
   })
 
@@ -267,7 +289,7 @@ describe('BackgroundTasks', () => {
 
     render(<BackgroundTasksButton conversationId="conv-1" />)
 
-    expect(screen.getByRole('button', { name: '打开后台任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '后台任务' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '全部停止' })).not.toBeInTheDocument()
   })
 
@@ -312,10 +334,24 @@ describe('BackgroundTasks', () => {
 
     render(<BackgroundTasksButton conversationId="conv-1" />)
 
-    const button = screen.getByRole('button', { name: '打开后台任务（2 项进行中）' })
+    const button = screen.getByRole('button', { name: '后台任务（2 项进行中）' })
     expect(button).toHaveTextContent('2')
     fireEvent.click(button)
     expect(mocks.openBackgroundTasks).toHaveBeenCalledWith('conv-1')
+  })
+
+  it('announces selected state and closes the panel on a second click', () => {
+    mocks.panel = {
+      ...mocks.panel,
+      view: { type: 'background-tasks', conversationId: 'conv-1' },
+    }
+
+    render(<BackgroundTasksButton conversationId="conv-1" />)
+
+    const button = screen.getByRole('button', { name: '后台任务（1 项进行中）' })
+    expect(button).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(button)
+    expect(mocks.closePanel).toHaveBeenCalledOnce()
   })
 
   it('does not let an older generation hide Stop all for newly admitted work', () => {
