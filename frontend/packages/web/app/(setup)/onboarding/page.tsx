@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createApiClient, useAuthStore } from '@cubeplex/core'
 import { OnboardingForm } from '@/components/onboarding/OnboardingForm'
@@ -8,6 +8,7 @@ import { OnboardingForm } from '@/components/onboarding/OnboardingForm'
 export default function OnboardingPage() {
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
+  const completingRef = useRef(false)
 
   useEffect(() => {
     const client = createApiClient('')
@@ -15,7 +16,7 @@ export default function OnboardingPage() {
   }, [])
 
   useEffect(() => {
-    if (user && !user.needs_onboarding) router.replace('/')
+    if (user && !user.needs_onboarding && !completingRef.current) router.replace('/')
   }, [user, router])
 
   if (!user) {
@@ -25,7 +26,11 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
-      <OnboardingForm />
+      <OnboardingForm
+        onCompletionChange={(completing) => {
+          completingRef.current = completing
+        }}
+      />
     </div>
   )
 }
