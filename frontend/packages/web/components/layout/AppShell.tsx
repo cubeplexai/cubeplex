@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
+import { BackgroundTaskPanel } from '@/components/panel/BackgroundTaskPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
 import { SandboxPanel } from '@/components/panel/sandbox/SandboxPanel'
@@ -18,6 +19,7 @@ import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { useConversationStore, usePanelStore, type SandboxTab } from '@cubeplex/core'
 import { useDeploymentMode } from '@cubeplex/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
+import { BackgroundTasksButton } from '@/components/layout/BackgroundTasks'
 import { ConversationMemberStrip } from '@/components/chat/ConversationMemberStrip'
 import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
 import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
@@ -75,6 +77,9 @@ export function AppShell({
   // overlay branch should not be the first paint on a 1440px session.
   const isDesktop = useMediaQuery('(min-width: 768px)', true)
   const close = usePanelStore((s) => s.close)
+  useEffect(() => {
+    if (view.type === 'background-tasks' && view.conversationId !== conversationId) close()
+  }, [view, conversationId, close])
   const openMobileMenu = useMobileMenu((s) => s.open)
   // DOM-level drag detection on the resize handle using pointer capture, so
   // pointerup landing inside the right panel's sandboxed iframe (Browser /
@@ -120,6 +125,8 @@ export function AppShell({
       <AttachmentPreviewView info={view.info} />
     ) : view.type === 'sandbox' ? (
       <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
+    ) : view.type === 'background-tasks' ? (
+      <BackgroundTaskPanel conversationId={view.conversationId} />
     ) : view.type === 'skill-candidate' ? (
       <SkillCandidatePanel
         candidateId={view.candidateId}
@@ -217,6 +224,7 @@ export function AppShell({
           </button>
         )}
         {!minimal && conversationId && <SharePanel conversationId={conversationId} />}
+        {!minimal && conversationId && <BackgroundTasksButton conversationId={conversationId} />}
         {workspaceId && sandboxEnabled && (
           <div className="mr-1 flex items-center gap-0.5">
             {SANDBOX_HEADER_ACTIONS.map(({ tab, label, testId, Icon }) => (

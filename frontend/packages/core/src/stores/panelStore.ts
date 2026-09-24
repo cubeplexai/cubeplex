@@ -70,6 +70,7 @@ export type PanelView =
       initialTab?: SandboxTab
       revision?: number
     }
+  | { type: 'background-tasks'; conversationId: string }
   | { type: 'skill-candidate'; candidateId: string; repo: string | null; sourceName: string }
 
 /** Tabs inside the sandbox side panel (Files / Browser / Terminal). */
@@ -100,6 +101,8 @@ export interface PanelStore {
   openSandbox: (tab?: SandboxTab) => void
 
   openSandboxFile: (path: string) => void
+
+  openBackgroundTasks: (conversationId: string) => void
 
   openSkillCandidate: (candidateId: string, repo: string | null, sourceName: string) => void
 
@@ -163,6 +166,9 @@ export const usePanelStore = create<PanelStore>((set) => ({
         revision: ++sandboxRevisionCounter,
       },
     }),
+
+  openBackgroundTasks: (conversationId) =>
+    set({ view: { type: 'background-tasks', conversationId } }),
 
   openSkillCandidate: (candidateId, repo, sourceName) =>
     set({ view: { type: 'skill-candidate', candidateId, repo, sourceName } }),

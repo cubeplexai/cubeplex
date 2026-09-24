@@ -114,13 +114,14 @@ export function SharePanel({ conversationId }: SharePanelProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
+        aria-label={t('share')}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs',
+          'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs sm:px-2.5',
           'text-muted-foreground hover:text-foreground hover:bg-muted transition-colors',
         )}
       >
         <Share2 className="size-3.5" />
-        {t('share')}
+        <span className="hidden sm:inline">{t('share')}</span>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-4 shadow-lg">
         <div className="space-y-3">
