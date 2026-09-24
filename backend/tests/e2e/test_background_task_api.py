@@ -213,12 +213,19 @@ async def test_recent_list_restores_stopped_task_without_result_event(
     client, workspace_id = authenticated_client
     item = await api_task_context.reserve(db_session)
     item.task.state = BackgroundTaskState.cancelled.value
+    item.task.backgrounded_at = NOW
     item.task.stop_requested_at = NOW
     item.task.notifications_cancelled_at = NOW
     item.task.finished_at = NOW
     item.command.status = "exited"
     item.command.log_state = "complete"
     item.command.finished_at = NOW
+    foreground = await api_task_context.reserve(db_session, description="Short foreground command")
+    foreground.task.state = BackgroundTaskState.succeeded.value
+    foreground.task.finished_at = NOW + timedelta(minutes=1)
+    foreground.command.status = "exited"
+    foreground.command.log_state = "complete"
+    foreground.command.finished_at = NOW + timedelta(minutes=1)
     await db_session.commit()
 
     path = task_path(workspace_id, item.task.conversation_id)
@@ -230,6 +237,34 @@ async def test_recent_list_restores_stopped_task_without_result_event(
     assert recent.status_code == 200, recent.text
     assert [row["id"] for row in recent.json()["items"]] == [item.task.id]
     assert recent.json()["items"][0]["state"] == "cancelled"
+
+
+async def test_recent_list_orders_background_results_by_finish_time(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+) -> None:
+    client, workspace_id = authenticated_client
+    long_task = await api_task_context.reserve(db_session, description="Long build")
+    short_task = await api_task_context.reserve(db_session, description="Short build")
+    for item in (long_task, short_task):
+        item.task.state = BackgroundTaskState.succeeded.value
+        item.task.backgrounded_at = NOW
+        item.command.status = "exited"
+        item.command.log_state = "complete"
+    long_task.task.created_at = NOW - timedelta(hours=2)
+    long_task.task.finished_at = NOW + timedelta(hours=1)
+    short_task.task.created_at = NOW - timedelta(hours=1)
+    short_task.task.finished_at = NOW
+    await db_session.commit()
+
+    response = await client.get(
+        task_path(workspace_id, api_task_context.conversation.id),
+        params={"recent_limit": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [row["id"] for row in response.json()["items"]] == [long_task.task.id]
 
 
 async def test_stop_returns_unconfirmed_then_preserves_terminal_fact(

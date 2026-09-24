@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   stopTask: vi.fn(),
   stopAllWork: vi.fn(),
   refreshBackground: vi.fn(),
+  listRecentBackgroundTasks: vi.fn(),
   loadMessages: vi.fn(),
   setWorkspaceId: vi.fn(),
   openBackgroundTasks: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@cubeplex/core', () => {
     selector(mocks.panel)
   return {
     createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
+    listRecentBackgroundTasks: mocks.listRecentBackgroundTasks,
     useMessageStore,
     usePanelStore,
   }
@@ -66,6 +68,8 @@ function runningTask() {
     id: 'bgt-1',
     description: 'Build project',
     created_at: '2026-09-22T00:00:00+00:00',
+    backgrounded_at: '2026-09-22T00:00:00+00:00',
+    finished_at: null,
     result_summary: '',
     execution_generation: 4,
     state: 'running',
@@ -84,6 +88,7 @@ describe('BackgroundTasks', () => {
     mocks.stopTask.mockResolvedValue(undefined)
     mocks.stopAllWork.mockResolvedValue(undefined)
     mocks.refreshBackground.mockResolvedValue(undefined)
+    mocks.listRecentBackgroundTasks.mockResolvedValue([])
     mocks.toastError.mockReset()
     mocks.panel = {
       view: { type: 'closed' },
@@ -320,6 +325,82 @@ describe('BackgroundTasks', () => {
     expect(screen.getByText('Build project')).toBeInTheDocument()
   })
 
+  it('restores recent stopped background work after a cold load', async () => {
+    mocks.state = { ...mocks.state, backgroundTasks: { 'conv-1': [] } }
+    mocks.listRecentBackgroundTasks.mockResolvedValue([
+      {
+        ...runningTask(),
+        state: 'cancelled',
+        stop_requested_at: '2026-09-22T00:01:00+00:00',
+        finished_at: '2026-09-22T00:01:00+00:00',
+        description: 'Stopped build',
+        capabilities: { can_stop: false },
+      },
+    ])
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(screen.getByText('Stopped build')).toBeInTheDocument()
+    expect(screen.getByText('已取消')).toBeInTheDocument()
+  })
+
+  it('checks recent history only while the detail panel is open', async () => {
+    const { unmount } = render(<BackgroundTasks conversationId="conv-1" />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(mocks.listRecentBackgroundTasks).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(mocks.listRecentBackgroundTasks).toHaveBeenCalledTimes(2)
+
+    unmount()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(mocks.listRecentBackgroundTasks).toHaveBeenCalledTimes(2)
+  })
+
+  it('excludes a command that has not been handed to the background', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [{ ...runningTask(), backgrounded_at: null }],
+      },
+    }
+
+    const { unmount } = render(<BackgroundTasksButton conversationId="conv-1" />)
+    expect(screen.getByRole('button', { name: '后台任务' })).not.toHaveTextContent('1')
+    unmount()
+    render(<BackgroundTasks conversationId="conv-1" />)
+    expect(screen.queryByText('Build project')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '全部停止' })).not.toBeInTheDocument()
+  })
+
+  it('limits completed history while keeping an active task visible', () => {
+    const completed = Array.from({ length: 55 }, (_, index) => ({
+      ...runningTask(),
+      id: `bgt-${index}`,
+      description: `Completed ${index}`,
+      state: 'succeeded',
+      finished_at: `2026-09-22T00:${String(index).padStart(2, '0')}:00+00:00`,
+      capabilities: { can_stop: false },
+    }))
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [...completed, runningTask()] },
+    }
+
+    render(<BackgroundTasks conversationId="conv-1" />)
+
+    expect(screen.getByText('Build project')).toBeInTheDocument()
+    expect(screen.getByText('Completed 54')).toBeInTheDocument()
+    expect(screen.queryByText('Completed 0')).not.toBeInTheDocument()
+  })
+
   it('counts only unfinished background tasks in the header badge', () => {
     mocks.state = {
       ...mocks.state,
@@ -399,6 +480,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(5_000)
 
     expect(mocks.refreshBackground).toHaveBeenCalledTimes(2)
+    expect(mocks.listRecentBackgroundTasks).not.toHaveBeenCalled()
   })
 
   it('refreshes control status immediately while Stop-all cleanup is pending', async () => {
