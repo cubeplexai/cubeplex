@@ -376,7 +376,7 @@ async def test_topic_participant_cannot_answer_hitl_until_they_send(
     assert isinstance(body.get("detail"), str), body
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_p_conv_can_answer_hitl_after_first_send(
     four_layer_admin_and_member: FourLayerFixture,
 ) -> None:
