@@ -104,10 +104,12 @@ means cleanup was accepted; the composer waits for the server to confirm it is i
 
 Stopping the current response and stopping background work are separate actions.
 The main **Stop** button targets only the response whose Run ID is shown in the
-conversation. Work that was already handed to the background continues, and its
-status appears in the **Background work** area above the composer. Use **Stop task**
-for one item, or **Stop all** when you intend to stop the current response and all
-background work that belongs to the conversation.
+conversation. Work that was already handed to the background continues. Open
+**Background work** from the button after **Share** in the conversation header;
+its badge counts unfinished tasks, and the right panel shows active and recent
+completed tasks. Use **Stop task** for one item, or **Stop all** when you intend
+to stop the current response and all background work that belongs to the
+conversation.
 
 A successful Stop request means CubePlex durably accepted it; remote cleanup may
 still be in progress. The UI keeps showing **Stopping** until the execution provider
