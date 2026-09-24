@@ -7,7 +7,6 @@ vi.mock('../../src/api', async (importOriginal) => {
   return {
     ...actual,
     listBackgroundTasks: vi.fn(),
-    listRecentBackgroundTasks: vi.fn(),
     listBackgroundTaskEvents: vi.fn(),
     getConversationBootstrap: vi.fn(),
     getConversationExecutionGeneration: vi.fn(),
@@ -23,7 +22,6 @@ import {
   getHistoryWindow,
   listBackgroundTaskEvents,
   listBackgroundTasks,
-  listRecentBackgroundTasks,
   stopAllConversationWork,
   stopBackgroundTask,
 } from '../../src/api'
@@ -90,7 +88,6 @@ function event(overrides: Partial<BackgroundTaskEvent> = {}): BackgroundTaskEven
 describe('messageStore background task state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(listRecentBackgroundTasks).mockResolvedValue([])
     vi.mocked(getHistoryWindow).mockReset().mockResolvedValue({
       messages: [],
       oldest_seq: null,
@@ -135,33 +132,6 @@ describe('messageStore background task state', () => {
     expect(state.backgroundEvents['conv-1']).toEqual([event()])
     expect(state.backgroundSummary['conv-1'].has_pending).toBe(true)
     expect(state.pendingSteers['conv-1']).toBeUndefined()
-  })
-
-  it('restores a stopped task with no result event after a cold load', async () => {
-    const stopped = task({
-      id: 'bgt-stopped',
-      state: 'cancelled',
-      stop_requested_at: '2026-09-22T00:01:00+00:00',
-      notification: {
-        enabled: true,
-        has_pending: false,
-        cancelled_at: '2026-09-22T00:01:00+00:00',
-      },
-      capabilities: { ...task().capabilities, can_stop: false },
-    })
-    vi.mocked(listBackgroundTasks).mockResolvedValue([])
-    vi.mocked(listRecentBackgroundTasks).mockResolvedValue([stopped])
-    vi.mocked(listBackgroundTaskEvents).mockResolvedValue({
-      items: [],
-      next_cursor: null,
-      has_more: false,
-    })
-
-    await useMessageStore.getState().refreshBackground(fakeClient, 'conv-1')
-
-    expect(listRecentBackgroundTasks).toHaveBeenCalledWith(fakeClient, 'conv-1')
-    expect(useMessageStore.getState().backgroundTasks['conv-1']).toEqual([stopped])
-    expect(useMessageStore.getState().backgroundSummary['conv-1'].has_inflight).toBe(false)
   })
 
   it('keeps the last confirmed snapshot when refresh fails', async () => {

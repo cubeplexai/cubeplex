@@ -4,7 +4,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { CircleStop, ListTodo, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { useShallow } from 'zustand/react/shallow'
-import { createApiClient, useMessageStore, usePanelStore } from '@cubeplex/core'
+import {
+  createApiClient,
+  listRecentBackgroundTasks,
+  useMessageStore,
+  usePanelStore,
+} from '@cubeplex/core'
 import type { BackgroundTask } from '@cubeplex/core'
 import { toast } from 'sonner'
 
@@ -24,6 +29,10 @@ interface BackgroundTasksProps {
 
 function taskIsInflight(state: string): boolean {
   return ['starting', 'running', 'waiting_input', 'unknown'].includes(state)
+}
+
+function taskNeedsAttention(task: BackgroundTask): boolean {
+  return taskIsInflight(task.state) || task.cleanup_pending || task.notification.has_pending
 }
 
 function useBackgroundTaskRefresh(conversationId: string) {
@@ -133,7 +142,9 @@ export function BackgroundTasksButton({ conversationId }: BackgroundTasksProps) 
   const close = usePanelStore((state) => state.close)
   useBackgroundTaskRefresh(conversationId)
 
-  const count = tasks.filter((task) => taskIsInflight(task.state)).length
+  const count = tasks.filter(
+    (task) => task.backgrounded_at !== null && taskIsInflight(task.state),
+  ).length
   const selected = view.type === 'background-tasks' && view.conversationId === conversationId
   return (
     <button
@@ -166,28 +177,55 @@ export function BackgroundTasksButton({ conversationId }: BackgroundTasksProps) 
 export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const { workspaceId } = useWorkspaceContext()
   const t = useTranslations('backgroundTasks')
-  const { tasks, summary, stopAll, refreshError, refreshing, executionGeneration } =
-    useMessageStore(
-      useShallow((state) => ({
-        tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
-        summary: state.backgroundSummary?.[conversationId],
-        stopAll: state.stopAllStatus?.[conversationId],
-        refreshError: state.backgroundRefreshError?.[conversationId],
-        refreshing: state.refreshingBackground?.[conversationId] ?? false,
-        executionGeneration: state.executionGeneration?.[conversationId] ?? 0,
-      })),
-    )
+  const { tasks, stopAll, refreshError, refreshing, executionGeneration } = useMessageStore(
+    useShallow((state) => ({
+      tasks: state.backgroundTasks?.[conversationId] ?? EMPTY_BACKGROUND_TASKS,
+      stopAll: state.stopAllStatus?.[conversationId],
+      refreshError: state.backgroundRefreshError?.[conversationId],
+      refreshing: state.refreshingBackground?.[conversationId] ?? false,
+      executionGeneration: state.executionGeneration?.[conversationId] ?? 0,
+    })),
+  )
   const refreshBackground = useMessageStore((state) => state.refreshBackground)
   const stopTask = useMessageStore((state) => state.stopTask)
   const stopAllWork = useMessageStore((state) => state.stopAllWork)
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null)
   const [stoppingAll, setStoppingAll] = useState(false)
+  const [recent, setRecent] = useState<BackgroundTask[]>([])
+  const [recentLoading, setRecentLoading] = useState(true)
+  const [recentError, setRecentError] = useState(false)
 
   const client = useCallback(() => {
     const next = createApiClient('')
     if (workspaceId) next.setWorkspaceId(workspaceId)
     return next
   }, [workspaceId])
+
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const loadRecent = async () => {
+      try {
+        const rows = await listRecentBackgroundTasks(client(), conversationId)
+        if (active) {
+          setRecent(rows)
+          setRecentError(false)
+        }
+      } catch {
+        if (active) setRecentError(true)
+      } finally {
+        if (active) {
+          setRecentLoading(false)
+          timer = setTimeout(() => void loadRecent(), BASELINE_REFRESH_MS)
+        }
+      }
+    }
+    void loadRecent()
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+    }
+  }, [client, conversationId])
 
   const onStopTask = async (taskId: string) => {
     setStoppingTaskId(taskId)
@@ -223,10 +261,24 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
     executionGeneration,
   )
   const currentStopAll = stopAll?.execution_generation === observedGeneration ? stopAll : null
-  const canStopAll = Boolean(summary?.can_stop || tasks.some((task) => task.capabilities.can_stop))
-  const orderedTasks = [...tasks].sort((left, right) =>
-    right.created_at.localeCompare(left.created_at),
+  const backgroundTasks = tasks.filter((task) => task.backgrounded_at !== null)
+  const byId = new Map(
+    [...recent, ...backgroundTasks]
+      .sort((left, right) => left.revision - right.revision)
+      .map((task) => [task.id, task]),
   )
+  const panelTasks = [...byId.values()]
+  const canStopAll = panelTasks.some((task) => task.capabilities.can_stop)
+  const actionableTasks = panelTasks.filter(taskNeedsAttention)
+  const recentTasks = panelTasks
+    .filter((task) => !taskNeedsAttention(task))
+    .sort(
+      (left, right) =>
+        (right.finished_at ?? '').localeCompare(left.finished_at ?? '') ||
+        right.id.localeCompare(left.id),
+    )
+    .slice(0, 50)
+  const orderedTasks = [...actionableTasks, ...recentTasks]
   return (
     <section className="space-y-4 p-4 text-xs">
       <div className="flex items-center justify-between gap-3">
@@ -298,7 +350,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
             )
           })}
         </ul>
-      ) : refreshing ? (
+      ) : refreshing || recentLoading ? (
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="size-4 animate-spin" aria-hidden />
           {t('loading')}
@@ -306,7 +358,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
       ) : (
         <EmptyState icon={ListTodo} title={t('empty')} size="sm" />
       )}
-      {refreshError ? (
+      {refreshError || recentError ? (
         <div className="mt-2 flex items-center gap-2 text-destructive">
           <RefreshCw className="size-3" />
           <span>{t('refreshFailed')}</span>
