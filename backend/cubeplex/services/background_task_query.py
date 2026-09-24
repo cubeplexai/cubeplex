@@ -174,7 +174,10 @@ class BackgroundTaskQueryService:
     ) -> list[TaskProjection]:
         query = self._task_query(conversation_id)
         if recent_limit is not None:
-            query = query.where(col(BackgroundTask.state).in_(TERMINAL_TASK_STATES))
+            query = query.where(
+                col(BackgroundTask.state).in_(TERMINAL_TASK_STATES),
+                col(BackgroundTask.backgrounded_at).is_not(None),
+            )
         elif task_ids is None:
             actionable_event = exists(
                 select(col(BackgroundTaskEvent.id)).where(
@@ -194,9 +197,15 @@ class BackgroundTaskQueryService:
             )
         else:
             query = query.where(col(BackgroundTask.id).in_(task_ids))
-        query = query.order_by(col(BackgroundTask.created_at).desc(), col(BackgroundTask.id).desc())
         if recent_limit is not None:
-            query = query.limit(recent_limit)
+            query = query.order_by(
+                col(BackgroundTask.finished_at).desc().nulls_last(),
+                col(BackgroundTask.id).desc(),
+            ).limit(recent_limit)
+        else:
+            query = query.order_by(
+                col(BackgroundTask.created_at).desc(), col(BackgroundTask.id).desc()
+            )
         rows = (await self.session.execute(query)).all()
         return [self._projection(row) for row in rows]
 
