@@ -58,7 +58,7 @@ The badge on each row reflects the sandbox's runtime state:
 
 ## Background commands and recovery
 
-Commands stream output into the current reply while the agent waits. If a command is still running after 15 seconds, CubePlex records it as a background task, returns its task and command IDs, and lets the current reply finish. The task then runs independently of that reply. When its final result is ready, CubePlex delivers one internal task event to the conversation; it does not add a user-authored bubble or repeatedly wake the agent.
+Commands stream output into the current reply while the agent waits. If a command is still running after 60 seconds, CubePlex records it as a background task, returns its task and command IDs, and lets the current reply finish. The task then runs independently of that reply. When its final result is ready, CubePlex delivers one internal task event to the conversation; it does not add a user-authored bubble or repeatedly wake the agent.
 
 Execute tasks use the configured command deadline, which is one hour by default. Setting `notify_on_complete=false` suppresses the final conversation event but does not remove that deadline. A command that has exited can still show `result_pending` while its final log is being recovered.
 

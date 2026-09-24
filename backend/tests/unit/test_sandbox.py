@@ -747,6 +747,12 @@ async def test_auto_background_promotes_long_command(
     assert isinstance(cid, str) and cid.startswith("scmd-")
 
 
+def test_auto_background_default_wait_is_one_minute() -> None:
+    from cubeplex.middleware.sandbox import AUTO_BACKGROUND_SECONDS
+
+    assert AUTO_BACKGROUND_SECONDS == 60
+
+
 @pytest.mark.asyncio
 async def test_auto_background_preserves_deadline_when_notifications_are_disabled(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
