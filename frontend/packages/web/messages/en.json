@@ -213,8 +213,8 @@
   },
   "backgroundTasks": {
     "title": "Background tasks",
-    "open": "Open background tasks",
-    "openWithCount": "Open background tasks ({count} active)",
+    "open": "Background tasks",
+    "openWithCount": "Background tasks ({count} active)",
     "description": "Background tasks and recent results for this conversation.",
     "empty": "No background tasks yet.",
     "loading": "Loading background tasks…",

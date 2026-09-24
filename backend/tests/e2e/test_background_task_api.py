@@ -205,6 +205,33 @@ async def test_list_discovers_terminal_tasks_while_log_cleanup_is_pending(
     assert response.json()["items"][0]["cleanup_pending"] is True
 
 
+async def test_recent_list_restores_stopped_task_without_result_event(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+) -> None:
+    client, workspace_id = authenticated_client
+    item = await api_task_context.reserve(db_session)
+    item.task.state = BackgroundTaskState.cancelled.value
+    item.task.stop_requested_at = NOW
+    item.task.notifications_cancelled_at = NOW
+    item.task.finished_at = NOW
+    item.command.status = "exited"
+    item.command.log_state = "complete"
+    item.command.finished_at = NOW
+    await db_session.commit()
+
+    path = task_path(workspace_id, item.task.conversation_id)
+    actionable = await client.get(path)
+    recent = await client.get(path, params={"recent_limit": 50})
+
+    assert actionable.status_code == 200, actionable.text
+    assert actionable.json()["items"] == []
+    assert recent.status_code == 200, recent.text
+    assert [row["id"] for row in recent.json()["items"]] == [item.task.id]
+    assert recent.json()["items"][0]["state"] == "cancelled"
+
+
 async def test_stop_returns_unconfirmed_then_preserves_terminal_fact(
     authenticated_client: tuple[httpx.AsyncClient, str],
     db_session: AsyncSession,

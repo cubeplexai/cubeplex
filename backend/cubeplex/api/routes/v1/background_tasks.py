@@ -137,12 +137,17 @@ async def list_background_tasks(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     task_ids: Annotated[list[str] | None, Query(max_length=100)] = None,
+    recent_limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> BackgroundTaskListResponse:
     del workspace_id
     await _require_conversation(session, ctx, conversation_id)
+    if task_ids is not None and recent_limit is not None:
+        raise HTTPException(
+            status_code=422, detail="task_ids and recent_limit are mutually exclusive"
+        )
     unique_ids = None if task_ids is None else tuple(dict.fromkeys(task_ids))
     items = await _query_service(session, ctx).list_tasks(
-        conversation_id=conversation_id, task_ids=unique_ids
+        conversation_id=conversation_id, task_ids=unique_ids, recent_limit=recent_limit
     )
     return BackgroundTaskListResponse(items=[serialize_task(item) for item in items])
 

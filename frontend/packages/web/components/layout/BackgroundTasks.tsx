@@ -251,7 +251,9 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
       {orderedTasks.length > 0 ? (
         <ul className="space-y-2">
           {orderedTasks.map((task) => {
-            const stopping = task.stop_requested_at !== null || stoppingTaskId === task.id
+            const stopping =
+              taskIsInflight(task.state) &&
+              (task.stop_requested_at !== null || stoppingTaskId === task.id)
             return (
               <li
                 key={task.id}
