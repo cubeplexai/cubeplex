@@ -259,14 +259,16 @@ export function AppShell({
             aria-modal="true"
           >
             {panelContent}
-            <button
-              type="button"
-              onClick={close}
-              className="absolute top-2 right-2 z-50 grid size-8 place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast"
-              aria-label="Close panel"
-            >
-              <X className="size-4" />
-            </button>
+            {view.type !== 'background-tasks' && (
+              <button
+                type="button"
+                onClick={close}
+                className="absolute top-2 right-2 z-50 grid size-8 place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast"
+                aria-label="Close panel"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
         )}
         {upgradeDialog}

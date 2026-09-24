@@ -16,6 +16,7 @@ from sqlmodel import col
 from cubeplex.config import config
 from cubeplex.models.background_task import (
     INFLIGHT_TASK_STATES,
+    TERMINAL_TASK_STATES,
     BackgroundTask,
     BackgroundTaskEvent,
     BackgroundTaskEventState,
@@ -165,10 +166,16 @@ class BackgroundTaskQueryService:
         return TaskProjection(task, command, bool(has_pending), bool(has_claimed))
 
     async def list_tasks(
-        self, *, conversation_id: str, task_ids: tuple[str, ...] | None = None
+        self,
+        *,
+        conversation_id: str,
+        task_ids: tuple[str, ...] | None = None,
+        recent_limit: int | None = None,
     ) -> list[TaskProjection]:
         query = self._task_query(conversation_id)
-        if task_ids is None:
+        if recent_limit is not None:
+            query = query.where(col(BackgroundTask.state).in_(TERMINAL_TASK_STATES))
+        elif task_ids is None:
             actionable_event = exists(
                 select(col(BackgroundTaskEvent.id)).where(
                     col(BackgroundTaskEvent.org_id) == self.org_id,
@@ -187,11 +194,10 @@ class BackgroundTaskQueryService:
             )
         else:
             query = query.where(col(BackgroundTask.id).in_(task_ids))
-        rows = (
-            await self.session.execute(
-                query.order_by(col(BackgroundTask.created_at).desc(), col(BackgroundTask.id).desc())
-            )
-        ).all()
+        query = query.order_by(col(BackgroundTask.created_at).desc(), col(BackgroundTask.id).desc())
+        if recent_limit is not None:
+            query = query.limit(recent_limit)
+        rows = (await self.session.execute(query)).all()
         return [self._projection(row) for row in rows]
 
     async def get_task(self, *, conversation_id: str, task_id: str) -> TaskProjection | None:
