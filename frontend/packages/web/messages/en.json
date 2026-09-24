@@ -212,8 +212,12 @@
     "cancelFailed": "Could not cancel the current run. Try again."
   },
   "backgroundTasks": {
-    "title": "Background work",
-    "description": "These tasks continue independently of the current reply.",
+    "title": "Background tasks",
+    "open": "Open background tasks",
+    "openWithCount": "Open background tasks ({count} active)",
+    "description": "Background tasks and recent results for this conversation.",
+    "empty": "No background tasks yet.",
+    "loading": "Loading background tasks…",
     "unnamed": "Background task",
     "stopTask": "Stop task",
     "stopAll": "Stop all",

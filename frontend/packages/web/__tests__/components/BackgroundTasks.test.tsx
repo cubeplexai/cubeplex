@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   refreshBackground: vi.fn(),
   loadMessages: vi.fn(),
   setWorkspaceId: vi.fn(),
+  openBackgroundTasks: vi.fn(),
+  closePanel: vi.fn(),
+  panel: { view: { type: 'closed' } } as Record<string, unknown>,
   toastError: vi.fn(),
   state: {} as Record<string, unknown>,
   selectorSnapshots: [] as unknown[],
@@ -19,9 +22,12 @@ vi.mock('@cubeplex/core', () => {
     return selected
   }
   useMessageStore.getState = () => mocks.state
+  const usePanelStore = (selector: (state: Record<string, unknown>) => unknown) =>
+    selector(mocks.panel)
   return {
     createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
     useMessageStore,
+    usePanelStore,
   }
 })
 
@@ -32,10 +38,13 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock('next-intl', () => ({
-  useTranslations: () => (key: string) =>
+  useTranslations: () => (key: string, values?: { count?: number }) =>
     ({
       title: '后台任务',
       description: '独立继续执行',
+      open: '打开后台任务',
+      openWithCount: `打开后台任务（${values?.count} 项进行中）`,
+      empty: '暂无后台任务',
       stopTask: '停止任务',
       stopAll: '全部停止',
       submittingStop: '正在提交…',
@@ -45,15 +54,18 @@ vi.mock('next-intl', () => ({
       refreshFailed: '刷新失败',
       unnamed: '后台任务',
       'states.running': '运行中',
+      'states.succeeded': '已成功',
     })[key] ?? key,
 }))
 
-import { BackgroundTasks } from '@/components/layout/BackgroundTasks'
+import { BackgroundTasks, BackgroundTasksButton } from '@/components/layout/BackgroundTasks'
 
 function runningTask() {
   return {
     id: 'bgt-1',
     description: 'Build project',
+    created_at: '2026-09-22T00:00:00+00:00',
+    result_summary: '',
     execution_generation: 4,
     state: 'running',
     stop_requested_at: null,
@@ -72,6 +84,11 @@ describe('BackgroundTasks', () => {
     mocks.stopAllWork.mockResolvedValue(undefined)
     mocks.refreshBackground.mockResolvedValue(undefined)
     mocks.toastError.mockReset()
+    mocks.panel = {
+      view: { type: 'closed' },
+      openBackgroundTasks: mocks.openBackgroundTasks,
+      close: mocks.closePanel,
+    }
     mocks.state = {
       backgroundTasks: { 'conv-1': [runningTask()] },
       backgroundSummary: {
@@ -203,7 +220,7 @@ describe('BackgroundTasks', () => {
     expect(screen.getByText('正在停止全部工作')).toBeInTheDocument()
   })
 
-  it('shows Stop all when the foreground run is the only active work', () => {
+  it('does not present a foreground-only run as background work', () => {
     mocks.state = {
       ...mocks.state,
       backgroundTasks: { 'conv-1': [] },
@@ -225,12 +242,13 @@ describe('BackgroundTasks', () => {
       },
     }
 
-    render(<BackgroundTasks conversationId="conv-1" />)
+    render(<BackgroundTasksButton conversationId="conv-1" />)
 
-    expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开后台任务' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '全部停止' })).not.toBeInTheDocument()
   })
 
-  it('shows Stop all for the locally admitted foreground run before bootstrap refreshes', () => {
+  it('does not present a locally admitted foreground run as background work', () => {
     mocks.state = {
       ...mocks.state,
       backgroundTasks: { 'conv-1': [] },
@@ -247,9 +265,57 @@ describe('BackgroundTasks', () => {
       currentRunId: 'run-local',
     }
 
+    render(<BackgroundTasksButton conversationId="conv-1" />)
+
+    expect(screen.getByRole('button', { name: '打开后台任务' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '全部停止' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a completed task available in the task detail view', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [
+          {
+            ...runningTask(),
+            state: 'succeeded',
+            capabilities: { can_stop: false },
+          },
+        ],
+      },
+      backgroundSummary: {
+        'conv-1': {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+      },
+    }
+
     render(<BackgroundTasks conversationId="conv-1" />)
 
-    expect(screen.getByRole('button', { name: '全部停止' })).toBeInTheDocument()
+    expect(screen.getByText('Build project')).toBeInTheDocument()
+  })
+
+  it('counts only unfinished background tasks in the header badge', () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: {
+        'conv-1': [
+          runningTask(),
+          { ...runningTask(), id: 'bgt-2', state: 'waiting_input' },
+          { ...runningTask(), id: 'bgt-3', state: 'succeeded' },
+        ],
+      },
+    }
+
+    render(<BackgroundTasksButton conversationId="conv-1" />)
+
+    const button = screen.getByRole('button', { name: '打开后台任务（2 项进行中）' })
+    expect(button).toHaveTextContent('2')
+    fireEvent.click(button)
+    expect(mocks.openBackgroundTasks).toHaveBeenCalledWith('conv-1')
   })
 
   it('does not let an older generation hide Stop all for newly admitted work', () => {
@@ -274,7 +340,7 @@ describe('BackgroundTasks', () => {
   })
 
   it('does not force a baseline bootstrap over a stream that starts during polling', async () => {
-    render(<BackgroundTasks conversationId="conv-1" />)
+    render(<BackgroundTasksButton conversationId="conv-1" />)
 
     await vi.advanceTimersByTimeAsync(30_000)
 
@@ -283,6 +349,20 @@ describe('BackgroundTasks', () => {
       preserveOtherConversationStream: true,
       throwOnError: true,
     })
+  })
+
+  it('keeps checking for new tasks while a foreground response is streaming', async () => {
+    mocks.state = {
+      ...mocks.state,
+      backgroundTasks: { 'conv-1': [] },
+      streamingConversationId: 'conv-1',
+    }
+
+    render(<BackgroundTasksButton conversationId="conv-1" />)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(mocks.refreshBackground).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes control status immediately while Stop-all cleanup is pending', async () => {
@@ -306,7 +386,7 @@ describe('BackgroundTasks', () => {
       },
     }
 
-    render(<BackgroundTasks conversationId="conv-1" />)
+    render(<BackgroundTasksButton conversationId="conv-1" />)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
@@ -338,10 +418,9 @@ describe('BackgroundTasks', () => {
       },
     }
 
-    render(<BackgroundTasks conversationId="conv-1" />)
+    render(<BackgroundTasksButton conversationId="conv-1" />)
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(screen.getByText('正在停止')).toBeInTheDocument()
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
@@ -357,7 +436,7 @@ describe('BackgroundTasks', () => {
           resolveRefresh = resolve
         }),
     )
-    render(<BackgroundTasks conversationId="conv-1" />)
+    render(<BackgroundTasksButton conversationId="conv-1" />)
     await vi.advanceTimersByTimeAsync(0)
 
     document.dispatchEvent(new Event('visibilitychange'))
