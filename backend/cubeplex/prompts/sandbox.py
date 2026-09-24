@@ -77,7 +77,7 @@ call. Prefer this over `sed`/`awk`.
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
 - Do not background with `&`, nohup, or disown. Long commands may omit \
-`background=true`; after 15 seconds they continue in the background and you \
+`background=true`; after 60 seconds they continue in the background and you \
 are told when they finish. Bare `sleep N` still blocks. Do not sleep to wait \
 on a job. Set `notify_on_complete=false` only for servers that should outlive \
 the turn; it does not remove the command deadline. Use `monitor` for predicates, \
