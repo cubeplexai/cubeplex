@@ -68,7 +68,7 @@ Result delivery is separate from process exit. The shared result state distingui
 
 Final task results are internal conversation events. They are delivered under the identity that started the task: a result may join that user's active run or start a new run when the conversation is idle, but waits while another participant owns the active run or while a confirmation is pending. An event is marked delivered only after its input is present in the durable checkpoint.
 
-Open **Background work** from the button after **Share** in the conversation header. Its badge counts unfinished tasks; the right panel shows active tasks and recent completed tasks. **Stop task** targets one item. **Stop all** stops the current response and every task in the current execution generation; an old retry cannot stop work created after that request. Accepted stops remain visible as **Stopping** until the execution provider confirms termination. Completed results also appear as compact system events in the timeline, not as steering messages or user bubbles.
+Open **Background tasks** from the button after **Share** in the conversation header. Its badge counts unfinished tasks; the right panel shows active tasks and recent completed tasks. **Stop task** targets one item. **Stop all** stops the current response and every task in the current execution generation; an old retry cannot stop work created after that request. Accepted stops remain visible as **Stopping** until the execution provider confirms termination. Completed results also appear as compact system events in the timeline, not as steering messages or user bubbles.
 
 ### Local development limitation
 

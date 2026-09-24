@@ -126,7 +126,7 @@ export function AppShell({
     ) : view.type === 'sandbox' ? (
       <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
     ) : view.type === 'background-tasks' ? (
-      <BackgroundTaskPanel conversationId={view.conversationId} />
+      <BackgroundTaskPanel key={view.conversationId} conversationId={view.conversationId} />
     ) : view.type === 'skill-candidate' ? (
       <SkillCandidatePanel
         candidateId={view.candidateId}
