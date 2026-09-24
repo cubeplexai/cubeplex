@@ -13,7 +13,11 @@ import {
   type SlugError,
 } from '@/lib/slugRules'
 
-export function OnboardingForm() {
+export function OnboardingForm({
+  onCompletionChange,
+}: {
+  onCompletionChange?: (completing: boolean) => void
+}) {
   const t = useTranslations('onboarding')
   const router = useRouter()
   const me = useAuthStore((s) => s.user)
@@ -68,9 +72,15 @@ export function OnboardingForm() {
           }
         : { workspace_name: workspaceName.trim() }
       const result = await completeOnboarding(client, body)
+      onCompletionChange?.(true)
       await useAuthStore.getState().loadMe(client)
+      const refreshed = useAuthStore.getState()
+      if (refreshed.user?.needs_onboarding !== false) {
+        throw new Error(refreshed.error || 'Unable to refresh account after onboarding.')
+      }
       router.replace(`/w/${result.workspace_id}`)
     } catch (err) {
+      onCompletionChange?.(false)
       const msg = (err as Error).message
       if (msg.includes('slug_taken')) {
         setError(slugErrorMessage('slug_taken'))
