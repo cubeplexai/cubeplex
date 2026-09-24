@@ -213,8 +213,8 @@
   },
   "backgroundTasks": {
     "title": "后台任务",
-    "open": "打开后台任务",
-    "openWithCount": "打开后台任务（{count} 项进行中）",
+    "open": "后台任务",
+    "openWithCount": "后台任务（{count} 项进行中）",
     "description": "此对话的后台任务和近期结果。",
     "empty": "暂无后台任务。",
     "loading": "正在加载后台任务…",

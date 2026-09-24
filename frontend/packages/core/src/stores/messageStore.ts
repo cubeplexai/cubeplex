@@ -44,6 +44,7 @@ import {
   getHistoryWindow,
   listBackgroundTaskEvents,
   listBackgroundTasks,
+  listRecentBackgroundTasks,
   stopAllConversationWork,
   stopBackgroundTask as requestBackgroundTaskStop,
   steerRun,
@@ -1994,8 +1995,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       },
     }))
     try {
-      const [inflight, eventPage] = await Promise.all([
+      const [inflight, recent, eventPage] = await Promise.all([
         listBackgroundTasks(client, conversationId),
+        listRecentBackgroundTasks(client, conversationId),
         listBackgroundTaskEvents(client, conversationId, { delivery: 'all' }),
       ])
       const cachedEvents = get().backgroundEvents[conversationId] ?? []
@@ -2034,6 +2036,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const knownIds = new Set<string>()
       for (const task of inflight) knownIds.add(task.id)
       for (const event of refreshedEvents) knownIds.add(event.task_id)
+      for (const task of recent) knownIds.add(task.id)
       for (const task of get().backgroundTasks[conversationId] ?? []) knownIds.add(task.id)
       const boundedIds = [...knownIds].slice(0, 100)
       const tasks =
@@ -2041,7 +2044,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           ? await listBackgroundTasks(client, conversationId, boundedIds)
           : inflight
       const actionableIds = new Set(inflight.map((task) => task.id))
-      const byId = new Map(tasks.map((task) => [task.id, task]))
+      const byId = new Map(
+        [...recent, ...tasks]
+          .sort((left, right) => left.revision - right.revision)
+          .map((task) => [task.id, task]),
+      )
       for (const task of inflight) {
         const current = byId.get(task.id)
         if (!current || task.revision > current.revision) byId.set(task.id, task)

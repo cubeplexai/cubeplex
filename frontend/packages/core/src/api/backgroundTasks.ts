@@ -27,6 +27,18 @@ export async function listBackgroundTasks(
   return ((await res.json()) as BackgroundTaskListResponse).items
 }
 
+export async function listRecentBackgroundTasks(
+  client: ApiClient,
+  conversationId: string,
+  limit = 50,
+): Promise<BackgroundTask[]> {
+  const res = await client.get(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}/background-tasks?recent_limit=${limit}`,
+  )
+  if (!res.ok) throw await toApiError(res)
+  return ((await res.json()) as BackgroundTaskListResponse).items
+}
+
 export async function getBackgroundTask(
   client: ApiClient,
   conversationId: string,
