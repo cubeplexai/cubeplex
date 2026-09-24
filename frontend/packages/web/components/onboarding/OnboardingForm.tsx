@@ -68,6 +68,7 @@ export function OnboardingForm() {
           }
         : { workspace_name: workspaceName.trim() }
       const result = await completeOnboarding(client, body)
+      await useAuthStore.getState().loadMe(client)
       router.replace(`/w/${result.workspace_id}`)
     } catch (err) {
       const msg = (err as Error).message
