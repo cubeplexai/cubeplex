@@ -125,6 +125,78 @@ class TestDiscordDispatchPatchResumeNewMessage:
         assert state.card_id == "msg_1"
 
 
+class TestDiscordSecondAskAfterResolve:
+    @pytest.mark.asyncio
+    async def test_empty_create_after_resolve_delivers_the_next_prompt(self) -> None:
+        """An empty follow-up create must not be sent; the platform rejects it."""
+        from cubeplex.im.outbound import fold_event
+
+        sent: list[str] = []
+
+        class _RejectEmpty:
+            async def send_message(self, text: str) -> str | None:
+                if not text:
+                    return None
+                sent.append(text)
+                return f"msg_{len(sent)}"
+
+            async def edit_message(self, msg_id: str, text: str) -> bool:
+                del msg_id, text
+                return True
+
+        state = RenderState(bot_name="test", run_id="r1", inbound_message_id="100")
+        dispatcher = DiscordOpDispatcher(connector=_RejectEmpty(), state=state)
+
+        async def dispatch(event: dict[str, object]) -> None:
+            op = fold_event(event, state, now=1.0)
+            if op is None:
+                return
+            if op.kind == "card_create":
+                await dispatcher.dispatch_create(state)
+            elif op.kind == "patch_card":
+                await dispatcher.dispatch_patch(state)
+
+        await dispatch({"type": "text_delta", "data": {"content": "intro"}})
+        await dispatch(
+            {
+                "type": "ask_user_request",
+                "data": {
+                    "question_id": "q1",
+                    "questions": [
+                        {
+                            "key": "repo",
+                            "prompt": "First?",
+                            "options": [{"label": "Other", "value": "other", "allow_input": True}],
+                        }
+                    ],
+                },
+            }
+        )
+        await dispatch(
+            {
+                "type": "ask_user_resolved",
+                "data": {"question_id": "q1", "answers": {"repo": "https://example.com"}},
+            }
+        )
+        await dispatch(
+            {
+                "type": "ask_user_request",
+                "data": {
+                    "question_id": "q2",
+                    "questions": [
+                        {
+                            "key": "branch",
+                            "prompt": "Second?",
+                            "options": [{"label": "Other", "value": "other", "allow_input": True}],
+                        }
+                    ],
+                },
+            }
+        )
+        assert any(text.startswith("Second?") for text in sent)
+        assert "" not in sent
+
+
 class TestDiscordAllowInputNotice:
     @pytest.mark.asyncio
     async def test_second_custom_choice_in_the_same_run_is_sent(self) -> None:

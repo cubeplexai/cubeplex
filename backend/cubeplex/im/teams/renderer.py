@@ -43,10 +43,19 @@ class TeamsOpDispatcher:
         if not self._can_edit():
             await self.dispatch_patch(state)
             return True
-        text = s.card_state.streaming_content
-        if not text:
-            text = "..."
+        text = s.card_state.streaming_content or ""
         current_segment = text[self.sent_char_offset :]
+        if not current_segment:
+            # A resolved HITL clears card_id and parks the offset at the end
+            # of the prior text. The next ask arrives as create with nothing
+            # new to post; an empty send is rejected and the prompt is lost.
+            pending = s.card_state.pending_input
+            if pending is not None and pending.resolved_choice is None:
+                await self.dispatch_patch(state)
+                return False
+            if text:
+                return False
+            current_segment = "..."
         sealed_prefix = False
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)

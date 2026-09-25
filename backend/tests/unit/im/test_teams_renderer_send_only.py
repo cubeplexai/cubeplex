@@ -43,6 +43,79 @@ async def test_send_only_channel_finalize_posts_full_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_editable_second_ask_is_not_an_empty_message() -> None:
+    """After resolve, create has no new text. Do not send ""; deliver the prompt."""
+    from cubeplex.im.outbound import fold_event
+
+    sent: list[str] = []
+
+    class _RejectEmpty:
+        supports_message_edit = True
+
+        async def send_message(self, text: str) -> str | None:
+            if not text:
+                return None
+            sent.append(text)
+            return f"msg-{len(sent)}"
+
+        async def edit_message(self, activity_id: str, text: str) -> bool:
+            del activity_id, text
+            return True
+
+    state = RenderState(bot_name="bot", run_id="run-edit")
+    dispatcher = TeamsOpDispatcher(connector=_RejectEmpty(), state=state)
+
+    async def dispatch(event: dict[str, object]) -> None:
+        op = fold_event(event, state, now=1.0)
+        if op is None:
+            return
+        if op.kind == "card_create":
+            await dispatcher.dispatch_create(state)
+        elif op.kind == "patch_card":
+            await dispatcher.dispatch_patch(state)
+
+    await dispatch({"type": "text_delta", "data": {"content": "intro"}})
+    await dispatch(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q1",
+                "questions": [
+                    {
+                        "key": "repo",
+                        "prompt": "First?",
+                        "options": [{"label": "Other", "value": "other", "allow_input": True}],
+                    }
+                ],
+            },
+        }
+    )
+    await dispatch(
+        {
+            "type": "ask_user_resolved",
+            "data": {"question_id": "q1", "answers": {"repo": "https://example.com"}},
+        }
+    )
+    await dispatch(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q2",
+                "questions": [
+                    {
+                        "key": "branch",
+                        "prompt": "Second?",
+                        "options": [{"label": "Other", "value": "other", "allow_input": True}],
+                    }
+                ],
+            },
+        }
+    )
+    assert any(text.startswith("Second?") for text in sent)
+    assert all(text for text in sent)
+
+
+@pytest.mark.asyncio
 async def test_send_only_create_delivers_each_custom_choice() -> None:
     """Web Chat never creates a card, so the ask must go out from create."""
     from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
