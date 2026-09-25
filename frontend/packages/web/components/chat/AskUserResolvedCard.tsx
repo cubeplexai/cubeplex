@@ -32,12 +32,8 @@ function parseAnswers(raw: string | null): ParsedAnswers {
   }
 }
 
-function customAnswerText(question: AskQuestion, answer: unknown): string | null {
-  if (!question.options || question.options.length === 0) return null
-  const known = new Set(question.options.map((opt) => opt.value))
-  const extra = [...selectedValues(answer)].filter((value) => !known.has(value))
-  if (extra.length === 0) return null
-  return extra.join('、')
+function questionAllowsCustom(question: AskQuestion): boolean {
+  return question.options?.some((opt) => opt.allow_input) ?? false
 }
 
 function selectedValues(value: unknown): Set<string> {
@@ -102,20 +98,14 @@ export function AskUserResolvedCard({ questions, resultContent }: AskUserResolve
       {questions.map((q) => {
         const answer = parsed.byKey[q.key]
         const hasAnswer = parsed.ok && answer !== undefined
-        const customText = customAnswerText(q, answer)
         return (
           <div key={q.key} className="flex flex-col gap-1.5">
             <div className="text-sm font-medium text-foreground">{q.prompt}</div>
-            {q.options && q.options.length > 0 ? (
-              <>
-                <OptionsList question={q} answer={answer} hasAnswer={hasAnswer} />
-                {customText ? (
-                  <div className="border-l-2 border-border pl-2 text-sm text-muted-foreground">
-                    {customText}
-                  </div>
-                ) : null}
-              </>
+            {q.options && q.options.length > 0 && !questionAllowsCustom(q) ? (
+              <OptionsList question={q} answer={answer} hasAnswer={hasAnswer} />
             ) : (
+              // A custom answer is the typed string, which can equal another
+              // option's value. Showing that string avoids marking the wrong option.
               <FreeTextAnswer answer={answer} hasAnswer={hasAnswer} />
             )}
           </div>

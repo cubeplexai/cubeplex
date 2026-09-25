@@ -127,6 +127,40 @@ class TestDiscordDispatchPatchResumeNewMessage:
 
 class TestDiscordAllowInputNotice:
     @pytest.mark.asyncio
+    async def test_second_custom_choice_in_the_same_run_is_sent(self) -> None:
+        from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
+
+        d, state, conn = _make_dispatcher()
+
+        def ask(question_id: str, prompt: str) -> None:
+            state.card_state.pending_input = PendingInput(
+                kind="ask_user",
+                run_id="r1",
+                question=prompt,
+                choices=[],
+                fields=[
+                    AskFormField(
+                        key="repo",
+                        prompt=prompt,
+                        kind="single_select",
+                        options=[AskFormOption(label="Other", value="repo_url", allow_input=True)],
+                    )
+                ],
+                question_id=question_id,
+                answer_key="repo",
+            )
+
+        ask("q1", "First?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_")
+        await d.dispatch_patch(state)
+        first = state.card_state.pending_input
+        assert first is not None
+        first.resolved_choice = "done"
+        await d.dispatch_patch(state)
+        ask("q2", "Second?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_")
+        await d.dispatch_patch(state)
+        assert any(text.startswith("Second?") for text in conn.sent)
+
+    @pytest.mark.asyncio
     async def test_custom_choice_sends_web_notice_not_buttons(self) -> None:
         from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
 

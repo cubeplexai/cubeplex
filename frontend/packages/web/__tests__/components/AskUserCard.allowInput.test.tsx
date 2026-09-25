@@ -197,4 +197,15 @@ describe('Ask User allow_input', () => {
     )
     expect(screen.getByText('https://github.com/acme/app')).toBeTruthy()
   })
+
+  it('does not mark another option selected when custom text equals its value', () => {
+    render(
+      <AskUserResolvedCard
+        questions={[repoQuestion]}
+        resultContent={`User answers:\n${JSON.stringify({ repo: 'main' })}`}
+      />,
+    )
+    expect(screen.getByText('main')).toBeTruthy()
+    expect(screen.queryByText('Main')).toBeNull()
+  })
 })

@@ -38,7 +38,10 @@ class TeamsOpDispatcher:
         s = self._state
         # No updateActivity → don't post a partial first token; finalize will
         # send the full reply once (avoids a stuck "你好" with no follow-up).
+        # A pending ask has no later edit to ride on when this channel never
+        # creates a card, so deliver that prompt now.
         if not self._can_edit():
+            await self.dispatch_patch(state)
             return True
         text = s.card_state.streaming_content
         if not text:
@@ -105,7 +108,10 @@ class TeamsOpDispatcher:
     async def dispatch_patch(self, state: Any) -> bool:
         s = self._state
         pending = s.card_state.pending_input
-        pending_id = f"{pending.kind}:{pending.run_id}" if pending else None
+        # question_id keeps a later ask in the same run from being dropped.
+        pending_id = (
+            f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}" if pending else None
+        )
         if (
             pending is not None
             and pending.resolved_choice is None

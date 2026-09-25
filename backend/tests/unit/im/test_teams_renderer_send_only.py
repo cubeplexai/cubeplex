@@ -43,6 +43,42 @@ async def test_send_only_channel_finalize_posts_full_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_only_create_delivers_each_custom_choice() -> None:
+    """Web Chat never creates a card, so the ask must go out from create."""
+    from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
+
+    conn = _SendOnlyConnector()
+    state = RenderState(bot_name="bot", run_id="run-custom")
+    dispatcher = TeamsOpDispatcher(connector=conn, state=state)
+
+    def ask(question_id: str, prompt: str) -> None:
+        state.card_state.pending_input = PendingInput(
+            kind="ask_user",
+            run_id="run-custom",
+            question=prompt,
+            choices=[],
+            fields=[
+                AskFormField(
+                    key="repo",
+                    prompt=prompt,
+                    kind="single_select",
+                    options=[AskFormOption(label="Other", value="repo_url", allow_input=True)],
+                )
+            ],
+            question_id=question_id,
+            answer_key="repo",
+        )
+
+    ask("q1", "First?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_")
+    assert await dispatcher.dispatch_create(SimpleNamespace()) is True
+    ask("q2", "Second?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_")
+    assert await dispatcher.dispatch_create(SimpleNamespace()) is True
+    assert conn.sent[0].startswith("First?")
+    assert conn.sent[1].startswith("Second?")
+    assert "网页端" in conn.sent[0] and "网页端" in conn.sent[1]
+
+
+@pytest.mark.asyncio
 async def test_allow_input_question_sends_web_notice_not_card() -> None:
     from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
 

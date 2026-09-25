@@ -99,7 +99,10 @@ class DiscordOpDispatcher:
         s = self._state
         # Render AskUser/SandboxConfirm buttons when pending_input is set.
         pending = s.card_state.pending_input
-        pending_id = f"{pending.kind}:{pending.run_id}" if pending else None
+        # question_id keeps a later ask in the same run from being dropped.
+        pending_id = (
+            f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}" if pending else None
+        )
         if (
             pending is not None
             and pending.resolved_choice is None
