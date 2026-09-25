@@ -23,7 +23,6 @@ from cubeplex.models.membership import Membership
 from cubeplex.models.sandbox_command import (
     MonitorOutcome,
     SandboxCommand,
-    SandboxCommandKind,
     SandboxCommandStatus,
 )
 from cubeplex.models.user_sandbox import UserSandbox
@@ -374,16 +373,7 @@ class BackgroundTaskLifecycle:
         if command.log_state in ("pending", "retrying"):
             command.log_state = "unavailable"
             task.revision += 1
-        if command.kind == SandboxCommandKind.monitor.value and command.monitor_outcome is None:
-            task.result_readiness = command_result_readiness(
-                state=task.state, log_state=command.log_state
-            ).value
-            if task.result_readiness == TaskResultReadiness.unavailable:
-                task.result_unavailable_reason = (
-                    task.result_unavailable_reason or "final command output could not be recovered"
-                )
-        else:
-            await self._ensure_completion(conversation, task, command, now)
+        await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
 
     async def record_environment_gone(
@@ -639,7 +629,14 @@ class BackgroundTaskLifecycle:
             task.result_unavailable_reason = (
                 task.result_unavailable_reason or "final command output could not be recovered"
             )
-        if command.kind == "monitor" and command.monitor_outcome is None:
+        if (
+            command.kind == "monitor"
+            and command.monitor_outcome is None
+            and (
+                command.sandbox_instance_id is not None
+                or command.status == SandboxCommandStatus.not_started.value
+            )
+        ):
             outcome: MonitorOutcome | None = None
             if task.stop_reason == TaskStopReason.deadline:
                 outcome = MonitorOutcome.timed_out

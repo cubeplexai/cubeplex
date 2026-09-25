@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
 from cubeplex.credentials.encryption import EncryptionBackend
-from cubeplex.models import BackgroundTask, BackgroundTaskEvent, SandboxCommand, UserSandbox
+from cubeplex.models import (
+    BackgroundTask,
+    BackgroundTaskEvent,
+    Conversation,
+    SandboxCommand,
+    UserSandbox,
+)
 from cubeplex.models.background_task import TaskStopReason
 from cubeplex.sandbox.log_io import AppendOutputResult
 from cubeplex.sandbox.manager import SandboxManager
@@ -109,11 +115,13 @@ async def test_terminal_task_without_original_instance_stops_retrying_logs(
     assert await coordinator.reconcile_once() == 0
 
 
+@pytest.mark.parametrize("conversation_closed", [False, True])
 async def test_migrated_monitor_without_instance_keeps_unknown_outcome(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     reservation_context: ReservationContext,
     mock_encryption_backend: EncryptionBackend,
+    conversation_closed: bool,
 ) -> None:
     task, command = await started_task(db_session, reservation_context)
     task.state = "succeeded"
@@ -124,6 +132,10 @@ async def test_migrated_monitor_without_instance_keeps_unknown_outcome(
     command.kind = "monitor"
     command.status = "exited"
     command.sandbox_instance_id = None
+    if conversation_closed:
+        conversation = await db_session.get(Conversation, task.conversation_id)
+        assert conversation is not None
+        conversation.execution_closed_at = NOW
     await db_session.commit()
     coordinator = BackgroundTaskCoordinator(
         session_factory,
