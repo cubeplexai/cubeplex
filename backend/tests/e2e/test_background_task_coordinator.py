@@ -20,6 +20,7 @@ from cubeplex.services.background_task_coordinator import (
     BackgroundTaskCoordinator,
     ForegroundRecovery,
 )
+from cubeplex.services.background_task_lifecycle import ForegroundResultEvidence
 from tests.e2e import test_background_task_reservation as reservation_fixtures
 from tests.e2e import test_command_instance_recovery as recovery_fixtures
 from tests.e2e.test_background_task_reservation import (
@@ -39,6 +40,72 @@ remote = recovery_fixtures.remote
 
 async def already_handed_off(task: BackgroundTask) -> ForegroundRecovery:
     raise AssertionError(f"background task {task.id} must not recover its foreground again")
+
+
+async def test_cancelled_unsubmitted_task_with_pending_log_finishes_recovery(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+) -> None:
+    item = await reserve(db_session, reservation_context)
+    item.task.state = "cancelled"
+    item.task.finished_at = NOW
+    item.command.status = "killed"
+    await db_session.commit()
+
+    async def checkpoint_result(task: BackgroundTask) -> ForegroundRecovery:
+        return ForegroundResultEvidence(
+            run_id=task.originating_run_id,
+            tool_call_id=task.tool_call_id,
+            agent_id=task.agent_id,
+        )
+
+    coordinator = BackgroundTaskCoordinator(
+        session_factory,
+        SandboxManager(session_factory, mock_encryption_backend),
+        resolve_foreground=checkpoint_result,
+        clock=lambda: NOW + timedelta(seconds=31),
+    )
+    assert await coordinator.reconcile_once() == 1
+    await db_session.refresh(item.task)
+    await db_session.refresh(item.command)
+    assert item.command.log_state == "complete"
+    assert item.task.result_readiness == "ready"
+    assert item.task.foreground_result_delivered_at is not None
+    coordinator.clock = lambda: NOW + timedelta(seconds=61)
+    assert await coordinator.reconcile_once() == 0
+
+
+async def test_terminal_task_without_original_instance_stops_retrying_logs(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+) -> None:
+    task, command = await started_task(db_session, reservation_context)
+    task.state = "succeeded"
+    task.finished_at = NOW
+    task.backgrounded_at = None
+    task.foreground_result_delivered_at = NOW
+    command.status = "exited"
+    command.sandbox_instance_id = None
+    await db_session.commit()
+    coordinator = BackgroundTaskCoordinator(
+        session_factory,
+        SandboxManager(session_factory, mock_encryption_backend),
+        resolve_foreground=already_handed_off,
+        clock=lambda: NOW + timedelta(seconds=31),
+    )
+
+    assert await coordinator.reconcile_once() == 1
+    await db_session.refresh(task)
+    await db_session.refresh(command)
+    assert task.state == "succeeded"
+    assert command.log_state == "unavailable"
+    assert task.result_readiness == "unavailable"
+    coordinator.clock = lambda: NOW + timedelta(seconds=61)
+    assert await coordinator.reconcile_once() == 0
 
 
 @pytest.mark.parametrize("stop_scope", ["run", "task", "conversation"])

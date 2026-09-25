@@ -343,11 +343,24 @@ class BackgroundTaskLifecycle:
             raise ValueError("a submitted start cannot be declared unstarted")
         if task.state not in TERMINAL_TASK_STATES:
             task.state = "cancelled" if task.stop_requested_at is not None else "failed"
-            command.status = "not_started"
             task.finished_at = command.finished_at = now
             if command.monitor_outcome is None:
                 task.result_summary = "command was never submitted; it was not restarted"
-            command.log_state = "complete"
+        command.status = "not_started"
+        command.log_state = "complete"
+        task.revision += 1
+        await self._ensure_completion(conversation, task, command, now)
+        await self.session.flush()
+
+    async def record_missing_command_instance(
+        self, *, task_id: str, owner_token: str, now: datetime
+    ) -> None:
+        conversation, _, task, command = await self._lock_command_task(task_id)
+        self._require_owner(task, owner_token, now)
+        if command.sandbox_instance_id is not None or task.state not in TERMINAL_TASK_STATES:
+            raise ValueError("missing instance cannot settle an unfinished command")
+        if command.log_state in ("pending", "retrying"):
+            command.log_state = "unavailable"
             task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()

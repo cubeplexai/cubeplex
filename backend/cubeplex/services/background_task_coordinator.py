@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
 from cubeplex.config import config
-from cubeplex.models.background_task import INFLIGHT_TASK_STATES, BackgroundTask
+from cubeplex.models.background_task import (
+    INFLIGHT_TASK_STATES,
+    TERMINAL_TASK_STATES,
+    BackgroundTask,
+)
 from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.sandbox.base import ProcessHandle, SandboxError, SandboxInstanceGoneError
 from cubeplex.sandbox.command_adapter import CommandAdapter
@@ -252,6 +256,12 @@ class BackgroundTaskCoordinator:
             if command.start_requested_at is None and command.provider_ref is None:
                 async with self.session_factory() as session:
                     await service(session).record_not_started(
+                        task_id=task_id, owner_token=token, now=self.clock()
+                    )
+                    await session.commit()
+            elif command.sandbox_instance_id is None and task.state in TERMINAL_TASK_STATES:
+                async with self.session_factory() as session:
+                    await service(session).record_missing_command_instance(
                         task_id=task_id, owner_token=token, now=self.clock()
                     )
                     await session.commit()
