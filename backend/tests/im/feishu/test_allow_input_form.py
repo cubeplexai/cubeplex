@@ -127,6 +127,36 @@ def test_multi_question_form_renders_custom_input_beside_dropdown() -> None:
     assert answers == {"repo": "main", "branch": "topic/ask"}
 
 
+def test_resolved_receipt_keeps_custom_text_that_matches_another_value() -> None:
+    state = _fold(
+        [
+            {
+                "key": "repo",
+                "prompt": "Which repository?",
+                "options": [
+                    {"label": "Main repository", "value": "main"},
+                    {"label": "Other", "value": "other", "allow_input": True},
+                ],
+            }
+        ]
+    )
+    card = render(state.card_state)
+    value = _submit_value(card)
+    input_name = _input_name(value, "repo", "other")
+    answers = _parse(value, {"repo": "other", input_name: "main"})
+    fold_event(
+        {
+            "type": "ask_user_resolved",
+            "data": {"question_id": "q_custom", "answers": answers},
+        },
+        state,
+        now=1.0,
+    )
+    pending = state.card_state.pending_input
+    assert pending is not None
+    assert pending.resolved_choice == "main"
+
+
 def test_multi_select_allow_input_replaces_only_the_custom_choice() -> None:
     state = _fold(
         [

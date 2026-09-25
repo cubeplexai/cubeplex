@@ -89,6 +89,10 @@ def _label_for_option(pending: Any, answer_key: str, value: str) -> str:
     for form_field in getattr(pending, "fields", None) or []:
         if form_field.key != answer_key:
             continue
+        # Custom text can equal another option's value. Showing the raw
+        # answer avoids labeling that text as the other option.
+        if any(opt.allow_input for opt in form_field.options):
+            return value or "answered"
         for opt in form_field.options:
             if opt.value == value:
                 return str(opt.label)
