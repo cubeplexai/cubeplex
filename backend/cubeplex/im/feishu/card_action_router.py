@@ -47,6 +47,49 @@ class ResumeAction:
     answers: dict[str, Any] | None = None
 
 
+def _apply_custom_inputs(answers: dict[str, Any], custom_inputs: dict[str, Any]) -> dict[str, Any]:
+    """Replace an allow_input option's fixed value with the text the user typed.
+
+    ``custom_inputs`` is ``{question_key: {option_value: form_input_name}}``
+    from the submit button. The companion inputs are removed so cubeloop
+    only sees question keys. An allow_input choice with blank text is
+    rejected — the web card blocks that submit, and a fixed sentinel would
+    hide what the user meant to type.
+    """
+    helper_names: set[str] = set()
+    for mapping in custom_inputs.values():
+        if isinstance(mapping, dict):
+            helper_names.update(str(name) for name in mapping.values())
+
+    rewritten = dict(answers)
+    for question_key, mapping in custom_inputs.items():
+        if not isinstance(mapping, dict):
+            continue
+        key = str(question_key)
+        selected = rewritten.get(key)
+        if isinstance(selected, list):
+            replaced: list[str] = []
+            for item in selected:
+                input_name = mapping.get(str(item))
+                if input_name is None:
+                    replaced.append(str(item))
+                    continue
+                text = str(rewritten.get(str(input_name), "")).strip()
+                if not text:
+                    raise InvalidAction("empty custom input")
+                replaced.append(text)
+            rewritten[key] = replaced
+        elif isinstance(selected, str) and selected in mapping:
+            text = str(rewritten.get(str(mapping[selected]), "")).strip()
+            if not text:
+                raise InvalidAction("empty custom input")
+            rewritten[key] = text
+    for name in helper_names:
+        if name not in custom_inputs:
+            rewritten.pop(name, None)
+    return rewritten
+
+
 def _normalize_form_value(form_value: dict[str, Any]) -> dict[str, Any]:
     """Drop submit-button noise and keep only user-filled field values.
 
@@ -91,6 +134,9 @@ def parse_action_payload(event: dict[str, Any]) -> ActionPayload:
     answers: dict[str, Any] | None = None
     if isinstance(form_value, dict) and form_value:
         answers = _normalize_form_value(form_value)
+        custom_inputs = value.get("custom_inputs")
+        if isinstance(custom_inputs, dict) and custom_inputs:
+            answers = _apply_custom_inputs(answers, custom_inputs)
         if not answers:
             raise InvalidAction("empty form_value")
         return ActionPayload(

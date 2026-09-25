@@ -324,7 +324,9 @@
     "submit": "提交",
     "submitting": "发送中…",
     "cancel": "取消",
-    "cancelling": "取消中…"
+    "cancelling": "取消中…",
+    "customPlaceholder": "请输入",
+    "customInput": "{label}的自定义回答"
   },
   "avatar": {
     "adminPanel": "管理后台",

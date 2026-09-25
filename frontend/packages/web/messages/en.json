@@ -324,7 +324,9 @@
     "submit": "Submit",
     "submitting": "Sending…",
     "cancel": "Cancel",
-    "cancelling": "Cancelling…"
+    "cancelling": "Cancelling…",
+    "customPlaceholder": "Type your answer",
+    "customInput": "Custom answer for {label}"
   },
   "avatar": {
     "adminPanel": "Admin panel",

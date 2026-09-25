@@ -140,11 +140,17 @@ class SlackOpDispatcher:
         if (
             pending is not None
             and pending.resolved_choice is None
-            and pending.choices
             and pending_id != self._pending_input_sent_id
         ):
-            await self._send_pending_input_buttons(pending)
-            self._pending_input_sent_id = pending_id
+            if pending.choices:
+                await self._send_pending_input_buttons(pending)
+                self._pending_input_sent_id = pending_id
+            elif pending.needs_form():
+                # allow_input / free-text / multi-question cannot be buttons.
+                # ``question`` already includes the web-client notice.
+                text = pending.question or "_(Please continue in the CubePlex web UI.)_"
+                await self._connector.send_message(text)
+                self._pending_input_sent_id = pending_id
         if pending is not None and pending.resolved_choice is not None:
             # New Slack message for the post-HITL answer — only on the first
             # resolved patch for this question_id. Later tool/artifact patches

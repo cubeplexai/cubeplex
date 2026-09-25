@@ -73,6 +73,40 @@ class TestDispatchStream:
         assert call_kwargs["key"] == "msgContent"
 
 
+class TestAllowInputNotice:
+    @pytest.mark.anyio()
+    async def test_custom_choice_sends_web_notice(
+        self, state: RenderState, connector: AsyncMock
+    ) -> None:
+        from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
+
+        d = DingtalkOpDispatcher(
+            connector=connector,
+            state=state,
+            open_conversation_id="cid_123",
+        )
+        notice = "Which repository?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_"
+        state.card_state.pending_input = PendingInput(
+            kind="ask_user",
+            run_id="run_001",
+            question=notice,
+            choices=[],
+            fields=[
+                AskFormField(
+                    key="repo",
+                    prompt="Which repository?",
+                    kind="single_select",
+                    options=[AskFormOption(label="Other", value="repo_url", allow_input=True)],
+                )
+            ],
+            question_id="q1",
+            answer_key="repo",
+        )
+        await d.dispatch_patch(state)
+        connector.reply_markdown.assert_awaited()
+        assert notice in connector.reply_markdown.await_args.kwargs["text"]
+
+
 class TestDispatchFinalize:
     @pytest.mark.anyio()
     async def test_finalizes_card(self, state: RenderState, connector: AsyncMock) -> None:

@@ -125,6 +125,32 @@ class TestDiscordDispatchPatchResumeNewMessage:
         assert state.card_id == "msg_1"
 
 
+class TestDiscordAllowInputNotice:
+    @pytest.mark.asyncio
+    async def test_custom_choice_sends_web_notice_not_buttons(self) -> None:
+        from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
+
+        d, state, conn = _make_dispatcher()
+        state.card_state.pending_input = PendingInput(
+            kind="ask_user",
+            run_id="r1",
+            question="Which repository?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_",
+            choices=[],
+            fields=[
+                AskFormField(
+                    key="repo",
+                    prompt="Which repository?",
+                    kind="single_select",
+                    options=[AskFormOption(label="Other", value="repo_url", allow_input=True)],
+                )
+            ],
+            question_id="q1",
+            answer_key="repo",
+        )
+        await d.dispatch_patch(state)
+        assert any("网页端" in text for text in conn.sent)
+
+
 class TestDiscordDispatchFinalize:
     @pytest.mark.asyncio
     async def test_finalize_edits_final_content(self) -> None:

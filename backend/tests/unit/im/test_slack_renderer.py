@@ -377,6 +377,38 @@ async def test_consecutive_same_kind_hitl_sends_both_button_sets() -> None:
 
 
 @pytest.mark.asyncio
+async def test_allow_input_question_sends_web_notice_not_buttons() -> None:
+    """A custom-choice question cannot be a fixed Slack button."""
+    from cubeplex.im.card_model import AskFormField, AskFormOption, PendingInput
+
+    state = _make_state()
+    d, conn = _make_dispatcher(state)
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run-1",
+        question="Which repository?\n\n_(此问含自定义输入，请在 CubePlex 网页端继续。)_",
+        choices=[],
+        fields=[
+            AskFormField(
+                key="repo",
+                prompt="Which repository?",
+                kind="single_select",
+                options=[
+                    AskFormOption(label="Main", value="main"),
+                    AskFormOption(label="Other", value="repo_url", allow_input=True),
+                ],
+            )
+        ],
+        question_id="qid-custom",
+        answer_key="repo",
+    )
+    await d.dispatch_patch(state)
+    conn.send_message_with_blocks.assert_not_awaited()
+    conn.send_message.assert_awaited()
+    assert "网页端" in conn.send_message.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_finalize_clears_empty_placeholder() -> None:
     """If a placeholder bot message exists with no final text, replace it."""
     state = _make_state()

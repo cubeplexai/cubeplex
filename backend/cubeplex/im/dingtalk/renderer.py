@@ -131,7 +131,7 @@ class DingtalkOpDispatcher:
         if (
             pending is not None
             and pending.resolved_choice is None
-            and pending.choices
+            and (pending.choices or pending.needs_form())
             and pending_id != self._pending_input_sent_id
         ):
             await self._emergency_pending_input(pending)

@@ -14,6 +14,8 @@ from typing import Any
 
 from cubeplex.im.feishu.card_model import (
     ArtifactItem,
+    AskFormField,
+    AskFormOption,
     CardState,
     PendingInput,
     SubAgentRow,
@@ -413,18 +415,72 @@ def _artifacts_panel(state: CardState) -> dict[str, Any]:
     }
 
 
-def _option_objects(options: list[tuple[str, str]]) -> list[dict[str, Any]]:
+def _option_objects(options: list[AskFormOption]) -> list[dict[str, Any]]:
     return [
         {
-            "text": {"tag": "plain_text", "content": label[:100] or value[:100]},
-            "value": value,
+            "text": {"tag": "plain_text", "content": (opt.label or opt.value)[:100]},
+            "value": opt.value,
         }
-        for label, value in options
-        if value
+        for opt in options
+        if opt.value
     ]
 
 
-def _render_form_field(field: Any, *, index: int) -> list[dict[str, Any]]:
+def _custom_input_name(field_index: int, option_index: int) -> str:
+    """Form item name for the text that replaces an allow_input option value.
+
+    element_id rules: start with a letter, letters/digits/underscore, ≤20.
+    """
+    return f"askc_{field_index}_{option_index}"
+
+
+def _render_custom_inputs(field: AskFormField, *, field_index: int) -> list[dict[str, Any]]:
+    """One input per allow_input option.
+
+    Feishu forms cannot reveal a field only after that option is selected,
+    so the input stays visible and its label names the option it belongs to.
+    The submit callback maps the option value to this input's name; the
+    action router substitutes the typed text into the answer.
+    """
+    elements: list[dict[str, Any]] = []
+    for option_index, opt in enumerate(field.options):
+        if not opt.allow_input:
+            continue
+        name = _custom_input_name(field_index, option_index)
+        label = opt.label or opt.value
+        elements.append(
+            {
+                "tag": "input",
+                "element_id": name,
+                "name": name,
+                "required": False,
+                "width": "fill",
+                "input_type": "multiline_text",
+                "rows": 1,
+                "placeholder": {"tag": "plain_text", "content": "请输入"},
+                "label": {
+                    "tag": "plain_text",
+                    "content": f"若选择「{label}」，请填写"[:200],
+                },
+            }
+        )
+    return elements
+
+
+def _custom_input_map(fields: list[AskFormField]) -> dict[str, dict[str, str]]:
+    """``{question_key: {option_value: form_input_name}}`` for allow_input."""
+    mapping: dict[str, dict[str, str]] = {}
+    for field_index, form_field in enumerate(fields):
+        by_value: dict[str, str] = {}
+        for option_index, opt in enumerate(form_field.options):
+            if opt.allow_input and opt.value:
+                by_value[opt.value] = _custom_input_name(field_index, option_index)
+        if by_value:
+            mapping[form_field.key] = by_value
+    return mapping
+
+
+def _render_form_field(field: AskFormField, *, index: int) -> list[dict[str, Any]]:
     """Project one AskFormField into Feishu form child elements.
 
     Select components have no ``label``; put the prompt as a div above.
@@ -472,6 +528,7 @@ def _render_form_field(field: Any, *, index: int) -> list[dict[str, Any]]:
             "options": _option_objects(list(field.options)),
         }
     )
+    elements.extend(_render_custom_inputs(field, field_index=index))
     return elements
 
 
@@ -492,6 +549,9 @@ def _render_ask_form(pending: PendingInput) -> dict[str, Any]:
     }
     if pending.question_id:
         submit_value["question_id"] = pending.question_id
+    custom_inputs = _custom_input_map(list(pending.fields))
+    if custom_inputs:
+        submit_value["custom_inputs"] = custom_inputs
     form_elements.append(
         {
             "tag": "button",

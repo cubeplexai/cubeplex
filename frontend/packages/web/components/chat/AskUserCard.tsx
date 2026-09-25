@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import type { PendingAsk, AskQuestion } from '@cubeplex/core'
+import type { AskOption, PendingAsk, AskQuestion } from '@cubeplex/core'
 
 interface AskUserCardProps {
   pending: PendingAsk
@@ -16,14 +16,97 @@ interface AskUserCardProps {
   onCancel?: () => Promise<void>
 }
 
-function QuestionField({
-  question,
+function customAnswerKey(questionKey: string, optionValue: string): string {
+  return `${questionKey}\0${optionValue}`
+}
+
+function customAnswerText(
+  custom: Record<string, string>,
+  questionKey: string,
+  optionValue: string,
+): string {
+  return (custom[customAnswerKey(questionKey, optionValue)] ?? '').trim()
+}
+
+function submittedAnswer(
+  question: AskQuestion,
+  raw: string | string[],
+  custom: Record<string, string>,
+): string | string[] {
+  if (!question.options) return raw
+  if (question.multi_select) {
+    const selected = Array.isArray(raw) ? raw : []
+    return selected.map((value) => {
+      const option = question.options?.find((opt) => opt.value === value)
+      if (!option?.allow_input) return value
+      return customAnswerText(custom, question.key, value)
+    })
+  }
+  const selected = typeof raw === 'string' ? raw : ''
+  const option = question.options.find((opt) => opt.value === selected)
+  if (!option?.allow_input) return selected
+  return customAnswerText(custom, question.key, selected)
+}
+
+function blocksSubmit(
+  question: AskQuestion,
+  raw: string | string[],
+  custom: Record<string, string>,
+): boolean {
+  if (!question.options) {
+    return question.required && (typeof raw !== 'string' || raw === '')
+  }
+  if (question.multi_select) {
+    const selected = Array.isArray(raw) ? raw : []
+    if (selected.length === 0) return question.required
+    return selected.some((value) => {
+      const option = question.options?.find((opt) => opt.value === value)
+      return Boolean(option?.allow_input) && customAnswerText(custom, question.key, value) === ''
+    })
+  }
+  const selected = typeof raw === 'string' ? raw : ''
+  if (selected === '') return question.required
+  const option = question.options.find((opt) => opt.value === selected)
+  return Boolean(option?.allow_input) && customAnswerText(custom, question.key, selected) === ''
+}
+
+function CustomAnswerInput({
+  questionKey,
+  option,
   value,
   onChange,
 }: {
+  questionKey: string
+  option: AskOption
+  value: string
+  onChange: (text: string) => void
+}) {
+  const t = useTranslations('askUser')
+  return (
+    <Input
+      id={`${questionKey}-${option.value}-custom`}
+      aria-label={t('customInput', { label: option.label })}
+      placeholder={t('customPlaceholder')}
+      value={value}
+      autoFocus
+      onChange={(e) => onChange(e.target.value)}
+      className="ml-6 h-8 text-sm"
+    />
+  )
+}
+
+function QuestionField({
+  question,
+  value,
+  custom,
+  onChange,
+  onCustomChange,
+}: {
   question: AskQuestion
   value: string | string[]
+  custom: Record<string, string>
   onChange: (v: string | string[]) => void
+  onCustomChange: (optionValue: string, text: string) => void
 }) {
   if (!question.options) {
     return (
@@ -43,26 +126,39 @@ function QuestionField({
     return (
       <div className="flex flex-col gap-1.5">
         <Label className="text-sm font-medium text-foreground">{question.prompt}</Label>
-        {question.options.map((opt) => (
-          <div key={opt.value} className="flex items-center gap-2">
-            <Checkbox
-              id={`${question.key}-${opt.value}`}
-              checked={selected.includes(opt.value)}
-              onCheckedChange={(checked) => {
-                const next = checked
-                  ? [...selected, opt.value]
-                  : selected.filter((v) => v !== opt.value)
-                onChange(next)
-              }}
-            />
-            <Label
-              htmlFor={`${question.key}-${opt.value}`}
-              className="cursor-pointer text-sm text-foreground"
-            >
-              {opt.label}
-            </Label>
-          </div>
-        ))}
+        {question.options.map((opt) => {
+          const checked = selected.includes(opt.value)
+          return (
+            <div key={opt.value} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id={`${question.key}-${opt.value}`}
+                  checked={checked}
+                  onCheckedChange={(nextChecked) => {
+                    const next = nextChecked
+                      ? [...selected, opt.value]
+                      : selected.filter((v) => v !== opt.value)
+                    onChange(next)
+                  }}
+                />
+                <Label
+                  htmlFor={`${question.key}-${opt.value}`}
+                  className="cursor-pointer text-sm text-foreground"
+                >
+                  {opt.label}
+                </Label>
+              </div>
+              {checked && opt.allow_input ? (
+                <CustomAnswerInput
+                  questionKey={question.key}
+                  option={opt}
+                  value={custom[customAnswerKey(question.key, opt.value)] ?? ''}
+                  onChange={(text) => onCustomChange(opt.value, text)}
+                />
+              ) : null}
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -76,17 +172,30 @@ function QuestionField({
         onValueChange={(v) => onChange(v)}
         className="flex flex-col gap-1"
       >
-        {question.options.map((opt) => (
-          <div key={opt.value} className="flex items-center gap-2">
-            <RadioGroupItem value={opt.value} id={`${question.key}-${opt.value}`} />
-            <Label
-              htmlFor={`${question.key}-${opt.value}`}
-              className="cursor-pointer text-sm text-foreground"
-            >
-              {opt.label}
-            </Label>
-          </div>
-        ))}
+        {question.options.map((opt) => {
+          const checked = typeof value === 'string' && value === opt.value
+          return (
+            <div key={opt.value} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value={opt.value} id={`${question.key}-${opt.value}`} />
+                <Label
+                  htmlFor={`${question.key}-${opt.value}`}
+                  className="cursor-pointer text-sm text-foreground"
+                >
+                  {opt.label}
+                </Label>
+              </div>
+              {checked && opt.allow_input ? (
+                <CustomAnswerInput
+                  questionKey={question.key}
+                  option={opt}
+                  value={custom[customAnswerKey(question.key, opt.value)] ?? ''}
+                  onChange={(text) => onCustomChange(opt.value, text)}
+                />
+              ) : null}
+            </div>
+          )
+        })}
       </RadioGroup>
     </div>
   )
@@ -101,6 +210,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
     }
     return init
   })
+  const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   // Initialise to null to avoid SSR/CSR hydration mismatch (Date.now() differs).
@@ -123,17 +233,30 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
     setAnswers((prev) => ({ ...prev, [key]: value }))
   }
 
-  const hasUnfilledRequired = pending.questions.some((q) => {
-    if (!q.required) return false
-    const v = answers[q.key]
-    return Array.isArray(v) ? v.length === 0 : v === ''
-  })
+  const setCustomAnswer = (questionKey: string, optionValue: string, text: string) => {
+    setCustomAnswers((prev) => ({
+      ...prev,
+      [customAnswerKey(questionKey, optionValue)]: text,
+    }))
+  }
+
+  const hasUnfilledRequired = pending.questions.some((q) =>
+    blocksSubmit(q, answers[q.key] ?? (q.multi_select ? [] : ''), customAnswers),
+  )
 
   const handleSubmit = async () => {
     if (submitting || hasUnfilledRequired) return
+    const payload: Record<string, string | string[]> = {}
+    for (const q of pending.questions) {
+      payload[q.key] = submittedAnswer(
+        q,
+        answers[q.key] ?? (q.multi_select ? [] : ''),
+        customAnswers,
+      )
+    }
     setSubmitting(true)
     try {
-      await onSubmit(answers)
+      await onSubmit(payload)
     } catch {
       setSubmitting(false)
     }
@@ -159,7 +282,9 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
               key={q.key}
               question={q}
               value={answers[q.key] ?? (q.multi_select ? [] : '')}
+              custom={customAnswers}
               onChange={(v) => setAnswer(q.key, v)}
+              onCustomChange={(optionValue, text) => setCustomAnswer(q.key, optionValue, text)}
             />
           ))}
         </div>

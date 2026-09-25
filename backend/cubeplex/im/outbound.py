@@ -18,6 +18,7 @@ from typing import Any, Literal
 from loguru import logger
 from redis.asyncio import Redis
 
+from cubeplex.im.card_model import AskFormOption
 from cubeplex.im.types import RenderState
 from cubeplex.streams.run_events import read_run_events_after
 
@@ -56,17 +57,41 @@ class OutboundOp:
     final: bool = False
 
 
+def _ask_form_option(opt: object) -> AskFormOption | None:
+    """Project one cubeloop option into ``AskFormOption``.
+
+    Accepts the legacy string form and the ``{label, value, allow_input}``
+    object cubeloop emits. Returns None when the option has no value.
+    """
+    if isinstance(opt, str):
+        text = opt.strip()
+        if not text:
+            return None
+        return AskFormOption(label=text, value=text)
+    if not isinstance(opt, dict):
+        return None
+    value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
+    label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
+    if not value:
+        return None
+    return AskFormOption(
+        label=label or value,
+        value=value,
+        allow_input=bool(opt.get("allow_input")),
+    )
+
+
 def _label_for_option(pending: Any, answer_key: str, value: str) -> str:
     """Map a machine answer value back to a human label when we have one."""
     for lbl, val, _ in pending.choices:
         if val == value:
             return str(lbl)
-    for field in getattr(pending, "fields", None) or []:
-        if field.key != answer_key:
+    for form_field in getattr(pending, "fields", None) or []:
+        if form_field.key != answer_key:
             continue
-        for lbl, val in field.options:
-            if val == value:
-                return str(lbl)
+        for opt in form_field.options:
+            if opt.value == value:
+                return str(opt.label)
     return value or "answered"
 
 
@@ -296,16 +321,12 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             multi_select = bool(q.get("multi_select"))
             required = bool(q.get("required", True))
             raw_opts = q.get("options") or []
-            options: list[tuple[str, str]] = []
+            options: list[AskFormOption] = []
             if isinstance(raw_opts, list):
                 for opt in raw_opts:
-                    if isinstance(opt, str) and opt:
-                        options.append((opt, opt))
-                    elif isinstance(opt, dict):
-                        value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
-                        label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
-                        if value:
-                            options.append((label, value))
+                    parsed = _ask_form_option(opt)
+                    if parsed is not None:
+                        options.append(parsed)
             if multi_select and options:
                 kind: Literal["single_select", "multi_select", "input"] = "multi_select"
             elif options:
@@ -330,26 +351,30 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # Button path still keys the single-choice resume on questions[0].key.
         answer_key = str(first.get("key") or "") or None
 
-        # One-click buttons only work for a single single-select question.
-        # multi_select needs a list; free-text needs an input; multi-question
+        # One-click buttons only work for a single single-select question
+        # whose every option is a fixed value. multi_select needs a list;
+        # free-text and allow_input need text the user types; multi-question
         # needs every key filled. Those go through the form path (Feishu) or
         # the web-client notice (other IM platforms).
         choices: list[tuple[str, str, str]] = []
+        has_custom = any(opt.allow_input for form_field in fields for opt in form_field.options)
         simple_button = (
-            len(fields) == 1 and fields[0].kind == "single_select" and bool(fields[0].options)
+            len(fields) == 1
+            and fields[0].kind == "single_select"
+            and bool(fields[0].options)
+            and not has_custom
         )
         if simple_button:
             raw_options = first.get("options") or []
             if isinstance(raw_options, list):
                 for opt in raw_options:
-                    if isinstance(opt, str) and opt:
-                        choices.append((opt, opt, "default"))
-                    elif isinstance(opt, dict):
-                        value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
-                        label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
+                    parsed = _ask_form_option(opt)
+                    if parsed is None:
+                        continue
+                    btn_type = "default"
+                    if isinstance(opt, dict):
                         btn_type = str(opt.get("type") or "default")
-                        if value:
-                            choices.append((label, value, btn_type))
+                    choices.append((parsed.label, parsed.value, btn_type))
 
         # Non-form platforms still show a web-client notice when buttons
         # can't complete the form. Feishu's form renderer uses ``fields``
@@ -361,6 +386,8 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
                 notice = "_(此问需多题作答，请在 CubePlex 网页端继续。)_"
             elif multi_select:
                 notice = "_(多选题需在 CubePlex 网页端作答。)_"
+            elif has_custom:
+                notice = "_(此问含自定义输入，请在 CubePlex 网页端继续。)_"
             else:
                 notice = "_(此问题需要文本输入；请在 CubePlex 网页端继续。)_"
             prompt = f"{prompt}\n\n{notice}" if prompt else notice

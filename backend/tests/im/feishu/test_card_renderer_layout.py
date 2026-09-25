@@ -150,7 +150,7 @@ def test_pending_input_form_renders_select_input_and_multi() -> None:
     """Multi-question / multi-select / free-text use a CardKit form so the
     user can submit every field in one click.
     """
-    from cubeplex.im.feishu.card_model import AskFormField
+    from cubeplex.im.feishu.card_model import AskFormField, AskFormOption
 
     state = _empty_state()
     state.pending_input = PendingInput(
@@ -163,13 +163,19 @@ def test_pending_input_form_renders_select_input_and_multi() -> None:
                 key="pick",
                 prompt="Pick one",
                 kind="single_select",
-                options=[("Yes", "yes"), ("No", "no")],
+                options=[
+                    AskFormOption(label="Yes", value="yes"),
+                    AskFormOption(label="No", value="no"),
+                ],
             ),
             AskFormField(
                 key="tags",
                 prompt="Tags",
                 kind="multi_select",
-                options=[("A", "a"), ("B", "b")],
+                options=[
+                    AskFormOption(label="A", value="a"),
+                    AskFormOption(label="B", value="b"),
+                ],
             ),
             AskFormField(key="name", prompt="Your name", kind="input"),
         ],

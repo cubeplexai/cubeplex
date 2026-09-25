@@ -103,11 +103,17 @@ class DiscordOpDispatcher:
         if (
             pending is not None
             and pending.resolved_choice is None
-            and pending.choices
             and pending_id != self._pending_input_sent_id
         ):
-            await self._send_pending_input_buttons(pending)
-            self._pending_input_sent_id = pending_id
+            if pending.choices:
+                await self._send_pending_input_buttons(pending)
+                self._pending_input_sent_id = pending_id
+            elif pending.needs_form():
+                # allow_input / free-text / multi-question cannot be buttons.
+                # ``question`` already includes the web-client notice.
+                text = pending.question or "_(请在 CubePlex 网页端继续。)_"
+                await self._connector.send_message(text)
+                self._pending_input_sent_id = pending_id
         # When the user answers a pending input, reset card state so the
         # follow-up reply appears as a NEW message below the buttons
         # instead of being edited into the old message above them.

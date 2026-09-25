@@ -1,5 +1,6 @@
 """Tests for fold_event ask_user_request / sandbox_confirm_request / *_resolved / done / error."""
 
+from cubeplex.im.card_model import AskFormOption
 from cubeplex.im.outbound import fold_event
 from cubeplex.im.types import RenderState
 
@@ -180,8 +181,55 @@ def test_ask_user_multi_select_populates_fields_and_needs_form() -> None:
     assert pending.choices == []
     assert pending.needs_form() is True
     assert pending.fields[0].kind == "multi_select"
-    assert pending.fields[0].options == [("A", "a"), ("B", "b")]
+    assert pending.fields[0].options == [
+        AskFormOption(label="A", value="a"),
+        AskFormOption(label="B", value="b"),
+    ]
     assert "多选" in pending.question and "网页端" in pending.question
+
+
+def test_ask_user_allow_input_skips_buttons_and_keeps_custom_option() -> None:
+    """A single-select option with allow_input is not a fixed-value button.
+
+    Feishu renders it on the form (needs_form). Other IM platforms get the
+    web-client notice baked into the question text.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q_custom",
+                "questions": [
+                    {
+                        "key": "repo",
+                        "prompt": "Which repository?",
+                        "options": [
+                            {"label": "Main", "value": "main"},
+                            {
+                                "label": "Other repository",
+                                "value": "repo_url",
+                                "allow_input": True,
+                            },
+                        ],
+                        "required": True,
+                    }
+                ],
+            },
+        },
+        state,
+        now=0.0,
+    )
+    pending = state.card_state.pending_input
+    assert pending is not None
+    assert pending.choices == []
+    assert pending.needs_form() is True
+    assert pending.fields[0].kind == "single_select"
+    assert pending.fields[0].options == [
+        AskFormOption(label="Main", value="main"),
+        AskFormOption(label="Other repository", value="repo_url", allow_input=True),
+    ]
+    assert "自定义输入" in pending.question and "网页端" in pending.question
 
 
 def test_ask_user_request_with_no_options_populates_input_field() -> None:

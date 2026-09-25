@@ -47,6 +47,19 @@ class ArtifactItem:
     description: str | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class AskFormOption:
+    """One cubeloop option projected onto a form select or a card button.
+
+    ``allow_input`` means the submitted answer is text the user types, not
+    ``value``. Button platforms cannot collect that text.
+    """
+
+    label: str
+    value: str
+    allow_input: bool = False
+
+
 @dataclass(slots=True)
 class AskFormField:
     """One cubeloop ``ask_user`` question projected for platform form renderers.
@@ -59,8 +72,8 @@ class AskFormField:
     key: str
     prompt: str
     kind: Literal["single_select", "multi_select", "input"]
-    options: list[tuple[str, str]] = field(default_factory=list)
-    """``(label, value)`` pairs for select kinds; empty for free-text input."""
+    options: list[AskFormOption] = field(default_factory=list)
+    """Select choices. Empty for free-text input."""
     required: bool = True
 
 
@@ -104,12 +117,19 @@ class PendingInput:
     resolved_at_iso: str | None = None
 
     def needs_form(self) -> bool:
-        """True when one-click buttons cannot submit a complete answer."""
+        """True when one-click buttons cannot submit a complete answer.
+
+        An ``allow_input`` option needs the text the user types, so the
+        question cannot be answered by a fixed-value button.
+        """
         if self.kind != "ask_user" or not self.fields:
             return False
         if len(self.fields) > 1:
             return True
-        return self.fields[0].kind in ("multi_select", "input")
+        field0 = self.fields[0]
+        if field0.kind in ("multi_select", "input"):
+            return True
+        return any(opt.allow_input for opt in field0.options)
 
 
 @dataclass(slots=True)
@@ -169,6 +189,7 @@ class CardState:
 __all__ = [
     "ArtifactItem",
     "AskFormField",
+    "AskFormOption",
     "CardState",
     "PendingInput",
     "SubAgentRow",
