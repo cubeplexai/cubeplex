@@ -42,7 +42,7 @@ async def already_handed_off(task: BackgroundTask) -> ForegroundRecovery:
     raise AssertionError(f"background task {task.id} must not recover its foreground again")
 
 
-async def test_cancelled_unsubmitted_task_with_pending_log_finishes_recovery(
+async def test_migrated_cancelled_task_preserves_unknown_log_when_recovering(
     db_session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     reservation_context: ReservationContext,
@@ -70,8 +70,9 @@ async def test_cancelled_unsubmitted_task_with_pending_log_finishes_recovery(
     assert await coordinator.reconcile_once() == 1
     await db_session.refresh(item.task)
     await db_session.refresh(item.command)
-    assert item.command.log_state == "complete"
-    assert item.task.result_readiness == "ready"
+    assert item.command.status == "killed"
+    assert item.command.log_state == "unavailable"
+    assert item.task.result_readiness == "unavailable"
     assert item.task.foreground_result_delivered_at is not None
     coordinator.clock = lambda: NOW + timedelta(seconds=61)
     assert await coordinator.reconcile_once() == 0

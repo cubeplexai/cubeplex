@@ -18,7 +18,7 @@ from cubeplex.models.background_task import (
     TERMINAL_TASK_STATES,
     BackgroundTask,
 )
-from cubeplex.models.sandbox_command import SandboxCommand
+from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandStatus
 from cubeplex.sandbox.base import ProcessHandle, SandboxError, SandboxInstanceGoneError
 from cubeplex.sandbox.command_adapter import CommandAdapter
 from cubeplex.sandbox.log_io import append_output
@@ -253,15 +253,22 @@ class BackgroundTaskCoordinator:
                 await session.commit()
 
         try:
-            if command.start_requested_at is None and command.provider_ref is None:
+            if (
+                command.start_requested_at is None
+                and command.provider_ref is None
+                and command.status
+                in (SandboxCommandStatus.starting.value, SandboxCommandStatus.not_started.value)
+            ):
                 async with self.session_factory() as session:
                     await service(session).record_not_started(
                         task_id=task_id, owner_token=token, now=self.clock()
                     )
                     await session.commit()
-            elif command.sandbox_instance_id is None and task.state in TERMINAL_TASK_STATES:
+            elif task.state in TERMINAL_TASK_STATES and (
+                command.sandbox_instance_id is None or command.provider_ref is None
+            ):
                 async with self.session_factory() as session:
-                    await service(session).record_missing_command_instance(
+                    await service(session).record_unrecoverable_terminal_log(
                         task_id=task_id, owner_token=token, now=self.clock()
                     )
                     await session.commit()

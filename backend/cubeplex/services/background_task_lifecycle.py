@@ -20,7 +20,7 @@ from cubeplex.models.background_task import (
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.membership import Membership
-from cubeplex.models.sandbox_command import MonitorOutcome, SandboxCommand
+from cubeplex.models.sandbox_command import MonitorOutcome, SandboxCommand, SandboxCommandStatus
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.background_task import BackgroundTaskRepository
 from cubeplex.repositories.conversation import ConversationRepository
@@ -339,7 +339,12 @@ class BackgroundTaskLifecycle:
     async def record_not_started(self, *, task_id: str, owner_token: str, now: datetime) -> None:
         conversation, _, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
-        if command.start_requested_at is not None or command.provider_ref is not None:
+        if (
+            command.start_requested_at is not None
+            or command.provider_ref is not None
+            or command.status
+            not in (SandboxCommandStatus.starting.value, SandboxCommandStatus.not_started.value)
+        ):
             raise ValueError("a submitted start cannot be declared unstarted")
         if task.state not in TERMINAL_TASK_STATES:
             task.state = "cancelled" if task.stop_requested_at is not None else "failed"
@@ -352,13 +357,15 @@ class BackgroundTaskLifecycle:
         await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
 
-    async def record_missing_command_instance(
+    async def record_unrecoverable_terminal_log(
         self, *, task_id: str, owner_token: str, now: datetime
     ) -> None:
         conversation, _, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
-        if command.sandbox_instance_id is not None or task.state not in TERMINAL_TASK_STATES:
-            raise ValueError("missing instance cannot settle an unfinished command")
+        if task.state not in TERMINAL_TASK_STATES or (
+            command.sandbox_instance_id is not None and command.provider_ref is not None
+        ):
+            raise ValueError("an observable or unfinished command cannot lose its log")
         if command.log_state in ("pending", "retrying"):
             command.log_state = "unavailable"
             task.revision += 1
