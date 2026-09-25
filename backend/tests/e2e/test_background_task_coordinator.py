@@ -109,6 +109,40 @@ async def test_terminal_task_without_original_instance_stops_retrying_logs(
     assert await coordinator.reconcile_once() == 0
 
 
+async def test_migrated_monitor_without_instance_keeps_unknown_outcome(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+) -> None:
+    task, command = await started_task(db_session, reservation_context)
+    task.state = "succeeded"
+    task.finished_at = NOW
+    task.result_summary = "Legacy monitor exit does not prove a match."
+    task.backgrounded_at = None
+    task.foreground_result_delivered_at = NOW
+    command.kind = "monitor"
+    command.status = "exited"
+    command.sandbox_instance_id = None
+    await db_session.commit()
+    coordinator = BackgroundTaskCoordinator(
+        session_factory,
+        SandboxManager(session_factory, mock_encryption_backend),
+        resolve_foreground=already_handed_off,
+        clock=lambda: NOW + timedelta(seconds=31),
+    )
+
+    assert await coordinator.reconcile_once() == 1
+    await db_session.refresh(task)
+    await db_session.refresh(command)
+    assert command.monitor_outcome is None
+    assert task.result_summary == "Legacy monitor exit does not prove a match."
+    assert command.log_state == "unavailable"
+    assert task.result_readiness == "unavailable"
+    coordinator.clock = lambda: NOW + timedelta(seconds=61)
+    assert await coordinator.reconcile_once() == 0
+
+
 @pytest.mark.parametrize("stop_scope", ["run", "task", "conversation"])
 async def test_cancelled_foreground_cleanup_finishes_without_background_handoff(
     db_session: AsyncSession,

@@ -20,7 +20,12 @@ from cubeplex.models.background_task import (
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.membership import Membership
-from cubeplex.models.sandbox_command import MonitorOutcome, SandboxCommand, SandboxCommandStatus
+from cubeplex.models.sandbox_command import (
+    MonitorOutcome,
+    SandboxCommand,
+    SandboxCommandKind,
+    SandboxCommandStatus,
+)
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.background_task import BackgroundTaskRepository
 from cubeplex.repositories.conversation import ConversationRepository
@@ -369,7 +374,16 @@ class BackgroundTaskLifecycle:
         if command.log_state in ("pending", "retrying"):
             command.log_state = "unavailable"
             task.revision += 1
-        await self._ensure_completion(conversation, task, command, now)
+        if command.kind == SandboxCommandKind.monitor.value and command.monitor_outcome is None:
+            task.result_readiness = command_result_readiness(
+                state=task.state, log_state=command.log_state
+            ).value
+            if task.result_readiness == TaskResultReadiness.unavailable:
+                task.result_unavailable_reason = (
+                    task.result_unavailable_reason or "final command output could not be recovered"
+                )
+        else:
+            await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
 
     async def record_environment_gone(
