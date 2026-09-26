@@ -295,6 +295,9 @@ async def cleanup_destinations(
     client, ws_id = authenticated_client
     yield client, ws_id
 
+    # Dispatch may return while its agent run is still writing conversation rows.
+    await _run_manager(client).drain(timeout_seconds=0)
+
     async with _db.async_session_maker() as session:
         # Order matches FK direction (children → parents). The
         # ``authenticated_client`` fixture gives us a brand-new workspace,
