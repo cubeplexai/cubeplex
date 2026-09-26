@@ -329,10 +329,11 @@ def _background_wait_guidance(task_id: str | None, notify_on_complete: bool) -> 
     if task_id is None:
         return " Completion notice pending; do not start polling commands."
     return (
-        " Result pending. If further work depends on it and write_todos is available, "
-        f'call it with an unfinished todo and wait_for_tasks=["{task_id}"]. '
-        "Otherwise report the pending task ID to your caller or the user. "
-        "End this turn; do not start polling commands."
+        " Result pending. Continue independent work. When remaining work depends "
+        "on this task, call write_todos if available with an unfinished todo and "
+        f'wait_for_tasks=["{task_id}"]. Otherwise report the pending task ID '
+        "to your caller or the user. End this turn only when no independent work "
+        "remains; do not start polling commands."
     )
 
 
@@ -1052,8 +1053,8 @@ def _make_execute_tool(
             "so the chat UI can show it while the command is still streaming. "
             "After 60 seconds, a long command may continue in the background; "
             "bare sleep stays in the foreground. "
-            "A running result with a task_id is pending; its completion notice "
-            "carries the final result. "
+            "A running result with a task_id is pending. A handed-off task with "
+            "notification=once sends a completion notice with its final result. "
             "The default execution deadline is one hour. For installs, downloads, or "
             "builds, pass timeout_seconds when they need a different deadline. "
             "If you hit the limit, "

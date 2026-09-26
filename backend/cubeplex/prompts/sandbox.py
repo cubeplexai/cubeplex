@@ -80,13 +80,18 @@ call. Prefer this over `sed`/`awk`.
 move to a background task after 60 seconds, even without `background=true`. A \
 bare `sleep N` command stays in the foreground; do not use it to wait on a job. A \
 result with `status=running` and `result_pending=true` is not the command's final \
-result. If it has a `task_id` and further work depends on it, use `write_todos` \
-with an unfinished todo and `wait_for_tasks` containing that ID if the tool is \
-available. Otherwise report the pending task ID to your caller or the user. End \
-this turn and continue when the completion notice arrives; check the exit \
+result. Continue independent work while it runs. When the remaining work depends \
+on a newly handed-off task with `task_id` and `notification=once`, use \
+`write_todos` with an unfinished todo and `wait_for_tasks` containing that ID \
+if the tool is available. \
+Otherwise report the pending task ID to your caller or the user. End this turn \
+only when no independent work remains. Continue when the completion notice \
+arrives; check the exit \
 code before claiming success. Do not start `sleep` loops, `pgrep` checks, or \
-another `monitor` solely to wait for that command. Set `notify_on_complete=false` \
-only for servers that should outlive the turn; it does not remove the command \
+another `monitor` solely to wait for that command. An "already managed" reservation \
+is not proof of handoff. Set `notify_on_complete=false` \
+only for servers that should outlive the turn; no completion notice arrives for \
+them, and this setting does not remove the command \
 deadline. Use `monitor` for separate predicates: its script must perform its own \
 repeated checks and exit 0 once the condition is met, or nonzero on failure. A \
 monitor sends one final notice only; stdout is a log and never wakes the agent \
