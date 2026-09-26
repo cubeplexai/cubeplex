@@ -205,8 +205,8 @@ class _ExecuteArgs(BaseModel):
         default=False,
         description=(
             "If true, start the command and return a command_id immediately. "
-            "Even when false, a command still running after 60 seconds returns "
-            "as a background task. Do not use shell &."
+            "Even when false, a long command may move to a background task after "
+            "60 seconds. Bare sleep commands stay in the foreground. Do not use shell &."
         ),
     )
     notify_on_complete: bool = Field(
@@ -329,9 +329,10 @@ def _background_wait_guidance(task_id: str | None, notify_on_complete: bool) -> 
     if task_id is None:
         return " Completion notice pending; do not start polling commands."
     return (
-        " Result pending. If further work depends on it, call write_todos with "
-        f'an unfinished todo and wait_for_tasks=["{task_id}"], then end this turn. '
-        "Do not start polling commands."
+        " Result pending. If further work depends on it and write_todos is available, "
+        f'call it with an unfinished todo and wait_for_tasks=["{task_id}"]. '
+        "Otherwise report the pending task ID to your caller or the user. "
+        "End this turn; do not start polling commands."
     )
 
 
@@ -565,9 +566,6 @@ def _make_execute_tool(
                                 TextContent(
                                     text=(
                                         f"Command is already managed in background as {command_id}."
-                                        + _background_wait_guidance(
-                                            explicit_task_id, args.notify_on_complete
-                                        )
                                     )
                                 )
                             ],
@@ -799,9 +797,6 @@ def _make_execute_tool(
                                             text=(
                                                 f"Command is already managed in background as "
                                                 f"{command_id}."
-                                                + _background_wait_guidance(
-                                                    auto_task_id, args.notify_on_complete
-                                                )
                                             )
                                         )
                                     ],
@@ -1055,7 +1050,8 @@ def _make_execute_tool(
             "Execute a shell command in the sandbox environment. "
             "Always set description first (a 5-10 word user-facing summary) "
             "so the chat UI can show it while the command is still streaming. "
-            "After 60 seconds, a still-running command continues in the background. "
+            "After 60 seconds, a long command may continue in the background; "
+            "bare sleep stays in the foreground. "
             "A running result with a task_id is pending; its completion notice "
             "carries the final result. "
             "The default execution deadline is one hour. For installs, downloads, or "

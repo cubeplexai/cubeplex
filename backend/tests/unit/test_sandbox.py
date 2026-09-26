@@ -457,7 +457,7 @@ async def test_execute_background_hands_off_before_returning_task_identity() -> 
     assert result.details["notification"] == "once"
     assert result.details["result_pending"] is True
     assert 'wait_for_tasks=["task-durable"]' in _text(result)
-    assert "Do not start polling commands" in _text(result)
+    assert "do not start polling commands" in _text(result).lower()
     assert live == {}
 
 

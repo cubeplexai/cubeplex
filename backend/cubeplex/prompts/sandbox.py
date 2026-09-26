@@ -76,13 +76,14 @@ call. Prefer this over `sed`/`awk`.
 - Pipes: `cat file.txt | grep pattern | wc -l`
 - Redirection: `command > output.txt 2>&1`
 - Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
-- Do not background with `&`, nohup, or disown. An `execute` command still running \
-after 60 seconds moves to a background task, even without `background=true`. A \
+- Do not background with `&`, nohup, or disown. A long `execute` command can \
+move to a background task after 60 seconds, even without `background=true`. A \
+bare `sleep N` command stays in the foreground; do not use it to wait on a job. A \
 result with `status=running` and `result_pending=true` is not the command's final \
-result. If it has a `task_id` and further work depends on it, call `write_todos` \
-with an unfinished todo and `wait_for_tasks` containing that ID, then tell the \
-user what is pending and end this turn. Continue when the completion notice \
-arrives; check the exit \
+result. If it has a `task_id` and further work depends on it, use `write_todos` \
+with an unfinished todo and `wait_for_tasks` containing that ID if the tool is \
+available. Otherwise report the pending task ID to your caller or the user. End \
+this turn and continue when the completion notice arrives; check the exit \
 code before claiming success. Do not start `sleep` loops, `pgrep` checks, or \
 another `monitor` solely to wait for that command. Set `notify_on_complete=false` \
 only for servers that should outlive the turn; it does not remove the command \
