@@ -456,6 +456,8 @@ async def test_execute_background_hands_off_before_returning_task_identity() -> 
     assert result.details["command_id"] == "scmd-durable"
     assert result.details["notification"] == "once"
     assert result.details["result_pending"] is True
+    assert 'wait_for_tasks=["task-durable"]' in _text(result)
+    assert "Do not start polling commands" in _text(result)
     assert live == {}
 
 
@@ -836,6 +838,7 @@ async def test_auto_background_hands_off_instead_of_waiting_at_run_end(
 
     assert handed_off == ["scmd-auto"]
     assert result.details["task_id"] == "task-auto"  # type: ignore[index]
+    assert 'wait_for_tasks=["task-auto"]' in _text(result)
     assert live == {}
 
 

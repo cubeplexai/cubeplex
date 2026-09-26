@@ -205,12 +205,16 @@ class _ExecuteArgs(BaseModel):
         default=False,
         description=(
             "If true, start the command and return a command_id immediately. "
-            "You will be notified when it exits. Do not use shell &."
+            "Even when false, a command still running after 60 seconds returns "
+            "as a background task. Do not use shell &."
         ),
     )
     notify_on_complete: bool = Field(
         default=True,
-        description="When background=true, inject a notice when the command exits.",
+        description=(
+            "Send one completion notice when an explicit or automatic background task "
+            "exits. Keep true for installs and builds; use false only for long-lived servers."
+        ),
     )
 
 
@@ -317,6 +321,18 @@ def _looks_like_shell_background(command: str) -> bool:
 def _is_bare_sleep(command: str) -> bool:
     """True for `sleep` / `sleep 30`, not `sleep 5 && make`."""
     return _BARE_SLEEP_RE.match(command.strip()) is not None
+
+
+def _background_wait_guidance(task_id: str | None, notify_on_complete: bool) -> str:
+    if not notify_on_complete:
+        return ""
+    if task_id is None:
+        return " Completion notice pending; do not start polling commands."
+    return (
+        " Result pending. If further work depends on it, call write_todos with "
+        f'an unfinished todo and wait_for_tasks=["{task_id}"], then end this turn. '
+        "Do not start polling commands."
+    )
 
 
 async def _maybe_await(result: Any) -> Any:
@@ -549,6 +565,9 @@ def _make_execute_tool(
                                 TextContent(
                                     text=(
                                         f"Command is already managed in background as {command_id}."
+                                        + _background_wait_guidance(
+                                            explicit_task_id, args.notify_on_complete
+                                        )
                                     )
                                 )
                             ],
@@ -629,6 +648,7 @@ def _make_execute_tool(
                 if args.notify_on_complete
                 else f"Command {command_id} is running without a completion notice."
             )
+            notice += _background_wait_guidance(explicit_task_id, args.notify_on_complete)
             return AgentToolResult(
                 content=[TextContent(text=notice)],
                 details={
@@ -779,6 +799,9 @@ def _make_execute_tool(
                                             text=(
                                                 f"Command is already managed in background as "
                                                 f"{command_id}."
+                                                + _background_wait_guidance(
+                                                    auto_task_id, args.notify_on_complete
+                                                )
                                             )
                                         )
                                     ],
@@ -948,6 +971,9 @@ def _make_execute_tool(
                                     f"{command_id}."
                                 )
                             )
+                            notice += _background_wait_guidance(
+                                auto_task_id, args.notify_on_complete
+                            )
                             return AgentToolResult(
                                 content=[TextContent(text=notice)],
                                 details={
@@ -1029,6 +1055,9 @@ def _make_execute_tool(
             "Execute a shell command in the sandbox environment. "
             "Always set description first (a 5-10 word user-facing summary) "
             "so the chat UI can show it while the command is still streaming. "
+            "After 60 seconds, a still-running command continues in the background. "
+            "A running result with a task_id is pending; its completion notice "
+            "carries the final result. "
             "The default execution deadline is one hour. For installs, downloads, or "
             "builds, pass timeout_seconds when they need a different deadline. "
             "If you hit the limit, "
