@@ -330,10 +330,12 @@ def _background_wait_guidance(task_id: str | None, notify_on_complete: bool) -> 
         return " Completion notice pending; do not start polling commands."
     return (
         " Result pending. Continue independent work. When remaining work depends "
-        "on this task, call write_todos if available with an unfinished todo and "
-        f'wait_for_tasks=["{task_id}"]. Otherwise report the pending task ID '
-        "to your caller or the user. End this turn only when no independent work "
-        "remains; do not start polling commands."
+        "on this task, use write_todos with "
+        f'wait_for_tasks=["{task_id}"] only if you already have unfinished todos '
+        "and write_todos is available. "
+        "Do not create a todo solely to wait. Otherwise report the pending task ID "
+        "to your caller or the user. End this turn normally when no independent "
+        "work remains; do not start polling commands."
     )
 
 

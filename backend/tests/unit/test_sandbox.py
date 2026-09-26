@@ -458,6 +458,7 @@ async def test_execute_background_hands_off_before_returning_task_identity() -> 
     assert result.details["result_pending"] is True
     assert 'wait_for_tasks=["task-durable"]' in _text(result)
     assert "Continue independent work" in _text(result)
+    assert "Do not create a todo solely to wait" in _text(result)
     assert "do not start polling commands" in _text(result).lower()
     assert live == {}
 

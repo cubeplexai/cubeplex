@@ -82,10 +82,10 @@ bare `sleep N` command stays in the foreground; do not use it to wait on a job. 
 result with `status=running` and `result_pending=true` is not the command's final \
 result. Continue independent work while it runs. When the remaining work depends \
 on a newly handed-off task with `task_id` and `notification=once`, use \
-`write_todos` with an unfinished todo and `wait_for_tasks` containing that ID \
-if the tool is available. \
+`write_todos` with `wait_for_tasks` containing that ID only if you already have \
+unfinished todos and the tool is available. Do not create a todo solely to wait. \
 Otherwise report the pending task ID to your caller or the user. End this turn \
-only when no independent work remains. Continue when the completion notice \
+normally when no independent work remains. Continue when the completion notice \
 arrives; check the exit \
 code before claiming success. Do not start `sleep` loops, `pgrep` checks, or \
 another `monitor` solely to wait for that command. An "already managed" reservation \
