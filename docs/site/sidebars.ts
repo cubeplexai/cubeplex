@@ -5,6 +5,11 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
+      label: 'Changelog',
+      items: ['changelog/0.9.0'],
+    },
+    {
+      type: 'category',
       label: 'Getting Started',
       collapsed: false,
       items: [

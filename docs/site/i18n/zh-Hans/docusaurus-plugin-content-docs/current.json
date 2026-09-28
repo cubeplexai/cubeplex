@@ -1,4 +1,8 @@
 {
+  "sidebar.docs.category.Changelog": {
+    "message": "更新日志",
+    "description": "Label for the Changelog sidebar category"
+  },
   "sidebar.docs.category.Getting Started": {
     "message": "开始使用",
     "description": "Label for the Getting Started sidebar category"
