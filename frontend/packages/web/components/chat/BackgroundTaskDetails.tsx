@@ -117,6 +117,12 @@ function TaskExecutionDetails({
     unavailable ? null : task.id,
     active ? 5_000 : 0,
   )
+  const serverUnavailable = error instanceof Error && error.name === 'OUTPUT_UNAVAILABLE'
+  const unavailableReason = unavailable
+    ? task.result_unavailable_reason
+    : serverUnavailable
+      ? error.message
+      : null
   const previous = useRef({ active, readiness: task.result_readiness })
   useEffect(() => {
     // Fetch final output on completion or readiness, without duplicating the mount fetch.
@@ -141,10 +147,10 @@ function TaskExecutionDetails({
       {args ? <GenericToolView args={args} result={result} /> : null}
       {task.details?.exit_code != null && <p>{t('exitCode', { code: task.details.exit_code })}</p>}
       <p className="font-medium text-muted-foreground">{t('output')}</p>
-      {unavailable ? (
+      {unavailable || serverUnavailable ? (
         <div className="space-y-1">
           <p>{t('outputUnavailable')}</p>
-          {task.result_unavailable_reason && <p>{task.result_unavailable_reason}</p>}
+          {unavailableReason && <p>{unavailableReason}</p>}
         </div>
       ) : loading ? (
         <p>{t('loadingOutput')}</p>

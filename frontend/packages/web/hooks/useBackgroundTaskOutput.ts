@@ -16,6 +16,12 @@ export function backgroundTaskOutputUrl(
 async function fetchOutput(url: string): Promise<{ content: string }> {
   const response = await fetch(url, { credentials: 'include' })
   if (response.status === 413) throw new Error('FILE_TOO_LARGE')
+  if (response.status === 410) {
+    const body = (await response.json()) as { detail?: unknown }
+    const error = new Error(typeof body.detail === 'string' ? body.detail : 'Output unavailable')
+    error.name = 'OUTPUT_UNAVAILABLE'
+    throw error
+  }
   if (!response.ok) throw new Error(`Task output fetch failed: ${response.status}`)
   return response.json() as Promise<{ content: string }>
 }

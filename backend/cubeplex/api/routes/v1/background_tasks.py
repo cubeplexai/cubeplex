@@ -26,6 +26,7 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.db import get_session
 from cubeplex.models.background_task import TERMINAL_TASK_STATES, TaskStopReason
+from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.repositories import ConversationRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import SandboxError
@@ -256,6 +257,20 @@ async def list_background_task_events(
     )
 
 
+def _require_task_output(item: TaskProjection | None) -> tuple[TaskProjection, SandboxCommand]:
+    if item is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if item.task.result_readiness == "unavailable":
+        raise HTTPException(
+            status_code=410,
+            detail=item.task.result_unavailable_reason or "Output unavailable",
+        )
+    command = item.command
+    if command is None or not command.log_path:
+        raise HTTPException(status_code=404, detail="Task output not found")
+    return item, command
+
+
 @router.get("/background-tasks/{task_id}/output", response_model=None)
 async def get_background_task_output(
     workspace_id: str,
@@ -270,16 +285,7 @@ async def get_background_task_output(
     item = await _query_service(session, ctx).get_task(
         conversation_id=conversation_id, task_id=task_id
     )
-    if item is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if item.task.result_readiness == "unavailable":
-        raise HTTPException(
-            status_code=410,
-            detail=item.task.result_unavailable_reason or "Output unavailable",
-        )
-    command = item.command
-    if command is None or not command.log_path:
-        raise HTTPException(status_code=404, detail="Task output not found")
+    item, command = _require_task_output(item)
     path = PurePosixPath(command.log_path)
 
     stack = AsyncExitStack()

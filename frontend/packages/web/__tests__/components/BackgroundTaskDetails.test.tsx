@@ -225,6 +225,21 @@ describe('persisted subagents and output availability', () => {
     expect(screen.queryByRole('button', { name: 'retry' })).not.toBeInTheDocument()
   })
 
+  it('shows authoritative unavailability even when the task snapshot is still ready', () => {
+    const error = new Error('Final output could not be recovered')
+    error.name = 'OUTPUT_UNAVAILABLE'
+    mocks.output.mockReturnValue({
+      content: 'stale partial log',
+      loading: false,
+      error,
+      refresh: mocks.refresh,
+    })
+    mount(task)
+    expect(screen.getByText('Final output could not be recovered')).toBeVisible()
+    expect(screen.queryByText('stale partial log')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'retry' })).not.toBeInTheDocument()
+  })
+
   it('does not read or refresh output declared unavailable by the backend', () => {
     mocks.output.mockReturnValue({
       content: 'partial log',
