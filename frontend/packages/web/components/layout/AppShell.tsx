@@ -8,6 +8,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { BackgroundTaskPanel } from '@/components/panel/BackgroundTaskPanel'
+import { BackgroundTaskResultPanel } from '@/components/panel/BackgroundTaskResultPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
 import { SandboxPanel } from '@/components/panel/sandbox/SandboxPanel'
@@ -78,7 +79,11 @@ export function AppShell({
   const isDesktop = useMediaQuery('(min-width: 768px)', true)
   const close = usePanelStore((s) => s.close)
   useEffect(() => {
-    if (view.type === 'background-tasks' && view.conversationId !== conversationId) close()
+    if (
+      (view.type === 'background-tasks' || view.type === 'background-task-result') &&
+      view.conversationId !== conversationId
+    )
+      close()
   }, [view, conversationId, close])
   const openMobileMenu = useMobileMenu((s) => s.open)
   // DOM-level drag detection on the resize handle using pointer capture, so
@@ -127,6 +132,12 @@ export function AppShell({
       <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
     ) : view.type === 'background-tasks' ? (
       <BackgroundTaskPanel key={view.conversationId} conversationId={view.conversationId} />
+    ) : view.type === 'background-task-result' ? (
+      <BackgroundTaskResultPanel
+        key={`${view.conversationId}:${view.event.id}`}
+        conversationId={view.conversationId}
+        event={view.event}
+      />
     ) : view.type === 'skill-candidate' ? (
       <SkillCandidatePanel
         candidateId={view.candidateId}
@@ -259,7 +270,7 @@ export function AppShell({
             aria-modal="true"
           >
             {panelContent}
-            {view.type !== 'background-tasks' && (
+            {view.type !== 'background-tasks' && view.type !== 'background-task-result' && (
               <button
                 type="button"
                 onClick={close}

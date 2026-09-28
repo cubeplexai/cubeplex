@@ -1,6 +1,6 @@
 // frontend/packages/core/src/stores/panelStore.ts
 import { create } from 'zustand'
-import type { PanelContentType, ToolCallRef } from '../types'
+import type { BackgroundTaskEvent, PanelContentType, ToolCallRef } from '../types'
 import { bareToolName } from '../lib/toolName'
 
 /** Map tool name + optional backend content_type to a PanelContentType. */
@@ -71,6 +71,7 @@ export type PanelView =
       revision?: number
     }
   | { type: 'background-tasks'; conversationId: string }
+  | { type: 'background-task-result'; conversationId: string; event: BackgroundTaskEvent }
   | { type: 'skill-candidate'; candidateId: string; repo: string | null; sourceName: string }
 
 /** Tabs inside the sandbox side panel (Files / Browser / Terminal). */
@@ -103,6 +104,8 @@ export interface PanelStore {
   openSandboxFile: (path: string) => void
 
   openBackgroundTasks: (conversationId: string) => void
+
+  openBackgroundTaskResult: (conversationId: string, event: BackgroundTaskEvent) => void
 
   openSkillCandidate: (candidateId: string, repo: string | null, sourceName: string) => void
 
@@ -169,6 +172,9 @@ export const usePanelStore = create<PanelStore>((set) => ({
 
   openBackgroundTasks: (conversationId) =>
     set({ view: { type: 'background-tasks', conversationId } }),
+
+  openBackgroundTaskResult: (conversationId, event) =>
+    set({ view: { type: 'background-task-result', conversationId, event } }),
 
   openSkillCandidate: (candidateId, repo, sourceName) =>
     set({ view: { type: 'skill-candidate', candidateId, repo, sourceName } }),

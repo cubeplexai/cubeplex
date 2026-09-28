@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { usePanelStore } from '@cubeplex/core'
+import { BackgroundTaskResultPanel } from '@/components/panel/BackgroundTaskResultPanel'
 
 import {
   BackgroundTaskEventItem,
@@ -38,7 +40,8 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
 }))
 
-vi.mock('@cubeplex/core', () => ({
+vi.mock('@cubeplex/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@cubeplex/core')>()),
   getBackgroundTask: vi.fn(),
   createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
   useMessageStore: (
@@ -79,9 +82,24 @@ vi.mock('next-intl', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
 
+function PreviewHost() {
+  const view = usePanelStore((state) => state.view)
+  if (view.type !== 'background-task-result') return null
+  return (
+    <aside aria-label="Result preview">
+      <BackgroundTaskResultPanel
+        key={view.event.id}
+        conversationId={view.conversationId}
+        event={view.event}
+      />
+    </aside>
+  )
+}
+
 describe('BackgroundTaskEvents', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    usePanelStore.getState().close()
     mocks.hasMore = true
     mocks.loadMore.mockResolvedValue(undefined)
   })
@@ -102,12 +120,46 @@ describe('BackgroundTaskEvents', () => {
     expect(mocks.loadMore).toHaveBeenCalledWith(expect.anything(), 'conv-1')
   })
 
-  it('opens the originating command and its output from a result notification', async () => {
+  it('opens result details in the shared preview slot without expanding the conversation', () => {
     render(<BackgroundTaskEventItem conversationId="conv-1" event={mocks.events[0] as never} />)
     fireEvent.click(screen.getByText('Background result'))
-    await waitFor(() => expect(screen.getByText('pnpm build')).toBeVisible())
-    expect(screen.getByText('Compiled successfully')).toBeVisible()
+    expect(usePanelStore.getState().view).toEqual({
+      type: 'background-task-result',
+      conversationId: 'conv-1',
+      event: mocks.events[0],
+    })
+    expect(screen.queryByText('pnpm build')).not.toBeInTheDocument()
+    expect(screen.queryByText('Compiled successfully')).not.toBeInTheDocument()
     expect(screen.queryByText('artifact://report')).not.toBeInTheDocument()
+  })
+
+  it('shows the selected result in preview and closes it without changing the timeline', async () => {
+    const event = mocks.events[0]
+    const laterEvent = { ...event, id: 'event-2', summary: 'Second execution finished' }
+    render(
+      <>
+        <section aria-label="Conversation">
+          <BackgroundTaskEventItem conversationId="conv-1" event={event as never} />
+          <BackgroundTaskEventItem conversationId="conv-1" event={laterEvent as never} />
+        </section>
+        <PreviewHost />
+      </>,
+    )
+    const timeline = within(screen.getByRole('region', { name: 'Conversation' }))
+    fireEvent.click(timeline.getAllByRole('button')[0])
+    const preview = within(await screen.findByRole('complementary', { name: 'Result preview' }))
+    expect(preview.getByText('pnpm build')).toBeVisible()
+    expect(preview.getByText('Compiled successfully')).toBeVisible()
+    expect(timeline.queryByText('pnpm build')).not.toBeInTheDocument()
+
+    fireEvent.click(timeline.getAllByRole('button')[1])
+    expect(preview.getByText('Second execution finished')).toBeVisible()
+    expect(preview.queryByText('Build finished')).not.toBeInTheDocument()
+    fireEvent.click(preview.getByRole('button', { name: 'close' }))
+    expect(usePanelStore.getState().view.type).toBe('closed')
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+    fireEvent.click(timeline.getAllByRole('button')[0])
+    expect(usePanelStore.getState().view).toMatchObject({ event })
   })
 
   it('reports pagination failures without removing the current result', async () => {
