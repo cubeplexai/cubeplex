@@ -395,8 +395,16 @@ RUN printf '[install]\nprefix = /workspace/.python-packages\n' > /opt/venv/pip.c
     && printf 'import sys, site; _o = f"/workspace/.python-packages/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages"; _b = len(sys.path); site.addsitedir(_o); _n = sys.path[_b:]; del sys.path[_b:]; sys.path[:0] = _n\n' \
         > "/opt/venv/lib/python${PYVER}/site-packages/zz-workspace-overlay.pth"
 
+# Node 24 / npm / pnpm ship Mozilla roots and ignore /etc/ssl/certs unless
+# pointed at the system bundle. Behind CubePlex egress MITM the leaf is signed
+# by cubebox-egress-mitm-ca, which update-ca-certificates already installs.
+# Do not bake that CA into the image; trust whatever is in the system store
+# at runtime (webhook rebuilds it on the shared ca-trust volume).
 ENV NPM_CONFIG_PREFIX=/workspace/.npm-global \
     NODE_PATH=/workspace/.npm-global/lib/node_modules:/usr/local/lib/node_modules \
-    PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/venv/bin:$PATH"
+    PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/venv/bin:$PATH" \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /workspace
