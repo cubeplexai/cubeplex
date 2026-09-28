@@ -675,7 +675,11 @@ export function MessageList({ conversationId }: MessageListProps) {
             // targets, so we just skip the anchor.
             <Fragment key={msg.id}>
               {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
-                <BackgroundTaskEventItem key={`background:${event.id}`} event={event} />
+                <BackgroundTaskEventItem
+                  key={`background:${event.id}`}
+                  event={event}
+                  conversationId={conversationId}
+                />
               ))}
               {msg.id === bannersBeforeHistoryId && (
                 <ModelChainBanners
@@ -755,7 +759,11 @@ export function MessageList({ conversationId }: MessageListProps) {
           ))}
 
           {trailingBackgroundEvents.map((event) => (
-            <BackgroundTaskEventItem key={`background:${event.id}`} event={event} />
+            <BackgroundTaskEventItem
+              key={`background:${event.id}`}
+              event={event}
+              conversationId={conversationId}
+            />
           ))}
           <BackgroundTaskEventsLoadMore conversationId={conversationId} />
 

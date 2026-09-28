@@ -13,6 +13,7 @@ import {
 import type { BackgroundTask } from '@cubeplex/core'
 import { toast } from 'sonner'
 
+import { BackgroundTaskDetails } from '@/components/chat/BackgroundTaskDetails'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { cn } from '@/lib/utils'
@@ -190,6 +191,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
   const stopTask = useMessageStore((state) => state.stopTask)
   const stopAllWork = useMessageStore((state) => state.stopAllWork)
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null)
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
   const [stoppingAll, setStoppingAll] = useState(false)
   const [recent, setRecent] = useState<BackgroundTask[]>([])
   const [recentLoading, setRecentLoading] = useState(true)
@@ -311,7 +313,7 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
                 key={task.id}
                 className="flex items-start gap-2 rounded-lg border border-border bg-card p-3"
               >
-                <span className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1">
                   <span className="block break-words font-medium text-foreground">
                     {task.description || t('unnamed')}
                   </span>
@@ -327,7 +329,32 @@ export function BackgroundTasks({ conversationId }: BackgroundTasksProps) {
                       {task.result_summary}
                     </span>
                   )}
-                </span>
+                  <details
+                    className="mt-2"
+                    onToggle={(e) => {
+                      const open = e.currentTarget.open
+                      setExpandedTasks((current) => {
+                        const next = new Set(current)
+                        if (open) next.add(task.id)
+                        else next.delete(task.id)
+                        return next
+                      })
+                    }}
+                  >
+                    <summary className="cursor-pointer text-muted-foreground">
+                      {t('viewDetails')}
+                    </summary>
+                    {expandedTasks.has(task.id) && (
+                      <div className="mt-2 border-t border-border pt-2">
+                        <BackgroundTaskDetails
+                          conversationId={conversationId}
+                          taskId={task.id}
+                          task={task}
+                        />
+                      </div>
+                    )}
+                  </details>
+                </div>
                 {task.capabilities.can_stop ? (
                   <Button
                     type="button"

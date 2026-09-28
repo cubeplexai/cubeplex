@@ -7,6 +7,7 @@ import { createApiClient, useMessageStore } from '@cubeplex/core'
 import type { BackgroundTaskEvent } from '@cubeplex/core'
 import { toast } from 'sonner'
 
+import { BackgroundTaskDetails } from './BackgroundTaskDetails'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
@@ -14,10 +15,20 @@ interface BackgroundTaskEventsProps {
   conversationId: string
 }
 
-export function BackgroundTaskEventItem({ event }: { event: BackgroundTaskEvent }) {
+export function BackgroundTaskEventItem({
+  event,
+  conversationId,
+}: {
+  event: BackgroundTaskEvent
+  conversationId: string
+}) {
   const t = useTranslations('backgroundTasks')
+  const [expanded, setExpanded] = useState(false)
   return (
-    <details className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm">
+    <details
+      onToggle={(e) => setExpanded(e.currentTarget.open)}
+      className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm"
+    >
       <summary className="cursor-pointer list-none text-muted-foreground">
         <span className="font-medium text-foreground">{t('resultLabel')}</span>
         <span className="mx-1.5">·</span>
@@ -25,12 +36,8 @@ export function BackgroundTaskEventItem({ event }: { event: BackgroundTaskEvent 
         {event.summary ? <span className="ml-2">{event.summary}</span> : null}
       </summary>
       <div className="mt-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
-        {event.result_ref ? (
-          <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono">
-            {event.result_ref}
-          </pre>
-        ) : (
-          <span>{event.summary || t('noResultDetails')}</span>
+        {expanded && (
+          <BackgroundTaskDetails conversationId={conversationId} taskId={event.task_id} />
         )}
       </div>
     </details>

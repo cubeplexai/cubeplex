@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  output: vi.fn(),
   stopTask: vi.fn(),
   stopAllWork: vi.fn(),
   refreshBackground: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@cubeplex/core', () => {
   }
 })
 
+vi.mock('@/hooks/useSandboxFileContent', () => ({ useSandboxFileContent: mocks.output }))
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
@@ -84,6 +86,7 @@ describe('BackgroundTasks', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mocks.output.mockReturnValue({ content: 'Build output', loading: false, error: null })
     mocks.selectorSnapshots = []
     mocks.stopTask.mockResolvedValue(undefined)
     mocks.stopAllWork.mockResolvedValue(undefined)
@@ -120,6 +123,29 @@ describe('BackgroundTasks', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('loads task output only after expanding its details in the sidebar', async () => {
+    mocks.state.backgroundTasks = {
+      'conv-1': [
+        {
+          ...runningTask(),
+          details: {
+            command_kind: 'execute',
+            command: 'pnpm build',
+            log_path: '/workspace/build.log',
+            exit_code: null,
+          },
+        },
+      ],
+    }
+    render(<BackgroundTasks conversationId="conv-1" />)
+    expect(mocks.output).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('viewDetails'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText(/pnpm build/)).toBeVisible()
+    expect(screen.getByText('Build output')).toBeVisible()
+    expect(mocks.output).toHaveBeenCalledWith('ws-1', '/workspace/build.log', 'conv-1', 5000)
   })
 
   it('keeps task controls separate from user steering', () => {

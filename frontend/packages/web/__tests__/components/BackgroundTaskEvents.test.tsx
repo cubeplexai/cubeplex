@@ -19,6 +19,19 @@ const mocks = vi.hoisted(() => ({
       revision: 2,
     },
   ],
+  tasks: [
+    {
+      id: 'task-1',
+      tool_call_id: 'tool-1',
+      details: {
+        command_kind: 'execute',
+        command: 'pnpm build',
+        log_path: '/workspace/build.log',
+        exit_code: 0,
+      },
+      result_readiness: 'ready',
+    },
+  ],
   hasMore: true,
   loadMore: vi.fn(),
   setWorkspaceId: vi.fn(),
@@ -26,6 +39,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@cubeplex/core', () => ({
+  getBackgroundTask: vi.fn(),
   createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
   useMessageStore: (
     selector: (state: {
@@ -35,10 +49,15 @@ vi.mock('@cubeplex/core', () => ({
     }) => unknown,
   ) =>
     selector({
+      backgroundTasks: { 'conv-1': mocks.tasks },
+      messages: {},
       backgroundEvents: { 'conv-1': mocks.events },
       backgroundEventsHasMore: { 'conv-1': mocks.hasMore },
       loadMoreBackgroundEvents: mocks.loadMore,
     }),
+}))
+vi.mock('@/hooks/useSandboxFileContent', () => ({
+  useSandboxFileContent: () => ({ content: 'Compiled successfully', loading: false, error: null }),
 }))
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
@@ -65,7 +84,7 @@ describe('BackgroundTaskEvents', () => {
   it('renders a compact system result and loads older results', async () => {
     render(
       <>
-        <BackgroundTaskEventItem event={mocks.events[0] as never} />
+        <BackgroundTaskEventItem conversationId="conv-1" event={mocks.events[0] as never} />
         <BackgroundTaskEventsLoadMore conversationId="conv-1" />
       </>,
     )
@@ -78,11 +97,19 @@ describe('BackgroundTaskEvents', () => {
     expect(mocks.loadMore).toHaveBeenCalledWith(expect.anything(), 'conv-1')
   })
 
+  it('opens the originating command and its output from a result notification', async () => {
+    render(<BackgroundTaskEventItem conversationId="conv-1" event={mocks.events[0] as never} />)
+    fireEvent.click(screen.getByText('Background result'))
+    await waitFor(() => expect(screen.getByText(/pnpm build/)).toBeVisible())
+    expect(screen.getByText('Compiled successfully')).toBeVisible()
+    expect(screen.queryByText('artifact://report')).not.toBeInTheDocument()
+  })
+
   it('reports pagination failures without removing the current result', async () => {
     mocks.loadMore.mockRejectedValue(new Error('network down'))
     render(
       <>
-        <BackgroundTaskEventItem event={mocks.events[0] as never} />
+        <BackgroundTaskEventItem conversationId="conv-1" event={mocks.events[0] as never} />
         <BackgroundTaskEventsLoadMore conversationId="conv-1" />
       </>,
     )

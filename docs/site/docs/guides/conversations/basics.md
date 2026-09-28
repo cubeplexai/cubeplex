@@ -107,7 +107,10 @@ The main **Stop** button targets only the response whose Run ID is shown in the
 conversation. Work that was already handed to the background continues. Open
 **Background tasks** from the button after **Share** in the conversation header;
 its badge counts unfinished tasks, and the right panel shows active and recent
-completed tasks. Use **Stop task** for one item, or **Stop all** when you intend
+completed tasks. Expand **View tool call and output** on a task to inspect its original
+tool arguments and response, saved command, exit code, and execution output. Output
+loads when you expand the task and refreshes while it is running. If the original
+message is outside the loaded history, the saved command remains available. Use **Stop task** for one item, or **Stop all** when you intend
 to stop the current response and all background work that belongs to the
 conversation.
 
@@ -118,7 +121,9 @@ generation, so retrying an old request cannot stop work that started later.
 
 Background results appear as compact system events in the timeline, separate from
 messages you send while steering a response. A task or monitor produces at most one
-final event: success, failure, cancellation, or timeout. See
+final event: success, failure, cancellation, or timeout. Expand a result event to
+inspect the same task details and output. If the sandbox or log file is no longer
+available, the details show an error with a retry action. See
 [Sandboxes](./sandboxes.md) for command deadlines and recovery behavior.
 
 ## Managing conversations
