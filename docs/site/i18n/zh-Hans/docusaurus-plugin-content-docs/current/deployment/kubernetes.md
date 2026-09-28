@@ -690,6 +690,32 @@ helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
   --wait --timeout 10m
 ```
 
+### 升级任务生命周期切换前的数据库 {#upgrading-a-database-from-before-the-task-lifecycle-cutover}
+
+后端 init 容器会拒绝在滚动升级中直接完成这次切换，避免迁移期间旧 Pod 继续写入。已有部署需分两步执行维护升级：
+
+```bash
+# 先停止所有旧 API/worker，等待所有后端 Pod 删除。
+kubectl -n cubeplex scale deployment/cubeplex-backend --replicas=0
+kubectl -n cubeplex wait --for=delete pod \
+  -l app.kubernetes.io/component=backend --timeout=5m
+
+# 启用持有迁移锁的一次性维护 hook，保持后端副本数为 0。
+helm upgrade cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version <new-version> --namespace cubeplex --values values.local.yaml \
+  --set backend.replicaCount=0 \
+  --set backend.lifecycleMaintenance.enabled=true \
+  --wait --timeout 20m
+
+# hook 成功后关闭维护模式，恢复 values.local.yaml 中设置的副本数。
+helm upgrade cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
+  --version <new-version> --namespace cubeplex --values values.local.yaml \
+  --set backend.lifecycleMaintenance.enabled=false \
+  --wait --timeout 10m
+```
+
+维护 Job 遇到仍在运行的旧版 run-lifetime 命令、monitor，或未记录原 sandbox 实例和执行方进程句柄的命令时会停止。处理或停止这些项目后，再运行同一命令。未知的执行方句柄会被保留，不会通过猜测去查询或终止当前 sandbox。全新安装，以及已经完成这次切换的数据库，继续使用正常的一条命令安装或升级流程。
+
 ### 卸载
 
 ```bash

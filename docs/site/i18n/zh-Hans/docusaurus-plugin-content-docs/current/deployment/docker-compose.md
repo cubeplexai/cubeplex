@@ -199,6 +199,27 @@ docker compose -f deploy/docker-compose/compose.yaml \
 
 如果缺少 `.env`、任一 YAML 配置文件或 `config/opensandbox.toml`，`up.sh` 会拒绝启动。
 
+### 升级任务生命周期切换前的数据库 {#upgrading-a-database-from-before-the-task-lifecycle-cutover}
+
+正常启动的 `backend-migrate` 容器会拒绝直接迁移尚未完成任务生命周期切换的已有数据库。迁移期间必须停止所有旧版后端，避免它们继续创建命令或通知：
+
+```bash
+# 先设置新版 BACKEND_TAG，再停止此部署中的所有旧 API/worker。
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml stop backend frontend
+
+# 同一进程持有数据库迁移锁，回填并验证数据，再应用最终约束。
+# 失败后可安全重试同一命令。
+docker compose -f deploy/docker-compose/compose.yaml \
+  -f deploy/docker-compose/compose.tempo.yaml run --rm backend-migrate \
+  python -m cubeplex.scripts.lifecycle_upgrade --maintenance
+
+# 正常启动会检查切换结果，再启动后端。
+deploy/docker-compose/scripts/up.sh
+```
+
+旧版后端仍在运行时，不得执行 `--maintenance`。如果迁移器报告仍在运行的旧版 run-lifetime 命令或 monitor，需等待它结束或明确停止。对于未记录原 sandbox 实例或执行方进程句柄的活跃命令，也需先处理或停止，再重试。迁移器不会猜测进程已结束，也不会把旧命令关联到替换后的 sandbox。
+
 ## 6. 验证
 
 ```bash
