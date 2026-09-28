@@ -758,3 +758,63 @@ async def test_running_task_output_stays_on_its_recorded_instance(
     assert connect.call_args.args == (original_instance,)
     provision.assert_not_awaited()
     raw.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        ("missing_task", 404),
+        ("missing_log", 404),
+        ("outside_workdir", 400),
+        ("removed_file", 404),
+        ("provider_error", 503),
+    ],
+)
+async def test_task_output_error_contracts(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    expected_status: int,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import opensandbox
+    from opensandbox.exceptions import SandboxException
+
+    client, workspace_id = authenticated_client
+    reserved = await api_task_context.reserve(db_session)
+    reserved.command.provider = "opensandbox"
+    if failure == "missing_log":
+        reserved.command.log_path = ""
+    elif failure == "outside_workdir":
+        reserved.command.log_path = "/workspace/../private.log"
+    await db_session.commit()
+    control = SimpleNamespace(
+        get_sandbox_info=AsyncMock(
+            return_value=SimpleNamespace(status=SimpleNamespace(state="Running"))
+        ),
+        close=AsyncMock(),
+    )
+    read = AsyncMock()
+    if failure == "removed_file":
+        read.side_effect = FileNotFoundError("Log removed")
+    elif failure == "provider_error":
+        read.side_effect = SandboxException("Provider temporarily unavailable")
+    files = SimpleNamespace(get_file_info=AsyncMock(return_value={}), read_file=read)
+    raw = SimpleNamespace(id=reserved.command.sandbox_instance_id, files=files, close=AsyncMock())
+    create = AsyncMock(return_value=control)
+    monkeypatch.setattr(opensandbox.SandboxManager, "create", create)
+    monkeypatch.setattr(opensandbox.Sandbox, "connect", AsyncMock(return_value=raw))
+    task_id = "bgt-missing" if failure == "missing_task" else reserved.task.id
+    path = task_path(workspace_id, api_task_context.conversation.id)
+    response = await client.get(f"{path}/{task_id}/output")
+    assert response.status_code == expected_status, response.text
+    if failure in ("missing_task", "missing_log"):
+        create.assert_not_awaited()
+    if failure in ("missing_task", "missing_log", "outside_workdir"):
+        read.assert_not_awaited()
+    else:
+        raw.close.assert_awaited_once()
