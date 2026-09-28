@@ -590,26 +590,36 @@ async def test_bootstrap_run_control_tracks_explicit_run_stop(
     assert bootstrap.json()["run_control"] is None
 
 
+@pytest.mark.parametrize("workdir", ["/workspace", "/custom-workdir"])
 async def test_task_output_reads_original_instance_and_downloads_large_logs(
     authenticated_client: tuple[httpx.AsyncClient, str],
     db_session: AsyncSession,
     api_task_context: ApiTaskContext,
     monkeypatch: pytest.MonkeyPatch,
+    workdir: str,
 ) -> None:
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     import opensandbox
 
+    from cubeplex.sandbox.manager import get_sandbox_manager
+    from tests.e2e.conftest import _FakeRaw
+
+    monkeypatch.setattr(get_sandbox_manager(), "_workdir", workdir)
     client, workspace_id = authenticated_client
     reserved = await api_task_context.reserve(db_session)
     reserved.command.provider = "opensandbox"
+    reserved.command.log_path = reserved.command.log_path.replace("/workspace", workdir)
+    original_instance = reserved.command.sandbox_instance_id
+    api_task_context.sandbox.status = "terminated"
+    api_task_context.sandbox.sandbox_id = None
     reserved.task.state = "succeeded"
     reserved.task.result_readiness = "ready"
     # Promotion changes the conversation's current scope; the task retains its instance.
     api_task_context.conversation.is_group_chat = True
     await db_session.commit()
-    instance_id = reserved.command.sandbox_instance_id
+    instance_id = f"revived-{uuid4()}"
     control = SimpleNamespace(
         get_sandbox_info=AsyncMock(
             return_value=SimpleNamespace(status=SimpleNamespace(state="Running"))
@@ -620,9 +630,14 @@ async def test_task_output_reads_original_instance_and_downloads_large_logs(
         get_file_info=AsyncMock(return_value={reserved.command.log_path: SimpleNamespace(size=10)}),
         read_file=AsyncMock(return_value="original command output"),
     )
-    raw = SimpleNamespace(id=instance_id, files=files, close=AsyncMock())
+    raw = _FakeRaw()
+    raw.id = instance_id
+    monkeypatch.setattr(raw, "files", files)
+    monkeypatch.setattr(raw, "close", AsyncMock())
     create = AsyncMock(return_value=control)
     connect = AsyncMock(return_value=raw)
+    provision = AsyncMock(return_value=raw)
+    monkeypatch.setattr(opensandbox.Sandbox, "create", provision)
     monkeypatch.setattr(opensandbox.SandboxManager, "create", create)
     monkeypatch.setattr(opensandbox.Sandbox, "connect", connect)
     path = task_path(workspace_id, api_task_context.conversation.id)
@@ -631,6 +646,11 @@ async def test_task_output_reads_original_instance_and_downloads_large_logs(
     assert response.status_code == 200, response.text
     assert response.json()["content"] == "original command output"
     assert connect.call_args.args == (instance_id,)
+    provision.assert_awaited_once()
+    create.assert_not_awaited()
+    await db_session.refresh(api_task_context.sandbox)
+    assert api_task_context.sandbox.sandbox_id == instance_id
+    assert reserved.command.sandbox_instance_id == original_instance
     files.read_file.assert_awaited_once_with(reserved.command.log_path)
 
     files.get_file_info.return_value = {reserved.command.log_path: SimpleNamespace(size=1_048_577)}
@@ -694,3 +714,47 @@ async def test_task_output_rejects_another_conversations_task(
     finally:
         await db_session.execute(delete(Conversation).where(col(Conversation.id) == other_id))
         await db_session.commit()
+
+
+async def test_running_task_output_stays_on_its_recorded_instance(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import opensandbox
+
+    client, workspace_id = authenticated_client
+    reserved = await api_task_context.reserve(db_session)
+    reserved.command.provider = "opensandbox"
+    reserved.task.state = "running"
+    original_instance = reserved.command.sandbox_instance_id
+    # The stable row now points to a replacement; live output must not jump to it.
+    api_task_context.sandbox.sandbox_id = f"replacement-{uuid4()}"
+    await db_session.commit()
+    control = SimpleNamespace(
+        get_sandbox_info=AsyncMock(
+            return_value=SimpleNamespace(status=SimpleNamespace(state="Running"))
+        ),
+        close=AsyncMock(),
+    )
+    files = SimpleNamespace(
+        get_file_info=AsyncMock(return_value={}),
+        read_file=AsyncMock(return_value="live original output"),
+    )
+    raw = SimpleNamespace(id=original_instance, files=files, close=AsyncMock())
+    connect = AsyncMock(return_value=raw)
+    provision = AsyncMock(side_effect=AssertionError("Must not provision a live output sandbox"))
+    monkeypatch.setattr(opensandbox.SandboxManager, "create", AsyncMock(return_value=control))
+    monkeypatch.setattr(opensandbox.Sandbox, "connect", connect)
+    monkeypatch.setattr(opensandbox.Sandbox, "create", provision)
+    path = task_path(workspace_id, api_task_context.conversation.id)
+    response = await client.get(f"{path}/{reserved.task.id}/output")
+    assert response.status_code == 200, response.text
+    assert response.json()["content"] == "live original output"
+    assert connect.call_args.args == (original_instance,)
+    provision.assert_not_awaited()
+    raw.close.assert_awaited_once()

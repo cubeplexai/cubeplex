@@ -124,7 +124,8 @@ messages you send while steering a response. A task or monitor produces at most 
 final event: success, failure, cancellation, or timeout. Expand a result event to
 inspect the same task details and output, including calls made by subagents. Output
 comes from the original task sandbox, even if the conversation later changes its
-sandbox scope. Logs above the preview limit have a download link. If the backend
+sandbox scope. Completed logs remain readable from that sandbox's persistent storage
+after its container is restarted or reaped. Logs above the preview limit have a download link. If the backend
 marks output unavailable, the details show the reason; temporary read failures
 offer retry. See
 [Sandboxes](./sandboxes.md) for command deadlines and recovery behavior.

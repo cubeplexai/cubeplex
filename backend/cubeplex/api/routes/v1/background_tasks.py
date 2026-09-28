@@ -27,6 +27,7 @@ from cubeplex.auth.dependencies import require_member
 from cubeplex.db import get_session
 from cubeplex.models.background_task import TERMINAL_TASK_STATES, TaskStopReason
 from cubeplex.repositories import ConversationRepository
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import SandboxError
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.sandbox.opensandbox import OpenSandbox
@@ -280,19 +281,33 @@ async def get_background_task_output(
     if command is None or not command.log_path:
         raise HTTPException(status_code=404, detail="Task output not found")
     path = PurePosixPath(command.log_path)
-    if not path.is_relative_to("/workspace") or ".." in path.parts:
-        raise HTTPException(status_code=400, detail="Output path outside workspace")
 
     stack = AsyncExitStack()
     streaming = False
     try:
-        sandbox = await stack.enter_async_context(
-            get_sandbox_manager().connect_command_instance(
-                command_id=command.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        manager = get_sandbox_manager()
+        if item.task.state in TERMINAL_TASK_STATES and item.task.result_readiness == "ready":
+            record = await UserSandboxRepository(
+                session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            ).get_by_id(command.user_sandbox_id)
+            if record is None or record.deleted_at is not None:
+                raise SandboxError("Original output storage unavailable")
+            attachment = await manager.ensure_running(record.id)
+            if attachment.user_sandbox_id != record.id:
+                raise SandboxError("Original output storage changed")
+            sandbox = attachment.sandbox
+            if isinstance(sandbox, OpenSandbox):
+                stack.push_async_callback(sandbox._sandbox.close)  # noqa: SLF001
+        else:
+            sandbox = await stack.enter_async_context(
+                manager.connect_command_instance(
+                    command_id=command.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+                )
             )
-        )
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("Task output requires OpenSandbox")
+        if not path.is_relative_to(sandbox.workdir) or ".." in path.parts:
+            raise HTTPException(status_code=400, detail="Output path outside sandbox workdir")
         files = sandbox._sandbox.files  # noqa: SLF001
         if download:
             stream = await files.read_bytes_stream(command.log_path)

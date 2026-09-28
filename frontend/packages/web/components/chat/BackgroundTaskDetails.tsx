@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import useSWR from 'swr'
 import { useTranslations } from 'next-intl'
 import {
@@ -117,10 +117,18 @@ function TaskExecutionDetails({
     unavailable ? null : task.id,
     active ? 5_000 : 0,
   )
+  const previous = useRef({ active, readiness: task.result_readiness })
   useEffect(() => {
-    // A task can finish before the next live-log poll. Fetch its final output.
-    if (!active && !unavailable && refresh) void refresh()
-  }, [active, unavailable, task.revision, refresh])
+    // Fetch final output on completion or readiness, without duplicating the mount fetch.
+    if (
+      !active &&
+      !unavailable &&
+      (previous.current.active ||
+        (previous.current.readiness !== 'ready' && task.result_readiness === 'ready'))
+    )
+      void refresh()
+    previous.current = { active, readiness: task.result_readiness }
+  }, [active, unavailable, task.result_readiness, refresh])
 
   const downloadUrl = workspaceId
     ? `${backgroundTaskOutputUrl(workspaceId, conversationId, task.id)}?download=true`

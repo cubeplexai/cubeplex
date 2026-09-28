@@ -91,6 +91,26 @@ describe('Background task execution details', () => {
     mocks.getTask.mockResolvedValue(task)
   })
 
+  it('does not refresh again when an already-completed task is opened', () => {
+    mount(task)
+    expect(mocks.refresh).not.toHaveBeenCalled()
+  })
+
+  it('refreshes when final output becomes ready, without polling delivery revisions', () => {
+    const view = mount({ ...task, result_readiness: 'pending' })
+    expect(mocks.refresh).not.toHaveBeenCalled()
+    const show = (next: BackgroundTask) =>
+      view.rerender(
+        <SWRConfig value={{ provider: () => new Map() }}>
+          <BackgroundTaskDetails conversationId="conv-1" taskId="bgt-1" task={next} />
+        </SWRConfig>,
+      )
+    show(task)
+    expect(mocks.refresh).toHaveBeenCalledOnce()
+    show({ ...task, revision: task.revision + 1 })
+    expect(mocks.refresh).toHaveBeenCalledOnce()
+  })
+
   it('matches tool call IDs and reads conversation logs', () => {
     mount(task)
     expect(screen.getByText(/echo original/)).toHaveTextContent('"timeout": 90')
