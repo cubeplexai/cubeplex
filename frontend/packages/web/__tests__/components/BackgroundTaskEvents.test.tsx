@@ -57,6 +57,7 @@ vi.mock('@cubeplex/core', () => ({
     }),
 }))
 vi.mock('@/hooks/useBackgroundTaskOutput', () => ({
+  backgroundTaskOutputUrl: () => '/task-output',
   useBackgroundTaskOutput: () => ({
     content: 'Compiled successfully',
     loading: false,
