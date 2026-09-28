@@ -15,13 +15,16 @@ acting**. Do not invent a shorter checklist.
 1. Inspect the current branch, worktree, `origin/main`, and existing release tags.
 2. Prepare a release PR that bumps every version source in `docs/releasing.md`
    (packages, chart, hardcoded code refs, `uv.lock`, compose `.env.example`,
-   **and** the English + Chinese deploy-doc snippets).
-3. Run the version-consistency check and the repository CI-equivalent checks.
+   **and** the English + Chinese deploy-doc snippets). Add the version's English
+   and Chinese changelog pages and sidebar entry; put upgrade notes after features and fixes.
+3. Run the version-consistency check, changelog renderer/tests, docs checks, and
+   repository CI-equivalent checks. Review the rendered GitHub Release body.
 4. Merge the release PR into `main`.
 5. Create `v<semver>` on that exact merged commit and push the tag.
 6. The tag push triggers two concurrent workflows: `images.yml` builds and pushes
    version-tagged images; `release.yml` verifies versions, waits for those images,
-   writes the release manifest, and creates the GitHub Release.
+   renders the changelog with a generated PR appendix, writes the release manifest,
+   and creates or updates the GitHub Release.
 7. Deploy using the manifest's release tags or digests. Do not edit chart defaults
    or use `latest` for production.
 

@@ -1,4 +1,4 @@
-# Configures `gh release create --generate-notes` (see .github/workflows/release.yml).
+# Configures the generated PR appendix (see .github/workflows/release.yml).
 # Categories match labels applied by .github/labeler.yml + Dependabot + humans.
 # Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
 

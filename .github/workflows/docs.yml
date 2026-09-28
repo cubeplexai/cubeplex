@@ -6,10 +6,16 @@ on:
     paths:
       - 'docs/site/**'
       - '.github/workflows/docs.yml'
+      - '.github/workflows/release.yml'
+      - 'scripts/release-notes.py'
+      - 'scripts/tests/test_release_notes.py'
   pull_request:
     paths:
       - 'docs/site/**'
       - '.github/workflows/docs.yml'
+      - '.github/workflows/release.yml'
+      - 'scripts/release-notes.py'
+      - 'scripts/tests/test_release_notes.py'
   workflow_dispatch:
     inputs:
       pages_branch:
@@ -49,6 +55,13 @@ jobs:
       - name: Build and type-check docs
         working-directory: docs/site
         run: pnpm check
+
+      - name: Check release changelog
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/tests -p 'test_release_notes.py'
+          version=$(node -p "require('./frontend/package.json').version")
+          python3 scripts/release-notes.py "v${version}" > release-notes.md
 
       - name: Upload docs build
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

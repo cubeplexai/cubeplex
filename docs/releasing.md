@@ -14,8 +14,10 @@ Agents: load the `release` skill, then follow this file.
 1. Inspect the current branch, worktree, `origin/main`, and existing `v*` tags.
    Never overwrite an existing application or sandbox version tag.
 2. From a feature branch off latest `origin/main`, prepare a **version-bump PR**.
+   Include one changelog page per version in English and Chinese, plus the sidebar entry.
 3. Run `scripts/check-version-consistency.sh v<semver>` and push. Pre-push runs
    the CI-equivalent checks for any code sides in the push.
+   Run the changelog renderer and docs checks before pushing (see below).
 4. Merge the PR into `main`.
 5. Create annotated tag `v<semver>` on that exact merged commit and push it.
 6. The tag push triggers `images.yml` (build/push application images) and
@@ -86,6 +88,55 @@ version:
 Do not put this process, or any other developer release procedure, under
 `docs/site/`.
 
+## Changelog and GitHub release notes
+
+Every release has its own page, named after the application semver without `v`:
+
+- English: `docs/site/docs/changelog/<semver>.md`
+- Chinese: `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/changelog/<semver>.md`
+
+Add the version to the **Changelog** category in `docs/site/sidebars.ts`, newest
+first. Keep the Chinese category label in the sidebar translations. These pages
+contain the user-facing release notes; do not copy this developer procedure into them.
+
+Review the changes since the previous release and write a summary users can
+understand. Put features and improvements first, followed by fixes, then upgrade
+steps and precautions at the end. Explain required migrations, configuration
+changes, and how existing sandbox policies or containers affect an upgrade.
+Keep the two languages aligned. Do not leave a temporary "unreleased" status or
+invent a publication date: publishing the tag does not rewrite documentation.
+
+Use plain Markdown with YAML frontmatter. Link to the deployment and feature
+guides instead of duplicating long procedures. Use inline Markdown links with
+`../` or `./` paths for other docs pages. Avoid MDX components and reference-style
+links in changelog pages so the same body can be published on GitHub.
+
+The English page is the source for the GitHub Release body. The renderer removes
+frontmatter, converts relative docs links to `https://cubeplex.ai/docs/...`, and
+adds links to both language pages. It fails if either page is missing, empty, or
+has missing or unclosed frontmatter. The release workflow runs it before registry operations.
+It then appends GitHub's automatically generated PR and contributor notes, using
+the categories in `.github/release.yml`. The handwritten summary stays first.
+
+On a workflow rerun, the Release body is replaced with the generated full body,
+not appended again. Manual edits to the GitHub Release body are therefore not
+preserved; edit the changelog in the release PR before creating the tag. The
+workflow reads the pages from the tagged commit, not the current `main` branch.
+The manifest remains a separate release attachment.
+
+Before pushing a release PR, verify the body and both language builds:
+
+```bash
+mkdir -p tmp
+python3 -m unittest discover -s scripts/tests -p 'test_release_notes.py'
+python3 scripts/release-notes.py v0.9.0 > tmp/release-notes-v0.9.0.md
+pnpm --dir docs/site check
+```
+
+Replace `v0.9.0` with the version being released and read the generated Markdown.
+The Docs workflow also checks the renderer and the current application version's
+pages on PRs. A successful preview does not publish a GitHub Release.
+
 ## Sandbox `VERSION`
 
 Format: `<app semver>-<YYMMDD>`, e.g. `0.6.0-260825`.
@@ -116,7 +167,9 @@ From a worktree (`./scripts/new-worktree feat/YYYY-MM-DD-release-<semver>`):
 2. Run `scripts/check-version-consistency.sh v0.6.0`.
 3. Grep the six deploy-doc files for the **previous** `v<semver>` / chart
    `--version` and replace only the CubePlex application examples.
-4. Push. GitHub's SSH closes the idle connection while pre-push runs (~3 min
+4. Add the English and Chinese changelog pages and sidebar entry; run the checks
+   under **Changelog and GitHub release notes**, then review the rendered body.
+5. Push. GitHub's SSH closes the idle connection while pre-push runs (~3 min
    if both backend and frontend changed; docs-only skips both). Use keepalive:
 
    ```bash
@@ -124,8 +177,8 @@ From a worktree (`./scripts/new-worktree feat/YYYY-MM-DD-release-<semver>`):
      git push origin feat/YYYY-MM-DD-release-<semver>
    ```
 
-5. Open a PR titled `Bump version to <semver>` (no prefixes).
-6. Merge with `gh pr merge <n> --squash --admin`. The `main` ruleset requires
+6. Open a PR titled `Bump version to <semver>` (no prefixes).
+7. Merge with `gh pr merge <n> --squash --admin`. The `main` ruleset requires
    last-push-approval, so a PR you pushed yourself cannot self-approve.
 
 ## Tag and publish
@@ -155,12 +208,14 @@ only on a tag push, or on `workflow_dispatch` with `publish: true`.
 **`release.yml`** (same tag push, runs concurrently):
 
 1. Checks package/chart versions equal `0.6.0`.
-2. Reads `deploy/images/sandbox/VERSION`.
+2. Reads `deploy/images/sandbox/VERSION`, verifies both changelog pages, and
+   prepares the English release body with a generated PR appendix.
 3. Polls for the three application images (up to ~30 min) and records digests.
 4. Waits for `sandbox-v<version>`, then promotes it to
    `cubeplex-sandbox:v0.6.0`.
 5. Packages the Helm chart to `oci://ghcr.io/cubeplexai/charts/cubeplex:0.6.0`.
-6. Uploads `release-manifest-v0.6.0.yaml` to the GitHub Release.
+6. Creates or updates the GitHub Release with the prepared notes, then uploads
+   `release-manifest-v0.6.0.yaml`.
 
 GHCR `unknown/unknown` entries are provenance attestations, not a runtime
 platform. Application and sandbox tags contain `linux/amd64` and
