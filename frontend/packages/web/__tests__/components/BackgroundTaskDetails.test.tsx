@@ -113,7 +113,10 @@ describe('Background task execution details', () => {
 
   it('matches tool call IDs and reads conversation logs', () => {
     mount(task)
-    expect(screen.getByText(/echo original/)).toHaveTextContent('"timeout": 90')
+    expect(screen.getByText('echo original')).toBeVisible()
+    fireEvent.click(screen.getByText('rawRequest'))
+    expect(screen.getByText(/"timeout": 90/)).toBeVisible()
+    fireEvent.click(screen.getByText('initialResponse'))
     expect(screen.getByText('Original tool response')).toBeVisible()
     expect(screen.getByText('Final command output')).toBeVisible()
     expect(screen.queryByText(/wrong command/)).not.toBeInTheDocument()
@@ -127,7 +130,7 @@ describe('Background task execution details', () => {
       toolResultMap: { 'tc-1': { content: 'Other conversation response', receivedAt: 1 } },
     })
     mount(task)
-    expect(screen.getByText(/echo saved/)).toBeVisible()
+    expect(screen.getByText('echo saved')).toBeVisible()
     expect(screen.queryByText('Other conversation response')).not.toBeInTheDocument()
   })
 
@@ -145,7 +148,7 @@ describe('Background task execution details', () => {
       refresh: mocks.refresh,
     })
     mount(task)
-    expect(screen.getByText(/echo original/)).toBeVisible()
+    expect(screen.getByText('echo original')).toBeVisible()
     expect(screen.getByText('outputFailed')).toBeVisible()
     mocks.refresh.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'retry' }))
@@ -206,7 +209,8 @@ describe('persisted subagents and output availability', () => {
       },
     })
     mount(task)
-    expect(screen.getByText(/inner command/)).toBeVisible()
+    expect(screen.getByText('inner command')).toBeVisible()
+    fireEvent.click(screen.getByText('initialResponse'))
     expect(screen.getByText('inner result')).toBeVisible()
   })
 

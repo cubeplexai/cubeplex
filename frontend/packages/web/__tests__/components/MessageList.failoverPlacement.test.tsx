@@ -156,7 +156,7 @@ describe('MessageList failover banner placement', () => {
 
     render(<MessageList conversationId={CONV} />, { wrapper })
 
-    const result = screen.getAllByText('background build completed')[0]
+    const result = screen.getByText('Background result')
     const later = screen.getByText('message sent after background completion')
     expect(result.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
