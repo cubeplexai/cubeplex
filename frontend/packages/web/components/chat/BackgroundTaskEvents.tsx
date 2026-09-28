@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { ChevronRight, Loader2, Terminal } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { createApiClient, useMessageStore } from '@cubeplex/core'
 import type { BackgroundTaskEvent } from '@cubeplex/core'
@@ -24,18 +24,50 @@ export function BackgroundTaskEventItem({
 }) {
   const t = useTranslations('backgroundTasks')
   const [expanded, setExpanded] = useState(false)
+  const task = useMessageStore((state) =>
+    state.backgroundTasks?.[conversationId]?.find(
+      (task) =>
+        task.id === event.task_id && task.execution_generation === event.execution_generation,
+    ),
+  )
   return (
     <details
-      onToggle={(e) => setExpanded(e.currentTarget.open)}
-      className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm"
+      onToggle={(e) => {
+        if (e.target === e.currentTarget) setExpanded(e.currentTarget.open)
+      }}
+      className="group/background-result min-w-0 text-xs"
     >
-      <summary className="cursor-pointer list-none text-muted-foreground">
-        <span className="font-medium text-foreground">{t('resultLabel')}</span>
-        <span className="mx-1.5">·</span>
-        <span>{t(`events.${event.state}`)}</span>
-        {event.summary ? <span className="ml-2">{event.summary}</span> : null}
+      <summary
+        className="flex w-full max-w-full cursor-pointer list-none items-center gap-2
+          rounded-lg border border-transparent px-2 py-1 text-left leading-5
+          text-muted-foreground transition-colors hover:border-border/60 hover:bg-muted/55
+          hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Terminal aria-hidden className="size-3.5 shrink-0 opacity-70" />
+        <span className="min-w-0 flex-1 truncate" title={task?.description || t('resultLabel')}>
+          <span className="font-medium text-foreground/90">{t('resultLabel')}</span>
+          {task?.description && (
+            <span className="ml-2 text-muted-foreground">{task.description}</span>
+          )}
+        </span>
+        <span className="shrink-0 text-2xs text-muted-foreground">
+          {t(`events.${event.state}`)}
+        </span>
+        <ChevronRight
+          aria-hidden
+          className="size-3 shrink-0 group-open/background-result:rotate-90"
+        />
       </summary>
-      <div className="mt-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+      <div
+        className="ml-3 mt-2 min-w-0 space-y-3 border-l border-border pl-3
+          text-muted-foreground"
+      >
+        {expanded && event.summary && (
+          <div>
+            <p className="mb-1 font-medium">{t('executionRecord')}</p>
+            <p className="break-words font-mono">{event.summary}</p>
+          </div>
+        )}
         {expanded && (
           <BackgroundTaskDetails conversationId={conversationId} taskId={event.task_id} />
         )}

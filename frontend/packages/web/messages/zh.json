@@ -256,11 +256,13 @@
       "unknown": "状态未知"
     },
     "events": {
-      "pending": "等待处理",
-      "claimed": "正在处理",
-      "delivered": "已送达",
-      "discarded": "已取消"
-    }
+      "pending": "结果等待送达",
+      "claimed": "结果送达中",
+      "delivered": "结果已送达",
+      "discarded": "通知已取消"
+    },
+    "executionRecord": "执行记录",
+    "initialResponse": "工具初始返回"
   },
   "slashCommands": {
     "listAria": "输入框命令",
@@ -1657,7 +1659,11 @@
     "leaveConfirmButton": "退出",
     "cleanupPending": "访问权限已移除，后台任务仍在停止中。",
     "accessDenied": "仅工作区管理员可管理成员。",
-    "accessRequests": { "title": "加入申请", "approve": "批准", "reject": "拒绝" },
+    "accessRequests": {
+      "title": "加入申请",
+      "approve": "批准",
+      "reject": "拒绝"
+    },
     "invite": {
       "sectionTitle": "邀请链接",
       "createLink": "创建邀请链接",
@@ -1773,6 +1779,21 @@
       "installing": "安装中…",
       "installed": "已安装",
       "installError": "安装失败，请重试。"
+    },
+    "command": {
+      "command": "命令",
+      "copyCommand": "复制命令",
+      "rawRequest": "原始请求 JSON",
+      "copyRequest": "复制请求 JSON",
+      "timeout": "超时",
+      "seconds": "{count} 秒",
+      "execution": "执行方式",
+      "background": "在后台启动",
+      "foreground": "在前台启动",
+      "notification": "完成通知",
+      "enabled": "开启",
+      "disabled": "关闭",
+      "persistent": "监控不设截止时间"
     }
   },
   "common": {
@@ -1997,7 +2018,7 @@
     "deleteConversationDescription": "「{title}」将从历史记录中移除。消息将无法再在该对话中查看。相关产物将不再出现在库或对话面板中。",
     "deleteConversationConfirm": "删除",
     "deleteConversationCancel": "取消",
-    "deleteConversationDeleting": "删除中\u2026",
+    "deleteConversationDeleting": "删除中…",
     "deleteConversationFailed": "删除对话失败",
     "deleteConversationCleanupPending": "对话已删除，后台任务仍在停止中。",
     "workspaceSettings": "工作区设置",

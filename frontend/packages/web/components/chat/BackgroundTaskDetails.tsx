@@ -14,6 +14,7 @@ import type { BackgroundTask, Message } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { backgroundTaskOutputUrl, useBackgroundTaskOutput } from '@/hooks/useBackgroundTaskOutput'
 import { GenericToolView } from '@/components/panel/GenericToolView'
+import { CommandRequestView } from '@/components/panel/CommandRequestView'
 import { Button } from '@/components/ui/button'
 
 const EMPTY_MESSAGES: Message[] = []
@@ -139,12 +140,35 @@ function TaskExecutionDetails({
   const downloadUrl = workspaceId
     ? `${backgroundTaskOutputUrl(workspaceId, conversationId, task.id)}?download=true`
     : null
+  const commandRequest =
+    task.details?.type === 'command' || name === 'execute' || name === 'monitor'
 
   return (
     <div className="min-w-0 space-y-3 text-xs">
       {name && <p className="break-words font-mono text-foreground">{name}</p>}
       {!originalCall && <p>{t('originalUnavailable')}</p>}
-      {args ? <GenericToolView args={args} result={result} /> : null}
+      {args ? (
+        commandRequest ? (
+          <>
+            <CommandRequestView args={args} />
+            {result && (
+              <details>
+                <summary className="cursor-pointer text-muted-foreground">
+                  {t('initialResponse')}
+                </summary>
+                <pre
+                  className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words
+                  rounded bg-sunken p-3 font-mono"
+                >
+                  {result}
+                </pre>
+              </details>
+            )}
+          </>
+        ) : (
+          <GenericToolView args={args} result={result} />
+        )
+      ) : null}
       {task.details?.exit_code != null && <p>{t('exitCode', { code: task.details.exit_code })}</p>}
       <p className="font-medium text-muted-foreground">{t('output')}</p>
       {unavailable || serverUnavailable ? (

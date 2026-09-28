@@ -94,7 +94,7 @@ describe('BackgroundTaskEvents', () => {
       </>,
     )
 
-    expect(screen.getByText('Build finished')).toBeInTheDocument()
+    expect(screen.getByText('Background result')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier background results' }))
@@ -105,7 +105,7 @@ describe('BackgroundTaskEvents', () => {
   it('opens the originating command and its output from a result notification', async () => {
     render(<BackgroundTaskEventItem conversationId="conv-1" event={mocks.events[0] as never} />)
     fireEvent.click(screen.getByText('Background result'))
-    await waitFor(() => expect(screen.getByText(/pnpm build/)).toBeVisible())
+    await waitFor(() => expect(screen.getByText('pnpm build')).toBeVisible())
     expect(screen.getByText('Compiled successfully')).toBeVisible()
     expect(screen.queryByText('artifact://report')).not.toBeInTheDocument()
   })
@@ -126,6 +126,6 @@ describe('BackgroundTaskEvents', () => {
         'Could not load earlier background results. Try again.',
       ),
     )
-    expect(screen.getByText('Build finished')).toBeInTheDocument()
+    expect(screen.getByText('Background result')).toBeInTheDocument()
   })
 })

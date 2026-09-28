@@ -1,11 +1,11 @@
+import { CommandRequestView } from './CommandRequestView'
+
 interface TerminalViewProps {
   args: Record<string, unknown>
   result: string | null
 }
 
 export function TerminalView({ args, result }: TerminalViewProps) {
-  const command = String(args.command ?? args.cmd ?? '')
-
   // Parse exit code from result if present
   const exitMatch = result?.match(/\[exit:\s*(\d+)\]\s*$/)
   const exitCode = exitMatch ? exitMatch[1] : null
@@ -13,14 +13,7 @@ export function TerminalView({ args, result }: TerminalViewProps) {
 
   return (
     <div className="p-4 space-y-3">
-      {command && (
-        <div
-          className="font-mono text-sm font-medium
-            text-foreground"
-        >
-          $ {command}
-        </div>
-      )}
+      <CommandRequestView args={args} />
       {output && (
         <div className="bg-muted rounded-lg p-3">
           <pre

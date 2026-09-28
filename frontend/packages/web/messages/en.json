@@ -256,11 +256,13 @@
       "unknown": "Status unknown"
     },
     "events": {
-      "pending": "Pending delivery",
-      "claimed": "Delivery in progress",
-      "delivered": "Delivered",
-      "discarded": "Cancelled"
-    }
+      "pending": "Result awaiting delivery",
+      "claimed": "Delivering result",
+      "delivered": "Result delivered",
+      "discarded": "Notification cancelled"
+    },
+    "executionRecord": "Execution record",
+    "initialResponse": "Initial tool response"
   },
   "slashCommands": {
     "listAria": "Composer commands",
@@ -1657,7 +1659,11 @@
     "leaveConfirmButton": "Leave",
     "cleanupPending": "Access was removed. Background work is still stopping.",
     "accessDenied": "Only workspace admins can manage members.",
-    "accessRequests": { "title": "Access requests", "approve": "Approve", "reject": "Reject" },
+    "accessRequests": {
+      "title": "Access requests",
+      "approve": "Approve",
+      "reject": "Reject"
+    },
     "invite": {
       "sectionTitle": "Invite links",
       "createLink": "Create invite link",
@@ -1773,6 +1779,21 @@
       "installing": "Installing…",
       "installed": "Installed",
       "installError": "Installation failed. Please try again."
+    },
+    "command": {
+      "command": "Command",
+      "copyCommand": "Copy command",
+      "rawRequest": "Original request JSON",
+      "copyRequest": "Copy request JSON",
+      "timeout": "Timeout",
+      "seconds": "{count} seconds",
+      "execution": "Execution",
+      "background": "Start in background",
+      "foreground": "Start in foreground",
+      "notification": "Completion notification",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "persistent": "No monitor deadline"
     }
   },
   "common": {
@@ -1997,7 +2018,7 @@
     "deleteConversationDescription": "\"{title}\" will be removed from your history. Messages will no longer be available in this conversation. Related artifacts will no longer appear in the library or the conversation panel.",
     "deleteConversationConfirm": "Delete",
     "deleteConversationCancel": "Cancel",
-    "deleteConversationDeleting": "Deleting\u2026",
+    "deleteConversationDeleting": "Deleting…",
     "deleteConversationFailed": "Failed to delete conversation",
     "deleteConversationCleanupPending": "Conversation deleted. Background work is still stopping.",
     "workspaceSettings": "Workspace settings",

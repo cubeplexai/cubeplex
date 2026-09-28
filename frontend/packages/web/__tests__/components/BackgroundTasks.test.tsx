@@ -146,7 +146,7 @@ describe('BackgroundTasks', () => {
     expect(mocks.output).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('viewDetails'))
     await vi.advanceTimersByTimeAsync(0)
-    expect(screen.getByText(/pnpm build/)).toBeVisible()
+    expect(screen.getByText('pnpm build')).toBeVisible()
     expect(screen.getByText('Build output')).toBeVisible()
     expect(mocks.output).toHaveBeenCalledWith('ws-1', 'conv-1', 'bgt-1', 5000)
   })
