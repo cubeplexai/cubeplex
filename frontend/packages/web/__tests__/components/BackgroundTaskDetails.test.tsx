@@ -16,7 +16,10 @@ vi.mock('@cubeplex/core', async (original) => ({
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
-vi.mock('@/hooks/useSandboxFileContent', () => ({ useSandboxFileContent: mocks.output }))
+vi.mock('@/hooks/useBackgroundTaskOutput', () => ({
+  useBackgroundTaskOutput: mocks.output,
+  backgroundTaskOutputUrl: () => '/task-output',
+}))
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }))
 
 const task = {
@@ -94,7 +97,7 @@ describe('Background task execution details', () => {
     expect(screen.getByText('Original tool response')).toBeVisible()
     expect(screen.getByText('Final command output')).toBeVisible()
     expect(screen.queryByText(/wrong command/)).not.toBeInTheDocument()
-    expect(mocks.output).toHaveBeenCalledWith('ws-1', '/workspace/result.log', 'conv-1', 0)
+    expect(mocks.output).toHaveBeenCalledWith('ws-1', 'conv-1', 'bgt-1', 0)
   })
 
   it('falls back to the saved command without using another conversation stream', () => {
@@ -131,7 +134,7 @@ describe('Background task execution details', () => {
 
   it('polls running logs and fetches final output when the task settles', () => {
     const view = mount({ ...task, state: 'running' })
-    expect(mocks.output).toHaveBeenLastCalledWith('ws-1', '/workspace/result.log', 'conv-1', 5000)
+    expect(mocks.output).toHaveBeenLastCalledWith('ws-1', 'conv-1', 'bgt-1', 5000)
     expect(mocks.refresh).not.toHaveBeenCalled()
     act(() =>
       view.rerender(
@@ -140,7 +143,79 @@ describe('Background task execution details', () => {
         </SWRConfig>,
       ),
     )
-    expect(mocks.output).toHaveBeenLastCalledWith('ws-1', '/workspace/result.log', 'conv-1', 0)
+    expect(mocks.output).toHaveBeenLastCalledWith('ws-1', 'conv-1', 'bgt-1', 0)
     expect(mocks.refresh).toHaveBeenCalledOnce()
+  })
+})
+
+describe('persisted subagents and output availability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useMessageStore.setState({ messages: {}, backgroundTasks: {}, streamingConversationId: null })
+    mocks.output.mockReturnValue({
+      content: null,
+      loading: false,
+      error: null,
+      refresh: mocks.refresh,
+    })
+  })
+
+  it.each(['metadata', 'details'] as const)('reads inner tool calls from %s', (location) => {
+    const summary = {
+      text: '',
+      thinking: '',
+      tool_calls: [{ id: 'tc-1', name: 'execute', arguments: { command: 'inner command' } }],
+      tool_results: [{ tool_call_id: 'tc-1', tool_name: 'execute', content: 'inner result' }],
+    }
+    const events = [
+      { type: 'tool_call', id: 'tc-1', name: 'execute', arguments: { command: 'inner command' } },
+      { type: 'tool_result', tool_call_id: 'tc-1', name: 'execute', result: 'inner result' },
+    ]
+    useMessageStore.setState({
+      messages: {
+        'conv-1': [
+          {
+            id: 'subagent-result',
+            role: 'tool_result',
+            tool_call_id: 'outer-call',
+            tool_name: 'agent',
+            content: [],
+            [location]: { subagent_events: location === 'metadata' ? summary : events },
+          },
+        ],
+      },
+    })
+    mount(task)
+    expect(screen.getByText(/inner command/)).toBeVisible()
+    expect(screen.getByText('inner result')).toBeVisible()
+  })
+
+  it('offers a download for logs above the preview limit', () => {
+    mocks.output.mockReturnValue({
+      content: null,
+      loading: false,
+      error: new Error('FILE_TOO_LARGE'),
+      refresh: mocks.refresh,
+    })
+    mount(task)
+    expect(screen.getByRole('link', { name: 'downloadOutput' })).toHaveAttribute(
+      'href',
+      '/task-output?download=true',
+    )
+    expect(screen.queryByRole('button', { name: 'retry' })).not.toBeInTheDocument()
+  })
+
+  it('does not read or refresh output declared unavailable by the backend', () => {
+    mocks.output.mockReturnValue({
+      content: 'partial log',
+      loading: false,
+      error: null,
+      refresh: mocks.refresh,
+    })
+    mount({ ...task, result_readiness: 'unavailable', result_unavailable_reason: 'instance_gone' })
+    expect(mocks.output).toHaveBeenCalledWith('ws-1', 'conv-1', null, 0)
+    expect(mocks.refresh).not.toHaveBeenCalled()
+    expect(screen.getByText('instance_gone')).toBeVisible()
+    expect(screen.queryByText('partial log')).not.toBeInTheDocument()
   })
 })

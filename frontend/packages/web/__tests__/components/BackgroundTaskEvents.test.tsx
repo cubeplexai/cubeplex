@@ -56,8 +56,12 @@ vi.mock('@cubeplex/core', () => ({
       loadMoreBackgroundEvents: mocks.loadMore,
     }),
 }))
-vi.mock('@/hooks/useSandboxFileContent', () => ({
-  useSandboxFileContent: () => ({ content: 'Compiled successfully', loading: false, error: null }),
+vi.mock('@/hooks/useBackgroundTaskOutput', () => ({
+  useBackgroundTaskOutput: () => ({
+    content: 'Compiled successfully',
+    loading: false,
+    error: null,
+  }),
 }))
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),

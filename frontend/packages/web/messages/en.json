@@ -237,6 +237,8 @@
     "exitCode": "Exit code: {code}",
     "output": "Background output",
     "loadingOutput": "Loading output…",
+    "outputTooLarge": "This log is too large to preview. Download it to see the full output.",
+    "downloadOutput": "Download output",
     "outputFailed": "Could not load output. The sandbox or log file may no longer be available.",
     "emptyOutput": "The command produced no output.",
     "outputUnavailable": "Output is unavailable.",

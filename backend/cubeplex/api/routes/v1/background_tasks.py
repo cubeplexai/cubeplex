@@ -1,10 +1,16 @@
 """Workspace conversation background-task snapshots and controls."""
 
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
+from opensandbox.exceptions import SandboxException as ProviderSandboxError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask as ResponseCleanup
 
 from cubeplex.api.schemas.background_tasks import (
     BackgroundTaskCapabilities,
@@ -21,6 +27,9 @@ from cubeplex.auth.dependencies import require_member
 from cubeplex.db import get_session
 from cubeplex.models.background_task import TERMINAL_TASK_STATES, TaskStopReason
 from cubeplex.repositories import ConversationRepository
+from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox.manager import get_sandbox_manager
+from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.services.background_task_query import (
     BackgroundTaskQueryService,
     InvalidBackgroundTaskCursorError,
@@ -28,6 +37,7 @@ from cubeplex.services.background_task_query import (
     TaskProjection,
 )
 from cubeplex.services.background_tasks import BackgroundTaskService
+from cubeplex.utils.http import content_disposition
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(
@@ -243,3 +253,77 @@ async def list_background_task_events(
         next_cursor=page.next_cursor,
         has_more=page.has_more,
     )
+
+
+@router.get("/background-tasks/{task_id}/output", response_model=None)
+async def get_background_task_output(
+    workspace_id: str,
+    conversation_id: str,
+    task_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    download: bool = False,
+) -> dict[str, str] | StreamingResponse:
+    del workspace_id
+    await _require_conversation(session, ctx, conversation_id)
+    item = await _query_service(session, ctx).get_task(
+        conversation_id=conversation_id, task_id=task_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if item.task.result_readiness == "unavailable":
+        raise HTTPException(
+            status_code=410,
+            detail=item.task.result_unavailable_reason or "Output unavailable",
+        )
+    command = item.command
+    if command is None or not command.log_path:
+        raise HTTPException(status_code=404, detail="Task output not found")
+    path = PurePosixPath(command.log_path)
+    if not path.is_relative_to("/workspace") or ".." in path.parts:
+        raise HTTPException(status_code=400, detail="Output path outside workspace")
+
+    stack = AsyncExitStack()
+    streaming = False
+    try:
+        sandbox = await stack.enter_async_context(
+            get_sandbox_manager().connect_command_instance(
+                command_id=command.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            )
+        )
+        if not isinstance(sandbox, OpenSandbox):
+            raise SandboxError("Task output requires OpenSandbox")
+        files = sandbox._sandbox.files  # noqa: SLF001
+        if download:
+            stream = await files.read_bytes_stream(command.log_path)
+
+            async def output_chunks() -> AsyncIterator[bytes]:
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await stack.aclose()
+
+            response = StreamingResponse(
+                output_chunks(),
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": content_disposition(path.name),
+                    "Cache-Control": "no-store",
+                },
+                background=ResponseCleanup(stack.aclose),
+            )
+            # StreamingResponse closes the observer after consuming the provider stream.
+            streaming = True
+            return response
+        info = (await files.get_file_info([command.log_path])).get(command.log_path)
+        if info is not None and info.size > 1_048_576:
+            raise HTTPException(status_code=413, detail="Log too large; download full output")
+        return {"content": await files.read_file(command.log_path), "mime_type": "text/plain"}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Task output not found") from exc
+    except (SandboxError, LookupError, ProviderSandboxError) as exc:
+        raise HTTPException(status_code=503, detail="Original task sandbox unavailable") from exc
+    finally:
+        if not streaming:
+            await stack.aclose()

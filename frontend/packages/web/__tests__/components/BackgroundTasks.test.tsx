@@ -34,7 +34,10 @@ vi.mock('@cubeplex/core', () => {
   }
 })
 
-vi.mock('@/hooks/useSandboxFileContent', () => ({ useSandboxFileContent: mocks.output }))
+vi.mock('@/hooks/useBackgroundTaskOutput', () => ({
+  useBackgroundTaskOutput: mocks.output,
+  backgroundTaskOutputUrl: () => '/task-output',
+}))
 vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
@@ -145,7 +148,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(screen.getByText(/pnpm build/)).toBeVisible()
     expect(screen.getByText('Build output')).toBeVisible()
-    expect(mocks.output).toHaveBeenCalledWith('ws-1', '/workspace/build.log', 'conv-1', 5000)
+    expect(mocks.output).toHaveBeenCalledWith('ws-1', 'conv-1', 'bgt-1', 5000)
   })
 
   it('keeps task controls separate from user steering', () => {

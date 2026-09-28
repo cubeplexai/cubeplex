@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -587,3 +588,109 @@ async def test_bootstrap_run_control_tracks_explicit_run_stop(
     )
     assert bootstrap.status_code == 200, bootstrap.text
     assert bootstrap.json()["run_control"] is None
+
+
+async def test_task_output_reads_original_instance_and_downloads_large_logs(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import opensandbox
+
+    client, workspace_id = authenticated_client
+    reserved = await api_task_context.reserve(db_session)
+    reserved.command.provider = "opensandbox"
+    reserved.task.state = "succeeded"
+    reserved.task.result_readiness = "ready"
+    # Promotion changes the conversation's current scope; the task retains its instance.
+    api_task_context.conversation.is_group_chat = True
+    await db_session.commit()
+    instance_id = reserved.command.sandbox_instance_id
+    control = SimpleNamespace(
+        get_sandbox_info=AsyncMock(
+            return_value=SimpleNamespace(status=SimpleNamespace(state="Running"))
+        ),
+        close=AsyncMock(),
+    )
+    files = SimpleNamespace(
+        get_file_info=AsyncMock(return_value={reserved.command.log_path: SimpleNamespace(size=10)}),
+        read_file=AsyncMock(return_value="original command output"),
+    )
+    raw = SimpleNamespace(id=instance_id, files=files, close=AsyncMock())
+    create = AsyncMock(return_value=control)
+    connect = AsyncMock(return_value=raw)
+    monkeypatch.setattr(opensandbox.SandboxManager, "create", create)
+    monkeypatch.setattr(opensandbox.Sandbox, "connect", connect)
+    path = task_path(workspace_id, api_task_context.conversation.id)
+    url = f"{path}/{reserved.task.id}/output"
+    response = await client.get(url)
+    assert response.status_code == 200, response.text
+    assert response.json()["content"] == "original command output"
+    assert connect.call_args.args == (instance_id,)
+    files.read_file.assert_awaited_once_with(reserved.command.log_path)
+
+    files.get_file_info.return_value = {reserved.command.log_path: SimpleNamespace(size=1_048_577)}
+    response = await client.get(url)
+    assert response.status_code == 413
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"full large log"
+
+    files.read_bytes_stream = AsyncMock(return_value=chunks())
+    response = await client.get(url, params={"download": "true"})
+    assert response.status_code == 200, response.text
+    assert response.content == b"full large log"
+    assert "attachment" in response.headers["content-disposition"]
+    files.read_bytes_stream.assert_awaited_once_with(reserved.command.log_path)
+    assert raw.close.await_count == 3
+
+
+async def test_task_output_unavailable_never_connects_to_a_sandbox(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    import opensandbox
+
+    client, workspace_id = authenticated_client
+    reserved = await api_task_context.reserve(db_session)
+    reserved.task.state = "failed"
+    reserved.task.result_readiness = "unavailable"
+    reserved.task.result_unavailable_reason = "sandbox_instance_gone"
+    await db_session.commit()
+    create = AsyncMock()
+    monkeypatch.setattr(opensandbox.SandboxManager, "create", create)
+    path = task_path(workspace_id, api_task_context.conversation.id)
+    for download in (False, True):
+        response = await client.get(
+            f"{path}/{reserved.task.id}/output", params={"download": str(download).lower()}
+        )
+        assert response.status_code == 410, response.text
+        assert response.json()["detail"] == "sandbox_instance_gone"
+    create.assert_not_awaited()
+
+
+async def test_task_output_rejects_another_conversations_task(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    api_task_context: ApiTaskContext,
+) -> None:
+    client, workspace_id = authenticated_client
+    reserved = await api_task_context.reserve(db_session)
+    await db_session.commit()
+    response = await client.post(f"/api/v1/ws/{workspace_id}/conversations")
+    other_id = response.json()["id"]
+    try:
+        path = task_path(workspace_id, other_id)
+        response = await client.get(f"{path}/{reserved.task.id}/output")
+        assert response.status_code == 404, response.text
+    finally:
+        await db_session.execute(delete(Conversation).where(col(Conversation.id) == other_id))
+        await db_session.commit()

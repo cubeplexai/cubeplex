@@ -237,6 +237,8 @@
     "exitCode": "退出码：{code}",
     "output": "后台执行输出",
     "loadingOutput": "正在加载输出…",
+    "outputTooLarge": "日志过大，无法预览。请下载查看完整输出。",
+    "downloadOutput": "下载输出",
     "outputFailed": "无法加载输出，沙箱或日志文件可能已不可用。",
     "emptyOutput": "命令未产生输出。",
     "outputUnavailable": "输出不可用。",

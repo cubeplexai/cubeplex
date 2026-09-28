@@ -6,12 +6,13 @@ import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   getBackgroundTask,
+  getSubagentSummary,
   getToolResultPreviewContent,
   useMessageStore,
 } from '@cubeplex/core'
 import type { BackgroundTask, Message } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
-import { useSandboxFileContent } from '@/hooks/useSandboxFileContent'
+import { backgroundTaskOutputUrl, useBackgroundTaskOutput } from '@/hooks/useBackgroundTaskOutput'
 import { GenericToolView } from '@/components/panel/GenericToolView'
 import { Button } from '@/components/ui/button'
 
@@ -77,10 +78,23 @@ function TaskExecutionDetails({
   const liveResult = useMessageStore((s) =>
     s.streamingConversationId === conversationId ? s.toolResultMap[task.tool_call_id] : undefined,
   )
+  const subagentSummaries = messages.flatMap((message) => {
+    if (message.role !== 'tool_result') return []
+    const summary = getSubagentSummary(message)
+    return summary ? [summary] : []
+  })
+  const subagentCall = subagentSummaries
+    .flatMap((summary) => summary.tool_calls)
+    .find((call) => call.id === task.tool_call_id)
+  const subagentResult = subagentSummaries
+    .flatMap((summary) => summary.tool_results ?? [])
+    .find((result) => result.tool_call_id === task.tool_call_id)
   const originalCall =
     messages
       .flatMap((message) => message.content)
-      .find((block) => block.type === 'tool_call' && block.id === task.tool_call_id) ?? liveCall
+      .find((block) => block.type === 'tool_call' && block.id === task.tool_call_id) ??
+    liveCall ??
+    (subagentCall ? { ...subagentCall, type: 'tool_call' as const } : undefined)
   const originalResult = messages.find(
     (message) => message.role === 'tool_result' && message.tool_call_id === task.tool_call_id,
   )
@@ -94,18 +108,23 @@ function TaskExecutionDetails({
   const result =
     originalResult?.role === 'tool_result'
       ? getToolResultPreviewContent(originalResult)
-      : (liveResult?.content ?? null)
+      : (subagentResult?.content ?? liveResult?.content ?? null)
   const active = ['starting', 'running', 'waiting_input', 'unknown'].includes(task.state)
-  const { content, error, loading, refresh } = useSandboxFileContent(
+  const unavailable = task.result_readiness === 'unavailable'
+  const { content, error, loading, refresh } = useBackgroundTaskOutput(
     workspaceId,
-    task.details?.log_path || task.result_ref,
     conversationId,
+    unavailable ? null : task.id,
     active ? 5_000 : 0,
   )
   useEffect(() => {
     // A task can finish before the next live-log poll. Fetch its final output.
-    if (!active && refresh) void refresh()
-  }, [active, task.revision, refresh])
+    if (!active && !unavailable && refresh) void refresh()
+  }, [active, unavailable, task.revision, refresh])
+
+  const downloadUrl = workspaceId
+    ? `${backgroundTaskOutputUrl(workspaceId, conversationId, task.id)}?download=true`
+    : null
 
   return (
     <div className="min-w-0 space-y-3 text-xs">
@@ -114,8 +133,22 @@ function TaskExecutionDetails({
       {args ? <GenericToolView args={args} result={result} /> : null}
       {task.details?.exit_code != null && <p>{t('exitCode', { code: task.details.exit_code })}</p>}
       <p className="font-medium text-muted-foreground">{t('output')}</p>
-      {loading ? (
+      {unavailable ? (
+        <div className="space-y-1">
+          <p>{t('outputUnavailable')}</p>
+          {task.result_unavailable_reason && <p>{task.result_unavailable_reason}</p>}
+        </div>
+      ) : loading ? (
         <p>{t('loadingOutput')}</p>
+      ) : error instanceof Error && error.message === 'FILE_TOO_LARGE' ? (
+        <div className="space-y-2">
+          <p>{t('outputTooLarge')}</p>
+          {downloadUrl && (
+            <a className="text-primary underline" download href={downloadUrl}>
+              {t('downloadOutput')}
+            </a>
+          )}
+        </div>
       ) : error ? (
         <div className="space-y-2">
           <p>{t('outputFailed')}</p>
@@ -131,7 +164,7 @@ function TaskExecutionDetails({
           {content || t('emptyOutput')}
         </pre>
       ) : (
-        <p>{t(task.result_readiness === 'unavailable' ? 'outputUnavailable' : 'outputPending')}</p>
+        <p>{t('outputPending')}</p>
       )}
     </div>
   )
