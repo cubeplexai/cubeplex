@@ -2,13 +2,62 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from opensandbox.models.execd import RunCommandOpts
 
 from cubeplex.sandbox.base import ExecuteResult
 from cubeplex.sandbox.local import LocalSandbox
 from cubeplex.sandbox.log_io import append_output
+from cubeplex.sandbox.opensandbox import OpenSandbox
+
+
+async def test_internal_logs_remain_writable_when_agent_cannot_write_root_owned_directory() -> None:
+    raw = MagicMock()
+    raw.files.write_file = AsyncMock()
+    exit_codes: dict[str, int] = {}
+
+    async def run(
+        command: str, *, opts: RunCommandOpts, handlers: object = None
+    ) -> SimpleNamespace:
+        allowed = opts.uid is None
+        command_id = str(len(exit_codes))
+        exit_codes[command_id] = 0 if allowed else 1
+        return SimpleNamespace(
+            id=command_id,
+            logs=SimpleNamespace(stdout=[], stderr=[]),
+        )
+
+    async def command_status(command_id: str) -> SimpleNamespace:
+        return SimpleNamespace(exit_code=exit_codes[command_id])
+
+    raw.commands.run = AsyncMock(side_effect=run)
+    raw.commands.get_command_status = AsyncMock(side_effect=command_status)
+    sandbox = OpenSandbox(sandbox=raw, run_uid=1000, run_gid=1000)
+
+    result = await append_output(sandbox, "/workspace/.cubeplex/execute-test.log", "output\n")
+
+    assert result.data_written and result.cleanup_done
+    await sandbox.execute("id")
+    assert raw.commands.run.await_args.kwargs["opts"].uid == 1000
+
+
+async def test_internal_log_append_does_not_follow_a_symlinked_log(tmp_path: Path) -> None:
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    outside = tmp_path / "outside.log"
+    outside.write_text("original\n")
+    directory = tmp_path / ".cubeplex"
+    directory.mkdir()
+    log = directory / "execute-test.log"
+    log.symlink_to(outside)
+
+    result = await append_output(sandbox, str(log), "must not escape\n")
+
+    assert not result.data_written
+    assert result.cleanup_done
+    assert outside.read_text() == "original\n"
 
 
 async def test_append_output_writes_only_inside_the_internal_log_directory(

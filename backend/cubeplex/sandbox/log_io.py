@@ -67,6 +67,7 @@ async def _cleanup_chunk(sandbox: Sandbox, chunk_path: str) -> bool:
         result = await sandbox.execute(
             f"rm -f -- {shlex.quote(chunk_path)}",
             timeout=30,
+            as_root=True,
         )
     except Exception:
         logger.exception("failed to clean command log chunk {}", chunk_path)
@@ -91,7 +92,8 @@ async def append_output(sandbox: Sandbox, path: str, data: str | bytes) -> Appen
         f"test -d {shlex.quote(parent)} && test ! -L {shlex.quote(parent)}"
     )
     try:
-        prepared = await sandbox.execute(prepare, timeout=30)
+        # Internal logs can predate non-root agent execution and remain root-owned on the PVC.
+        prepared = await sandbox.execute(prepare, timeout=30, as_root=True)
     except Exception:
         logger.exception("failed to prepare command log directory {}", parent)
         return AppendOutputResult(data_written=False, cleanup_done=True)
@@ -111,7 +113,7 @@ async def append_output(sandbox: Sandbox, path: str, data: str | bytes) -> Appen
                 shlex.quote(chunk_path),
             )
         )
-        written = await sandbox.execute(command, timeout=30)
+        written = await sandbox.execute(command, timeout=30, as_root=True)
         data_written = written.exit_code == 0
         if not data_written:
             logger.warning("command log append exited {} for {}", written.exit_code, path)

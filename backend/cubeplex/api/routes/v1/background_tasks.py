@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
+from opensandbox.exceptions import SandboxApiException as ProviderApiError
 from opensandbox.exceptions import SandboxException as ProviderSandboxError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask as ResponseCleanup
@@ -315,32 +316,37 @@ async def get_background_task_output(
         if not path.is_relative_to(sandbox.workdir) or ".." in path.parts:
             raise HTTPException(status_code=400, detail="Output path outside sandbox workdir")
         files = sandbox._sandbox.files  # noqa: SLF001
-        if download:
-            stream = await files.read_bytes_stream(command.log_path)
+        try:
+            if download:
+                stream = await files.read_bytes_stream(command.log_path)
 
-            async def output_chunks() -> AsyncIterator[bytes]:
-                try:
-                    async for chunk in stream:
-                        yield chunk
-                finally:
-                    await stack.aclose()
+                async def output_chunks() -> AsyncIterator[bytes]:
+                    try:
+                        async for chunk in stream:
+                            yield chunk
+                    finally:
+                        await stack.aclose()
 
-            response = StreamingResponse(
-                output_chunks(),
-                media_type="text/plain",
-                headers={
-                    "Content-Disposition": content_disposition(path.name),
-                    "Cache-Control": "no-store",
-                },
-                background=ResponseCleanup(stack.aclose),
-            )
-            # StreamingResponse closes the observer after consuming the provider stream.
-            streaming = True
-            return response
-        info = (await files.get_file_info([command.log_path])).get(command.log_path)
-        if info is not None and info.size > 1_048_576:
-            raise HTTPException(status_code=413, detail="Log too large; download full output")
-        return {"content": await files.read_file(command.log_path), "mime_type": "text/plain"}
+                response = StreamingResponse(
+                    output_chunks(),
+                    media_type="text/plain",
+                    headers={
+                        "Content-Disposition": content_disposition(path.name),
+                        "Cache-Control": "no-store",
+                    },
+                    background=ResponseCleanup(stack.aclose),
+                )
+                # StreamingResponse closes the observer after consuming the provider stream.
+                streaming = True
+                return response
+            info = (await files.get_file_info([command.log_path])).get(command.log_path)
+            if info is not None and info.size > 1_048_576:
+                raise HTTPException(status_code=413, detail="Log too large; download full output")
+            return {"content": await files.read_file(command.log_path), "mime_type": "text/plain"}
+        except ProviderApiError as exc:
+            if exc.status_code == 404:
+                raise HTTPException(status_code=404, detail="Task output not found") from exc
+            raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Task output not found") from exc
     except (SandboxError, LookupError, ProviderSandboxError) as exc:

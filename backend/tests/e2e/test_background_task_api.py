@@ -767,6 +767,8 @@ async def test_running_task_output_stays_on_its_recorded_instance(
         ("missing_log", 404),
         ("outside_workdir", 400),
         ("removed_file", 404),
+        ("provider_missing_file", 404),
+        ("provider_missing_download", 404),
         ("provider_error", 503),
     ],
 )
@@ -782,7 +784,7 @@ async def test_task_output_error_contracts(
     from unittest.mock import AsyncMock
 
     import opensandbox
-    from opensandbox.exceptions import SandboxException
+    from opensandbox.exceptions import SandboxApiException, SandboxException
 
     client, workspace_id = authenticated_client
     reserved = await api_task_context.reserve(db_session)
@@ -804,13 +806,18 @@ async def test_task_output_error_contracts(
     elif failure == "provider_error":
         read.side_effect = SandboxException("Provider temporarily unavailable")
     files = SimpleNamespace(get_file_info=AsyncMock(return_value={}), read_file=read)
+    if failure in ("provider_missing_file", "provider_missing_download"):
+        missing = SandboxApiException("file not found", status_code=404)
+        files.get_file_info.side_effect = missing
+        files.read_bytes_stream = AsyncMock(side_effect=missing)
     raw = SimpleNamespace(id=reserved.command.sandbox_instance_id, files=files, close=AsyncMock())
     create = AsyncMock(return_value=control)
     monkeypatch.setattr(opensandbox.SandboxManager, "create", create)
     monkeypatch.setattr(opensandbox.Sandbox, "connect", AsyncMock(return_value=raw))
     task_id = "bgt-missing" if failure == "missing_task" else reserved.task.id
     path = task_path(workspace_id, api_task_context.conversation.id)
-    response = await client.get(f"{path}/{task_id}/output")
+    suffix = "?download=true" if failure == "provider_missing_download" else ""
+    response = await client.get(f"{path}/{task_id}/output{suffix}")
     assert response.status_code == expected_status, response.text
     if failure in ("missing_task", "missing_log"):
         create.assert_not_awaited()
