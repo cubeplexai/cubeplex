@@ -375,6 +375,15 @@ async def process_one_queue_item(
                 async with session_maker() as session:
                     execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
 
+        # The fingerprint is the request, not the resolved preset. Human IM
+        # messages are admitted with model_key unset; passing the resolved
+        # key back into start_run makes resolve_user_run reject the run.
+        # Automatic handoffs fingerprint that frozen key on purpose.
+        request_model_key = (
+            None
+            if admitted is None or admitted.admission.source_kind == "user_message"
+            else admitted.execution.model_key
+        )
         run_id = await run_manager.start_run(
             conversation_id=captured["conversation_id"],
             content=captured["content"],
@@ -392,7 +401,7 @@ async def process_one_queue_item(
                 sender_display_name=captured["sender_display_name"],
             ),
             run_id=admitted.admission.run_id if admitted is not None else None,
-            model_key=admitted.execution.model_key if admitted is not None else None,
+            model_key=request_model_key,
             reasoning=admitted.execution.reasoning if admitted is not None else None,
             cancel_pending_hitl=admitted is None,
             llm_snapshot=execution_snapshot,

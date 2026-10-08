@@ -133,6 +133,56 @@ class _FakeRunManager:
         return f"run-fake-{len(self.calls)}"
 
 
+class _AdmissionResolvingRunManager:
+    """Stand-in that checks the admission the same way ``RunManager.start_run`` does.
+
+    The production worker used to pass the resolved preset key for a human
+    message admitted with ``model_key=None``. ``resolve_user_run`` then
+    rejects the run, and a fake that only records kwargs never notices.
+    """
+
+    def __init__(self, maker: async_sessionmaker[AsyncSession]) -> None:
+        self._maker = maker
+        self.model_keys: list[str | None] = []
+
+    async def start_run(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        attachments: list[str] | None,
+        ctx: RunContext,
+        run_id: str | None = None,
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
+        cancel_pending_hitl: bool = False,
+        llm_snapshot: object | None = None,
+        admission_id: str | None = None,
+    ) -> str:
+        del cancel_pending_hitl
+        assert run_id is not None
+        assert admission_id is not None
+        assert isinstance(llm_snapshot, LLMSnapshot)
+        async with self._maker() as session:
+            await ConversationExecutionService(
+                session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            ).resolve_user_run(
+                admission_id=admission_id,
+                conversation_id=conversation_id,
+                actor_user_id=ctx.user_id,
+                run_id=run_id,
+                intent=UserMessageIntent(
+                    content=content,
+                    attachment_ids=tuple(attachments or []),
+                    model_key=model_key,
+                    reasoning=reasoning or ReasoningControl(),
+                ),
+                snapshot=llm_snapshot,
+            )
+        self.model_keys.append(model_key)
+        return run_id
+
+
 async def test_worker_processes_one_item_and_completes_receipt(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
@@ -535,6 +585,132 @@ async def test_revoked_automatic_handoff_completes_without_starting(
 
     assert completed is True
     assert run_manager.calls == []
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        assert item.status == "completed"
+
+
+async def test_human_im_message_resolves_against_its_admission(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Human IM requests have no model selection. Replay that request."""
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-human-admission",
+            channel_id="oc_chat",
+            scope_key="u:human-admission",
+            scope_kind="participant",
+            reply_to_id=None,
+            inbound_message_id="ev-human-admission",
+            sender_ref="human-admission",
+            sender_open_id="human-admission",
+            text="hello from im",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    run_manager = _AdmissionResolvingRunManager(maker)
+    did_run = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=run_manager,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
+        deliverable_connection_ids=lambda: {account.id},
+    )
+
+    assert did_run is True
+    assert run_manager.model_keys == [None]
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        admission = await session.get(ConversationExecutionAdmission, item.execution_admission_id)
+        assert item.status == "completed"
+        assert admission is not None
+        assert admission.source_kind == "user_message"
+        assert admission.resolved_execution is not None
+        assert admission.resolved_execution["model_key"] == "pro"
+
+
+async def test_automatic_im_handoff_resolves_with_its_execution_model(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Schedules and triggers fingerprint the frozen execution model key."""
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="ev-automatic-admission",
+            channel_id="oc_chat",
+            scope_key="u:automatic-admission",
+            scope_kind="participant",
+            reply_to_id=None,
+            inbound_message_id="ev-automatic-admission",
+            sender_ref="automatic-admission",
+            sender_open_id="automatic-admission",
+            text="run the schedule",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)
+            )
+        ).scalar_one()
+        snapshot = await im_test_execution_snapshot(session, account.org_id)
+        execution = ResolvedExecution(
+            model_key="pro",
+            primary="provider/default",
+            reasoning=ReasoningControl(),
+            trigger="automated",
+        )
+        admitted = await ConversationExecutionService(
+            session,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+        ).admit_automatic_run(
+            conversation_id=item.conversation_id,
+            actor_user_id=_USER_ID,
+            source_kind="schedule_occurrence",
+            source_id="stkrn-automatic-admission",
+            intent=UserMessageIntent(
+                content=item.content,
+                model_key=execution.model_key,
+                reasoning=execution.reasoning,
+            ),
+            execution=execution,
+            snapshot=snapshot,
+            now=datetime.now(UTC),
+        )
+        item.execution_admission_id = admitted.admission.id
+        item.inbound_message_id = None
+        await session.commit()
+
+    run_manager = _AdmissionResolvingRunManager(maker)
+    did_run = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=run_manager,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
+        deliverable_connection_ids=lambda: {account.id},
+    )
+
+    assert did_run is True
+    assert run_manager.model_keys == ["pro"]
     async with maker() as session:
         item = (
             await session.execute(
