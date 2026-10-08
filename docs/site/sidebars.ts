@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Changelog',
-      items: ['changelog/0.9.0'],
+      items: ['changelog/0.9.1', 'changelog/0.9.0'],
     },
     {
       type: 'category',
