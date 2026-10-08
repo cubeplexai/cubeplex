@@ -75,8 +75,8 @@ fi
 # The Dockerfile hardcodes this ref for the neko stage. daemon.json
 # registry-mirrors only accelerate docker.io, so pull ghcr from a mirror and
 # retag it — the build then finds it locally and never reaches ghcr.io.
-NEKO_REF="ghcr.io/m1k1o/neko/chromium:latest"
-NEKO_MIRROR="${NEKO_MIRROR:-ghcr.nju.edu.cn/m1k1o/neko/chromium:latest}"
+NEKO_REF="ghcr.io/m1k1o/neko/chromium:3.1.4"
+NEKO_MIRROR="${NEKO_MIRROR:-ghcr.nju.edu.cn/m1k1o/neko/chromium:3.1.4}"
 
 BUILD_ARGS=(--build-arg "BASE_IMAGE=$BASE_IMAGE")
 

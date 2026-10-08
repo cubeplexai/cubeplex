@@ -680,7 +680,7 @@ def create_app(
     app = FastAPI(
         title="CubePlex API",
         description="AI Agent System Backend",
-        version="0.9.0",
+        version="0.9.1",
         lifespan=lifespan,
     )
 
