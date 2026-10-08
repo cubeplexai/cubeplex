@@ -173,8 +173,8 @@ $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```yaml
 image:
   # 固定成与 chart appVersion 不同的镜像版本：
-  backend:  { tag: "v0.9.1" }
-  frontend: { tag: "v0.9.1" }
+  backend:  { tag: "v0.9.2" }
+  frontend: { tag: "v0.9.2" }
 ```
 
 自己构建 / 私有 registry 的镜像，则额外设置其位置：
@@ -488,7 +488,7 @@ egress:
   sandboxNamespace: "opensandbox"
   webhook:
     image:
-      tag: "v0.9.1"             # 与 backend/frontend 相同的 release 版本
+      tag: "v0.9.2"             # 与 backend/frontend 相同的 release 版本
     # 必须与 opensandbox-server 配置的 egress.image 完全一致。
     # 国内镜像源：sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
     egressImage: "opensandbox/egress:v1.0.12"
@@ -658,7 +658,7 @@ backend:
 
 ```bash
 helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --namespace cubeplex --create-namespace \
   --values values.local.yaml \
   --wait --timeout 10m
@@ -951,8 +951,8 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "v0.9.1" }
-  frontend: { tag: "v0.9.1" }
+  backend:  { tag: "v0.9.2" }
+  frontend: { tag: "v0.9.2" }
 
 backend:
   configOverrides:
