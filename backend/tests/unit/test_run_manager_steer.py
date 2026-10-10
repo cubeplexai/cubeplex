@@ -66,6 +66,7 @@ def _make_manager() -> RunManager:
     manager._redis = _FakeRedis()  # type: ignore[assignment]
     manager._key_prefix = "t"
     manager._cleanup_tasks = set()
+    manager._metric_task_started_at = {}
     manager._agent_claim_tokens = {}
     manager._resume_claim_tokens = {}
     manager._preparing_claim_tokens = {}
