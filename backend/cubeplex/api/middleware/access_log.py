@@ -6,8 +6,8 @@ Logs one line per HTTP request via loguru, matching the app's log format:
 
     <client ip> <method> <path?query> <status> <duration>ms
 
-Health-probe paths and CORS preflights (OPTIONS) are skipped so k8s liveness
-/ readiness checks don't flood the log.
+Health-probe paths, Prometheus scrapes, and CORS preflights (OPTIONS) are skipped
+so periodic probes don't flood the log.
 """
 
 import time
@@ -31,7 +31,11 @@ class AccessLogMiddleware:
 
         method = scope["method"]
         path = scope["path"]
-        if method == "OPTIONS" or any(path.startswith(p) for p in _SKIP_PATH_PREFIXES):
+        if (
+            method == "OPTIONS"
+            or path == "/metrics"
+            or any(path.startswith(p) for p in _SKIP_PATH_PREFIXES)
+        ):
             await self.app(scope, receive, send)
             return
 

@@ -74,7 +74,7 @@ def record_llm_call(outcome: str, usage: dict[str, int] | None = None) -> None:
 
 
 def record_tool_call(name: str, *, is_error: bool) -> None:
-    if name in {"execute", "read", "write", "edit"}:
+    if name in {"execute", "monitor", "kill_execute", "read", "write", "edit", "sandbox_config"}:
         category = "sandbox"
     elif name == "subagent":
         category = "subagent"

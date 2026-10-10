@@ -797,7 +797,7 @@ your Prometheus installation to use those annotations. `/metrics` is available
 through the backend ClusterIP Service, not the public Ingress. To inspect it:
 
 ```bash
-kubectl -n cubeplex port-forward svc/cubeplex-backend 18000:8000
+kubectl -n cubeplex port-forward svc/cubeplex-backend 18000:http
 curl http://localhost:18000/metrics
 ```
 

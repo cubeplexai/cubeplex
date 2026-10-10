@@ -11,7 +11,7 @@ from prometheus_fastapi_instrumentator.metrics import Info
 from starlette.requests import Request
 from starlette.responses import Response
 
-from cubeplex.metrics import _record_http_latency, record_llm_call
+from cubeplex.metrics import _record_http_latency, record_llm_call, record_tool_call
 from cubeplex.middleware.metrics import ToolMetricsMiddleware
 from cubeplex.streams.run_manager import RunManager
 
@@ -57,6 +57,16 @@ def test_llm_token_metric_uses_only_fixed_directions() -> None:
         REGISTRY.get_sample_value("cubeplex_llm_tokens_total", {"direction": "cache_read"})
         == reads_before + 3
     )
+
+
+def test_sandbox_tool_metric_includes_background_and_config_tools() -> None:
+    labels = {"category": "sandbox", "outcome": "success"}
+    before = REGISTRY.get_sample_value("cubeplex_tool_calls_total", labels) or 0
+
+    for name in ("monitor", "kill_execute", "sandbox_config"):
+        record_tool_call(name, is_error=False)
+
+    assert REGISTRY.get_sample_value("cubeplex_tool_calls_total", labels) == before + 3
 
 
 @pytest.mark.asyncio
