@@ -970,6 +970,8 @@ async def test_idle_notice_is_delivered_only_after_initial_checkpoint(
         "cubeplex.llm.snapshot.load_llm_snapshot",
         AsyncMock(return_value=snapshot()),
     )
+    create_run_spy = AsyncMock(wraps=create_run)
+    monkeypatch.setattr("cubeplex.streams.run_manager.create_run", create_run_spy)
 
     try:
         assert await run_manager.start_background_notice(
@@ -990,6 +992,7 @@ async def test_idle_notice_is_delivered_only_after_initial_checkpoint(
         initial = checkpoint.messages[0]
         assert initial.metadata["source"] == "background_task"
         assert initial.metadata["notice_id"] == event.id
+        assert create_run_spy.await_args.kwargs["user_message"] == ""
         assert provider.call_count == 1
     finally:
         await run_fixtures.cleanup_run_rows(db_session, event.conversation_id)

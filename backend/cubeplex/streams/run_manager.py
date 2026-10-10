@@ -1256,7 +1256,7 @@ class RunManager:
                 conversation_id=conversation_id,
                 status="running",
                 started_at=started_at,
-                user_message=content,
+                user_message=content if background_notice_id is None else "",
                 ttl_seconds=self._run_event_ttl_seconds,
                 trigger=ctx.trigger,
                 claim_token=ctx.execution.attempt_id if ctx.execution is not None else None,
