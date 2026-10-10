@@ -725,6 +725,11 @@ def create_app(
     if config.get("logging.access_log", True):
         app.add_middleware(AccessLogMiddleware)
 
+    from cubeplex.metrics import ConnectionMetricsMiddleware, instrumentator
+
+    instrumentator.instrument(app)
+    app.add_middleware(ConnectionMetricsMiddleware)
+
     # Wire slowapi limiter into app state + exception handler
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
@@ -880,5 +885,7 @@ def create_app(
     # port.
     if _egress_auth_config.get("mode", "mtls") == "dev":
         app.include_router(internal_egress.router, prefix="/api/v1")
+
+    instrumentator.expose(app, include_in_schema=False)
 
     return app

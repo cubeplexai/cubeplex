@@ -791,6 +791,18 @@ INGRESS_IP=<your node IP> deploy/kubernetes/scripts/smoke-test.sh
 Checks: rollout complete, health endpoints respond, ingress routes backend
 + frontend, Next.js renders HTML. Does **not** hit the LLM.
 
+The backend Pod has `prometheus.io/scrape`, `prometheus.io/path`, and
+`prometheus.io/port` annotations for annotation-based Pod discovery. Configure
+your Prometheus installation to use those annotations. `/metrics` is available
+through the backend ClusterIP Service, not the public Ingress. To inspect it:
+
+```bash
+kubectl -n cubeplex port-forward svc/cubeplex-backend 18000:8000
+curl http://localhost:18000/metrics
+```
+
+See the [metric list](./overview.md#metrics) for names and counting rules.
+
 ### 6.3 End-to-end test (LLM round-trip)
 
 ```bash

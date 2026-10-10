@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -28,6 +29,14 @@ from cubeplex.agents.schemas import (
     StatusEvent,
 )
 from cubeplex.errors import ErrorCode, classify_exception, english_fallback
+from cubeplex.metrics import (
+    AGENT_HITL_PAUSES,
+    AGENT_RUN_ATTEMPT_DURATION,
+    AGENT_RUN_ATTEMPTS_ACTIVE,
+    AGENT_RUN_ATTEMPTS_STARTED,
+    AGENT_RUNS_FINISHED,
+    run_trigger_label,
+)
 from cubeplex.services.usage import apply_last_llm_usage
 from cubeplex.streams.execution_adapter import (
     HOST_EVENT_ENQUEUE_TIMEOUT_SECONDS,
@@ -1076,6 +1085,7 @@ class RunManager:
         self._run_event_ttl_seconds = run_event_ttl_seconds
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._metric_task_started_at: dict[asyncio.Task[None], float] = {}
         self._cleanup_tasks: set[asyncio.Task[None]] = set()
         self._agents: dict[str, Any] = {}
         self._agent_claim_tokens: dict[str, tuple[Any, str | None]] = {}
@@ -1113,6 +1123,10 @@ class RunManager:
         completed_task: asyncio.Task[None],
     ) -> None:
         """Done-callback that removes the run task and signals drain when empty."""
+        metric_started_at = self._metric_task_started_at.pop(completed_task, None)
+        if metric_started_at is not None:
+            AGENT_RUN_ATTEMPTS_ACTIVE.dec()
+            AGENT_RUN_ATTEMPT_DURATION.observe(time.perf_counter() - metric_started_at)
         self._cleanup_tasks.discard(completed_task)
         if self._tasks.get(run_id) is not completed_task:
             return
@@ -1124,6 +1138,11 @@ class RunManager:
         getattr(self, "_cancelled_pre_execution_inputs", {}).pop(run_id, None)
         if not self._tasks:
             self._tasks_empty.set()
+
+    def _observe_task(self, task: asyncio.Task[None], *, trigger: str, phase: str) -> None:
+        self._metric_task_started_at[task] = time.perf_counter()
+        AGENT_RUN_ATTEMPTS_ACTIVE.inc()
+        AGENT_RUN_ATTEMPTS_STARTED.labels(trigger=run_trigger_label(trigger), phase=phase).inc()
 
     async def start_run(
         self,
@@ -1388,6 +1407,7 @@ class RunManager:
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
+        self._observe_task(task, trigger=ctx.trigger, phase="start")
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
@@ -1866,6 +1886,7 @@ class RunManager:
         )
         self._tasks_empty.clear()
         self._tasks[run_id] = task
+        self._observe_task(task, trigger=ctx.trigger, phase="resume")
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
@@ -1972,6 +1993,7 @@ class RunManager:
         self._cleanup_tasks.add(task)
         self._tasks_empty.clear()
         self._tasks[run_id] = task
+        self._observe_task(task, trigger=ctx.trigger, phase="cancel_cleanup")
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
@@ -2177,6 +2199,8 @@ class RunManager:
                     if not recorded:
                         raise RunClaimLost("cleanup terminal outcome belongs to another attempt")
                     await outcome_session.commit()
+                    if admission.run_terminal_status is None:
+                        AGENT_RUNS_FINISHED.labels(outcome=terminal_status).inc()
             released = await clear_active_run(
                 self._redis,
                 prefix=self._key_prefix,
@@ -2838,6 +2862,7 @@ class RunManager:
             )
             if recorded:
                 await session.commit()
+                AGENT_RUNS_FINISHED.labels(outcome=status).inc()
             return recorded
 
     async def _require_reflection_authority(
@@ -4838,6 +4863,9 @@ class RunManager:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
         # 7. SubagentMiddleware — cubeloop built-in; cubeplex only maps events to SSE.
+        from cubeplex.middleware.metrics import ToolMetricsMiddleware
+
+        tool_metrics_mw = ToolMetricsMiddleware()
         try:
             from cubeloop.middleware.subagents import SubagentMiddleware
 
@@ -4881,6 +4909,7 @@ class RunManager:
                     *authority_middleware,
                     *_cost_mw_for_inherit,
                     tool_result_limit_mw,
+                    tool_metrics_mw,
                 ],
                 excluded_tool_names={"subagent", "load_skill"},
                 event_mapper=map_subagent_event,
@@ -4959,6 +4988,7 @@ class RunManager:
         # Last after_tool_call rewriter so truncated content is what
         # ToolExecutionEndEvent (and the model) see.
         cubeloop_middleware.append(tool_result_limit_mw)
+        cubeloop_middleware.append(tool_metrics_mw)
 
         # --- Final tool merge ---
         # Stable composition order — changes invalidate the prompt cache prefix:
@@ -5645,6 +5675,8 @@ class RunManager:
                 status=final_status,
                 **meta_claim_kwargs,
             )
+            if final_status == "paused_hitl":
+                AGENT_HITL_PAUSES.inc()
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             # Post-done bookkeeping: the stream is closed, so failures here
             # must not surface as SSE error events — log and move on. The
@@ -6368,6 +6400,8 @@ class RunManager:
             # finalize_run_meta_if_claim_matches (CAS-guarded). A naive
             # update_run_meta would race with whatever flow stole the slot
             # while we were running.
+            if final_status == "paused_hitl":
+                AGENT_HITL_PAUSES.inc()
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             await self._maybe_consolidate_memory(
                 conversation_id=conversation_id,

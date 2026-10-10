@@ -33,6 +33,7 @@ from loguru import logger
 
 from cubeplex.db.engine import async_session_maker
 from cubeplex.llm.config import ModelCost
+from cubeplex.metrics import record_llm_call
 from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 from cubeplex.models.public_id import generate_public_id
 from cubeplex.repositories.billing import BillingRepository
@@ -138,6 +139,7 @@ class CostMiddleware(Middleware):
             async with async_session_maker() as session:
                 repo = BillingRepository(session, org_id=self._org_id)
                 await repo.insert_llm_event(be, le)
+            record_llm_call("success", usage)
 
         except Exception as exc:
             logger.warning("billing write failed (run_id={}): {}", run_id, exc)

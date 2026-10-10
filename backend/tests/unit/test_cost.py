@@ -13,11 +13,13 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cubeloop.providers.base import AssistantMessage, TextContent, Usage
+from prometheus_client import REGISTRY
 
 from cubeplex.llm.config import ModelCost
 from cubeplex.middleware.cost import CostMiddleware, _compute_cost_micro, _extract_usage
@@ -506,3 +508,39 @@ async def test_billing_write_failure_does_not_raise() -> None:
         await asyncio.sleep(0)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_llm_metrics_follow_successful_billing_write() -> None:
+    mw = _make_middleware()
+    response = _make_response(input_tokens=17)
+    labels = {"outcome": "success"}
+    before = REGISTRY.get_sample_value("cubeplex_llm_calls_total", labels) or 0
+
+    class _FakeRepo:
+        def __init__(self, session: Any, *, org_id: str) -> None:
+            pass
+
+        async def insert_llm_event(self, be: Any, le: Any) -> None:
+            return None
+
+    fake_session = AsyncMock()
+    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+    fake_session.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
+    ):
+        await mw._write(response, "bill-test", datetime.now(UTC), "success", None)
+    assert REGISTRY.get_sample_value("cubeplex_llm_calls_total", labels) == before + 1
+
+    class _BrokenRepo(_FakeRepo):
+        async def insert_llm_event(self, be: Any, le: Any) -> None:
+            raise RuntimeError("write failed")
+
+    with (
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _BrokenRepo),
+    ):
+        await mw._write(response, "bill-failed", datetime.now(UTC), "success", None)
+    assert REGISTRY.get_sample_value("cubeplex_llm_calls_total", labels) == before + 1

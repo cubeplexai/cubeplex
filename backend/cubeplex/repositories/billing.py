@@ -9,6 +9,7 @@ from typing import Any, Literal
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubeplex.metrics import record_llm_call
 from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
 
@@ -68,6 +69,7 @@ class BillingRepository:
         self.session.add(be)
         self.session.add(le)
         await self.session.commit()
+        record_llm_call("fallback_failed")
 
     async def get_workspace_spend(
         self,
