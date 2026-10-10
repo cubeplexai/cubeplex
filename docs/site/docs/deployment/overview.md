@@ -175,6 +175,32 @@ while migration is in progress. Use this rollout order:
 Objects historically written below a conversation other than the artifact's
 owner are not discovered automatically and require manual recovery.
 
+## Metrics
+
+The backend serves Prometheus text at `GET /metrics` without application
+authentication. Scrape each backend instance separately. The endpoint has no
+tenant, user, conversation, run, model, or raw tool names in its labels.
+Counters reset when a backend process restarts; billing records remain the
+source of truth for historical usage.
+
+| Metric | Meaning |
+|---|---|
+| `cubeplex_http_requests_total` | Completed HTTP requests by route template, method, and status. SSE requests count when the stream closes. |
+| `cubeplex_http_request_duration_seconds` | Completed non-SSE HTTP request duration. Health probes and `/metrics` are excluded. |
+| `cubeplex_http_requests_in_flight` | HTTP requests currently being served, including SSE streams. |
+| `cubeplex_sse_connections_active`, `cubeplex_sse_connections_opened_total` | Open SSE streams and streams opened since process start. |
+| `cubeplex_agent_run_attempts_active`, `cubeplex_agent_run_attempts_started_total` | Worker tasks executing or cleaning up, and tasks scheduled by trigger and phase. A HITL pause has no active worker. |
+| `cubeplex_agent_run_attempt_duration_seconds` | Worker task duration including cleanup; time waiting for a HITL answer is excluded. |
+| `cubeplex_agent_runs_finished_total` | Durable terminal outcomes recorded by this process: `completed`, `cancelled`, `errored`, `failed`. |
+| `cubeplex_agent_hitl_pauses_total` | Run attempts that reached a HITL pause. |
+| `cubeplex_llm_calls_total`, `cubeplex_llm_tokens_total` | Committed LLM billing events and their token usage. Call outcomes are `success` and `fallback_failed`. |
+| `cubeplex_tool_calls_total` | Completed tool calls by fixed category and success/error outcome. |
+
+The Prometheus Python client also exports `process_cpu_seconds_total`,
+`process_resident_memory_bytes`, and `process_open_fds`. Use host/container
+exporters for machine and container resources, and separate Postgres/Redis
+exporters for those services.
+
 ## Next steps
 
 - [Docker Compose install guide](./docker-compose.md)

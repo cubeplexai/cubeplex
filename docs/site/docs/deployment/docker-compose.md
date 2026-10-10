@@ -262,6 +262,25 @@ registration.
 Both scripts default to `localhost`; override with `HOST`, `BACKEND_PORT`,
 `FRONTEND_PORT` to run against a remote host.
 
+### Prometheus metrics
+
+The backend serves `/metrics` on its mapped `BACKEND_PORT` (default 8000).
+The Compose service has `prometheus.io/*` labels for Docker service discovery;
+labels alone do not configure a Prometheus scrape job. A Prometheus container
+on the same Compose network can use:
+
+```yaml
+scrape_configs:
+  - job_name: cubeplex-backend
+    static_configs:
+      - targets: ["backend:8000"]
+```
+
+From the host, verify with `curl http://localhost:${BACKEND_PORT:-8000}/metrics`.
+Because the backend port is mapped to the host, restrict access to that port
+when the metrics endpoint should stay internal. See the
+[metric list](./overview.md#metrics) for names and counting rules.
+
 ## 7. Troubleshooting
 
 ### Backend keeps restarting

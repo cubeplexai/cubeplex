@@ -57,6 +57,7 @@ dependencies = [
     "websockets>=11,<18",
     "aiohttp>=3.14.3",
     "cubeloop[mcp,postgres,trace-cli,tracing,tracing-otlp]",
+    "prometheus-fastapi-instrumentator==8.1.0",
 ]
 
 [project.optional-dependencies]
