@@ -158,7 +158,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           prune-cache: false
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@v6.1.0
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v7
