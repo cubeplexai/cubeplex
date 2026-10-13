@@ -24,7 +24,6 @@ from cubeplex.middleware.sandbox import (
     _ExecuteArgs,
     _FileReadArgs,
     _first_changed_line,
-    _has_shell_background_operator,
     _make_edit_file_tool,
     _make_execute_tool,
     _make_file_read_tool,
@@ -119,40 +118,26 @@ def test_subagent_sandbox_tools_have_no_background_capability() -> None:
     assert "notify_on_complete" not in execute.parameters.model_fields
 
 
-@pytest.mark.parametrize(
-    ("command", "background"),
-    [
-        ("sleep 999 & echo started", True),
-        ("(sleep 999 &)", True),
-        ("echo hi && echo done", False),
-        ("echo '&'", False),
-        (r"echo \&", False),
-        ("echo hello >&2", False),
-        ("echo hello &> /tmp/output", False),
-    ],
-)
-def test_subagent_shell_background_operator_detection(command: str, background: bool) -> None:
-    assert _has_shell_background_operator(command) is background
-
-
 @pytest.mark.asyncio
-async def test_subagent_rejects_embedded_shell_background_operator() -> None:
+@pytest.mark.parametrize("command", ["cat <&0", "echo $((flags & 1))"])
+async def test_subagent_accepts_foreground_shell_syntax(command: str) -> None:
     sandbox = _make_sandbox()
     sandbox.supports_background.return_value = True
-    sandbox.start = AsyncMock()
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-shell"))
+    sandbox.poll = AsyncMock(return_value=ProcessSnapshot(status="exited", exit_code=0))
     execute = next(
         tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
     )
 
     result = await execute.execute(
-        "tc-shell-background",
+        "tc-shell-syntax",
         execute.parameters.model_validate(
-            {"description": "Start a shell command", "command": "sleep 999 & echo started"}
+            {"description": "Run a shell command", "command": command}
         ),
     )
 
-    assert result.is_error is True
-    sandbox.start.assert_not_called()
+    assert result.details == {"status": "exited"}
+    sandbox.start.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -359,31 +359,6 @@ def _looks_like_shell_background(command: str) -> bool:
     return _SHELL_BG_RE.search(command.strip()) is not None
 
 
-def _has_shell_background_operator(command: str) -> bool:
-    quote: str | None = None
-    index = 0
-    while index < len(command):
-        char = command[index]
-        if char == "\\" and quote != "'":
-            index += 2
-            continue
-        if char == quote:
-            quote = None
-        elif quote is None:
-            if char in ("'", '"'):
-                quote = char
-            elif char == "&":
-                before = command[index - 1] if index else ""
-                after = command[index + 1] if index + 1 < len(command) else ""
-                if after == "&":
-                    index += 2
-                    continue
-                if before not in ("&", "|", ">") and after != ">":
-                    return True
-        index += 1
-    return False
-
-
 def _is_bare_sleep(command: str) -> bool:
     """True for `sleep` / `sleep 30`, not `sleep 5 && make`."""
     return _BARE_SLEEP_RE.match(command.strip()) is not None
@@ -1302,9 +1277,7 @@ def _make_foreground_execute_tool(
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         async def run() -> AgentToolResult:
-            if _looks_like_shell_background(args.command) or _has_shell_background_operator(
-                args.command
-            ):
+            if _looks_like_shell_background(args.command):
                 return AgentToolResult(
                     content=[TextContent(text="Do not background shell commands.")],
                     is_error=True,
