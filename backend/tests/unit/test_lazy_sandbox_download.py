@@ -13,7 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, Sandbox
+from cubeplex.sandbox.base import (
+    ProcessHandle,
+    ProcessSnapshot,
+    Sandbox,
+    SandboxError,
+    SandboxInstanceGoneError,
+)
 from cubeplex.sandbox.lazy import LazySandbox
 from cubeplex.sandbox.manager import SandboxAttachment
 
@@ -95,18 +101,39 @@ async def test_foreground_operation_uses_one_lease_for_many_polls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_foreground_start_failure_recreates_backend_once() -> None:
+async def test_uncertain_foreground_start_failure_does_not_replay_operation() -> None:
     manager = _CountingManager()
     lazy = _make_lazy(manager)
     attempts: list[str] = []
 
     async def start_on_backend(backend: Sandbox) -> str:
         attempts.append(backend.id)
+        raise SandboxError("transport failed before start receipt")
+
+    with pytest.raises(SandboxError, match="transport failed"):
+        await lazy.run_with_backend(start_on_backend)
+
+    assert attempts == ["sbx-1"]
+    assert manager.create_count == 1
+
+
+@pytest.mark.asyncio
+async def test_confirmed_instance_loss_recreates_only_for_next_operation() -> None:
+    manager = _CountingManager()
+    lazy = _make_lazy(manager)
+    attempts: list[str] = []
+
+    async def operation(backend: Sandbox) -> str:
+        attempts.append(backend.id)
         if backend.id == "sbx-1":
-            raise ProcessStartFailure("backend disappeared before command started")
+            raise SandboxInstanceGoneError(backend.id)
         return backend.id
 
-    assert await lazy.run_with_backend(start_on_backend) == "sbx-2"
+    with pytest.raises(SandboxInstanceGoneError):
+        await lazy.run_with_backend(operation)
+
+    assert attempts == ["sbx-1"]
+    assert await lazy.run_with_backend(operation) == "sbx-2"
     assert attempts == ["sbx-1", "sbx-2"]
     assert manager.create_count == 2
 

@@ -35,7 +35,7 @@ from cubeplex.middleware.sandbox import (
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, SandboxError
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, SandboxError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -293,7 +293,41 @@ async def test_subagent_repeated_poll_failures_still_obey_command_deadline(
 
 
 @pytest.mark.asyncio
-async def test_subagent_start_failure_without_receipt_is_retryable() -> None:
+async def test_subagent_progress_callback_cannot_outlive_command_deadline() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="process")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="running", new_output="progress", log_cursor="1")
+    )
+    sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    async def on_update(_payload: AgentToolResult) -> None:
+        await asyncio.Event().wait()
+
+    result = await asyncio.wait_for(
+        execute.execute(
+            "tc-stalled-update",
+            execute.parameters.model_validate(
+                {"description": "Run a limited command", "command": "build", "timeout_seconds": 1}
+            ),
+            on_update=on_update,
+        ),
+        timeout=3,
+    )
+
+    assert result.is_error is True
+    assert "[timeout]" in _text(result)
+    sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_start_failure_without_receipt_does_not_replay() -> None:
     sandbox = _make_sandbox()
     sandbox.supports_background.return_value = True
     sandbox.start = AsyncMock(side_effect=RuntimeError("backend disappeared"))
@@ -301,7 +335,7 @@ async def test_subagent_start_failure_without_receipt_is_retryable() -> None:
         tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
     )
 
-    with pytest.raises(ProcessStartFailure):
+    with pytest.raises(RuntimeError, match="backend disappeared"):
         await execute.execute(
             "tc-start-error",
             execute.parameters.model_validate(
@@ -309,6 +343,7 @@ async def test_subagent_start_failure_without_receipt_is_retryable() -> None:
             ),
         )
 
+    sandbox.start.assert_awaited_once()
     sandbox.kill.assert_not_called()
 
 
@@ -735,6 +770,20 @@ async def test_execute_tool_timeout_returns_error_result() -> None:
     assert text.startswith("[timeout]")
     assert "3600s" in text
     assert result.is_error is True
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_does_not_treat_transport_deadline_as_command_timeout() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = False
+    sandbox.execute = AsyncMock(side_effect=SandboxError("context deadline exceeded"))
+    tool = _make_execute_tool(sandbox)
+
+    with pytest.raises(SandboxError, match="context deadline exceeded"):
+        await tool.execute(
+            "tc-transport-deadline",
+            _ExecuteArgs(command="build", description="Run a long build"),
+        )
 
 
 @pytest.mark.asyncio

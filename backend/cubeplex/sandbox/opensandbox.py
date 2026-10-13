@@ -13,6 +13,7 @@ from typing import Any
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
+from opensandbox.exceptions import SandboxApiException as _ProviderApiError
 from opensandbox.exceptions import SandboxException as _ProviderError
 from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 
@@ -24,6 +25,7 @@ from cubeplex.sandbox.base import (
     ProcessSnapshot,
     Sandbox,
     SandboxError,
+    SandboxInstanceGoneError,
 )
 from cubeplex.sandbox.panel_token import (
     get_panel_base_url,
@@ -170,6 +172,18 @@ class OpenSandbox(Sandbox):
     def supports_background_reconnect(self) -> bool:
         return True
 
+    async def _raise_if_instance_gone(self) -> None:
+        try:
+            info = await self._sandbox.get_info()
+        except _ProviderApiError as exc:
+            if exc.status_code == 404:
+                raise SandboxInstanceGoneError(self.id) from exc
+            return
+        except Exception:
+            return
+        if info.status.state in ("Failed", "Terminated", "Succeed"):
+            raise SandboxInstanceGoneError(self.id)
+
     async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
         with _as_sandbox_error():
             status = await self._sandbox.commands.get_command_status(handle.provider_ref)
@@ -222,12 +236,16 @@ class OpenSandbox(Sandbox):
                 if inspect.isawaitable(maybe):
                     await maybe
 
-        with _as_sandbox_error():
-            execution = await self._sandbox.commands.run(
-                command,
-                opts=opts,
-                handlers=ExecutionHandlers(on_init=_on_init, skip_accumulation=True),
-            )
+        try:
+            with _as_sandbox_error():
+                execution = await self._sandbox.commands.run(
+                    command,
+                    opts=opts,
+                    handlers=ExecutionHandlers(on_init=_on_init, skip_accumulation=True),
+                )
+        except SandboxError:
+            await self._raise_if_instance_gone()
+            raise
         ref = started[0] if started else str(execution.id or "")
         self._log_cursors[ref] = 0
         if on_started is not None and not started and ref:
@@ -237,8 +255,12 @@ class OpenSandbox(Sandbox):
         return ProcessHandle(command_id="", provider_ref=ref)
 
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:
-        status = await self.observe(handle)
-        output = await self.read_output(handle)
+        try:
+            status = await self.observe(handle)
+            output = await self.read_output(handle)
+        except SandboxError:
+            await self._raise_if_instance_gone()
+            raise
         return ProcessSnapshot(
             status=status.status,
             exit_code=status.exit_code,

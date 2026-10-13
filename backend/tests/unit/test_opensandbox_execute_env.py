@@ -13,9 +13,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.execd import RunCommandOpts
 
-from cubeplex.sandbox.base import ProcessHandle
+from cubeplex.sandbox.base import ProcessHandle, SandboxError, SandboxInstanceGoneError
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
 
@@ -114,6 +115,21 @@ async def test_start_keeps_main_agent_deadline_in_application() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_confirms_dead_sandbox_without_replaying_command() -> None:
+    backend, raw = _make_backend()
+    raw.commands.run = AsyncMock(
+        side_effect=SandboxApiException("sandbox unavailable", status_code=404)
+    )
+    raw.get_info = AsyncMock(return_value=MagicMock(status=MagicMock(state="Terminated")))
+
+    with pytest.raises(SandboxInstanceGoneError):
+        await backend.start("echo hello")
+
+    raw.commands.run.assert_awaited_once()
+    raw.get_info.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_execute_timeout_error_returns_marker() -> None:
     backend, raw = _make_backend()
 
@@ -161,6 +177,32 @@ async def test_poll_preserves_provider_error_reason() -> None:
 
     assert snapshot.status == "exited"
     assert snapshot.error == "command timed out"
+
+
+@pytest.mark.asyncio
+async def test_poll_confirms_missing_sandbox_instance_after_provider_error() -> None:
+    backend, raw = _make_backend()
+    raw.commands.get_command_status = AsyncMock(
+        side_effect=SandboxApiException("process unavailable", status_code=404)
+    )
+    raw.get_info = AsyncMock(return_value=MagicMock(status=MagicMock(state="Terminated")))
+
+    with pytest.raises(SandboxInstanceGoneError):
+        await backend.poll(ProcessHandle(command_id="scmd-1", provider_ref="process-1"))
+
+    raw.get_info.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_poll_keeps_command_error_retryable_while_instance_runs() -> None:
+    backend, raw = _make_backend()
+    raw.commands.get_command_status = AsyncMock(
+        side_effect=SandboxApiException("process unavailable", status_code=404)
+    )
+    raw.get_info = AsyncMock(return_value=MagicMock(status=MagicMock(state="Running")))
+
+    with pytest.raises(SandboxError, match="process unavailable"):
+        await backend.poll(ProcessHandle(command_id="scmd-1", provider_ref="process-1"))
 
 
 @pytest.mark.asyncio

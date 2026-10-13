@@ -26,10 +26,6 @@ class SandboxError(Exception):
     """
 
 
-class ProcessStartFailure(SandboxError):
-    """Command startup failed before the provider supplied a process handle."""
-
-
 class SandboxConflictError(SandboxError):
     """Sandbox is in a state that conflicts with the requested operation
     (e.g. restart while provisioning)."""

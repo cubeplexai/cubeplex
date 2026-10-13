@@ -57,7 +57,6 @@ from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubeplex.sandbox.base import (
     ProcessHandle,
     ProcessSnapshot,
-    ProcessStartFailure,
     Sandbox,
     SandboxInstanceGoneError,
 )
@@ -355,6 +354,11 @@ def _is_timeout_result(output: str, exit_code: int | None) -> bool:
 
 def _is_timeout_error(exc: BaseException | str) -> bool:
     text = str(exc).lower()
+    return "timeout" in text or "timed out" in text
+
+
+def _is_provider_timeout_status(error: str) -> bool:
+    text = error.lower()
     return any(term in text for term in ("timeout", "timed out", "deadline", "time limit"))
 
 
@@ -1201,14 +1205,14 @@ def _make_foreground_execute_tool(
                         )
                     )
                     if inspect.isawaitable(maybe):
-                        await maybe
+                        await asyncio.wait_for(maybe, timeout=remaining())
                 except Exception:
                     logger.exception("foreground execute on_update failed")
 
         async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
             nonlocal finished
             finished = True
-            if snapshot.error and _is_timeout_error(snapshot.error):
+            if snapshot.error and _is_provider_timeout_status(snapshot.error):
                 return AgentToolResult(
                     content=[TextContent(text=_timeout_tool_message(timeout))],
                     details={"status": "timed_out"},
@@ -1241,20 +1245,15 @@ def _make_foreground_execute_tool(
             return max(0.0, deadline - time.monotonic())
 
         try:
-            try:
-                handle = await asyncio.wait_for(
-                    driver.start(
-                        args.command,
-                        timeout=timeout,
-                        provider_timeout=True,
-                        on_started=on_started,
-                    ),
-                    timeout=remaining(),
-                )
-            except Exception as exc:
-                if started_ref is None and not isinstance(exc, TimeoutError):
-                    raise ProcessStartFailure(str(exc)) from exc
-                raise
+            handle = await asyncio.wait_for(
+                driver.start(
+                    args.command,
+                    timeout=timeout,
+                    provider_timeout=True,
+                    on_started=on_started,
+                ),
+                timeout=remaining(),
+            )
             handle.command_id = command_id
             poll_failure_logged = False
             while True:
