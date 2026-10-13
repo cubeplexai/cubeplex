@@ -35,6 +35,8 @@ from cubeplex.middleware.sandbox import (
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+from cubeplex.sandbox.log_io import AppendOutputResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -121,9 +123,21 @@ async def test_subagent_execute_waits_for_final_result_past_background_threshold
 
     sandbox = _make_sandbox()
     sandbox.supports_background.return_value = True
-    sandbox.start = AsyncMock(side_effect=AssertionError("subagent started background command"))
-    sandbox.execute = AsyncMock(return_value=MagicMock(output="finished", exit_code=0))
+    handle = ProcessHandle(command_id="", provider_ref="process-1")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessSnapshot(status="running"),
+            ProcessSnapshot(status="exited", exit_code=0, new_output="finished"),
+        ]
+    )
+    monkeypatch.setattr(
+        sandbox_mod,
+        "_append_snapshot_output",
+        AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True)),
+    )
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0)
     mw = _make_middleware(sandbox=sandbox)
     subagent_tools = getattr(mw, "subagent_tools", None)
     assert subagent_tools is not None
@@ -138,25 +152,27 @@ async def test_subagent_execute_waits_for_final_result_past_background_threshold
 
     assert result.details == {"status": "exited"}
     assert _text(result) == "finished"
-    sandbox.execute.assert_awaited_once_with("echo finished", timeout=3600, on_chunk=ANY)
-    sandbox.start.assert_not_awaited()
+    sandbox.start.assert_awaited_once()
+    assert sandbox.start.await_args.args == ("echo finished",)
+    assert sandbox.start.await_args.kwargs["timeout"] == 3600
+    assert sandbox.poll.await_count == 2
+    sandbox.kill.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_subagent_execute_stops_when_agent_is_aborted() -> None:
     sandbox = _make_sandbox()
     started = asyncio.Event()
-    cancelled = asyncio.Event()
+    handle = ProcessHandle(command_id="", provider_ref="process-2")
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.kill = AsyncMock()
 
-    async def run_command(*_: Any, **__: Any) -> Any:
+    async def poll_command(*_: Any, **__: Any) -> Any:
         started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
+        await asyncio.Event().wait()
 
-    sandbox.execute = AsyncMock(side_effect=run_command)
+    sandbox.poll = AsyncMock(side_effect=poll_command)
     mw = _make_middleware(sandbox=sandbox)
     subagent_tools = getattr(mw, "subagent_tools", None)
     assert subagent_tools is not None
@@ -176,7 +192,104 @@ async def test_subagent_execute_stops_when_agent_is_aborted() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(call_task, timeout=1)
-    assert cancelled.is_set()
+    sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_stops_process_when_start_is_aborted() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    started = asyncio.Event()
+    sandbox.kill = AsyncMock()
+
+    async def start_command(_command: str, **kwargs: Any) -> ProcessHandle:
+        kwargs["on_started"]("process-while-starting")
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("start should have been cancelled")
+
+    sandbox.start = AsyncMock(side_effect=start_command)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+    signal = asyncio.Event()
+    call_task = asyncio.create_task(
+        execute.execute(
+            "tc-start-abort",
+            execute.parameters.model_validate(
+                {"description": "Start long command", "command": "sleep 30"}
+            ),
+            signal=signal,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    signal.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(call_task, timeout=1)
+    killed = sandbox.kill.await_args.args[0]
+    assert isinstance(killed, ProcessHandle)
+    assert killed.provider_ref == "process-while-starting"
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_kills_command_at_requested_timeout() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="process-timeout")
+    sandbox.start = AsyncMock(return_value=handle)
+
+    async def poll_forever(_handle: ProcessHandle) -> ProcessSnapshot:
+        await asyncio.Event().wait()
+        raise AssertionError("poll should have timed out")
+
+    sandbox.poll = AsyncMock(side_effect=poll_forever)
+    sandbox.kill = AsyncMock()
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-timeout",
+        execute.parameters.model_validate(
+            {"description": "Run limited command", "command": "sleep 30", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.is_error is True
+    assert "[timeout]" in _text(result)
+    sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_bounds_verbose_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="process-3"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 100_000)
+    )
+    monkeypatch.setattr(
+        sandbox_mod,
+        "_append_snapshot_output",
+        AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True)),
+    )
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-verbose",
+        execute.parameters.model_validate({"description": "Run verbose build", "command": "build"}),
+    )
+
+    assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
+    assert "[truncated] full output written to" in _text(result)
+    assert sandbox.poll.await_count == 1
 
 
 def test_tools_property_returns_fresh_list_each_time() -> None:
@@ -839,7 +952,6 @@ async def test_auto_background_preserves_deadline_when_notifications_are_disable
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
-    from cubeplex.sandbox.base import ProcessHandle
     from cubeplex.sandbox.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
@@ -886,7 +998,6 @@ async def test_auto_background_hands_off_instead_of_waiting_at_run_end(
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
     from cubeplex.middleware.sandbox import _ReservedCommand
-    from cubeplex.sandbox.base import ProcessHandle
     from cubeplex.sandbox.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)

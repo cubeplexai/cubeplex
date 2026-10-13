@@ -126,26 +126,10 @@ class OpenSandbox(Sandbox):
             except Exception:
                 logger.exception("OpenSandbox on_chunk failed")
 
-        started_ref: str | None = None
-
-        async def _on_init(msg: Any) -> None:
-            nonlocal started_ref
-            execution_id = getattr(msg, "execution_id", None) or getattr(msg, "id", None)
-            if execution_id is not None:
-                started_ref = str(execution_id)
-
-        async def _interrupt_started() -> None:
-            if started_ref is None:
-                return
-            try:
-                await asyncio.wait_for(self._sandbox.commands.interrupt(started_ref), timeout=10)
-            except Exception as exc:
-                logger.warning("Could not interrupt foreground command {}: {}", started_ref, exc)
-
-        handlers = ExecutionHandlers(
-            on_init=_on_init,
-            on_stdout=_handle_output if on_chunk is not None else None,
-            on_stderr=_handle_output if on_chunk is not None else None,
+        handlers = (
+            ExecutionHandlers(on_stdout=_handle_output, on_stderr=_handle_output)
+            if on_chunk is not None
+            else None
         )
 
         async def _run() -> ExecuteResult:
@@ -174,14 +158,9 @@ class OpenSandbox(Sandbox):
                 return await asyncio.wait_for(_run(), timeout=timeout)
             return await _run()
         except TimeoutError:
-            await _interrupt_started()
             return ExecuteResult(output="[timeout]", exit_code=-1)
-        except asyncio.CancelledError:
-            await _interrupt_started()
-            raise
         except SandboxError as exc:
             if timeout is not None and _is_timeout_error(exc):
-                await _interrupt_started()
                 return ExecuteResult(output="[timeout]", exit_code=-1)
             raise
 

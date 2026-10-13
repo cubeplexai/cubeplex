@@ -54,7 +54,7 @@ from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox, SandboxError
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.background_task_lifecycle import LogState
@@ -181,6 +181,40 @@ def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
     if len(out) > EXECUTE_RESULT_SPILL_CHARS:
         return out[:EXECUTE_RESULT_SPILL_CHARS]
     return out
+
+
+class _StreamingExcerpt:
+    """Keep a bounded command preview while the full output is written to a log."""
+
+    def __init__(self) -> None:
+        self._total = 0
+        self._full: str | None = ""
+        self._head = ""
+        self._tail = ""
+
+    def append(self, text: str) -> None:
+        self._total += len(text)
+        half = EXECUTE_RESULT_SPILL_CHARS // 2
+        self._head += text[: max(0, half - len(self._head))]
+        self._tail = (self._tail + text)[-half:]
+        if self._full is not None:
+            self._full = self._full + text if self._total <= EXECUTE_RESULT_SPILL_CHARS else None
+
+    @property
+    def truncated(self) -> bool:
+        return self._full is None
+
+    def render(self, *, suffix: str = "") -> str:
+        budget = EXECUTE_RESULT_SPILL_CHARS - len(suffix)
+        if self._full is not None:
+            return _bounded_execute_excerpt(self._full, suffix=suffix)
+        marker = f"\n\n[... {self._total} chars total ...]\n\n"
+        keep = max(0, (budget - len(marker)) // 2)
+        omitted = max(0, self._total - 2 * keep)
+        marker = f"\n\n[... {omitted} chars omitted ...]\n\n"
+        keep = max(0, (budget - len(marker)) // 2)
+        tail = self._tail[-keep:] if keep else ""
+        return self._head[:keep] + marker + tail + suffix
 
 
 class _ForegroundExecuteArgs(BaseModel):
@@ -1081,12 +1115,91 @@ def _make_foreground_execute_tool(
     workspace_id: str | None = None,
     conversation_id: str | None = None,
 ) -> AgentTool[_ForegroundExecuteArgs]:
-    delegate = _make_execute_tool(
+    direct = _make_execute_tool(
         sandbox,
         workspace_id=workspace_id,
         conversation_id=conversation_id,
         auto_background=False,
     )
+
+    async def _run_polled(
+        args: _ForegroundExecuteArgs,
+        *,
+        on_update: Callable[[StructuredValue], None] | None,
+    ) -> AgentToolResult:
+        timeout = args.timeout_seconds or get_command_default_timeout_seconds()
+        command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
+        log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+        handle: ProcessHandle | None = None
+        started_ref: str | None = None
+
+        def on_started(ref: str) -> None:
+            nonlocal started_ref
+            started_ref = ref
+
+        excerpt = _StreamingExcerpt()
+        finished = False
+        try:
+            async with asyncio.timeout(timeout):
+                handle = await sandbox.start(args.command, timeout=timeout, on_started=on_started)
+                handle.command_id = command_id
+                while True:
+                    snapshot = await sandbox.poll(handle)
+                    written = await _append_snapshot_output(sandbox, log_path, snapshot)
+                    if not written.data_written:
+                        raise SandboxError("could not save foreground command output")
+                    if snapshot.log_cursor is not None:
+                        await sandbox.acknowledge_output(handle, snapshot.log_cursor)
+                    if snapshot.new_output:
+                        excerpt.append(snapshot.new_output)
+                        if on_update is not None:
+                            try:
+                                await _maybe_await(
+                                    on_update(
+                                        AgentToolResult(
+                                            content=[TextContent(text=excerpt.render())],
+                                            details={"status": "running"},
+                                        )
+                                    )
+                                )
+                            except Exception:
+                                logger.exception("execute on_update failed")
+                    if snapshot.status != "running":
+                        finished = True
+                        if snapshot.status == "killed":
+                            return AgentToolResult(
+                                content=[TextContent(text="[killed]")],
+                                details={"status": "killed"},
+                                is_error=True,
+                            )
+                        if snapshot.exit_code == 0 and workspace_id and conversation_id:
+                            _record_executed(workspace_id, conversation_id, args.command)
+                        suffix = (
+                            f"\n[exit code: {snapshot.exit_code}]"
+                            if snapshot.exit_code not in (None, 0)
+                            else ""
+                        )
+                        if excerpt.truncated:
+                            suffix += f"\n\n[truncated] full output written to {log_path}"
+                        return AgentToolResult(
+                            content=[TextContent(text=excerpt.render(suffix=suffix))],
+                            details={"status": "exited"},
+                        )
+                    await asyncio.sleep(_BACKGROUND_POLL_INTERVAL_SECONDS)
+        except TimeoutError:
+            return AgentToolResult(
+                content=[TextContent(text=_timeout_tool_message(timeout))],
+                is_error=True,
+            )
+        finally:
+            if not finished:
+                if handle is None and started_ref is not None:
+                    handle = ProcessHandle(command_id=command_id, provider_ref=started_ref)
+                try:
+                    if handle is not None:
+                        await asyncio.wait_for(sandbox.kill(handle), timeout=10)
+                except Exception:
+                    logger.exception("failed to stop foreground sandbox command {}", command_id)
 
     async def _execute(
         tool_call_id: str,
@@ -1096,7 +1209,14 @@ def _make_foreground_execute_tool(
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         async def run() -> AgentToolResult:
-            return await delegate.execute(
+            if _looks_like_shell_background(args.command):
+                return AgentToolResult(
+                    content=[TextContent(text="Do not background shell commands.")],
+                    is_error=True,
+                )
+            if sandbox.supports_background() is True:
+                return await _run_polled(args, on_update=on_update)
+            return await direct.execute(
                 tool_call_id,
                 _ExecuteArgs(
                     description=args.description,

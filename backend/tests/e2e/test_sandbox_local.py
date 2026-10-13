@@ -1,4 +1,6 @@
 import asyncio
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -105,6 +107,31 @@ async def test_kill_marks_process_killed() -> None:
     snap = await sandbox.poll(handle)
     assert snap.status == "killed"
     assert snap.exit_code is not None and snap.exit_code < 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "linux", reason="process state is checked through /proc")
+async def test_kill_stops_command_descendants() -> None:
+    sandbox = LocalSandbox()
+    handle = await sandbox.start("sh -c 'sleep 30 & echo $!; wait'")
+    child_pid: int | None = None
+    try:
+        async with asyncio.timeout(5):
+            while child_pid is None:
+                snapshot = await sandbox.poll(handle)
+                if snapshot.new_output.strip():
+                    child_pid = int(snapshot.new_output.strip())
+                    break
+                await asyncio.sleep(0.01)
+
+        await sandbox.kill(handle)
+        assert child_pid is not None
+        child_stat = Path(f"/proc/{child_pid}/stat")
+        async with asyncio.timeout(5):
+            while child_stat.exists() and child_stat.read_text().split()[2] != "Z":
+                await asyncio.sleep(0.01)
+    finally:
+        await sandbox.kill(handle)
 
 
 @pytest.mark.asyncio

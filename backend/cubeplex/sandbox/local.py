@@ -131,13 +131,6 @@ class LocalSandbox(Sandbox):
             except Exception:
                 pass
             return ExecuteResult(output="[timeout]", exit_code=-1)
-        except asyncio.CancelledError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            await proc.wait()
-            raise
 
         return ExecuteResult(
             output="".join(chunks),
