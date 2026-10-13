@@ -54,7 +54,13 @@ from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, Sandbox
+from cubeplex.sandbox.base import (
+    ProcessHandle,
+    ProcessSnapshot,
+    ProcessStartFailure,
+    Sandbox,
+    SandboxInstanceGoneError,
+)
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.background_task_lifecycle import LogState
@@ -1250,10 +1256,27 @@ def _make_foreground_execute_tool(
                     raise ProcessStartFailure(str(exc)) from exc
                 raise
             handle.command_id = command_id
+            poll_failure_logged = False
             while True:
                 if remaining() <= 0:
                     raise TimeoutError
-                snapshot = await asyncio.wait_for(driver.poll(handle), timeout=remaining())
+                try:
+                    snapshot = await asyncio.wait_for(driver.poll(handle), timeout=remaining())
+                except SandboxInstanceGoneError:
+                    raise
+                except Exception as exc:
+                    if remaining() <= 0:
+                        raise TimeoutError from exc
+                    if not poll_failure_logged:
+                        logger.warning(
+                            "retrying foreground sandbox command {} after poll failure: {}",
+                            command_id,
+                            exc,
+                        )
+                        poll_failure_logged = True
+                    await asyncio.sleep(min(_BACKGROUND_POLL_INTERVAL_SECONDS, remaining()))
+                    continue
+                poll_failure_logged = False
                 await accept_snapshot(snapshot)
                 if snapshot.status != "running":
                     return await completed_result(snapshot)

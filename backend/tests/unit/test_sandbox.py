@@ -35,7 +35,7 @@ from cubeplex.middleware.sandbox import (
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, SandboxError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -222,6 +222,74 @@ async def test_subagent_execute_streams_bounded_progress(
     assert _text(updates[0]).startswith("working")
     assert _text(updates[-1]).endswith(" done")
     assert "[truncated] full output unavailable" in _text(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("poll_error", [SandboxError("temporary HTTP failure"), TimeoutError()])
+async def test_subagent_execute_retries_transient_poll_failure(
+    monkeypatch: pytest.MonkeyPatch, poll_error: Exception
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="process")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            poll_error,
+            ProcessSnapshot(status="running"),
+            ProcessSnapshot(status="exited", exit_code=0, new_output="done", log_cursor="1"),
+        ]
+    )
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-poll-retry",
+        execute.parameters.model_validate(
+            {"description": "Complete a command", "command": "echo done"}
+        ),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert _text(result) == "done"
+    assert sandbox.poll.await_count == 3
+    sandbox.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_subagent_repeated_poll_failures_still_obey_command_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="process")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.poll = AsyncMock(side_effect=SandboxError("provider unavailable"))
+    sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0.01)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-poll-deadline",
+        execute.parameters.model_validate(
+            {"description": "Run a limited command", "command": "build", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.is_error is True
+    assert "[timeout]" in _text(result)
+    sandbox.kill.assert_awaited_once_with(handle)
 
 
 @pytest.mark.asyncio
