@@ -136,6 +136,22 @@ async def test_poll_prefers_persisted_handle_cursor_over_process_cache() -> None
 
 
 @pytest.mark.asyncio
+async def test_poll_preserves_provider_error_reason() -> None:
+    backend, raw = _make_backend()
+    raw.commands.get_command_status = AsyncMock(
+        return_value=MagicMock(running=False, exit_code=-9, error="command timed out")
+    )
+    raw.commands.get_background_command_logs = AsyncMock(
+        return_value=MagicMock(content="", cursor=0)
+    )
+
+    snapshot = await backend.poll(ProcessHandle(command_id="scmd-1", provider_ref="process-1"))
+
+    assert snapshot.status == "exited"
+    assert snapshot.error == "command timed out"
+
+
+@pytest.mark.asyncio
 async def test_per_call_envs_merge_and_win_over_run_env() -> None:
     """Per-call envs override run-level env; both are present in opts.envs."""
     backend, _ = _make_backend()

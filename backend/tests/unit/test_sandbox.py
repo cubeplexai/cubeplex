@@ -366,6 +366,68 @@ async def test_subagent_timeout_rechecks_command_that_just_exited(
 
 
 @pytest.mark.asyncio
+async def test_subagent_does_not_replay_output_when_deadline_passes_during_spill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-spill"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 30_000)
+    )
+
+    async def slow_append(*_: Any) -> AppendOutputResult:
+        await asyncio.sleep(1.1)
+        return AppendOutputResult(data_written=True, cleanup_done=True)
+
+    append = AsyncMock(side_effect=slow_append)
+    monkeypatch.setattr(sandbox_mod, "_append_sandbox_log", append)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-spill-boundary",
+        execute.parameters.model_validate(
+            {"description": "Run a verbose command", "command": "build", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert append.await_count == 1
+    assert sandbox.poll.await_count == 1
+    assert "chars omitted" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_subagent_preserves_provider_timeout_reason() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-timeout"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(
+            status="exited", exit_code=-9, error="command deadline exceeded"
+        )
+    )
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-provider-timeout",
+        execute.parameters.model_validate(
+            {"description": "Run limited command", "command": "sleep 30", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.is_error is True
+    assert result.details == {"status": "timed_out"}
+    assert "[timeout]" in _text(result)
+
+
+@pytest.mark.asyncio
 async def test_subagent_execute_bounds_verbose_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

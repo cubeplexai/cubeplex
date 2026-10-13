@@ -175,9 +175,13 @@ class OpenSandbox(Sandbox):
             status = await self._sandbox.commands.get_command_status(handle.provider_ref)
         running = getattr(status, "running", None)
         code = getattr(status, "exit_code", None)
+        raw_error = getattr(status, "error", None)
+        error = raw_error if isinstance(raw_error, str) else None
         if not isinstance(running, bool) or (code is not None and type(code) is not int):
             raise SandboxError("provider returned an invalid process status")
-        return ProcessSnapshot(status="running" if running else "exited", exit_code=code)
+        return ProcessSnapshot(
+            status="running" if running else "exited", exit_code=code, error=error
+        )
 
     async def start(
         self,
@@ -237,6 +241,7 @@ class OpenSandbox(Sandbox):
             exit_code=status.exit_code,
             new_output=output.new_output,
             log_cursor=output.log_cursor,
+            error=status.error,
         )
 
     async def read_output(self, handle: ProcessHandle) -> ProcessOutput:

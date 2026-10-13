@@ -65,6 +65,7 @@ class ProcessSnapshot:
     exit_code: int | None = None
     new_output: str = ""
     log_cursor: str | None = None
+    error: str | None = None
 
 
 @dataclass

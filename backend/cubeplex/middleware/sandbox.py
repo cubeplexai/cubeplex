@@ -347,9 +347,9 @@ def _is_timeout_result(output: str, exit_code: int | None) -> bool:
     return exit_code == -1 and output.strip().startswith("[timeout]")
 
 
-def _is_timeout_error(exc: BaseException) -> bool:
+def _is_timeout_error(exc: BaseException | str) -> bool:
     text = str(exc).lower()
-    return "timeout" in text or "timed out" in text
+    return any(term in text for term in ("timeout", "timed out", "deadline", "time limit"))
 
 
 _SHELL_BG_RE = re.compile(r"(^|\s)(nohup|disown)(\s|$)|&\s*$")
@@ -1231,6 +1231,12 @@ def _make_foreground_execute_tool(
         async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
             nonlocal finished, log_available
             finished = True
+            if snapshot.error and _is_timeout_error(snapshot.error):
+                return AgentToolResult(
+                    content=[TextContent(text=_timeout_tool_message(timeout))],
+                    details={"status": "timed_out"},
+                    is_error=True,
+                )
             if snapshot.status == "killed":
                 return AgentToolResult(
                     content=[TextContent(text="[killed]")],
@@ -1262,16 +1268,25 @@ def _make_foreground_execute_tool(
                 details={"status": "exited"},
             )
 
+        deadline = time.monotonic() + timeout
+
+        def remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
         try:
-            async with asyncio.timeout(timeout):
-                handle = await driver.start(args.command, timeout=timeout, on_started=on_started)
-                handle.command_id = command_id
-                while True:
-                    snapshot = await driver.poll(handle)
-                    await accept_snapshot(snapshot)
-                    if snapshot.status != "running":
-                        return await completed_result(snapshot)
-                    await asyncio.sleep(_BACKGROUND_POLL_INTERVAL_SECONDS)
+            handle = await asyncio.wait_for(
+                driver.start(args.command, timeout=timeout, on_started=on_started),
+                timeout=remaining(),
+            )
+            handle.command_id = command_id
+            while True:
+                if remaining() <= 0:
+                    raise TimeoutError
+                snapshot = await asyncio.wait_for(driver.poll(handle), timeout=remaining())
+                await accept_snapshot(snapshot)
+                if snapshot.status != "running":
+                    return await completed_result(snapshot)
+                await asyncio.sleep(min(_BACKGROUND_POLL_INTERVAL_SECONDS, remaining()))
         except TimeoutError:
             if handle is not None:
                 try:
