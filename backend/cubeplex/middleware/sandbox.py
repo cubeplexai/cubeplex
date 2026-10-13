@@ -56,6 +56,7 @@ from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubeplex.sandbox.base import (
     ProcessHandle,
+    ProcessHandleNotFoundError,
     ProcessSnapshot,
     Sandbox,
     SandboxInstanceGoneError,
@@ -135,6 +136,7 @@ def reset_executed_commands() -> None:
 EXECUTE_RESULT_SPILL_CHARS = 20_000
 _EXECUTE_UPDATE_INTERVAL_SECONDS = 0.1
 _BACKGROUND_POLL_INTERVAL_SECONDS = 1.0
+_MISSING_PROCESS_GRACE_SECONDS = 5.0
 MAX_LIVE_BACKGROUND_COMMANDS = 8
 _COMMAND_LEASE_SECONDS = 15
 _TASK_OWNER_LEASE_SECONDS = 45
@@ -1218,25 +1220,33 @@ def _make_foreground_execute_tool(
                     details={"status": "timed_out"},
                     is_error=True,
                 )
+            error_suffix = ""
+            if snapshot.error:
+                error = snapshot.error[:1000]
+                if len(snapshot.error) > 1000:
+                    error += "..."
+                error_suffix = f"\n[provider error: {error}]"
             if snapshot.status == "killed":
                 return AgentToolResult(
-                    content=[TextContent(text="[killed]")],
+                    content=[TextContent(text="[killed]" + error_suffix)],
                     details={"status": "killed"},
                     is_error=True,
                 )
-            if snapshot.exit_code == 0 and workspace_id and conversation_id:
+            if snapshot.exit_code == 0 and not snapshot.error and workspace_id and conversation_id:
                 _record_executed(workspace_id, conversation_id, args.command)
             suffix = (
                 f"\n[exit code: {snapshot.exit_code}]"
                 if snapshot.exit_code not in (None, 0)
                 else ""
             )
+            suffix += error_suffix
             full = excerpt.full_text
             if excerpt.truncated or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS:
                 suffix += "\n\n[truncated] full output unavailable"
             return AgentToolResult(
                 content=[TextContent(text=excerpt.render(suffix=suffix))],
                 details={"status": "exited"},
+                is_error=bool(snapshot.error),
             )
 
         deadline = time.monotonic() + timeout
@@ -1256,6 +1266,7 @@ def _make_foreground_execute_tool(
             )
             handle.command_id = command_id
             poll_failure_logged = False
+            missing_since: float | None = None
             while True:
                 if remaining() <= 0:
                     raise TimeoutError
@@ -1263,6 +1274,14 @@ def _make_foreground_execute_tool(
                     snapshot = await asyncio.wait_for(driver.poll(handle), timeout=remaining())
                 except SandboxInstanceGoneError:
                     raise
+                except ProcessHandleNotFoundError:
+                    now = time.monotonic()
+                    if missing_since is None:
+                        missing_since = now
+                    if now - missing_since >= _MISSING_PROCESS_GRACE_SECONDS:
+                        raise
+                    await asyncio.sleep(min(_BACKGROUND_POLL_INTERVAL_SECONDS, remaining()))
+                    continue
                 except Exception as exc:
                     if remaining() <= 0:
                         raise TimeoutError from exc
@@ -1276,6 +1295,7 @@ def _make_foreground_execute_tool(
                     await asyncio.sleep(min(_BACKGROUND_POLL_INTERVAL_SECONDS, remaining()))
                     continue
                 poll_failure_logged = False
+                missing_since = None
                 await accept_snapshot(snapshot)
                 if snapshot.status != "running":
                     return await completed_result(snapshot)

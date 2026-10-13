@@ -39,6 +39,13 @@ class SandboxInstanceGoneError(SandboxError):
         super().__init__(f"original sandbox instance {sandbox_instance_id} no longer exists")
 
 
+class ProcessHandleNotFoundError(SandboxError):
+    """The provider cannot find a process previously returned by command start."""
+
+    def __init__(self, provider_ref: str) -> None:
+        super().__init__(f"provider process record {provider_ref} is unavailable")
+
+
 @dataclass
 class ExecuteResult:
     """Result of a shell command execution."""

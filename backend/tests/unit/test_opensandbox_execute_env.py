@@ -16,7 +16,11 @@ import pytest
 from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.execd import RunCommandOpts
 
-from cubeplex.sandbox.base import ProcessHandle, SandboxError, SandboxInstanceGoneError
+from cubeplex.sandbox.base import (
+    ProcessHandle,
+    ProcessHandleNotFoundError,
+    SandboxInstanceGoneError,
+)
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
 
@@ -201,7 +205,7 @@ async def test_poll_keeps_command_error_retryable_while_instance_runs() -> None:
     )
     raw.get_info = AsyncMock(return_value=MagicMock(status=MagicMock(state="Running")))
 
-    with pytest.raises(SandboxError, match="process unavailable"):
+    with pytest.raises(ProcessHandleNotFoundError, match="process-1"):
         await backend.poll(ProcessHandle(command_id="scmd-1", provider_ref="process-1"))
 
 

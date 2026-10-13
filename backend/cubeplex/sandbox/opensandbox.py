@@ -21,6 +21,7 @@ from cubeplex.sandbox.base import (
     BrowserEndpoint,
     ExecuteResult,
     ProcessHandle,
+    ProcessHandleNotFoundError,
     ProcessOutput,
     ProcessSnapshot,
     Sandbox,
@@ -186,7 +187,12 @@ class OpenSandbox(Sandbox):
 
     async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
         with _as_sandbox_error():
-            status = await self._sandbox.commands.get_command_status(handle.provider_ref)
+            try:
+                status = await self._sandbox.commands.get_command_status(handle.provider_ref)
+            except _ProviderApiError as exc:
+                if exc.status_code == 404:
+                    raise ProcessHandleNotFoundError(handle.provider_ref) from exc
+                raise
         running = getattr(status, "running", None)
         code = getattr(status, "exit_code", None)
         raw_error = getattr(status, "error", None)

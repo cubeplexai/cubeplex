@@ -35,7 +35,12 @@ from cubeplex.middleware.sandbox import (
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, SandboxError
+from cubeplex.sandbox.base import (
+    ProcessHandle,
+    ProcessHandleNotFoundError,
+    ProcessSnapshot,
+    SandboxError,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -290,6 +295,71 @@ async def test_subagent_repeated_poll_failures_still_obey_command_deadline(
     assert result.is_error is True
     assert "[timeout]" in _text(result)
     sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_missing_process_record_stops_retrying_after_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="missing-process")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.poll = AsyncMock(side_effect=ProcessHandleNotFoundError("missing-process"))
+    sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(sandbox_mod, "_MISSING_PROCESS_GRACE_SECONDS", 0.03)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    with pytest.raises(ProcessHandleNotFoundError, match="missing-process"):
+        await asyncio.wait_for(
+            execute.execute(
+                "tc-missing-process",
+                execute.parameters.model_validate(
+                    {"description": "Run a limited command", "command": "build"}
+                ),
+            ),
+            timeout=3,
+        )
+
+    sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_reconciles_transient_missing_process_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    handle = ProcessHandle(command_id="", provider_ref="process")
+    sandbox.start = AsyncMock(return_value=handle)
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessHandleNotFoundError("process"),
+            ProcessSnapshot(status="exited", exit_code=0, new_output="done"),
+        ]
+    )
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-reconcile-process",
+        execute.parameters.model_validate(
+            {"description": "Complete a command", "command": "echo done"}
+        ),
+    )
+
+    assert _text(result) == "done"
+    sandbox.kill.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -602,6 +672,33 @@ async def test_subagent_preserves_provider_timeout_reason() -> None:
     assert result.is_error is True
     assert result.details == {"status": "timed_out"}
     assert "[timeout]" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_subagent_surfaces_non_timeout_provider_error() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-error"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(
+            status="exited", exit_code=None, new_output="partial output", error="permission denied"
+        )
+    )
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-provider-error",
+        execute.parameters.model_validate(
+            {"description": "Run a protected command", "command": "restricted-command"}
+        ),
+    )
+
+    assert result.is_error is True
+    assert result.details == {"status": "exited"}
+    assert "partial output" in _text(result)
+    assert "permission denied" in _text(result)
 
 
 @pytest.mark.asyncio
