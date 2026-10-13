@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, Sandbox
 from cubeplex.sandbox.lazy import LazySandbox
 from cubeplex.sandbox.manager import SandboxAttachment
 
@@ -92,3 +92,37 @@ async def test_foreground_operation_uses_one_lease_for_many_polls() -> None:
     assert manager.renew_count == 1
     assert manager.create_count == 1
     assert (await lazy.observe(handle)).status == "killed"
+
+
+@pytest.mark.asyncio
+async def test_foreground_start_failure_recreates_backend_once() -> None:
+    manager = _CountingManager()
+    lazy = _make_lazy(manager)
+    attempts: list[str] = []
+
+    async def start_on_backend(backend: Sandbox) -> str:
+        attempts.append(backend.id)
+        if backend.id == "sbx-1":
+            raise ProcessStartFailure("backend disappeared before command started")
+        return backend.id
+
+    assert await lazy.run_with_backend(start_on_backend) == "sbx-2"
+    assert attempts == ["sbx-1", "sbx-2"]
+    assert manager.create_count == 2
+
+
+@pytest.mark.asyncio
+async def test_foreground_failure_after_start_does_not_replay_operation() -> None:
+    manager = _CountingManager()
+    lazy = _make_lazy(manager)
+    attempts: list[str] = []
+
+    async def poll_on_backend(backend: Sandbox) -> None:
+        attempts.append(backend.id)
+        raise RuntimeError("poll failed after command started")
+
+    with pytest.raises(RuntimeError, match="poll failed"):
+        await lazy.run_with_backend(poll_on_backend)
+
+    assert attempts == ["sbx-1"]
+    assert manager.create_count == 1

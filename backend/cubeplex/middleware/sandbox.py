@@ -54,7 +54,7 @@ from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure, Sandbox
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.background_task_lifecycle import LogState
@@ -1129,6 +1129,7 @@ def _make_foreground_execute_tool(
     async def _run_polled(
         driver: Sandbox,
         args: _ForegroundExecuteArgs,
+        on_update: Callable[[StructuredValue], None] | None,
     ) -> AgentToolResult:
         timeout = args.timeout_seconds or get_command_default_timeout_seconds()
         command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
@@ -1172,10 +1173,12 @@ def _make_foreground_execute_tool(
             snapshot: ProcessSnapshot, *, terminal_recheck: bool = False
         ) -> None:
             assert handle is not None
+            progress: str | None = None
             if snapshot.new_output and (
                 snapshot.log_cursor is None or snapshot.log_cursor != handle.log_cursor
             ):
                 excerpt.append(snapshot.new_output)
+                progress = excerpt.render()
             if snapshot.log_cursor is not None and snapshot.log_cursor != handle.log_cursor:
                 handle.log_cursor = snapshot.log_cursor
                 if not terminal_recheck:
@@ -1183,6 +1186,18 @@ def _make_foreground_execute_tool(
                         driver.acknowledge_output(handle, snapshot.log_cursor),
                         timeout=remaining(),
                     )
+            if progress is not None and on_update is not None:
+                try:
+                    maybe = on_update(
+                        AgentToolResult(
+                            content=[TextContent(text=progress)],
+                            details={"status": "running"},
+                        )
+                    )
+                    if inspect.isawaitable(maybe):
+                        await maybe
+                except Exception:
+                    logger.exception("foreground execute on_update failed")
 
         async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
             nonlocal finished
@@ -1220,15 +1235,20 @@ def _make_foreground_execute_tool(
             return max(0.0, deadline - time.monotonic())
 
         try:
-            handle = await asyncio.wait_for(
-                driver.start(
-                    args.command,
-                    timeout=timeout,
-                    provider_timeout=True,
-                    on_started=on_started,
-                ),
-                timeout=remaining(),
-            )
+            try:
+                handle = await asyncio.wait_for(
+                    driver.start(
+                        args.command,
+                        timeout=timeout,
+                        provider_timeout=True,
+                        on_started=on_started,
+                    ),
+                    timeout=remaining(),
+                )
+            except Exception as exc:
+                if started_ref is None and not isinstance(exc, TimeoutError):
+                    raise ProcessStartFailure(str(exc)) from exc
+                raise
             handle.command_id = command_id
             while True:
                 if remaining() <= 0:
@@ -1283,7 +1303,9 @@ def _make_foreground_execute_tool(
                     is_error=True,
                 )
             if sandbox.supports_background() is True:
-                return await sandbox.run_with_backend(lambda driver: _run_polled(driver, args))
+                return await sandbox.run_with_backend(
+                    lambda driver: _run_polled(driver, args, on_update)
+                )
             return await direct.execute(
                 tool_call_id,
                 _ExecuteArgs(

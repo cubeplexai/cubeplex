@@ -60,7 +60,7 @@ The badge on each row reflects the sandbox's runtime state:
 
 Main-agent commands stream output into the current reply while the agent waits. If a background-capable command is still running after 60 seconds, CubePlex records it as a background task, returns its task and command IDs, and lets the current reply finish. The task then runs independently of that reply. When its final result is ready, CubePlex delivers one internal task event to the conversation. Its raw delivery payload stays out of chat, including while the agent is responding, and does not repeatedly wake the agent.
 
-Subagent execute calls wait for the command result or timeout before returning to the main agent. Very long output is shortened in the returned result. Subagents cannot use CubePlex background tasks, command monitors, or task completion notices. The main agent can still start background tasks when needed.
+Subagent execute calls show command progress while waiting for the result or timeout, then return to the main agent. Very long output is shortened in progress updates and the returned result. Subagents cannot use CubePlex background tasks, command monitors, or task completion notices. The main agent can still start background tasks when needed.
 
 The agent can finish other steps while the command runs. If the remaining work depends on its result, the current reply may end with that work still unfinished. The result event brings the agent back to check whether the command succeeded and continue the request. An unfinished checklist item stays unfinished until that follow-up work is done; the end of the current reply does not mark the request complete.
 

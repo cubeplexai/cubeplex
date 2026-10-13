@@ -23,6 +23,7 @@ from cubeplex.sandbox.base import (
     ExecuteResult,
     ProcessHandle,
     ProcessSnapshot,
+    ProcessStartFailure,
     Sandbox,
     SandboxError,
 )
@@ -508,7 +509,17 @@ class LazySandbox(Sandbox):
 
     async def run_with_backend(self, operation: Callable[[Sandbox], Awaitable[T]]) -> T:
         sandbox = await self._ensure_with_retry()
-        return await self._run_with_keepalive(operation(sandbox))
+        try:
+            return await self._run_with_keepalive(operation(sandbox))
+        except ProcessStartFailure:
+            async with self._lock:
+                self._sandbox = None
+                self._invalidate_skills_sync()
+                self._user_sandbox_id = None
+            logger.warning("Lazy sandbox: process start failed, recreating sandbox")
+            sandbox = await self._ensure()
+            await self._ensure_skills_synced(sandbox)
+            return await self._run_with_keepalive(operation(sandbox))
 
     async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
         sandbox = await self._ensure_with_retry()

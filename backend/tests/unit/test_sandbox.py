@@ -35,7 +35,7 @@ from cubeplex.middleware.sandbox import (
     _WriteFileArgs,
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, ProcessStartFailure
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,6 +178,98 @@ async def test_subagent_execute_waits_for_final_result_past_background_threshold
     assert sandbox.start.await_args.kwargs["provider_timeout"] is True
     assert sandbox.poll.await_count == 2
     sandbox.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_streams_bounded_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="process"))
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessSnapshot(
+                status="running",
+                new_output="working" + "x" * EXECUTE_RESULT_SPILL_CHARS,
+                log_cursor="1",
+            ),
+            ProcessSnapshot(status="exited", exit_code=0, new_output=" done", log_cursor="2"),
+        ]
+    )
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0)
+    updates: list[AgentToolResult] = []
+
+    async def on_update(payload: AgentToolResult) -> None:
+        updates.append(payload)
+
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+    result = await execute.execute(
+        "tc-progress",
+        execute.parameters.model_validate({"description": "Run a long build", "command": "build"}),
+        on_update=on_update,
+    )
+
+    assert [update.details for update in updates] == [
+        {"status": "running"},
+        {"status": "running"},
+    ]
+    assert all(len(_text(update)) <= EXECUTE_RESULT_SPILL_CHARS for update in updates)
+    assert _text(updates[0]).startswith("working")
+    assert _text(updates[-1]).endswith(" done")
+    assert "[truncated] full output unavailable" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_subagent_start_failure_without_receipt_is_retryable() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(side_effect=RuntimeError("backend disappeared"))
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    with pytest.raises(ProcessStartFailure):
+        await execute.execute(
+            "tc-start-error",
+            execute.parameters.model_validate(
+                {"description": "Run a short command", "command": "echo hello"}
+            ),
+        )
+
+    sandbox.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_subagent_start_failure_after_receipt_does_not_retry() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed"))
+
+    async def start_then_fail(_command: str, **kwargs: Any) -> ProcessHandle:
+        kwargs["on_started"]("process-started")
+        raise RuntimeError("response lost after process started")
+
+    sandbox.start = AsyncMock(side_effect=start_then_fail)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    with pytest.raises(RuntimeError, match="response lost"):
+        await execute.execute(
+            "tc-start-after-receipt",
+            execute.parameters.model_validate(
+                {"description": "Run a short command", "command": "echo hello"}
+            ),
+        )
+
+    sandbox.start.assert_awaited_once()
+    assert sandbox.kill.await_args.args[0].provider_ref == "process-started"
 
 
 @pytest.mark.asyncio
