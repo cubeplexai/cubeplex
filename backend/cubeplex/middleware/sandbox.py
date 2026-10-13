@@ -1154,12 +1154,9 @@ def _make_foreground_execute_tool(
     async def _run_polled(
         driver: Sandbox,
         args: _ForegroundExecuteArgs,
-        *,
-        on_update: Callable[[StructuredValue], None] | None,
     ) -> AgentToolResult:
         timeout = args.timeout_seconds or get_command_default_timeout_seconds()
         command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
-        log_path = f"{driver.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
         handle: ProcessHandle | None = None
         started_ref: str | None = None
 
@@ -1195,41 +1192,22 @@ def _make_foreground_execute_tool(
         excerpt = _StreamingExcerpt()
         finished = False
         stop_attempted = False
-        log_available = True
 
         async def accept_snapshot(snapshot: ProcessSnapshot) -> None:
-            nonlocal log_available
-            if snapshot.new_output:
-                previous_full = excerpt.full_text
+            assert handle is not None
+            if snapshot.new_output and (
+                snapshot.log_cursor is None or snapshot.log_cursor != handle.log_cursor
+            ):
                 excerpt.append(snapshot.new_output)
-                if excerpt.truncated and log_available:
-                    output = (
-                        previous_full + snapshot.new_output
-                        if previous_full is not None
-                        else snapshot.new_output
-                    )
-                    written = await _append_sandbox_log(driver, log_path, output)
-                    if not written.data_written:
-                        log_available = False
-                        logger.warning("could not save foreground command output {}", command_id)
-            if snapshot.log_cursor is not None:
-                assert handle is not None
-                await driver.acknowledge_output(handle, snapshot.log_cursor)
-            if snapshot.new_output and on_update is not None:
-                try:
-                    await _maybe_await(
-                        on_update(
-                            AgentToolResult(
-                                content=[TextContent(text=excerpt.render())],
-                                details={"status": "running"},
-                            )
-                        )
-                    )
-                except Exception:
-                    logger.exception("execute on_update failed")
+            if snapshot.log_cursor is not None and snapshot.log_cursor != handle.log_cursor:
+                handle.log_cursor = snapshot.log_cursor
+                await asyncio.wait_for(
+                    driver.acknowledge_output(handle, snapshot.log_cursor),
+                    timeout=remaining(),
+                )
 
         async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
-            nonlocal finished, log_available
+            nonlocal finished
             finished = True
             if snapshot.error and _is_timeout_error(snapshot.error):
                 return AgentToolResult(
@@ -1251,18 +1229,8 @@ def _make_foreground_execute_tool(
                 else ""
             )
             full = excerpt.full_text
-            needs_spill = (
-                excerpt.truncated or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
-            )
-            if needs_spill and full is not None and log_available:
-                written = await _append_sandbox_log(driver, log_path, full)
-                log_available = written.data_written
-            if needs_spill:
-                suffix += (
-                    f"\n\n[truncated] full output written to {log_path}"
-                    if log_available
-                    else "\n\n[truncated] full output unavailable"
-                )
+            if excerpt.truncated or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS:
+                suffix += "\n\n[truncated] full output unavailable"
             return AgentToolResult(
                 content=[TextContent(text=excerpt.render(suffix=suffix))],
                 details={"status": "exited"},
@@ -1275,7 +1243,12 @@ def _make_foreground_execute_tool(
 
         try:
             handle = await asyncio.wait_for(
-                driver.start(args.command, timeout=timeout, on_started=on_started),
+                driver.start(
+                    args.command,
+                    timeout=timeout,
+                    provider_timeout=True,
+                    on_started=on_started,
+                ),
                 timeout=remaining(),
             )
             handle.command_id = command_id
@@ -1334,9 +1307,7 @@ def _make_foreground_execute_tool(
                     is_error=True,
                 )
             if sandbox.supports_background() is True:
-                return await sandbox.run_with_backend(
-                    lambda driver: _run_polled(driver, args, on_update=on_update)
-                )
+                return await sandbox.run_with_backend(lambda driver: _run_polled(driver, args))
             return await direct.execute(
                 tool_call_id,
                 _ExecuteArgs(

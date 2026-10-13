@@ -37,7 +37,6 @@ from cubeplex.middleware.sandbox import (
 )
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot
-from cubeplex.sandbox.log_io import AppendOutputResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -191,6 +190,7 @@ async def test_subagent_execute_waits_for_final_result_past_background_threshold
     sandbox.start.assert_awaited_once()
     assert sandbox.start.await_args.args == ("echo finished",)
     assert sandbox.start.await_args.kwargs["timeout"] == 3600
+    assert sandbox.start.await_args.kwargs["provider_timeout"] is True
     assert sandbox.poll.await_count == 2
     sandbox.kill.assert_not_called()
 
@@ -366,39 +366,35 @@ async def test_subagent_timeout_rechecks_command_that_just_exited(
 
 
 @pytest.mark.asyncio
-async def test_subagent_does_not_replay_output_when_deadline_passes_during_spill(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cubeplex.middleware import sandbox as sandbox_mod
-
+async def test_subagent_does_not_replay_output_when_ack_crosses_deadline() -> None:
     sandbox = _make_sandbox()
     sandbox.supports_background.return_value = True
-    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-spill"))
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="p-ack"))
     sandbox.poll = AsyncMock(
-        return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 30_000)
+        return_value=ProcessSnapshot(
+            status="exited", exit_code=0, new_output="done", log_cursor="1"
+        )
     )
 
-    async def slow_append(*_: Any) -> AppendOutputResult:
-        await asyncio.sleep(1.1)
-        return AppendOutputResult(data_written=True, cleanup_done=True)
+    async def slow_ack(*_: Any) -> None:
+        await asyncio.sleep(2)
 
-    append = AsyncMock(side_effect=slow_append)
-    monkeypatch.setattr(sandbox_mod, "_append_sandbox_log", append)
+    sandbox.acknowledge_output = AsyncMock(side_effect=slow_ack)
     execute = next(
         tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
     )
 
     result = await execute.execute(
-        "tc-spill-boundary",
+        "tc-ack-boundary",
         execute.parameters.model_validate(
-            {"description": "Run a verbose command", "command": "build", "timeout_seconds": 1}
+            {"description": "Run a short command", "command": "echo done", "timeout_seconds": 1}
         ),
     )
 
     assert result.details == {"status": "exited"}
-    assert append.await_count == 1
-    assert sandbox.poll.await_count == 1
-    assert "chars omitted" in _text(result)
+    assert sandbox.poll.await_count == 2
+    assert sandbox.acknowledge_output.await_count == 1
+    assert _text(result) == "done"
 
 
 @pytest.mark.asyncio
@@ -428,21 +424,12 @@ async def test_subagent_preserves_provider_timeout_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_subagent_execute_bounds_verbose_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cubeplex.middleware import sandbox as sandbox_mod
-
+async def test_subagent_execute_bounds_verbose_output() -> None:
     sandbox = _make_sandbox()
     sandbox.supports_background.return_value = True
     sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="process-3"))
     sandbox.poll = AsyncMock(
         return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 100_000)
-    )
-    monkeypatch.setattr(
-        sandbox_mod,
-        "_append_sandbox_log",
-        AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True)),
     )
     execute = next(
         tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
@@ -454,42 +441,8 @@ async def test_subagent_execute_bounds_verbose_output(
     )
 
     assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
-    assert "[truncated] full output written to" in _text(result)
-    assert sandbox.poll.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_subagent_spill_failure_keeps_bounded_command_result(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cubeplex.middleware import sandbox as sandbox_mod
-
-    sandbox = _make_sandbox()
-    sandbox.supports_background.return_value = True
-    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="process-4"))
-    sandbox.poll = AsyncMock(
-        return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 100_000)
-    )
-    sandbox.kill = AsyncMock()
-    monkeypatch.setattr(
-        sandbox_mod,
-        "_append_sandbox_log",
-        AsyncMock(return_value=AppendOutputResult(data_written=False, cleanup_done=True)),
-    )
-    execute = next(
-        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
-    )
-
-    result = await execute.execute(
-        "tc-no-log",
-        execute.parameters.model_validate({"description": "Run verbose build", "command": "build"}),
-    )
-
-    assert result.details == {"status": "exited"}
-    assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
     assert "[truncated] full output unavailable" in _text(result)
-    assert "full output written to" not in _text(result)
-    sandbox.kill.assert_not_called()
+    assert sandbox.poll.await_count == 1
 
 
 def test_tools_property_returns_fresh_list_each_time() -> None:

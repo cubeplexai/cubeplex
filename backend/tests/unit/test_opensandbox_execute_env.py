@@ -92,13 +92,25 @@ async def test_execute_forwards_timeout_to_run_opts() -> None:
 async def test_start_forwards_timeout_to_provider() -> None:
     backend, _ = _make_backend()
 
-    await backend.start("sleep 9", timeout=120)
+    await backend.start("sleep 9", timeout=120, provider_timeout=True)
 
     _, opts = backend._test_run_calls[0]  # type: ignore[attr-defined]
     assert opts is not None
     assert opts.background is True
     assert opts.timeout is not None
     assert opts.timeout.total_seconds() == 120
+
+
+@pytest.mark.asyncio
+async def test_start_keeps_main_agent_deadline_in_application() -> None:
+    backend, _ = _make_backend()
+
+    await backend.start("sleep 9", timeout=120)
+
+    _, opts = backend._test_run_calls[0]  # type: ignore[attr-defined]
+    assert opts is not None
+    assert opts.background is True
+    assert opts.timeout is None
 
 
 @pytest.mark.asyncio

@@ -519,6 +519,7 @@ class LazySandbox(Sandbox):
         command: str,
         *,
         timeout: int | None = None,
+        provider_timeout: bool = False,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
@@ -528,6 +529,7 @@ class LazySandbox(Sandbox):
         return await sandbox.start(
             command,
             timeout=timeout,
+            provider_timeout=provider_timeout,
             envs=envs,
             as_root=as_root,
             on_chunk=on_chunk,

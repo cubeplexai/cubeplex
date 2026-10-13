@@ -175,12 +175,13 @@ class Sandbox(ABC):
         command: str,
         *,
         timeout: int | None = None,
+        provider_timeout: bool = False,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
         on_started: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> ProcessHandle:
-        del command, timeout, envs, as_root, on_chunk, on_started
+        del command, timeout, provider_timeout, envs, as_root, on_chunk, on_started
         raise SandboxError("this sandbox driver does not support background commands")
 
     async def poll(self, handle: ProcessHandle) -> ProcessSnapshot:

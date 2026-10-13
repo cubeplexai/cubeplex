@@ -188,6 +188,7 @@ class OpenSandbox(Sandbox):
         command: str,
         *,
         timeout: int | None = None,
+        provider_timeout: bool = False,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
@@ -200,8 +201,10 @@ class OpenSandbox(Sandbox):
         opts = RunCommandOpts(
             working_directory=self._workdir,
             envs=merged if merged else None,
-            # Keep the deadline if the worker disappears before it can interrupt the command.
-            timeout=timedelta(seconds=timeout) if timeout is not None else None,
+            # Subagent deadlines survive a worker restart; main commands retain their lifecycle.
+            timeout=(
+                timedelta(seconds=timeout) if provider_timeout and timeout is not None else None
+            ),
             uid=uid,
             gid=gid,
             background=True,

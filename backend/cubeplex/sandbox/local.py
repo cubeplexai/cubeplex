@@ -156,12 +156,13 @@ class LocalSandbox(Sandbox):
         command: str,
         *,
         timeout: int | None = None,
+        provider_timeout: bool = False,
         envs: dict[str, str] | None = None,
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
         on_started: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> ProcessHandle:
-        del timeout, envs, as_root, on_chunk
+        del timeout, provider_timeout, envs, as_root, on_chunk
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
