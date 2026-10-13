@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from cubeplex.middleware.sandbox import SandboxMiddleware
 from cubeplex.sandbox.local import LocalSandbox
 
 
@@ -13,6 +14,45 @@ async def test_execute_simple_command():
     result = await sandbox.execute("echo hello")
     assert result.output.strip() == "hello"
     assert result.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_subagent_short_command_does_not_leave_log(tmp_path) -> None:
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    execute = next(
+        tool for tool in SandboxMiddleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-short",
+        execute.parameters.model_validate(
+            {"description": "Run a short command", "command": "echo hello"}
+        ),
+    )
+
+    assert "hello" in result.content[0].text
+    assert list((tmp_path / ".cubeplex").glob("execute-*.log")) == []
+
+
+@pytest.mark.asyncio
+async def test_subagent_verbose_command_spills_full_log(tmp_path) -> None:
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    execute = next(
+        tool for tool in SandboxMiddleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-verbose",
+        execute.parameters.model_validate(
+            {"description": "Run a verbose command", "command": "python3 -c 'print(\"x\" * 30000)'"}
+        ),
+    )
+
+    assert len(result.content[0].text) <= 20_000
+    assert "[truncated] full output written to" in result.content[0].text
+    logs = list((tmp_path / ".cubeplex").glob("execute-*.log"))
+    assert len(logs) == 1
+    assert logs[0].read_text() == "x" * 30000 + "\n"
 
 
 @pytest.mark.asyncio

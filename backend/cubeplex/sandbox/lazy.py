@@ -506,6 +506,14 @@ class LazySandbox(Sandbox):
             return self._sandbox.supports_background()
         return True
 
+    async def run_with_backend(self, operation: Callable[[Sandbox], Awaitable[T]]) -> T:
+        sandbox = await self._ensure_with_retry()
+        return await self._run_with_keepalive(operation(sandbox))
+
+    async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.observe(handle)
+
     async def start(
         self,
         command: str,

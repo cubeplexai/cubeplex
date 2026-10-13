@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
 from cubeplex.sandbox.lazy import LazySandbox
 from cubeplex.sandbox.manager import SandboxAttachment
 
@@ -24,12 +25,19 @@ class _FakeSandbox:
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         raise FileNotFoundError(paths[0])
 
+    async def poll(self, _handle: ProcessHandle) -> ProcessSnapshot:
+        return ProcessSnapshot(status="running")
+
+    async def observe(self, _handle: ProcessHandle) -> ProcessSnapshot:
+        return ProcessSnapshot(status="killed", exit_code=-9)
+
 
 class _CountingManager:
     """Counts get_or_create so the test can assert no recreate happened."""
 
     def __init__(self) -> None:
         self.create_count = 0
+        self.renew_count = 0
 
     async def get_or_create(self, **_kwargs: object) -> SandboxAttachment:
         self.create_count += 1
@@ -40,7 +48,7 @@ class _CountingManager:
         return None
 
     async def renew_lease(self, *_a: object, **_k: object) -> None:
-        return None
+        self.renew_count += 1
 
 
 def _make_lazy(manager: _CountingManager) -> LazySandbox:
@@ -66,3 +74,21 @@ async def test_download_failure_does_not_recreate_sandbox() -> None:
     # triggered a recreate, and the live sandbox handle must be preserved.
     assert manager.create_count == 1
     assert lazy.initialized is True
+
+
+@pytest.mark.asyncio
+async def test_foreground_operation_uses_one_lease_for_many_polls() -> None:
+    manager = _CountingManager()
+    lazy = _make_lazy(manager)
+    handle = ProcessHandle(command_id="scmd-test", provider_ref="provider-test")
+
+    async def poll_many(backend: Sandbox) -> None:
+        for _ in range(5):
+            snapshot = await backend.poll(handle)
+            assert snapshot.status == "running"
+
+    await lazy.run_with_backend(poll_many)
+
+    assert manager.renew_count == 1
+    assert manager.create_count == 1
+    assert (await lazy.observe(handle)).status == "killed"

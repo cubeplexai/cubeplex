@@ -6,12 +6,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from cubeplex.parsers import FileReadOutput, ParseOptions
+
+T = TypeVar("T")
 
 
 class SandboxError(Exception):
@@ -153,6 +155,10 @@ class Sandbox(ABC):
     def supports_background(self) -> bool:
         """Whether ``start`` / ``poll`` / ``kill`` are implemented."""
         return False
+
+    async def run_with_backend(self, operation: Callable[[Sandbox], Awaitable[T]]) -> T:
+        """Run an operation against a concrete backend for its entire lifetime."""
+        return await operation(self)
 
     def supports_background_reconnect(self) -> bool:
         """Whether another worker can recover a persisted process handle."""

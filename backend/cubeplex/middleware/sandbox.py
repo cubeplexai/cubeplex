@@ -204,6 +204,10 @@ class _StreamingExcerpt:
     def truncated(self) -> bool:
         return self._full is None
 
+    @property
+    def full_text(self) -> str | None:
+        return self._full
+
     def render(self, *, suffix: str = "") -> str:
         budget = EXECUTE_RESULT_SPILL_CHARS - len(suffix)
         if self._full is not None:
@@ -1148,13 +1152,14 @@ def _make_foreground_execute_tool(
     )
 
     async def _run_polled(
+        driver: Sandbox,
         args: _ForegroundExecuteArgs,
         *,
         on_update: Callable[[StructuredValue], None] | None,
     ) -> AgentToolResult:
         timeout = args.timeout_seconds or get_command_default_timeout_seconds()
         command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
-        log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
+        log_path = f"{driver.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
         handle: ProcessHandle | None = None
         started_ref: str | None = None
 
@@ -1170,14 +1175,14 @@ def _make_foreground_execute_tool(
                 return False
             interrupted = False
             try:
-                await asyncio.wait_for(sandbox.kill(handle), timeout=10)
+                await asyncio.wait_for(driver.kill(handle), timeout=10)
                 interrupted = True
             except Exception:
                 logger.exception("failed to stop foreground sandbox command {}", command_id)
             try:
                 async with asyncio.timeout(3):
                     while True:
-                        status = await sandbox.observe(handle)
+                        status = await driver.observe(handle)
                         if status.status != "running":
                             return True
                         if not interrupted:
@@ -1192,17 +1197,25 @@ def _make_foreground_execute_tool(
         stop_attempted = False
         try:
             async with asyncio.timeout(timeout):
-                handle = await sandbox.start(args.command, timeout=timeout, on_started=on_started)
+                handle = await driver.start(args.command, timeout=timeout, on_started=on_started)
                 handle.command_id = command_id
                 while True:
-                    snapshot = await sandbox.poll(handle)
-                    written = await _append_snapshot_output(sandbox, log_path, snapshot)
-                    if not written.data_written:
-                        raise SandboxError("could not save foreground command output")
-                    if snapshot.log_cursor is not None:
-                        await sandbox.acknowledge_output(handle, snapshot.log_cursor)
+                    snapshot = await driver.poll(handle)
                     if snapshot.new_output:
+                        previous_full = excerpt.full_text
                         excerpt.append(snapshot.new_output)
+                        if excerpt.truncated:
+                            output = (
+                                previous_full + snapshot.new_output
+                                if previous_full is not None
+                                else snapshot.new_output
+                            )
+                            written = await _append_sandbox_log(driver, log_path, output)
+                            if not written.data_written:
+                                raise SandboxError("could not save foreground command output")
+                    if snapshot.log_cursor is not None:
+                        await driver.acknowledge_output(handle, snapshot.log_cursor)
+                    if snapshot.new_output:
                         if on_update is not None:
                             try:
                                 await _maybe_await(
@@ -1230,7 +1243,18 @@ def _make_foreground_execute_tool(
                             if snapshot.exit_code not in (None, 0)
                             else ""
                         )
-                        if excerpt.truncated:
+                        full = excerpt.full_text
+                        if (
+                            full is not None
+                            and len(full) + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
+                        ):
+                            written = await _append_sandbox_log(driver, log_path, full)
+                            if not written.data_written:
+                                raise SandboxError("could not save foreground command output")
+                        if (
+                            excerpt.truncated
+                            or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
+                        ):
                             suffix += f"\n\n[truncated] full output written to {log_path}"
                         return AgentToolResult(
                             content=[TextContent(text=excerpt.render(suffix=suffix))],
@@ -1276,7 +1300,9 @@ def _make_foreground_execute_tool(
                     is_error=True,
                 )
             if sandbox.supports_background() is True:
-                return await _run_polled(args, on_update=on_update)
+                return await sandbox.run_with_backend(
+                    lambda driver: _run_polled(driver, args, on_update=on_update)
+                )
             return await direct.execute(
                 tool_call_id,
                 _ExecuteArgs(

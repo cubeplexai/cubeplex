@@ -54,7 +54,11 @@ def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
     async def _acknowledge(handle: Any, cursor: str) -> None:
         handle.log_cursor = cursor
 
+    async def _run_with_backend(operation: Any) -> Any:
+        return await operation(sandbox)
+
     sandbox.acknowledge_output = AsyncMock(side_effect=_acknowledge)
+    sandbox.run_with_backend = AsyncMock(side_effect=_run_with_backend)
     return sandbox
 
 
@@ -167,11 +171,6 @@ async def test_subagent_execute_waits_for_final_result_past_background_threshold
             ProcessSnapshot(status="running"),
             ProcessSnapshot(status="exited", exit_code=0, new_output="finished"),
         ]
-    )
-    monkeypatch.setattr(
-        sandbox_mod,
-        "_append_snapshot_output",
-        AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True)),
     )
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
     monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 0)
@@ -345,7 +344,7 @@ async def test_subagent_execute_bounds_verbose_output(
     )
     monkeypatch.setattr(
         sandbox_mod,
-        "_append_snapshot_output",
+        "_append_sandbox_log",
         AsyncMock(return_value=AppendOutputResult(data_written=True, cleanup_done=True)),
     )
     execute = next(
