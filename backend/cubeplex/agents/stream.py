@@ -569,6 +569,8 @@ def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
 
     if isinstance(evt, MessageEndEvent) and isinstance(evt.message, UserMessage):
         meta = evt.message.metadata
+        if meta.get("source") == "background_task":
+            return []
         steer_id = meta.get("steer_id")
         if steer_id:
             text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))

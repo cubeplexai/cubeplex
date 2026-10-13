@@ -393,6 +393,18 @@ def test_injected_user_message_without_steer_id_is_dropped() -> None:
     assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
 
 
+def test_background_task_input_with_steer_id_is_not_projected_into_chat() -> None:
+    msg = UserMessage(
+        content=[TextContent(text='Background task result:\n{"source":"background_task"}')],
+        metadata={
+            "source": "background_task",
+            "notice_id": "bge-notice",
+            "steer_id": "bge-notice",
+        },
+    )
+    assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
+
+
 def test_injected_group_chat_message_carries_sender_identity() -> None:
     # Group-chat steers persist sender_user_id/sender_display_name in metadata;
     # the SSE event must forward them so live viewers render the SenderBadge.
