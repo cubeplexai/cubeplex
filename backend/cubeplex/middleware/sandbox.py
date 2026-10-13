@@ -54,7 +54,7 @@ from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
 from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
-from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox, SandboxError
+from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, Sandbox
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 from cubeplex.sandbox_policy.rules import evaluate_command
 from cubeplex.services.background_task_lifecycle import LogState
@@ -1195,73 +1195,92 @@ def _make_foreground_execute_tool(
         excerpt = _StreamingExcerpt()
         finished = False
         stop_attempted = False
+        log_available = True
+
+        async def accept_snapshot(snapshot: ProcessSnapshot) -> None:
+            nonlocal log_available
+            if snapshot.new_output:
+                previous_full = excerpt.full_text
+                excerpt.append(snapshot.new_output)
+                if excerpt.truncated and log_available:
+                    output = (
+                        previous_full + snapshot.new_output
+                        if previous_full is not None
+                        else snapshot.new_output
+                    )
+                    written = await _append_sandbox_log(driver, log_path, output)
+                    if not written.data_written:
+                        log_available = False
+                        logger.warning("could not save foreground command output {}", command_id)
+            if snapshot.log_cursor is not None:
+                assert handle is not None
+                await driver.acknowledge_output(handle, snapshot.log_cursor)
+            if snapshot.new_output and on_update is not None:
+                try:
+                    await _maybe_await(
+                        on_update(
+                            AgentToolResult(
+                                content=[TextContent(text=excerpt.render())],
+                                details={"status": "running"},
+                            )
+                        )
+                    )
+                except Exception:
+                    logger.exception("execute on_update failed")
+
+        async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
+            nonlocal finished, log_available
+            finished = True
+            if snapshot.status == "killed":
+                return AgentToolResult(
+                    content=[TextContent(text="[killed]")],
+                    details={"status": "killed"},
+                    is_error=True,
+                )
+            if snapshot.exit_code == 0 and workspace_id and conversation_id:
+                _record_executed(workspace_id, conversation_id, args.command)
+            suffix = (
+                f"\n[exit code: {snapshot.exit_code}]"
+                if snapshot.exit_code not in (None, 0)
+                else ""
+            )
+            full = excerpt.full_text
+            needs_spill = (
+                excerpt.truncated or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
+            )
+            if needs_spill and full is not None and log_available:
+                written = await _append_sandbox_log(driver, log_path, full)
+                log_available = written.data_written
+            if needs_spill:
+                suffix += (
+                    f"\n\n[truncated] full output written to {log_path}"
+                    if log_available
+                    else "\n\n[truncated] full output unavailable"
+                )
+            return AgentToolResult(
+                content=[TextContent(text=excerpt.render(suffix=suffix))],
+                details={"status": "exited"},
+            )
+
         try:
             async with asyncio.timeout(timeout):
                 handle = await driver.start(args.command, timeout=timeout, on_started=on_started)
                 handle.command_id = command_id
                 while True:
                     snapshot = await driver.poll(handle)
-                    if snapshot.new_output:
-                        previous_full = excerpt.full_text
-                        excerpt.append(snapshot.new_output)
-                        if excerpt.truncated:
-                            output = (
-                                previous_full + snapshot.new_output
-                                if previous_full is not None
-                                else snapshot.new_output
-                            )
-                            written = await _append_sandbox_log(driver, log_path, output)
-                            if not written.data_written:
-                                raise SandboxError("could not save foreground command output")
-                    if snapshot.log_cursor is not None:
-                        await driver.acknowledge_output(handle, snapshot.log_cursor)
-                    if snapshot.new_output:
-                        if on_update is not None:
-                            try:
-                                await _maybe_await(
-                                    on_update(
-                                        AgentToolResult(
-                                            content=[TextContent(text=excerpt.render())],
-                                            details={"status": "running"},
-                                        )
-                                    )
-                                )
-                            except Exception:
-                                logger.exception("execute on_update failed")
+                    await accept_snapshot(snapshot)
                     if snapshot.status != "running":
-                        finished = True
-                        if snapshot.status == "killed":
-                            return AgentToolResult(
-                                content=[TextContent(text="[killed]")],
-                                details={"status": "killed"},
-                                is_error=True,
-                            )
-                        if snapshot.exit_code == 0 and workspace_id and conversation_id:
-                            _record_executed(workspace_id, conversation_id, args.command)
-                        suffix = (
-                            f"\n[exit code: {snapshot.exit_code}]"
-                            if snapshot.exit_code not in (None, 0)
-                            else ""
-                        )
-                        full = excerpt.full_text
-                        if (
-                            full is not None
-                            and len(full) + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
-                        ):
-                            written = await _append_sandbox_log(driver, log_path, full)
-                            if not written.data_written:
-                                raise SandboxError("could not save foreground command output")
-                        if (
-                            excerpt.truncated
-                            or len(full or "") + len(suffix) > EXECUTE_RESULT_SPILL_CHARS
-                        ):
-                            suffix += f"\n\n[truncated] full output written to {log_path}"
-                        return AgentToolResult(
-                            content=[TextContent(text=excerpt.render(suffix=suffix))],
-                            details={"status": "exited"},
-                        )
+                        return await completed_result(snapshot)
                     await asyncio.sleep(_BACKGROUND_POLL_INTERVAL_SECONDS)
         except TimeoutError:
+            if handle is not None:
+                try:
+                    snapshot = await asyncio.wait_for(driver.poll(handle), timeout=5)
+                    if snapshot.status != "running":
+                        await accept_snapshot(snapshot)
+                        return await completed_result(snapshot)
+                except Exception:
+                    logger.exception("could not recheck foreground command {}", command_id)
             stop_attempted = True
             if not await stop_and_confirm():
                 return AgentToolResult(

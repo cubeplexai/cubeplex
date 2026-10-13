@@ -331,6 +331,41 @@ async def test_subagent_timeout_reports_unconfirmed_termination() -> None:
 
 
 @pytest.mark.asyncio
+async def test_subagent_timeout_rechecks_command_that_just_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(
+        return_value=ProcessHandle(command_id="", provider_ref="process-finished")
+    )
+    sandbox.poll = AsyncMock(
+        side_effect=[
+            ProcessSnapshot(status="running"),
+            ProcessSnapshot(status="exited", exit_code=0, new_output="done"),
+        ]
+    )
+    sandbox.kill = AsyncMock()
+    monkeypatch.setattr(sandbox_mod, "_BACKGROUND_POLL_INTERVAL_SECONDS", 2)
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-finished-at-timeout",
+        execute.parameters.model_validate(
+            {"description": "Finish a short command", "command": "echo done", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert _text(result) == "done"
+    sandbox.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_subagent_execute_bounds_verbose_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -359,6 +394,40 @@ async def test_subagent_execute_bounds_verbose_output(
     assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
     assert "[truncated] full output written to" in _text(result)
     assert sandbox.poll.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_subagent_spill_failure_keeps_bounded_command_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(return_value=ProcessHandle(command_id="", provider_ref="process-4"))
+    sandbox.poll = AsyncMock(
+        return_value=ProcessSnapshot(status="exited", exit_code=0, new_output="x" * 100_000)
+    )
+    sandbox.kill = AsyncMock()
+    monkeypatch.setattr(
+        sandbox_mod,
+        "_append_sandbox_log",
+        AsyncMock(return_value=AppendOutputResult(data_written=False, cleanup_done=True)),
+    )
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-no-log",
+        execute.parameters.model_validate({"description": "Run verbose build", "command": "build"}),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert len(_text(result)) <= EXECUTE_RESULT_SPILL_CHARS
+    assert "[truncated] full output unavailable" in _text(result)
+    assert "full output written to" not in _text(result)
+    sandbox.kill.assert_not_called()
 
 
 def test_tools_property_returns_fresh_list_each_time() -> None:
