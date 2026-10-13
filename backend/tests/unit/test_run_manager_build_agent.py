@@ -20,9 +20,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cubeloop.hitl import CheckpointedChannel
+from cubeloop.middleware.subagents import SubagentMiddleware
 
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.middleware.sandbox import SandboxMiddleware
 from cubeplex.services.conversation_execution import RunExecutionBinding
 from cubeplex.streams.run_manager import RunContext, RunManager
 
@@ -167,6 +169,25 @@ async def test_build_returns_tuple_shape(monkeypatch: pytest.MonkeyPatch) -> Non
     # Tools are a list of callable/registered objects; the smoke test just
     # cares that the return slot is a list (not None, not a tuple).
     assert isinstance(channel, CheckpointedChannel)
+
+
+async def test_subagent_receives_foreground_sandbox_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _build(monkeypatch, sandbox=MagicMock())
+
+    from cubeplex.agents.graph import create_cubeplex_agent
+
+    middleware = create_cubeplex_agent.call_args.kwargs["middleware"]
+    sandbox = next(item for item in middleware if isinstance(item, SandboxMiddleware))
+    subagent = next(item for item in middleware if isinstance(item, SubagentMiddleware))
+    main_execute = next(tool for tool in sandbox.tools if tool.name == "execute")
+    child_execute = next(tool for tool in subagent.shared_tools if tool.name == "execute")
+
+    assert "background" in main_execute.parameters.model_fields
+    assert "background" not in child_execute.parameters.model_fields
+    assert "notify_on_complete" not in child_execute.parameters.model_fields
+    assert {tool.name for tool in subagent.shared_tools}.isdisjoint({"monitor", "kill_execute"})
 
 
 async def test_build_wires_run_id_into_channel(

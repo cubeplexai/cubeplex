@@ -10,10 +10,12 @@ Tests:
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from opensandbox.models.execd import RunCommandOpts
+from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 
 from cubeplex.sandbox.base import ProcessHandle
 from cubeplex.sandbox.opensandbox import OpenSandbox
@@ -102,6 +104,47 @@ async def test_execute_timeout_error_returns_marker() -> None:
     result = await backend.execute("sleep 999", timeout=120)
     assert result.output == "[timeout]"
     assert result.exit_code == -1
+
+
+@pytest.mark.asyncio
+async def test_execute_timeout_interrupts_started_command() -> None:
+    backend, raw = _make_backend()
+    raw.commands.interrupt = AsyncMock()
+
+    async def time_out(command: str, *, handlers: ExecutionHandlers, **_: object) -> None:
+        del command
+        assert callable(handlers.on_init)
+        await handlers.on_init(SimpleNamespace(execution_id="exec-1"))
+        raise TimeoutError
+
+    raw.commands.run = time_out
+    result = await backend.execute("sleep 999", timeout=120, on_chunk=lambda _: None)
+
+    assert result.exit_code == -1
+    raw.commands.interrupt.assert_awaited_once_with("exec-1")
+
+
+@pytest.mark.asyncio
+async def test_execute_cancellation_interrupts_started_command() -> None:
+    backend, raw = _make_backend()
+    raw.commands.interrupt = AsyncMock()
+    started = asyncio.Event()
+
+    async def wait_forever(command: str, *, handlers: ExecutionHandlers, **_: object) -> None:
+        del command
+        assert callable(handlers.on_init)
+        await handlers.on_init(SimpleNamespace(execution_id="exec-2"))
+        started.set()
+        await asyncio.Event().wait()
+
+    raw.commands.run = wait_forever
+    task = asyncio.create_task(backend.execute("sleep 999", timeout=120, on_chunk=lambda _: None))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    raw.commands.interrupt.assert_awaited_once_with("exec-2")
 
 
 @pytest.mark.asyncio

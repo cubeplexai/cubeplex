@@ -102,6 +102,83 @@ def test_tool_names_are_stable() -> None:
     assert names == _EXPECTED_TOOL_NAMES
 
 
+def test_subagent_sandbox_tools_have_no_background_capability() -> None:
+    mw = _make_middleware()
+
+    subagent_tools = getattr(mw, "subagent_tools", None)
+    assert subagent_tools is not None
+    assert {tool.name for tool in subagent_tools} == {"execute", "write", "edit", "read"}
+    execute = next(tool for tool in subagent_tools if tool.name == "execute")
+    assert "background" not in execute.parameters.model_fields
+    assert "notify_on_complete" not in execute.parameters.model_fields
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_waits_for_final_result_past_background_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.middleware import sandbox as sandbox_mod
+
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(side_effect=AssertionError("subagent started background command"))
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="finished", exit_code=0))
+    monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0)
+    mw = _make_middleware(sandbox=sandbox)
+    subagent_tools = getattr(mw, "subagent_tools", None)
+    assert subagent_tools is not None
+    execute = next(tool for tool in subagent_tools if tool.name == "execute")
+
+    result = await execute.execute(
+        "tc-subagent",
+        execute.parameters.model_validate(
+            {"description": "Complete a command", "command": "echo finished"}
+        ),
+    )
+
+    assert result.details == {"status": "exited"}
+    assert _text(result) == "finished"
+    sandbox.execute.assert_awaited_once_with("echo finished", timeout=3600, on_chunk=ANY)
+    sandbox.start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subagent_execute_stops_when_agent_is_aborted() -> None:
+    sandbox = _make_sandbox()
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def run_command(*_: Any, **__: Any) -> Any:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    sandbox.execute = AsyncMock(side_effect=run_command)
+    mw = _make_middleware(sandbox=sandbox)
+    subagent_tools = getattr(mw, "subagent_tools", None)
+    assert subagent_tools is not None
+    execute = next(tool for tool in subagent_tools if tool.name == "execute")
+    signal = asyncio.Event()
+    call_task = asyncio.create_task(
+        execute.execute(
+            "tc-abort",
+            execute.parameters.model_validate(
+                {"description": "Wait for command", "command": "wait"}
+            ),
+            signal=signal,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    signal.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(call_task, timeout=1)
+    assert cancelled.is_set()
+
+
 def test_tools_property_returns_fresh_list_each_time() -> None:
     mw = _make_middleware()
     list1 = mw.tools

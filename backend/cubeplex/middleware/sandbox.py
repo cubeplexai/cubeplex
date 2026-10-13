@@ -183,7 +183,7 @@ def _bounded_execute_excerpt(text: str, *, suffix: str = "") -> str:
     return out
 
 
-class _ExecuteArgs(BaseModel):
+class _ForegroundExecuteArgs(BaseModel):
     description: str = Field(
         description=(
             "Short, user-facing summary of what this command does (5-10 words). "
@@ -201,6 +201,9 @@ class _ExecuteArgs(BaseModel):
             "Raise or lower it when the task has a different execution deadline."
         ),
     )
+
+
+class _ExecuteArgs(_ForegroundExecuteArgs):
     background: bool = Field(
         default=False,
         description=(
@@ -392,6 +395,7 @@ def _make_execute_tool(
     deadline_tasks: dict[str, asyncio.Task[None]] | None = None,
     on_live: Callable[[], None] | None = None,
     handoff: Callable[[str], Awaitable[bool]] | None = None,
+    auto_background: bool = True,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubeloop.AgentTool backed by a sandbox instance.
 
@@ -739,7 +743,11 @@ def _make_execute_tool(
 
         try:
             try:
-                if not _is_bare_sleep(args.command) and sandbox.supports_background() is True:
+                if (
+                    auto_background
+                    and not _is_bare_sleep(args.command)
+                    and sandbox.supports_background() is True
+                ):
                     command_id = generate_public_id(PREFIX_SANDBOX_COMMAND)
                     log_path = f"{sandbox.workdir.rstrip('/')}/.cubeplex/execute-{command_id}.log"
                     deadline_at = cast(
@@ -1063,6 +1071,70 @@ def _make_execute_tool(
             "raise timeout_seconds or split the work and retry."
         ),
         parameters=_ExecuteArgs,
+        execute=_execute,
+    )
+
+
+def _make_foreground_execute_tool(
+    sandbox: Sandbox,
+    *,
+    workspace_id: str | None = None,
+    conversation_id: str | None = None,
+) -> AgentTool[_ForegroundExecuteArgs]:
+    delegate = _make_execute_tool(
+        sandbox,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        auto_background=False,
+    )
+
+    async def _execute(
+        tool_call_id: str,
+        args: _ForegroundExecuteArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        async def run() -> AgentToolResult:
+            return await delegate.execute(
+                tool_call_id,
+                _ExecuteArgs(
+                    description=args.description,
+                    command=args.command,
+                    timeout_seconds=args.timeout_seconds,
+                    background=False,
+                    notify_on_complete=False,
+                ),
+                signal=signal,
+                on_update=on_update,
+            )
+
+        if signal is None:
+            return await run()
+        if signal.is_set():
+            raise asyncio.CancelledError
+        execution = asyncio.create_task(run())
+        aborted = asyncio.create_task(signal.wait())
+        try:
+            await asyncio.wait({execution, aborted}, return_when=asyncio.FIRST_COMPLETED)
+            if aborted.done() and not execution.done():
+                execution.cancel()
+            return await execution
+        finally:
+            aborted.cancel()
+            if not execution.done():
+                execution.cancel()
+            await asyncio.gather(execution, aborted, return_exceptions=True)
+
+    return AgentTool(
+        name="execute",
+        description=(
+            "Execute a shell command in the sandbox and wait for its final result. "
+            "Always set description first (a 5-10 word user-facing summary). "
+            "The default deadline is one hour; set timeout_seconds when needed. "
+            "This tool cannot start background tasks."
+        ),
+        parameters=_ForegroundExecuteArgs,
         execute=_execute,
     )
 
@@ -1985,11 +2057,28 @@ class SandboxMiddleware(Middleware):
         ]
         if config_loader is not None:
             self._tools.append(create_sandbox_config_tool(config_loader))
+        self._subagent_tools: list[AgentTool[Any]] = [
+            _make_foreground_execute_tool(
+                sandbox,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+            ),
+            *(
+                tool
+                for tool in self._tools
+                if tool.name not in {"execute", "monitor", "kill_execute"}
+            ),
+        ]
 
     @property
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubeloop.AgentTool list for this middleware."""
         return list(self._tools)
+
+    @property
+    def subagent_tools(self) -> list[AgentTool[Any]]:
+        """Return sandbox tools without background task controls for subagents."""
+        return list(self._subagent_tools)
 
     def _task_scope(self) -> tuple[str, str]:
         if self.org_id is None or self.workspace_id is None:

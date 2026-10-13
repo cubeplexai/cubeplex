@@ -4148,6 +4148,7 @@ class RunManager:
         from cubeplex.tools.registry import list_builtin_tools
 
         _sandbox_tools: list[Any] = []
+        _subagent_sandbox_tools: list[Any] = []
         _artifact_tools: list[Any] = []
         _todo_tools: list[Any] = []
         _subagent_tools: list[Any] = []
@@ -4859,6 +4860,7 @@ class RunManager:
                 # Middleware tools (execute, write, edit, read) collected for
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
+                _subagent_sandbox_tools.extend(sandbox_mw.subagent_tools)
             except Exception as _exc:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
@@ -4903,7 +4905,7 @@ class RunManager:
                 # main agent's deferred groups; subagents get them eagerly
                 # because catalog round-trips would dominate a child run.
                 shared_tools=_subagent_shared_tools(
-                    _sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
+                    _subagent_sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
                 ),
                 inherited_middleware=[
                     *authority_middleware,
