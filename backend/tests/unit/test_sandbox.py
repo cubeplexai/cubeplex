@@ -344,7 +344,7 @@ async def test_subagent_timeout_rechecks_command_that_just_exited(
     sandbox.poll = AsyncMock(
         side_effect=[
             ProcessSnapshot(status="running"),
-            ProcessSnapshot(status="exited", exit_code=0, new_output="done"),
+            ProcessSnapshot(status="exited", exit_code=0, new_output="done", log_cursor="1"),
         ]
     )
     sandbox.kill = AsyncMock()
@@ -362,6 +362,7 @@ async def test_subagent_timeout_rechecks_command_that_just_exited(
 
     assert result.details == {"status": "exited"}
     assert _text(result) == "done"
+    sandbox.acknowledge_output.assert_not_called()
     sandbox.kill.assert_not_called()
 
 

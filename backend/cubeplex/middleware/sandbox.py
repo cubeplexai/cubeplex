@@ -1193,7 +1193,9 @@ def _make_foreground_execute_tool(
         finished = False
         stop_attempted = False
 
-        async def accept_snapshot(snapshot: ProcessSnapshot) -> None:
+        async def accept_snapshot(
+            snapshot: ProcessSnapshot, *, terminal_recheck: bool = False
+        ) -> None:
             assert handle is not None
             if snapshot.new_output and (
                 snapshot.log_cursor is None or snapshot.log_cursor != handle.log_cursor
@@ -1201,10 +1203,11 @@ def _make_foreground_execute_tool(
                 excerpt.append(snapshot.new_output)
             if snapshot.log_cursor is not None and snapshot.log_cursor != handle.log_cursor:
                 handle.log_cursor = snapshot.log_cursor
-                await asyncio.wait_for(
-                    driver.acknowledge_output(handle, snapshot.log_cursor),
-                    timeout=remaining(),
-                )
+                if not terminal_recheck:
+                    await asyncio.wait_for(
+                        driver.acknowledge_output(handle, snapshot.log_cursor),
+                        timeout=remaining(),
+                    )
 
         async def completed_result(snapshot: ProcessSnapshot) -> AgentToolResult:
             nonlocal finished
@@ -1265,7 +1268,7 @@ def _make_foreground_execute_tool(
                 try:
                     snapshot = await asyncio.wait_for(driver.poll(handle), timeout=5)
                     if snapshot.status != "running":
-                        await accept_snapshot(snapshot)
+                        await accept_snapshot(snapshot, terminal_recheck=True)
                         return await completed_result(snapshot)
                 except Exception:
                     logger.exception("could not recheck foreground command {}", command_id)
