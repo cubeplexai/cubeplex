@@ -24,6 +24,7 @@ from cubeplex.middleware.sandbox import (
     _ExecuteArgs,
     _FileReadArgs,
     _first_changed_line,
+    _has_shell_background_operator,
     _make_edit_file_tool,
     _make_execute_tool,
     _make_file_read_tool,
@@ -113,6 +114,42 @@ def test_subagent_sandbox_tools_have_no_background_capability() -> None:
     execute = next(tool for tool in subagent_tools if tool.name == "execute")
     assert "background" not in execute.parameters.model_fields
     assert "notify_on_complete" not in execute.parameters.model_fields
+
+
+@pytest.mark.parametrize(
+    ("command", "background"),
+    [
+        ("sleep 999 & echo started", True),
+        ("(sleep 999 &)", True),
+        ("echo hi && echo done", False),
+        ("echo '&'", False),
+        (r"echo \&", False),
+        ("echo hello >&2", False),
+        ("echo hello &> /tmp/output", False),
+    ],
+)
+def test_subagent_shell_background_operator_detection(command: str, background: bool) -> None:
+    assert _has_shell_background_operator(command) is background
+
+
+@pytest.mark.asyncio
+async def test_subagent_rejects_embedded_shell_background_operator() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock()
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-shell-background",
+        execute.parameters.model_validate(
+            {"description": "Start a shell command", "command": "sleep 999 & echo started"}
+        ),
+    )
+
+    assert result.is_error is True
+    sandbox.start.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -245,6 +282,7 @@ async def test_subagent_execute_kills_command_at_requested_timeout() -> None:
 
     sandbox.poll = AsyncMock(side_effect=poll_forever)
     sandbox.kill = AsyncMock()
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="killed", exit_code=-9))
     execute = next(
         tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
     )
@@ -259,6 +297,38 @@ async def test_subagent_execute_kills_command_at_requested_timeout() -> None:
     assert result.is_error is True
     assert "[timeout]" in _text(result)
     sandbox.kill.assert_awaited_once_with(handle)
+
+
+@pytest.mark.asyncio
+async def test_subagent_timeout_reports_unconfirmed_termination() -> None:
+    sandbox = _make_sandbox()
+    sandbox.supports_background.return_value = True
+    sandbox.start = AsyncMock(
+        return_value=ProcessHandle(command_id="", provider_ref="process-unconfirmed")
+    )
+
+    async def poll_forever(_handle: ProcessHandle) -> ProcessSnapshot:
+        await asyncio.Event().wait()
+        raise AssertionError("poll should have timed out")
+
+    sandbox.poll = AsyncMock(side_effect=poll_forever)
+    sandbox.kill = AsyncMock(side_effect=RuntimeError("interrupt failed"))
+    sandbox.observe = AsyncMock(return_value=ProcessSnapshot(status="running"))
+    execute = next(
+        tool for tool in _make_middleware(sandbox=sandbox).subagent_tools if tool.name == "execute"
+    )
+
+    result = await execute.execute(
+        "tc-unconfirmed",
+        execute.parameters.model_validate(
+            {"description": "Run limited command", "command": "sleep 30", "timeout_seconds": 1}
+        ),
+    )
+
+    assert result.is_error is True
+    assert "termination could not be confirmed" in _text(result)
+    assert "was killed" not in _text(result)
+    assert result.details["status"] == "running"  # type: ignore[index]
 
 
 @pytest.mark.asyncio

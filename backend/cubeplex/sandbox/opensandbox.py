@@ -189,14 +189,15 @@ class OpenSandbox(Sandbox):
         on_chunk: Callable[[str], None] | None = None,
         on_started: Callable[[str], Any] | None = None,
     ) -> ProcessHandle:
-        del timeout, on_chunk
+        del on_chunk
         merged = {**self._run_env, **(envs or {})}
         uid: int | None = None if as_root else self._run_uid
         gid: int | None = None if as_root or uid is None else self._run_gid
         opts = RunCommandOpts(
             working_directory=self._workdir,
             envs=merged if merged else None,
-            timeout=None,
+            # Keep the deadline if the worker disappears before it can interrupt the command.
+            timeout=timedelta(seconds=timeout) if timeout is not None else None,
             uid=uid,
             gid=gid,
             background=True,

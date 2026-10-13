@@ -355,6 +355,31 @@ def _looks_like_shell_background(command: str) -> bool:
     return _SHELL_BG_RE.search(command.strip()) is not None
 
 
+def _has_shell_background_operator(command: str) -> bool:
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if char == quote:
+            quote = None
+        elif quote is None:
+            if char in ("'", '"'):
+                quote = char
+            elif char == "&":
+                before = command[index - 1] if index else ""
+                after = command[index + 1] if index + 1 < len(command) else ""
+                if after == "&":
+                    index += 2
+                    continue
+                if before not in ("&", "|", ">") and after != ">":
+                    return True
+        index += 1
+    return False
+
+
 def _is_bare_sleep(command: str) -> bool:
     """True for `sleep` / `sleep 30`, not `sleep 5 && make`."""
     return _BARE_SLEEP_RE.match(command.strip()) is not None
@@ -1137,8 +1162,34 @@ def _make_foreground_execute_tool(
             nonlocal started_ref
             started_ref = ref
 
+        async def stop_and_confirm() -> bool:
+            nonlocal handle
+            if handle is None and started_ref is not None:
+                handle = ProcessHandle(command_id=command_id, provider_ref=started_ref)
+            if handle is None:
+                return False
+            interrupted = False
+            try:
+                await asyncio.wait_for(sandbox.kill(handle), timeout=10)
+                interrupted = True
+            except Exception:
+                logger.exception("failed to stop foreground sandbox command {}", command_id)
+            try:
+                async with asyncio.timeout(3):
+                    while True:
+                        status = await sandbox.observe(handle)
+                        if status.status != "running":
+                            return True
+                        if not interrupted:
+                            return False
+                        await asyncio.sleep(0.25)
+            except Exception:
+                logger.exception("could not confirm foreground command stopped {}", command_id)
+            return False
+
         excerpt = _StreamingExcerpt()
         finished = False
+        stop_attempted = False
         try:
             async with asyncio.timeout(timeout):
                 handle = await sandbox.start(args.command, timeout=timeout, on_started=on_started)
@@ -1187,19 +1238,27 @@ def _make_foreground_execute_tool(
                         )
                     await asyncio.sleep(_BACKGROUND_POLL_INTERVAL_SECONDS)
         except TimeoutError:
+            stop_attempted = True
+            if not await stop_and_confirm():
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            text=(
+                                f"Command exceeded {timeout}s, but termination "
+                                "could not be confirmed."
+                            )
+                        )
+                    ],
+                    details={"status": "running", "command_id": command_id},
+                    is_error=True,
+                )
             return AgentToolResult(
                 content=[TextContent(text=_timeout_tool_message(timeout))],
                 is_error=True,
             )
         finally:
-            if not finished:
-                if handle is None and started_ref is not None:
-                    handle = ProcessHandle(command_id=command_id, provider_ref=started_ref)
-                try:
-                    if handle is not None:
-                        await asyncio.wait_for(sandbox.kill(handle), timeout=10)
-                except Exception:
-                    logger.exception("failed to stop foreground sandbox command {}", command_id)
+            if not finished and not stop_attempted:
+                await stop_and_confirm()
 
     async def _execute(
         tool_call_id: str,
@@ -1209,7 +1268,9 @@ def _make_foreground_execute_tool(
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         async def run() -> AgentToolResult:
-            if _looks_like_shell_background(args.command):
+            if _looks_like_shell_background(args.command) or _has_shell_background_operator(
+                args.command
+            ):
                 return AgentToolResult(
                     content=[TextContent(text="Do not background shell commands.")],
                     is_error=True,
