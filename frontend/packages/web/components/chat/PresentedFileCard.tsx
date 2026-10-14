@@ -70,6 +70,9 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   const { workspaceId } = useWorkspaceContext()
   const [imgLoaded, setImgLoaded] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
+    null,
+  )
 
   if (!file) {
     return (
@@ -98,7 +101,9 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   const isImage = file.kind === 'image' || file.mime_type.startsWith('image/')
 
   if (isImage && !imgFailed) {
-    const size = presentedImageSize(file.width, file.height)
+    const width = imageDimensions?.width ?? file.width
+    const height = imageDimensions?.height ?? file.height
+    const size = presentedImageSize(width, height)
     return (
       <a
         href={fullUrl}
@@ -121,13 +126,21 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
           <img
             src={fullUrl}
             alt={caption}
-            width={file.width ?? undefined}
-            height={file.height ?? undefined}
+            loading="lazy"
+            width={width ?? undefined}
+            height={height ?? undefined}
             className={cn(
               'h-auto w-full max-w-full transition-opacity duration-300',
               imgLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
             )}
-            onLoad={() => setImgLoaded(true)}
+            onLoad={(event) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget
+              if (naturalWidth > 0 && naturalHeight > 0) {
+                // Browser dimensions include EXIF rotation; stored dimensions may not.
+                setImageDimensions({ width: naturalWidth, height: naturalHeight })
+              }
+              setImgLoaded(true)
+            }}
             onError={() => setImgFailed(true)}
           />
         </div>

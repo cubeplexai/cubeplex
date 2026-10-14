@@ -29,6 +29,7 @@ describe('PresentedFileCard', () => {
       'src',
       '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
     )
+    expect(img).toHaveAttribute('loading', 'lazy')
     const link = img.closest('a')
     expect(link).toHaveAttribute(
       'href',
@@ -48,6 +49,22 @@ describe('PresentedFileCard', () => {
       '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
     )
     expect(link).toHaveAttribute('download', 'qr.png')
+  })
+
+  it('uses decoded image dimensions when EXIF rotation differs from stored dimensions', () => {
+    render(<PresentedFileCard file={{ ...qrFile, width: 640, height: 320 }} />)
+    const img = screen.getByRole('img', { name: 'Login QR' })
+    Object.defineProperties(img, {
+      naturalWidth: { value: 320 },
+      naturalHeight: { value: 640 },
+    })
+
+    fireEvent.load(img)
+
+    expect(img.closest('a')).toHaveStyle({ width: '320px' })
+    expect(img.parentElement).toHaveStyle({ aspectRatio: '320 / 640' })
+    expect(img).toHaveAttribute('width', '320')
+    expect(img).toHaveAttribute('height', '640')
   })
 
   it('sizes small images to their native pixel width instead of stretching', () => {
