@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any
 
 import httpx
@@ -141,7 +141,7 @@ def validate_request_headers(api: str, headers: dict[str, Any]) -> None:
 
 
 class NoAuthentication(httpx.Auth):
-    def auth_flow(self, request: httpx.Request) -> Iterator[httpx.Request]:
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         request.headers.pop("Authorization", None)
         request.headers.pop("x-api-key", None)
         yield request
