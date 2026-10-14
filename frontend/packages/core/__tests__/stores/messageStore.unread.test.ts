@@ -12,13 +12,16 @@ vi.mock('../../src/api', async (importOriginal) => {
     ...actual,
     cancelActiveRun: vi.fn().mockResolvedValue({ status: 'cancelled', run_id: 'r1' }),
     getConversationBootstrap: vi.fn().mockResolvedValue({
-      messages: [],
-      oldest_seq: null,
-      has_more: false,
-      todos: null,
-      active_run: null,
-      pending_hitl: null,
-      last_run_status: null,
+      bootstrap: {
+        messages: [],
+        oldest_seq: null,
+        has_more: false,
+        todos: null,
+        active_run: null,
+        pending_hitl: null,
+        last_run_status: null,
+      },
+      etag: null,
     }),
   }
 })

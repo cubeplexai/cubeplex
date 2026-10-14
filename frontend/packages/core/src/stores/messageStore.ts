@@ -210,6 +210,7 @@ export interface MessageStore {
   messages: Record<string, Message[]>
   /** Per-conversation bootstrap state for the initial history window. */
   loadingMessagesByConv: Record<string, boolean>
+  bootstrapEtags: Record<string, string | null>
   pendingSteers: Record<string, PendingSteer[]>
   backgroundTasks: Record<string, BackgroundTask[]>
   backgroundEvents: Record<string, BackgroundTaskEvent[]>
@@ -292,6 +293,7 @@ export interface MessageStore {
     conversationId: string,
     options?: {
       force?: boolean
+      conditional?: boolean
       throwOnError?: boolean
       preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
@@ -449,8 +451,9 @@ async function waitForConversationIdle(
 ): Promise<boolean> {
   while (get().cancellingConversationIds[conversationId]) {
     try {
-      const bootstrap = await getConversationBootstrap(client, conversationId)
+      const { bootstrap } = await getConversationBootstrap(client, conversationId)
       if (
+        bootstrap &&
         !bootstrap.active_run &&
         !bootstrap.pending_hitl &&
         !bootstrap.run_control?.cleanup_pending
@@ -624,7 +627,7 @@ function maybeAutoOpenFilePreview(
 
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
-const loadMessagesInFlight = new Map<string, Promise<void>>()
+const loadMessagesInFlight = new Map<string, { promise: Promise<void>; conditional: boolean }>()
 
 /** Dedup map for ``loadOlderMessages``: a user click on "Load earlier" and the
  *  ``loadOlderUntilSeq`` deep-link loop may both fire concurrently. Sharing
@@ -676,10 +679,15 @@ function normalizeThinkingTiming(blocks: ContentBlock[]): ContentBlock[] {
   })
 }
 
-function normalizeMessages(messages: Message[]): Message[] {
+function normalizeMessages(messages: Message[], conversationId: string): Message[] {
   return messages.map((msg) => {
-    // Some legacy fixtures may omit `id`; synthesize one for React keys.
-    const withId = msg.id ? msg : { ...msg, id: nextMessageId(msg.role) }
+    // Checkpoint messages have a stable seq but no id. Keep React keys across refreshes.
+    const withId = msg.id
+      ? msg
+      : {
+          ...msg,
+          id: msg.seq != null ? `history-${conversationId}-${msg.seq}` : nextMessageId(msg.role),
+        }
     if (
       withId.role !== 'tool_result' &&
       Array.isArray(withId.content) &&
@@ -689,6 +697,21 @@ function normalizeMessages(messages: Message[]): Message[] {
     }
     return withId
   })
+}
+
+function reuseEqualValue<T>(current: T, next: T): T {
+  return current === next || JSON.stringify(current) === JSON.stringify(next) ? current : next
+}
+
+function reuseHistoryMessages(current: Message[], next: Message[]): Message[] {
+  const byId = new Map(current.map((message) => [message.id, message]))
+  const shared = next.map((message) => {
+    const previous = byId.get(message.id)
+    return previous ? reuseEqualValue(previous, message) : message
+  })
+  return shared.length === current.length && shared.every((message, i) => message === current[i])
+    ? current
+    : shared
 }
 
 function mergeHistoryTail(current: Message[], tail: Message[]): Message[] {
@@ -751,7 +774,7 @@ async function fillHistoryGap(
       beforeSeq: cursor,
       limit: HISTORY_GAP_PAGE_SIZE,
     })
-    bridge = [...normalizeMessages(page.messages), ...bridge]
+    bridge = [...normalizeMessages(page.messages, conversationId), ...bridge]
     if (page.oldest_seq === null || page.oldest_seq >= cursor || !page.has_more) break
     cursor = page.oldest_seq
   }
@@ -1863,8 +1886,8 @@ async function consumeRunStream(
         return
       }
       try {
-        const bootstrap = await getConversationBootstrap(client, conversationId)
-        if (bootstrap.active_run?.run_id !== runId) {
+        const { bootstrap } = await getConversationBootstrap(client, conversationId)
+        if (bootstrap && bootstrap.active_run?.run_id !== runId) {
           shouldFinalize = false
           set({ streamConnection: null })
           queueMicrotask(() => {
@@ -1900,6 +1923,7 @@ const unreadMarkAt: Record<string, number> = {}
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   loadingMessagesByConv: {},
+  bootstrapEtags: {},
   pendingSteers: {},
   backgroundTasks: {},
   backgroundEvents: {},
@@ -1964,7 +1988,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   appendHistoryMessage(conversationId, message) {
-    const [normalized] = normalizeMessages([message])
+    const [normalized] = normalizeMessages([message], conversationId)
     if (!normalized) return
     set((s) => {
       const existing = s.messages[conversationId] ?? []
@@ -2253,30 +2277,46 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     conversationId: string,
     options?: {
       force?: boolean
+      conditional?: boolean
       throwOnError?: boolean
       preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
     },
   ) {
     const force = options?.force === true
+    const conditional = options?.conditional === true && !force
     const state = get()
     if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
+    const requestKey = JSON.stringify([
+      useAuthStore.getState().user?.id,
+      client.baseUrl,
+      client.workspaceId,
+      conversationId,
+    ])
     // The page-level effect and <MessageList>'s own effect both fire on mount
     // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
-    const existingLoad = loadMessagesInFlight.get(conversationId)
-    if (existingLoad) {
-      if (!force) return existingLoad
-      await existingLoad
+    let existingLoad = loadMessagesInFlight.get(requestKey)
+    while (existingLoad) {
+      if (!force && (conditional || !existingLoad.conditional)) return existingLoad.promise
+      // Recovery still needs a full response if the background check failed.
+      await existingLoad.promise.catch(() => undefined)
+      existingLoad = loadMessagesInFlight.get(requestKey)
     }
-    set((s) => ({
-      loadingMessagesByConv: {
-        ...s.loadingMessagesByConv,
-        [conversationId]: true,
-      },
-    }))
+    const showLoading = !conditional || get().messages[conversationId] === undefined
+    if (showLoading) {
+      set((s) => ({
+        loadingMessagesByConv: { ...s.loadingMessagesByConv, [conversationId]: true },
+      }))
+    }
     const promise = (async () => {
       try {
-        const bootstrap = await getConversationBootstrap(client, conversationId)
+        const etag =
+          conditional && get().messages[conversationId] !== undefined
+            ? (get().bootstrapEtags[requestKey] ?? undefined)
+            : undefined
+        const response = await getConversationBootstrap(client, conversationId, etag)
+        const { bootstrap } = response
+        if (bootstrap === null) return
         const current = get()
         if (
           options?.preserveOtherConversationStream &&
@@ -2288,7 +2328,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         if (!force && current.isStreaming && current.streamingConversationId === conversationId)
           return
 
-        let messages = normalizeMessages(bootstrap.messages ?? [])
+        let messages = normalizeMessages(bootstrap.messages ?? [], conversationId)
         if (bootstrap.active_run?.user_message) {
           messages = trimHistoryForActiveRun(
             messages,
@@ -2331,12 +2371,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const usageSummary = bootstrap.usage_summary
         const newTurnUsage = {
           ...get().turnUsage,
-          [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
+          [conversationId]: reuseEqualValue(
+            get().turnUsage[conversationId] ?? null,
+            (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
+          ),
         }
         const newSessionUsage = {
           ...get().sessionUsage,
-          [conversationId]: (usageSummary?.session ?? null) as
-            import('../types').SessionUsage | null,
+          [conversationId]: reuseEqualValue(
+            get().sessionUsage[conversationId] ?? null,
+            (usageSummary?.session ?? null) as import('../types').SessionUsage | null,
+          ),
         }
         const newContextWindow = {
           ...get().contextWindow,
@@ -2519,9 +2564,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             s.backgroundEventsHasMore[conversationId],
             backgroundPage,
           )
-          const nextMessages = preserveHistory
-            ? mergeHistoryTail(s.messages[conversationId] ?? [], messages)
-            : messages
+          const currentMessages = s.messages[conversationId] ?? []
+          const nextMessages = reuseHistoryMessages(
+            currentMessages,
+            preserveHistory ? mergeHistoryTail(currentMessages, messages) : messages,
+          )
           const hasExistingCursor = Object.prototype.hasOwnProperty.call(
             s.oldestSeqByConv,
             conversationId,
@@ -2531,6 +2578,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             conversationId,
           )
           return {
+            bootstrapEtags: { ...s.bootstrapEtags, [requestKey]: response.etag },
             messages: { ...s.messages, [conversationId]: nextMessages },
             oldestSeqByConv: {
               ...s.oldestSeqByConv,
@@ -2546,16 +2594,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                   ? s.hasMoreByConv[conversationId]
                   : bootstrap.has_more,
             },
-            todos: restoredTodos,
+            todos: reuseEqualValue(s.todos, restoredTodos),
             // Clear only when bootstrap has authoritative error state or persisted
             // assistant history; otherwise keep a live error visible through the
             // bootstrap race.
             errors: { ...s.errors, [conversationId]: nextError },
             lastRunStatus: bootstrap.last_run_status ?? null,
-            streamAgents: nextStreamAgents,
+            streamAgents: reuseEqualValue(s.streamAgents, nextStreamAgents),
             pendingSteers: {
               ...s.pendingSteers,
-              [conversationId]: hydratedPending,
+              [conversationId]: reuseEqualValue(
+                s.pendingSteers[conversationId] ?? [],
+                hydratedPending,
+              ),
             },
             backgroundTasks: {
               ...s.backgroundTasks,
@@ -2563,7 +2614,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             },
             backgroundEvents: {
               ...s.backgroundEvents,
-              [conversationId]: mergedBackgroundEvents.items,
+              [conversationId]: reuseEqualValue(
+                s.backgroundEvents[conversationId] ?? [],
+                mergedBackgroundEvents.items,
+              ),
             },
             backgroundEventCursor: {
               ...s.backgroundEventCursor,
@@ -2599,15 +2653,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             // A periodic baseline refresh returns only the newest page. Build
             // this map from the merged history so older loaded tool cards keep
             // their result state and previews.
-            toolResultMap: toolResultsFromHistory(nextMessages),
+            toolResultMap: reuseEqualValue(s.toolResultMap, toolResultsFromHistory(nextMessages)),
             // When `skipSeed` fired (we just answered this exact question),
             // preserve the current pendingAsk / pendingConfirmMap
             // instead of clearing them. The form stays mounted in its
             // submitting/cancelling state until the SSE `ask_user_resolved`
             // event arrives, which avoids the visible blank gap that
             // optimistic-clear used to produce.
-            pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
-            pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
+            pendingConfirmMap: skipSeed
+              ? s.pendingConfirmMap
+              : reuseEqualValue(s.pendingConfirmMap, seedPendingConfirmMap),
+            pendingAsk: skipSeed ? s.pendingAsk : reuseEqualValue(s.pendingAsk, seedPendingAsk),
             cancellingConversationIds: bootstrap.run_control?.cleanup_pending
               ? { ...s.cancellingConversationIds, [conversationId]: true }
               : !bootstrap.active_run && !bootstrap.pending_hitl
@@ -2667,17 +2723,18 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }))
       }
     })()
-    loadMessagesInFlight.set(conversationId, promise)
+    loadMessagesInFlight.set(requestKey, { promise, conditional })
     try {
       await promise
     } finally {
-      loadMessagesInFlight.delete(conversationId)
-      set((s) => ({
-        loadingMessagesByConv: {
-          ...s.loadingMessagesByConv,
-          [conversationId]: false,
-        },
-      }))
+      if (loadMessagesInFlight.get(requestKey)?.promise === promise) {
+        loadMessagesInFlight.delete(requestKey)
+      }
+      if (showLoading) {
+        set((s) => ({
+          loadingMessagesByConv: { ...s.loadingMessagesByConv, [conversationId]: false },
+        }))
+      }
     }
   },
 
@@ -2696,7 +2753,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const promise = (async () => {
       try {
         const page = await getHistoryWindow(client, conversationId, { beforeSeq: cursor })
-        const older = normalizeMessages(page.messages)
+        const older = normalizeMessages(page.messages, conversationId)
         hydrateCitationsFromHistory(conversationId, older)
         set((s) => ({
           messages: {

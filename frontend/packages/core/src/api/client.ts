@@ -26,7 +26,10 @@ export interface ApiClient {
   setLocale(locale: string | null): void
   /** Rewrite a path by injecting the workspace segment when applicable. */
   resolvePath(path: string): string
-  get(path: string): Promise<Response>
+  get(
+    path: string,
+    options?: { headers?: Record<string, string>; cache?: RequestCache },
+  ): Promise<Response>
   post(path: string, body: unknown): Promise<Response>
   postRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<Response>
   postForm(path: string, form: Record<string, string>): Promise<Response>
@@ -119,10 +122,11 @@ export function createApiClient(baseUrl: string): ApiClient {
       locale = l
     },
     resolvePath,
-    get(path) {
+    get(path, options) {
       return doFetch(path, {
         method: 'GET',
-        headers: buildHeaders('GET', {}),
+        headers: buildHeaders('GET', options?.headers ?? {}),
+        ...(options?.cache ? { cache: options.cache } : {}),
       })
     },
     post(path, body) {

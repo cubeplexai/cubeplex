@@ -456,28 +456,31 @@ describe('messageStore background task state', () => {
       backgroundEventsHasMore: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [],
-      oldest_seq: null,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: {
-        items: [newest],
-        next_cursor: 'first-page-cursor',
-        has_more: true,
-      },
-    } as never)
+      bootstrap: {
+        messages: [],
+        oldest_seq: null,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: {
+          items: [newest],
+          next_cursor: 'first-page-cursor',
+          has_more: true,
+        },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', { force: true })
 
@@ -514,16 +517,22 @@ describe('messageStore background task state', () => {
       },
       background_events: { items: [], next_cursor: null, has_more: false },
     }
-    vi.mocked(getConversationBootstrap).mockResolvedValueOnce(bootstrap as never)
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: bootstrap as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', { force: true })
 
     expect(useMessageStore.getState().cancellingConversationIds).toEqual({ 'conv-1': true })
 
     vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
-      ...bootstrap,
-      run_control: { ...bootstrap.run_control, cleanup_pending: false },
-    } as never)
+      bootstrap: {
+        ...bootstrap,
+        run_control: { ...bootstrap.run_control, cleanup_pending: false },
+      } as never,
+      etag: null,
+    })
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', { force: true })
 
     expect(useMessageStore.getState().cancellingConversationIds).toEqual({})
@@ -548,24 +557,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': true },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [newest],
-      oldest_seq: 350,
-      has_more: true,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [newest],
+        oldest_seq: 350,
+        has_more: true,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -613,24 +625,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [newest],
-      oldest_seq: 1001,
-      has_more: true,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [newest],
+        oldest_seq: 1001,
+        has_more: true,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
     vi.mocked(getHistoryWindow)
       .mockResolvedValueOnce({
         messages: [laterMiddle],
@@ -685,24 +700,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [newest],
-      oldest_seq: 1001,
-      has_more: true,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [newest],
+        oldest_seq: 1001,
+        has_more: true,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
     let resolveGap: ((value: Awaited<ReturnType<typeof getHistoryWindow>>) => void) | null = null
     vi.mocked(getHistoryWindow).mockImplementationOnce(
       () =>
@@ -774,24 +792,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': true },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [newest],
-      oldest_seq: 350,
-      has_more: true,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [newest],
+        oldest_seq: 350,
+        has_more: true,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -834,24 +855,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [persistedAssistant, persistedTool],
-      oldest_seq: 10,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [persistedAssistant, persistedTool],
+        oldest_seq: 10,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -883,24 +907,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [persisted],
-      oldest_seq: 10,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [persisted],
+        oldest_seq: 10,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -928,24 +955,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [persistedSteer],
-      oldest_seq: 10,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [persistedSteer],
+        oldest_seq: 10,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -973,24 +1003,27 @@ describe('messageStore background task state', () => {
       hasMoreByConv: { 'conv-1': false },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      messages: [persistedAssistant],
-      oldest_seq: 10,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
-      },
-      background_events: { items: [], next_cursor: null, has_more: false },
-    } as never)
+      bootstrap: {
+        messages: [persistedAssistant],
+        oldest_seq: 10,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
 
     await useMessageStore.getState().loadMessages(fakeClient, 'conv-1', {
       preserveLoadedHistory: true,
@@ -1036,23 +1069,26 @@ describe('messageStore background task state', () => {
     })
     useMessageStore.setState({ messages: { 'conv-1': [older, appended] } })
     resolveBootstrap?.({
-      messages: [persisted],
-      oldest_seq: 10,
-      has_more: false,
-      active_run: null,
-      pending_hitl: null,
-      pending_steers: [],
-      todos: [],
-      execution_generation: 4,
-      stop_all: null,
-      run_control: null,
-      background_summary: {
-        has_inflight: false,
-        has_pending: false,
-        has_cleanup: false,
-        can_stop: false,
+      bootstrap: {
+        messages: [persisted],
+        oldest_seq: 10,
+        has_more: false,
+        active_run: null,
+        pending_hitl: null,
+        pending_steers: [],
+        todos: [],
+        execution_generation: 4,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
       },
-      background_events: { items: [], next_cursor: null, has_more: false },
+      etag: null,
     })
     await loading
 

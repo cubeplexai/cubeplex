@@ -1,5 +1,6 @@
 """Conversations API routes."""
 
+import hashlib
 import json
 import logging
 import re
@@ -11,7 +12,7 @@ from typing import Annotated, Any, Literal, Self
 
 from cubeloop.providers.base import ReasoningControl
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -1831,7 +1832,7 @@ async def get_conversation_bootstrap(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     rds: Annotated[RedisHandle, Depends(redis_dep)],
-) -> dict[str, object]:
+) -> Response:
     """Return history tail + active-run metadata + usage panel data in one round trip.
 
     History is the most recent ``lifecycle.bootstrap_history_tail`` messages
@@ -2003,7 +2004,7 @@ async def get_conversation_bootstrap(
         else None
     )
 
-    return {
+    payload = {
         "messages": history.messages,
         "oldest_seq": history.oldest_seq,
         "has_more": history.has_more,
@@ -2079,6 +2080,18 @@ async def get_conversation_bootstrap(
             for row in pending_steering
         ],
     }
+    body = json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    etag = f'W/"{hashlib.sha256(body).hexdigest()}"'
+    headers = {"ETag": etag, "Cache-Control": "private, no-store"}
+    validator = raw_request.headers.get("if-none-match", "").strip()
+    # Hash the whole projection so control-only changes also invalidate the baseline.
+    if validator == "*" or etag.removeprefix("W/") in {
+        tag.strip().removeprefix("W/") for tag in validator.split(",")
+    }:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 def _parse_error_params(raw: str | None) -> dict[str, Any] | None:

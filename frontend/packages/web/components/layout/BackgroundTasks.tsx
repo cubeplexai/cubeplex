@@ -92,6 +92,7 @@ function useBackgroundTaskRefresh(conversationId: string) {
           state.streamingConversationId !== conversationId
         ) {
           await loadMessages(client(), conversationId, {
+            conditional: true,
             preserveLoadedHistory: true,
             preserveOtherConversationStream: true,
             throwOnError: true,

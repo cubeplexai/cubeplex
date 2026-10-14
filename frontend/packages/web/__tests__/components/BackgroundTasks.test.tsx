@@ -491,6 +491,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(30_000)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      conditional: true,
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
       throwOnError: true,
@@ -537,6 +538,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      conditional: true,
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
       throwOnError: true,
@@ -569,6 +571,7 @@ describe('BackgroundTasks', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(mocks.loadMessages).toHaveBeenCalledWith(expect.anything(), 'conv-1', {
+      conditional: true,
       preserveLoadedHistory: true,
       preserveOtherConversationStream: true,
       throwOnError: true,

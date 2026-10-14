@@ -112,10 +112,19 @@ function readCookie(name: string): string {
 export async function getConversationBootstrap(
   client: ApiClient,
   conversationId: string,
-): Promise<ConversationBootstrap> {
-  const res = await client.get(`/api/v1/conversations/${conversationId}/bootstrap`)
+  etag?: string,
+): Promise<{ bootstrap: ConversationBootstrap | null; etag: string | null }> {
+  const res = await client.get(`/api/v1/conversations/${conversationId}/bootstrap`, {
+    // The store handles 304 itself; the browser must not substitute a cached body.
+    cache: 'no-store',
+    headers: etag ? { 'If-None-Match': etag } : {},
+  })
+  if (res.status === 304 && etag) return { bootstrap: null, etag }
   if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<ConversationBootstrap>
+  return {
+    bootstrap: (await res.json()) as ConversationBootstrap,
+    etag: res.headers.get('ETag'),
+  }
 }
 
 export async function getHistoryWindow(

@@ -7,6 +7,11 @@ title: Conversation Basics
 
 Conversations are where you interact with the AI agent. Each conversation is a persistent message thread scoped to your workspace, with full context carried across turns.
 
+While a conversation is visible, CubePlex periodically checks for new messages and
+background results. When nothing has changed, it skips downloading the history again
+and keeps your reading position and expanded message cards. Checks pause while the
+tab is hidden and resume when you return.
+
 ## Starting a conversation
 
 When you open a workspace, you land on the home page with an empty input bar. Type a message and press **Enter** (or click the send button) to start a new conversation. CubePlex creates the conversation automatically and routes you to it.

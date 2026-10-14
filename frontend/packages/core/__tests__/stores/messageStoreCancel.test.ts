@@ -64,7 +64,10 @@ describe('messageStore.cancelStream', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getAdmittedRunId).mockResolvedValue(null)
-    vi.mocked(getConversationBootstrap).mockResolvedValue(idleBootstrap())
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      bootstrap: idleBootstrap(),
+      etag: null,
+    })
     useMessageStore.setState({
       messages: {},
       streamAgents: {},
@@ -87,15 +90,18 @@ describe('messageStore.cancelStream', () => {
       blocks: [{ type: 'text', text: 'partial answer' }],
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      ...idleBootstrap(),
-      messages: [
-        {
-          id: 'cancelled-assistant-1',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'partial answer' }],
-          stop_reason: 'aborted',
-        },
-      ],
+      bootstrap: {
+        ...idleBootstrap(),
+        messages: [
+          {
+            id: 'cancelled-assistant-1',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'partial answer' }],
+            stop_reason: 'aborted',
+          },
+        ],
+      },
+      etag: null,
     })
 
     await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
@@ -137,15 +143,18 @@ describe('messageStore.cancelStream', () => {
       },
     })
     vi.mocked(getConversationBootstrap).mockResolvedValue({
-      ...idleBootstrap(),
-      messages: [
-        {
-          id: 'steer-message-1',
-          role: 'user',
-          content: [{ type: 'text', text: 'already injected' }],
-          metadata: { steer_id: 'steer-before-cancel' },
-        },
-      ],
+      bootstrap: {
+        ...idleBootstrap(),
+        messages: [
+          {
+            id: 'steer-message-1',
+            role: 'user',
+            content: [{ type: 'text', text: 'already injected' }],
+            metadata: { steer_id: 'steer-before-cancel' },
+          },
+        ],
+      },
+      etag: null,
     })
 
     await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
@@ -169,18 +178,21 @@ describe('messageStore.cancelStream', () => {
       },
     })
     vi.mocked(getConversationBootstrap)
-      .mockResolvedValueOnce(idleBootstrap())
+      .mockResolvedValueOnce({ bootstrap: idleBootstrap(), etag: null })
       .mockRejectedValueOnce(new Error('bootstrap unavailable'))
       .mockResolvedValue({
-        ...idleBootstrap(),
-        messages: [
-          {
-            id: 'steer-message-retry',
-            role: 'user',
-            content: [{ type: 'text', text: 'already injected' }],
-            metadata: { steer_id: 'steer-retry-refresh' },
-          },
-        ],
+        bootstrap: {
+          ...idleBootstrap(),
+          messages: [
+            {
+              id: 'steer-message-retry',
+              role: 'user',
+              content: [{ type: 'text', text: 'already injected' }],
+              metadata: { steer_id: 'steer-retry-refresh' },
+            },
+          ],
+        },
+        etag: null,
       })
 
     let settled = false
@@ -334,10 +346,13 @@ describe('messageStore.cancelStream', () => {
     })
     vi.mocked(getConversationBootstrap)
       .mockResolvedValueOnce({
-        ...idleBootstrap(),
-        active_run: { run_id: 'r1', status: 'running' },
+        bootstrap: {
+          ...idleBootstrap(),
+          active_run: { run_id: 'r1', status: 'running' },
+        },
+        etag: null,
       })
-      .mockResolvedValue(idleBootstrap())
+      .mockResolvedValue({ bootstrap: idleBootstrap(), etag: null })
 
     const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
     await Promise.resolve()
