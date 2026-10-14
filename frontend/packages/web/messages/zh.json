@@ -1070,7 +1070,7 @@
       "applyGroup": "确认聊天/文本并应用上限",
       "confirmSuggestions": "确认所选模型所有已显示的建议",
       "existing": "已配置",
-      "complete": "参数完整",
+      "complete": "必需参数完整",
       "needsReview": "待审核参数",
       "fields": "参数及来源",
       "unknown": "未知",

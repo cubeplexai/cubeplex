@@ -28,7 +28,18 @@ interface Props {
   onProviderSaved?: (id: string) => void
   onImported: (providerId: string, models: ImportModelOutcome[]) => void
 }
-const required: ModelField[] = ['purpose', 'context_window', 'max_tokens', 'input_modalities']
+const required: ModelField[] = [
+  'purpose',
+  'context_window',
+  'max_tokens',
+  'input_modalities',
+  'reasoning',
+  'reasoning_levels',
+  'cost_input',
+  'cost_output',
+  'cost_cache_read',
+  'cost_cache_write',
+]
 const canSelect = (m: DiscoveredModel) =>
   !m.existing_model_db_id && !['embedding', 'image', 'audio'].includes(m.purpose)
 

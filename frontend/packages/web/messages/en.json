@@ -1070,7 +1070,7 @@
       "applyGroup": "Confirm chat/text and apply limits",
       "confirmSuggestions": "Confirm all displayed suggestions for selection",
       "existing": "Already configured",
-      "complete": "Fields complete",
+      "complete": "Required fields complete",
       "needsReview": "Review fields",
       "fields": "Specifications and sources",
       "unknown": "Unknown",
