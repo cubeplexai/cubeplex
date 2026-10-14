@@ -118,6 +118,7 @@ def build_catalog(
                 plan=ep.plan,
                 base_url=compose_base_url(v.regions, ep),
                 capability=resolve_capability(ep.capability, profiles),
+                discovery=ep.discovery,
                 models=models,
             )
     return Catalog(vendors=vendors, endpoints=endpoints)

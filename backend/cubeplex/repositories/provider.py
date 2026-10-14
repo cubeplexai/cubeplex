@@ -43,6 +43,18 @@ class ProviderRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def lock(self, provider_id: str) -> Provider | None:
+        stmt = (
+            select(Provider)
+            .where(
+                Provider.id == provider_id,  # type: ignore[arg-type]
+                Provider.org_id == self.org_id,  # type: ignore[arg-type]
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_by_name(self, name: str) -> Provider | None:
         stmt = (
             select(Provider)

@@ -6,6 +6,21 @@ from cubeplex.llm.catalog.types import Endpoint, Vendor
 PROFILES: dict[str, dict[str, object]] = {"x": {}}
 
 
+def test_cliproxyapi_is_a_self_hosted_vendor_with_instance_discovery():
+    from cubeplex.llm.catalog import load_catalog
+
+    catalog = load_catalog()
+    vendors = {v.vendor: v for v in catalog.vendors}
+    assert "cliproxyapi" in vendors
+    assert vendors["cliproxyapi"].category == "oss-framework"
+    for protocol in ("openai-completions", "openai-responses"):
+        endpoint = catalog.resolve(f"cliproxyapi/local/{protocol}")
+        assert endpoint.base_url == "http://localhost:8317/v1"
+        assert endpoint.models == []
+        assert endpoint.discovery.adapter == "openai"
+        assert endpoint.discovery.metadata_profile == "cliproxyapi"
+
+
 def _vendor(**over):
     base = {
         "vendor": "v",

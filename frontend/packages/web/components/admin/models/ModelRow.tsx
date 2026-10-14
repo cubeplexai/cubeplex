@@ -1,9 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Brain, Check, Loader2, Pencil, RotateCw, TriangleAlert, Trash2, X } from 'lucide-react'
-import { testModel, type ApiClient, type Model } from '@cubeplex/core'
+import {
+  enableTestedModels,
+  parseTestStream,
+  startTestStream,
+  type ApiClient,
+  type Model,
+} from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -58,14 +64,28 @@ export function ModelRow({
   const tExtra = useTranslations('adminModelsExtra')
   const t = useTranslations('adminModels')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [retesting, setRetesting] = useState(false)
+  const controller = useRef<AbortController | null>(null)
+  useEffect(() => () => controller.current?.abort(), [])
   const issues = testIssues(model.last_test_summary)
 
   async function handleRetest() {
+    controller.current?.abort()
+    controller.current = new AbortController()
     setRetesting(true)
+    setError(null)
     try {
-      await testModel(client, providerId, model.id)
+      const stream = await startTestStream(
+        client,
+        providerId,
+        [model.id],
+        controller.current.signal,
+      )
+      for await (const event of parseTestStream(stream)) void event
       onRetested?.()
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setRetesting(false)
     }
@@ -95,6 +115,11 @@ export function ModelRow({
         </div>
         {model.display_name && model.display_name !== model.model_id && (
           <span className="mt-0.5 block truncate text-muted-foreground">{model.display_name}</span>
+        )}
+        {error && (
+          <p role="alert" className="text-xs text-danger-fg">
+            {error}
+          </p>
         )}
         {issues.length > 0 && (
           <ul className="mt-1 flex flex-col gap-0.5">
@@ -138,9 +163,13 @@ export function ModelRow({
         className="hidden min-w-[100px] shrink-0 text-right text-muted-foreground lg:block"
         title={t('costPerMillion')}
       >
-        {model.cost_input > 0 || model.cost_output > 0
-          ? `$${formatCost(model.cost_input)}/$${formatCost(model.cost_output)}`
-          : '-'}
+        {model.configuration_metadata &&
+        (!model.configuration_metadata.fields?.cost_input ||
+          !model.configuration_metadata.fields?.cost_output)
+          ? t('priceUnknown')
+          : model.cost_input > 0 || model.cost_output > 0
+            ? `$${formatCost(model.cost_input)}/$${formatCost(model.cost_output)}`
+            : '-'}
       </span>
 
       <div className="hidden shrink-0 items-center md:flex">
@@ -148,6 +177,30 @@ export function ModelRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {!model.enabled && !model.is_system && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retesting}
+            onClick={async () => {
+              setRetesting(true)
+              setError(null)
+              try {
+                const result = await enableTestedModels(client, providerId, [model.id])
+                if (result.results[0]?.status === 'blocked') {
+                  setError(result.results[0].reason ?? t('verificationRequired'))
+                } else onRetested?.()
+              } catch (e) {
+                setError((e as Error).message)
+              } finally {
+                setRetesting(false)
+              }
+            }}
+          >
+            {t('enableVerified')}
+          </Button>
+        )}
+
         {!confirmOpen && (
           <Button
             variant="ghost"

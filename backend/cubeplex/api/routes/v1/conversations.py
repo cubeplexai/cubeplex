@@ -8,12 +8,12 @@ import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal
 
 from cubeloop.providers.base import ReasoningControl
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -1075,13 +1075,7 @@ class SendMessageRequest(BaseModel):
     content: str = ""
     attachments: list[str] = []
     model_key: str | None = None
-    reasoning: ReasoningControl = Field(default_factory=ReasoningControl)
-
-    @model_validator(mode="after")
-    def _reject_unsupported_auto_reasoning(self) -> Self:
-        if self.reasoning.mode == "auto":
-            raise ValueError("reasoning.mode='auto' is not supported by current presets")
-        return self
+    reasoning: ReasoningControl | None = None
 
 
 class SendMessageResponse(BaseModel):

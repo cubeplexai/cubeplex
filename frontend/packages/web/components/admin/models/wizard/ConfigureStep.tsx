@@ -5,13 +5,17 @@ import { useTranslations } from 'next-intl'
 import {
   ApiError,
   createProvider,
+  fetchProvider,
   updateProvider,
   type ApiClient,
   type EndpointPreset,
   type ProviderCreate,
   type ProviderUpdate,
   type VendorPreset,
+  type ImportModelOutcome,
 } from '@cubeplex/core'
+import { DiscoveryPanel } from '../DiscoveryPanel'
+import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
@@ -26,6 +30,8 @@ interface ConfigureStepProps {
   // creating a second row.
   existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
+  onProviderSaved?: (providerId: string) => void
+  onModelsImported?: (providerId: string, models: ImportModelOutcome[]) => void
   // Persisted form values, so stepping back into this step restores them.
   configDraft: ConfigDraft | null
   onConfigDraftChange: (draft: ConfigDraft) => void
@@ -42,11 +48,14 @@ export function ConfigureStep({
   onSelectEndpoint,
   existingProviderId,
   onProviderCreated,
+  onProviderSaved,
+  onModelsImported,
   configDraft,
   onConfigDraftChange,
 }: ConfigureStepProps) {
   const t = useTranslations('adminModels.wizard.configure')
   const tw = useTranslations('adminModels.wizard')
+  const [draft, setDraft] = useState<ProviderCreate | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -94,12 +103,31 @@ export function ConfigureStep({
     capability: chosen.capability,
   }
 
-  async function handleSubmit(body: ProviderCreate | ProviderUpdate) {
+  async function handleSubmit(body: ProviderCreate | ProviderUpdate, manual = false) {
+    if (
+      !existingProviderId &&
+      !manual &&
+      chosen.discovery &&
+      chosen.discovery.adapter !== 'static'
+    ) {
+      setDraft(body as ProviderCreate)
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       if (existingProviderId) {
-        await updateProvider(client, existingProviderId, body as ProviderUpdate)
+        const current = await fetchProvider(client, existingProviderId)
+        const {
+          slug: _slug,
+          discovery_id: _discoveryId,
+          model_capability_overrides: _overrides,
+          ...fields
+        } = body as ProviderCreate
+        await updateProvider(client, existingProviderId, {
+          ...fields,
+          expected_configuration_revision: current.configuration_revision,
+        })
         onProviderCreated(existingProviderId)
       } else {
         const provider = await createProvider(client, body as ProviderCreate)
@@ -168,21 +196,44 @@ export function ConfigureStep({
         </div>
       )}
 
-      <ProviderConfigForm
-        key={chosen.preset_key}
-        mode="create"
-        preset={createPreset}
-        // Restore the draft only when it belongs to the current endpoint; a
-        // different endpoint should fall back to that endpoint's defaults.
-        initialValues={configDraft?.presetKey === chosen.preset_key ? configDraft : null}
-        onValuesChange={(values: ConfigFormValues) =>
-          onConfigDraftChange({ ...values, presetKey: chosen.preset_key })
-        }
-        saving={saving}
-        error={error}
-        submitLabel={tw('next')}
-        onSubmit={(body) => void handleSubmit(body)}
-      />
+      {!draft && (
+        <ProviderConfigForm
+          key={chosen.preset_key}
+          mode="create"
+          preset={createPreset}
+          // Restore the draft only when it belongs to the current endpoint; a
+          // different endpoint should fall back to that endpoint's defaults.
+          initialValues={configDraft?.presetKey === chosen.preset_key ? configDraft : null}
+          onValuesChange={(values: ConfigFormValues) =>
+            onConfigDraftChange({ ...values, presetKey: chosen.preset_key })
+          }
+          saving={saving}
+          error={error}
+          submitLabel={tw('next')}
+          onSubmit={(body) => void handleSubmit(body)}
+        />
+      )}
+      {draft && (
+        <>
+          <DiscoveryPanel
+            client={client}
+            draft={draft}
+            onProviderSaved={onProviderSaved}
+            onImported={(id, models) => onModelsImported?.(id, models)}
+          />
+          <Button variant="outline" disabled={saving} onClick={() => setDraft(null)}>
+            {tw('back')}
+          </Button>
+          <Button variant="ghost" disabled={saving} onClick={() => void handleSubmit(draft, true)}>
+            {tw('manualSetup')}
+          </Button>
+          {error && (
+            <p role="alert" className="text-sm text-danger-fg">
+              {error}
+            </p>
+          )}
+        </>
+      )}
     </div>
   )
 }

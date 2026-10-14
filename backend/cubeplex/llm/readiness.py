@@ -21,6 +21,10 @@ import hashlib
 import json
 from typing import Any
 
+from cubeloop.providers.capability import CapabilityDescriptor
+
+from cubeplex.models.provider import Model, Provider
+
 # §4.1 readiness enum values (string literals, server-derived).
 READY = "ready"
 DEGRADED = "degraded"
@@ -86,3 +90,83 @@ def capability_fingerprint(
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def provider_configuration_fingerprint(provider: Provider, credential_revision: int) -> str:
+    return _hash(
+        {
+            "api": provider.provider_type,
+            "base_url": provider.base_url.rstrip("/"),
+            "auth_type": provider.auth_type,
+            "credential_id": provider.credential_id,
+            "credential_revision": credential_revision,
+            "extra_body": provider.extra_body or {},
+            "extra_headers": provider.extra_headers or {},
+        }
+    )
+
+
+def configuration_fingerprint(
+    provider: Provider, model: Model, credential_revision: int = 1
+) -> str:
+    overrides = provider.model_capability_overrides or {}
+    capability = overrides.get(model.model_id, provider.capability or {})
+    effective = CapabilityDescriptor.model_validate(capability).model_dump(mode="json")
+    return _hash(
+        {
+            "provider": provider_configuration_fingerprint(provider, credential_revision),
+            "model_id": model.model_id,
+            "capability": effective,
+            "context_window": model.context_window,
+            "max_tokens": model.max_tokens,
+            "reasoning": model.reasoning,
+            "input_modalities": sorted(model.input_modalities),
+            "extra_body": {**(provider.extra_body or {}), **(model.extra_body or {})},
+            "extra_headers": {**(provider.extra_headers or {}), **(model.extra_headers or {})},
+        }
+    )
+
+
+def verification_pending(provider: Provider, model: Model, credential_revision: int = 1) -> bool:
+    summary = model.last_test_summary or {}
+    stored = summary.get("configuration_fingerprint")
+    if stored is None:
+        return (
+            model.last_test_status is not None
+            or model.configuration_metadata.get("origin") == "discovery"
+        )
+    return (
+        stored != configuration_fingerprint(provider, model, credential_revision)
+        or summary.get("probe_generation") != model.probe_generation
+        or summary.get("evidence_revision") != model.evidence_revision
+    )
+
+
+def model_activation_blocker(
+    provider: Provider, model: Model, credential_revision: int = 1
+) -> str | None:
+    summary = model.last_test_summary or {}
+    if verification_pending(provider, model, credential_revision):
+        return "verification_pending"
+    if model.last_test_status not in {"ok", "warn"}:
+        return "model_test_required"
+    if (
+        summary.get("probe_generation") != model.probe_generation
+        or summary.get("evidence_revision") != model.evidence_revision
+    ):
+        return "test_superseded"
+    if provider.last_liveness_status != "ok":
+        return "provider_test_required"
+    if provider.last_liveness_summary.get(
+        "configuration_fingerprint"
+    ) != provider_configuration_fingerprint(provider, credential_revision):
+        return "provider_test_required"
+    if not summary.get("required_checks_passed"):
+        return "capability_test_required"
+    return None

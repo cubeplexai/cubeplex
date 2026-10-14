@@ -215,10 +215,10 @@ describe('ProviderConfigForm — edit', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onSubmit).toHaveBeenCalledTimes(1)
     const body = onSubmit.mock.calls[0][0] as ProviderUpdate
-    expect(body.api_key).toBeNull()
+    expect(body).not.toHaveProperty('api_key')
     expect(body.provider_type).toBe('anthropic-messages')
-    expect(body.capability).toEqual({ supports_tools: true })
-    expect(body.model_capability_overrides).toEqual({ 'gpt-x': { reasoning: true } })
+    expect(body).not.toHaveProperty('capability')
+    expect(body).not.toHaveProperty('model_capability_overrides')
   })
 
   it('slug input is disabled and ProviderUpdate body has no slug', () => {

@@ -2,7 +2,7 @@
 
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, Column, Index
+from sqlalchemy import JSON, Column, Index, Integer
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase
@@ -42,6 +42,9 @@ class Credential(CubeplexBase, table=True):
     kind: str = Field(max_length=32)
     name: str = Field(max_length=128)
     value_encrypted: bytes
+    value_revision: int = Field(
+        default=1, sa_column=Column(Integer, nullable=False, server_default="1")
+    )
     cred_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True

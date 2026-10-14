@@ -133,9 +133,57 @@ export async function setModelEnabled(
   modelDbId: string,
   enabled: boolean,
 ): Promise<Model> {
+  const provider = await fetchProvider(client, providerId)
+  const model = provider.models?.find((m) => m.id === modelDbId)
+  if (!model) throw new Error('Model not found')
   const res = await client.patch(`/api/v1/admin/providers/${providerId}/models/${modelDbId}`, {
     enabled,
+    expected_configuration_revision: model.configuration_revision,
   })
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Model>
+}
+
+export async function discoverModels(
+  client: ApiClient,
+  body: import('../types/provider').DiscoveryRequest,
+  signal?: AbortSignal,
+): Promise<import('../types/provider').DiscoveryResponse> {
+  const res = await client.post('/api/v1/admin/providers/discover', body, signal)
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+export async function discoverSavedModels(
+  client: ApiClient,
+  providerId: string,
+  body: { management_key?: string; selected_model_ids?: string[] } = {},
+  signal?: AbortSignal,
+): Promise<import('../types/provider').DiscoveryResponse> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/discover`, body, signal)
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+export async function importDiscoveredModels(
+  client: ApiClient,
+  providerId: string,
+  discoveryId: string,
+  models: import('../types/provider').ImportModelSelection[],
+): Promise<{ results: import('../types/provider').ImportModelOutcome[] }> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/models/import`, {
+    discovery_id: discoveryId,
+    models,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
+}
+export async function enableTestedModels(
+  client: ApiClient,
+  providerId: string,
+  modelDbIds: string[],
+): Promise<{ results: { model_db_id: string; status: 'enabled' | 'blocked'; reason?: string }[] }> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/models/enable-tested`, {
+    model_db_ids: modelDbIds,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json()
 }

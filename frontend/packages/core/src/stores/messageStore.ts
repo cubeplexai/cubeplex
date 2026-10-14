@@ -320,7 +320,7 @@ export interface MessageStore {
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; reasoning?: ReasoningControl },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl | null },
   ): Promise<void>
   /**
    * Append a ``model_failover`` event to the conversation's banner list.
@@ -2824,7 +2824,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; reasoning?: ReasoningControl },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl | null },
   ) {
     if (get().cancellingConversationIds[conversationId]) {
       throw new ApiError('Previous turn is still finishing.', 409, 'active_run_conflict', null)

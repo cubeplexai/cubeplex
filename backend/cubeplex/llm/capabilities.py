@@ -25,14 +25,22 @@ class LLMCapabilities:
         return None
 
     def combined_input_modalities(self) -> set[str]:
-        """Union of supported input types across the active model + its fallbacks."""
-        modalities: set[str] = set()
+        """Input types supported by every member of the active model chain."""
+        modalities: set[str] | None = None
         for ref in [self._cfg.default_model, *self._cfg.fallback_models]:
             if ref is not None:
                 m = self._resolve(ref)
                 if m is not None:
-                    modalities.update(m.input)
-        return modalities
+                    inputs = set(m.input)
+                    if (
+                        m.configuration_metadata.get("origin") == "discovery"
+                        and not m.image_verified
+                    ):
+                        inputs.discard("image")
+                    modalities = inputs if modalities is None else modalities & inputs
+                else:
+                    return set()
+        return modalities or set()
 
     def supports_image(self) -> bool:
         return "image" in self.combined_input_modalities()

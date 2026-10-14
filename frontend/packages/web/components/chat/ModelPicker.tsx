@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { reasoningLevels } from '@/lib/reasoning-control'
 import { EffortSlider } from '@/components/chat/EffortSlider'
 import { ModelBrandLogo } from '@/components/models/ModelBrandLogo'
 import { fetchWorkspaceModelPresets } from '@/lib/api/presets'
@@ -30,6 +31,10 @@ interface ModelPickerProps {
 }
 
 const THINKING_LABEL_KEY = {
+  default: 'thinkingLevelDefault',
+  on: 'thinkingLevelOn',
+  auto: 'thinkingLevelAuto',
+  minimal: 'thinkingLevelMinimal',
   off: 'thinkingLevelOff',
   low: 'thinkingLevelLow',
   medium: 'thinkingLevelMedium',
@@ -267,7 +272,11 @@ export function ModelPicker({ wsId, open, onOpenChange }: ModelPickerProps): Rea
               </div>
             </TooltipProvider>
             <div className="border-t border-border p-3">
-              <EffortSlider value={thinking} onChange={setThinking} />
+              <EffortSlider
+                levels={reasoningLevels(selected)}
+                value={thinking}
+                onChange={setThinking}
+              />
             </div>
           </>
         )}
@@ -369,6 +378,18 @@ function PresetTooltipBody({
         </>
       ) : null}
 
+      {p.verification_pending && (
+        <>
+          <dt>{t('verificationPending')}</dt>
+          <dd>{t('verificationPendingHint')}</dd>
+        </>
+      )}
+      {p.reasoning == null && (
+        <>
+          <dt>{t('modelTooltipReasoning')}</dt>
+          <dd>{t('reasoningUnknown')}</dd>
+        </>
+      )}
       {p.reasoning != null ? (
         <>
           <dt className="text-background/70">{t('modelTooltipReasoning')}</dt>

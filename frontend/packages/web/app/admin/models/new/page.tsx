@@ -72,6 +72,20 @@ export default function AddProviderWizardPage() {
                 selectedPresetKey={state.selectedPresetKey}
                 onSelectEndpoint={(presetKey) => dispatch({ type: 'selectEndpoint', presetKey })}
                 existingProviderId={state.providerId}
+                onProviderSaved={(id) => dispatch({ type: 'providerCreated', providerId: id })}
+                onModelsImported={(id, models) => {
+                  dispatch({ type: 'providerCreated', providerId: id })
+                  dispatch({ type: 'next' })
+                  dispatch({
+                    type: 'modelsCreated',
+                    models: models.map((m) => ({
+                      id: m.model_db_id,
+                      model_id: m.model_id,
+                      display_name: m.model_id,
+                    })),
+                  })
+                  dispatch({ type: 'next' })
+                }}
                 onProviderCreated={(id) => {
                   dispatch({ type: 'providerCreated', providerId: id })
                   dispatch({ type: 'next' })

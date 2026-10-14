@@ -44,7 +44,7 @@ def create_cubeplex_agent(
     mw_list = middleware or []
     return Agent(
         model=bound_model,
-        reasoning=reasoning or ReasoningControl(),
+        reasoning=reasoning,
         system_prompt=system_prompt,
         tools=tools or [],
         checkpointer=checkpointer,

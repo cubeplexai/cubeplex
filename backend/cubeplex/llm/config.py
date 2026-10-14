@@ -52,6 +52,13 @@ class ModelConfig(BaseModel):
     """Configuration for a specific model"""
 
     id: str = Field(description="Model identifier")
+    model_db_id: str | None = None
+    configuration_fingerprint: str | None = None
+    evidence_revision: int = 0
+    probe_generation: int = 0
+    configuration_metadata: dict[str, Any] = Field(default_factory=dict)
+    verification_pending: bool = False
+    image_verified: bool = False
     name: str = Field(description="Model display name")
     reasoning: bool = Field(default=False, description="Whether this is a reasoning model")
     input: list[str] = Field(
@@ -80,7 +87,14 @@ class ProviderConfig(BaseModel):
     """Configuration for an LLM provider"""
 
     base_url: str = Field(description="Base URL for API", alias="base_url")
-    api_key: str | None = Field(default=None, description="API key", alias="api_key")
+    api_key: str | None = Field(default=None, description="API key", alias="api_key", repr=False)
+    provider_db_id: str | None = None
+    org_id: str | None = None
+    auth_type: str = "api_key"
+    credential_revision: int = 0
+    configuration_fingerprint: str | None = None
+    evidence_revision: int = 0
+    probe_generation: int = 0
     api: str = Field(
         default="openai-completions",
         description="API type (openai-completions, anthropic, etc.)",

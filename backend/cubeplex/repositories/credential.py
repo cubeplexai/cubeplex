@@ -30,6 +30,16 @@ class CredentialRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def lock(self, credential_id: str) -> Credential | None:
+        stmt = (
+            self._scope(
+                select(Credential).where(Credential.id == credential_id)  # type: ignore[arg-type]
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_by_kind_name(self, *, kind: str, name: str) -> Credential | None:
         stmt = self._scope(
             select(Credential).where(

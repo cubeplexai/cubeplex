@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import uuid4
 
 from cubeloop.providers.base import ReasoningControl
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -56,7 +56,7 @@ class UserMessageIntent(BaseModel):
     content: str
     attachment_ids: tuple[str, ...] = ()
     model_key: str | None = None
-    reasoning: ReasoningControl = Field(default_factory=ReasoningControl)
+    reasoning: ReasoningControl | None = None
 
 
 class ResolvedExecution(BaseModel):
@@ -65,7 +65,7 @@ class ResolvedExecution(BaseModel):
     model_key: str
     primary: str
     fallbacks: tuple[str, ...] = ()
-    reasoning: ReasoningControl
+    reasoning: ReasoningControl | None = None
     trigger: Literal["interactive", "im", "automated"] = "interactive"
 
     def model_preset(self) -> ModelPreset:
@@ -988,14 +988,26 @@ class ConversationExecutionService:
             return AdmittedExecution(previous, execution, False)
 
         preset = resolve_model_preset(snapshot, intent.model_key)
+        from cubeplex.llm.controls import validate_reasoning_for_chain
+
+        validate_reasoning_for_chain(snapshot, preset, intent.reasoning)
         execution = ResolvedExecution(
             model_key=preset.key,
             primary=preset.primary,
             fallbacks=preset.fallbacks,
-            reasoning=intent.reasoning.model_copy(deep=True),
+            reasoning=intent.reasoning.model_copy(deep=True)
+            if intent.reasoning is not None
+            else None,
             trigger="im" if namespace == "im" else "interactive",
         )
-        await self._attach_files(conversation_id, actor_user_id, intent.attachment_ids, now)
+        await self._attach_files(
+            conversation_id,
+            actor_user_id,
+            intent.attachment_ids,
+            now,
+            snapshot=snapshot,
+            execution=execution,
+        )
         if conversation.execution_closed_at is not None:
             conversation.execution_generation += 1
             conversation.execution_closed_at = None
@@ -1016,7 +1028,9 @@ class ConversationExecutionService:
         )
         conversation.has_messages = True
         conversation.model_key = intent.model_key
-        conversation.reasoning = execution.reasoning.model_dump(mode="json")
+        conversation.reasoning = (
+            execution.reasoning.model_dump(mode="json") if execution.reasoning is not None else None
+        )
         conversation.updated_at = now
         self.session.add(admission)
         await self.session.flush()
@@ -1081,7 +1095,14 @@ class ConversationExecutionService:
                 "automatic occurrence predates the current conversation generation"
             )
         self._validate_models(execution, snapshot)
-        await self._attach_files(conversation_id, actor_user_id, intent.attachment_ids, now)
+        await self._attach_files(
+            conversation_id,
+            actor_user_id,
+            intent.attachment_ids,
+            now,
+            snapshot=snapshot,
+            execution=execution,
+        )
         if conversation.execution_closed_at is not None:
             conversation.execution_generation += 1
             conversation.execution_closed_at = None
@@ -1190,7 +1211,9 @@ class ConversationExecutionService:
             model_key=preset.key,
             primary=preset.primary,
             fallbacks=preset.fallbacks,
-            reasoning=ReasoningControl.model_validate(conversation.reasoning),
+            reasoning=ReasoningControl.model_validate(conversation.reasoning)
+            if conversation.reasoning is not None
+            else None,
             trigger="automated",
         )
         admission = ConversationExecutionAdmission(
@@ -1544,6 +1567,9 @@ class ConversationExecutionService:
         actor_user_id: str,
         attachment_ids: tuple[str, ...],
         now: datetime,
+        *,
+        snapshot: LLMSnapshot,
+        execution: ResolvedExecution,
     ) -> None:
         for attachment_id in sorted(set(attachment_ids)):
             row = await self.session.scalar(
@@ -1560,6 +1586,14 @@ class ConversationExecutionService:
             )
             if row is None or row.status not in ("pending", "attached"):
                 raise ValueError("attachment is not available for this input")
+            if row.mime_type.startswith("image/"):
+                from cubeplex.llm.controls import chain_controls
+
+                if (
+                    "image"
+                    not in chain_controls(snapshot, execution.model_preset()).input_modalities
+                ):
+                    raise ValueError("The selected model chain does not support image input")
             if row.status == "pending":
                 row.status = "attached"
                 row.attached_at = now

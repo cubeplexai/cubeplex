@@ -24,16 +24,37 @@ from cubeplex.api.schemas.provider import (
     ProviderTestStreamRequest,
     ProviderUpdate,
 )
+from cubeplex.api.schemas.provider_discovery import (
+    DiscoveryRequest,
+    EnableTestedModelsRequest,
+    EnableTestedModelsResponse,
+    ImportModelsRequest,
+    ImportModelsResponse,
+    SavedDiscoveryRequest,
+)
 from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubeplex.cache import redis_dep
+from cubeplex.config import config
 from cubeplex.credentials.dependencies import build_credential_service
 from cubeplex.db import get_session
-from cubeplex.llm.readiness import capability_fingerprint, derive_readiness
+from cubeplex.llm.discovery_types import CallingConfiguration, DiscoveryPolicy, DiscoveryResponse
+from cubeplex.llm.readiness import (
+    configuration_fingerprint,
+    derive_readiness,
+    provider_configuration_fingerprint,
+    verification_pending,
+)
 from cubeplex.models import User
 from cubeplex.models.org_provider_override import OrgProviderOverride
 from cubeplex.models.provider import Model, Provider
 from cubeplex.repositories.model import ModelRepository
 from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
 from cubeplex.repositories.provider import ProviderRepository
+from cubeplex.services.provider_discovery import discover_models
+from cubeplex.services.provider_discovery_preview import (
+    DiscoveryOperationError,
+    DiscoveryPreviewStore,
+)
 from cubeplex.services.provider_probe import ProbeResult, ProbeStep
 from cubeplex.services.provider_service import (
     InvalidProviderSlugError,
@@ -67,6 +88,7 @@ async def _svc(user: User, session: AsyncSession, request: Request) -> ProviderS
         session=session,
         org_id=org_id,
         actor_user_id=user.id,
+        preview_store=DiscoveryPreviewStore(redis_dep(request), str(config.get("auth.jwt_secret"))),
     )
 
 
@@ -90,10 +112,12 @@ def _model_out(m: Model) -> ModelOut:
         is_system=m.org_id is None,
         created_at=m.created_at,
         updated_at=m.updated_at,
+        configuration_revision=m.configuration_revision,
+        configuration_metadata=m.configuration_metadata,
     )
 
 
-def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
+def _model_readiness_out(m: Model, p: Provider, credential_revision: int = 1) -> ModelReadinessOut:
     """Build a model row with per-model status + server-derived readiness.
 
     The `stale` signal compares the provider's current capability fingerprint
@@ -102,16 +126,22 @@ def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
     capability is treated as unchanged (not stale).
     """
     summary = m.last_test_summary or {}
-    stored_fp = summary.get("capability_fingerprint")
-    if stored_fp is None:
-        capability_changed = False
-    else:
-        current_fp = capability_fingerprint(p.capability, p.model_capability_overrides)
-        capability_changed = stored_fp != current_fp
-
+    capability_changed = verification_pending(p, m, credential_revision)
+    live_current = (p.last_liveness_summary or {}).get(
+        "configuration_fingerprint"
+    ) == provider_configuration_fingerprint(p, credential_revision)
+    runtime = summary.get("runtime_observation", {})
+    runtime_current = runtime.get("configuration_fingerprint") == configuration_fingerprint(
+        p, m, credential_revision
+    )
+    model_status = (
+        runtime.get("status")
+        if runtime_current
+        else (None if capability_changed else m.last_test_status)
+    )
     readiness = derive_readiness(
-        liveness_status=p.last_liveness_status,
-        model_test_status=m.last_test_status,
+        liveness_status=p.last_liveness_status if live_current else None,
+        model_test_status=model_status,
         capability_changed_since_test=capability_changed,
     )
     return ModelReadinessOut(
@@ -133,10 +163,13 @@ def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
         is_system=m.org_id is None,
         created_at=m.created_at,
         updated_at=m.updated_at,
+        configuration_revision=m.configuration_revision,
+        configuration_metadata=m.configuration_metadata,
         last_test_at=utc_isoformat(m.last_test_at) if m.last_test_at else None,
         last_test_status=m.last_test_status,
         last_test_summary=summary,
-        readiness=readiness,
+        readiness="verification_pending" if readiness == "stale" else readiness,
+        verification_pending=capability_changed,
     )
 
 
@@ -166,6 +199,8 @@ def _provider_out(
     model_count: int = 0,
     models: list[Model] | None = None,
     override: OrgProviderOverride | None = None,
+    credential_revision: int = 1,
+    creation_recovered: bool = False,
 ) -> ProviderOut:
     return ProviderOut(
         id=p.id,
@@ -179,7 +214,9 @@ def _provider_out(
         enabled=p.enabled,
         is_system=p.org_id is None,
         model_count=model_count,
-        models=[_model_readiness_out(m, p) for m in models] if models is not None else None,
+        models=[_model_readiness_out(m, p, credential_revision) for m in models]
+        if models is not None
+        else None,
         org_override=OrgProviderOverrideOut(enabled=override.enabled) if override else None,
         extra_body=p.extra_body,
         extra_headers=p.extra_headers,
@@ -187,6 +224,9 @@ def _provider_out(
         logo=_resolve_logo(p.preset_slug),
         capability=p.capability or {},
         model_capability_overrides=p.model_capability_overrides or {},
+        configuration_revision=p.configuration_revision,
+        discovery=DiscoveryPolicy.model_validate(p.discovery) if p.discovery else None,
+        creation_recovered=creation_recovered,
         last_liveness_at=utc_isoformat(p.last_liveness_at) if p.last_liveness_at else None,
         last_liveness_status=p.last_liveness_status,
         last_liveness_summary=p.last_liveness_summary or {},
@@ -194,6 +234,116 @@ def _provider_out(
         created_at=p.created_at,
         updated_at=p.updated_at,
     )
+
+
+# -- Discovery and reviewed import -------------------------------------------------
+
+
+@router.post("/providers/discover", response_model=DiscoveryResponse)
+async def discover_unsaved_provider(
+    body: DiscoveryRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DiscoveryResponse:
+    org_id = await resolve_current_org_id(user, session)
+    calling = CallingConfiguration.model_validate(
+        {field: getattr(body, field) for field in CallingConfiguration.model_fields}
+    )
+    store = DiscoveryPreviewStore(redis_dep(request), str(config.get("auth.jwt_secret")))
+    try:
+        return await discover_models(
+            calling,
+            store,
+            org_id=org_id,
+            actor_user_id=user.id,
+            selected_ids=body.selected_model_ids,
+            management_key=body.management_key,
+        )
+    except DiscoveryOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid discovery configuration") from exc
+
+
+@router.post("/providers/{provider_id}/discover", response_model=DiscoveryResponse)
+async def discover_saved_provider(
+    provider_id: str,
+    body: SavedDiscoveryRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DiscoveryResponse:
+    svc = await _svc(user, session, request)
+    try:
+        provider = await svc.get_provider(provider_id)
+        svc._check_not_system(provider)
+        calling = await svc.calling_configuration(provider)
+        existing = {
+            model.model_id: model.id
+            for model in await svc._models.list_all_for_provider(provider_id)
+        }
+        store = DiscoveryPreviewStore(redis_dep(request), str(config.get("auth.jwt_secret")))
+        return await discover_models(
+            calling,
+            store,
+            org_id=svc.org_id,
+            actor_user_id=user.id,
+            provider_id=provider_id,
+            existing=existing,
+            selected_ids=body.selected_model_ids,
+            management_key=body.management_key,
+        )
+    except ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="provider_not_found") from exc
+    except ProviderSystemReadonlyError as exc:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
+    except DiscoveryOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+
+
+@router.post("/providers/{provider_id}/models/import", response_model=ImportModelsResponse)
+async def import_provider_models(
+    provider_id: str,
+    body: ImportModelsRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ImportModelsResponse:
+    svc = await _svc(user, session, request)
+    try:
+        return await svc.import_models(provider_id, body)
+    except ProviderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="provider_not_found") from exc
+    except ProviderSystemReadonlyError as exc:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
+    except DiscoveryOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid reviewed configuration") from exc
+
+
+@router.post(
+    "/providers/{provider_id}/models/enable-tested", response_model=EnableTestedModelsResponse
+)
+async def enable_tested_provider_models(
+    provider_id: str,
+    body: EnableTestedModelsRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EnableTestedModelsResponse:
+    svc = await _svc(user, session, request)
+    try:
+        return await svc.enable_tested_models(provider_id, body.model_db_ids)
+    except (ProviderNotFoundError, ModelNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="model_not_found") from exc
+    except ProviderSystemReadonlyError as exc:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
 
 
 # -- Provider CRUD -----------------------------------------------------------------
@@ -243,9 +393,11 @@ async def create_provider(
         raise HTTPException(status_code=409, detail={"code": "provider_slug_conflict"}) from e
     except InvalidProviderSlugError as e:
         raise HTTPException(status_code=422, detail={"code": "invalid_provider_slug"}) from e
+    except DiscoveryOperationError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return _provider_out(p)
+    return _provider_out(p, creation_recovered=svc.creation_recovered)
 
 
 @router.get("/providers/{provider_id}", response_model=ProviderOut)
@@ -270,7 +422,13 @@ async def get_provider(
     result = await session.execute(stmt)
     models = list(result.scalars().all())
     override = await svc.get_override(provider_id)
-    return _provider_out(p, model_count=len(models), models=models, override=override)
+    return _provider_out(
+        p,
+        model_count=len(models),
+        models=models,
+        override=override,
+        credential_revision=await svc._credential_revision(p),
+    )
 
 
 @router.patch("/providers/{provider_id}", response_model=ProviderOut)
@@ -295,6 +453,8 @@ async def update_provider(
         raise HTTPException(
             status_code=409, detail={"code": "provider_oauth_not_implemented"}
         ) from e
+    except DiscoveryOperationError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _provider_out(p)
@@ -336,6 +496,8 @@ async def create_model(
         raise HTTPException(status_code=404, detail="provider_not_found") from e
     except ProviderSystemReadonlyError as e:
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+    except DiscoveryOperationError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _model_out(m)
@@ -360,6 +522,8 @@ async def update_model(
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
     except ModelNotFoundError as e:
         raise HTTPException(status_code=404, detail="model_not_found") from e
+    except DiscoveryOperationError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _model_out(m)

@@ -15,5 +15,5 @@ export interface Conversation {
    */
   model_key: string | null
   /** The user's last-sent reasoning control for this conversation. */
-  reasoning: ReasoningControl
+  reasoning: ReasoningControl | null
 }

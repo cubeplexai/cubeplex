@@ -1,14 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient, Model, ProbeResult } from '@cubeplex/core'
+import type { ApiClient, Model } from '@cubeplex/core'
 import * as core from '@cubeplex/core'
 import en from '../../../../messages/en.json'
 import { ModelRow } from '../ModelRow'
 
 vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
-  return { ...actual, testModel: vi.fn() }
+  return { ...actual, startTestStream: vi.fn(), parseTestStream: vi.fn() }
 })
 
 const fakeClient = {} as ApiClient
@@ -55,12 +55,11 @@ function renderRow(model: Model, onRetested = vi.fn()) {
 
 describe('ModelRow', () => {
   beforeEach(() => {
-    vi.mocked(core.testModel).mockReset()
-    vi.mocked(core.testModel).mockResolvedValue({
-      overall: 'pass',
-      blocking_failed: false,
-      steps: [],
-    } as ProbeResult)
+    vi.mocked(core.startTestStream).mockReset()
+    vi.mocked(core.startTestStream).mockResolvedValue(new ReadableStream<Uint8Array>())
+    vi.mocked(core.parseTestStream).mockImplementation(async function* () {
+      yield { event: 'done', data: {} }
+    })
   })
 
   it('renders the readiness badge for a degraded model', () => {
@@ -92,7 +91,14 @@ describe('ModelRow', () => {
     const { onRetested } = renderRow(makeModel())
     const btn = screen.getByTestId('model-row-gpt-test-retest')
     fireEvent.click(btn)
-    await waitFor(() => expect(core.testModel).toHaveBeenCalledWith(fakeClient, 'prv_1', 'mdl_1'))
+    await waitFor(() =>
+      expect(core.startTestStream).toHaveBeenCalledWith(
+        fakeClient,
+        'prv_1',
+        ['mdl_1'],
+        expect.any(AbortSignal),
+      ),
+    )
     await waitFor(() => expect(onRetested).toHaveBeenCalled())
   })
 })

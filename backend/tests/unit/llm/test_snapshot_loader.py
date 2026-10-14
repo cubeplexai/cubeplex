@@ -181,9 +181,9 @@ async def test_load_providers_is_not_n_plus_one(async_session, encryption_backen
 
     def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
         low = statement.lower()
-        if "from models" in low:
+        if "from models" in low or "join models" in low:
             counts["models"] += 1
-        if "from credentials" in low:
+        if "from credentials" in low or "join credentials" in low:
             counts["credentials"] += 1
 
     event.listen(sync_engine, "before_cursor_execute", _before_cursor_execute)
@@ -196,8 +196,8 @@ async def test_load_providers_is_not_n_plus_one(async_session, encryption_backen
 
     # One batched SELECT against models (covers all 5 providers).
     assert counts["models"] == 1, f"expected single batched models query, got {counts['models']}"
-    # No credentials referenced → zero queries (empty cred_ids skips the IN).
-    assert counts["credentials"] == 0, (
+    # The same joined read includes credentials, avoiding mixed configuration versions.
+    assert counts["credentials"] == 1, (
         f"expected no credentials query when cred_ids empty, got {counts['credentials']}"
     )
 

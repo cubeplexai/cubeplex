@@ -113,3 +113,31 @@ Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Ant
 ```
 
 Use `effort_path: "reasoning.effort"` for Responses-style nested payloads, or put provider-specific fields under `extra_body` for OpenAI-compatible gateways such as LiteLLM. If a model only supports reasoning on/off, omit `effort_path` and `effort_values`.
+
+## Discover and import models
+
+Choose the vendor first. CLIProxyAPI is available alongside vLLM and Ollama. Enter a base URL reachable from the CubePlex backend and the calling API key (or select no authentication for a keyless endpoint). **List available models** reads the configured instance without saving a provider.
+
+Listing interfaces differ by vendor. OpenAI-compatible instances commonly expose `GET /v1/models`; Anthropic uses its own authentication and cursor pagination, and Ollama uses `/api/tags` with selected-model details from `/api/show`. Vendors without a verified adapter offer preset suggestions and manual setup.
+
+Review the returned IDs and their field sources. Select all chat candidates, confirm suggestions you have checked, or apply reviewed context/output limits to a selected group. Unknown fields stay unknown; conflicting sources require a choice or an explicit value. Embedding, audio, and image-generation models cannot be imported as agent chat models. Missing prices are unknown estimates, not free service.
+
+CLIProxyAPI's optional management key enriches the listing for this discovery only. CubePlex does not save it; it is distinct from the calling key. Client templates supply suggestions rather than proof of model capabilities. For Ollama, select up to 100 models and use **Load selected metadata** before reviewing their fields.
+
+**Import selected models** creates disabled rows in batches of at most 100. Existing IDs are preserved and skipped, including on retry. Discovery previews expire after 10 minutes; rediscover after expiry or a calling-configuration change. Provider creation can be recovered for 24 hours using the same discovery receipt. A deleted provider cannot be recreated by replaying its receipt.
+
+Run model tests, then choose **Enable verified model** (or finish the wizard to enable passing models). Tests check actual streaming and a completed tool call, plus declared reasoning and image input. A failing required capability leaves the model disabled.
+
+Editing endpoint, key, limits, or calling capabilities marks old evidence **Verification pending**. Already enabled models remain usable. A disabled imported model needs a passing test of its current configuration before activation or reactivation. Calls already bound retain their snapshot; new calls and delayed/resumed starts bind current configuration.
+
+For upgrades, apply migrations and record legacy provenance once:
+
+```bash
+cd backend
+uv run alembic upgrade head
+uv run python scripts/dev/backfill_model_discovery.py
+```
+
+The backfill is idempotent, preserves enabled rows, and marks old tests historical. It never promotes historical tests to current passes. Legacy zero prices remain unknown until confirmed.
+
+<!-- Screenshot pending: vendor selection (CLIProxyAPI), discovery field review, test results and enable action; capture in light/dark themes. -->

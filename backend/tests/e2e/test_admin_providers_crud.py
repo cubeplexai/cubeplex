@@ -131,7 +131,10 @@ async def test_model_crud(admin_client: tuple[AsyncClient, str]) -> None:
     # Update
     res = await client.patch(
         f"/api/v1/admin/providers/{pid}/models/{mid}",
-        json={"display_name": "Updated Model"},
+        json={
+            "display_name": "Updated Model",
+            "expected_configuration_revision": model_data["configuration_revision"],
+        },
     )
     assert res.status_code == 200
     assert res.json()["display_name"] == "Updated Model"
@@ -334,7 +337,7 @@ async def test_create_provider_persists_capability(
             "base_url": "https://example.com",
             "auth_type": "api_key",
             "api_key": "sk-x",
-            "preset_slug": "anthropic",
+            "preset_slug": "anthropic/intl/anthropic-messages",
             "capability": cap,
             "model_capability_overrides": {},
         },
@@ -342,7 +345,7 @@ async def test_create_provider_persists_capability(
     assert res.status_code == 201
     pid = res.json()["id"]
     got = (await client.get(f"/api/v1/admin/providers/{pid}")).json()
-    assert got["preset_slug"] == "anthropic"
+    assert got["preset_slug"] == "anthropic/intl/anthropic-messages"
     assert got["capability"] == cap
     await client.delete(f"/api/v1/admin/providers/{pid}")
 

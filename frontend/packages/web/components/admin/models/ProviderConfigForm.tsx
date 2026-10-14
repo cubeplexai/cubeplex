@@ -124,6 +124,9 @@ export function ProviderConfigForm({
         ? JSON.stringify(provider.extra_headers, null, 2)
         : '',
   )
+  const [modelCapabilities, setModelCapabilities] = useState<
+    Record<string, Record<string, unknown> | null>
+  >({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [headersError, setHeadersError] = useState<string | null>(null)
 
@@ -206,17 +209,30 @@ export function ProviderConfigForm({
       onSubmit(body)
     } else {
       const body: ProviderUpdate = {
-        name: name.trim() || null,
-        provider_type: providerType,
-        base_url: baseUrl.trim() || null,
-        auth_type: authType,
-        // Blank = keep the existing key.
-        api_key: apiKey.trim() || null,
-        logo_url: logoUrl.trim() || null,
-        extra_headers: parsedHeaders ?? null,
-        capability,
-        model_capability_overrides: provider?.model_capability_overrides ?? {},
+        expected_configuration_revision: provider?.configuration_revision,
       }
+      if (name.trim() !== provider?.name) body.name = name.trim()
+      if (providerType !== provider?.provider_type) body.provider_type = providerType
+      if (baseUrl.trim() !== provider?.base_url) body.base_url = baseUrl.trim()
+      if (authChoice !== (provider?.auth_type === 'none' ? 'none' : 'api_key')) {
+        body.auth_type = authType
+      }
+      if (apiKey.trim()) body.api_key = apiKey
+      if ((logoUrl.trim() || null) !== provider?.logo_url) body.logo_url = logoUrl.trim() || null
+      if (JSON.stringify(parsedHeaders ?? {}) !== JSON.stringify(provider?.extra_headers ?? {})) {
+        body.extra_headers = parsedHeaders ?? {}
+      }
+      if (JSON.stringify(capability) !== JSON.stringify(provider?.capability ?? {})) {
+        body.capability = capability
+      }
+      const changes = (provider?.models ?? [])
+        .filter((m) => m.id in modelCapabilities)
+        .map((m) => ({
+          model_db_id: m.id,
+          expected_configuration_revision: m.configuration_revision ?? 1,
+          capability: modelCapabilities[m.id],
+        }))
+      if (changes.length) body.model_capability_updates = changes
       onSubmit(body)
     }
   }
@@ -355,6 +371,39 @@ export function ProviderConfigForm({
                 onChange={setCapability}
                 allowTemplate={isCreate ? preset?.category === 'custom' : true}
               />
+              {!isCreate &&
+                provider?.models?.map((model) => (
+                  <div key={model.id} className="flex flex-col gap-2 border-t border-border pt-3">
+                    <Label>
+                      {model.model_id} · {t('modelCapability')}
+                    </Label>
+                    <CapabilityEditor
+                      value={
+                        ((model.id in modelCapabilities
+                          ? modelCapabilities[model.id]
+                          : provider.model_capability_overrides?.[model.model_id]) as Record<
+                          string,
+                          unknown
+                        >) ?? capability
+                      }
+                      onChange={(value) =>
+                        setModelCapabilities((prev) => ({ ...prev, [model.id]: value }))
+                      }
+                      allowTemplate
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-start"
+                      onClick={() =>
+                        setModelCapabilities((prev) => ({ ...prev, [model.id]: null }))
+                      }
+                    >
+                      {t('useProviderCapability')}
+                    </Button>
+                  </div>
+                ))}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="pcf-logo-url">{t('logoUrl')}</Label>
                 <Input

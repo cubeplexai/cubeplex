@@ -1,5 +1,6 @@
 """Credential vault service for internal backend consumers."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 from cubeplex.credentials.encryption import EncryptionBackend
@@ -48,6 +49,41 @@ class CredentialService:
         saved = await self._repo.add(cred)
         return saved.id
 
+    async def stage_create(self, *, kind: str, name: str, plaintext: str) -> str:
+        cred = Credential(
+            org_id=self._org_id,
+            kind=kind,
+            name=name,
+            value_encrypted=await self._backend.encrypt(plaintext.encode("utf-8")),
+            created_by_user_id=self._actor_user_id,
+        )
+        self._repo.session.add(cred)
+        await self._repo.session.flush()
+        return cred.id
+
+    async def stage_update(
+        self, *, credential_id: str, plaintext: str | None = None, name: str | None = None
+    ) -> None:
+        cred = await self._repo.lock(credential_id)
+        if cred is None:
+            raise CredentialNotFound(credential_id)
+        if plaintext is not None:
+            cred.value_encrypted = await self._backend.encrypt(plaintext.encode("utf-8"))
+            cred.value_revision += 1
+        if name is not None:
+            cred.name = name
+        cred.updated_at = datetime.now(UTC)
+        self._repo.session.add(cred)
+        await self._repo.session.flush()
+
+    async def stage_delete(self, *, credential_id: str) -> None:
+        cred = await self._repo.lock(credential_id)
+        if cred is None:
+            return
+        await self._guard_references(credential_id)
+        await self._repo.session.delete(cred)
+        await self._repo.session.flush()
+
     async def get_decrypted_system(self, *, credential_id: str, requesting_kind: str) -> str:
         """Decrypt a SYSTEM (org_id NULL) credential regardless of caller org scope.
 
@@ -85,11 +121,12 @@ class CredentialService:
         name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        cred = await self._repo.get(credential_id)
+        cred = await self._repo.lock(credential_id)
         if cred is None:
             raise CredentialNotFound(credential_id)
         if plaintext is not None:
             cred.value_encrypted = await self._backend.encrypt(plaintext.encode("utf-8"))
+            cred.value_revision += 1
         if name is not None:
             cred.name = name
         if metadata is not None:
@@ -116,7 +153,11 @@ class CredentialService:
         existing = await self._repo.get_by_kind_name(kind=kind, name=name)
         if existing is None:
             return await self.create(kind=kind, name=name, plaintext=plaintext, metadata=metadata)
+        existing = await self._repo.lock(existing.id)
+        if existing is None:
+            raise CredentialNotFound(name)
         existing.value_encrypted = await self._backend.encrypt(plaintext.encode("utf-8"))
+        existing.value_revision += 1
         if metadata is not None:
             existing.cred_metadata = metadata
         await self._repo.update(existing)

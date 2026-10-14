@@ -140,3 +140,17 @@ custom-anthropic:
   temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
   supports_tools: true
   supports_images: true
+
+cliproxyapi-openai-completions:
+  temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+  max_tokens_field: max_tokens
+  supports_tools: true
+  supports_images: false
+  supports_streaming: true
+
+cliproxyapi-openai-responses:
+  temperature: { mode: free, min: 0.0, max: 2.0, default: 0.7 }
+  max_tokens_field: max_tokens
+  supports_tools: true
+  supports_images: false
+  supports_streaming: true

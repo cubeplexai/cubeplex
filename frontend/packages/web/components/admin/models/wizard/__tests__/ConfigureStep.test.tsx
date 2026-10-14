@@ -9,7 +9,7 @@ import { makeVendor } from './fixtures'
 
 vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
-  return { ...actual, createProvider: vi.fn(), updateProvider: vi.fn() }
+  return { ...actual, createProvider: vi.fn(), updateProvider: vi.fn(), fetchProvider: vi.fn() }
 })
 
 const fakeClient = {} as ApiClient
@@ -83,6 +83,7 @@ describe('ConfigureStep', () => {
   beforeEach(() => {
     vi.mocked(core.createProvider).mockReset()
     vi.mocked(core.createProvider).mockResolvedValue(created('prv_new'))
+    vi.mocked(core.fetchProvider).mockResolvedValue(created('prv_existing'))
     vi.mocked(core.updateProvider).mockReset()
     vi.mocked(core.updateProvider).mockResolvedValue(created('prv_existing'))
   })

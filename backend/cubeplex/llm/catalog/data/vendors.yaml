@@ -14,7 +14,7 @@
   regions:
     intl: { host: https://api.anthropic.com }
   endpoints:
-    - { region: intl, protocol: anthropic-messages, capability: anthropic-native }
+    - { region: intl, protocol: anthropic-messages, capability: anthropic-native, discovery: { adapter: anthropic, auth: anthropic, pagination: anthropic, root_api_path: /v1, reference: https://docs.anthropic.com/en/api/models-list } }
   models:
     - { model_id: claude-opus-4-7, display_name: Claude Opus 4.7, context_window: 1000000, max_tokens: 128000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: claude-sonnet-4-6, display_name: Claude Sonnet 4.6, context_window: 1000000, max_tokens: 64000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -29,7 +29,7 @@
   regions:
     intl: { host: https://api.openai.com }
   endpoints:
-    - { region: intl, protocol: openai-responses, path: /v1, capability: openai-responses }
+    - { region: intl, protocol: openai-responses, path: /v1, capability: openai-responses, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://platform.openai.com/docs/api-reference/models/list } }
   models:
     - { model_id: gpt-5.5, display_name: GPT-5.5, context_window: 1000000, max_tokens: 128000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: gpt-5.4, display_name: GPT-5.4, context_window: 1000000, max_tokens: 65536, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -45,7 +45,7 @@
   regions:
     intl: { host: https://api.openai.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: openai-chat-completions }
+    - { region: intl, protocol: openai-completions, path: /v1, capability: openai-chat-completions, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://platform.openai.com/docs/api-reference/models/list } }
   models:
     - { model_id: gpt-4o, display_name: GPT-4o, context_window: 128000, max_tokens: 16384, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
     - { model_id: gpt-4.1, display_name: GPT-4.1, context_window: 1000000, max_tokens: 32768, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
@@ -60,12 +60,12 @@
     intl: { host: https://dashscope-intl.aliyuncs.com }
     cn: { host: https://dashscope.aliyuncs.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
-    - { region: cn, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat, discovery: { adapter: static } }
     # Coding Plan. CN lives on a different host (coding.dashscope) — the actual
     # deployed endpoint; intl coding shares the compatible-mode endpoint.
-    - { region: intl, protocol: openai-completions, plan: coding, path: /compatible-mode/v1, capability: qwen-compat }
-    - { region: cn, protocol: openai-completions, plan: coding, host: https://coding.dashscope.aliyuncs.com, path: /v1, capability: qwen-compat }
+    - { region: intl, protocol: openai-completions, plan: coding, path: /compatible-mode/v1, capability: qwen-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: coding, host: https://coding.dashscope.aliyuncs.com, path: /v1, capability: qwen-compat, discovery: { adapter: static } }
   models:
     - { model_id: qwen3-max, display_name: Qwen3 Max, plan: general, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: qwen3.7-plus, display_name: Qwen 3.7 Plus, plan: coding, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -84,15 +84,15 @@
   regions:
     cn: { host: https://ark.cn-beijing.volces.com }
   endpoints:
-    - { region: cn, protocol: openai-completions, plan: general, path: /api/v3, capability: doubao-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /api/v3, capability: doubao-compat, discovery: { adapter: static } }
     # Coding Plan, two wires: OpenAI-compat on /api/coding/v3 (arkcode) and the
     # Claude-Code-compatible anthropic wire on /api/coding.
-    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/v3, capability: doubao-compat }
-    - { region: cn, protocol: anthropic-messages, plan: coding, path: /api/coding, capability: volcengine-coding }
+    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/v3, capability: doubao-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: anthropic-messages, plan: coding, path: /api/coding, capability: volcengine-coding, discovery: { adapter: static } }
     # Agent Plan — same family of models, dedicated routing on /api/plan/* with
     # a separate subscription / quota. Two wires, mirroring the coding plan.
-    - { region: cn, protocol: openai-completions, plan: agent, path: /api/plan/v3, capability: doubao-compat }
-    - { region: cn, protocol: anthropic-messages, plan: agent, path: /api/plan, capability: volcengine-coding }
+    - { region: cn, protocol: openai-completions, plan: agent, path: /api/plan/v3, capability: doubao-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: anthropic-messages, plan: agent, path: /api/plan, capability: volcengine-coding, discovery: { adapter: static } }
   models:
     - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -117,8 +117,8 @@
   regions:
     cn: { host: https://api.deepseek.com }
   endpoints:
-    - { region: cn, protocol: anthropic-messages, path: /anthropic, capability: deepseek-anthropic }
-    - { region: cn, protocol: openai-completions, capability: deepseek-openai }
+    - { region: cn, protocol: anthropic-messages, path: /anthropic, capability: deepseek-anthropic, discovery: { adapter: openai, auth: bearer, reference: https://api-docs.deepseek.com/api/list-models, url_mode: origin, path: models } }
+    - { region: cn, protocol: openai-completions, capability: deepseek-openai, discovery: { adapter: openai, auth: bearer, reference: https://api-docs.deepseek.com/api/list-models, url_mode: origin, path: models } }
   models:
     - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: deepseek-v4-flash, display_name: DeepSeek V4 Flash, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -133,11 +133,11 @@
     intl: { host: https://api.moonshot.ai }
     cn: { host: https://api.moonshot.cn }
   endpoints:
-    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat }
-    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat, discovery: { adapter: static } }
     # Coding Plan: same /v1 wire, separate subscription api_key.
-    - { region: intl, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat }
-    - { region: cn, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat }
+    - { region: intl, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat, discovery: { adapter: static } }
   models:
     - { model_id: kimi-k2.6, display_name: Kimi K2.6, plan: [general, coding], context_window: 262144, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: kimi-k2, display_name: Kimi K2, plan: [general, coding], context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
@@ -152,11 +152,11 @@
     intl: { host: https://api.z.ai }
     cn: { host: https://open.bigmodel.cn }
   endpoints:
-    - { region: intl, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat }
-    - { region: cn, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat, discovery: { adapter: static } }
     # Coding Plan: dedicated /coding/ route, separate subscription api_key.
-    - { region: intl, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat }
-    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat }
+    - { region: intl, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat, discovery: { adapter: static } }
   models:
     - { model_id: glm-5, display_name: GLM-5, plan: [general, coding], context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: glm-4.7, display_name: GLM-4.7, plan: [general, coding], context_window: 200000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -172,11 +172,11 @@
     intl: { host: https://api.minimax.io }
     cn: { host: https://api.minimaxi.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat }
-    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat, discovery: { adapter: static } }
+    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat, discovery: { adapter: static } }
     # Coding Plan: anthropic-shape wire (/anthropic), separate subscription api_key.
-    - { region: intl, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic }
-    - { region: cn, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic }
+    - { region: intl, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic, discovery: { adapter: static } }
+    - { region: cn, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic, discovery: { adapter: static } }
   models:
     - { model_id: MiniMax-M2.7, display_name: MiniMax M2.7, plan: [general, coding], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: MiniMax-M2.7-highspeed, display_name: MiniMax M2.7 Highspeed, plan: [general, coding], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
@@ -191,7 +191,7 @@
   regions:
     intl: { host: https://api.x.ai }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: xai-compat }
+    - { region: intl, protocol: openai-completions, path: /v1, capability: xai-compat, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://docs.x.ai/docs/api-reference/models } }
   models:
     - { model_id: grok-4.3, display_name: Grok 4.3, context_window: 1000000, max_tokens: 32768, input_modalities: [text, image, video], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: grok-4.20, display_name: Grok 4.20, context_window: 2000000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -205,7 +205,7 @@
   regions:
     intl: { host: https://api.mistral.ai }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: mistral-compat }
+    - { region: intl, protocol: openai-completions, path: /v1, capability: mistral-compat, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://docs.mistral.ai/api/endpoint/models } }
   models:
     - { model_id: mistral-large-latest, display_name: Mistral Large 3, context_window: 256000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: mistral-medium-latest, display_name: Mistral Medium 3.5, context_window: 256000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -220,7 +220,7 @@
   regions:
     intl: { host: https://openrouter.ai }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /api/v1, capability: openrouter-compat }
+    - { region: intl, protocol: openai-completions, path: /api/v1, capability: openrouter-compat, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://openrouter.ai/docs/api-reference/list-available-models, metadata_profile: openrouter } }
   models:
     - { model_id: "google/gemma-4-31b-it:free", display_name: Gemma 4 31B (free), context_window: 262000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: "stepfun/step-3.5-flash:free", display_name: StepFun 3.5 Flash (free), context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -234,7 +234,7 @@
   regions:
     intl: { host: https://api.together.xyz }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: together-compat }
+    - { region: intl, protocol: openai-completions, path: /v1, capability: together-compat, discovery: { adapter: static } }
   models: []
 
 - vendor: groq
@@ -246,7 +246,7 @@
   regions:
     intl: { host: https://api.groq.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /openai/v1, capability: groq-compat }
+    - { region: intl, protocol: openai-completions, path: /openai/v1, capability: groq-compat, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://console.groq.com/docs/models } }
   models: []
 
 - vendor: fireworks
@@ -258,7 +258,7 @@
   regions:
     intl: { host: https://api.fireworks.ai }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /inference/v1, capability: fireworks-compat }
+    - { region: intl, protocol: openai-completions, path: /inference/v1, capability: fireworks-compat, discovery: { adapter: static } }
   models: []
 
 - vendor: vllm
@@ -270,7 +270,7 @@
   regions:
     local: { host: http://localhost:8000 }
   endpoints:
-    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools }
+    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://docs.vllm.ai/en/latest/serving/openai_compatible_server/ } }
   models: []
 
 - vendor: ollama
@@ -282,7 +282,7 @@
   regions:
     local: { host: http://localhost:11434 }
   endpoints:
-    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools }
+    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools, discovery: { adapter: ollama, auth: none, path: api/tags, url_mode: instance, metadata_profile: ollama, reference: https://docs.ollama.com/api/tags } }
   models: []
 
 - vendor: lm-studio
@@ -294,7 +294,7 @@
   regions:
     local: { host: http://localhost:1234 }
   endpoints:
-    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools }
+    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://lmstudio.ai/docs/developer/openai-compat/models } }
   models: []
 
 - vendor: tgi
@@ -306,7 +306,7 @@
   regions:
     local: { host: http://localhost:8080 }
   endpoints:
-    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools }
+    - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools, discovery: { adapter: static } }
   models: []
 
 - vendor: custom-openai
@@ -316,7 +316,7 @@
   category: custom
   description: Bring your own OpenAI chat-completions endpoint.
   endpoints:
-    - { region: any, protocol: openai-completions, base_url: "", capability: custom-openai }
+    - { region: any, protocol: openai-completions, base_url: "", capability: custom-openai, discovery: { adapter: openai, auth: bearer, reference: https://platform.openai.com/docs/api-reference/models/list, root_api_path: /v1 } }
   models: []
 
 - vendor: custom-anthropic
@@ -326,5 +326,17 @@
   category: custom
   description: Bring your own Anthropic Messages endpoint.
   endpoints:
-    - { region: any, protocol: anthropic-messages, base_url: "", capability: custom-anthropic }
+    - { region: any, protocol: anthropic-messages, base_url: "", capability: custom-anthropic, discovery: { adapter: anthropic, auth: anthropic, pagination: anthropic, root_api_path: /v1, reference: https://docs.anthropic.com/en/api/models-list } }
+  models: []
+
+- vendor: cliproxyapi
+  display_name: CLIProxyAPI
+  short_name: CLIProxyAPI
+  category: oss-framework
+  description: Self-hosted multi-provider gateway with instance model discovery.
+  regions:
+    local: { host: http://localhost:8317 }
+  endpoints:
+    - { region: local, protocol: openai-completions, path: /v1, capability: cliproxyapi-openai-completions, discovery: { adapter: openai, auth: bearer, metadata_profile: cliproxyapi, root_api_path: /v1, reference: https://github.com/router-for-me/CLIProxyAPI/tree/v8.0.27 } }
+    - { region: local, protocol: openai-responses, path: /v1, capability: cliproxyapi-openai-responses, discovery: { adapter: openai, auth: bearer, metadata_profile: cliproxyapi, root_api_path: /v1, reference: https://github.com/router-for-me/CLIProxyAPI/tree/v8.0.27 } }
   models: []

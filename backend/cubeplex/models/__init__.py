@@ -46,6 +46,7 @@ from cubeplex.models.organization import Organization
 from cubeplex.models.organization_membership import OrganizationMembership, OrgRole
 from cubeplex.models.presented_file import PresentedFile
 from cubeplex.models.provider import Model, Provider
+from cubeplex.models.provider_creation_receipt import ProviderCreationReceipt
 from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandWake
 from cubeplex.models.sandbox_env import SandboxEnvVar  # noqa: F401
 from cubeplex.models.sandbox_policy import SandboxPolicy  # noqa: F401
@@ -116,6 +117,7 @@ __all__ = [
     "OrganizationMembership",
     "PresentedFile",
     "Provider",
+    "ProviderCreationReceipt",
     "Role",
     "EgressRef",
     "SandboxEnvVar",

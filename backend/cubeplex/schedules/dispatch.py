@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from cubeloop.providers.base import ReasoningControl
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,7 +139,7 @@ async def freeze_scheduled_occurrence(
             model_key=preset.key,
             primary=preset.primary,
             fallbacks=preset.fallbacks,
-            reasoning=ReasoningControl(),
+            reasoning=None,
             trigger="automated",
         ),
     )
