@@ -15,13 +15,25 @@ def llm_transport(monkeypatch, request):
     original = ProviderService._provider_factory_from_config
     requests = []
     auth_failure = getattr(request, "param", None) == "tool_auth_failure"
+    vision_transition = getattr(request, "param", None) == "vision_transition"
+    vision_responses = 0
 
     def respond(request):
+        nonlocal vision_responses
         body = json.loads(request.content)
         requests.append(body)
         if auth_failure and body["model"] == "unknown-alias" and body.get("tools"):
             return httpx.Response(401, json={"error": {"message": "credential rejected"}})
         delta = {"content": "OK"}
+        if vision_transition and any(
+            isinstance(part, dict) and part.get("type") == "image_url"
+            for message in body.get("messages", [])
+            for part in (
+                message.get("content", []) if isinstance(message.get("content"), list) else []
+            )
+        ):
+            vision_responses += 1
+            delta = {"content": "yellow blue red green" if vision_responses == 1 else "OK"}
         if body.get("tools"):
             delta = {
                 "tool_calls": [
@@ -426,4 +438,85 @@ async def test_model_probe_auth_failure_blocks_earlier_passed_models(
         assert activation.json()["results"][0]["status"] == "blocked"
         assert (await client.get(path)).json()["last_liveness_status"] == "auth_error"
     finally:
+        await client.delete(path)
+
+
+@pytest.mark.parametrize("llm_transport", ["vision_transition"], indirect=True)
+async def test_current_negative_vision_retracts_image_support_without_disabling_text(
+    admin_client,
+    db_session,
+    llm_transport,
+):
+    from sqlalchemy import delete
+
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.provider import Provider
+
+    client, ws_id = admin_client
+    created = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "vision-evidence-update",
+            "base_url": "http://localhost:8317/v1",
+            "auth_type": "none",
+            "capability": {"supports_images": True},
+        },
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    path = f"/api/v1/admin/providers/{provider['id']}"
+    try:
+        model = (
+            await client.post(
+                path + "/models",
+                json={
+                    "model_id": "manual-img",
+                    "display_name": "Manual image",
+                    "context_window": 8192,
+                    "max_tokens": 1024,
+                    "input_modalities": ["text", "image"],
+                },
+            )
+        ).json()
+        configured = await client.put(
+            "/api/v1/admin/model-presets",
+            json={
+                "tiers": {
+                    "pro": {
+                        "enabled": True,
+                        "primary": provider["slug"] + "/manual-img",
+                        "fallbacks": [],
+                    }
+                },
+                "custom_presets": [],
+                "default_preset": "pro",
+                "task_routing": {},
+            },
+        )
+        assert configured.status_code == 200, configured.text
+        passed = await client.post(path + f"/models/{model['id']}/test")
+        assert passed.json()["overall"] == "pass", passed.text
+        edited = await client.patch(
+            path,
+            json={
+                "base_url": "http://localhost:8317/other/v1",
+                "expected_configuration_revision": provider["configuration_revision"],
+            },
+        )
+        assert edited.status_code == 200, edited.text
+        before = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
+        assert "image" in next(p for p in before if p["key"] == "pro")["input_modalities"]
+        rejected = await client.post(path + f"/models/{model['id']}/test")
+        assert rejected.json()["overall"] == "fail", rejected.text
+        after = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
+        assert next(p for p in after if p["key"] == "pro")["input_modalities"] == ["text"]
+        assert (await client.get(path)).json()["models"][0]["enabled"] is True
+    finally:
+        row = await db_session.get(Provider, provider["id"])
+        await db_session.execute(
+            delete(OrgSettings).where(
+                OrgSettings.org_id == row.org_id, OrgSettings.key == MODEL_PRESETS_KEY
+            )
+        )
+        await db_session.commit()
         await client.delete(path)

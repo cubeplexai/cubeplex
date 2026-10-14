@@ -50,9 +50,11 @@ def chain_controls(snapshot: LLMSnapshot, preset: ModelPreset) -> ChainControls:
         efforts: set[str] = set(mapping.effort_values) if mapping and mapping.effort_path else set()
         has_effort_mapping |= bool(mapping and mapping.effort_path and mapping.effort_values)
         inputs = set(model.input) & {"text", "image"}
-        if model.configuration_metadata.get(
-            "origin"
-        ) == "discovery" or model.configuration_metadata.get("vision_requires_verification"):
+        if (
+            model.configuration_metadata.get("origin") == "discovery"
+            or model.configuration_metadata.get("vision_requires_verification")
+            or model.configuration_metadata.get("vision_verification_required")
+        ):
             if not capability.supports_images or not model.image_verified:
                 inputs.discard("image")
         shared_modes = modes if shared_modes is None else shared_modes & modes

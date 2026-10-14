@@ -78,3 +78,19 @@ def test_mode_only_controls_do_not_advertise_effort_levels():
         validate_reasoning_for_chain(
             snap, snap.model_presets[0], ReasoningControl(mode="on", effort="high")
         )
+
+
+def test_manual_vision_support_remains_subject_to_new_negative_evidence():
+    snap = snapshot()
+    model = snap.providers["p"].models[0]
+    model.configuration_metadata = {
+        "origin": "manual",
+        "vision_requires_verification": False,
+        "vision_verification_required": True,
+    }
+    model.image_verified = False
+    snap.providers["p"].capability["supports_images"] = True
+    preset = ModelPreset(key="vision", primary="p/a", fallbacks=(), kind="custom", is_default=True)
+    assert chain_controls(snap, preset).input_modalities == ("text",)
+    model.image_verified = True
+    assert chain_controls(snap, preset).input_modalities == ("image", "text")

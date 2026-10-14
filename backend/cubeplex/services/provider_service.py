@@ -619,6 +619,7 @@ class ProviderService:
             "origin": "manual",
             "fields": fields,
             "vision_requires_verification": "image" in m.input_modalities,
+            "vision_verification_required": "image" in m.input_modalities,
         }
         return await self._models.add(m)
 
@@ -688,6 +689,7 @@ class ProviderService:
         metadata["fields"] = fields
         if adding_image:
             metadata["vision_requires_verification"] = True
+            metadata["vision_verification_required"] = True
         m.configuration_metadata = metadata
         m.configuration_revision += 1
         m.updated_at = datetime.now(UTC)
@@ -957,6 +959,11 @@ class ProviderService:
         )
         model.last_test_status = _OVERALL_TO_STATUS[result.overall]
         model.last_test_at = datetime.now(UTC)
+        if required.get("vision") in {"pass", "fail"}:
+            model.configuration_metadata = {
+                **model.configuration_metadata,
+                "vision_verification_required": True,
+            }
         if required.get("vision") == "pass":
             model.configuration_metadata = {
                 **model.configuration_metadata,

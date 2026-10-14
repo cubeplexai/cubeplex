@@ -34,9 +34,18 @@ class LLMCapabilities:
                     inputs = set(m.input)
                     if (
                         m.configuration_metadata.get("origin") == "discovery"
-                        and not m.image_verified
+                        or m.configuration_metadata.get("vision_requires_verification")
+                        or m.configuration_metadata.get("vision_verification_required")
                     ):
-                        inputs.discard("image")
+                        from cubeloop.providers.capability import CapabilityDescriptor
+
+                        slug, model_id = ref.split("/", 1)
+                        provider = self._cfg.providers[slug]
+                        capability = CapabilityDescriptor.model_validate(
+                            provider.model_capability_overrides.get(model_id, provider.capability)
+                        )
+                        if not m.image_verified or not capability.supports_images:
+                            inputs.discard("image")
                     modalities = inputs if modalities is None else modalities & inputs
                 else:
                     return set()

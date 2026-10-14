@@ -170,7 +170,7 @@ async def _generate_title(
                 await title_session.generate(
                     system="",
                     messages=messages,
-                    max_output_tokens=LLM_MAX_TOKENS,
+                    max_output_tokens=min(bound.spec.max_tokens, LLM_MAX_TOKENS),
                 ),
             )
     else:

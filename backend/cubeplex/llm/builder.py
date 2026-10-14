@@ -57,7 +57,7 @@ def build_provider(
     validate_request_extensions(api, cfg.extra_body or {}, cap_dict)
     validate_request_headers(api, cfg.extra_headers)
     if api == "anthropic-messages":
-        from cubeloop.providers.anthropic import AnthropicProvider
+        from cubeplex.llm.anthropic_provider import AnthropicProvider
 
         return configure_auth(
             AnthropicProvider(

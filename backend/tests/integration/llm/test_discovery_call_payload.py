@@ -197,3 +197,67 @@ async def test_reasoning_probe_uses_a_small_budget_compatible_with_its_mapping(
         result = await probe_reasoning_toggle(provider, model_id="r", capability=cap)
     assert result.status == "pass"
     assert calls and all(body["max_tokens"] == expected_output for body in calls)
+
+
+async def test_native_anthropic_preserves_saved_total_output_limit_and_probe_budget():
+    from cubeloop.providers.capability import CapabilityDescriptor
+
+    from cubeplex.llm.builder import build_provider
+    from cubeplex.services.provider_probe import probe_reasoning_toggle
+
+    calls = []
+
+    def respond(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "No generation in serialization test",
+                }
+            },
+        )
+
+    cap = CapabilityDescriptor.model_validate(
+        {
+            "reasoning": {
+                "mode_payloads": {"on": {"thinking": {"type": "enabled"}}},
+                "effort_path": "thinking.budget_tokens",
+                "effort_values": {"low": 2048},
+            }
+        }
+    )
+    model = ModelConfig(
+        id="claude-alias", name="Claude", reasoning=True, context_window=8192, max_tokens=4096
+    )
+    cfg = ProviderConfig(
+        api="anthropic-messages",
+        api_key="test-key",
+        base_url="http://localhost",
+        capability=cap.model_dump(),
+        models=[model],
+    )
+    snap = LLMSnapshot(providers={"p": cfg}, model_presets=(), task_routing={})
+    control = ReasoningControl(mode="on", effort="low")
+    bound = build_bound_model(snap, "p/claude-alias", reasoning=control)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        bound.provider._client = bound.provider._client.with_options(http_client=client)
+        stream = await bound.provider.stream(
+            model=bound.spec,
+            messages=[UserMessage(content=[TextContent(text="OK")])],
+            options=StreamOptions(reasoning=control),
+        )
+        async for _ in stream:
+            pass
+        await stream.result()
+    assert calls[0]["max_tokens"] == 4096
+    assert calls[0]["thinking"]["budget_tokens"] == 2048
+    calls.clear()
+    provider = build_provider(snap, "p")
+    provider._cubeplex_probe_model = model
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        provider._client = provider._client.with_options(http_client=client)
+        await probe_reasoning_toggle(provider, model_id=model.id, capability=cap)
+    assert calls[0]["max_tokens"] == 2176
+    assert calls[0]["thinking"]["budget_tokens"] == 2048
