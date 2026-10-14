@@ -63,18 +63,15 @@ function contextLimitError(): AsyncGenerator<AgentEvent> {
 }
 
 function bootstrapResponse(active = true): Promise<Response> {
-  return Promise.resolve({
-    ok: true,
-    status: 200,
-    json: () =>
-      Promise.resolve({
-        messages: [],
-        active_run: active ? { run_id: 'r1', status: 'running' } : null,
-        pending_hitl: null,
-        pending_steers: [],
-        last_run_status: null,
-      }),
-  } as Response)
+  return Promise.resolve(
+    Response.json({
+      messages: [],
+      active_run: active ? { run_id: 'r1', status: 'running' } : null,
+      pending_hitl: null,
+      pending_steers: [],
+      last_run_status: null,
+    }),
+  )
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

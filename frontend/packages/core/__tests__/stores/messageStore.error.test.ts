@@ -28,13 +28,8 @@ function resetStore(): void {
 }
 
 function makeBootstrapClient(body: Record<string, unknown>): ApiClient {
-  const response = {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve(body),
-  }
   return {
-    get: vi.fn().mockResolvedValue(response),
+    get: vi.fn().mockImplementation(async () => Response.json(body)),
   } as unknown as ApiClient
 }
 

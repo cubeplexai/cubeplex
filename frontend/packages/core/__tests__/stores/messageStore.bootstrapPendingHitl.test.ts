@@ -2,18 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useMessageStore } from '../../src/stores/messageStore'
 import type { ApiClient } from '../../src/api'
 
-// Helper: construct a stub ApiClient whose ``get`` returns a Response-like
-// object containing the given bootstrap body. The store only touches
+// Helper: construct a stub ApiClient whose ``get`` returns a Response
+// containing the given bootstrap body. The store only touches
 // ``client.get(...)`` for ``loadMessages`` (and skips the active_run branch
 // when ``active_run: null``), so we can leave the rest of the surface bare.
 function makeBootstrapClient(body: Record<string, unknown>): ApiClient {
-  const response = {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve(body),
-  }
   return {
-    get: vi.fn().mockResolvedValue(response),
+    get: vi.fn().mockImplementation(async () => Response.json(body)),
   } as unknown as ApiClient
 }
 
@@ -149,23 +144,18 @@ describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
 
   it('runs a forced bootstrap after an older in-flight bootstrap finishes', async () => {
     let resolveFirst: ((value: unknown) => void) | undefined
-    const response = {
-      ok: true,
-      status: 200,
-      json: () =>
-        Promise.resolve({
-          messages: [],
-          active_run: null,
-          pending_hitl: null,
-          pending_steers: [],
-          last_run_status: null,
-        }),
-    }
+    const response = Response.json({
+      messages: [],
+      active_run: null,
+      pending_hitl: null,
+      pending_steers: [],
+      last_run_status: null,
+    })
     const client = {
       get: vi
         .fn()
         .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
-        .mockResolvedValueOnce(response),
+        .mockResolvedValueOnce(response.clone()),
     } as unknown as ApiClient
 
     const older = useMessageStore.getState().loadMessages(client, 'conv-force')
@@ -207,18 +197,15 @@ describe('loadMessages → bootstrap.pending_hitl seeds pending state', () => {
         },
       },
     })
-    resolveBootstrap?.({
-      ok: true,
-      status: 200,
-      json: () =>
-        Promise.resolve({
-          messages: [],
-          active_run: { run_id: 'run-a', status: 'running' },
-          pending_hitl: null,
-          pending_steers: [],
-          last_run_status: null,
-        }),
-    })
+    resolveBootstrap?.(
+      Response.json({
+        messages: [],
+        active_run: { run_id: 'run-a', status: 'running' },
+        pending_hitl: null,
+        pending_steers: [],
+        last_run_status: null,
+      }),
+    )
     await recovery
 
     expect(useMessageStore.getState()).toMatchObject({

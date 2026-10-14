@@ -49,11 +49,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 function makeBootstrapClient(body: Record<string, unknown>): ApiClient {
   return {
-    get: vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(body),
-    }),
+    get: vi.fn().mockImplementation(async () => Response.json(body)),
   } as unknown as ApiClient
 }
 
