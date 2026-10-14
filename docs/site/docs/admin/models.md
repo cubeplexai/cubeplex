@@ -22,13 +22,14 @@ A provider represents an LLM API endpoint. Each provider has:
 
 ### Add a provider from a preset
 
-CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
+CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL, discovery policy, and calling configuration. Supply the calling key, or choose no authentication for a keyless local endpoint.
 
 1. Go to **Admin > Models**.
 2. Click **Add Provider**.
 3. Select a preset from the list (e.g., "Anthropic").
-4. Paste your API key.
-5. Click **Save**.
+4. Review the endpoint and authentication, then click **Next**.
+5. Click **List available models**, review field sources, select models, and import.
+6. Run verification and click **Finish** to enable passing models. Vendors with static suggestions use the manual model step.
 
 ### Add a custom provider
 
@@ -38,8 +39,8 @@ Any service that exposes an OpenAI-compatible chat completions endpoint can be a
 2. Click **Add Provider**.
 3. Choose **Custom (OpenAI-compatible)**.
 4. Enter a name, base URL, and API key.
-5. Configure the capability descriptor to match what the endpoint supports.
-6. Click **Save**.
+5. Review the calling configuration, then click **Next** to discover models.
+6. Complete missing fields or resolve conflicts, import the selection, and verify before enabling.
 
 ### Test provider connectivity
 
@@ -77,7 +78,7 @@ If you want to stop offering a specific model to your team, disable it in the mo
 
 ### Add a self-hosted or proxy endpoint
 
-For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubePlex backend server.
+Choose CLIProxyAPI, vLLM, or Ollama for those deployments, or a custom provider for another compatible endpoint. The base URL must be reachable from the CubePlex backend server.
 
 ### Configure reasoning for a custom endpoint
 
@@ -85,7 +86,7 @@ CubePlex stores one standard reasoning control for each conversation:
 
 | Field     | Values                                       |
 | --------- | -------------------------------------------- |
-| `mode`    | `off` or `on`                                |
+| `mode`    | `off`, `auto`, or `on`                                |
 | `effort`  | `minimal`, `low`, `medium`, `high`, or `max` |
 | `summary` | `none`, `auto`, `detailed`, or `summarized`  |
 

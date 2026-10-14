@@ -22,13 +22,14 @@ CubePlex 通过你在组织级别配置的 API 密钥连接 LLM 提供商。设�
 
 ### 从预设添加提供商
 
-CubePlex 为常见提供商（Anthropic、OpenAI 等）提供预设。预设会预填 Base URL 和能力描述符，因此你只需输入 API 密钥。
+CubePlex 为常见提供商（Anthropic、OpenAI 等）提供预设。预设会预填 Base URL、发现策略与调用配置。填写调用密钥；无密钥的本地端点可选择无认证。
 
 1. 前往 **Admin > Models**。
 2. 点击 **Add Provider**。
 3. 从列表中选择一个预设（例如“Anthropic”）。
-4. 粘贴 API 密钥。
-5. 点击 **Save**。
+4. 审核端点与认证方式，点击**下一步**。
+5. 点击**列出可用模型**，审核字段来源、选择模型并导入。
+6. 运行验证，点击**完成**启用通过测试的模型。仅提供静态建议的供应商使用手动模型步骤。
 
 ### 添加自定义提供商
 
@@ -38,8 +39,8 @@ CubePlex 为常见提供商（Anthropic、OpenAI 等）提供预设。预设会�
 2. 点击 **Add Provider**。
 3. 选择 **Custom (OpenAI-compatible)**。
 4. 输入名称、Base URL 和 API 密钥。
-5. 配置与端点支持能力相匹配的能力描述符。
-6. 点击 **Save**。
+5. 审核调用配置，点击**下一步**发现模型。
+6. 补齐缺失字段或解决冲突，导入所选模型，验证后启用。
 
 ### 测试提供商连通性
 
@@ -77,7 +78,7 @@ CubePlex 为常见提供商（Anthropic、OpenAI 等）提供预设。预设会�
 
 ### 添加自托管或代理端点
 
-对于位于反向代理、VPN 或自托管推理服务器后的模型，请使用自定义提供商流程。确保 CubePlex 后端服务器能够访问该 Base URL。
+对于相应部署请选择 CLIProxyAPI、vLLM 或 Ollama；其他兼容端点使用自定义提供商。确保 CubePlex 后端服务器能够访问该 Base URL。
 
 ### 为自定义端点配置推理
 
@@ -85,7 +86,7 @@ CubePlex 为每个对话保存一组标准推理控制：
 
 | 字段 | 值 |
 | --- | --- |
-| `mode` | `off` 或 `on` |
+| `mode` | `off`、`auto` 或 `on` |
 | `effort` | `minimal`、`low`、`medium`、`high` 或 `max` |
 | `summary` | `none`、`auto`、`detailed` 或 `summarized` |
 
