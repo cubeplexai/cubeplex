@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { PresentedFileCard } from '@/components/chat/PresentedFileCard'
@@ -22,12 +22,12 @@ const qrFile = {
 }
 
 describe('PresentedFileCard', () => {
-  it('renders image with thumbnail URL (full content via link)', () => {
+  it('loads the original image directly and links to the same file', () => {
     render(<PresentedFileCard file={qrFile} />)
     const img = screen.getByRole('img', { name: 'Login QR' })
     expect(img).toHaveAttribute(
       'src',
-      '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/thumbnail',
+      '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
     )
     const link = img.closest('a')
     expect(link).toHaveAttribute(
@@ -35,6 +35,19 @@ describe('PresentedFileCard', () => {
       '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
     )
     expect(link).toHaveClass('w-full')
+  })
+
+  it('keeps the original downloadable when the image fails to load', () => {
+    render(<PresentedFileCard file={qrFile} />)
+    fireEvent.error(screen.getByRole('img', { name: 'Login QR' }))
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    const link = screen.getByRole('link', { name: /qr\.png/ })
+    expect(link).toHaveAttribute(
+      'href',
+      '/api/v1/ws/ws-test/conversations/conv-1/presented-files/pfile-abc/content',
+    )
+    expect(link).toHaveAttribute('download', 'qr.png')
   })
 
   it('sizes small images to their native pixel width instead of stretching', () => {

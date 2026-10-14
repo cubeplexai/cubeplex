@@ -16,6 +16,8 @@ You do not create artifacts directly. The agent creates them by calling one of t
 
 When the agent only needs you to **see a file right now** (a login QR code, a screenshot, a one-off export) it uses **`present_file`** instead. That file appears inline in the chat and is **not** added to the artifact gallery. On Feishu, Slack, or Discord the same file is delivered as a native image or file message when the reply finishes.
 
+Images shown with `present_file` load the original image and fit it into the chat at up to 480 pixels wide, preserving its proportions. Click the image to open the original in a new tab. If the image cannot load, the card offers the file for download.
+
 This happens naturally when you ask the agent to build something concrete:
 
 - "Build me a landing page"

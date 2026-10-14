@@ -47,15 +47,10 @@ function presentedImageSize(
   return { card, frame: { aspectRatio: `${width} / ${height}` } }
 }
 
-function presentedUrl(
-  workspaceId: string,
-  conversationId: string,
-  fileId: string,
-  kind: 'content' | 'thumbnail',
-): string {
+function presentedUrl(workspaceId: string, conversationId: string, fileId: string): string {
   return (
     `/api/v1/ws/${workspaceId}/conversations/${conversationId}` +
-    `/presented-files/${fileId}/${kind}`
+    `/presented-files/${fileId}/content`
   )
 }
 
@@ -74,8 +69,6 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
   const t = useTranslations('chatExtras')
   const { workspaceId } = useWorkspaceContext()
   const [imgLoaded, setImgLoaded] = useState(false)
-  /** Prefer thumbnail; fall back to full content once if thumb fails. */
-  const [useFullContent, setUseFullContent] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
 
   if (!file) {
@@ -101,9 +94,7 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
       </div>
     )
   }
-  const fullUrl = presentedUrl(workspaceId, file.conversation_id, file.id, 'content')
-  const thumbUrl = presentedUrl(workspaceId, file.conversation_id, file.id, 'thumbnail')
-  const displayUrl = useFullContent ? fullUrl : thumbUrl
+  const fullUrl = presentedUrl(workspaceId, file.conversation_id, file.id)
   const isImage = file.kind === 'image' || file.mime_type.startsWith('image/')
 
   if (isImage && !imgFailed) {
@@ -128,7 +119,7 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
           )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={displayUrl}
+            src={fullUrl}
             alt={caption}
             width={file.width ?? undefined}
             height={file.height ?? undefined}
@@ -137,15 +128,7 @@ function PresentedFileCardImpl({ file, captionFallback }: PresentedFileCardProps
               imgLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0',
             )}
             onLoad={() => setImgLoaded(true)}
-            onError={() => {
-              if (!useFullContent) {
-                // Thumbnail missing/corrupt → retry once with full content.
-                setUseFullContent(true)
-                setImgLoaded(false)
-                return
-              }
-              setImgFailed(true)
-            }}
+            onError={() => setImgFailed(true)}
           />
         </div>
         {caption && (
