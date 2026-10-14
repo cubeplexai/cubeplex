@@ -1,6 +1,6 @@
 # Model discovery and batch import
 
-**Status:** Draft for review; activation after edits awaits a product decision
+**Status:** Design reviewed; activation after edits awaits a product decision
 
 **Date:** 2026-10-13
 
@@ -377,4 +377,4 @@ The implementation is accepted when these invariants hold:
 15. Null/default reasoning survives client state, API validation, execution admission, resume, and runtime binding. Models with unknown mappings or an empty fallback-control intersection can perform basic chat without falsely claiming reasoning is off. Unknown support displays as unknown in both the model center and picker. Explicit unsupported reasoning choices and chain-incompatible image inputs are rejected before generation; probes and runtime apply the same supported extra request parameters.
 16. The matching English/Chinese model-management pages describe equivalent behavior, commands, limitations, and screenshot instructions.
 
-This document fixes the design boundary. Implementation sequencing and file-level work belong in a separate plan after spec review.
+This document fixes the design boundary. Implementation sequencing and file-level work are in the [implementation plan](../plans/2026-10-13-model-discovery.md). Local design review completed on 2026-10-13; the activation-after-edit choice remains pending before implementation.

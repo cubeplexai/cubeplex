@@ -1,6 +1,6 @@
 # Model discovery and batch import — implementation plan
 
-**Status:** Draft for review; activation after edits awaits a product decision
+**Status:** Design reviewed; activation after edits awaits a product decision
 
 **Date:** 2026-10-13
 
@@ -364,6 +364,8 @@ Schema validation, actual `alembic upgrade head`, transactional E2E, generated m
 Review the spec and this plan with the `local-codex-review` skill before implementation. The review must read the existing repository seams and the exact two documents, including their uncommitted content. Focus on scope creep, preview/configuration binding, transaction ownership, test-result races, optional metadata trust, and the ability to finish ordinary CLIProxyAPI setup without per-model forms.
 
 Verify each finding against the actual code. Correct clear contract/implementation omissions in both documents, then rerun in the same local Codex session. Product-scope choices or changes to established behavior that require the user's decision must be presented before depending on them. Preserve review prompts/output locally and report material findings plus the final review outcome.
+
+Local Codex design review completed on 2026-10-13 in four rounds. Six HIGH and four MEDIUM findings were corrected across the spec and plan: stale-form writes, credential transaction ownership, observation ordering, legacy evidence, default reasoning, management inventory, durable creation recovery, unknown-support display, fallback modalities, and final request identity/budgets. The final review of `36d9fb0a2` reports no unresolved CRITICAL/HIGH findings or MEDIUM findings introduced by that correction. This reviews the design contracts; implementation validation remains the work described above.
 
 ### Pending product decision
 
