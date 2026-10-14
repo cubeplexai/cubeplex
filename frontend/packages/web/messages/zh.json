@@ -1006,7 +1006,9 @@
           "provider_name_conflict": "已存在同名 provider，请换一个名称。",
           "invalid_provider_slug": "slug 只能包含小写字母、数字和连字符（最长 64 字符）。",
           "provider_oauth_not_implemented": "暂不支持 OAuth 认证。"
-        }
+        },
+        "loading": "正在加载已保存配置…",
+        "reload": "重新加载已保存配置"
       },
       "capability": {
         "label": "Capability JSON",

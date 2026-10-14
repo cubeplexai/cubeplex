@@ -167,7 +167,7 @@ export default function AddProviderWizardPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {state.step > 1 && (
+              {state.step > 1 && (state.step > 2 || !state.providerId) && (
                 <Button
                   type="button"
                   variant="outline"

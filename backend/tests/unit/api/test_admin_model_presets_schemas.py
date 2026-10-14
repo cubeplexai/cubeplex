@@ -134,6 +134,9 @@ def test_workspace_summary_shape() -> None:
         "context_window": None,
         "reasoning": None,
         "input_modalities": None,
+        "reasoning_modes": [],
+        "reasoning_efforts": [],
+        "verification_pending": False,
     }
 
 

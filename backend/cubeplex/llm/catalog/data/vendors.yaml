@@ -220,7 +220,7 @@
   regions:
     intl: { host: https://openrouter.ai }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /api/v1, capability: openrouter-compat, discovery: { adapter: openai, root_api_path: /v1, auth: bearer, reference: https://openrouter.ai/docs/api-reference/list-available-models, metadata_profile: openrouter } }
+    - { region: intl, protocol: openai-completions, path: /api/v1, capability: openrouter-compat, discovery: { adapter: openai, root_api_path: /api/v1, auth: bearer, reference: https://openrouter.ai/docs/api-reference/list-available-models, metadata_profile: openrouter } }
   models:
     - { model_id: "google/gemma-4-31b-it:free", display_name: Gemma 4 31B (free), context_window: 262000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: "stepfun/step-3.5-flash:free", display_name: StepFun 3.5 Flash (free), context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }

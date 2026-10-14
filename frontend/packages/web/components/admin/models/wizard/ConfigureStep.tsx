@@ -12,6 +12,7 @@ import {
   type ProviderCreate,
   type ProviderUpdate,
   type VendorPreset,
+  type Provider,
   type ImportModelOutcome,
 } from '@cubeplex/core'
 import { DiscoveryPanel } from '../DiscoveryPanel'
@@ -55,9 +56,26 @@ export function ConfigureStep({
 }: ConfigureStepProps) {
   const t = useTranslations('adminModels.wizard.configure')
   const tw = useTranslations('adminModels.wizard')
+  const [reloadCount, setReloadCount] = useState(0)
+  const [savedProvider, setSavedProvider] = useState<Provider | null>(null)
   const [draft, setDraft] = useState<ProviderCreate | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!existingProviderId) return
+    let disposed = false
+    void fetchProvider(client, existingProviderId)
+      .then((row) => {
+        if (!disposed) setSavedProvider(row)
+      })
+      .catch((e) => {
+        if (!disposed) setError((e as Error).message)
+      })
+    return () => {
+      disposed = true
+    }
+  }, [client, existingProviderId, reloadCount])
 
   // The currently-selected endpoint: the one matching selectedPresetKey, else
   // the vendor's first endpoint.
@@ -117,17 +135,7 @@ export function ConfigureStep({
     setError(null)
     try {
       if (existingProviderId) {
-        const current = await fetchProvider(client, existingProviderId)
-        const {
-          slug: _slug,
-          discovery_id: _discoveryId,
-          model_capability_overrides: _overrides,
-          ...fields
-        } = body as ProviderCreate
-        await updateProvider(client, existingProviderId, {
-          ...fields,
-          expected_configuration_revision: current.configuration_revision,
-        })
+        await updateProvider(client, existingProviderId, body as ProviderUpdate)
         onProviderCreated(existingProviderId)
       } else {
         const provider = await createProvider(client, body as ProviderCreate)
@@ -161,7 +169,7 @@ export function ConfigureStep({
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
-      {showSelectors && (
+      {showSelectors && !draft && !existingProviderId && (
         <div className="grid grid-cols-3 gap-3 rounded-lg border border-border/70 p-3">
           <Selector
             label={t('region')}
@@ -196,10 +204,29 @@ export function ConfigureStep({
         </div>
       )}
 
-      {!draft && (
+      {existingProviderId && !draft && (
+        <>
+          {!savedProvider && <p role="status">{error ?? t('loading')}</p>}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setReloadCount((n) => n + 1)
+            }}
+          >
+            {t('reload')}
+          </Button>
+        </>
+      )}
+      {!draft && (!existingProviderId || savedProvider) && (
         <ProviderConfigForm
-          key={chosen.preset_key}
-          mode="create"
+          key={
+            savedProvider
+              ? `${savedProvider.id}:${savedProvider.configuration_revision}`
+              : chosen.preset_key
+          }
+          mode={existingProviderId ? 'edit' : 'create'}
+          provider={savedProvider ?? undefined}
           preset={createPreset}
           // Restore the draft only when it belongs to the current endpoint; a
           // different endpoint should fall back to that endpoint's defaults.

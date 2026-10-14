@@ -12,6 +12,7 @@ import {
 } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { configuredPrice } from '@/lib/models/configured-price'
 import { cn } from '@/lib/utils'
 import { formatProbeDetail } from '@/lib/probeDetail'
 import { ReadinessBadge } from './ReadinessBadge'
@@ -163,13 +164,12 @@ export function ModelRow({
         className="hidden min-w-[100px] shrink-0 text-right text-muted-foreground lg:block"
         title={t('costPerMillion')}
       >
-        {model.configuration_metadata &&
-        (!model.configuration_metadata.fields?.cost_input ||
-          !model.configuration_metadata.fields?.cost_output)
-          ? t('priceUnknown')
-          : model.cost_input > 0 || model.cost_output > 0
-            ? `$${formatCost(model.cost_input)}/$${formatCost(model.cost_output)}`
-            : '-'}
+        {(['cost_input', 'cost_output'] as const)
+          .map((field) => {
+            const price = configuredPrice(model, field)
+            return price === null ? t('priceUnknown') : `$${formatCost(price)}`
+          })
+          .join(' / ')}
       </span>
 
       <div className="hidden shrink-0 items-center md:flex">

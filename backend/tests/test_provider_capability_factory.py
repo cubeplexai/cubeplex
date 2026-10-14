@@ -32,11 +32,12 @@ def _build(cfg: ProviderConfig, *, slug: str = "acme") -> Any:
     return build_provider(snap, slug)
 
 
-def test_legacy_no_capability_keeps_cap_inactive() -> None:
+def test_empty_capability_uses_explicit_neutral_defaults() -> None:
     """OpenAI provider with empty capability stays behavior-identical (_cap_active False)."""
     cfg = _bare_provider_config("openai-completions")
     provider = _build(cfg)
-    assert provider._cap_active is False
+    assert provider._cap_active is True
+    assert provider._capability.reasoning is None
 
 
 def test_with_capability_activates_and_carries_payload() -> None:

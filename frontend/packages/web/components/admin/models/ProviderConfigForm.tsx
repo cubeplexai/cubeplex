@@ -66,7 +66,7 @@ interface ProviderConfigFormProps {
 export function ProviderConfigForm({
   mode,
   preset,
-  provider,
+  provider: currentProvider,
   initialValues,
   onValuesChange,
   saving,
@@ -74,6 +74,7 @@ export function ProviderConfigForm({
   submitLabel,
   onSubmit,
 }: ProviderConfigFormProps) {
+  const [provider] = useState(currentProvider)
   const t = useTranslations('adminModels')
   const tc = useTranslations('adminModels.wizard.configure')
   const isCreate = mode === 'create'

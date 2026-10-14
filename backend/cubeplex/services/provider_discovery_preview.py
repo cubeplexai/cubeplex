@@ -56,6 +56,10 @@ def resolve_discovery_configuration(
             else "https://platform.openai.com/docs/api-reference/models/list",
         )
     base = validated_base(config.base_url)
+    if endpoint and not urlsplit(base).path:
+        path = urlsplit(endpoint.base_url).path.rstrip("/")
+        if path:
+            base += path
     if config.api == "anthropic-messages":
         if base.endswith("/v1"):
             base = base[:-3]
@@ -66,7 +70,8 @@ def resolve_discovery_configuration(
             "base_url": base,
             "discovery": policy,
             "capability": config.capability
-            or (endpoint.capability.model_dump(mode="json") if endpoint else {}),
+            if "capability" in config.model_fields_set
+            else (endpoint.capability.model_dump(mode="json") if endpoint else {}),
         }
     )
     return resolved, policy, endpoint

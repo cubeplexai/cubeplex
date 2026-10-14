@@ -141,3 +141,5 @@ uv run python scripts/dev/backfill_model_discovery.py
 The backfill is idempotent, preserves enabled rows, and marks old tests historical. It never promotes historical tests to current passes. Legacy zero prices remain unknown until confirmed.
 
 <!-- Screenshot pending: vendor selection (CLIProxyAPI), discovery field review, test results and enable action; capture in light/dark themes. -->
+
+In **Edit → Advanced**, review each model’s calling configuration separately. Imported models keep their own capability overrides; **Use provider configuration** removes that override. Forms submit only changed fields with the displayed revision, so concurrent edits require a reload. New image declarations require a vision pass before image attachments are offered, including on an enabled manual model. Its text calls remain available. Reasoning verification uses a small output budget, raised only when needed to fit an explicitly mapped thinking budget and always bounded by the saved output limit.

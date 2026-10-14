@@ -33,6 +33,7 @@ def chain_controls(snapshot: LLMSnapshot, preset: ModelPreset) -> ChainControls:
     shared_modes: set[str] | None = None
     shared_efforts: set[str] | None = None
     shared_inputs: set[str] | None = None
+    has_effort_mapping = False
     for ref in preset.chain:
         slug, model_id = parse_model_ref(ref)
         provider = snapshot.providers.get(slug)
@@ -47,13 +48,18 @@ def chain_controls(snapshot: LLMSnapshot, preset: ModelPreset) -> ChainControls:
         if not model.reasoning:
             modes -= {"on", "auto"}
         efforts: set[str] = set(mapping.effort_values) if mapping and mapping.effort_path else set()
+        has_effort_mapping |= bool(mapping and mapping.effort_path and mapping.effort_values)
         inputs = set(model.input) & {"text", "image"}
-        if model.configuration_metadata.get("origin") == "discovery":
+        if model.configuration_metadata.get(
+            "origin"
+        ) == "discovery" or model.configuration_metadata.get("vision_requires_verification"):
             if not capability.supports_images or not model.image_verified:
                 inputs.discard("image")
         shared_modes = modes if shared_modes is None else shared_modes & modes
         shared_efforts = efforts if shared_efforts is None else shared_efforts & efforts
         shared_inputs = inputs if shared_inputs is None else shared_inputs & inputs
+    if has_effort_mapping and not shared_efforts:
+        shared_modes = (shared_modes or set()) - {"on", "auto"}
     return ChainControls(
         tuple(sorted(shared_modes or ())),
         tuple(sorted(shared_efforts or ())),
@@ -69,7 +75,11 @@ def validate_reasoning_for_chain(
     allowed = chain_controls(snapshot, preset)
     if control.mode not in allowed.modes:
         raise ValueError("This reasoning mode is not available for the selected model chain")
-    if control.mode != "off" and bool(allowed.efforts) and control.effort not in allowed.efforts:
+    if (
+        control.mode != "off"
+        and (bool(allowed.efforts) or "effort" in control.model_fields_set)
+        and control.effort not in allowed.efforts
+    ):
         raise ValueError("This reasoning effort is not available for the selected model chain")
     if control.summary != "none":
         for ref in preset.chain:

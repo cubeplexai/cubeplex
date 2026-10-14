@@ -1006,7 +1006,9 @@
           "provider_name_conflict": "A provider with this name already exists. Pick another name.",
           "invalid_provider_slug": "Slug must be lowercase letters, numbers and hyphens (max 64 chars).",
           "provider_oauth_not_implemented": "OAuth authentication isn't supported yet."
-        }
+        },
+        "loading": "Loading saved configuration…",
+        "reload": "Reload saved configuration"
       },
       "capability": {
         "label": "Capability JSON",

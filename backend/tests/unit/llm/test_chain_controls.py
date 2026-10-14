@@ -51,3 +51,30 @@ def test_unknown_imported_reasoning_does_not_become_a_negative_declaration():
     assert reasoning_support(model) is None
     model.configuration_metadata["fields"]["reasoning"] = {"state": "confirmed", "value": False}
     assert reasoning_support(model) is False
+
+
+def test_disjoint_mapped_efforts_never_allow_an_arbitrary_effort():
+    snap = snapshot()
+    provider = snap.providers["p"]
+    provider.model_capability_overrides["a"] = {
+        "reasoning": {
+            "mode_payloads": {"on": {}, "off": {}},
+            "effort_path": "reasoning_effort",
+            "effort_values": {"low": "low"},
+        }
+    }
+    assert chain_controls(snap, snap.model_presets[0]).efforts == ()
+    with pytest.raises(ValueError):
+        validate_reasoning_for_chain(
+            snap, snap.model_presets[0], ReasoningControl(mode="on", effort="low")
+        )
+
+
+def test_mode_only_controls_do_not_advertise_effort_levels():
+    snap = snapshot()
+    snap.providers["p"].capability = {"reasoning": {"mode_payloads": {"on": {}, "off": {}}}}
+    validate_reasoning_for_chain(snap, snap.model_presets[0], ReasoningControl(mode="on"))
+    with pytest.raises(ValueError, match="effort"):
+        validate_reasoning_for_chain(
+            snap, snap.model_presets[0], ReasoningControl(mode="on", effort="high")
+        )

@@ -9,15 +9,18 @@ from cubeplex.llm.discovery_transport import DiscoveryTransport
 
 
 @pytest.fixture
-def llm_transport(monkeypatch):
+def llm_transport(monkeypatch, request):
     from cubeplex.services.provider_service import ProviderService
 
     original = ProviderService._provider_factory_from_config
     requests = []
+    auth_failure = getattr(request, "param", None) == "tool_auth_failure"
 
     def respond(request):
         body = json.loads(request.content)
         requests.append(body)
+        if auth_failure and body["model"] == "unknown-alias" and body.get("tools"):
+            return httpx.Response(401, json={"error": {"message": "credential rejected"}})
         delta = {"content": "OK"}
         if body.get("tools"):
             delta = {
@@ -300,5 +303,127 @@ async def test_invalid_import_rolls_back_entire_batch_and_stale_forms_are_reject
         )
         assert old_preview.status_code == 409
         assert (await client.get(path)).json()["name"] == "atomic-discovery"
+    finally:
+        await client.delete(path)
+
+
+async def test_new_image_declaration_requires_vision_proof_even_on_an_enabled_manual_model(
+    admin_client,
+    db_session,
+):
+    from sqlalchemy import delete
+
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.provider import Provider
+
+    client, ws_id = admin_client
+    created = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "new-image-proof",
+            "base_url": "http://localhost:8317/v1",
+            "auth_type": "none",
+            "capability": {"supports_images": True},
+        },
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    path = f"/api/v1/admin/providers/{provider['id']}"
+    try:
+        model = (
+            await client.post(
+                path + "/models",
+                json={
+                    "model_id": "chat",
+                    "display_name": "Chat",
+                    "context_window": 8192,
+                    "max_tokens": 1024,
+                },
+            )
+        ).json()
+        presets = await client.put(
+            "/api/v1/admin/model-presets",
+            json={
+                "tiers": {
+                    "pro": {"enabled": True, "primary": provider["slug"] + "/chat", "fallbacks": []}
+                },
+                "custom_presets": [],
+                "default_preset": "pro",
+                "task_routing": {},
+            },
+        )
+        assert presets.status_code == 200, presets.text
+        edit = await client.patch(
+            path + "/models/" + model["id"],
+            json={
+                "input_modalities": ["text", "image"],
+                "expected_configuration_revision": model["configuration_revision"],
+            },
+        )
+        assert edit.status_code == 200, edit.text
+        summaries = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
+        assert next(p for p in summaries if p["key"] == "pro")["input_modalities"] == ["text"]
+        assert (await client.get(path)).json()["models"][0]["enabled"] is True
+    finally:
+        row = await db_session.get(Provider, provider["id"])
+        await db_session.execute(
+            delete(OrgSettings).where(
+                OrgSettings.org_id == row.org_id, OrgSettings.key == MODEL_PRESETS_KEY
+            )
+        )
+        await db_session.commit()
+        await client.delete(path)
+
+
+@pytest.mark.parametrize("llm_transport", ["tool_auth_failure"], indirect=True)
+async def test_model_probe_auth_failure_blocks_earlier_passed_models(
+    admin_client,
+    model_listing,
+    llm_transport,
+):
+    client, _ = admin_client
+    config = {"base_url": "http://localhost:8317/v1", "auth_type": "none"}
+    preview = (await client.post("/api/v1/admin/providers/discover", json=config)).json()
+    provider = (
+        await client.post(
+            "/api/v1/admin/providers",
+            json={
+                "name": "probe-auth-grain",
+                **config,
+                "discovery_id": preview["discovery_id"],
+            },
+        )
+    ).json()
+    path = f"/api/v1/admin/providers/{provider['id']}"
+    try:
+        imported = await client.post(
+            path + "/models/import",
+            json={
+                "discovery_id": preview["discovery_id"],
+                "models": [
+                    {"model_id": "alias/chat"},
+                    {
+                        "model_id": "unknown-alias",
+                        "overrides": {
+                            "purpose": "chat",
+                            "context_window": 8192,
+                            "max_tokens": 512,
+                            "input_modalities": ["text"],
+                        },
+                    },
+                ],
+            },
+        )
+        assert imported.status_code == 200, imported.text
+        ids = [row["model_db_id"] for row in imported.json()["results"]]
+        passed = await client.post(path + f"/models/{ids[0]}/test")
+        assert passed.json()["overall"] == "pass", passed.text
+        rejected = await client.post(path + f"/models/{ids[1]}/test")
+        assert rejected.json()["overall"] == "fail", rejected.text
+        activation = await client.post(
+            path + "/models/enable-tested", json={"model_db_ids": [ids[0]]}
+        )
+        assert activation.json()["results"][0]["status"] == "blocked"
+        assert (await client.get(path)).json()["last_liveness_status"] == "auth_error"
     finally:
         await client.delete(path)

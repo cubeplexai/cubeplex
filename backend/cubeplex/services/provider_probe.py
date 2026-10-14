@@ -20,11 +20,11 @@ from cubeloop.providers.base import (
     ToolDefinition,
     UserMessage,
 )
-from cubeloop.providers.capability import CapabilityDescriptor
+from cubeloop.providers.capability import CapabilityDescriptor, apply_reasoning_control
 from pydantic import BaseModel, Field
 
 from cubeplex.llm.config import ModelConfig
-from cubeplex.llm.request_parameters import prepare_provider_for_call
+from cubeplex.llm.request_parameters import normalized_extra_body, prepare_provider_for_call
 
 ProbeStepName = Literal[
     "liveness", "reasoning", "temperature", "tools", "streaming", "usage", "vision"
@@ -166,10 +166,7 @@ async def _drain_stream(
                     raise ValueError("Probe stream exceeded its event budget")
                 if getattr(event, "type", None) in {"done", "error"}:
                     break
-            try:
-                result = await stream.result()
-            except Exception:
-                result = None
+            result = await stream.result()
             return events, time.perf_counter() - start, result
     finally:
         signal.set()
@@ -178,6 +175,16 @@ async def _drain_stream(
         if isinstance(task, asyncio.Task) and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+def _stream_error_step(name: ProbeStepName, event: Any, *, warning: bool = False) -> ProbeStep:
+    detail = _error_event_detail(event)
+    return ProbeStep(
+        name=name,
+        status="warn" if warning else "fail",
+        detail=detail,
+        error=ProbeError(type="StreamError", message=detail, raw_status=_status_from_text(detail)),
+    )
 
 
 def _first_error_event(events: list[Any]) -> Any | None:
@@ -277,6 +284,26 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
     )
 
 
+def _reasoning_probe_budget(
+    provider: Any, capability: CapabilityDescriptor, control: ReasoningControl, model_limit: int
+) -> int:
+    payload: dict[str, Any] = {
+        "extra_body": normalized_extra_body(
+            getattr(provider, "_extra_body", {}), capability, control
+        )
+    }
+    apply_reasoning_control(payload, capability, control)
+    body = payload.get("extra_body", {})
+    thinking = payload.get("thinking", body.get("thinking", {}))
+    raw_budget = thinking.get("budget_tokens", 0) if isinstance(thinking, dict) else 0
+    if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+        raw_budget = 0
+    budget = raw_budget if type(raw_budget) is int and raw_budget > 0 else 0
+    if budget >= model_limit:
+        raise ValueError("The reasoning budget must fit within the configured output limit")
+    return min(model_limit, max(512, budget + 128))
+
+
 async def probe_reasoning_toggle(
     provider: Any, *, model_id: str, capability: CapabilityDescriptor
 ) -> ProbeStep:
@@ -303,7 +330,10 @@ async def probe_reasoning_toggle(
             configured = getattr(provider, "_cubeplex_probe_model", None)
             output_bound = configured.max_tokens if isinstance(configured, ModelConfig) else 8192
             events, _, _ = await _drain_stream(
-                provider, model_id, reasoning=control, max_output=output_bound
+                provider,
+                model_id,
+                reasoning=control,
+                max_output=_reasoning_probe_budget(provider, capability, control, output_bound),
             )
             error = _first_error_event(events)
             if error is not None:
@@ -337,7 +367,10 @@ async def probe_temperature(
     else:
         value = spec.default
     try:
-        await _drain_stream(provider, model_id, temperature=value)
+        events, _, _ = await _drain_stream(provider, model_id, temperature=value)
+        error = _first_error_event(events)
+        if error is not None:
+            return _stream_error_step("temperature", error, warning=True)
     except Exception as exc:
         return ProbeStep(
             name="temperature",
@@ -374,6 +407,9 @@ async def probe_tools(provider: Any, *, model_id: str) -> ProbeStep:
         return ProbeStep(
             name="tools", status="fail", detail="tool-call request failed", error=_probe_error(exc)
         )
+    err = _first_error_event(events)
+    if err is not None:
+        return _stream_error_step("tools", err)
     event_content = [
         block
         for event in events
@@ -386,9 +422,6 @@ async def probe_tools(provider: Any, *, model_id: str) -> ProbeStep:
     )
     if saw_result_toolcall:
         return ProbeStep(name="tools", status="pass", detail="endpoint returned a tool call")
-    err = _first_error_event(events)
-    if err is not None:
-        return ProbeStep(name="tools", status="fail", detail=_error_event_detail(err))
     return ProbeStep(name="tools", status="fail", detail="endpoint did not return a tool call")
 
 
@@ -409,9 +442,10 @@ async def probe_streaming(provider: Any, *, model_id: str) -> ProbeStep:
         )
     err = _first_error_event(events)
     if err is not None:
-        return ProbeStep(name="streaming", status="fail", detail=_error_event_detail(err))
+        return _stream_error_step("streaming", err)
     chunks = sum(
         getattr(event, "type", None) in {"text_delta", "thinking_delta", "toolcall_delta"}
+        and bool(getattr(event, "delta", None))
         for event in events
     )
     if chunks > 0:
@@ -423,7 +457,10 @@ async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
     """Advisory: did the response carry a parseable token-usage structure?
     cubeplex cost tracking records zeros without it. Own minimal stream."""
     try:
-        _, _, msg = await _drain_stream(provider, model_id, prompt="hi", max_output=64)
+        events, _, msg = await _drain_stream(provider, model_id, prompt="hi", max_output=64)
+        error = _first_error_event(events)
+        if error is not None:
+            return _stream_error_step("usage", error, warning=True)
     except Exception as exc:
         return ProbeStep(name="usage", status="warn", error=_probe_error(exc))
     usage = getattr(msg, "usage", None)
@@ -468,9 +505,7 @@ async def probe_vision(
         b"IHDR", struct.pack(">IIBBBBB", width, width, 8, 2, 0, 0, 0)
     )
     png += chunk(b"IDAT", zlib.compress(bytes(pixels))) + chunk(b"IEND", b"")
-    image = ImageContent(
-        source="data:image/png;base64," + base64.b64encode(png).decode(), media_type="image/png"
-    )
+    image = ImageContent(source=base64.b64encode(png).decode(), media_type="image/png")
     try:
         events, _, result = await _drain_stream(
             provider,
@@ -480,7 +515,7 @@ async def probe_vision(
         )
         error = _first_error_event(events)
         if error:
-            return ProbeStep(name="vision", status="fail", detail=_error_event_detail(error))
+            return _stream_error_step("vision", error)
         text = " ".join(
             block.text
             for block in (getattr(result, "content", []) or [])

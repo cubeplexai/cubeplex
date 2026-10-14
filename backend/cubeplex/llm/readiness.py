@@ -139,6 +139,7 @@ def verification_pending(provider: Provider, model: Model, credential_revision: 
     if stored is None:
         return (
             model.last_test_status is not None
+            or bool(model.configuration_metadata.get("vision_requires_verification"))
             or model.configuration_metadata.get("origin") == "discovery"
         )
     return (

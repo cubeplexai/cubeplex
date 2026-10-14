@@ -99,3 +99,18 @@ def test_negative_purpose_cannot_be_overridden_through_a_template_conflict():
                 },
             ),
         )
+
+
+def test_explicit_empty_capability_is_not_replaced_by_catalog_defaults():
+    from cubeplex.llm.discovery_types import CallingConfiguration
+    from cubeplex.services.provider_discovery_preview import resolve_discovery_configuration
+
+    base = {
+        "api": "anthropic-messages",
+        "base_url": "https://api.anthropic.com",
+        "preset_slug": "anthropic/intl/anthropic-messages",
+    }
+    inherited, _, _ = resolve_discovery_configuration(CallingConfiguration(**base))
+    neutral, _, _ = resolve_discovery_configuration(CallingConfiguration(**base, capability={}))
+    assert inherited.capability.get("reasoning")
+    assert neutral.capability == {}

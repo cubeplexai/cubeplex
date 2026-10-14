@@ -83,7 +83,16 @@ describe('ConfigureStep', () => {
   beforeEach(() => {
     vi.mocked(core.createProvider).mockReset()
     vi.mocked(core.createProvider).mockResolvedValue(created('prv_new'))
-    vi.mocked(core.fetchProvider).mockResolvedValue(created('prv_existing'))
+    vi.mocked(core.fetchProvider).mockReset()
+    vi.mocked(core.fetchProvider).mockResolvedValue({
+      ...created('prv_existing'),
+      name: 'Existing',
+      slug: 'existing',
+      base_url: 'http://localhost/v1',
+      provider_type: 'openai-completions',
+      auth_type: 'api_key',
+      configuration_revision: 4,
+    })
     vi.mocked(core.updateProvider).mockReset()
     vi.mocked(core.updateProvider).mockResolvedValue(created('prv_existing'))
   })
@@ -138,11 +147,19 @@ describe('ConfigureStep', () => {
 
   it('revisit: updates the existing provider instead of creating a second one', async () => {
     const { onProviderCreated } = renderStep(makeVendor(), vi.fn(), 'prv_existing')
-    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
+    fireEvent.change(
+      await screen.findByLabelText(/api key/i, { selector: 'input[type=password]' }),
+      { target: { value: 'sk-123' } },
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(core.updateProvider).toHaveBeenCalled())
     expect(vi.mocked(core.updateProvider).mock.calls[0][1]).toBe('prv_existing')
     expect(core.createProvider).not.toHaveBeenCalled()
+    expect(core.fetchProvider).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(core.updateProvider).mock.calls[0][2]).toMatchObject({
+      expected_configuration_revision: 4,
+      api_key: 'sk-123',
+    })
     await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
   })
 
@@ -163,7 +180,7 @@ describe('ConfigureStep', () => {
     expect(screen.queryByText('HTTP 409')).not.toBeInTheDocument()
   })
 
-  it('restores a saved draft for the current endpoint (revisit)', () => {
+  it('revisit loads the saved configuration rather than an old draft', async () => {
     const vendor = makeVendor()
     const draft = {
       presetKey: vendor.endpoints[0].preset_key,
@@ -191,7 +208,7 @@ describe('ConfigureStep', () => {
         />
       </NextIntlClientProvider>,
     )
-    expect(screen.getByLabelText('Name')).toHaveValue('Restored Name')
+    expect(await screen.findByLabelText('Name')).toHaveValue('Existing')
   })
 
   it('ignores a draft from a different endpoint (falls back to preset default)', () => {

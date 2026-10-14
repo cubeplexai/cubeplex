@@ -51,12 +51,22 @@ def validate_request_extensions(
             _check_patch(patch)
             if "temperature" in patch or "temperature" in patch.get("extra_body", {}):
                 raise ValueError("Temperature must be configured through its policy")
-        for path in (cap.reasoning.effort_path, cap.reasoning.summary_path):
+        for path, values in (
+            (cap.reasoning.effort_path, cap.reasoning.effort_values),
+            (cap.reasoning.summary_path, cap.reasoning.summary_values),
+        ):
             if path:
                 parts = path.split(".")
                 field = parts[1] if parts[0] == "extra_body" and len(parts) > 1 else parts[0]
-                if field in _RESERVED:
+                if field in _RESERVED | {"temperature", "extra_headers", "headers", "api_key"}:
                     raise ValueError("Reasoning mapping targets a reserved request field")
+                if path == "extra_body":
+                    for value in values.values():
+                        if not isinstance(value, dict):
+                            raise ValueError("A whole extra-body mapping must be an object")
+                        _check_patch(value)
+                        if "temperature" in value:
+                            raise ValueError("Temperature must use its configured policy")
 
 
 def _remove_path(body: dict[str, Any], path: str) -> None:

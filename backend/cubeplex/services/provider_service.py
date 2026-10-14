@@ -268,7 +268,11 @@ class ProviderService:
                     "api_key": data.api_key,
                     "auth_type": data.auth_type,
                     "preset_slug": data.preset_slug,
-                    "capability": data.capability,
+                    **(
+                        {"capability": data.capability}
+                        if "capability" in data.model_fields_set
+                        else {}
+                    ),
                     "extra_body": data.extra_body,
                     "extra_headers": data.extra_headers,
                     "discovery": data.discovery,
@@ -479,7 +483,7 @@ class ProviderService:
             reviewed = review_selection(candidates[selection.model_id], selection)
             raw_capability = configured_value(reviewed, "capability")
             capability = CapabilityDescriptor.model_validate(
-                raw_capability or provider.capability or {}
+                raw_capability if raw_capability is not None else provider.capability or {}
             )
             if not raw_capability or not configured_value(reviewed, "reasoning", False):
                 capability.reasoning = None
@@ -611,7 +615,11 @@ class ProviderService:
             )
             if field in data.model_fields_set
         }
-        m.configuration_metadata = {"origin": "manual", "fields": fields}
+        m.configuration_metadata = {
+            "origin": "manual",
+            "fields": fields,
+            "vision_requires_verification": "image" in m.input_modalities,
+        }
         return await self._models.add(m)
 
     async def update_model(self, provider_id: str, model_db_id: str, data: ModelUpdate) -> Model:
@@ -621,6 +629,9 @@ class ProviderService:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
         self._check_revision(m.configuration_revision, data.expected_configuration_revision)
         credential_revision = await self._credential_revision(provider, lock=True)
+        adding_image = "image" not in m.input_modalities and "image" in (
+            data.input_modalities or []
+        )
         activating_import = (
             data.enabled is True
             and not m.enabled
@@ -675,6 +686,8 @@ class ProviderService:
                     "state": "confirmed",
                 }
         metadata["fields"] = fields
+        if adding_image:
+            metadata["vision_requires_verification"] = True
         m.configuration_metadata = metadata
         m.configuration_revision += 1
         m.updated_at = datetime.now(UTC)
@@ -917,6 +930,26 @@ class ProviderService:
             await self._session.rollback()
             return False
         provider, model, _ = rows
+        auth_error = next(
+            (
+                step.error
+                for step in result.steps
+                if step.error is not None and provider_probe._error_says_auth_failure(step.error)
+            ),
+            None,
+        )
+        if auth_error is not None:
+            provider.evidence_revision += 1
+            provider.last_liveness_status = "auth_error"
+            provider.last_liveness_at = datetime.now(UTC)
+            provider.last_liveness_summary = {
+                "source": "model_probe",
+                "detail": "Provider credential rejected",
+                "configuration_fingerprint": claim.provider_fingerprint,
+                "probe_generation": claim.provider_probe_generation,
+                "evidence_revision": provider.evidence_revision,
+            }
+            self._session.add(provider)
         model.evidence_revision += 1
         required = {step.name: step.status for step in result.steps}
         optional = all(
@@ -924,6 +957,11 @@ class ProviderService:
         )
         model.last_test_status = _OVERALL_TO_STATUS[result.overall]
         model.last_test_at = datetime.now(UTC)
+        if required.get("vision") == "pass":
+            model.configuration_metadata = {
+                **model.configuration_metadata,
+                "vision_requires_verification": False,
+            }
         model.last_test_summary = {
             **result.model_dump(mode="json"),
             "configuration_fingerprint": claim.configuration_fingerprint,
@@ -1073,6 +1111,20 @@ class ProviderService:
                 yield _sse(
                     "model", {"model_db_id": claim.model_db_id, **result.model_dump(mode="json")}
                 )
+                if accepted and any(
+                    step.error is not None and provider_probe._error_says_auth_failure(step.error)
+                    for step in result.steps
+                ):
+                    yield _sse(
+                        "liveness",
+                        {
+                            "name": "liveness",
+                            "status": "fail",
+                            "detail": "Provider credential rejected during model verification.",
+                            "current": True,
+                        },
+                    )
+                    break
         finally:
             for task in tasks:
                 if not task.done():

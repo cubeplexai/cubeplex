@@ -267,3 +267,28 @@ describe('ProviderConfigForm — edit', () => {
     expect((onSubmit.mock.calls[0][0] as ProviderUpdate).api_key).toBe('sk-new')
   })
 })
+
+it('keeps the displayed revision when fresh provider props arrive during an edit', () => {
+  const initial = makeProvider({ configuration_revision: 4, name: 'Initial' })
+  const onSubmit = vi.fn()
+  const form = (provider: Provider) => (
+    <NextIntlClientProvider locale="en" messages={en}>
+      <ProviderConfigForm
+        mode="edit"
+        provider={provider}
+        saving={false}
+        error={null}
+        submitLabel="Save"
+        onSubmit={onSubmit}
+      />
+    </NextIntlClientProvider>
+  )
+  const view = render(form(initial))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'My draft' } })
+  view.rerender(form({ ...initial, name: 'Concurrent edit', configuration_revision: 5 }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(onSubmit.mock.calls[0][0]).toMatchObject({
+    name: 'My draft',
+    expected_configuration_revision: 4,
+  })
+})

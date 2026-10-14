@@ -249,7 +249,11 @@ async def discover_unsaved_provider(
 ) -> DiscoveryResponse:
     org_id = await resolve_current_org_id(user, session)
     calling = CallingConfiguration.model_validate(
-        {field: getattr(body, field) for field in CallingConfiguration.model_fields}
+        {
+            field: getattr(body, field)
+            for field in CallingConfiguration.model_fields
+            if field in body.model_fields_set
+        }
     )
     store = DiscoveryPreviewStore(redis_dep(request), str(config.get("auth.jwt_secret")))
     try:
