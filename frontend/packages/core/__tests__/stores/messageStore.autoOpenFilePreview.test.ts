@@ -23,6 +23,21 @@ function toolCallEvent(name: string, args: Record<string, unknown>, id = 'tc-wri
   } as unknown as AgentEvent
 }
 
+function deltaEvent(
+  id: string | null,
+  index: number,
+  argsDelta = '',
+  name: string | null = 'write',
+): AgentEvent {
+  return {
+    type: 'tool_call_delta',
+    timestamp: TS,
+    agent_id: null,
+    agent_name: null,
+    data: { tool_call_id: id, index, name, args_delta: argsDelta },
+  }
+}
+
 function reset(): void {
   useMessageStore.setState({
     lastAppliedEventId: null,
@@ -65,7 +80,7 @@ describe('messageStore — auto-open write/edit file preview', () => {
     }
   })
 
-  it('follows a later write after an earlier auto-opened edit', () => {
+  it('keeps the first file selected when another call arrives', () => {
     useMessageStore.getState().__applyEvent(toolCallEvent('edit', { file_path: '/workspace/a.md' }))
     useMessageStore
       .getState()
@@ -73,9 +88,80 @@ describe('messageStore — auto-open write/edit file preview', () => {
     const view = usePanelStore.getState().view
     expect(view.type).toBe('tool')
     if (view.type === 'tool') {
-      expect(view.contentType).toBe('write')
-      expect(view.toolArgs.file_path).toBe('/workspace/b.md')
+      expect(view.contentType).toBe('edit')
+      expect(view.toolArgs.file_path).toBe('/workspace/a.md')
     }
+  })
+
+  it('opens before arguments arrive and keeps parallel streams separate without switching', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    apply(deltaEvent('a', 0))
+    expect(usePanelStore.getState().view).toMatchObject({
+      type: 'tool',
+      toolRef: { tool_call_id: 'a' },
+      toolArgs: {},
+    })
+    apply(deltaEvent('b', 1, '{"content":"B'))
+    apply(deltaEvent('a', 0, '{"content":"A'))
+    apply(deltaEvent('b', 1, ' body"}'))
+    apply(deltaEvent('a', 0, ' body"}'))
+    expect(useMessageStore.getState().streamAgents.main.blocks).toMatchObject([
+      { tool_call_id: 'a', args_text: '{"content":"A body"}' },
+      { tool_call_id: 'b', args_text: '{"content":"B body"}' },
+    ])
+    expect(usePanelStore.getState().view).toMatchObject({
+      type: 'tool',
+      toolRef: { tool_call_id: 'a' },
+    })
+  })
+
+  it('does not replace a user-selected write when a sibling streams or completes', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    apply(deltaEvent('a', 0))
+    apply(deltaEvent('b', 1))
+    usePanelStore.getState().openTool('write', {}, null, 'write', {
+      agent_id: null,
+      tool_call_id: 'b',
+      index: 1,
+    })
+    apply(deltaEvent('a', 0, '{"content":"A"}'))
+    apply(toolCallEvent('write', { content: 'A' }, 'a'))
+    apply(toolCallEvent('write', { content: 'B' }, 'b'))
+    expect(usePanelStore.getState().view).toMatchObject({
+      type: 'tool',
+      source: 'user',
+      toolRef: { tool_call_id: 'b' },
+      toolArgs: { content: 'B' },
+    })
+  })
+
+  it('fills in a late tool name so buffered content can be previewed', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    apply(deltaEvent(null, 0, '{"content":"early', null))
+    apply(deltaEvent('a', 0, ' text"}', 'write'))
+    expect(useMessageStore.getState().streamAgents.main.blocks).toMatchObject([
+      { name: 'write', tool_call_id: 'a', args_text: '{"content":"early text"}' },
+    ])
+    expect(usePanelStore.getState().view).toMatchObject({
+      type: 'tool',
+      contentType: 'write',
+      toolRef: { tool_call_id: 'a' },
+    })
+  })
+
+  it('binds a late call ID so a reused index cannot redirect the selected preview', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    apply(deltaEvent(null, 0))
+    apply(deltaEvent('a', 0, '{"content":"A"}'))
+    apply(deltaEvent('b', 0, '{"content":"B"}'))
+    expect(usePanelStore.getState().view).toMatchObject({
+      type: 'tool',
+      toolRef: { tool_call_id: 'a' },
+    })
+    expect(useMessageStore.getState().streamAgents.main.blocks).toMatchObject([
+      { tool_call_id: 'a', args_text: '{"content":"A"}' },
+      { tool_call_id: 'b', args_text: '{"content":"B"}' },
+    ])
   })
 
   it('does not reopen the same tool call', () => {

@@ -395,6 +395,19 @@ class StreamConverter:
             return [{"type": "text_delta", "delta": evt.delta or ""}]
         if t == "thinking_delta":
             return [{"type": "reasoning", "delta": evt.delta or ""}]
+        if t == "toolcall_start":
+            block = self._block_for(evt)
+            if block is None or block.name == _DEFERRED_DISPATCH_TOOL_NAME:
+                return []
+            return [
+                {
+                    "type": "tool_call_delta",
+                    "delta": "",
+                    "index": evt.content_index,
+                    "id": block.id,
+                    "name": block.name,
+                }
+            ]
         if t == "toolcall_delta":
             return self._on_toolcall_delta(evt)
         if t == "toolcall_end":

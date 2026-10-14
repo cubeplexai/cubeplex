@@ -26,6 +26,10 @@ The layout has three main areas:
 - **Chat area** (center) — the message thread and input bar.
 - **Side panel** (right, opens on demand) — previews artifacts, attachment images, tool call details, or the sandbox browser. When the agent uses the browser skill, this panel opens on the **Browser** tab by itself and the live view follows the tab the agent is operating on. You can still take over at any time, or close the panel if you do not want to watch.
 
+When the agent starts a **write** call, its tool row appears before the file content has finished generating. If the side panel is available, the file preview opens immediately and updates as the content arrives. The preview shows content being generated; the file is saved when the tool successfully executes.
+
+If several files are being written at once, each tool row tracks its own content. The file already open in the preview stays selected as other calls update or finish. Click another write row to follow that file; later updates from other calls will not switch your selection.
+
 ![Conversation view with the chat thread and an artifact preview panel](/img/conversations/conversation-layout.png)
 
 The input bar sits at the bottom. It includes:

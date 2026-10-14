@@ -80,6 +80,32 @@ def test_toolcall_delta_emits_tool_call_delta() -> None:
     assert out[0]["name"] == "search"
 
 
+def test_toolcall_start_opens_write_before_any_arguments_arrive() -> None:
+    partial = _mk_assistant(tool_calls=[ToolCall(id="write-1", name="write", arguments={})])
+    evt = StreamEvent(type="toolcall_start", content_index=0, partial=partial)
+    assert convert_event_to_sse(evt) == [
+        {
+            "type": "tool_call_delta",
+            "id": "write-1",
+            "name": "write",
+            "index": 0,
+            "delta": "",
+        }
+    ]
+
+
+def test_toolcall_start_without_identity_does_not_create_a_phantom_tool() -> None:
+    assert convert_event_to_sse(StreamEvent(type="toolcall_start", content_index=0)) == []
+
+
+def test_deferred_toolcall_start_waits_for_real_tool_identity() -> None:
+    partial = _mk_assistant(
+        tool_calls=[ToolCall(id="deferred-1", name="deferred_tool_call", arguments={})]
+    )
+    evt = StreamEvent(type="toolcall_start", content_index=0, partial=partial)
+    assert convert_event_to_sse(evt) == []
+
+
 def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
     """End-to-end live seam: a streamed ``toolcall_delta`` must survive both
     translation hops (``convert_agent_event_to_sse`` then

@@ -135,10 +135,14 @@ describe('shouldAutoOpenFilePreview', () => {
 })
 
 describe('canAutoOpenFilePreview', () => {
-  it('opens a closed panel and follows an existing write/edit preview', () => {
+  it('opens a closed panel and preserves the selected write/edit preview', () => {
     expect(canAutoOpenFilePreview({ type: 'closed' })).toBe(true)
-    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'write' })).toBe(true)
-    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'edit', source: 'user' })).toBe(true)
+    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'write', source: 'auto' })).toBe(
+      false,
+    )
+    expect(canAutoOpenFilePreview({ type: 'tool', contentType: 'edit', source: 'user' })).toBe(
+      false,
+    )
   })
 
   it('may replace an auto-opened artifact but not a user-picked surface', () => {

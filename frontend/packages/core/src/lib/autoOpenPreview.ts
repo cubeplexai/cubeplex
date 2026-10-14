@@ -118,7 +118,7 @@ export function shouldAutoOpenFilePreview(
  * Whether write/edit auto-open may replace the current panel view.
  *
  * - Closed → open.
- * - Already on a write/edit tool preview → follow the latest file mutation.
+ * - Already on a tool preview → keep the selected call, including parallel writes.
  * - Auto-opened artifact → follow the live file instead.
  * - User-picked artifact / sandbox / attachment / other tool → leave alone.
  */
@@ -128,6 +128,5 @@ export function canAutoOpenFilePreview(view: {
   contentType?: string
 }): boolean {
   if (view.type === 'closed') return true
-  if (view.type === 'tool' && isWriteOrEditTool(view.contentType ?? '')) return true
   return view.type === 'artifact' && view.source === 'auto'
 }

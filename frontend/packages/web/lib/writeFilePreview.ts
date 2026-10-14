@@ -60,7 +60,10 @@ export function resolveLiveWriteFile(
     }
     if (block.type === 'tool_call_streaming' && block.name === 'write') {
       const sameId = toolRef.tool_call_id && block.tool_call_id === toolRef.tool_call_id
-      const sameIndex = toolRef.index != null && block.index === toolRef.index
+      const sameIndex =
+        !(toolRef.tool_call_id && block.tool_call_id) &&
+        toolRef.index != null &&
+        block.index === toolRef.index
       if (sameId || sameIndex) {
         return parseWriteFileArgs({}, block.args_text)
       }

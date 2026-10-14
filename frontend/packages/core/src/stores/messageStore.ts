@@ -604,16 +604,18 @@ function maybeAutoOpenFilePreview(
     const current = panel.view.toolRef
     const sameId = Boolean(toolRef.tool_call_id) && current?.tool_call_id === toolRef.tool_call_id
     const sameIndex =
+      !(toolRef.tool_call_id && current?.tool_call_id) &&
       toolRef.index != null &&
       current?.index === toolRef.index &&
       current?.agent_id === toolRef.agent_id
     if (sameId || sameIndex) {
-      if (Object.keys(args).length > 0) {
+      const hasArgs = Object.keys(args).length > 0
+      if (hasArgs || (toolRef.tool_call_id && !current?.tool_call_id)) {
         usePanelStore.setState({
           view: {
             ...panel.view,
             toolName,
-            toolArgs: args,
+            toolArgs: hasArgs ? args : panel.view.toolArgs,
             toolRef,
           },
         })
@@ -1164,13 +1166,18 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         : state.toolStartedMap
 
     const existingIdx = blocks.findIndex(
-      (block) => block.type === 'tool_call_streaming' && block.index === idx,
+      (block) =>
+        block.type === 'tool_call_streaming' &&
+        (block.tool_call_id && e.data.tool_call_id
+          ? block.tool_call_id === e.data.tool_call_id
+          : block.index === idx),
     )
 
     if (existingIdx >= 0) {
       const existing = blocks[existingIdx] as Extract<ContentBlock, { type: 'tool_call_streaming' }>
       blocks[existingIdx] = {
         ...existing,
+        name: e.data.name || existing.name,
         args_text: existing.args_text + (e.data.args_delta || ''),
         tool_call_id: e.data.tool_call_id ?? existing.tool_call_id,
       }

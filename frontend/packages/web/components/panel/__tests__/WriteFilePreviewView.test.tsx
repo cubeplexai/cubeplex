@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import {
   useConversationStore,
   useMessageStore,
@@ -8,6 +8,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { WriteFilePreviewView } from '../WriteFilePreviewView'
+import { resolveLiveWriteFile } from '@/lib/writeFilePreview'
+import { ToolCallItem } from '@/components/chat/ToolCallItem'
 
 vi.mock('@/hooks/useSandboxMarkdownContext', () => ({
   useSandboxMarkdownContext: () => null,
@@ -22,7 +24,13 @@ vi.stubGlobal('ResizeObserver', ResizeObserverStub)
 
 const CONVERSATION_ID = 'conv-write-preview'
 
-function writeDelta(argsDelta: string, eventId: string, name: string | null = 'write'): AgentEvent {
+function writeDelta(
+  argsDelta: string,
+  eventId: string,
+  name: string | null = 'write',
+  id = 'tc-write-1',
+  index = 0,
+): AgentEvent {
   return {
     type: 'tool_call_delta',
     event_id: eventId,
@@ -30,12 +38,44 @@ function writeDelta(argsDelta: string, eventId: string, name: string | null = 'w
     agent_id: null,
     agent_name: null,
     data: {
-      tool_call_id: 'tc-write-1',
+      tool_call_id: id,
       name,
       args_delta: argsDelta,
-      index: 0,
+      index,
     },
   }
+}
+
+function SelectedWritePreview() {
+  const view = usePanelStore((s) => s.view)
+  const blocks = useMessageStore((s) => s.streamAgents.main?.blocks)
+  return (
+    <>
+      {blocks?.map(
+        (block) =>
+          block.type === 'tool_call_streaming' && (
+            <ToolCallItem
+              key={block.index}
+              name={block.name}
+              arguments={{}}
+              toolCallId={block.tool_call_id ?? ''}
+              summaryOverride={`File ${block.index}`}
+              contentTypeOverride="write"
+              isPending
+              allowOpenWhenPending
+              toolRef={{ agent_id: null, tool_call_id: block.tool_call_id, index: block.index }}
+            />
+          ),
+      )}
+      {view.type === 'tool' && (
+        <WriteFilePreviewView
+          args={view.toolArgs}
+          result={view.toolResult}
+          toolRef={view.toolRef}
+        />
+      )}
+    </>
+  )
 }
 
 function completedWriteCall(): AgentEvent {
@@ -109,5 +149,62 @@ describe('WriteFilePreviewView', () => {
     expect(screen.getByText('/workspace/notes.txt')).toBeInTheDocument()
     expect(screen.getByText('streamed body')).toBeInTheDocument()
     expect(screen.queryByText('Untitled file')).not.toBeInTheDocument()
+  })
+
+  it('streams parallel files independently and respects a user switch before completion', () => {
+    render(<SelectedWritePreview />)
+    const apply = useMessageStore.getState().__applyEvent
+    act(() => apply(writeDelta('', '1-0')))
+    expect(screen.getByRole('button', { name: /Write.*File 0/ })).toBeEnabled()
+    expect(screen.getByText('Untitled file')).toBeInTheDocument()
+
+    act(() => {
+      apply(writeDelta('{"file_path":"/workspace/notes.txt","content":"first', '1-1'))
+      apply(
+        writeDelta(
+          '{"file_path":"/workspace/other.txt","content":"second',
+          '1-2',
+          'write',
+          'tc-write-2',
+          1,
+        ),
+      )
+    })
+    expect(screen.getByText('/workspace/notes.txt')).toBeInTheDocument()
+    expect(screen.getByText('first')).toBeInTheDocument()
+    expect(screen.queryByText('second')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Write.*File 1/ }))
+    act(() => {
+      apply(writeDelta(' file"}', '1-3', null))
+      apply(writeDelta(' file"}', '1-4', null, 'tc-write-2', 1))
+      apply({ ...completedWriteCall(), event_id: '1-5' })
+    })
+    expect(screen.getByText('/workspace/other.txt')).toBeInTheDocument()
+    expect(screen.getByText('second file')).toBeInTheDocument()
+    expect(screen.queryByText('streamed body')).not.toBeInTheDocument()
+  })
+
+  it('uses the call ID rather than a reused index to resolve the preview', () => {
+    const resolved = resolveLiveWriteFile(
+      [
+        {
+          type: 'tool_call_streaming',
+          name: 'write',
+          tool_call_id: 'a',
+          index: 0,
+          args_text: '{"content":"selected"}',
+        },
+        {
+          type: 'tool_call_streaming',
+          name: 'write',
+          tool_call_id: 'b',
+          index: 0,
+          args_text: '{"content":"other"}',
+        },
+      ],
+      { agent_id: null, tool_call_id: 'a', index: 0 },
+    )
+    expect(resolved?.content).toBe('selected')
   })
 })
