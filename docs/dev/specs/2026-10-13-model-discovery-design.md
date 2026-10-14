@@ -1,6 +1,6 @@
 # Model discovery and batch import
 
-**Status:** Draft for review
+**Status:** Draft for review; activation after edits awaits a product decision
 
 **Date:** 2026-10-13
 
@@ -80,6 +80,8 @@ Preserve the existing vendor, region, protocol, and plan choices, and add a CLIP
 
 The configuration form retains drafts when navigating back. Changing the endpoint, protocol, plan, credentials, or discovery profile invalidates the previous preview and selection. A late response from an older request cannot replace the current preview.
 
+Provider creation and its calling credential commit together. For this flow, `POST /providers` accepts the reviewed `discovery_id` as a creation-recovery token and saves it with the provider and initiating user. A retry after a lost creation response returns the original provider binding, even if the preview has since expired; it never creates another credential/provider or applies new configuration implicitly. The UI consumes the actual saved configuration and validates the preview again before importing models. Changing configuration after a recovered creation uses an explicit edit. A failed first creation leaves neither a provider nor an orphan credential.
+
 Name and slug remain editable, with existing defaults and conflict validation. Advanced capability JSON is collapsed; ordinary supported imports do not require editing JSON.
 
 ### 4.2 CLIProxyAPI vendor
@@ -114,6 +116,8 @@ Add **Discover models** to the provider detail. Use the saved credential without
 - System-provider discovery, model import, and configuration edits remain read-only for organization administrators, following the existing system-provider rule.
 
 Discovery results must not change conversation model references or model presets. New models use the existing provider slug and exact advertised ID.
+
+The user is deciding whether an explicit runtime configuration edit to an already enabled model pauses affected models until retesting, or leaves them enabled with a stale warning. This concerns endpoint/key/capability changes, not discovery refresh, imports of unrelated models, labels, or prices. Both policies preserve the strict gate for first activation of newly imported models. Resolve this choice before implementing configuration-edit enablement behavior; do not infer it from the legacy cutover rule.
 
 ## 5. Endpoint discovery policy
 
@@ -213,6 +217,12 @@ The UI exposes only controls that have an explicit, validated mapping. Do not ad
 
 When reasoning support or its wire mapping is unknown, import can proceed for a verified basic chat path with reasoning controls unavailable. The UI says **Reasoning configuration incomplete**, rather than declaring the model non-reasoning. A deliberate reasoning-disabled configuration is also allowed.
 
+Define **Use model default** separately from an explicit on/off/effort choice. In the chat API, `reasoning: null` or an omitted reasoning field means to use the reviewed basic-chat configuration without request-time reasoning overrides. Persist this choice as null in conversation settings and resolved execution snapshots; do not translate it to `off`, `medium`, or a newly invented standard reasoning mode. Existing stored explicit controls remain explicit.
+
+The composer supports a persisted `default` UI choice, emits null for it, and uses it when no controls are available or a primary/fallback chain has no shared explicit controls. Explicit unsupported controls are rejected before a new generation is admitted; null remains valid. Background callers without an explicit reasoning choice also retain null. A frozen execution continues with its admitted choice, rather than being reinterpreted from newer conversation settings.
+
+Runtime binding suppresses only request-time reasoning patches for null, using a per-call copy of the effective descriptor with its reasoning mapping omitted. It retains the reviewed base request configuration, limits, and other capabilities; it does not mutate saved/global descriptors or claim the provider has disabled its own default reasoning. The basic-chat probes exercise this same binding. Explicit controls continue to use the original reviewed mappings. No cubeloop API upgrade or new wire reasoning mode is required.
+
 Resolve temperature and `max_tokens` versus `max_completion_tokens` through the profile and selected model configuration. Do not copy one model's mapping onto every model behind a mixed proxy.
 
 ### 6.5 Prices
@@ -234,13 +244,17 @@ Use existing Provider and Model rows; no new business table is needed.
 - Per-model runtime capability remains in `Provider.model_capability_overrides`, validated through the existing descriptor type. Import changes only overrides for new selected models.
 - Existing rows receive provenance `existing`, without claiming discovery or probe evidence. Existing enablement is preserved. Legacy zero rates receive unknown configuration state; nonzero existing rates are treated as existing configured estimates. The administrator can explicitly confirm a zero rate.
 
-All normal model-edit and provider-edit paths must update provenance for touched fields. Discovery does not silently overwrite existing data. Use an autogenerated Alembic migration; do not hand-author schema migration changes.
+Provider and Model rows also carry integer configuration-edit revisions, probe generations, and evidence revisions. Configuration-edit revisions prevent stale authoring; they are not themselves runtime fingerprints, so display-name/price changes do not stale verified runtime configuration. Credential rows carry a value revision that advances on plaintext creation/rotation, not credential renaming. The runtime fingerprint includes credential identity/value revision and the effective runtime fields.
+
+Persist the provider's creation `discovery_id` with a unique organization/user/token binding. Conversation reasoning becomes nullable for the model-default contract; resolved-execution schemas and all callers preserve null instead of applying an off default. These are columns/schema changes on existing tables, not new business tables.
+
+All normal model-edit and provider-edit paths must update provenance for touched fields. Ordinary forms send only fields the administrator edited. Provider/model configuration edits require the current `expected_configuration_revision` and return `409 configuration_changed` on a stale revision. Replace whole-map provider override updates with explicit per-model patches; an omitted override is preserved, and only an explicit deletion removes it. Batch imports advance the provider's edit revision when adding overrides, but unrelated additions do not change a model's effective test fingerprint or invalidate the listing preview. Discovery does not silently overwrite existing data. Use an autogenerated Alembic migration; do not hand-author schema migration changes.
 
 ### 7.2 Transient previews
 
 Return an opaque `discovery_id` and keep the normalized preview in Redis for 10 minutes. Bind it to organization, initiating user, saved provider when present, and a fingerprint of the calling/discovery configuration. Use the deployment/worktree Redis prefix and timezone-aware observation times.
 
-The fingerprint covers endpoint, protocol, region/plan preset, profile revision, relevant headers, and a server-keyed hash of the resolved calling credential. Use the same canonical calculation for a submitted key and its later vault-stored equivalent, so saving the provider does not invalidate an otherwise unchanged preview. Vault rotation changes that hash. Neither API key is stored in the preview. A retained preview may contain normalized results of management enrichment but no Management Key.
+The fingerprint covers endpoint, protocol, region/plan preset, profile revision, relevant headers/base request fields, the resolved provider-default capability, and a server-keyed hash of the resolved calling credential. Resolve omitted preset defaults before hashing, using the same canonical calculation for a submitted key/configuration and its later vault-stored equivalent, so saving the provider does not invalidate an otherwise unchanged preview. Vault rotation changes the credential hash. Exclude name/slug/price, authoring revisions, and unrelated model overrides so an import does not invalidate later batches. Neither API key is stored in the preview. A retained preview may contain normalized results of management enrichment but no Management Key.
 
 Expired previews return `409 discovery_expired`. Changed configuration returns `409 discovery_stale`. No endpoint consumes a preview from another user or organization. Frontend drafts do not count as authoritative preview evidence.
 
@@ -250,8 +264,10 @@ All paths below are under `/api/v1/admin`. Use separate handlers for unsaved and
 
 | Route | Contract |
 | --- | --- |
-| `POST /providers/discover` | Unsaved preview. Accept calling configuration, `preset_slug`, discovery profile, and optional request-only Management Key. No test `model_id` is required. No provider/model rows are written. |
-| `POST /providers/{provider_id}/discover` | Saved preview. Resolve the scoped provider and vault credential; accept optional enrichment input. Reject writes/discovery of system-provider configuration through the org-owned import flow. |
+| `POST /providers/discover` | Unsaved preview. Accept calling configuration, `preset_slug`, discovery profile, optional selected IDs for lazy enrichment, and optional request-only Management Key. No test `model_id` is required. No provider/model rows are written. |
+| `POST /providers/{provider_id}/discover` | Saved preview. Resolve the scoped provider and vault credential; accept optional selected IDs/enrichment input. Reject writes/discovery of system-provider configuration through the org-owned import flow. |
+| Existing `POST /providers` | With `discovery_id`, atomically create the provider/credential and record the scoped creation binding, or return its already committed provider. The response identifies a recovered creation and contains actual saved configuration. |
+| Existing provider/model configuration `PATCH` | Accept edited fields, `expected_configuration_revision`, and explicit per-model override patches where applicable. Reject stale authoring; never replace a whole override map from an old form. |
 | `POST /providers/{provider_id}/models/import` | Accept `discovery_id` and selected `{model_id, overrides, conflict_resolutions}` items. Derive everything else from the validated preview. Maximum 100 items per batch. |
 | `POST /providers/{provider_id}/models/enable-tested` | Accept explicit model DB IDs. Enable only models belonging to this provider whose required configuration and current successful probe fingerprint match. Return per-model enabled/blocked outcomes. |
 | Existing `/providers/{provider_id}/test/stream` | Reuse explicit model DB IDs and `liveness`, `model`, `done` SSE events. Allow retrying only failed selections. |
@@ -262,7 +278,7 @@ When discovery fails, the UI can use the existing manual/preset creation flow. T
 
 Import validates every selection, required field, conflict resolution, price state, and capability before writing. One batch commits in one transaction. Invalid selections roll back the batch. Exact existing IDs return `existing` and are not changed; new IDs return `created` with DB IDs, always disabled. Reject non-chat selections from this agent-model import endpoint.
 
-Serialize imports for a provider and retain the existing unique `(provider_id, model_id)` constraint. Retrying after a lost response or running concurrent imports cannot duplicate rows or rewrite existing settings. If more than 100 models are selected, the UI submits ordered batches and shows committed progress; a failed later batch does not conceal earlier successful batches. Newly created rows and per-model overrides commit together.
+Serialize imports for a provider and retain the existing unique `(provider_id, model_id)` constraint. Retrying after a lost response or running concurrent imports cannot duplicate rows or rewrite existing settings. If more than 100 models are selected, the UI submits ordered batches and shows committed progress; a failed later batch does not conceal earlier successful batches. Newly created rows and per-model overrides commit together. Provider creation/configuration edits also use one service-owned transaction for their provider and credential mutations, with staging helpers that never commit inside the lock. Locks are acquired provider first, then credentials/models in stable ID order. No upstream network call holds these locks.
 
 When an unsaved preview is followed by provider creation, import must verify that the saved provider configuration matches the preview fingerprint. A merely similar URL or profile is insufficient.
 
@@ -288,11 +304,17 @@ Streaming and an actual tool-call result are required for agent activation. Temp
 
 Probe results state the evidence: request parameters accepted, tool call observed, streaming observed, usage reported, and image-input behavior observed. Parameter acceptance alone does not prove the provider honored an effort level. Lightweight tests do not establish maximum context/output limits or price correctness.
 
-Fingerprint the effective configuration for the tested model, including the selected provider transport/credential version, only that model's resolved capability, and its relevant runtime fields. Adding another model's override must not mark previously verified models stale. Required-field/capability edits invalidate the affected result; display-name/price edits do not. At cutover, carry forward an existing successful result only if its stored old fingerprint matches the pre-change configuration and that tested effective configuration is unchanged. Otherwise retain the result as historical evidence and mark it stale. Do not invent successful evidence for old rows or change never-tested seeded enablement.
+Fingerprint the effective configuration for the tested model, including the selected provider transport/credential value revision, only that model's resolved capability, and its relevant runtime fields. Adding another model's override must not mark previously verified models stale. Required-field/capability edits invalidate the affected result; display-name/price edits do not.
+
+Configuration fingerprints do not order test attempts. Claim a monotonically increasing probe generation under a short row lock for provider liveness and each explicitly selected model. After liveness, model workers capture the provider/model evidence revisions. A completion is current only if its configuration fingerprint and probe generation still match, and no newer accepted observation changed those evidence revisions. Otherwise it is reported as superseded and cannot replace current evidence or enable a model. Starting a retry makes the previous attempt non-authoritative even when configuration is identical. Accepted evidence mutations advance the evidence revision; activation checks that the stored result belongs to the latest requested generation and current evidence/configuration.
+
+Runtime status writeback receives the provider/model database identity, configuration fingerprint, and evidence revisions captured by the call's immutable configuration snapshot. Conditional updates check them against current rows. An old success cannot clear a newer failure; an old key/endpoint call cannot change status for a new configuration or a recreated provider with the same slug. Runtime observations may downgrade readiness or clear same-configuration connectivity failures, but cannot manufacture a passing tools/vision/reasoning result.
+
+At cutover, a legacy capability-only fingerprint cannot certify historical transport, credentials, or limits. Preserve all legacy probe results as historical/stale evidence until a new complete test runs; never stamp current transport inputs onto an old pass. Preserve existing enabled rows and never-tested seeded behavior, so the cutover does not disable working models. The old fingerprint algorithm is not retained as a runtime compatibility path.
 
 **Enable successful models** accepts only current pass/warn results with no blocking failure or unresolved required fields. A partial success enables that subset and leaves failures disabled. Closing or abandoning the test flow leaves all unenabled imports disabled for later completion.
 
-Discovery and probes must not change production system prompts, cache markers, conversation history, or message replay. Runtime requests continue through the existing provider adapters.
+Discovery and probes must not change production system prompts, cache markers, message history, or message replay. The new default-reasoning choice is stored in configuration/execution fields without rewriting prior messages or admitted executions. Runtime requests continue through the existing provider adapters.
 
 ## 9. UI and documentation
 
@@ -306,8 +328,10 @@ Implementation must update both existing product-doc pages in the same PR:
 
 - `docs/site/docs/admin/models.md`
 - `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/admin/models.md`
+- `docs/site/docs/guides/conversations/model-selection.md`
+- `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/guides/conversations/model-selection.md`
 
-Document the CLIProxyAPI vendor entry and protocol choices, supported discovery coverage, static fallback, optional Management Key, backend-reachable local address, metadata limitations, price state, and failed-model recovery. Keep screenshot instructions equivalent in both languages. This draft spec does not change shipped documentation or behavior.
+Document the CLIProxyAPI vendor entry and protocol choices, supported discovery coverage, static fallback, optional Management Key, backend-reachable local address, metadata limitations, price state, and failed-model recovery. The model-selection guide also explains model-default reasoning, the distinction from off, available controls, and fallback intersections. Keep screenshot instructions equivalent in both languages. This draft spec does not change shipped documentation or behavior.
 
 ## 10. Out of scope
 
@@ -334,12 +358,13 @@ The implementation is accepted when these invariants hold:
 6. Conflicting limits/efforts and Codex-template defaults require review. TTS/image template fields cannot make a non-chat model importable as an agent model.
 7. Missing prices render as unconfigured, per-token rates are normalized correctly, and explicit zero remains distinguishable from missing data.
 8. Import rejects another organization/user's preview, changed credentials/configuration, expired previews, non-chat selections, and unresolved required fields before any write.
-9. Repeated/concurrent imports create one row per provider/model ID, preserve existing edits, and atomically save each new row with its capability override.
+9. Repeated/concurrent imports create one row per provider/model ID, preserve existing edits, and atomically save each new row with its capability override. Provider/credential creation is atomic and recoverable after a lost response. A stale provider form cannot delete newly imported overrides.
 10. Newly imported models remain disabled until required tests pass for their current configuration. Direct API enablement cannot bypass this gate.
-11. Adding an unrelated model does not stale prior tests. Changing a tested model's transport/capability does stale its result and prevents activation until retested. Runtime binding uses the saved context/output limits.
+11. Adding an unrelated model does not stale prior tests. Changing a tested model's transport/capability does stale its result and prevents activation until retested. Older same-configuration probes and delayed runtime writeback cannot replace newer authoritative evidence. Legacy capability-only passes remain historical. Runtime binding uses the saved context/output limits.
 12. Partial test success enables only successful selections. Individual retries do not recreate rows or retest every previously successful model.
 13. A browser business-flow test protects preview invalidation and interrupted/retried SSE behavior through the real Next proxy; it does not merely count rendered model rows.
 14. A nightly local-CLIProxyAPI flow starts from the CLIProxyAPI vendor preset, discovers the then-current advertised list, enriches selected chat models, imports and verifies them, and exercises one tool-using conversation. It asserts relationships and gating rather than pinning the research count of 42 or vendor limits.
-15. The matching English/Chinese model-management pages describe equivalent behavior, commands, limitations, and screenshot instructions.
+15. Null/default reasoning survives client state, API validation, execution admission, resume, and runtime binding. Models with unknown mappings or an empty fallback-control intersection can perform basic chat without falsely claiming reasoning is off. Explicit unsupported choices are rejected before generation.
+16. The matching English/Chinese model-management pages describe equivalent behavior, commands, limitations, and screenshot instructions.
 
 This document fixes the design boundary. Implementation sequencing and file-level work belong in a separate plan after spec review.

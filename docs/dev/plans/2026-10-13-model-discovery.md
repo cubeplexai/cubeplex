@@ -1,6 +1,6 @@
 # Model discovery and batch import — implementation plan
 
-**Status:** Draft for review
+**Status:** Draft for review; activation after edits awaits a product decision
 
 **Date:** 2026-10-13
 
@@ -139,25 +139,34 @@ Unit tests protect canonicalization and credential-independent UI names. Backend
 
 **Files**
 
-- Modify `backend/cubeplex/models/provider.py`: non-secret discovery configuration and model `configuration_metadata`.
+- Modify `backend/cubeplex/models/provider.py`: non-secret discovery configuration, creation-preview binding, model `configuration_metadata`, configuration-edit revisions, probe generations, and evidence revisions.
+- Modify `backend/cubeplex/models/credential.py`, `services/credential.py`, and `repositories/credential.py`: credential value revision and encrypted no-commit mutation helpers used by provider transactions.
 - Modify `backend/cubeplex/api/schemas/provider.py` and `provider_discovery.py`: persisted/output types and supported explicit edit fields.
 - Modify `backend/cubeplex/services/provider_service.py`: import transaction, provenance updates, and normal edit integration.
-- Modify `backend/cubeplex/repositories/provider.py` and `model.py`: scoped provider lock and no-commit bulk mutation helpers.
+- Modify `backend/cubeplex/repositories/provider.py` and `model.py`: scoped provider lock, creation-binding lookup, revision-checked edits, and no-commit bulk mutation helpers.
 - Generate `backend/alembic/versions/<revision>_add_model_discovery_configuration.py` through `alembic revision --autogenerate`.
+- Add `backend/scripts/dev/backfill_model_discovery.py`: idempotent provenance/historical-evidence backfill using the generated schema, with no generation calls or newly certified passes.
 - Add `backend/tests/e2e/test_admin_model_import.py`; extend `test_admin_providers_crud.py` for normal edit provenance.
 
 **Interfaces**
 
 - `POST /api/v1/admin/providers/{provider_id}/models/import` consumes the unit 5 preview and unit 2 selection contract.
 - New repository methods stage model additions with `flush` and no internal commit. Existing single-row methods remain valid for their existing callers.
+- Credential staging methods encrypt and stage creation/rotation/rename/deletion without committing. Provider services own the final commit across provider and credential changes; ordinary vault callers can retain their existing transaction-owning entry points.
 - A provider-row lock guards the canonical fingerprint recheck, existing-ID lookup, new model rows, and new per-model overrides in one transaction.
+- `ProviderCreate.discovery_id` is optional for manual callers and required for this discovered-provider creation flow. A unique `(org_id, created_by_user_id, creation_discovery_id)` binding identifies the original committed creation. Responses identify recovered creation and return the actual saved provider.
+- Provider/model configuration edits require `expected_configuration_revision`; mismatches return `409 configuration_changed`. Replace provider whole-map override writes with explicit `model_capability_updates` items containing an existing model ID and a full descriptor or explicit null deletion. Omitted items remain untouched.
 - `configuration_metadata` includes source/state per field/rate, model purpose, explicit confirmations, profile revision, and import origin. Typed schema is validated on read/write.
 
 **Core logic**
 
 Validate preview ownership, deadline, current provider configuration, selection membership, confirmations/conflicts, and all resulting rows before any write. Derive automatic fields from the server preview, not client-provided copies. Reject non-chat selections. Persist new models with `enabled=false`; add only their effective per-model overrides and metadata.
 
-The current `ModelRepository.add` commits each row and cannot implement this transaction. Use staging helpers and one service-owned commit. Roll back all additions/override changes in a failed batch. Lock provider configuration updates/imports consistently to prevent overwrite races. The unique `(provider_id, model_id)` constraint remains the final duplicate guard.
+The current `ModelRepository.add` and credential helpers commit internally and cannot implement these transactions. Use staging helpers and one service-owned commit. Provider-plus-credential creation, provider-plus-credential edits, and each model import batch are separate atomic transactions. Lock provider first, then credential/model rows in stable ID order; never call a transaction-owning helper while holding these locks. Roll back all related row/override/credential changes on failure. The unique `(provider_id, model_id)` constraint remains the final duplicate guard.
+
+For creation, validate the first preview before writes and use a scoped creation-token lock plus the persisted unique binding to serialize concurrent retries. A committed binding is looked up before checking preview TTL; returning its provider never replays incoming configuration or creates another credential. A concurrent unique conflict rolls back the complete losing transaction before reading the winner's authorized binding. The UI compares the returned saved configuration with its current preview and rediscovery/edit requirements rather than assuming the incoming draft was saved. Manual provider creation also commits its credential and provider together.
+
+Ordinary forms send only deliberately edited fields, not the cached entire override map. Explicit override patches merge into the locked current map and validate model ownership. Revision checks reject stale sensitive/default configuration edits; an import advances the provider edit revision when adding overrides. The separate preview fingerprint covers only calling/discovery inputs, not the edit revision or unrelated model overrides, so subsequent batches remain valid.
 
 Existing rows return `existing` without changes, including on retry after an unknown commit outcome. Return their actual configuration/readiness to the UI rather than showing the candidate preview as their saved configuration. Reuse the preview across ordered batches; expiry between batches preserves earlier commits and requires rediscovery for the remainder.
 
@@ -165,7 +174,7 @@ Backfill provenance as existing data, preserving enabled rows. Nonzero existing 
 
 **Tests**
 
-Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, invalid later selections, concurrent imports, lost-response retries, foreign preview/model IDs, saved-config changes, existing disabled-row deduplication, and manual settings preservation. Migration/provenance E2E covers explicit zero and existing nonzero rates without asserting that zero implies a free model.
+Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, invalid later selections, concurrent imports, lost-response retries, foreign preview/model IDs, saved-config changes, existing disabled-row deduplication, and manual settings preservation. Include provider-create failure after credential staging, a lost successful creation response, concurrent creation retries, key edits competing with imports, and an import between form load/save. Migration/provenance E2E covers explicit zero and existing nonzero rates without asserting that zero implies a free model.
 
 ## 7. Effective fingerprints and activation gate
 
@@ -174,7 +183,7 @@ Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, inval
 - Modify `backend/cubeplex/llm/readiness.py`: per-model configuration fingerprint and readiness derivation.
 - Modify `backend/cubeplex/services/provider_service.py`: activation, normal enable/update guards, and result persistence checks.
 - Modify `backend/cubeplex/api/routes/v1/admin_providers.py`: `enable-tested` and consistent serializers.
-- Review `backend/cubeplex/llm/runtime_writeback.py`: runtime failures must not create or restore a full capability verification result.
+- Modify `backend/cubeplex/llm/runtime_writeback.py` and its binding in `streams/run_manager.py`: configuration-bound conditional observations, with provider/model database IDs and captured evidence revisions.
 - Add unit fingerprint/gate tests to `backend/tests/unit/test_readiness.py` and `test_provider_service_invariants.py`; add `backend/tests/e2e/test_model_activation.py`.
 
 **Interfaces**
@@ -182,21 +191,23 @@ Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, inval
 - `configuration_fingerprint(provider_transport, credential_revision, model_runtime_fields, effective_capability)` hashes the actual selected model, not every sibling override.
 - `enable_tested_models(provider_id, model_db_ids)` checks scoped ownership and current required configuration/test evidence atomically and returns per-item decisions.
 - Both the normal model `PATCH enabled=true` and bulk activation call the same lower-level gate for imported models.
-- Persist tests with their start fingerprint and a compare-against-current check before assigning current readiness or enabling models.
+- A short transaction claims monotonically increasing provider/model `probe_generation` values for explicit test selections. Workers carry the generation, start fingerprint, and captured provider/model `evidence_revision` values.
+- Persist a completion only when its generation/fingerprint/evidence revisions remain authoritative; accepted evidence changes advance the evidence revision. Activation requires the current successful result's generation, current model evidence revision/configuration, and current provider connectivity state.
+- Runtime writeback accepts the database identities, call configuration fingerprint, and evidence revisions frozen in the call snapshot, rather than resolving only a possibly reused provider slug at completion.
 
 **Core logic**
 
 Use full effective descriptors because runtime overrides replace the default descriptor rather than merging individual fields. Include runtime transport, credential revision, context/output limits, modality flags, and reasoning/request mappings; exclude labels/prices and unrelated overrides.
 
-Check the current configuration under lock when persisting a probe and when enabling. A key/capability edit during a test, or a late completion from an obsolete test, must not certify the changed configuration. Network calls do not hold database locks. Snapshot configuration before calling upstream, then use a short persistence transaction.
+Claim a new generation under short row locks when each explicit test starts. Model workers capture evidence revisions after the liveness result is accepted. Check generation, effective configuration, and unchanged evidence revisions under lock when persisting. A newer attempt supersedes an older attempt even when both use the same fingerprint; a newer runtime failure supersedes an older in-flight positive observation. Superseded results may be emitted for explanation but cannot overwrite authoritative rows or pass activation. Activation rechecks this state in its own short transaction. No upstream calls hold locks.
 
-At cutover, retain current successful evidence only where the old stored capability fingerprint validates against its pre-change effective inputs; otherwise preserve it as historical/stale evidence. Keep never-tested seeded enablement behavior. After cutover the old fingerprint algorithm is not a runtime compatibility branch.
+At cutover, historical transport/key/limit evidence is unavailable from the legacy capability-only fingerprint. Mark every legacy probe result historical/stale until a complete new-contract test is performed; never stamp current inputs onto an old pass. Keep existing enabled rows and never-tested seeded behavior. The one-time backfill records the historical state; the old fingerprint algorithm is not a runtime compatibility branch.
 
-Runtime success can clear a connectivity failure, but cannot manufacture tools/vision/reasoning test evidence or bypass imported-model gating. Runtime failure may downgrade readiness without deleting configuration provenance.
+Runtime writeback conditionally compares the call's database identities, configuration fingerprint, and captured evidence revisions with current rows. Only a still-current observation mutates status and advances evidence revision. An old success cannot clear a newer failure, and an old endpoint/key request cannot affect a changed/recreated provider. Current runtime success can clear same-configuration connectivity failure but cannot manufacture a full capability result; current failure can downgrade readiness while preserving provenance and historical probe details.
 
 **Tests**
 
-Protect direct enable bypass, stale result rejection, mixed-org IDs, unrelated-import stability, key rotation, effective override replacement, late test completions, and partial activation. Test the cutover with matching, stale, and missing old fingerprints. Existing seeded models are not silently disabled.
+Protect direct enable bypass, stale result rejection, mixed-org IDs, unrelated-import stability, key rotation, effective override replacement, and partial activation. Across separate sessions, complete probe A after newer failing probe B with the same fingerprint, and deliver delayed runtime success after newer failure/key change/provider recreation. A new retry must remain authoritative. Test legacy matching/stale/missing capability fingerprints: none can certify previously unrecorded transport/limits. Existing seeded models are not silently disabled.
 
 ## 8. Probes, cancellation, and SSE
 
@@ -210,14 +221,14 @@ Protect direct enable bypass, stale result rejection, mixed-org IDs, unrelated-i
 
 **Interfaces**
 
-- Probe input binds the selected model's real context, output bound, effective capability, enabled optional controls, and start fingerprint.
+- Probe input binds the selected model's real context, output bound, effective capability, enabled optional controls, start fingerprint, probe generation, and captured evidence revisions. Baseline probes use the same null/default-reasoning binding as ordinary basic chat.
 - `ProbeStepName` grows a vision step; per-step evidence distinguishes accepted parameters from observed capability behavior.
 - Keep `liveness`, `model`, `done`; each `model` event contains DB ID, result, and whether the result is current or stale.
 - A subset rerun uses the existing explicit `model_db_ids` request; no new all-provider retry endpoint is required.
 
 **Core logic**
 
-Run provider liveness once, then up to two model probe workers. Workers perform upstream operations only; do not concurrently use the request's `AsyncSession`. Persist completed results serially or in isolated short sessions, checking unit 7's fingerprint rules. Emit results in completion order with stable IDs.
+Run provider liveness once, then up to two model probe workers. Workers perform upstream operations only; do not concurrently use the request's `AsyncSession`. Persist completed results serially or in isolated short sessions, checking unit 7's configuration, generation, and evidence-order rules. Emit results in completion order with stable IDs. A superseded liveness result does not start model workers, and a superseded model result does not count as a successful activation candidate.
 
 Bound the entire stream drain/result lifecycle, not only creation of a stream object. Choose a small output budget compatible with the tested reasoning configuration. Test only advertised modes/efforts, treat unsupported off as skipped, and require actual tools/streaming. Optional capability failure blocks the unchanged configuration; administrator removal and retest is explicit. Vision is tested with a small fixed non-secret image and a content-specific response expectation.
 
@@ -233,10 +244,12 @@ Unit tests protect supported controls, actual tool-call recognition, bounded dra
 
 **Files**
 
-- Modify `backend/cubeplex/llm/config.py`, `snapshot.py`, `builder.py`, and `preset_details.py`: typed effective model controls/modalities and saved limits at the runtime boundary.
+- Modify `backend/cubeplex/llm/config.py`, `snapshot.py`, `builder.py`, and `preset_details.py`: effective control metadata, saved limits, null/default binding, and immutable runtime observation identities/revisions. Modalities stay in configuration/capability metadata rather than nonexistent cubeloop model-spec fields.
 - Modify `backend/cubeplex/api/schemas/model_presets.py` and `routes/v1/model_presets.py`: available standard reasoning controls in workspace summaries.
-- Modify `frontend/packages/web/lib/types/presets.ts`, preset selection state, `components/chat/ModelPicker.tsx`, and `EffortSlider.tsx`: expose only supported controls and reconcile obsolete persisted choices.
-- Update the existing server-side reasoning validation seam used by conversation execution, rather than trusting frontend filtering.
+- Modify `frontend/packages/core/src/types/events.ts`, `types/conversation.ts`, `api/stream.ts`, and `stores/messageStore.ts`, plus web `lib/types/presets.ts`, `lib/stores/preset-selection.ts`, `ModelPicker.tsx`, and `EffortSlider.tsx`: nullable request/response reasoning and the persisted UI `default` choice.
+- Modify `backend/cubeplex/models/conversation.py`, `api/schemas/conversations.py`, `api/routes/v1/conversations.py`, `services/conversation_execution.py`, `streams/run_manager.py`, and `agents/graph.py`: preserve null across admission, persisted settings, resumed execution, and bound-model construction. Generate the nullable-column change through Alembic autogeneration.
+- Generate `backend/alembic/versions/<revision>_allow_model_default_reasoning.py` through autogeneration for the nullable conversation setting. Preserve existing explicit reasoning JSON and frozen execution snapshots.
+- Update the reasoning-consuming seams in `sandbox/command_coordinator.py`, `schedules/dispatch.py`, `im/worker.py`, `triggers/pipeline.py`, and `repositories/conversation.py` so absent/default reasoning is not converted into an explicit off control. Preserve their existing admission/lifecycle behavior.
 - Extend `backend/tests/unit/llm/test_builder_bound.py`, `test_builder_chain.py`, `backend/tests/unit/test_model_presets_service.py`, and existing preset/client-state tests.
 
 **Interfaces**
@@ -244,18 +257,23 @@ Unit tests protect supported controls, actual tool-call recognition, bounded dra
 - `ModelConfig`/preset details expose explicit standard `reasoning_modes` and `reasoning_efforts` derived from the effective descriptor plus confirmed/verified model support.
 - Workspace preset summaries expose the allowed controls for the preset's configured primary and enabled fallbacks; use the intersection to avoid selecting controls that a fallback cannot implement.
 - No new standard effort values are added. Unknown mapping produces no advertised reasoning controls, even if source metadata suggests the model might reason.
+- API `reasoning: ReasoningControl | null` uses null/omission for the reviewed basic-chat configuration without request-time reasoning patches. Conversation/resolved-execution storage preserves null. The client UI `default` maps to null; it is not a new canonical wire mode or a synonym for off.
 
 **Core logic**
 
-Pass stored context/output bounds and applicable modalities into the actual bound model, including each fallback-chain member. Do not rely on default 32,000 output or default context for a resolved configured model.
+Pass stored context/output bounds into the actual bound model, including each fallback-chain member; use confirmed modalities through the existing configuration/capability consumers. Do not rely on default 32,000 output or default context for a resolved configured model.
 
-Compute allowed controls from actual endpoint/model mappings. Preserve explicit reviewed canonical-to-wire mappings; do not invent a new mapping because a vendor has a similar level name. Validate unsupported requested controls before issuing a generation request. When a user switches to a preset that cannot honor their persisted setting, show the supported default/change in the UI instead of sending an invalid control silently.
+Compute allowed explicit controls from actual endpoint/model mappings. Preserve reviewed canonical-to-wire mappings without inventing similar vendor-level translations. Null is always the reviewed baseline, including when the chain has an empty explicit-control intersection. Reject unsupported explicit choices before new execution admission. On a preset switch, show the supported model-default choice and emit null rather than a hidden stale off/medium setting.
+
+For null, construct per-call effective descriptor copies with the reasoning mapping omitted, preserving reviewed base request fields, temperature/limits, and other capabilities. The cubeloop agent may retain its own internal default control, but the provider binding must prevent that internal off default from emitting request-time reasoning patches or overwriting null in CubePlex's persisted execution. Explicit choices use original mappings. Do not mutate shared/persisted capability descriptors. The baseline used by probes is identical.
+
+Propagate null through every reasoning-consuming seam listed above, including resumes and background callers. Previously admitted explicit settings and old message/checkpoint content remain unchanged. Changing a current conversation's setting does not rewrite a frozen execution.
 
 Keep all workspace route handlers separate from admin configuration routes. This is limited configuration consumption; system prompts, cache markers, checkpoint replay, and conversation reference identity do not change.
 
 **Tests**
 
-Protect saved context/output forwarding, different fallback configurations, unknown controls, unavailable off/max, and client/server agreement. Business-flow E2E proves unsupported controls cannot be sent through a raw API request and a current imported model can perform a tool-using conversation.
+Protect saved context/output forwarding, different fallback configurations, unknown controls, unavailable off/max, and client/server agreement. Exercise unknown mapping and empty fallback intersection through persisted `default`/null choices, admission, resume, sandbox/background callers, and actual bound-model payload construction. No path may reinterpret null as off or change a frozen explicit choice. Business-flow E2E proves unsupported explicit controls cannot be sent through a raw API request and a current imported basic-chat model can perform a tool-using conversation.
 
 ## 10. Frontend discovery and import flows
 
@@ -270,7 +288,7 @@ Protect saved context/output forwarding, different fallback configurations, unkn
 
 **Interfaces**
 
-- Core API calls support unsaved/saved discovery, typed selection import, and server-checked activation.
+- Core API calls support unsaved/saved discovery, creation recovery by `discovery_id`, revision-checked edits with explicit override patches, typed selection import, and server-checked activation.
 - Wizard state retains unsaved config, request generation, discovery preview, selection/resolutions, committed import results, and per-model verification. Management Key remains ephemeral and is cleared when enrichment/request lifetime ends.
 - New-provider advancement depends on a reviewed preview or explicit preset/manual path; it no longer requires saving the provider before discovery.
 - Shared components receive candidate/evidence data and callbacks, not an admin/workspace mode switch.
@@ -279,7 +297,9 @@ Protect saved context/output forwarding, different fallback configurations, unkn
 
 Keep the existing vendor picker, adding CLIProxyAPI under All/Self-hosted through the catalog. Its preset selects its enrichment behavior without an extra profile dropdown. Default addresses remain editable and explain backend reachability.
 
-Use abort plus request-generation checks so old responses cannot overwrite edited configuration. Search/filtering does not invalidate selection; endpoint/protocol/plan/key changes do. On a confirmed import, create/update the provider once, verify the preview-to-provider match, then submit ordered batches. Track unknown commit outcomes by rediscovering saved IDs or retrying the same batch; do not create duplicate providers/models.
+Use abort plus request-generation checks so old responses cannot overwrite edited configuration. Search/filtering does not invalidate selection; endpoint/protocol/plan/key changes do. On a confirmed import, create the provider with the preview's scoped recovery token or edit the saved provider with the expected revision, verify the returned saved configuration matches the preview, then submit ordered batches. A lost create response retries the same token and consumes its original committed binding; an expired preview requires rediscovery before new model batches, not creation of another provider.
+
+Edit forms submit only touched fields and explicit override changes. Stale revision errors preserve the draft, refetch the current configuration, and require the administrator to review conflicts before retrying. Do not automatically replay an old whole-map payload. Unknown numeric-zero prices remain unknown when unrelated fields are edited; only deliberate price entry/confirmation changes their provenance.
 
 Only new imported models enter the default test selection. Existing rows show their saved configuration and current status. Retrying selects failed/stale IDs only. Finish calls `enable-tested`, consumes per-model outcomes, and leaves blocked rows disabled. Interrupted streams preserve known results without setting unfinished models to success.
 
@@ -287,13 +307,14 @@ Render separate configuration and probe states. Required unknown/conflicting fie
 
 **Tests**
 
-Protect draft/preview invalidation, old-response suppression, batch progress and lost-response retry, cancelled provider creation, selected-only testing, partial activation, retained saved settings, unknown pricing, and both locales. Use state-machine/business assertions rather than DOM presence/count checks. Build `@cubeplex/core` before web integration and typecheck.
+Protect draft/preview invalidation, old-response suppression, batch progress and lost-response retry, atomic/cancelled creation and recovered bindings, stale form saves after import, selected-only testing, partial activation, retained saved settings, unknown pricing during unrelated edits, and both locales. Use state-machine/business assertions rather than DOM presence/count checks. Build `@cubeplex/core` before web integration and typecheck.
 
 ## 11. Product docs and final validation
 
 **Files**
 
 - Update `docs/site/docs/admin/models.md` and its matching `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/admin/models.md`.
+- Update `docs/site/docs/guides/conversations/model-selection.md` and its matching Chinese page for model-default reasoning and filtered/fallback control behavior.
 - Extend existing backend/frontend E2E coverage for the accepted business flow; use the established nightly real-LLM lane rather than adding unmarked live calls.
 
 **Core logic**
@@ -326,5 +347,9 @@ Schema validation, actual `alembic upgrade head`, transactional E2E, generated m
 Review the spec and this plan with the `local-codex-review` skill before implementation. The review must read the existing repository seams and the exact two documents, including their uncommitted content. Focus on scope creep, preview/configuration binding, transaction ownership, test-result races, optional metadata trust, and the ability to finish ordinary CLIProxyAPI setup without per-model forms.
 
 Verify each finding against the actual code. Correct clear contract/implementation omissions in both documents, then rerun in the same local Codex session. Product-scope choices or changes to established behavior that require the user's decision must be presented before depending on them. Preserve review prompts/output locally and report material findings plus the final review outcome.
+
+### Pending product decision
+
+The user has been asked whether editing an already enabled model's endpoint, key, or effective capability should pause affected models until revalidation, or preserve enablement with a stale warning. This affects the edit/activation behavior in units 6, 7, and 10. It does not affect the first-activation gate for imported models, and neither discovery refresh nor label/price edits can pause models. Record the selected behavior in both documents before implementation; the current draft does not assume an answer.
 
 These units describe responsibilities, interfaces, and invariants. They intentionally do not pre-write implementation code.
