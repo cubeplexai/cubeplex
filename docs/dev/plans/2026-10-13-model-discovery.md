@@ -96,7 +96,7 @@ Pure URL and address validation covers API subpaths, root addresses, pasted oper
 
 Use documented OpenRouter price/length/modalities fields and native Ollama `/api/show` only for selected models. A selection requiring lazy enrichment refreshes the preview through the discovery request with explicit selected IDs; the backend validates those IDs against the base listing. All enrichment uses unit 3's transport and bounds.
 
-For CLIProxyAPI, first obtain `/v1/models`, then optionally read the supported Codex-client catalog. Treat untraceable or template fields as suggestions even if populated. Explicit Management Key input authorizes only the v8 credential-model identities and channel-definition reads described in the spec. Derive that API base from the same instance, retain the calling ID, and never read full configuration or credential file contents.
+For CLIProxyAPI, first obtain `/v1/models`, then optionally read the supported Codex-client catalog. Treat untraceable or template fields as suggestions even if populated. Explicit Management Key input authorizes the v8 read sequence in the spec: paginated `GET /credentials?page=1&page_size=100` (`files[]`, `has_more`), `GET /credentials/models?name=...`, then `GET /routing/model-definitions/{channel}`. Keep only name/provider-or-channel/ID/status/disabled inventory fields, deduplicate requests, URL-encode names, and discard account/token metadata immediately. Apply the shared bounds across inventory and enrichment; incomplete enrichment leaves unresolved fields and a warning. Derive that API base from the same instance, retain the calling ID, and never read full configuration or credential file contents.
 
 Management metadata cannot introduce IDs absent from the complete base listing. Ambiguous aliases, absent canonical mapping, contradictory limits/efforts, and synthesized TTS/image capabilities require review. Price suggestions do not establish the cost of a proxy/subscription and cannot overwrite explicit rates. Match exact IDs/profile mappings; never strip arbitrary prefixes or fuzzy-match.
 
@@ -104,7 +104,7 @@ Normalize total context separately from input/output bounds. Validate positive i
 
 **Tests**
 
-Protect exact alias identity, absent mappings, source priority, missing versus confirmed zero, declared versus template evidence, conflicting limits, per-token price conversion, unknown-purpose blocking, and unrelated provider metadata isolation. Redacted fixtures reproduce the researched CLIProxyAPI contradictions without treating vendor limits or the count of 42 as permanent facts.
+Protect exact alias identity, absent mappings, source priority, missing versus confirmed zero, declared versus template evidence, conflicting limits, per-token price conversion, unknown-purpose blocking, and unrelated provider metadata isolation. Exercise the management inventory-to-name-to-model-to-channel sequence, pagination, projection/redaction, and enrichment bounds. Redacted fixtures reproduce the researched CLIProxyAPI contradictions without treating vendor limits or the count of 42 as permanent facts.
 
 ## 5. Scoped previews and discovery APIs
 
@@ -139,11 +139,12 @@ Unit tests protect canonicalization and credential-independent UI names. Backend
 
 **Files**
 
-- Modify `backend/cubeplex/models/provider.py`: non-secret discovery configuration, creation-preview binding, model `configuration_metadata`, configuration-edit revisions, probe generations, and evidence revisions.
+- Modify `backend/cubeplex/models/provider.py`: non-secret discovery configuration, model `configuration_metadata`, configuration-edit revisions, probe generations, and evidence revisions.
+- Create `backend/cubeplex/models/provider_creation_receipt.py` and `repositories/provider_creation_receipt.py`: scoped durable creation outcomes, unique token lookup, retention, and no-commit staging. Register the model in `models/__init__.py` and public-ID prefix `pcr` in `models/public_id.py`.
 - Modify `backend/cubeplex/models/credential.py`, `services/credential.py`, and `repositories/credential.py`: credential value revision and encrypted no-commit mutation helpers used by provider transactions.
 - Modify `backend/cubeplex/api/schemas/provider.py` and `provider_discovery.py`: persisted/output types and supported explicit edit fields.
 - Modify `backend/cubeplex/services/provider_service.py`: import transaction, provenance updates, and normal edit integration.
-- Modify `backend/cubeplex/repositories/provider.py` and `model.py`: scoped provider lock, creation-binding lookup, revision-checked edits, and no-commit bulk mutation helpers.
+- Modify `backend/cubeplex/repositories/provider.py` and `model.py`: scoped provider lock, revision-checked edits, and no-commit bulk mutation helpers.
 - Generate `backend/alembic/versions/<revision>_add_model_discovery_configuration.py` through `alembic revision --autogenerate`.
 - Add `backend/scripts/dev/backfill_model_discovery.py`: idempotent provenance/historical-evidence backfill using the generated schema, with no generation calls or newly certified passes.
 - Add `backend/tests/e2e/test_admin_model_import.py`; extend `test_admin_providers_crud.py` for normal edit provenance.
@@ -154,7 +155,7 @@ Unit tests protect canonicalization and credential-independent UI names. Backend
 - New repository methods stage model additions with `flush` and no internal commit. Existing single-row methods remain valid for their existing callers.
 - Credential staging methods encrypt and stage creation/rotation/rename/deletion without committing. Provider services own the final commit across provider and credential changes; ordinary vault callers can retain their existing transaction-owning entry points.
 - A provider-row lock guards the canonical fingerprint recheck, existing-ID lookup, new model rows, and new per-model overrides in one transaction.
-- `ProviderCreate.discovery_id` is optional for manual callers and required for this discovered-provider creation flow. A unique `(org_id, created_by_user_id, creation_discovery_id)` binding identifies the original committed creation. Responses identify recovered creation and return the actual saved provider.
+- `ProviderCreate.discovery_id` is optional for manual callers and required for this discovered-provider creation flow. A unique `(org_id, created_by_user_id, creation_discovery_id)` receipt identifies the original committed creation. Store `created`/`deleted`, nullable provider FK with `ON DELETE SET NULL`, and timezone-aware creation/expiry times; no configuration or secrets. Responses identify recovered creation and return the actual saved provider, or `409 provider_creation_deleted` for a terminal deleted receipt.
 - Provider/model configuration edits require `expected_configuration_revision`; mismatches return `409 configuration_changed`. Replace provider whole-map override writes with explicit `model_capability_updates` items containing an existing model ID and a full descriptor or explicit null deletion. Omitted items remain untouched.
 - `configuration_metadata` includes source/state per field/rate, model purpose, explicit confirmations, profile revision, and import origin. Typed schema is validated on read/write.
 
@@ -162,19 +163,21 @@ Unit tests protect canonicalization and credential-independent UI names. Backend
 
 Validate preview ownership, deadline, current provider configuration, selection membership, confirmations/conflicts, and all resulting rows before any write. Derive automatic fields from the server preview, not client-provided copies. Reject non-chat selections. Persist new models with `enabled=false`; add only their effective per-model overrides and metadata.
 
-The current `ModelRepository.add` and credential helpers commit internally and cannot implement these transactions. Use staging helpers and one service-owned commit. Provider-plus-credential creation, provider-plus-credential edits, and each model import batch are separate atomic transactions. Lock provider first, then credential/model rows in stable ID order; never call a transaction-owning helper while holding these locks. Roll back all related row/override/credential changes on failure. The unique `(provider_id, model_id)` constraint remains the final duplicate guard.
+The current `ModelRepository.add` and credential helpers commit internally and cannot implement these transactions. Use staging helpers and one service-owned commit. Provider-plus-credential-plus-receipt creation, provider-plus-credential edits, and each model import batch are separate atomic transactions. Creation/recovery and receipt-bearing deletion lock the scoped creation token/receipt first, then provider, then credential/model rows in stable ID order. Ordinary edits/imports start with provider; never acquire the token/receipt lock after provider or call a transaction-owning helper while holding locks. Roll back all related row/override/credential/receipt changes on failure. The unique `(provider_id, model_id)` constraint remains the final duplicate guard.
 
-For creation, validate the first preview before writes and use a scoped creation-token lock plus the persisted unique binding to serialize concurrent retries. A committed binding is looked up before checking preview TTL; returning its provider never replays incoming configuration or creates another credential. A concurrent unique conflict rolls back the complete losing transaction before reading the winner's authorized binding. The UI compares the returned saved configuration with its current preview and rediscovery/edit requirements rather than assuming the incoming draft was saved. Manual provider creation also commits its credential and provider together.
+For creation, use a transaction-scoped creation-token advisory lock plus the persisted unique receipt to serialize first creation and concurrent retries. Look up an authorized receipt before checking preview TTL; an unexpired created outcome returns the actual provider without replaying incoming configuration. With no receipt, validate the preview before any writes and commit provider, credential, and receipt together. A concurrent unique conflict rolls back the entire losing transaction before reading the winner's authorized outcome. Provider deletion finds any receipt before taking provider locks, follows the same token/receipt lock order, preserves existing deletion guards, and marks it deleted in the deletion transaction. A deleted outcome cannot resurrect the provider.
+
+Retain receipts for 24 hours from creation without extending expiry on retries. Bounded org-scoped cleanup on creation/recovery may remove expired receipts; no new scheduler is needed. After that period, the original 10-minute preview is expired, so the old token returns `discovery_expired` and cannot create anything. The UI compares recovered saved configuration with its current preview and handles deletion/expiry with rediscovery rather than assuming its incoming draft was saved. Manual provider creation also commits its credential and provider together.
 
 Ordinary forms send only deliberately edited fields, not the cached entire override map. Explicit override patches merge into the locked current map and validate model ownership. Revision checks reject stale sensitive/default configuration edits; an import advances the provider edit revision when adding overrides. The separate preview fingerprint covers only calling/discovery inputs, not the edit revision or unrelated model overrides, so subsequent batches remain valid.
 
 Existing rows return `existing` without changes, including on retry after an unknown commit outcome. Return their actual configuration/readiness to the UI rather than showing the candidate preview as their saved configuration. Reuse the preview across ordered batches; expiry between batches preserves earlier commits and requires rediscovery for the remainder.
 
-Backfill provenance as existing data, preserving enabled rows. Nonzero existing rates remain configured estimates; legacy zero rates become unknown until explicitly confirmed. Keep migration schema generation and any idempotent data backfill separate from hand-edited autogenerated migration content. No new table/public-ID prefix is required.
+Backfill provenance as existing data, preserving enabled rows. Nonzero existing rates remain configured estimates; legacy zero rates become unknown until explicitly confirmed. Keep migration schema generation and any idempotent data backfill separate from hand-edited autogenerated migration content. Include receipt schema/FK/uniqueness/expiry index in the autogenerated migration, with model registration and `pcr` public-ID coverage.
 
 **Tests**
 
-Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, invalid later selections, concurrent imports, lost-response retries, foreign preview/model IDs, saved-config changes, existing disabled-row deduplication, and manual settings preservation. Include provider-create failure after credential staging, a lost successful creation response, concurrent creation retries, key edits competing with imports, and an import between form load/save. Migration/provenance E2E covers explicit zero and existing nonzero rates without asserting that zero implies a free model.
+Real-DB E2E protects all-or-nothing import, rows-plus-overrides atomicity, invalid later selections, concurrent imports, lost-response retries, foreign preview/model IDs, saved-config changes, existing disabled-row deduplication, and manual settings preservation. Include provider-create failure after credential staging, a lost successful creation response, concurrent creation retries, deletion between creation commit and retry, recovery racing deletion, receipt retention/expiry, key edits competing with imports, and an import between form load/save. Migration/provenance E2E covers explicit zero and existing nonzero rates without asserting that zero implies a free model.
 
 ## 7. Effective fingerprints and activation gate
 
@@ -245,7 +248,8 @@ Unit tests protect supported controls, actual tool-call recognition, bounded dra
 **Files**
 
 - Modify `backend/cubeplex/llm/config.py`, `snapshot.py`, `builder.py`, and `preset_details.py`: effective control metadata, saved limits, null/default binding, and immutable runtime observation identities/revisions. Modalities stay in configuration/capability metadata rather than nonexistent cubeloop model-spec fields.
-- Modify `backend/cubeplex/api/schemas/model_presets.py` and `routes/v1/model_presets.py`: available standard reasoning controls in workspace summaries.
+- Modify `backend/cubeplex/llm/capabilities.py` and its image-input consumers: intersect modalities across the active chain instead of unioning them; use the same chain evidence for injection and admission.
+- Modify `backend/cubeplex/api/schemas/model_presets.py` and `routes/v1/model_presets.py`: available standard reasoning controls, provenance-aware nullable reasoning support, and chain-safe input modalities in workspace summaries.
 - Modify `frontend/packages/core/src/types/events.ts`, `types/conversation.ts`, `api/stream.ts`, and `stores/messageStore.ts`, plus web `lib/types/presets.ts`, `lib/stores/preset-selection.ts`, `ModelPicker.tsx`, and `EffortSlider.tsx`: nullable request/response reasoning and the persisted UI `default` choice.
 - Modify `backend/cubeplex/models/conversation.py`, `api/schemas/conversations.py`, `api/routes/v1/conversations.py`, `services/conversation_execution.py`, `streams/run_manager.py`, and `agents/graph.py`: preserve null across admission, persisted settings, resumed execution, and bound-model construction. Generate the nullable-column change through Alembic autogeneration.
 - Generate `backend/alembic/versions/<revision>_allow_model_default_reasoning.py` through autogeneration for the nullable conversation setting. Preserve existing explicit reasoning JSON and frozen execution snapshots.
@@ -255,6 +259,7 @@ Unit tests protect supported controls, actual tool-call recognition, bounded dra
 **Interfaces**
 
 - `ModelConfig`/preset details expose explicit standard `reasoning_modes` and `reasoning_efforts` derived from the effective descriptor plus confirmed/verified model support.
+- Carry nullable reasoning support separately from the SDK boolean. Workspace `reasoning=true/false/null` means declared/confirmed support, confirmed absence, or unknown; null displays **Unknown**, independently of available controls or the selected default/off choice.
 - Workspace preset summaries expose the allowed controls for the preset's configured primary and enabled fallbacks; use the intersection to avoid selecting controls that a fallback cannot implement.
 - No new standard effort values are added. Unknown mapping produces no advertised reasoning controls, even if source metadata suggests the model might reason.
 - API `reasoning: ReasoningControl | null` uses null/omission for the reviewed basic-chat configuration without request-time reasoning patches. Conversation/resolved-execution storage preserves null. The client UI `default` maps to null; it is not a new canonical wire mode or a synonym for off.
@@ -262,6 +267,10 @@ Unit tests protect supported controls, actual tool-call recognition, bounded dra
 **Core logic**
 
 Pass stored context/output bounds into the actual bound model, including each fallback-chain member; use confirmed modalities through the existing configuration/capability consumers. Do not rely on default 32,000 output or default context for a resolved configured model.
+
+Replace modality union with intersection across every active primary/fallback member's reviewed configuration. Imported image support requires its current successful optional probe. Use this intersection in preset metadata, `LLMCapabilities.supports_image`, image injection, and input admission; a text-only member prevents images from being admitted or injected into that chain. Reject unsupported user payloads before admission with a clear configuration error. Keep existing fallback sequencing; request-specific fallback routing is outside scope.
+
+Bind effective extra bodies/headers in both probes and runtime, merging supported model values over provider defaults by key. Check each adapter's actual accepted arguments; reject unsupported fields during configuration validation rather than silently ignoring them. Retain the full saved descriptor/configuration identity for fingerprints and observation snapshots, even when null reasoning derives a request-specific copy.
 
 Compute allowed explicit controls from actual endpoint/model mappings. Preserve reviewed canonical-to-wire mappings without inventing similar vendor-level translations. Null is always the reviewed baseline, including when the chain has an empty explicit-control intersection. Reject unsupported explicit choices before new execution admission. On a preset switch, show the supported model-default choice and emit null rather than a hidden stale off/medium setting.
 
@@ -273,7 +282,7 @@ Keep all workspace route handlers separate from admin configuration routes. This
 
 **Tests**
 
-Protect saved context/output forwarding, different fallback configurations, unknown controls, unavailable off/max, and client/server agreement. Exercise unknown mapping and empty fallback intersection through persisted `default`/null choices, admission, resume, sandbox/background callers, and actual bound-model payload construction. No path may reinterpret null as off or change a frozen explicit choice. Business-flow E2E proves unsupported explicit controls cannot be sent through a raw API request and a current imported basic-chat model can perform a tool-using conversation.
+Protect saved context/output forwarding, effective extra body/header forwarding or explicit rejection, different fallback configurations, unknown support distinct from false, unknown controls, unavailable off/max, and client/server agreement. Exercise mixed image/text and all-image chains through summaries, image injection, and raw input admission. Exercise unknown mapping and empty fallback intersection through persisted `default`/null choices, admission, resume, sandbox/background callers, and actual bound-model payload construction. No path may reinterpret null as off, invalidate evidence solely through the per-call descriptor projection, or change a frozen explicit choice. Business-flow E2E proves unsupported explicit controls/images cannot be sent through a raw API request and a current imported basic-chat model can perform a tool-using conversation.
 
 ## 10. Frontend discovery and import flows
 
