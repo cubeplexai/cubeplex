@@ -143,3 +143,5 @@ The backfill is idempotent, preserves enabled rows, and marks old tests historic
 <!-- Screenshot pending: vendor selection (CLIProxyAPI), discovery field review, test results and enable action; capture in light/dark themes. -->
 
 In **Edit → Advanced**, review each model’s calling configuration separately. Imported models keep their own capability overrides; **Use provider configuration** removes that override. Forms submit only changed fields with the displayed revision, so concurrent edits require a reload. New image declarations require a vision pass before image attachments are offered, including on an enabled manual model. Its text calls remain available. Reasoning verification uses a small output budget, raised only when needed to fit an explicitly mapped thinking budget and always bounded by the saved output limit.
+
+A current failed reasoning test removes the corresponding explicit controls from the picker and admission checks. Model default and enabled text use remain available. A failure from an older configuration does not certify the new one or restrict its newly reviewed mappings.

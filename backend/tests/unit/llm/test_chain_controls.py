@@ -94,3 +94,15 @@ def test_manual_vision_support_remains_subject_to_new_negative_evidence():
     assert chain_controls(snap, preset).input_modalities == ("text",)
     model.image_verified = True
     assert chain_controls(snap, preset).input_modalities == ("image", "text")
+
+
+def test_current_reasoning_failure_retracts_explicit_controls_but_preserves_default():
+    snap = snapshot()
+    snap.providers["p"].models[0].reasoning_failed = True
+    controls = chain_controls(snap, snap.model_presets[0])
+    assert controls.modes == () and controls.efforts == ()
+    validate_reasoning_for_chain(snap, snap.model_presets[0], None)
+    with pytest.raises(ValueError):
+        validate_reasoning_for_chain(
+            snap, snap.model_presets[0], ReasoningControl(mode="on", effort="high")
+        )

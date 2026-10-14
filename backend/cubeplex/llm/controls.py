@@ -49,6 +49,9 @@ def chain_controls(snapshot: LLMSnapshot, preset: ModelPreset) -> ChainControls:
             modes -= {"on", "auto"}
         efforts: set[str] = set(mapping.effort_values) if mapping and mapping.effort_path else set()
         has_effort_mapping |= bool(mapping and mapping.effort_path and mapping.effort_values)
+        if model.reasoning_failed:
+            modes.clear()
+            efforts.clear()
         inputs = set(model.input) & {"text", "image"}
         if (
             model.configuration_metadata.get("origin") == "discovery"

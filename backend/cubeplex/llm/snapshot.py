@@ -136,6 +136,11 @@ async def _load_providers(
                         "evidence_revision": m.evidence_revision,
                         "probe_generation": m.probe_generation,
                         "configuration_metadata": m.configuration_metadata,
+                        "reasoning_failed": not verification_pending(p, m, credential_revision)
+                        and any(
+                            step.get("name") == "reasoning" and step.get("status") == "fail"
+                            for step in (m.last_test_summary or {}).get("steps", [])
+                        ),
                         "image_verified": (
                             not m.configuration_metadata.get("vision_requires_verification")
                             or not verification_pending(p, m, credential_revision)

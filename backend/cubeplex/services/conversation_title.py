@@ -135,6 +135,11 @@ def _build_prompt(snippet: str, ui_language: str) -> str:
     return prompt.replace(UI_LANGUAGE_PLACEHOLDER, ui_language)
 
 
+def title_output_limit(bound: Any) -> int:
+    members = getattr(bound, "chain", None) or (bound,)
+    return int(min(LLM_MAX_TOKENS, *(member.spec.max_tokens for member in members)))
+
+
 async def _generate_title(
     session: AsyncSession,
     org_id: str,
@@ -155,7 +160,7 @@ async def _generate_title(
     # generation is a one-shot call with no prior conversation context, so
     # no cache breakpoints will be inserted regardless of the policy used.
     bound = build_chain_model(snap, preset)
-    bound.spec.max_tokens = min(bound.spec.max_tokens, LLM_MAX_TOKENS)
+    bound.spec.max_tokens = title_output_limit(bound)
 
     messages = [UserMessage(content=[TextContent(text=full_prompt)])]
 
@@ -170,7 +175,7 @@ async def _generate_title(
                 await title_session.generate(
                     system="",
                     messages=messages,
-                    max_output_tokens=min(bound.spec.max_tokens, LLM_MAX_TOKENS),
+                    max_output_tokens=title_output_limit(bound),
                 ),
             )
     else:

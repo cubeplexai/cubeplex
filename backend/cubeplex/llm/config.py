@@ -59,6 +59,7 @@ class ModelConfig(BaseModel):
     configuration_metadata: dict[str, Any] = Field(default_factory=dict)
     verification_pending: bool = False
     image_verified: bool = False
+    reasoning_failed: bool = False
     name: str = Field(description="Model display name")
     reasoning: bool = Field(default=False, description="Whether this is a reasoning model")
     input: list[str] = Field(

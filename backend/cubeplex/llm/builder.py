@@ -114,6 +114,8 @@ def build_bound_model(
     model_cfg = next((m for m in cfg.models if m.id == model_id), None)
     if model_cfg is None:
         raise ValueError(f"model {model_id!r} not in provider {slug!r}")
+    if reasoning is not None and model_cfg.reasoning_failed:
+        raise ValueError("Reasoning controls failed verification for the current configuration")
     from dataclasses import replace
 
     from cubeplex.llm.request_parameters import prepare_provider_for_call

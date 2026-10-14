@@ -261,3 +261,60 @@ async def test_native_anthropic_preserves_saved_total_output_limit_and_probe_bud
         await probe_reasoning_toggle(provider, model_id=model.id, capability=cap)
     assert calls[0]["max_tokens"] == 2176
     assert calls[0]["thinking"]["budget_tokens"] == 2048
+
+
+async def test_title_output_override_respects_a_smaller_fallback_limit():
+    from cubeplex.llm.builder import build_chain_model
+    from cubeplex.llm.snapshot import ModelPreset
+    from cubeplex.services.conversation_title import title_output_limit
+
+    bodies = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if body["model"] == "primary":
+            return httpx.Response(
+                404, json={"error": {"code": "model_not_found", "message": "model not found"}}
+            )
+        chunk = {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "backup",
+            "choices": [{"index": 0, "delta": {"content": "A title"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+        )
+
+    snap = LLMSnapshot(
+        providers={
+            "p": ProviderConfig(
+                base_url="http://localhost/v1",
+                api_key="test-key",
+                models=[
+                    ModelConfig(id=name, name=name, context_window=8192, max_tokens=limit)
+                    for name, limit in [("primary", 8192), ("backup", 128)]
+                ],
+            )
+        },
+        model_presets=(),
+        task_routing={},
+    )
+    preset = ModelPreset(
+        key="title", primary="p/primary", fallbacks=("p/backup",), kind="custom", is_default=True
+    )
+    bound = build_chain_model(snap, preset)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        for member in bound.chain:
+            member.provider._client = member.provider._client.with_options(http_client=client)
+        result = await bound.generate(
+            [UserMessage(content=[TextContent(text="Title")])],
+            max_output_tokens=title_output_limit(bound),
+        )
+    assert result.content
+    assert [body["model"] for body in bodies] == ["primary", "backup"]
+    assert all(body["max_tokens"] <= 128 for body in bodies)

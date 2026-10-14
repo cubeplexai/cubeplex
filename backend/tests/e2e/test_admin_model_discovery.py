@@ -16,12 +16,17 @@ def llm_transport(monkeypatch, request):
     requests = []
     auth_failure = getattr(request, "param", None) == "tool_auth_failure"
     vision_transition = getattr(request, "param", None) == "vision_transition"
+    reasoning_failure = getattr(request, "param", None) == "reasoning_failure"
     vision_responses = 0
 
     def respond(request):
         nonlocal vision_responses
         body = json.loads(request.content)
         requests.append(body)
+        if reasoning_failure and "reasoning_effort" in body:
+            return httpx.Response(
+                400, json={"error": {"message": "unsupported reasoning parameter"}}
+            )
         if auth_failure and body["model"] == "unknown-alias" and body.get("tools"):
             return httpx.Response(401, json={"error": {"message": "credential rejected"}})
         delta = {"content": "OK"}
@@ -511,6 +516,94 @@ async def test_current_negative_vision_retracts_image_support_without_disabling_
         after = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
         assert next(p for p in after if p["key"] == "pro")["input_modalities"] == ["text"]
         assert (await client.get(path)).json()["models"][0]["enabled"] is True
+    finally:
+        row = await db_session.get(Provider, provider["id"])
+        await db_session.execute(
+            delete(OrgSettings).where(
+                OrgSettings.org_id == row.org_id, OrgSettings.key == MODEL_PRESETS_KEY
+            )
+        )
+        await db_session.commit()
+        await client.delete(path)
+
+
+@pytest.mark.parametrize("llm_transport", ["reasoning_failure"], indirect=True)
+async def test_current_reasoning_failure_restricts_controls_and_obsolete_failures_do_not(
+    admin_client,
+    db_session,
+    llm_transport,
+):
+    from sqlalchemy import delete
+
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.provider import Provider
+
+    client, ws_id = admin_client
+    created = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "reasoning-evidence-update",
+            "base_url": "http://localhost:8317/v1",
+            "auth_type": "none",
+            "capability": {
+                "reasoning": {
+                    "mode_payloads": {"on": {}},
+                    "effort_path": "reasoning_effort",
+                    "effort_values": {"high": "high"},
+                }
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    path = f"/api/v1/admin/providers/{provider['id']}"
+    try:
+        model = (
+            await client.post(
+                path + "/models",
+                json={
+                    "model_id": "manual-reason",
+                    "display_name": "Manual reasoning",
+                    "context_window": 8192,
+                    "max_tokens": 1024,
+                    "reasoning": True,
+                },
+            )
+        ).json()
+        configured = await client.put(
+            "/api/v1/admin/model-presets",
+            json={
+                "tiers": {
+                    "pro": {
+                        "enabled": True,
+                        "primary": provider["slug"] + "/manual-reason",
+                        "fallbacks": [],
+                    }
+                },
+                "custom_presets": [],
+                "default_preset": "pro",
+                "task_routing": {},
+            },
+        )
+        assert configured.status_code == 200, configured.text
+        tested = await client.post(path + f"/models/{model['id']}/test")
+        assert tested.json()["overall"] == "fail", tested.text
+        steps = {step["name"]: step["status"] for step in tested.json()["steps"]}
+        assert steps["reasoning"] == "fail" and steps["tools"] == steps["streaming"] == "pass"
+        after = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
+        current = next(p for p in after if p["key"] == "pro")
+        assert current["reasoning_modes"] == [] and current["reasoning_efforts"] == []
+        assert (await client.get(path)).json()["models"][0]["enabled"] is True
+        edited = await client.patch(
+            path,
+            json={
+                "base_url": "http://localhost:8317/other/v1",
+                "expected_configuration_revision": provider["configuration_revision"],
+            },
+        )
+        assert edited.status_code == 200, edited.text
+        stale = (await client.get(f"/api/v1/ws/{ws_id}/model-presets")).json()["presets"]
+        assert next(p for p in stale if p["key"] == "pro")["reasoning_modes"] == ["on"]
     finally:
         row = await db_session.get(Provider, provider["id"])
         await db_session.execute(
