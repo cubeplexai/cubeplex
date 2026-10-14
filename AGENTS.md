@@ -45,9 +45,21 @@ Full-stack agent platform.
     pre-PR.
 12. **Plain language in docs/specs.** Say what happens and why. No invented
     jargon.
-13. **Docs ship with the code.** User-facing change → update matching
-    `docs/site/docs/` page in the **same PR**. New subsystem → new page (only
-    sanctioned new-doc exception). Missing screenshot → placeholder, never a
+13. **Docs ship with the code in English and Chinese.** User-facing change →
+    update both matching pages in the **same PR**:
+
+    - English: `docs/site/docs/<relative-path>`
+    - 简体中文: `docs/site/i18n/zh-Hans/docusaurus-plugin-content-docs/current/<relative-path>`
+
+    Changes to either language require the corresponding update in the other,
+    including new pages, renames, and deletions. Keep behavior, commands, limits,
+    links, and screenshot instructions consistent; English fallback is not a
+    substitute for a Chinese update. Before committing, inspect the PR diff
+    against its base and verify every changed product-doc page has its matching
+    language update and equivalent content. Do not claim documentation is done
+    after updating only one language.
+    New subsystem → new page in both languages (only sanctioned new-doc
+    exception). Missing screenshot → placeholder in both languages, never a
     silent gap. Mapping:
     [docs/dev/plans/2026-06-23-docs-overhaul.md](docs/dev/plans/2026-06-23-docs-overhaul.md)
 14. **PR titles** are a brief description only. No "Codex-generated", "[WIP]",
