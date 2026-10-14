@@ -1,6 +1,6 @@
 # Model discovery and batch import
 
-**Status:** Design reviewed; activation after edits awaits a product decision
+**Status:** Design reviewed; product decisions resolved
 
 **Date:** 2026-10-13
 
@@ -111,13 +111,15 @@ Add **Discover models** to the provider detail. Use the saved credential without
 
 - Exact `(provider_id, model_id)` matches are labeled **Already added** and unchecked.
 - Import skips existing rows and never overwrites them.
-- Show proposed differences for existing rows. Applying an edit uses the existing explicit model/provider update flow and requires retesting the affected effective configuration.
+- Show proposed differences for existing rows. Applying an edit uses the existing explicit model/provider update flow and marks affected verification evidence stale; the administrator can retest without interrupting continued use.
 - A complete live listing can label a saved model **Not in the current listing**. This does not delete, disable, or rename it. An incomplete or failed listing cannot establish that a model disappeared.
 - System-provider discovery, model import, and configuration edits remain read-only for organization administrators, following the existing system-provider rule.
 
 Discovery results must not change conversation model references or model presets. New models use the existing provider slug and exact advertised ID.
 
-The user is deciding whether an explicit runtime configuration edit to an already enabled model pauses affected models until retesting, or leaves them enabled with a stale warning. This concerns endpoint/key/capability changes, not discovery refresh, imports of unrelated models, labels, or prices. Both policies preserve the strict gate for first activation of newly imported models. Resolve this choice before implementing configuration-edit enablement behavior; do not infer it from the legacy cutover rule.
+Editing the endpoint, calling key, limits, or effective capability of an already enabled model preserves its enabled flag and continued use. Show **Enabled · Verification pending** for affected models and offer retesting. Stale evidence alone cannot remove them from the picker, active preset chains, or runtime eligibility. New calls use the edited configuration; already admitted executions retain their frozen configuration. Discovery refresh, unrelated imports, labels, and prices do not stale verification.
+
+For imported models, first activation and any later disabled-to-enabled transition still require a current successful test. An update that leaves `enabled=true` is continued use, not another activation, and must not invoke that transition gate. An administrator can explicitly disable a model at any time. Existing handling of actual authentication, connectivity, and request failures remains applicable; continued-use policy does not present stale evidence as a current passing test.
 
 ## 5. Endpoint discovery policy
 
@@ -302,15 +304,17 @@ Requests originate from the CubePlex backend. Browser requests retain existing C
 
 Batch import writes disabled rows, so the existing never-tested-is-ready fallback cannot expose newly discovered models. The server, including the normal model-enable update path for newly imported rows, enforces the gate; hiding an enable button is insufficient.
 
+Keep activation eligibility separate from continued-use eligibility. Configuration edits invalidate verification evidence without disabling an enabled model or blocking it merely for stale evidence. Retesting is available while the model remains enabled. For imported models, a later explicit disable ends continued use, and re-enabling requires the current activation gate. Report enablement and verification state separately in admin and workspace responses.
+
 Run provider liveness once, then model-level tests with bounded concurrency of two models. Respect cancellation and per-model deadlines; failures on one model do not prevent testing the remaining selections unless provider authentication/connectivity fails. A 429 remains a retryable diagnostic, not proof that a model does not exist.
 
 Reuse streaming, tool-call, temperature, and usage probes. Test reasoning only for controls that are actually advertised by the reviewed configuration. Skipping an unsupported off mode is not a passing off-mode test. Use the selected model's real capability/limits rather than the existing probe's generic 8,192-context/16-output-token model declaration where that would distort results. Apply a small probe output budget compatible with the tested reasoning budget, never exceeding the selected model's configured output limit; do not request the full advertised maximum merely to test connectivity.
 
 The saved context and output limits must also reach the runtime model specification. Verify that the binding path uses them, including fallback-chain members, rather than silently substituting adapter defaults. This is part of making imported configuration effective, not a redesign of the provider runtime.
 
-Streaming and an actual tool-call result are required for agent activation. Temperature/usage warnings do not block activation. If advertised reasoning or image input fails its probe, that configuration cannot be enabled unchanged. The administrator can explicitly remove the optional capability and rerun the required chat tests. A declared image-input capability requires a bounded image-input probe before exposing it in the model picker; this is additional coverage, since the current model probe does not exercise vision.
+Streaming and an actual tool-call result are required for agent activation. Temperature/usage warnings do not block activation. If advertised reasoning or image input fails its probe, that configuration cannot transition from disabled to enabled unchanged. The administrator can explicitly remove the optional capability and rerun the required chat tests. A newly advertised image-input capability requires a bounded image-input probe before exposing it in the model picker; this is additional coverage, since the current model probe does not exercise vision. An already enabled model's previously verified and still-declared image support remains available with a stale warning after an endpoint/key edit; a newly added image capability cannot inherit that evidence. Current negative capability evidence restricts the corresponding advertised control.
 
-For an active primary/fallback chain, expose only input modalities supported by every configured member, using each member's reviewed and, for imported optional image support, verified configuration. The model picker, image-injection gate, and admission validation use the same intersection. A mixed text-only/image chain cannot accept an image payload or inject image messages; reject unsupported user input before admission and explain which chain configuration prevents it. Do not forward images to unsupported fallback members.
+For an active primary/fallback chain, expose only input modalities supported by every configured member, using each member's reviewed and, for imported optional image support, verified configuration subject to the continued-use rule above. The model picker, image-injection gate, and admission validation use the same intersection. A mixed text-only/image chain cannot accept an image payload or inject image messages; reject unsupported user input before admission and explain which chain configuration prevents it. Do not forward images to unsupported fallback members.
 
 Probe results state the evidence: request parameters accepted, tool call observed, streaming observed, usage reported, and image-input behavior observed. Parameter acceptance alone does not prove the provider honored an effort level. Lightweight tests do not establish maximum context/output limits or price correctness.
 
@@ -370,11 +374,11 @@ The implementation is accepted when these invariants hold:
 8. Import rejects another organization/user's preview, changed credentials/configuration, expired previews, non-chat selections, and unresolved required fields before any write.
 9. Repeated/concurrent imports create one row per provider/model ID, preserve existing edits, and atomically save each new row with its capability override. Provider/credential/receipt creation is atomic and recoverable after a lost response; recovery after deletion returns a terminal outcome and cannot recreate the provider. A stale provider form cannot delete newly imported overrides.
 10. Newly imported models remain disabled until required tests pass for their current configuration. Direct API enablement cannot bypass this gate.
-11. Adding an unrelated model does not stale prior tests. Changing a tested model's transport/capability does stale its result and prevents activation until retested. Older same-configuration probes and delayed runtime writeback cannot replace newer authoritative evidence. Legacy capability-only passes remain historical. Runtime binding uses the saved context/output limits.
+11. Adding an unrelated model does not stale prior tests. Changing a tested model's transport/capability does stale its result, preserves continued use when already enabled, and displays verification pending. Staleness alone cannot hide it from selection or routing. Imported models that are disabled cannot activate until retested. Older same-configuration probes and delayed runtime writeback cannot replace newer authoritative evidence. Legacy capability-only passes remain historical. New calls use the edited configuration and saved limits; admitted executions retain their frozen configuration.
 12. Partial test success enables only successful selections. Individual retries do not recreate rows or retest every previously successful model.
 13. A browser business-flow test protects preview invalidation and interrupted/retried SSE behavior through the real Next proxy; it does not merely count rendered model rows.
 14. A nightly local-CLIProxyAPI flow starts from the CLIProxyAPI vendor preset, discovers the then-current advertised list, enriches selected chat models, imports and verifies them, and exercises one tool-using conversation. It asserts relationships and gating rather than pinning the research count of 42 or vendor limits.
 15. Null/default reasoning survives client state, API validation, execution admission, resume, and runtime binding. Models with unknown mappings or an empty fallback-control intersection can perform basic chat without falsely claiming reasoning is off. Unknown support displays as unknown in both the model center and picker. Explicit unsupported reasoning choices and chain-incompatible image inputs are rejected before generation; probes and runtime apply the same supported extra request parameters.
 16. The matching English/Chinese model-management pages describe equivalent behavior, commands, limitations, and screenshot instructions.
 
-This document fixes the design boundary. Implementation sequencing and file-level work are in the [implementation plan](../plans/2026-10-13-model-discovery.md). Local design review completed on 2026-10-13; the activation-after-edit choice remains pending before implementation.
+This document fixes the design boundary. Implementation sequencing and file-level work are in the [implementation plan](../plans/2026-10-13-model-discovery.md). Local design review completed on 2026-10-13. On 2026-10-14, the continued-use policy for already enabled models was confirmed; product decisions are resolved.
