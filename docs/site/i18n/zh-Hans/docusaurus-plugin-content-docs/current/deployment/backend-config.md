@@ -407,6 +407,14 @@ logging:
 前面已有反代记录请求时，把 `access_log` 设为 `false`。往 `verbose_modules` 加
 部分 logger 名可选择性重开 DEBUG。
 
+关机时，超过 `api.transport_shutdown_timeout_seconds` 仍未结束的 HTTP 请求和
+SSE 流会被 Uvicorn 取消。只有异常类型为 `CancelledError`，且取消原因恰好为
+`Task cancelled, timeout graceful shutdown exceeded` 时，Uvicorn 的 ASGI 异常
+日志才会以 INFO 级别输出，不附带堆栈。其他取消和应用异常保留原来的级别与堆栈。
+Uvicorn 的超时摘要（`Cancel N running task(s), timeout graceful shutdown exceeded`）
+仍为 ERROR，让强制关闭传输连接的情况保持可见。这只改变日志；取消仍会继续传播，
+agent run 的排空流程不变。
+
 ## 生命周期
 
 ```yaml

@@ -11,7 +11,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 class CancellationMiddleware:
-    """Handle request cancellation (client disconnect) gracefully."""
+    """Log request cancellation without suppressing it or assuming its cause."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -24,9 +24,8 @@ class CancellationMiddleware:
         try:
             await self.app(scope, receive, send)
         except asyncio.CancelledError:
-            # 客户端断开连接，记录 debug 级别日志，不污染错误日志
             logger.debug(
-                "Request cancelled (client disconnect): {} {}",
+                "Request cancelled: {} {}",
                 scope["method"],
                 scope["path"],
             )

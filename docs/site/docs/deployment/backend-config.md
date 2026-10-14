@@ -442,6 +442,16 @@ logging:
 Set `access_log: false` behind a proxy that already logs requests. Add partial
 logger names to `verbose_modules` to selectively re-enable DEBUG.
 
+During shutdown, HTTP requests and SSE streams that exceed
+`api.transport_shutdown_timeout_seconds` are cancelled by Uvicorn. Its ASGI
+exception report is logged at INFO without a traceback only when the exception
+is `CancelledError` with the exact reason
+`Task cancelled, timeout graceful shutdown exceeded`. Other cancellations and
+application exceptions keep their original level and traceback. Uvicorn's
+timeout summary (`Cancel N running task(s), timeout graceful shutdown exceeded`)
+remains ERROR so forced transport shutdown stays visible. This changes logging
+only; cancellation still propagates and agent run drain is unchanged.
+
 ## Lifecycle
 
 ```yaml

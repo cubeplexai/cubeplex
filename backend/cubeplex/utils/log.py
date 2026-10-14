@@ -7,6 +7,7 @@ Provides centralized logging setup using loguru with:
 - Integration with standard logging
 """
 
+import asyncio
 import atexit
 import json
 import logging
@@ -176,8 +177,19 @@ class InterceptHandler(logging.Handler):
         should_capture_exception = record.exc_info or (
             record.levelno >= logging.ERROR and sys.exc_info()[0] is not None
         )
+        message = record.getMessage()
+        if (
+            record.name == "uvicorn.error"
+            and message.strip() == "Exception in ASGI application"
+            and record.exc_info is not None
+            and isinstance(record.exc_info[1], asyncio.CancelledError)
+            and record.exc_info[1].args == ("Task cancelled, timeout graceful shutdown exceeded",)
+        ):
+            level = "INFO"
+            message = "ASGI request cancelled after graceful shutdown timeout"
+            should_capture_exception = False
 
-        logger.opt(depth=depth, exception=should_capture_exception).log(level, record.getMessage())
+        logger.opt(depth=depth, exception=should_capture_exception).log(level, message)
 
 
 def init(log_path: str | None = None, debug: bool | None = None) -> None:
