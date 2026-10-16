@@ -45,18 +45,18 @@ export function MermaidDiagram({ source }: { source: string }) {
     }
   }, [id, source, theme])
 
-  if (result?.source === source && result.theme === theme) {
-    return (
-      <div
-        className="not-prose my-4 max-w-full overflow-x-auto [&_svg]:mx-auto"
-        dangerouslySetInnerHTML={{ __html: result.svg }}
-      />
-    )
-  }
-
   return (
-    <pre>
-      <code className="language-mermaid">{source}</code>
-    </pre>
+    <div data-mermaid-source={source} className="my-4 max-w-full overflow-x-auto">
+      {result?.source === source && result.theme === theme ? (
+        <div
+          className="not-prose [&_svg]:mx-auto"
+          dangerouslySetInnerHTML={{ __html: result.svg }}
+        />
+      ) : (
+        <pre>
+          <code className="language-mermaid">{source}</code>
+        </pre>
+      )}
+    </div>
   )
 }

@@ -14,12 +14,13 @@ function extractTokens(text: string): string[] {
 }
 
 interface TextEntry {
-  node: Text
+  text: string
+  block: HTMLElement | null
   start: number
 }
 
 /**
- * Search the container's concatenated visible text for a token sequence
+ * Search rendered text (original source for Mermaid diagrams) for a token sequence
  * derived from the chunk, then collect every block-level element whose
  * text overlaps the matched range.
  *
@@ -27,16 +28,39 @@ interface TextEntry {
  * because we search one continuous string, not per-block.
  */
 function findChunkBlocks(container: HTMLElement, chunkText: string): HTMLElement[] {
-  // 1. Collect text nodes → build concatenated DOM text + offset map
+  // 1. Diagrams keep their source on a stable wrapper; SVG labels omit syntax tokens.
   const entries: TextEntry[] = []
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const walker = document.createTreeWalker(
+    container,
+    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        if (node.parentElement?.closest('[data-mermaid-source]')) return NodeFilter.FILTER_REJECT
+        if (
+          node.nodeType === Node.TEXT_NODE ||
+          (node instanceof HTMLElement && node.hasAttribute('data-mermaid-source'))
+        ) {
+          return NodeFilter.FILTER_ACCEPT
+        }
+        return NodeFilter.FILTER_SKIP
+      },
+    },
+  )
   let total = 0
   while (walker.nextNode()) {
-    const node = walker.currentNode as Text
-    entries.push({ node, start: total })
-    total += node.textContent?.length ?? 0
+    const node = walker.currentNode
+    const text =
+      node instanceof HTMLElement
+        ? `mermaid\n${node.dataset.mermaidSource ?? ''}`
+        : (node.textContent ?? '')
+    const block =
+      node instanceof HTMLElement
+        ? node
+        : (node.parentElement?.closest<HTMLElement>(BLOCK_SEL) ?? null)
+    entries.push({ text, block, start: total })
+    total += text.length
   }
-  const domText = entries.map((e) => e.node.textContent ?? '').join('')
+  const domText = entries.map((e) => e.text).join('')
 
   // 2. Extract tokens from chunk (markdown-agnostic)
   const tokens = extractTokens(chunkText)
@@ -69,9 +93,9 @@ function findChunkBlocks(container: HTMLElement, chunkText: string): HTMLElement
       // 4. Map matched range [firstIdx, endPos] back to block elements
       const blocks: HTMLElement[] = []
       for (const entry of entries) {
-        const nodeEnd = entry.start + (entry.node.textContent?.length ?? 0)
+        const nodeEnd = entry.start + entry.text.length
         if (nodeEnd <= firstIdx || entry.start >= endPos) continue
-        const block = entry.node.parentElement?.closest(BLOCK_SEL) as HTMLElement | null
+        const block = entry.block
         if (block && !blocks.includes(block)) blocks.push(block)
       }
       if (blocks.length > 0) return blocks
