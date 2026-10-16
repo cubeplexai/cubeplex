@@ -74,7 +74,8 @@ export type AgentEventType =
  * Slider values used by the composer. ``off`` maps to ``ReasoningControl.mode =
  * "off"``; the other values map to ``mode = "on"`` with the same effort.
  */
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
+export type ThinkingLevel =
+  'default' | 'off' | 'on' | 'auto' | 'minimal' | 'low' | 'medium' | 'high' | 'max'
 
 export type ReasoningMode = 'off' | 'auto' | 'on'
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'max'
@@ -82,7 +83,7 @@ export type ReasoningSummary = 'none' | 'auto' | 'detailed' | 'summarized'
 
 export interface ReasoningControl {
   mode: ReasoningMode
-  effort: ReasoningEffort
+  effort?: ReasoningEffort
   summary: ReasoningSummary
 }
 

@@ -2,6 +2,7 @@ import { useTranslations } from 'next-intl'
 import type { Readiness } from '@cubeplex/core'
 
 const MAP = {
+  verification_pending: { dot: 'bg-warning-solid', key: 'verificationPending' },
   ready: { dot: 'bg-success-solid', key: 'ready' },
   degraded: { dot: 'bg-warning-solid', key: 'degraded' },
   stale: { dot: 'bg-warning-solid', key: 'stale' },

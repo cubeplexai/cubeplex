@@ -135,6 +135,11 @@ def _build_prompt(snippet: str, ui_language: str) -> str:
     return prompt.replace(UI_LANGUAGE_PLACEHOLDER, ui_language)
 
 
+def title_output_limit(bound: Any) -> int:
+    members = getattr(bound, "chain", None) or (bound,)
+    return int(min(LLM_MAX_TOKENS, *(member.spec.max_tokens for member in members)))
+
+
 async def _generate_title(
     session: AsyncSession,
     org_id: str,
@@ -149,62 +154,50 @@ async def _generate_title(
     """
     from cubeloop.providers.base import ReasoningControl, StreamOptions, TextContent, UserMessage
 
-    from cubeplex.llm.runtime_writeback import (
-        schedule_runtime_status_writeback as _schedule_writeback,
-    )
-
     snap = await load_llm_snapshot(session, org_id, encryption_backend)
     preset = resolve_task_preset(snap, "title")
     # cache_policy_factory=None → cubeloop's DefaultCacheMarkerPolicy. Title
     # generation is a one-shot call with no prior conversation context, so
     # no cache breakpoints will be inserted regardless of the policy used.
     bound = build_chain_model(snap, preset)
-    provider_slug = bound.spec.provider_id
-    model_id = bound.spec.id
+    bound.spec.max_tokens = title_output_limit(bound)
 
     messages = [UserMessage(content=[TextContent(text=full_prompt)])]
 
-    try:
-        if tracer is not None:
-            async with tracer.oneshot(
-                model=bound,
-                operation="conversation_title",
-                metadata=trace_metadata,
-            ) as title_session:
-                raw_text = cast(
-                    str,
-                    await title_session.generate(
-                        system="",
-                        messages=messages,
-                        max_output_tokens=LLM_MAX_TOKENS,
-                    ),
-                )
-        else:
-            stream = await bound.provider.stream(
-                model=bound.spec,
-                messages=messages,
-                system_prompt="",  # title-gen prompt is fully in the user message
-                # Force reasoning off: title-gen is latency-sensitive and a
-                # reasoning model here can stall (the 30s timeout incident).
-                options=StreamOptions(reasoning=ReasoningControl(mode="off")),
+    if tracer is not None:
+        async with tracer.oneshot(
+            model=bound,
+            operation="conversation_title",
+            metadata=trace_metadata,
+        ) as title_session:
+            raw_text = cast(
+                str,
+                await title_session.generate(
+                    system="",
+                    messages=messages,
+                    max_output_tokens=title_output_limit(bound),
+                ),
             )
-
-            parts: list[str] = []
-            async for evt in stream:
-                if evt.type == "text_delta":
-                    if evt.delta:
-                        parts.append(evt.delta)
-                elif evt.type == "error":
-                    raise RuntimeError(evt.error_message or "title generation failed")
-                elif evt.type == "done":
-                    break
-            raw_text = "".join(parts)
-    except BaseException as _exc:
-        # Out-of-band, best-effort runtime status writeback (spec §4.4a).
-        _schedule_writeback(org_id=org_id, provider_slug=provider_slug, model_id=model_id, exc=_exc)
-        raise
     else:
-        _schedule_writeback(org_id=org_id, provider_slug=provider_slug, model_id=model_id, exc=None)
+        stream = await bound.provider.stream(
+            model=bound.spec,
+            messages=messages,
+            system_prompt="",  # title-gen prompt is fully in the user message
+            # Force reasoning off: title-gen is latency-sensitive and a
+            # reasoning model here can stall (the 30s timeout incident).
+            options=StreamOptions(reasoning=ReasoningControl(mode="off")),
+        )
+
+        parts: list[str] = []
+        async for evt in stream:
+            if evt.type == "text_delta":
+                if evt.delta:
+                    parts.append(evt.delta)
+            elif evt.type == "error":
+                raise RuntimeError(evt.error_message or "title generation failed")
+            elif evt.type == "done":
+                break
+        raw_text = "".join(parts)
     return raw_text
 
 

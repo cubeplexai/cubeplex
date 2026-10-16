@@ -593,7 +593,14 @@
       "label": "上下文已压缩",
       "manual": "上下文已压缩",
       "auto": "上下文已自动压缩"
-    }
+    },
+    "thinkingLevelDefault": "模型默认",
+    "thinkingLevelOn": "开启推理",
+    "thinkingLevelAuto": "自动",
+    "thinkingLevelMinimal": "最低",
+    "verificationPending": "待验证",
+    "verificationPendingHint": "已启用模型仍可使用，请管理员重新测试。",
+    "reasoningUnknown": "未知"
   },
   "subagent": {
     "cluster": "Agent 集群",
@@ -933,7 +940,8 @@
       "providerError": "Provider 不可达",
       "authError": "认证失败",
       "modelError": "模型测试失败",
-      "unavailable": "不可用"
+      "unavailable": "不可用",
+      "verificationPending": "待验证"
     },
     "wizard": {
       "title": "添加 Provider",
@@ -998,7 +1006,9 @@
           "provider_name_conflict": "已存在同名 provider，请换一个名称。",
           "invalid_provider_slug": "slug 只能包含小写字母、数字和连字符（最长 64 字符）。",
           "provider_oauth_not_implemented": "暂不支持 OAuth 认证。"
-        }
+        },
+        "loading": "正在加载已保存配置…",
+        "reload": "重新加载已保存配置"
       },
       "capability": {
         "label": "Capability JSON",
@@ -1040,8 +1050,59 @@
           "fail": "无法启用",
           "unavailable": "无法启用"
         }
-      }
-    }
+      },
+      "manualSetup": "保存供应商并手动配置"
+    },
+    "discovery": {
+      "title": "发现模型",
+      "discover": "列出可用模型",
+      "working": "处理中…",
+      "hint": "可用性来自这个端点。导入前请审核参数；导入的模型通过测试后才能启用。",
+      "managementKey": "CLIProxyAPI 管理密钥（可选）",
+      "managementHint": "仅用于本次发现，不会保存；与调用 API 的密钥不同。",
+      "staticHint": "这个供应商暂没有经过验证的发现接口。这里是预置建议，请使用手动配置。",
+      "count": "端点返回了 {count} 个模型",
+      "failed": "发现失败",
+      "selectAll": "全选聊天候选模型",
+      "clear": "清空选择",
+      "enrich": "加载所选模型详情（最多 100 个）",
+      "groupHint": "将同一组已审核参数应用到所选模型，并确认聊天用途和文本输入。留空的上限保留其已有来源。",
+      "applyGroup": "确认聊天/文本并应用上限",
+      "confirmSuggestions": "确认所选模型所有已显示的建议",
+      "existing": "已配置",
+      "complete": "必需参数完整",
+      "needsReview": "待审核参数",
+      "fields": "参数及来源",
+      "unknown": "未知",
+      "declared": "端点声明",
+      "suggested": "建议值，需确认",
+      "confirmed": "已确认",
+      "conflict": "来源冲突",
+      "resolve": "解决{field}冲突",
+      "chooseSource": "选择来源…",
+      "confirmField": "确认这个建议值",
+      "override": "填写已审核的值",
+      "confirmChat": "确认这是聊天模型",
+      "declareImage": "声明支持文本与图片输入（需视觉测试）",
+      "import": "导入所选 {count} 个模型",
+      "purpose": "用途",
+      "context_window": "上下文窗口",
+      "max_tokens": "输出上限",
+      "input_modalities": "输入类型",
+      "output_modalities": "输出类型",
+      "reasoning": "推理支持",
+      "reasoning_levels": "推理控制",
+      "capability": "调用配置",
+      "cost_input": "输入价格 / 百万 token",
+      "cost_output": "输出价格 / 百万 token",
+      "cost_cache_read": "缓存读取价格 / 百万 token",
+      "cost_cache_write": "缓存写入价格 / 百万 token"
+    },
+    "priceUnknown": "未知",
+    "enableVerified": "启用已验证模型",
+    "verificationRequired": "启用前请运行模型测试。",
+    "modelCapability": "模型调用配置",
+    "useProviderCapability": "使用供应商配置"
   },
   "adminSettings": {
     "title": "通用",

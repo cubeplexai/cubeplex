@@ -27,15 +27,16 @@ The preset marked as the workspace default shows a small "Default" badge in the 
 
 ## Thinking (extended reasoning)
 
-Some models support **extended thinking** — a mode where the agent reasons step-by-step before producing its final answer. CubePlex exposes this as a separate **Effort** control (a "Faster → Smarter" slider) next to the preset picker.
+Some models support **extended thinking** — a mode where the agent reasons step-by-step before producing its final answer. CubePlex exposes this as an **Effort** control inside the model picker.
 
 ### Thinking levels
 
 | Level      | Behavior                                                       |
 | ---------- | -------------------------------------------------------------- |
+| **Model default** | Use saved endpoint parameters and the model default. |
 | **Off**    | No extended thinking. The agent responds directly.             |
 | **Low**    | Brief internal reasoning. Fast, low cost.                      |
-| **Medium** | Moderate reasoning depth. Good default for most tasks.         |
+| **Medium** | Moderate reasoning depth, when supported by the selected chain.         |
 | **High**   | Deep reasoning. Better for complex analytical or coding tasks. |
 | **Max**    | Maximum reasoning effort. Use for the hardest problems.        |
 
@@ -88,3 +89,9 @@ See the [Model Management](../../admin/models.md) admin guide for details on how
 - **Turn thinking off for simple exchanges.** Extended reasoning adds latency and cost. Use it when the task genuinely benefits from step-by-step analysis.
 - **Watch for the thinking badge.** If you set thinking to high earlier and forgot, the badge reminds you. Click the control to lower it when you no longer need deep reasoning.
 - **Try different models on the same task.** If you are not satisfied with a response, switch presets and re-ask. Different models have different strengths and the same question can get a better answer from a different model.
+
+## Model defaults and available controls
+
+**Model default** is the initial reasoning choice. It leaves reasoning to the saved endpoint configuration and the model's own default. Explicit Off, On, Automatic, and effort levels appear only when every enabled member of the preset's fallback chain has the corresponding mapping. Changing presets resets an unsupported choice to Model default. An unknown reasoning declaration appears as Unknown rather than No.
+
+Input types also require support from every fallback member. An imported model's image input is offered only after its vision test passes. If an enabled model's endpoint, key, or limits change, its verification warning does not remove it from the picker; ask an admin to retest. Disabled imported models need a current passing test before activation.

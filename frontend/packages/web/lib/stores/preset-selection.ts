@@ -11,6 +11,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { reasoningLevels } from '@/lib/reasoning-control'
 import type { ThinkingLevel, WorkspacePresetSummary } from '@/lib/types/presets'
 
 export type PresetFetchStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -28,7 +29,7 @@ export interface PresetSelectionState {
    * model take effect without the user re-selecting. `null` = workspace default.
    */
   modelKey: string | null
-  /** Selected thinking level; default `"medium"`. */
+  /** Selected thinking level; default `"default"`. */
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
@@ -95,13 +96,52 @@ export function getPresetSelectionStore(
         presetFetchStatus: 'idle' as PresetFetchStatus,
         presetFetchError: null,
         modelKey: null,
-        thinking: 'medium' as ThinkingLevel,
-        setPresets: (presets) => set({ presets }),
+        thinking: 'default' as ThinkingLevel,
+        setPresets: (presets) =>
+          set((state) => {
+            const selected =
+              presets.find((p) => p.key === state.modelKey) ??
+              presets.find((p) => p.is_default) ??
+              null
+            return {
+              presets,
+              thinking: reasoningLevels(selected).includes(state.thinking)
+                ? state.thinking
+                : 'default',
+            }
+          }),
         setPresetFetchState: (presetFetchStatus, presetFetchError = null) =>
           set({ presetFetchStatus, presetFetchError }),
-        setModelKey: (modelKey) => set({ modelKey }),
-        setThinking: (thinking) => set({ thinking }),
-        reset: () => set({ modelKey: null, thinking: 'medium' as ThinkingLevel }),
+        setModelKey: (modelKey) =>
+          set((state) => {
+            const selected =
+              state.presets.find((p) => p.key === modelKey) ??
+              state.presets.find((p) => p.is_default) ??
+              null
+            return {
+              modelKey,
+              thinking: reasoningLevels(selected).includes(state.thinking)
+                ? state.thinking
+                : 'default',
+            }
+          }),
+        setThinking: (thinking) =>
+          set((state) => {
+            const selected =
+              state.presets.find((p) => p.key === state.modelKey) ??
+              state.presets.find((p) => p.is_default) ??
+              null
+            const allowed = reasoningLevels(selected)
+            return {
+              thinking: allowed.includes(thinking)
+                ? thinking
+                : allowed.includes('on') &&
+                    ['minimal', 'low', 'medium', 'high', 'max'].includes(thinking)
+                  ? 'on'
+                  : 'default',
+            }
+          }),
+        reset: () => set({ modelKey: null, thinking: 'default' as ThinkingLevel }),
       }),
       {
         name: storageKey(wsId),
@@ -123,7 +163,7 @@ export function getPresetSelectionStore(
         // orphan. v4 changed the default thinking level off → medium. Drop
         // any persisted `thinking` so it re-defaults to medium; keep the
         // model choice.
-        version: 5,
+        version: 6,
         migrate: (persisted, _version) => {
           const p = (persisted as Partial<PresetSelectionState> & { modelPresetKey?: string }) ?? {}
           return { modelKey: p.modelKey ?? p.modelPresetKey ?? null } as PresetSelectionState

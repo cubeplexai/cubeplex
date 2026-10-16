@@ -30,8 +30,13 @@ export interface ApiClient {
     path: string,
     options?: { headers?: Record<string, string>; cache?: RequestCache },
   ): Promise<Response>
-  post(path: string, body: unknown): Promise<Response>
-  postRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<Response>
+  post(path: string, body: unknown, signal?: AbortSignal): Promise<Response>
+  postRaw(
+    path: string,
+    body: unknown,
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<Response>
   postForm(path: string, form: Record<string, string>): Promise<Response>
   put(path: string, body: unknown): Promise<Response>
   patch(path: string, body: unknown): Promise<Response>
@@ -129,16 +134,18 @@ export function createApiClient(baseUrl: string): ApiClient {
         ...(options?.cache ? { cache: options.cache } : {}),
       })
     },
-    post(path, body) {
+    post(path, body, signal) {
       return doFetch(path, {
         method: 'POST',
+        signal,
         headers: buildHeaders('POST', { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       })
     },
-    postRaw(path, body, headers) {
+    postRaw(path, body, headers, signal) {
       return doFetch(path, {
         method: 'POST',
+        signal,
         body: JSON.stringify(body),
         headers: buildHeaders('POST', { 'Content-Type': 'application/json', ...(headers ?? {}) }),
       })

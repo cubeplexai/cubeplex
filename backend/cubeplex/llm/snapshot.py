@@ -15,12 +15,18 @@ from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.llm.config import ProviderConfig
 from cubeplex.llm.errors import CorruptPresetsRowError
+from cubeplex.llm.readiness import (
+    configuration_fingerprint,
+    provider_configuration_fingerprint,
+    verification_pending,
+)
 from cubeplex.llm.snapshot_schema import ModelPresetsConfig, ModelTier, TierSetting
 
 logger = logging.getLogger(__name__)
@@ -69,42 +75,31 @@ async def _load_providers(
     from cubeplex.models.provider import Provider as DBP
 
     stmt = (
-        select(DBP)
-        .outerjoin(
-            DBO,
-            (DBP.id == DBO.provider_id) & (DBO.org_id == org_id),  # type: ignore[arg-type]
-        )
-        .where(
-            (DBP.org_id == None) | (DBP.org_id == org_id),  # type: ignore[arg-type]  # noqa: E711
-        )
-        .where(func.coalesce(DBO.enabled, DBP.enabled, True))
+        select(DBP, DBM, Credential)
+        .outerjoin(DBO, and_(col(DBP.id) == col(DBO.provider_id), col(DBO.org_id) == org_id))
+        .outerjoin(DBM, and_(col(DBM.provider_id) == col(DBP.id), col(DBM.enabled)))
+        .outerjoin(Credential, col(Credential.id) == col(DBP.credential_id))
+        .where(col(DBP.org_id).is_(None) | (col(DBP.org_id) == org_id))
+        .where(func.coalesce(col(DBO.enabled), col(DBP.enabled), True))
+        .order_by(col(DBP.org_id).nullsfirst(), col(DBP.id), col(DBM.model_id))
     )
-    rows = (await session.execute(stmt)).scalars().all()
-
-    # Batch-load enabled models for all providers in one query (was: one
-    # SELECT per provider — N+1).
-    provider_ids = [p.id for p in rows]
-    models_by_provider: dict[str, list[DBM]] = {pid: [] for pid in provider_ids}
-    if provider_ids:
-        models_stmt = select(DBM).where(
-            DBM.provider_id.in_(provider_ids),  # type: ignore[attr-defined]
-            DBM.enabled,  # type: ignore[arg-type]
-        )
-        for m in (await session.execute(models_stmt)).scalars().all():
-            models_by_provider.setdefault(m.provider_id, []).append(m)
-
-    # Batch-load credentials in one query (was: session.get per provider).
-    cred_ids = [p.credential_id for p in rows if p.credential_id is not None]
+    # One read snapshot keeps endpoint, credential version and model fields consistent.
+    providers_by_id: dict[str, DBP] = {}
+    models_by_provider: dict[str, list[DBM]] = {}
     cred_map: dict[str, Credential] = {}
-    if cred_ids:
-        cred_stmt = select(Credential).where(
-            Credential.id.in_(cred_ids)  # type: ignore[attr-defined]
-        )
-        cred_map = {c.id: c for c in (await session.execute(cred_stmt)).scalars().all()}
+    for provider, model, credential in (await session.execute(stmt)).all():
+        providers_by_id[provider.id] = provider
+        if model is not None:
+            models_by_provider.setdefault(provider.id, []).append(model)
+        if credential is not None:
+            cred_map[credential.id] = credential
+    rows = list(providers_by_id.values())
 
     out: dict[str, ProviderConfig] = {}
     for p in rows:
         models = models_by_provider.get(p.id, [])
+        credential = cred_map.get(p.credential_id) if p.credential_id else None
+        credential_revision = credential.value_revision if credential else 0
         api_key: str | None = None
         if p.credential_id is not None:
             cred = cred_map.get(p.credential_id)
@@ -116,6 +111,15 @@ async def _load_providers(
         out[p.slug] = ProviderConfig.model_validate(
             {
                 "base_url": p.base_url,
+                "provider_db_id": p.id,
+                "org_id": p.org_id,
+                "auth_type": p.auth_type,
+                "credential_revision": credential_revision,
+                "configuration_fingerprint": provider_configuration_fingerprint(
+                    p, credential_revision
+                ),
+                "evidence_revision": p.evidence_revision,
+                "probe_generation": p.probe_generation,
                 "api_key": api_key,
                 "api": p.provider_type,
                 "extra_body": p.extra_body,
@@ -125,6 +129,27 @@ async def _load_providers(
                 "models": [
                     {
                         "id": m.model_id,
+                        "model_db_id": m.id,
+                        "configuration_fingerprint": configuration_fingerprint(
+                            p, m, credential_revision
+                        ),
+                        "evidence_revision": m.evidence_revision,
+                        "probe_generation": m.probe_generation,
+                        "configuration_metadata": m.configuration_metadata,
+                        "reasoning_failed": not verification_pending(p, m, credential_revision)
+                        and any(
+                            step.get("name") == "reasoning" and step.get("status") == "fail"
+                            for step in (m.last_test_summary or {}).get("steps", [])
+                        ),
+                        "image_verified": (
+                            not m.configuration_metadata.get("vision_requires_verification")
+                            or not verification_pending(p, m, credential_revision)
+                        )
+                        and any(
+                            step.get("name") == "vision" and step.get("status") == "pass"
+                            for step in (m.last_test_summary or {}).get("steps", [])
+                        ),
+                        "verification_pending": verification_pending(p, m, credential_revision),
                         "name": m.display_name,
                         "reasoning": m.reasoning,
                         "input": m.input_modalities,

@@ -1201,7 +1201,7 @@ class RunManager:
                         content=content,
                         attachment_ids=tuple(attachments or []),
                         model_key=model_key,
-                        reasoning=reasoning or ReasoningControl(),
+                        reasoning=reasoning,
                     ),
                     snapshot=llm_snapshot,
                 )
@@ -1399,7 +1399,7 @@ class RunManager:
                 attachments=list(attachments or []),
                 ctx=ctx,
                 model_key=model_key,
-                reasoning=reasoning or ReasoningControl(),
+                reasoning=reasoning,
                 llm_snapshot=llm_snapshot,
                 input_metadata=input_metadata,
             ),
@@ -3088,7 +3088,7 @@ class RunManager:
                 publish_stream_event=publish_stream_event,
                 trigger=trigger,
                 model_key=model_key,
-                reasoning=reasoning or ReasoningControl(),
+                reasoning=reasoning,
             )
             extra_ref_holder["steering_agent"] = agent
             # Register as soon as the Agent exists so steers received during
@@ -3277,16 +3277,7 @@ class RunManager:
             # no-op when tracing is disabled (tracer is None).
             from cubeloop.tracing import trace, tracing_context
 
-            from cubeplex.llm.runtime_writeback import (
-                schedule_runtime_status_writeback as _schedule_writeback,
-            )
-
             tracer = getattr(self._app.state, "tracer", None)
-            # Provider/model identity were resolved inside the factory; the
-            # writeback below uses them so the per-run liveness flips still
-            # target the same provider+model the agent actually called.
-            provider_name: str = extra_ref_holder["provider_name"]
-            model_id: str = extra_ref_holder["model_id"]
             # Stamp the run's identity onto the trace spans (recorder writes
             # these as cubeloop.metadata.* on the invoke_agent span). Skip None
             # and stringify so OTel attribute typing is always satisfied.
@@ -3382,25 +3373,8 @@ class RunManager:
                         await self._require_execution_authority(ctx, run_id)
                         await self._begin_execution_finalization(ctx, run_id)
             except BaseException as _run_exc:
-                # Out-of-band, best-effort: a 401/403 flips provider liveness to
-                # "fail"; a model_not_found flips this model to "unavailable".
-                # Never blocks or alters the live request — we re-raise as-is.
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=_run_exc,
-                )
                 raise
             else:
-                # Success clears a stale liveness "fail" via a guarded UPDATE.
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=None,
-                )
-
                 # --- Out-of-band reflection trigger ---
                 # Spawn a detached task that runs a small reflection agent
                 # to decide whether memory_save / memory_update calls are
@@ -3520,9 +3494,14 @@ class RunManager:
                             # falls back to summarize routing, then org default.
                             # Only if snapshot resolution fails use the chat model.
                             assert _snap_ref is not None
+                            from cubeplex.llm.builder import build_bound_model
+
                             _refl_model = resolve_reflection_model(
                                 _snap_ref,
-                                fallback_model=_provider_ref.model(model_id),
+                                fallback_model=build_bound_model(
+                                    _snap_ref,
+                                    f"{extra_ref_holder['provider_name']}/{extra_ref_holder['model_id']}",
+                                ),
                                 run_id=run_id,
                             )
 
@@ -3853,13 +3832,7 @@ class RunManager:
 
             from cubeloop.tracing import trace, tracing_context
 
-            from cubeplex.llm.runtime_writeback import (
-                schedule_runtime_status_writeback as _schedule_writeback,
-            )
-
             tracer = getattr(self._app.state, "tracer", None)
-            provider_name: str = extra_ref_holder["provider_name"]
-            model_id: str = extra_ref_holder["model_id"]
             # turn_kind=respond distinguishes resume spans from the original
             # prompt span when grouped by conversation_id in the trace store.
             _trace_meta = {
@@ -3942,12 +3915,6 @@ class RunManager:
                 ):
                     claim_conflict_reason = "resume claim was replaced before cleanup"
                     raise ResumeConflict(claim_conflict_reason)
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=None,
-                )
                 if final_status == "completed":
                     from cubeplex.streams.hitl_resume import stale_answered_pending
 
@@ -3977,12 +3944,6 @@ class RunManager:
             except BaseException as _run_exc:
                 final_status = "errored"
                 defer_terminal_to_owner = ctx.execution is not None
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=_run_exc,
-                )
                 raise
             finally:
                 # Heartbeat / registration teardown must not depend on Redis
@@ -4115,6 +4076,7 @@ class RunManager:
             ),
             on_failover=on_failover_cb,
             on_retry=on_retry_cb,
+            reasoning=ctx.execution.execution.reasoning if ctx.execution is not None else reasoning,
         )
 
         # Extract downstream-required vars from the bound model so middleware,
@@ -5037,9 +4999,7 @@ class RunManager:
             thread_id=conversation_id,
             middleware=cubeloop_middleware,
             reasoning=(
-                ctx.execution.execution.reasoning
-                if ctx.execution is not None
-                else reasoning or ReasoningControl()
+                ctx.execution.execution.reasoning if ctx.execution is not None else reasoning
             ),
             channel=sandbox_hitl_channel,
             deferred_tool_groups=_deferred_groups or None,
@@ -5489,25 +5449,20 @@ class RunManager:
 
             # Resolve effective model + context_window for the DoneEvent. The
             # actual cubeloop.Provider construction happens inside _run_cubeloop_path.
-            # Stash the snapshot in extra_ref_holder so the subsequent
-            # _build_agent_for_conversation call reuses it instead of loading
-            # the same providers/credentials again (Fix-8). The route already
-            # loaded a snapshot for preset validation — reuse it when passed
-            # in, skipping a second _load_providers + credential-decrypt pass.
+            # Resolve current credentials/configuration when this attempt binds,
+            # including queued starts and resumes. Admission freezes model refs,
+            # not an old credential-bearing snapshot.
             from cubeplex.db.engine import async_session_maker
             from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset
-            from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+            from cubeplex.llm.snapshot import load_llm_snapshot
 
             context_window: int = 0
             try:
-                if isinstance(llm_snapshot, LLMSnapshot):
-                    ctx_snap = llm_snapshot
-                else:
-                    async with async_session_maker() as ctx_session:
-                        ctx_snap = await load_llm_snapshot(
-                            ctx_session, ctx.org_id, self._app.state.encryption_backend
-                        )
-                        await ctx_session.commit()
+                async with async_session_maker() as ctx_session:
+                    ctx_snap = await load_llm_snapshot(
+                        ctx_session, ctx.org_id, self._app.state.encryption_backend
+                    )
+                    await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
                 _ctx_preset = (
                     ctx.execution.execution.model_preset()
@@ -5598,7 +5553,7 @@ class RunManager:
                 trigger=ctx.trigger,
                 extra_ref_holder=extra_ref_holder,
                 model_key=model_key,
-                reasoning=reasoning or ReasoningControl(),
+                reasoning=reasoning,
                 input_metadata=input_metadata,
             )
             # Kick the session-usage aggregate NOW so it overlaps the queue

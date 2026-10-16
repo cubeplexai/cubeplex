@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 
@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { DiscoveryPanel } from './DiscoveryPanel'
 import { ProviderLogo } from './ProviderLogo'
 import { ProviderFormDialog } from './ProviderFormDialog'
 import { ModelFormDialog } from './ModelFormDialog'
@@ -134,10 +135,15 @@ export function ProviderDetail({
   const [testingAll, setTestingAll] = useState(false)
   const [testingConn, setTestingConn] = useState(false)
 
+  const testController = useRef<AbortController | null>(null)
+  useEffect(() => () => testController.current?.abort(), [])
+
   const isSystem = provider.is_system
 
   async function handleTestAll() {
     if (models.length === 0) return
+    testController.current?.abort()
+    testController.current = new AbortController()
     setTestingAll(true)
     setModelError(null)
     try {
@@ -145,6 +151,7 @@ export function ProviderDetail({
         client,
         provider.id,
         models.map((m) => m.id),
+        testController.current.signal,
       )
       // Drain the stream so the backend records each model result.
       for await (const _e of parseTestStream(stream)) {
@@ -343,6 +350,14 @@ export function ProviderDetail({
       )}
 
       <Separator />
+      {!isSystem && (
+        <DiscoveryPanel
+          key={`${provider.id}:${provider.configuration_revision}`}
+          client={client}
+          provider={provider}
+          onImported={() => onRefresh?.()}
+        />
+      )}
 
       <section>
         <div className="mb-3 flex items-center justify-between">
@@ -503,7 +518,7 @@ export function ProviderDetail({
       <ProviderFormDialog
         open={editOpen}
         onOpenChange={setEditOpen}
-        provider={provider}
+        provider={{ ...provider, models }}
         onSave={handleEditSave}
       />
 

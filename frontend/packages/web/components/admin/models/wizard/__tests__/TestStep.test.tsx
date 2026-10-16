@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient, Model, ProbeResult, ProbeStep, TestStreamEvent } from '@cubeplex/core'
+import type { ApiClient, ProbeResult, ProbeStep, TestStreamEvent } from '@cubeplex/core'
 import * as core from '@cubeplex/core'
 import en from '../../../../../messages/en.json'
 import { TestStep } from '../TestStep'
@@ -12,7 +12,7 @@ vi.mock('@cubeplex/core', async (importOriginal) => {
     ...actual,
     startTestStream: vi.fn(),
     parseTestStream: vi.fn(),
-    setModelEnabled: vi.fn(),
+    enableTestedModels: vi.fn(),
   }
 })
 
@@ -57,7 +57,7 @@ describe('TestStep', () => {
   beforeEach(() => {
     vi.mocked(core.startTestStream).mockReset()
     vi.mocked(core.parseTestStream).mockReset()
-    vi.mocked(core.setModelEnabled).mockReset()
+    vi.mocked(core.enableTestedModels).mockReset()
     vi.mocked(core.startTestStream).mockResolvedValue(
       new ReadableStream<Uint8Array>() as ReadableStream<Uint8Array>,
     )
@@ -68,7 +68,9 @@ describe('TestStep', () => {
         { event: 'done', data: {} },
       ]),
     )
-    vi.mocked(core.setModelEnabled).mockResolvedValue({ id: 'mdl_1' } as Model)
+    vi.mocked(core.enableTestedModels).mockResolvedValue({
+      results: [{ model_db_id: 'mdl_1', status: 'enabled' }],
+    })
   })
 
   it('shows the model display name (not the db id) when the event omits one', async () => {
@@ -92,7 +94,7 @@ describe('TestStep', () => {
     await waitFor(() => expect(save).toBeEnabled())
     fireEvent.click(save)
     await waitFor(() =>
-      expect(core.setModelEnabled).toHaveBeenCalledWith(fakeClient, 'prv_1', 'mdl_1', true),
+      expect(core.enableTestedModels).toHaveBeenCalledWith(fakeClient, 'prv_1', ['mdl_1']),
     )
     await waitFor(() => expect(onFinish).toHaveBeenCalled())
   })

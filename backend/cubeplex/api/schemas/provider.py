@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from cubeplex.llm.discovery_types import DiscoveryPolicy
 
 WireApi = Literal["openai-completions", "openai-responses", "anthropic-messages"]
 
@@ -23,9 +25,20 @@ class ProviderCreate(BaseModel):
     preset_slug: str | None = Field(default=None, max_length=64)
     capability: dict[str, Any] = Field(default_factory=dict)
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    discovery: DiscoveryPolicy | None = None
+    discovery_id: str | None = Field(default=None, max_length=64)
+
+
+class ModelCapabilityUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_db_id: str
+    expected_configuration_revision: int = Field(ge=1)
+    capability: dict[str, Any] | None
 
 
 class ProviderUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, max_length=64)
     provider_type: WireApi | None = None
     base_url: str | None = Field(default=None, max_length=2048)
@@ -37,7 +50,11 @@ class ProviderUpdate(BaseModel):
     enabled: bool | None = None
     preset_slug: str | None = None
     capability: dict[str, Any] | None = None
-    model_capability_overrides: dict[str, Any] | None = None
+    model_capability_updates: list[ModelCapabilityUpdate] | None = Field(
+        default=None, max_length=100
+    )
+    discovery: DiscoveryPolicy | None = None
+    expected_configuration_revision: int | None = Field(default=None, ge=1)
 
 
 class ModelTest(BaseModel):
@@ -83,14 +100,15 @@ class OrgProviderOverrideOut(BaseModel):
 
 
 class ModelCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     model_id: str = Field(max_length=128)
     display_name: str = Field(max_length=128)
     reasoning: bool = False
     input_modalities: list[str] = Field(default_factory=lambda: ["text"])
-    cost_input: float = 0.0
-    cost_output: float = 0.0
-    cost_cache_read: float = 0.0
-    cost_cache_write: float = 0.0
+    cost_input: float = Field(default=0.0, ge=0)
+    cost_output: float = Field(default=0.0, ge=0)
+    cost_cache_read: float = Field(default=0.0, ge=0)
+    cost_cache_write: float = Field(default=0.0, ge=0)
     context_window: int
     max_tokens: int
     extra_body: dict[str, Any] = Field(default_factory=dict)
@@ -99,13 +117,16 @@ class ModelCreate(BaseModel):
 
 
 class ModelUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    expected_configuration_revision: int | None = Field(default=None, ge=1)
     display_name: str | None = Field(default=None, max_length=128)
     reasoning: bool | None = None
     input_modalities: list[str] | None = None
-    cost_input: float | None = None
-    cost_output: float | None = None
-    cost_cache_read: float | None = None
-    cost_cache_write: float | None = None
+    cost_input: float | None = Field(default=None, ge=0)
+    cost_output: float | None = Field(default=None, ge=0)
+    cost_cache_read: float | None = Field(default=None, ge=0)
+    cost_cache_write: float | None = Field(default=None, ge=0)
     context_window: int | None = None
     max_tokens: int | None = None
     extra_body: dict[str, Any] | None = None
@@ -129,6 +150,8 @@ class ModelOut(BaseModel):
     extra_body: dict[str, Any]
     extra_headers: dict[str, Any]
     enabled: bool
+    configuration_revision: int = 1
+    configuration_metadata: dict[str, Any] = Field(default_factory=dict)
     is_system: bool
     created_at: datetime
     updated_at: datetime
@@ -146,6 +169,7 @@ class ModelReadinessOut(ModelOut):
     last_test_summary: dict[str, Any] = Field(default_factory=dict)
     # §4.1: "ready"|"degraded"|"stale"|"model_error"|"unavailable"|"provider_error"
     readiness: str
+    verification_pending: bool = False
 
 
 class ProviderOut(BaseModel):
@@ -173,6 +197,9 @@ class ProviderOut(BaseModel):
     logo: str | None = None
     capability: dict[str, Any] = Field(default_factory=dict)
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    discovery: DiscoveryPolicy | None = None
+    configuration_revision: int = 1
+    creation_recovered: bool = False
     # Provider-level liveness/credential status (spec §4.1). UTC-offset ISO string.
     last_liveness_at: str | None = None
     last_liveness_status: str | None = None  # "ok" | "fail"

@@ -17,7 +17,7 @@ export interface SendMessageRequest {
   content: string
   attachments?: string[]
   model_key?: string | null
-  reasoning?: ReasoningControl
+  reasoning?: ReasoningControl | null
 }
 
 export interface CancelRunResponse {
@@ -207,7 +207,7 @@ export async function* streamMessages(
   options?: {
     client_message_id?: string
     model_key?: string | null
-    reasoning?: ReasoningControl
+    reasoning?: ReasoningControl | null
     /**
      * Fires as soon as the POST returns a run id, BEFORE any event is
      * yielded — only on the JSON-then-tail path (the production path

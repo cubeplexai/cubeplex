@@ -7,6 +7,8 @@ from typing import Any, Literal
 from cubeloop.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
+from cubeplex.llm.discovery_types import DiscoveryPolicy
+
 # The protocols cubeplex offers in its catalog. Mirrors cubeloop's WireApi but
 # declared locally so the catalog does not import cubeloop's (to-be-deleted)
 # catalog package. See spec §3 "WireApi decoupling".
@@ -53,6 +55,7 @@ class Endpoint(BaseModel):
     base_url: str | None = None  # full override, bypasses composition (§4.1)
     capability: str | dict[str, Any]  # profile name (str) or inline descriptor (dict)
     key: str | None = None  # optional preset_key override (§4.4)
+    discovery: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
 
 
 class Vendor(BaseModel):
@@ -77,6 +80,7 @@ class ResolvedEndpoint(BaseModel):
     plan: str | None
     base_url: str
     capability: CapabilityDescriptor
+    discovery: DiscoveryPolicy = Field(default_factory=DiscoveryPolicy)
     models: list[ModelPreset]  # the subset serving this endpoint (§4 membership)
 
 
@@ -113,6 +117,7 @@ class Catalog(BaseModel):
                             # Resolved capability so the wizard can prefill the editor
                             # and send it back only when the user overrides it.
                             "capability": e.capability.model_dump(mode="json"),
+                            "discovery": e.discovery.model_dump(mode="json"),
                         }
                         for e in v_eps
                     ],

@@ -1039,7 +1039,9 @@ async def _deliver_wake(
             ctx=ctx,
             run_id=delivery_run_id,
             model_key=conversation.model_key,
-            reasoning=ReasoningControl.model_validate(conversation.reasoning),
+            reasoning=ReasoningControl.model_validate(conversation.reasoning)
+            if conversation.reasoning is not None
+            else None,
             input_metadata={"notice_id": wake.id, "command_id": wake.command_id},
         )
     except RuntimeError:

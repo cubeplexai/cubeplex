@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Loader2, Play, RotateCw } from 'lucide-react'
 import {
   parseTestStream,
-  setModelEnabled,
+  enableTestedModels,
   startTestStream,
   type ApiClient,
   type ProbeResult,
@@ -36,17 +36,21 @@ export function TestStep({ client, providerId, modelDbIds, modelLabels, onFinish
   const [done, setDone] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const started = useRef(false)
+  const controller = useRef<AbortController | null>(null)
 
   const run = useCallback(async () => {
+    controller.current?.abort()
+    const attempt = new AbortController()
+    controller.current = attempt
     setRunning(true)
     setDone(false)
     setError(null)
     setLiveness(null)
     setCards([])
     try {
-      const stream = await startTestStream(client, providerId, modelDbIds)
+      const stream = await startTestStream(client, providerId, modelDbIds, attempt.signal)
       for await (const e of parseTestStream(stream)) {
+        if (attempt.signal.aborted) break
         if (e.event === 'liveness') {
           setLiveness(e.data as ProbeStep)
         } else if (e.event === 'model') {
@@ -68,21 +72,31 @@ export function TestStep({ client, providerId, modelDbIds, modelLabels, onFinish
         }
       }
     } catch (err) {
-      setError((err as Error).message)
+      if (!attempt.signal.aborted) setError((err as Error).message)
     } finally {
-      setRunning(false)
-      setDone(true)
+      if (controller.current === attempt) {
+        setRunning(false)
+        setDone(true)
+      }
     }
   }, [client, providerId, modelDbIds, modelLabels])
 
   useEffect(() => {
-    if (started.current) return
-    started.current = true
-    void run()
+    let disposed = false
+    queueMicrotask(() => {
+      if (!disposed) void run()
+    })
+    return () => {
+      disposed = true
+      controller.current?.abort()
+    }
   }, [run])
 
   const livenessOk = liveness?.status === 'pass' || liveness?.status === 'warn'
-  const usableModels = cards.filter((c) => c.overall === 'pass' || c.overall === 'warn')
+  const usableModels = cards.filter(
+    (c) =>
+      c.current !== false && !c.blocking_failed && (c.overall === 'pass' || c.overall === 'warn'),
+  )
   const canSave = livenessOk && usableModels.length > 0 && !running && !saving
 
   async function handleSave() {
@@ -90,8 +104,14 @@ export function TestStep({ client, providerId, modelDbIds, modelLabels, onFinish
     setSaving(true)
     setError(null)
     try {
-      for (const c of usableModels) {
-        await setModelEnabled(client, providerId, c.model_db_id, true)
+      for (let i = 0; i < usableModels.length; i += 100) {
+        const result = await enableTestedModels(
+          client,
+          providerId,
+          usableModels.slice(i, i + 100).map((c) => c.model_db_id),
+        )
+        const blocked = result.results.filter((r) => r.status === 'blocked')
+        if (blocked.length) throw new Error(blocked.map((r) => r.reason).join('; '))
       }
       onFinish()
     } catch (err) {

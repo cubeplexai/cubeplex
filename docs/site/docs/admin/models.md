@@ -22,13 +22,14 @@ A provider represents an LLM API endpoint. Each provider has:
 
 ### Add a provider from a preset
 
-CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
+CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL, discovery policy, and calling configuration. Supply the calling key, or choose no authentication for a keyless local endpoint.
 
 1. Go to **Admin > Models**.
 2. Click **Add Provider**.
 3. Select a preset from the list (e.g., "Anthropic").
-4. Paste your API key.
-5. Click **Save**.
+4. Review the endpoint and authentication, then click **Next**.
+5. Click **List available models**, review field sources, select models, and import.
+6. Run verification and click **Finish** to enable passing models. Vendors with static suggestions use the manual model step.
 
 ### Add a custom provider
 
@@ -38,8 +39,8 @@ Any service that exposes an OpenAI-compatible chat completions endpoint can be a
 2. Click **Add Provider**.
 3. Choose **Custom (OpenAI-compatible)**.
 4. Enter a name, base URL, and API key.
-5. Configure the capability descriptor to match what the endpoint supports.
-6. Click **Save**.
+5. Review the calling configuration, then click **Next** to discover models.
+6. Complete missing fields or resolve conflicts, import the selection, and verify before enabling.
 
 ### Test provider connectivity
 
@@ -77,7 +78,7 @@ If you want to stop offering a specific model to your team, disable it in the mo
 
 ### Add a self-hosted or proxy endpoint
 
-For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubePlex backend server.
+Choose CLIProxyAPI, vLLM, or Ollama for those deployments, or a custom provider for another compatible endpoint. The base URL must be reachable from the CubePlex backend server.
 
 ### Configure reasoning for a custom endpoint
 
@@ -85,7 +86,7 @@ CubePlex stores one standard reasoning control for each conversation:
 
 | Field     | Values                                       |
 | --------- | -------------------------------------------- |
-| `mode`    | `off` or `on`                                |
+| `mode`    | `off`, `auto`, or `on`                                |
 | `effort`  | `minimal`, `low`, `medium`, `high`, or `max` |
 | `summary` | `none`, `auto`, `detailed`, or `summarized`  |
 
@@ -113,3 +114,35 @@ Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Ant
 ```
 
 Use `effort_path: "reasoning.effort"` for Responses-style nested payloads, or put provider-specific fields under `extra_body` for OpenAI-compatible gateways such as LiteLLM. If a model only supports reasoning on/off, omit `effort_path` and `effort_values`.
+
+## Discover and import models
+
+Choose the vendor first. CLIProxyAPI is available alongside vLLM and Ollama. Enter a base URL reachable from the CubePlex backend and the calling API key (or select no authentication for a keyless endpoint). **List available models** reads the configured instance without saving a provider.
+
+Listing interfaces differ by vendor. OpenAI-compatible instances commonly expose `GET /v1/models`; Anthropic uses its own authentication and cursor pagination, and Ollama uses `/api/tags` with selected-model details from `/api/show`. Vendors without a verified adapter offer preset suggestions and manual setup.
+
+Review the returned IDs and their field sources. Select all chat candidates, confirm suggestions you have checked, or apply reviewed context/output limits to a selected group. Unknown fields stay unknown; conflicting sources require a choice or an explicit value. Embedding, audio, and image-generation models cannot be imported as agent chat models. Missing prices are unknown estimates, not free service.
+
+CLIProxyAPI's optional management key enriches the listing for this discovery only. CubePlex does not save it; it is distinct from the calling key. Client templates supply suggestions rather than proof of model capabilities. For Ollama, select up to 100 models and use **Load selected metadata** before reviewing their fields.
+
+**Import selected models** creates disabled rows in batches of at most 100. Existing IDs are preserved and skipped, including on retry. Discovery previews expire after 10 minutes; rediscover after expiry or a calling-configuration change. Provider creation can be recovered for 24 hours using the same discovery receipt. A deleted provider cannot be recreated by replaying its receipt.
+
+Run model tests, then choose **Enable verified model** (or finish the wizard to enable passing models). Tests check actual streaming and a completed tool call, plus declared reasoning and image input. A failing required capability leaves the model disabled.
+
+Editing endpoint, key, limits, or calling capabilities marks old evidence **Verification pending**. Already enabled models remain usable. A disabled imported model needs a passing test of its current configuration before activation or reactivation. Calls already bound retain their snapshot; new calls and delayed/resumed starts bind current configuration.
+
+For upgrades, apply migrations and record legacy provenance once:
+
+```bash
+cd backend
+uv run alembic upgrade head
+uv run python scripts/dev/backfill_model_discovery.py
+```
+
+The backfill is idempotent, preserves enabled rows, and marks old tests historical. It never promotes historical tests to current passes. Legacy zero prices remain unknown until confirmed.
+
+<!-- Screenshot pending: vendor selection (CLIProxyAPI), discovery field review, test results and enable action; capture in light/dark themes. -->
+
+In **Edit → Advanced**, review each model’s calling configuration separately. Imported models keep their own capability overrides; **Use provider configuration** removes that override. Forms submit only changed fields with the displayed revision, so concurrent edits require a reload. New image declarations require a vision pass before image attachments are offered, including on an enabled manual model. Its text calls remain available. Reasoning verification uses a small output budget, raised only when needed to fit an explicitly mapped thinking budget and always bounded by the saved output limit.
+
+A current failed reasoning test removes the corresponding explicit controls from the picker and admission checks. Model default and enabled text use remain available. A failure from an older configuration does not certify the new one or restrict its newly reviewed mappings.

@@ -16,9 +16,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.llm.runtime_writeback import _do_writeback
+from cubeplex.llm.readiness import configuration_fingerprint, provider_configuration_fingerprint
+from cubeplex.llm.runtime_writeback import RuntimeObservation, _do_writeback
 from cubeplex.models.provider import Model, Provider
 
 pytestmark = pytest.mark.e2e
@@ -69,44 +71,55 @@ async def _seed_provider_with_models(
     return provider.id, model_a.id, model_b.id
 
 
-async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession) -> None:
-    from cubeplex.utils.slug import slugify
+async def _observation(session: AsyncSession, provider_id: str) -> RuntimeObservation:
+    provider = await session.get(Provider, provider_id)
+    model = (
+        await session.execute(
+            select(Model).where(Model.provider_id == provider_id, Model.model_id == "model-a")
+        )
+    ).scalar_one()
+    assert provider is not None
+    return RuntimeObservation(
+        org_id=provider.org_id,
+        provider_id=provider.id,
+        model_db_id=model.id,
+        configuration_fingerprint=configuration_fingerprint(provider, model, 0),
+        provider_fingerprint=provider_configuration_fingerprint(provider, 0),
+        provider_evidence_revision=provider.evidence_revision,
+        model_evidence_revision=model.evidence_revision,
+        provider_probe_generation=provider.probe_generation,
+        model_probe_generation=model.probe_generation,
+    )
 
+
+async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession) -> None:
     name = f"rt-writeback-auth-{uuid.uuid4().hex[:8]}"
     provider_id, _, _ = await _seed_provider_with_models(
         db_session, name=name, liveness_status="ok"
     )
 
     await _do_writeback(
-        org_id=_ORG_ID,
-        provider_slug=slugify(name),
-        model_id="model-a",
+        observation=await _observation(db_session, provider_id),
         outcome="auth_error",
-        summary="HTTPStatusError: 401 Unauthorized",
     )
 
     refreshed = await db_session.get(Provider, provider_id)
     assert refreshed is not None
     await db_session.refresh(refreshed)
-    assert refreshed.last_liveness_status == "fail"
+    assert refreshed.last_liveness_status == "auth_error"
     assert refreshed.last_liveness_at is not None
     assert refreshed.last_liveness_summary.get("source") == "runtime"
 
 
 async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -> None:
-    from cubeplex.utils.slug import slugify
-
     name = f"rt-writeback-modelnf-{uuid.uuid4().hex[:8]}"
     provider_id, model_a_id, model_b_id = await _seed_provider_with_models(
         db_session, name=name, liveness_status="ok"
     )
 
     await _do_writeback(
-        org_id=_ORG_ID,
-        provider_slug=slugify(name),
-        model_id="model-a",
+        observation=await _observation(db_session, provider_id),
         outcome="model_not_found",
-        summary="404 model_not_found",
     )
 
     model_a = await db_session.get(Model, model_a_id)
@@ -115,8 +128,8 @@ async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -
     await db_session.refresh(model_a)
     await db_session.refresh(model_b)
     # Target model flipped to unavailable…
-    assert model_a.last_test_status == "unavailable"
-    assert model_a.last_test_at is not None
+    assert model_a.last_test_summary["runtime_observation"]["status"] == "unavailable"
+    assert model_a.last_test_status == "ok"
     # …sibling untouched.
     assert model_b.last_test_status == "ok"
     # Provider liveness untouched — model_not_found is model-grain only.
@@ -127,19 +140,14 @@ async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -
 
 
 async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -> None:
-    from cubeplex.utils.slug import slugify
-
     # Provider currently failing -> success clears it back to "ok".
     name_fail = f"rt-writeback-clear-{uuid.uuid4().hex[:8]}"
     provider_id_fail, _, _ = await _seed_provider_with_models(
         db_session, name=name_fail, liveness_status="fail"
     )
     await _do_writeback(
-        org_id=_ORG_ID,
-        provider_slug=slugify(name_fail),
-        model_id="model-a",
+        observation=await _observation(db_session, provider_id_fail),
         outcome="other",
-        summary="runtime call succeeded",
     )
     provider = await db_session.get(Provider, provider_id_fail)
     assert provider is not None
@@ -148,8 +156,6 @@ async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -
 
 
 async def test_success_is_noop_for_healthy_provider(db_session: AsyncSession) -> None:
-    from cubeplex.utils.slug import slugify
-
     # Guarded UPDATE: a provider that was never tested (NULL) stays NULL —
     # success must not invent an "ok" out of nowhere.
     name_ok = f"rt-writeback-noop-{uuid.uuid4().hex[:8]}"
@@ -157,13 +163,36 @@ async def test_success_is_noop_for_healthy_provider(db_session: AsyncSession) ->
         db_session, name=name_ok, liveness_status=None
     )
     await _do_writeback(
-        org_id=_ORG_ID,
-        provider_slug=slugify(name_ok),
-        model_id="model-a",
+        observation=await _observation(db_session, provider_id_ok),
         outcome="other",
-        summary="runtime call succeeded",
     )
     provider = await db_session.get(Provider, provider_id_ok)
     assert provider is not None
     await db_session.refresh(provider)
     assert provider.last_liveness_status is None
+
+
+async def test_late_success_cannot_clear_a_newer_failure(db_session: AsyncSession) -> None:
+    provider_id, _, _ = await _seed_provider_with_models(
+        db_session, name=f"rt-late-{uuid.uuid4().hex[:8]}", liveness_status="ok"
+    )
+    old = await _observation(db_session, provider_id)
+    await _do_writeback(observation=old, outcome="auth_error")
+    await _do_writeback(observation=old, outcome="other")
+    provider = await db_session.get(Provider, provider_id)
+    await db_session.refresh(provider)
+    assert provider.last_liveness_status == "auth_error"
+
+
+async def test_endpoint_edit_rejects_old_call_observations(db_session: AsyncSession) -> None:
+    provider_id, _, _ = await _seed_provider_with_models(
+        db_session, name=f"rt-edited-{uuid.uuid4().hex[:8]}", liveness_status="ok"
+    )
+    old = await _observation(db_session, provider_id)
+    provider = await db_session.get(Provider, provider_id)
+    provider.base_url = "http://localhost:9999/v1"
+    db_session.add(provider)
+    await db_session.commit()
+    await _do_writeback(observation=old, outcome="auth_error")
+    await db_session.refresh(provider)
+    assert provider.last_liveness_status == "ok"

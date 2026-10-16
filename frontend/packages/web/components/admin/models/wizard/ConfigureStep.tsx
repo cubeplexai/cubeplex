@@ -5,13 +5,18 @@ import { useTranslations } from 'next-intl'
 import {
   ApiError,
   createProvider,
+  fetchProvider,
   updateProvider,
   type ApiClient,
   type EndpointPreset,
   type ProviderCreate,
   type ProviderUpdate,
   type VendorPreset,
+  type Provider,
+  type ImportModelOutcome,
 } from '@cubeplex/core'
+import { DiscoveryPanel } from '../DiscoveryPanel'
+import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
@@ -26,6 +31,8 @@ interface ConfigureStepProps {
   // creating a second row.
   existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
+  onProviderSaved?: (providerId: string) => void
+  onModelsImported?: (providerId: string, models: ImportModelOutcome[]) => void
   // Persisted form values, so stepping back into this step restores them.
   configDraft: ConfigDraft | null
   onConfigDraftChange: (draft: ConfigDraft) => void
@@ -42,13 +49,33 @@ export function ConfigureStep({
   onSelectEndpoint,
   existingProviderId,
   onProviderCreated,
+  onProviderSaved,
+  onModelsImported,
   configDraft,
   onConfigDraftChange,
 }: ConfigureStepProps) {
   const t = useTranslations('adminModels.wizard.configure')
   const tw = useTranslations('adminModels.wizard')
+  const [reloadCount, setReloadCount] = useState(0)
+  const [savedProvider, setSavedProvider] = useState<Provider | null>(null)
+  const [draft, setDraft] = useState<ProviderCreate | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!existingProviderId) return
+    let disposed = false
+    void fetchProvider(client, existingProviderId)
+      .then((row) => {
+        if (!disposed) setSavedProvider(row)
+      })
+      .catch((e) => {
+        if (!disposed) setError((e as Error).message)
+      })
+    return () => {
+      disposed = true
+    }
+  }, [client, existingProviderId, reloadCount])
 
   // The currently-selected endpoint: the one matching selectedPresetKey, else
   // the vendor's first endpoint.
@@ -94,7 +121,16 @@ export function ConfigureStep({
     capability: chosen.capability,
   }
 
-  async function handleSubmit(body: ProviderCreate | ProviderUpdate) {
+  async function handleSubmit(body: ProviderCreate | ProviderUpdate, manual = false) {
+    if (
+      !existingProviderId &&
+      !manual &&
+      chosen.discovery &&
+      chosen.discovery.adapter !== 'static'
+    ) {
+      setDraft(body as ProviderCreate)
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -133,7 +169,7 @@ export function ConfigureStep({
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
-      {showSelectors && (
+      {showSelectors && !draft && !existingProviderId && (
         <div className="grid grid-cols-3 gap-3 rounded-lg border border-border/70 p-3">
           <Selector
             label={t('region')}
@@ -168,21 +204,63 @@ export function ConfigureStep({
         </div>
       )}
 
-      <ProviderConfigForm
-        key={chosen.preset_key}
-        mode="create"
-        preset={createPreset}
-        // Restore the draft only when it belongs to the current endpoint; a
-        // different endpoint should fall back to that endpoint's defaults.
-        initialValues={configDraft?.presetKey === chosen.preset_key ? configDraft : null}
-        onValuesChange={(values: ConfigFormValues) =>
-          onConfigDraftChange({ ...values, presetKey: chosen.preset_key })
-        }
-        saving={saving}
-        error={error}
-        submitLabel={tw('next')}
-        onSubmit={(body) => void handleSubmit(body)}
-      />
+      {existingProviderId && !draft && (
+        <>
+          {!savedProvider && <p role="status">{error ?? t('loading')}</p>}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setReloadCount((n) => n + 1)
+            }}
+          >
+            {t('reload')}
+          </Button>
+        </>
+      )}
+      {!draft && (!existingProviderId || savedProvider) && (
+        <ProviderConfigForm
+          key={
+            savedProvider
+              ? `${savedProvider.id}:${savedProvider.configuration_revision}`
+              : chosen.preset_key
+          }
+          mode={existingProviderId ? 'edit' : 'create'}
+          provider={savedProvider ?? undefined}
+          preset={createPreset}
+          // Restore the draft only when it belongs to the current endpoint; a
+          // different endpoint should fall back to that endpoint's defaults.
+          initialValues={configDraft?.presetKey === chosen.preset_key ? configDraft : null}
+          onValuesChange={(values: ConfigFormValues) =>
+            onConfigDraftChange({ ...values, presetKey: chosen.preset_key })
+          }
+          saving={saving}
+          error={error}
+          submitLabel={tw('next')}
+          onSubmit={(body) => void handleSubmit(body)}
+        />
+      )}
+      {draft && (
+        <>
+          <DiscoveryPanel
+            client={client}
+            draft={draft}
+            onProviderSaved={onProviderSaved}
+            onImported={(id, models) => onModelsImported?.(id, models)}
+          />
+          <Button variant="outline" disabled={saving} onClick={() => setDraft(null)}>
+            {tw('back')}
+          </Button>
+          <Button variant="ghost" disabled={saving} onClick={() => void handleSubmit(draft, true)}>
+            {tw('manualSetup')}
+          </Button>
+          {error && (
+            <p role="alert" className="text-sm text-danger-fg">
+              {error}
+            </p>
+          )}
+        </>
+      )}
     </div>
   )
 }

@@ -7,6 +7,10 @@ import { cn } from '@/lib/utils'
 import type { ThinkingLevel } from '@/lib/types/presets'
 
 const LEVELS = [
+  { value: 'default', labelKey: 'thinkingLevelDefault' },
+  { value: 'on', labelKey: 'thinkingLevelOn' },
+  { value: 'auto', labelKey: 'thinkingLevelAuto' },
+  { value: 'minimal', labelKey: 'thinkingLevelMinimal' },
   { value: 'off', labelKey: 'thinkingLevelOff' },
   { value: 'low', labelKey: 'thinkingLevelLow' },
   { value: 'medium', labelKey: 'thinkingLevelMedium' },
@@ -14,9 +18,8 @@ const LEVELS = [
   { value: 'max', labelKey: 'thinkingLevelMax' },
 ] as const satisfies readonly { value: ThinkingLevel; labelKey: string }[]
 
-const MAX_INDEX = LEVELS.length - 1
-
 interface EffortSliderProps {
+  levels?: ThinkingLevel[]
   value: ThinkingLevel
   onChange: (value: ThinkingLevel) => void
 }
@@ -27,18 +30,24 @@ interface EffortSliderProps {
  * (and Home/End) step it. The whole track is the slider (role="slider"); the
  * dots are visual stops.
  */
-export function EffortSlider({ value, onChange }: EffortSliderProps): React.ReactElement {
+export function EffortSlider({
+  value,
+  onChange,
+  levels = ['default'],
+}: EffortSliderProps): React.ReactElement {
   const t = useTranslations('chat')
+  const available = LEVELS.filter((l) => levels.includes(l.value))
+  const MAX_INDEX = Math.max(0, available.length - 1)
   const trackRef = useRef<HTMLDivElement>(null)
   const index = Math.max(
     0,
-    LEVELS.findIndex((l) => l.value === value),
+    available.findIndex((l) => l.value === value),
   )
-  const currentLabel = t(LEVELS[index].labelKey)
+  const currentLabel = t(available[index].labelKey)
 
   const setByIndex = (i: number): void => {
     const clamped = Math.min(MAX_INDEX, Math.max(0, i))
-    onChange(LEVELS[clamped].value)
+    onChange(available[clamped].value)
   }
 
   const setFromClientX = (clientX: number): void => {
@@ -97,11 +106,11 @@ export function EffortSlider({ value, onChange }: EffortSliderProps): React.Reac
         {/* filled rail up to the thumb */}
         <div
           className="absolute top-1/2 left-2 h-1 -translate-y-1/2 rounded-full bg-primary"
-          style={{ width: `calc((100% - 16px) * ${index / MAX_INDEX})` }}
+          style={{ width: `calc((100% - 16px) * ${index / Math.max(1, MAX_INDEX)})` }}
         />
         {/* stops + thumb */}
         <div className="relative flex h-full items-center justify-between px-2">
-          {LEVELS.map((lvl, i) => (
+          {available.map((lvl, i) => (
             <span key={lvl.value} aria-hidden className="flex size-5 items-center justify-center">
               {i === index ? (
                 <span className="size-3.5 rounded-full border-2 border-primary bg-background shadow-sm" />

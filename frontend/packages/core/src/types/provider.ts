@@ -1,7 +1,14 @@
 export type WireApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
 export type Readiness =
-  'ready' | 'degraded' | 'stale' | 'provider_error' | 'auth_error' | 'model_error' | 'unavailable'
+  | 'verification_pending'
+  | 'ready'
+  | 'degraded'
+  | 'stale'
+  | 'provider_error'
+  | 'auth_error'
+  | 'model_error'
+  | 'unavailable'
 
 export interface AuthSpec {
   mode: 'api_key' | 'bearer' | 'none' | 'oauth' | 'iam'
@@ -19,6 +26,7 @@ export interface EndpointPreset {
   /** Resolved capability descriptor for this endpoint. The wizard prefills the
    *  capability editor with it and sends it back only when the user overrides it. */
   capability: Record<string, unknown>
+  discovery?: DiscoveryPolicy
 }
 
 export interface ModelPresetEntry {
@@ -54,10 +62,14 @@ export interface ProbeStep {
 export interface ProbeResult {
   overall: 'pass' | 'fail' | 'warn' | 'unavailable'
   blocking_failed: boolean
+  current?: boolean
   steps: ProbeStep[]
 }
 
 export interface Provider {
+  configuration_revision?: number
+  discovery?: DiscoveryPolicy | null
+  creation_recovered?: boolean
   id: string
   name: string
   slug: string
@@ -84,6 +96,8 @@ export interface Provider {
 }
 
 export interface Model {
+  configuration_revision?: number
+  configuration_metadata?: { origin?: string; fields?: Record<string, FieldEvidence> }
   id: string
   provider_id: string
   model_id: string
@@ -109,6 +123,8 @@ export interface Model {
 }
 
 export interface ProviderCreate {
+  discovery_id?: string
+  discovery?: DiscoveryPolicy
   name: string
   slug?: string
   provider_type?: string
@@ -124,6 +140,13 @@ export interface ProviderCreate {
 }
 
 export interface ProviderUpdate {
+  expected_configuration_revision?: number
+  discovery?: DiscoveryPolicy
+  model_capability_updates?: {
+    model_db_id: string
+    expected_configuration_revision: number
+    capability: Record<string, unknown> | null
+  }[]
   name?: string | null
   provider_type?: string | null
   base_url?: string | null
@@ -135,7 +158,6 @@ export interface ProviderUpdate {
   enabled?: boolean | null
   preset_slug?: string
   capability?: Record<string, unknown>
-  model_capability_overrides?: Record<string, unknown>
 }
 
 export interface ModelCreate {
@@ -155,6 +177,7 @@ export interface ModelCreate {
 }
 
 export interface ModelUpdate {
+  expected_configuration_revision?: number
   display_name?: string | null
   reasoning?: boolean | null
   input_modalities?: string[] | null
@@ -167,4 +190,93 @@ export interface ModelUpdate {
   extra_body?: Record<string, unknown> | null
   extra_headers?: Record<string, unknown> | null
   enabled?: boolean | null
+}
+
+export interface DiscoveryPolicy {
+  adapter: 'static' | 'openai' | 'anthropic' | 'ollama'
+  path: string
+  url_mode: 'relative' | 'instance' | 'origin'
+  auth: 'none' | 'bearer' | 'anthropic'
+  pagination: 'none' | 'anthropic' | 'ollama'
+  metadata_profile: 'generic' | 'cliproxyapi' | 'openrouter' | 'ollama'
+  revision: string
+  reference?: string | null
+  root_api_path: string
+}
+export type ModelField =
+  | 'purpose'
+  | 'context_window'
+  | 'max_tokens'
+  | 'input_modalities'
+  | 'output_modalities'
+  | 'reasoning'
+  | 'reasoning_levels'
+  | 'capability'
+  | 'cost_input'
+  | 'cost_output'
+  | 'cost_cache_read'
+  | 'cost_cache_write'
+export interface EvidenceDeclaration {
+  value: unknown
+  source: string
+  state: 'declared' | 'suggested' | 'confirmed' | 'unknown' | 'conflict' | 'existing'
+  revision?: string | null
+  observed_at?: string | null
+}
+export interface FieldEvidence extends EvidenceDeclaration {
+  alternatives: EvidenceDeclaration[]
+}
+export interface DiscoveredModel {
+  model_id: string
+  display_name: string
+  purpose: 'chat' | 'embedding' | 'image' | 'audio' | 'unknown'
+  fields: Partial<Record<ModelField, FieldEvidence>>
+  eligible: boolean
+  missing_fields: ModelField[]
+  existing_model_db_id?: string | null
+  diagnostics: { code: string; message: string }[]
+}
+export interface DiscoveryResponse {
+  status: 'complete' | 'not_supported' | 'failed'
+  availability_source: 'live' | 'preset'
+  discovery_id: string | null
+  candidates: DiscoveredModel[]
+  observed_at: string
+  diagnostics: { code: string; message: string; retry_after?: string | null }[]
+}
+export interface DiscoveryRequest {
+  api: WireApi
+  base_url: string
+  api_key?: string | null
+  auth_type?: string
+  preset_slug?: string
+  discovery?: DiscoveryPolicy
+  capability?: Record<string, unknown>
+  extra_body?: Record<string, unknown>
+  extra_headers?: Record<string, unknown>
+  management_key?: string
+  selected_model_ids?: string[]
+}
+export interface ImportModelSelection {
+  model_id: string
+  overrides?: {
+    display_name?: string
+    purpose?: 'chat'
+    context_window?: number
+    max_tokens?: number
+    input_modalities?: ('text' | 'image')[]
+    reasoning?: boolean
+    capability?: Record<string, unknown>
+    cost_input?: number
+    cost_output?: number
+    cost_cache_read?: number
+    cost_cache_write?: number
+  }
+  confirm_fields?: ModelField[]
+  resolutions?: Partial<Record<ModelField, string>>
+}
+export interface ImportModelOutcome {
+  model_id: string
+  model_db_id: string
+  status: 'created' | 'existing'
 }

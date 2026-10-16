@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.controls import reasoning_support
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +76,6 @@ def detail_fields(
         model_id=model_id,
         model_display_name=mc.name,
         context_window=mc.context_window,
-        reasoning=mc.reasoning,
+        reasoning=reasoning_support(mc),
         input_modalities=list(mc.input),
     )

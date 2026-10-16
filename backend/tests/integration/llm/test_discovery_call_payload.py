@@ -1,0 +1,320 @@
+"""Check the SDK's final HTTP JSON against the saved calling configuration."""
+
+import json
+
+import httpx
+import pytest
+from cubeloop.providers.base import ReasoningControl, StreamOptions, TextContent, UserMessage
+
+from cubeplex.llm.builder import build_bound_model
+from cubeplex.llm.config import ModelConfig, ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
+
+
+@pytest.mark.parametrize("control", [None, ReasoningControl(mode="on", effort="high")])
+async def test_default_and_explicit_controls_preserve_identity_limits_and_unrelated_body(control):
+    calls = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        calls.append((body, request.headers))
+        chunk = {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": body["model"],
+            "choices": [{"index": 0, "delta": {"content": "OK"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+        )
+
+    capability = {
+        "temperature": {"mode": "fixed", "fixed_value": 0.25},
+        "reasoning": {
+            "mode_payloads": {"on": {"extra_body": {"reasoning": {"enabled": True}}}},
+            "effort_path": "extra_body.reasoning.effort",
+            "effort_values": {"high": "high"},
+        },
+    }
+    cfg = ProviderConfig(
+        base_url="http://localhost/v1",
+        auth_type="none",
+        capability=capability,
+        extra_body={
+            "reasoning": {"effort": "low", "enabled": False, "format": "compact"},
+            "temperature": 1.9,
+        },
+        models=[
+            ModelConfig(
+                id="Exact/Alias", name="Alias", reasoning=True, context_window=4096, max_tokens=128
+            )
+        ],
+    )
+    snap = LLMSnapshot(providers={"local": cfg}, model_presets=(), task_routing={})
+    bound = build_bound_model(snap, "local/Exact/Alias", reasoning=control)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), auth=bound.provider._client._client.auth
+    ) as client:
+        bound.provider._client = bound.provider._client.with_options(http_client=client)
+        stream = await bound.provider.stream(
+            model=bound.spec,
+            messages=[UserMessage(content=[TextContent(text="OK")])],
+            options=StreamOptions(reasoning=control or ReasoningControl()),
+        )
+        async for _ in stream:
+            pass
+        await stream.result()
+    body, headers = calls[0]
+    assert body["model"] == "Exact/Alias" and body["max_tokens"] == 128
+    assert body["stream"] is True and body["temperature"] == 0.25
+    assert body["reasoning"]["format"] == "compact"
+    assert body["reasoning"]["effort"] == ("high" if control else "low")
+    assert body["reasoning"]["enabled"] is bool(control)
+    assert "authorization" not in headers
+
+
+@pytest.mark.parametrize("api", ["openai-completions", "openai-responses", "anthropic-messages"])
+async def test_vision_probe_serializes_a_decodable_png_for_each_adapter(api):
+    import base64
+
+    from cubeloop.providers.capability import CapabilityDescriptor
+
+    from cubeplex.llm.builder import build_provider
+    from cubeplex.services.provider_probe import probe_vision
+
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            400, json={"error": {"message": "No generation in serialization test"}}
+        )
+
+    model = ModelConfig(
+        id="vision", name="Vision", context_window=8192, max_tokens=128, input=["text", "image"]
+    )
+    cap = CapabilityDescriptor(supports_images=True)
+    snap = LLMSnapshot(
+        providers={
+            "p": ProviderConfig(
+                api=api,
+                base_url="http://localhost/v1",
+                api_key="test-key",
+                capability=cap.model_dump(),
+                models=[model],
+            )
+        },
+        model_presets=(),
+        task_routing={},
+    )
+    provider = build_provider(snap, "p")
+    provider._cubeplex_probe_model = model
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        provider._client = provider._client.with_options(http_client=client)
+        await probe_vision(provider, model_id=model.id, capability=cap)
+
+    def objects(value):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from objects(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from objects(child)
+
+    blocks = list(objects(requests[0]))
+    if api == "anthropic-messages":
+        encoded = next(b["data"] for b in blocks if b.get("type") == "base64")
+    else:
+        value = next(b["image_url"] for b in blocks if "image_url" in b)
+        url = value["url"] if isinstance(value, dict) else value
+        assert url.count("data:image/png;base64,") == 1
+        encoded = url.split(",", 1)[1]
+    assert base64.b64decode(encoded, validate=True).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.parametrize("thinking_budget,expected_output", [(None, 512), (2048, 2176)])
+async def test_reasoning_probe_uses_a_small_budget_compatible_with_its_mapping(
+    thinking_budget,
+    expected_output,
+):
+    from cubeloop.providers.capability import CapabilityDescriptor
+
+    from cubeplex.llm.builder import build_provider
+    from cubeplex.services.provider_probe import probe_reasoning_toggle
+
+    calls = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        chunk = {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "r",
+            "choices": [{"index": 0, "delta": {"content": "OK"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+        )
+
+    cap = CapabilityDescriptor.model_validate(
+        {
+            "reasoning": {
+                "mode_payloads": {"on": {}},
+                "effort_path": "extra_body.thinking.budget_tokens"
+                if thinking_budget
+                else "reasoning_effort",
+                "effort_values": {"high": thinking_budget or "high"},
+            }
+        }
+    )
+    model = ModelConfig(
+        id="r", name="Reasoning", reasoning=True, context_window=200000, max_tokens=128000
+    )
+    snap = LLMSnapshot(
+        providers={
+            "p": ProviderConfig(
+                api_key="test-key",
+                base_url="http://localhost/v1",
+                capability=cap.model_dump(),
+                models=[model],
+            )
+        },
+        model_presets=(),
+        task_routing={},
+    )
+    provider = build_provider(snap, "p")
+    provider._cubeplex_probe_model = model
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        provider._client = provider._client.with_options(http_client=client)
+        result = await probe_reasoning_toggle(provider, model_id="r", capability=cap)
+    assert result.status == "pass"
+    assert calls and all(body["max_tokens"] == expected_output for body in calls)
+
+
+async def test_native_anthropic_preserves_saved_total_output_limit_and_probe_budget():
+    from cubeloop.providers.capability import CapabilityDescriptor
+
+    from cubeplex.llm.builder import build_provider
+    from cubeplex.services.provider_probe import probe_reasoning_toggle
+
+    calls = []
+
+    def respond(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "No generation in serialization test",
+                }
+            },
+        )
+
+    cap = CapabilityDescriptor.model_validate(
+        {
+            "reasoning": {
+                "mode_payloads": {"on": {"thinking": {"type": "enabled"}}},
+                "effort_path": "thinking.budget_tokens",
+                "effort_values": {"low": 2048},
+            }
+        }
+    )
+    model = ModelConfig(
+        id="claude-alias", name="Claude", reasoning=True, context_window=8192, max_tokens=4096
+    )
+    cfg = ProviderConfig(
+        api="anthropic-messages",
+        api_key="test-key",
+        base_url="http://localhost",
+        capability=cap.model_dump(),
+        models=[model],
+    )
+    snap = LLMSnapshot(providers={"p": cfg}, model_presets=(), task_routing={})
+    control = ReasoningControl(mode="on", effort="low")
+    bound = build_bound_model(snap, "p/claude-alias", reasoning=control)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        bound.provider._client = bound.provider._client.with_options(http_client=client)
+        stream = await bound.provider.stream(
+            model=bound.spec,
+            messages=[UserMessage(content=[TextContent(text="OK")])],
+            options=StreamOptions(reasoning=control),
+        )
+        async for _ in stream:
+            pass
+        await stream.result()
+    assert calls[0]["max_tokens"] == 4096
+    assert calls[0]["thinking"]["budget_tokens"] == 2048
+    calls.clear()
+    provider = build_provider(snap, "p")
+    provider._cubeplex_probe_model = model
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        provider._client = provider._client.with_options(http_client=client)
+        await probe_reasoning_toggle(provider, model_id=model.id, capability=cap)
+    assert calls[0]["max_tokens"] == 2176
+    assert calls[0]["thinking"]["budget_tokens"] == 2048
+
+
+async def test_title_output_override_respects_a_smaller_fallback_limit():
+    from cubeplex.llm.builder import build_chain_model
+    from cubeplex.llm.snapshot import ModelPreset
+    from cubeplex.services.conversation_title import title_output_limit
+
+    bodies = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if body["model"] == "primary":
+            return httpx.Response(
+                404, json={"error": {"code": "model_not_found", "message": "model not found"}}
+            )
+        chunk = {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "backup",
+            "choices": [{"index": 0, "delta": {"content": "A title"}, "finish_reason": "stop"}],
+        }
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+        )
+
+    snap = LLMSnapshot(
+        providers={
+            "p": ProviderConfig(
+                base_url="http://localhost/v1",
+                api_key="test-key",
+                models=[
+                    ModelConfig(id=name, name=name, context_window=8192, max_tokens=limit)
+                    for name, limit in [("primary", 8192), ("backup", 128)]
+                ],
+            )
+        },
+        model_presets=(),
+        task_routing={},
+    )
+    preset = ModelPreset(
+        key="title", primary="p/primary", fallbacks=("p/backup",), kind="custom", is_default=True
+    )
+    bound = build_chain_model(snap, preset)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        for member in bound.chain:
+            member.provider._client = member.provider._client.with_options(http_client=client)
+        result = await bound.generate(
+            [UserMessage(content=[TextContent(text="Title")])],
+            max_output_tokens=title_output_limit(bound),
+        )
+    assert result.content
+    assert [body["model"] for body in bodies] == ["primary", "backup"]
+    assert all(body["max_tokens"] <= 128 for body in bodies)

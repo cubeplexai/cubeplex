@@ -51,6 +51,8 @@ const PRESETS = [
     model_display_name: 'Claude Opus 4.7',
     context_window: 1_000_000,
     reasoning: true,
+    reasoning_modes: ['off', 'on'],
+    reasoning_efforts: ['low', 'medium', 'high', 'max'],
     input_modalities: ['text', 'image'],
   },
   {
@@ -205,8 +207,8 @@ describe('ModelPicker', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('defaults the thinking level to medium', () => {
-    expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('medium')
+  it('defaults to the model default reasoning choice', () => {
+    expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('default')
   })
 
   it('shows tier labels with model names in the list; no mono primary or description body text', async () => {

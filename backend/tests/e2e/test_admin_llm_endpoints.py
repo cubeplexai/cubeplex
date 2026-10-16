@@ -7,7 +7,7 @@ pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
 
 # Tracks the cubeplex nested vendor catalog (cubeplex/llm/catalog/data/vendors.yaml).
 # Bump if vendors are added/removed.
-EXPECTED_VENDOR_COUNT = 21
+EXPECTED_VENDOR_COUNT = 22
 
 
 async def test_list_provider_presets(
@@ -230,7 +230,7 @@ async def test_saved_model_test_persists_status_and_fingerprint(
     assert model["last_test_status"] == "warn"
     assert model["last_test_at"] is not None
     # Fingerprint REQUIRED for Task 5 stale detection.
-    assert model["last_test_summary"].get("capability_fingerprint")
+    assert model["last_test_summary"].get("configuration_fingerprint")
 
     await client.delete(f"/api/v1/admin/providers/{pid}")
 

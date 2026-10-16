@@ -7,7 +7,7 @@ an API-namespaced name.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cubeplex.llm.snapshot_schema import ModelPresetsConfig as AdminModelPresetsBody
 
@@ -26,6 +26,9 @@ class WorkspacePresetSummary(BaseModel):
     context_window: int | None = None
     reasoning: bool | None = None
     input_modalities: list[str] | None = None
+    reasoning_modes: list[str] = Field(default_factory=list)
+    reasoning_efforts: list[str] = Field(default_factory=list)
+    verification_pending: bool = False
 
 
 class WorkspacePresetsResponse(BaseModel):

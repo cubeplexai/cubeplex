@@ -478,7 +478,7 @@ describe('InputBar', () => {
     })
     expect(storeMocks.send.mock.calls[0][5]).toEqual({
       model_key: null,
-      reasoning: { mode: 'off', effort: 'minimal', summary: 'none' },
+      reasoning: { mode: 'off', summary: 'none' },
     })
   })
 

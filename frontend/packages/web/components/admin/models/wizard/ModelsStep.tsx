@@ -65,8 +65,8 @@ export function ModelsStep({
     return vendor.models.filter((m) => ids.has(m.model_id))
   }, [vendor, presetKey])
 
-  const [rows, setRows] = useState<ModelRow[]>(() =>
-    endpointModels.map((m, i) => ({
+  const [rows, setRows] = useState<ModelRow[]>(() => [
+    ...endpointModels.map((m, i) => ({
       key: `preset-${i}`,
       model_id: m.model_id,
       display_name: m.display_name,
@@ -78,10 +78,29 @@ export function ModelsStep({
       cost_output: m.pricing.output,
       cost_cache_read: m.pricing.cache_read ?? 0,
       cost_cache_write: m.pricing.cache_write ?? 0,
-      checked: true,
+      checked:
+        existingModels.length === 0 ||
+        existingModels.some((saved) => saved.model_id === m.model_id),
       custom: false,
     })),
-  )
+    ...existingModels
+      .filter((saved) => !endpointModels.some((m) => m.model_id === saved.model_id))
+      .map((saved) => ({
+        key: `existing-${saved.id}`,
+        model_id: saved.model_id,
+        display_name: saved.display_name,
+        context_window: 0,
+        max_tokens: 0,
+        input_modalities: ['text'],
+        reasoning: false,
+        cost_input: 0,
+        cost_output: 0,
+        cost_cache_read: 0,
+        cost_cache_write: 0,
+        checked: true,
+        custom: false,
+      })),
+  ])
   const [addOpen, setAddOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

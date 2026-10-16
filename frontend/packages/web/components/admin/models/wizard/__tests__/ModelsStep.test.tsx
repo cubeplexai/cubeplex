@@ -192,3 +192,27 @@ describe('ModelsStep', () => {
     ])
   })
 })
+
+it('revisits live-imported models without recreating them when the vendor has no static pool', async () => {
+  const liveVendor = makeVendor({
+    models: [],
+    endpoints: [{ ...vendor.endpoints[0], model_ids: [] }],
+  })
+  const existing = [{ id: 'mdl_live', model_id: 'live-alias', display_name: 'Live alias' }]
+  const onModelsCreated = vi.fn()
+  render(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <ModelsStep
+        client={fakeClient}
+        vendor={liveVendor}
+        presetKey={PRESET_KEY}
+        providerId="prv_1"
+        existingModels={existing}
+        onModelsCreated={onModelsCreated}
+      />
+    </NextIntlClientProvider>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+  await waitFor(() => expect(onModelsCreated).toHaveBeenCalledWith(existing))
+  expect(core.createModel).not.toHaveBeenCalled()
+})

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, Integer, UniqueConstraint, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -53,6 +53,18 @@ class Provider(CubeplexBase, table=True):
     preset_slug: str | None = Field(default=None, max_length=64)
     capability: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    discovery: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False, server_default=text("'{}'"))
+    )
+    configuration_revision: int = Field(
+        default=1, sa_column=Column(Integer, nullable=False, server_default="1")
+    )
+    probe_generation: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
+    evidence_revision: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
     # Provider-level test = liveness/credential ONLY (spec §4.1).
     last_liveness_at: datetime | None = Field(
         default=None,
@@ -91,6 +103,18 @@ class Model(CubeplexBase, table=True):
     max_tokens: int = Field()
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    configuration_metadata: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False, server_default=text("'{}'"))
+    )
+    configuration_revision: int = Field(
+        default=1, sa_column=Column(Integer, nullable=False, server_default="1")
+    )
+    probe_generation: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
+    evidence_revision: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
     # Per-model test = capability probe + model existence (spec §4.1).
     # "ok" | "warn" | "fail" | "unavailable".
     last_test_at: datetime | None = Field(

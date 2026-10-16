@@ -22,7 +22,6 @@ from cubeplex.models import Conversation
 from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.public_id import generate_public_id
 from cubeplex.models.topic import Topic, TopicParticipant
-from cubeplex.reasoning import DEFAULT_REASONING
 from cubeplex.repositories.base import ScopedRepository
 from cubeplex.utils.time import utc_isoformat
 
@@ -260,7 +259,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         self,
         conversation_id: str,
         *,
-        model_setting: tuple[str | None, dict[str, Any]] | None = None,
+        model_setting: tuple[str | None, dict[str, Any] | None] | None = None,
     ) -> None:
         """Mark the conversation as having user activity.
 
@@ -366,7 +365,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
             is_pinned=False,
             is_group_chat=False,
             model_key=src.model_key,
-            reasoning=dict(src.reasoning or DEFAULT_REASONING),
+            reasoning=dict(src.reasoning) if src.reasoning is not None else None,
         )
         return await self.add(conv)
 

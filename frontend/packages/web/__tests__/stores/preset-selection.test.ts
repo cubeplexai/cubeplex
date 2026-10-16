@@ -48,7 +48,15 @@ describe('preset-selection store', () => {
         description: '',
         is_default: true,
       },
-      { key: 'lite', kind: 'tier', primary: 'openai/gpt-5', description: '', is_default: false },
+      {
+        key: 'lite',
+        kind: 'tier',
+        primary: 'openai/gpt-5',
+        description: '',
+        is_default: false,
+        reasoning_modes: ['on'],
+        reasoning_efforts: ['high'],
+      },
     ])
     ws.getState().setModelKey('lite')
     ws.getState().setThinking('high')
@@ -86,7 +94,7 @@ describe('preset-selection store', () => {
     ws.getState().reset()
     const st = ws.getState()
     expect(st.modelKey).toBeNull()
-    expect(st.thinking).toBe('medium')
+    expect(st.thinking).toBe('default')
     expect(st.presets).toHaveLength(1)
   })
 

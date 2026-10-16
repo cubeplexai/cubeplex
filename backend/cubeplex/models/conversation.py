@@ -7,7 +7,6 @@ from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, text
 from sqlmodel import Field
 
 from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
-from cubeplex.reasoning import DEFAULT_REASONING
 
 
 class Conversation(CubeplexBase, OrgScopedMixin, table=True):
@@ -50,9 +49,9 @@ class Conversation(CubeplexBase, OrgScopedMixin, table=True):
     # label), NULL meaning "use the workspace default". ``reasoning`` stores
     # the provider-independent ReasoningControl JSON.
     model_key: str | None = Field(default=None, max_length=64)
-    reasoning: dict[str, Any] = Field(
-        default_factory=lambda: dict(DEFAULT_REASONING),
-        sa_column=Column(JSON, nullable=False),
+    reasoning: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
     )
     # Source metadata (e.g. IM-bot linkage under an "im" key). Mirrors
     # Topic.attributes; see docs/dev/specs/2026-06-23-im-bot-settings-design.md.

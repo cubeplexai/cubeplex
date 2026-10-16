@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from cubeloop.providers.base import ReasoningControl
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, or_, select, update
@@ -123,7 +122,7 @@ async def freeze_trigger_event(
             model_key=preset.key,
             primary=preset.primary,
             fallbacks=preset.fallbacks,
-            reasoning=ReasoningControl(),
+            reasoning=None,
             trigger="automated",
         ),
     )

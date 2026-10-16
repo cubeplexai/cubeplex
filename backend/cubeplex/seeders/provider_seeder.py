@@ -158,10 +158,15 @@ async def _upsert_system_credential(
     System credentials live with ``org_id=NULL``; uniqueness on (kind, name)
     is enforced by ``uq_credential_system_kind_name``.
     """
-    existing_q = select(Credential).where(
-        Credential.org_id.is_(None),  # type: ignore[union-attr]
-        Credential.kind == _PROVIDER_KEY_KIND,  # type: ignore[arg-type]
-        Credential.name == provider.name,  # type: ignore[arg-type]
+    existing_q = (
+        select(Credential)
+        .where(
+            Credential.org_id.is_(None),  # type: ignore[union-attr]
+            Credential.kind == _PROVIDER_KEY_KIND,  # type: ignore[arg-type]
+            Credential.name == provider.name,  # type: ignore[arg-type]
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     cred = (await session.execute(existing_q)).scalar_one_or_none()
     ciphertext = await backend.encrypt(plaintext.encode("utf-8"))
@@ -178,6 +183,9 @@ async def _upsert_system_credential(
         await session.flush()
         logger.info("Seeded system credential for provider: {}", provider.name)
     else:
+        previous = (await backend.decrypt(cred.value_encrypted)).decode("utf-8")
+        if previous != plaintext:
+            cred.value_revision += 1
         cred.value_encrypted = ciphertext
         session.add(cred)
         await session.flush()
@@ -241,10 +249,13 @@ async def seed_system_providers_from_config(
             continue
 
         existing = await session.execute(
-            select(Provider).where(
+            select(Provider)
+            .where(
                 Provider.org_id.is_(None),  # type: ignore[union-attr]
                 Provider.name == name,  # type: ignore[arg-type]
             )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         provider: Provider | None = existing.scalar_one_or_none()
 

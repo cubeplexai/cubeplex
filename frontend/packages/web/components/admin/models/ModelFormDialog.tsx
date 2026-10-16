@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { configuredPrice } from '@/lib/models/configured-price'
 import { cn } from '@/lib/utils'
 
 const MODALITIES = ['text', 'image', 'audio', 'video'] as const
@@ -52,10 +53,10 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
         setDisplayName(model.display_name)
         setReasoning(model.reasoning)
         setInputModalities([...model.input_modalities])
-        setCostInput(model.cost_input.toString())
-        setCostOutput(model.cost_output.toString())
-        setCostCacheRead(model.cost_cache_read.toString())
-        setCostCacheWrite(model.cost_cache_write.toString())
+        setCostInput(configuredPrice(model, 'cost_input')?.toString() ?? '')
+        setCostOutput(configuredPrice(model, 'cost_output')?.toString() ?? '')
+        setCostCacheRead(configuredPrice(model, 'cost_cache_read')?.toString() ?? '')
+        setCostCacheWrite(configuredPrice(model, 'cost_cache_write')?.toString() ?? '')
         setContextWindow(model.context_window.toString())
         setMaxTokens(model.max_tokens.toString())
       } else {
@@ -93,15 +94,41 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
     try {
       if (isEdit) {
         const body: ModelUpdate = {
+          expected_configuration_revision: model!.configuration_revision,
           display_name: displayName || null,
           reasoning,
           input_modalities: inputModalities.length > 0 ? inputModalities : null,
-          cost_input: costInput ? parseNumber(costInput) : null,
-          cost_output: costOutput ? parseNumber(costOutput) : null,
-          cost_cache_read: costCacheRead ? parseNumber(costCacheRead) : null,
-          cost_cache_write: costCacheWrite ? parseNumber(costCacheWrite) : null,
+          ...(costInput !== '' &&
+          (parseNumber(costInput) !== model!.cost_input ||
+            configuredPrice(model!, 'cost_input') === null)
+            ? { cost_input: parseNumber(costInput) }
+            : {}),
+          ...(costOutput !== '' &&
+          (parseNumber(costOutput) !== model!.cost_output ||
+            configuredPrice(model!, 'cost_output') === null)
+            ? { cost_output: parseNumber(costOutput) }
+            : {}),
+          ...(costCacheRead !== '' &&
+          (parseNumber(costCacheRead) !== model!.cost_cache_read ||
+            configuredPrice(model!, 'cost_cache_read') === null)
+            ? { cost_cache_read: parseNumber(costCacheRead) }
+            : {}),
+          ...(costCacheWrite !== '' &&
+          (parseNumber(costCacheWrite) !== model!.cost_cache_write ||
+            configuredPrice(model!, 'cost_cache_write') === null)
+            ? { cost_cache_write: parseNumber(costCacheWrite) }
+            : {}),
           context_window: contextWindow ? parseNumber(contextWindow) : null,
           max_tokens: maxTokens ? parseNumber(maxTokens) : null,
+        }
+        for (const field of [
+          'display_name',
+          'reasoning',
+          'input_modalities',
+          'context_window',
+          'max_tokens',
+        ] as const) {
+          if (JSON.stringify(body[field]) === JSON.stringify(model![field])) delete body[field]
         }
         await onSave(body)
       } else {
@@ -110,10 +137,10 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
           display_name: displayName,
           reasoning,
           input_modalities: inputModalities,
-          cost_input: parseNumber(costInput),
-          cost_output: parseNumber(costOutput),
-          cost_cache_read: parseNumber(costCacheRead),
-          cost_cache_write: parseNumber(costCacheWrite),
+          ...(costInput !== '' ? { cost_input: parseNumber(costInput) } : {}),
+          ...(costOutput !== '' ? { cost_output: parseNumber(costOutput) } : {}),
+          ...(costCacheRead !== '' ? { cost_cache_read: parseNumber(costCacheRead) } : {}),
+          ...(costCacheWrite !== '' ? { cost_cache_write: parseNumber(costCacheWrite) } : {}),
           context_window: parseNumber(contextWindow),
           max_tokens: parseNumber(maxTokens),
         }
@@ -227,7 +254,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                         step="any"
                         value={costInput}
                         onChange={(e) => setCostInput(e.target.value)}
-                        placeholder="0"
+                        placeholder={t('priceUnknown')}
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -240,7 +267,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                         step="any"
                         value={costOutput}
                         onChange={(e) => setCostOutput(e.target.value)}
-                        placeholder="0"
+                        placeholder={t('priceUnknown')}
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -253,7 +280,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                         step="any"
                         value={costCacheRead}
                         onChange={(e) => setCostCacheRead(e.target.value)}
-                        placeholder="0"
+                        placeholder={t('priceUnknown')}
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -266,7 +293,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                         step="any"
                         value={costCacheWrite}
                         onChange={(e) => setCostCacheWrite(e.target.value)}
-                        placeholder="0"
+                        placeholder={t('priceUnknown')}
                       />
                     </div>
                   </div>

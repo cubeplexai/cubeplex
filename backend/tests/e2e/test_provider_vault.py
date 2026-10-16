@@ -90,7 +90,7 @@ async def test_update_api_key_replaces_ciphertext_keeps_credential_id(
 
     res = await client.patch(
         f"/api/v1/admin/providers/{pid}",
-        json={"api_key": "sk-new"},
+        json={"api_key": "sk-new", "expected_configuration_revision": p_old.configuration_revision},
     )
     assert res.status_code == 200
 

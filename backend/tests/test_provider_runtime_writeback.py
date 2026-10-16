@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from cubeplex.llm.runtime_writeback import (
+    RuntimeObservation,
     classify_runtime_error,
     schedule_runtime_status_writeback,
 )
@@ -63,6 +64,17 @@ def test_auth_wins_over_model_marker() -> None:
 def test_schedule_returns_none_for_non_actionable_error() -> None:
     # A transient/other error must not schedule a writeback task at all.
     task = schedule_runtime_status_writeback(
-        org_id="org-x", provider_slug="p", model_id="m", exc=_StatusExc("boom", 500)
+        observation=RuntimeObservation(
+            org_id="org-x",
+            provider_id="p",
+            model_db_id="m",
+            configuration_fingerprint="cfg",
+            provider_fingerprint="transport",
+            provider_evidence_revision=0,
+            model_evidence_revision=0,
+            provider_probe_generation=0,
+            model_probe_generation=0,
+        ),
+        exc=_StatusExc("boom", 500),
     )
     assert task is None

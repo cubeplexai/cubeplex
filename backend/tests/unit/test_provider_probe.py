@@ -156,19 +156,29 @@ def test_aggregate_streaming_fail_is_blocking():
     assert blocked is True
 
 
-def test_aggregate_advisory_fail_does_not_block_or_degrade():
-    # reasoning/temperature/usage are advisory: a live model that streams + calls
-    # tools is usable even if these warn/fail, so overall stays "pass".
+def test_aggregate_temperature_and_usage_are_advisory():
     steps = [
         ProbeStep(name="liveness", status="pass"),
         ProbeStep(name="tools", status="pass"),
         ProbeStep(name="streaming", status="pass"),
-        ProbeStep(name="reasoning", status="fail"),
+        ProbeStep(name="temperature", status="warn"),
         ProbeStep(name="usage", status="warn"),
     ]
     overall, blocked = _aggregate_overall(steps)
     assert overall == "pass"
     assert blocked is False
+
+
+def test_aggregate_advertised_reasoning_failure_blocks_activation():
+    overall, blocked = _aggregate_overall(
+        [
+            ProbeStep(name="tools", status="pass"),
+            ProbeStep(name="streaming", status="pass"),
+            ProbeStep(name="reasoning", status="fail"),
+        ]
+    )
+    assert overall == "fail"
+    assert blocked
 
 
 @pytest.mark.asyncio
@@ -192,11 +202,11 @@ async def test_probe_temperature_skips_when_ignored():
 
 
 @pytest.mark.asyncio
-async def test_probe_tools_pass_on_toolcall_event():
+async def test_probe_tools_rejects_incomplete_start_event():
     provider = _StubProvider(events=[type("E", (), {"type": "toolcall_start"})()])
     step = await probe_tools(provider, model_id="m")
     assert step.name == "tools"
-    assert step.status == "pass"
+    assert step.status == "fail"
 
 
 @pytest.mark.asyncio
@@ -452,14 +462,17 @@ async def test_run_liveness_pass_and_fail():
 
 @pytest.mark.asyncio
 async def test_run_model_probe_happy_path():
-    # Default capability has supports_tools=True, so the tools probe runs and
-    # needs a toolcall event to pass; pair it with a text delta for reasoning.
+    from cubeloop.providers.base import ToolCall
+
     happy_events = [
         type("E", (), {"type": "toolcall_start"})(),
         _good_event(),
     ]
     result = await run_model_probe(
-        provider_factory=lambda: _StubProvider(events=happy_events),
+        provider_factory=lambda: _StubProvider(
+            events=happy_events,
+            result_content=[ToolCall(id="echo-call", name="echo", arguments={"text": "ping"})],
+        ),
         model_id="m",
         capability=_reasoning_cap(),
     )

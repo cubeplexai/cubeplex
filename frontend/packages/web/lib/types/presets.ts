@@ -1,4 +1,5 @@
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max'
+export type ThinkingLevel =
+  'default' | 'off' | 'on' | 'auto' | 'minimal' | 'low' | 'medium' | 'high' | 'max'
 export type ModelTier = 'lite' | 'flash' | 'pro' | 'max'
 export type TaskKey = 'title' | 'summarize' | 'compaction' | 'memory'
 export const MODEL_TIERS: ModelTier[] = ['lite', 'flash', 'pro', 'max']
@@ -35,6 +36,9 @@ export interface WorkspacePresetSummary {
   model_id?: string | null
   model_display_name?: string | null
   context_window?: number | null
+  reasoning_modes?: string[]
+  reasoning_efforts?: string[]
+  verification_pending?: boolean
   reasoning?: boolean | null
   input_modalities?: string[] | null
 }
