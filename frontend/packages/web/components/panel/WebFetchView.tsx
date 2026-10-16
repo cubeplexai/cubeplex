@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 
 import { proseClasses } from '@/lib/utils'
@@ -145,7 +146,9 @@ export function WebFetchView({ args, result, highlightText, highlightKey }: WebF
       )}
       {result && (
         <div ref={contentRef} className={proseClasses}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
+          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+            {result}
+          </ReactMarkdown>
         </div>
       )}
     </div>

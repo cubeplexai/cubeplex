@@ -3,6 +3,7 @@
 import useSWR from 'swr'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 import { formatSkillLabel, type SkillContent } from '@cubeplex/core'
 import { proseClasses } from '@/lib/utils'
@@ -105,7 +106,9 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
 
       {displayContent && (
         <div className={proseClasses}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+            {displayContent}
+          </ReactMarkdown>
         </div>
       )}
 

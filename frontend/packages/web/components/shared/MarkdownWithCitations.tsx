@@ -14,6 +14,7 @@ import { useConversationStore } from '@cubeplex/core'
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from '@/components/chat/CitationMarker'
 import { resolveSandboxHref } from '@/lib/sandboxLinks'
+import { markdownComponents } from './markdownComponents'
 
 const CITATION_RE = /【\d+-\d+】/
 
@@ -80,13 +81,13 @@ function MarkdownWithCitationsImpl({
   const deferredChildren = useDeferredValue(children)
   const md = useMemo(() => fixCjkBoldQuotes(deferredChildren), [deferredChildren])
   const hasCitations = useMemo(() => CITATION_RE.test(md), [md])
-  const sandboxComponents = useMemo(
-    () => (sandbox ? buildSandboxComponents(sandbox) : null),
+  const baseComponents = useMemo(
+    () => ({ ...markdownComponents, ...(sandbox ? buildSandboxComponents(sandbox) : {}) }),
     [sandbox],
   )
   const citationComponents = useMemo<MarkdownComponents>(
     () => ({
-      ...(sandboxComponents ?? {}),
+      ...baseComponents,
       p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
       li: ({ children: c }) => <li>{renderWithCitations(c, conversationId, CitationMarker)}</li>,
       td: ({ children: c }) => <td>{renderWithCitations(c, conversationId, CitationMarker)}</td>,
@@ -101,7 +102,7 @@ function MarkdownWithCitationsImpl({
       h5: ({ children: c }) => <h5>{renderWithCitations(c, conversationId, CitationMarker)}</h5>,
       h6: ({ children: c }) => <h6>{renderWithCitations(c, conversationId, CitationMarker)}</h6>,
     }),
-    [sandboxComponents, conversationId],
+    [baseComponents, conversationId],
   )
 
   if (!hasCitations) {
@@ -110,7 +111,7 @@ function MarkdownWithCitationsImpl({
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
           rehypePlugins={REHYPE_PLUGINS}
-          components={sandboxComponents ?? undefined}
+          components={baseComponents}
         >
           {md}
         </ReactMarkdown>

@@ -63,6 +63,21 @@ Markdown document artifacts (`.md` / `.markdown` / `.mdx`, or `text/markdown`)
 render **inline** in the transcript — similar to image previews — so you can
 read them without opening the side panel.
 
+Markdown previews support Mermaid diagrams in chat messages, inline artifact
+cards, the right-side panel, and expanded previews. Put the diagram source in a
+fenced code block labeled `mermaid`:
+
+````markdown
+```mermaid
+flowchart LR
+  A[Draft] --> B[Review] --> C[Publish]
+```
+````
+
+Diagrams follow the light or dark theme. While a diagram is loading, or if its
+syntax is incomplete or invalid, the preview shows its source instead. Other
+code blocks keep their normal formatting. Downloads retain the Markdown source.
+
 - **Edit** opens a rich-text editor (TipTap). Save creates a **new version** of
   the artifact. If the conversation sandbox and file path are still valid,
   CubePlex also tries to write the same content back to that path; if not, the

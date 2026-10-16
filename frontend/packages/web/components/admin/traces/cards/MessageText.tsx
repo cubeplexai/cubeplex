@@ -1,6 +1,7 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import type { ComponentProps } from 'react'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -25,7 +26,11 @@ interface Props {
 export function MessageText({ children }: Props) {
   return (
     <div className={proseClasses}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
+      <ReactMarkdown
+        components={markdownComponents}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+      >
         {children}
       </ReactMarkdown>
     </div>

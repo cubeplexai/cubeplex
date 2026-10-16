@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 import { Download, ExternalLink, Sparkles } from 'lucide-react'
 import useSWR from 'swr'
@@ -148,7 +149,9 @@ export function SkillCandidatePanel({
             )}
 
             <div className={proseClasses}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
+              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                {data.content}
+              </ReactMarkdown>
             </div>
           </>
         )}

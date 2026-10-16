@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 import { ArrowUpCircle, FileText, Files, GitCompare, History, RefreshCw } from 'lucide-react'
 import {
@@ -645,7 +646,7 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
           {content && (
             <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
               <div className={proseClasses}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
                   {stripFrontmatter(content.content)}
                 </ReactMarkdown>
               </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink, FileText, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import {
@@ -192,7 +193,7 @@ export function AdminCandidateDetailPanel({
           {preview && (
             <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
               <div className={cn(proseClasses)}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
                   {stripFrontmatter(preview.content)}
                 </ReactMarkdown>
               </div>

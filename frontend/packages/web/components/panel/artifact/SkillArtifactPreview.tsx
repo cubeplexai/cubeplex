@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X, AlertCircle, CheckCircle2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import { markdownComponents } from '@/components/shared/markdownComponents'
 import remarkGfm from 'remark-gfm'
 import useSWR from 'swr'
 import type { Artifact } from '@cubeplex/core'
@@ -77,7 +78,9 @@ export function SkillArtifactPreview({
           {isLoading ? (
             <p className="text-sm text-muted-foreground">{t('previewLoading')}</p>
           ) : skillMd ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillMd}</ReactMarkdown>
+            <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+              {skillMd}
+            </ReactMarkdown>
           ) : (
             <p className="text-sm text-muted-foreground">{t('noSkillMd')}</p>
           )}
