@@ -201,6 +201,9 @@ The Prometheus Python client also exports `process_cpu_seconds_total`,
 exporters for machine and container resources, and separate Postgres/Redis
 exporters for those services.
 
+For scrape setup, see the [Docker Compose](./docker-compose.md#prometheus-metrics)
+and [Kubernetes](./kubernetes.md) guides.
+
 ## Next steps
 
 - [Docker Compose install guide](./docker-compose.md)

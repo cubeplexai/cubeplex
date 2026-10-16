@@ -173,8 +173,8 @@ $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```yaml
 image:
   # 固定成与 chart appVersion 不同的镜像版本：
-  backend:  { tag: "v0.9.2" }
-  frontend: { tag: "v0.9.2" }
+  backend:  { tag: "v0.9.3" }
+  frontend: { tag: "v0.9.3" }
 ```
 
 自己构建 / 私有 registry 的镜像，则额外设置其位置：
@@ -488,7 +488,7 @@ egress:
   sandboxNamespace: "opensandbox"
   webhook:
     image:
-      tag: "v0.9.2"             # 与 backend/frontend 相同的 release 版本
+      tag: "v0.9.3"             # 与 backend/frontend 相同的 release 版本
     # 必须与 opensandbox-server 配置的 egress.image 完全一致。
     # 国内镜像源：sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
     egressImage: "opensandbox/egress:v1.0.12"
@@ -658,7 +658,7 @@ backend:
 
 ```bash
 helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace cubeplex --create-namespace \
   --values values.local.yaml \
   --wait --timeout 10m
@@ -746,6 +746,17 @@ INGRESS_IP=<你的节点 IP> deploy/kubernetes/scripts/smoke-test.sh
 
 检查项：rollout 完成、健康检查端点有响应、ingress 正确路由 backend 和
 frontend、Next.js 能渲染 HTML。**不**会触发 LLM 调用。
+
+后端 Pod 带有 `prometheus.io/scrape`、`prometheus.io/path` 和
+`prometheus.io/port` 注解，可用于基于注解的 Pod 发现。请在 Prometheus 中配置使用这些注解。
+`/metrics` 可通过后端 ClusterIP Service 访问，不通过公共 Ingress 暴露。检查方式：
+
+```bash
+kubectl -n cubeplex port-forward svc/cubeplex-backend 18000:http
+curl http://localhost:18000/metrics
+```
+
+指标名称与统计规则见[指标列表](./overview.md#metrics)。
 
 ### 6.3 端到端测试（含 LLM 往返）
 
@@ -951,8 +962,8 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "v0.9.2" }
-  frontend: { tag: "v0.9.2" }
+  backend:  { tag: "v0.9.3" }
+  frontend: { tag: "v0.9.3" }
 
 backend:
   configOverrides:

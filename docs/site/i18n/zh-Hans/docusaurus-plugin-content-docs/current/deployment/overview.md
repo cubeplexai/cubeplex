@@ -150,6 +150,32 @@ volcengine / moonshot / zhipu / minimax / openrouter / anthropic / openai
 `REPLACE_ME`、`USE ENV`、`CHANGE_ME…` 等已知占位符时，后端都会拒绝启动。
 Helm 也会在安装时拒绝这些占位符。
 
+## 指标 {#metrics}
+
+后端在 `GET /metrics` 提供 Prometheus 文本格式的指标，无需应用层认证。
+请分别抓取每个后端实例。指标标签不包含租户、用户、对话、运行、模型或原始工具名称。
+后端进程重启后计数器会重置；历史用量仍以计费记录为准。
+
+| 指标 | 含义 |
+|---|---|
+| `cubeplex_http_requests_total` | 按路由模板、方法和状态统计已完成的 HTTP 请求。SSE 请求在流关闭时计数。 |
+| `cubeplex_http_request_duration_seconds` | 已完成的非 SSE HTTP 请求耗时，不包含健康探针和 `/metrics`。 |
+| `cubeplex_http_requests_in_flight` | 当前处理中的 HTTP 请求，包括 SSE 流。 |
+| `cubeplex_sse_connections_active`、`cubeplex_sse_connections_opened_total` | 当前打开的 SSE 流，以及进程启动以来打开的流总数。 |
+| `cubeplex_agent_run_attempts_active`、`cubeplex_agent_run_attempts_started_total` | 正在执行或清理的工作任务，以及按触发来源和阶段统计的已调度任务。HITL 暂停时没有活跃工作任务。 |
+| `cubeplex_agent_run_attempt_duration_seconds` | 工作任务耗时，包含清理，不包含等待 HITL 回答的时间。 |
+| `cubeplex_agent_runs_finished_total` | 本进程记录的持久化终态：`completed`、`cancelled`、`errored`、`failed`。 |
+| `cubeplex_agent_hitl_pauses_total` | 进入 HITL 暂停的运行尝试次数。 |
+| `cubeplex_llm_calls_total`、`cubeplex_llm_tokens_total` | 已提交的 LLM 计费事件及 token 用量。调用结果为 `success` 或 `fallback_failed`。 |
+| `cubeplex_tool_calls_total` | 按固定类别及成功或错误结果统计的已完成工具调用。 |
+
+Prometheus Python 客户端还会导出 `process_cpu_seconds_total`、
+`process_resident_memory_bytes` 和 `process_open_fds`。机器和容器资源请使用宿主机或容器 exporter，
+Postgres、Redis 也应使用各自的 exporter。
+
+抓取配置参见 [Docker Compose](./docker-compose.md#prometheus-metrics)
+和 [Kubernetes](./kubernetes.md) 指南。
+
 ## 下一步
 
 - [Docker Compose 安装指南](./docker-compose.md)

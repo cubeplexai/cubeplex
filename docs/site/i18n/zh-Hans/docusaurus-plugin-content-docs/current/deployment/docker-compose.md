@@ -54,7 +54,7 @@ ghcr.io/cubeplexai/cubeplex-frontend:<version>
 ```
 
 从[发布页](https://github.com/cubeplexai/cubeplex/releases)选一个版本 tag——
-backend 和 frontend 共用同一个应用版本，例如 `v0.9.2`——在下一步设为
+backend 和 frontend 共用同一个应用版本，例如 `v0.9.3`——在下一步设为
 `BACKEND_TAG` / `FRONTEND_TAG`。`IMAGE_REGISTRY` / `IMAGE_REPO` 已默认为
 `ghcr.io` / `cubeplexai`，标准安装无需改动。GHCR 发布镜像是公开的，无需
 `docker login`。
@@ -100,8 +100,8 @@ $EDITOR .env
 ```dotenv
 IMAGE_REGISTRY=ghcr.io
 IMAGE_REPO=cubeplexai
-BACKEND_TAG=v0.9.2        # 发布页上的一个版本 tag
-FRONTEND_TAG=v0.9.2
+BACKEND_TAG=v0.9.3        # 发布页上的一个版本 tag
+FRONTEND_TAG=v0.9.3
 
 # openssl rand -hex 16
 POSTGRES_PASSWORD=<...>
@@ -244,6 +244,23 @@ PROMPT="Say the word hello and nothing else." \
 两个脚本默认针对 `localhost`；用 `HOST`、`BACKEND_PORT`、`FRONTEND_PORT`
 覆盖以针对远程主机运行。
 
+### Prometheus 指标 {#prometheus-metrics}
+
+后端在映射的 `BACKEND_PORT`（默认 8000）上提供 `/metrics`。
+Compose 服务带有用于 Docker 服务发现的 `prometheus.io/*` 标签；
+仅有标签不会配置 Prometheus 抓取任务。同一 Compose 网络中的 Prometheus 容器可使用：
+
+```yaml
+scrape_configs:
+  - job_name: cubeplex-backend
+    static_configs:
+      - targets: ["backend:8000"]
+```
+
+在宿主机上用 `curl http://localhost:${BACKEND_PORT:-8000}/metrics` 验证。
+由于后端端口映射到宿主机，如果指标端点应仅供内部访问，请限制该端口的访问。
+指标名称与统计规则见[指标列表](./overview.md#metrics)。
+
 ## 7. 常见故障排查
 
 ### Backend 反复重启
@@ -332,7 +349,7 @@ $EDITOR config/opensandbox.toml          # 设置 api_key、eip/host_ip、execd_
 $EDITOR config/config.production.secrets.yaml
 #   sandbox:
 #     domain:  "opensandbox-server:8090"   # 这个 overlay 里的 Docker DNS 名称
-#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.9.2"
+#     image:   "ghcr.io/cubeplexai/cubeplex-sandbox:v0.9.3"
 #     api_key: "<与 opensandbox.toml 中 [server].api_key 相同>"
 
 # 3. backend 非密钥配置（示例已启用 sandbox）
