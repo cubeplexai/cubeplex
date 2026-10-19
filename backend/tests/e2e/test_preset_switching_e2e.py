@@ -98,6 +98,15 @@ async def _seed_switching_providers_and_presets() -> None:
                     provider_type="openai-completions",
                     base_url=f"https://{slug}.test/v1",
                     auth_type="api_key",
+                    capability={
+                        "reasoning": {
+                            "mode_payloads": {"on": {}},
+                            "effort_path": "reasoning_effort",
+                            "effort_values": {"high": "high"},
+                        }
+                    }
+                    if slug == "small"
+                    else {},
                     enabled=True,
                 )
                 session.add(provider)
@@ -108,7 +117,7 @@ async def _seed_switching_providers_and_presets() -> None:
                         provider_id=provider.id,
                         model_id="m1",
                         display_name=f"{slug}-m1",
-                        reasoning=False,
+                        reasoning=slug == "small",
                         input_modalities=["text"],
                         cost_input=0.0,
                         cost_output=0.0,

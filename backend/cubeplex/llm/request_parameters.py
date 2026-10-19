@@ -126,6 +126,9 @@ def prepare_provider_for_call(
 ) -> Any:
     from copy import copy
 
+    # Providers implementing only the public protocol own their serialization.
+    if not hasattr(provider, "_resolve_capability"):
+        return provider
     configured = copy(provider)
     capability = provider._resolve_capability(model_id).model_copy(deep=True)
     if hasattr(provider, "_extra_body"):

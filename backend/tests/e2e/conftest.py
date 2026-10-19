@@ -2150,3 +2150,77 @@ async def uninstall_skill_for_workspace(
         delete(Skill).where(Skill.id == skill_id)  # type: ignore[arg-type]
     )
     await session.commit()
+
+
+@asynccontextmanager
+async def persisted_admission_models(db_session: AsyncSession, org_id: str) -> AsyncIterator[None]:
+    """Persist the model refs used by admission fixtures for execution-time binding."""
+    from copy import deepcopy
+
+    from sqlalchemy import delete, select, update
+
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.provider import Model, Provider
+
+    await _ensure_default_user_and_membership()
+    provider = Provider(
+        org_id=org_id,
+        name="admitted-execution-provider",
+        slug="provider",
+        base_url="https://example.invalid",
+        auth_type="none",
+    )
+    db_session.add(provider)
+    await db_session.flush()
+    for model_id in ("first", "next"):
+        db_session.add(
+            Model(
+                org_id=org_id,
+                provider_id=provider.id,
+                model_id=model_id,
+                display_name=model_id,
+                input_modalities=["text"],
+                context_window=128_000,
+                max_tokens=4096,
+            )
+        )
+    settings = await db_session.scalar(
+        select(OrgSettings).where(
+            OrgSettings.org_id == org_id,
+            OrgSettings.key == MODEL_PRESETS_KEY,
+        )
+    )
+    previous = deepcopy(settings.value) if settings else None
+    if settings is None:
+        settings = OrgSettings(org_id=org_id, key=MODEL_PRESETS_KEY, value={})
+        db_session.add(settings)
+    off = {"enabled": False, "primary": None, "fallbacks": []}
+    settings.value = {
+        "tiers": {"lite": off, "flash": off, "pro": off},
+        "custom_presets": [
+            {"label": "admitted", "primary": "provider/first", "fallbacks": [], "description": ""}
+        ],
+        "default_preset": "admitted",
+        "task_routing": {},
+    }
+    await db_session.commit()
+    provider_id, settings_id = provider.id, settings.id
+    try:
+        yield
+    finally:
+        await db_session.rollback()
+        if previous is None:
+            await db_session.execute(delete(OrgSettings).where(OrgSettings.id == settings_id))
+        else:
+            await db_session.execute(
+                update(OrgSettings).where(OrgSettings.id == settings_id).values(value=previous)
+            )
+        await db_session.execute(delete(Model).where(Model.provider_id == provider_id))
+        await db_session.execute(delete(Provider).where(Provider.id == provider_id))
+        await db_session.commit()
+
+
+@pytest_asyncio.fixture
+async def admitted_provider(db_session: AsyncSession) -> AsyncIterator[None]:
+    async with persisted_admission_models(db_session, DEFAULT_ORG_ID):
+        yield

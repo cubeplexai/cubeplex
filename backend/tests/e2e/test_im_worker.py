@@ -175,7 +175,7 @@ class _AdmissionResolvingRunManager:
                     content=content,
                     attachment_ids=tuple(attachments or []),
                     model_key=model_key,
-                    reasoning=reasoning or ReasoningControl(),
+                    reasoning=reasoning,
                 ),
                 snapshot=llm_snapshot,
             )

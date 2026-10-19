@@ -1049,7 +1049,9 @@
           "warn": "降级",
           "fail": "无法启用",
           "unavailable": "无法启用"
-        }
+        },
+        "modelPending": "正在测试模型能力…",
+        "waitingLiveness": "等待连接检查完成…"
       },
       "manualSetup": "保存供应商并手动配置"
     },
@@ -1059,7 +1061,7 @@
       "working": "处理中…",
       "hint": "可用性来自这个端点。导入前请审核参数；导入的模型通过测试后才能启用。",
       "managementKey": "CLIProxyAPI 管理密钥（可选）",
-      "managementHint": "仅用于本次发现，不会保存；与调用 API 的密钥不同。",
+      "managementHint": "可选：从此实例读取模型参数后再核对。此密钥仅使用一次且不会保存，与 API key 不同。",
       "staticHint": "这个供应商暂没有经过验证的发现接口。这里是预置建议，请使用手动配置。",
       "count": "端点返回了 {count} 个模型",
       "failed": "发现失败",
@@ -1096,7 +1098,21 @@
       "cost_input": "输入价格 / 百万 token",
       "cost_output": "输出价格 / 百万 token",
       "cost_cache_read": "缓存读取价格 / 百万 token",
-      "cost_cache_write": "缓存写入价格 / 百万 token"
+      "cost_cache_write": "缓存写入价格 / 百万 token",
+      "search": "搜索模型",
+      "selectedOnly": "仅显示已选模型（{count}）",
+      "missing": "待补齐：{fields}",
+      "unsupported": "不是聊天模型",
+      "reviewedValue": "将导入：{value}",
+      "selectionStatus": "已选 {selected} 个 · {ready} 个可导入",
+      "reviewBeforeImport": "请先补齐 {count} 个已选模型的必需配置，再导入。",
+      "reviewSelection": "检查已选模型",
+      "invalidLimits": "请输入正整数，输出上限不能超过上下文窗口。",
+      "errors": {
+        "incomplete_configuration": "部分已选模型仍缺少必需参数，请检查各模型列出的字段。",
+        "discovery_expired": "模型列表已过期，请重新获取可用模型，核对后再导入。",
+        "discovery_stale": "连接配置已变更，请重新获取模型后再导入。"
+      }
     },
     "priceUnknown": "未知",
     "enableVerified": "启用已验证模型",

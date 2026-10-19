@@ -108,7 +108,7 @@ async def _drain_stream(
     reasoning: ReasoningControl | None = None,
     prompt: str = "Reply with OK.",
     max_output: int = 512,
-    max_seconds: float = 15.0,
+    max_seconds: float = 30.0,
     temperature: float | None = None,
     tools: list[ToolDefinition] | None = None,
     image: ImageContent | None = None,
@@ -168,6 +168,10 @@ async def _drain_stream(
                     break
             result = await stream.result()
             return events, time.perf_counter() - start, result
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"Model did not finish responding within {max_seconds:g} seconds."
+        ) from exc
     finally:
         signal.set()
         # MessageStream has no close API; cancel its attached producer on timeout/cancellation.
@@ -245,8 +249,7 @@ def _liveness_error_is_provider_level(error: ProbeError) -> bool:
 
 
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
-    # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
-    # 5s timeout. Proves base_url + key + network reach the endpoint.
+    # Keep the output small while allowing a gateway's first-token latency.
     try:
         events, elapsed, _ = await _drain_stream(
             provider,
@@ -254,7 +257,7 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
             reasoning=None,
             prompt=".",
             max_output=1,
-            max_seconds=5.0,
+            max_seconds=30.0,
         )
     except Exception as exc:
         err = _probe_error(exc)

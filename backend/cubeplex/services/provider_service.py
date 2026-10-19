@@ -456,10 +456,10 @@ class ProviderService:
     ) -> ImportModelsResponse:
         if self._preview_store is None:
             raise RuntimeError("Discovery preview store is unavailable")
+        provider = await self._lock_provider(provider_id)
         preview = await self._preview_store.get(
             data.discovery_id, org_id=self.org_id, actor_user_id=self.actor_user_id
         )
-        provider = await self._lock_provider(provider_id)
         await self._credential_revision(provider, lock=True)
         config = await self.calling_configuration(provider)
         self._preview_store.verify(preview, config, provider_id)

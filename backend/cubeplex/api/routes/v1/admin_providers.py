@@ -266,7 +266,9 @@ async def discover_unsaved_provider(
             management_key=body.management_key,
         )
     except DiscoveryOperationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid discovery configuration") from exc
 
@@ -305,7 +307,9 @@ async def discover_saved_provider(
     except ProviderSystemReadonlyError as exc:
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
     except DiscoveryOperationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
 
 
 @router.post("/providers/{provider_id}/models/import", response_model=ImportModelsResponse)
@@ -325,7 +329,9 @@ async def import_provider_models(
     except ProviderSystemReadonlyError as exc:
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
     except DiscoveryOperationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid reviewed configuration") from exc
 

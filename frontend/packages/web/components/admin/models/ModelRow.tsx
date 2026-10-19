@@ -49,7 +49,7 @@ function testIssues(summary: Record<string, unknown> | undefined): TestIssue[] {
       return {
         name: String(s.name ?? ''),
         status: String(s.status ?? ''),
-        detail: formatProbeDetail(String(s.detail ?? error?.message ?? '')),
+        detail: formatProbeDetail(String(error?.message || s.detail || '')),
       }
     })
 }
@@ -70,6 +70,9 @@ export function ModelRow({
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
   const issues = testIssues(model.last_test_summary)
+  const canEnable =
+    ['ready', 'degraded'].includes(model.readiness ?? '') &&
+    model.last_test_summary?.required_checks_passed === true
 
   async function handleRetest() {
     controller.current?.abort()
@@ -181,7 +184,8 @@ export function ModelRow({
           <Button
             size="sm"
             variant="outline"
-            disabled={retesting}
+            disabled={retesting || !canEnable}
+            title={canEnable ? undefined : t('verificationRequired')}
             onClick={async () => {
               setRetesting(true)
               setError(null)

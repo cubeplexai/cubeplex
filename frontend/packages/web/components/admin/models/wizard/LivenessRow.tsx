@@ -16,7 +16,7 @@ export function LivenessRow({ step, running }: LivenessRowProps) {
   const status = step?.status ?? null
   const ok = status === 'pass' || status === 'warn'
   // Show the failure reason in full (wrapping) rather than a clipped raw blob.
-  const reason = status === 'fail' ? formatProbeDetail(step?.detail ?? step?.error?.message) : ''
+  const reason = status === 'fail' ? formatProbeDetail(step?.error?.message || step?.detail) : ''
 
   return (
     <div

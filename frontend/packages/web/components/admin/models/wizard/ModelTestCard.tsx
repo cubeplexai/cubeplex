@@ -37,7 +37,7 @@ function StepChip({ step }: { step: ProbeStep }) {
           : Minus
   return (
     <span
-      title={formatProbeDetail(step.detail ?? step.error?.message) || step.name}
+      title={formatProbeDetail(step.error?.message || step.detail) || step.name}
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
         tone,
@@ -82,7 +82,7 @@ export function ModelTestCard({ state, onRetest }: ModelTestCardProps) {
         <ul className="flex flex-col gap-1 border-t border-border/60 pt-2">
           {issues.map((s) => {
             const isFail = s.status === 'fail'
-            const detail = formatProbeDetail(s.detail ?? s.error?.message)
+            const detail = formatProbeDetail(s.error?.message || s.detail)
             return (
               <li key={s.name} className="flex items-start gap-1.5 text-xs">
                 {isFail ? (

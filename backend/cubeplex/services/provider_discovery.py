@@ -150,7 +150,9 @@ def review_selection(
     refresh_eligibility(model)
     if not model.eligible:
         raise DiscoveryOperationError(
-            "incomplete_configuration", "Complete required chat-model fields.", 422
+            "incomplete_configuration",
+            f"Complete required fields for {model.model_id}: {', '.join(model.missing_fields)}.",
+            422,
         )
     return model
 

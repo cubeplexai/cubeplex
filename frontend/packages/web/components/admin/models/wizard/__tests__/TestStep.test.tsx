@@ -104,7 +104,15 @@ describe('TestStep', () => {
       streamEvents([
         {
           event: 'liveness',
-          data: { name: 'liveness', status: 'fail', error: { type: 'auth', message: 'bad key' } },
+          data: {
+            name: 'liveness',
+            status: 'fail',
+            detail: '',
+            error: {
+              type: 'TimeoutError',
+              message: 'Model did not finish responding within 30 seconds.',
+            },
+          },
         },
         { event: 'done', data: {} },
       ]),
@@ -113,5 +121,54 @@ describe('TestStep', () => {
     const save = await screen.findByRole('button', { name: 'Finish' })
     await waitFor(() => expect(core.parseTestStream).toHaveBeenCalled())
     expect(save).toBeDisabled()
+    expect(screen.getByText('Model did not finish responding within 30 seconds.')).toBeVisible()
+  })
+
+  it('retests only the failed model and retains the other passing result', async () => {
+    vi.mocked(core.parseTestStream)
+      .mockReturnValueOnce(
+        streamEvents([
+          { event: 'liveness', data: livenessPass },
+          { event: 'model', data: modelPass },
+          {
+            event: 'model',
+            data: { ...modelPass, model_db_id: 'mdl_2', overall: 'fail', blocking_failed: true },
+          },
+          { event: 'done', data: {} },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamEvents([
+          { event: 'liveness', data: livenessPass },
+          { event: 'model', data: { ...modelPass, model_db_id: 'mdl_2' } },
+          { event: 'done', data: {} },
+        ]),
+      )
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <TestStep
+          client={fakeClient}
+          providerId="prv_1"
+          modelDbIds={['mdl_1', 'mdl_2']}
+          modelLabels={{ mdl_1: 'First', mdl_2: 'Second' }}
+          onFinish={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /^Re-test$/ }))
+    await waitFor(() =>
+      expect(core.startTestStream).toHaveBeenLastCalledWith(
+        fakeClient,
+        'prv_1',
+        ['mdl_2'],
+        expect.any(AbortSignal),
+      ),
+    )
+    expect(screen.getByText('First')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }))
+    await waitFor(() =>
+      expect(core.enableTestedModels).toHaveBeenCalledWith(fakeClient, 'prv_1', ['mdl_1', 'mdl_2']),
+    )
   })
 })

@@ -38,9 +38,9 @@ test.describe('M2 Model Management', () => {
     await page.getByText(/^(None|无认证)$/).click()
     await page.getByTestId('provider-config-submit').click()
 
-    // Provider is created at step 2; the wizard advances to the Models step where
-    // "Finish later" appears. Clicking it (only present once a provider exists)
-    // implicitly waits for the create to land, then returns to the list.
+    // Reviewing a discovery draft does not save it. Choose manual setup to
+    // persist the provider without making an upstream discovery request.
+    await page.getByRole('button', { name: 'Save provider and configure manually' }).click()
     await page.getByRole('button', { name: /Finish later|稍后完成/ }).dispatchEvent('click')
     await expect(page).toHaveURL(/\/admin\/models$/)
 

@@ -3,6 +3,31 @@ import pytest
 from cubeplex.llm.request_parameters import validate_request_extensions
 
 
+def test_public_provider_can_bind_without_adapter_capability_internals(monkeypatch):
+    from cubeloop.providers.faux import FauxProvider
+
+    from cubeplex.llm import builder
+    from cubeplex.llm.config import ModelConfig, ProviderConfig
+    from cubeplex.llm.snapshot import LLMSnapshot
+
+    provider = FauxProvider(provider_id="local")
+    monkeypatch.setattr(builder, "build_provider", lambda *args, **kwargs: provider)
+    snapshot = LLMSnapshot(
+        providers={
+            "local": ProviderConfig(
+                base_url="http://localhost/v1",
+                models=[ModelConfig(id="chat", name="Chat", context_window=8192, max_tokens=512)],
+            )
+        },
+        model_presets=(),
+        task_routing={},
+    )
+    bound = builder.build_bound_model(snapshot, "local/chat")
+    assert bound.provider is provider
+    assert bound.spec.id == "chat"
+    assert bound.spec.max_tokens == 512
+
+
 @pytest.mark.parametrize(
     "field",
     [

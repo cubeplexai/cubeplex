@@ -878,7 +878,11 @@ async def test_idle_run_binds_notice_before_execution_task_is_scheduled(
         ),
         run_id=admitted.admission.run_id,
         model_key=conversation.model_key,
-        reasoning=ReasoningControl.model_validate(conversation.reasoning),
+        reasoning=(
+            ReasoningControl.model_validate(conversation.reasoning)
+            if conversation.reasoning is not None
+            else None
+        ),
         llm_snapshot=snapshot(),
         input_metadata={
             **claim.notice.model_dump(mode="json"),

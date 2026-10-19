@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import uuid
@@ -79,19 +78,19 @@ def resolve_discovery_configuration(
 
 def preview_fingerprint(config: CallingConfiguration, secret: str) -> str:
     resolved, _, _ = resolve_discovery_configuration(config)
-    key_hash = hmac.new(
+    key_hash = hmac.digest(
         secret.encode(),
         b"cubeplex:model-discovery:credential:v1\0" + (resolved.api_key or "").encode(),
-        hashlib.sha256,
-    ).hexdigest()
+        "sha256",
+    ).hex()
     payload = resolved.model_dump(mode="json")
     payload["credential_hash"] = key_hash
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hmac.new(
+    return hmac.digest(
         secret.encode(),
         b"cubeplex:model-discovery:preview:v1\0" + canonical.encode(),
-        hashlib.sha256,
-    ).hexdigest()
+        "sha256",
+    ).hex()
 
 
 class DiscoveryPreviewStore:

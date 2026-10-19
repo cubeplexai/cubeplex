@@ -13,7 +13,7 @@ async def test_deadline_covers_stream_drain_not_only_stream_creation():
             return self
 
         async def __anext__(self):
-            await asyncio.sleep(30)
+            await asyncio.Event().wait()
             raise StopAsyncIteration
 
         async def result(self):
@@ -27,6 +27,6 @@ async def test_deadline_covers_stream_drain_not_only_stream_creation():
             return HungStream()
 
     start = time.monotonic()
-    with pytest.raises(TimeoutError):
+    with pytest.raises(TimeoutError, match="within 0.02 seconds"):
         await asyncio.wait_for(_drain_stream(Provider(), "m", max_seconds=0.02), timeout=0.3)
     assert time.monotonic() - start < 0.2

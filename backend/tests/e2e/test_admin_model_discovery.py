@@ -294,6 +294,9 @@ async def test_invalid_import_rolls_back_entire_batch_and_stale_forms_are_reject
             },
         )
         assert bad.status_code == 422, bad.text
+        assert bad.json()["detail"]["code"] == "incomplete_configuration"
+        assert "unknown-alias" in bad.json()["detail"]["message"]
+        assert "context_window" in bad.json()["detail"]["message"]
         assert (await client.get(path)).json()["models"] == []
         edited = await client.patch(
             path,
@@ -613,3 +616,79 @@ async def test_current_reasoning_failure_restricts_controls_and_obsolete_failure
         )
         await db_session.commit()
         await client.delete(path)
+
+
+async def test_saved_discovery_uses_current_key_and_rejects_pre_rotation_preview(
+    admin_client,
+    model_listing,
+):
+    client, _ = admin_client
+    created = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "saved-discovery-key-rotation",
+            "base_url": "http://localhost:8317/v1",
+            "api_key": "initial-discovery-key",
+        },
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    path = f"/api/v1/admin/providers/{provider['id']}"
+    try:
+        discovered = await client.post(path + "/discover", json={})
+        assert discovered.status_code == 200, discovered.text
+        preview = discovered.json()
+        assert preview["status"] == "complete"
+        assert "initial-discovery-key" not in discovered.text
+        changed = await client.patch(
+            path,
+            json={
+                "api_key": "rotated-discovery-key",
+                "expected_configuration_revision": provider["configuration_revision"],
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        stale = await client.post(
+            path + "/models/import",
+            json={
+                "discovery_id": preview["discovery_id"],
+                "models": [{"model_id": "alias/chat"}],
+            },
+        )
+        assert stale.status_code == 409 and stale.json()["detail"]["code"] == "discovery_stale"
+        refreshed = await client.post(path + "/discover", json={})
+        assert refreshed.status_code == 200, refreshed.text
+        imported = await client.post(
+            path + "/models/import",
+            json={
+                "discovery_id": refreshed.json()["discovery_id"],
+                "models": [{"model_id": "alias/chat"}],
+            },
+        )
+        assert imported.status_code == 200, imported.text
+        rediscovered = await client.post(path + "/discover", json={})
+        existing = rediscovered.json()["candidates"][0]
+        assert existing["existing_model_db_id"] == imported.json()["results"][0]["model_db_id"]
+        assert not (await client.get(path)).json()["models"][0]["enabled"]
+    finally:
+        await client.delete(path)
+
+
+async def test_discovery_does_not_modify_system_or_nonexistent_providers(
+    admin_client, model_listing
+):
+    client, _ = admin_client
+    system = next(p for p in (await client.get("/api/v1/admin/providers")).json() if p["is_system"])
+    for suffix in ["/discover", "/models/import"]:
+        body = (
+            {}
+            if suffix == "/discover"
+            else {
+                "discovery_id": "untrusted",
+                "models": [{"model_id": "alias/chat"}],
+            }
+        )
+        response = await client.post(f"/api/v1/admin/providers/{system['id']}" + suffix, json=body)
+        assert response.status_code == 403, response.text
+        missing = await client.post("/api/v1/admin/providers/prv-not-found" + suffix, json=body)
+        assert missing.status_code == 404, missing.text

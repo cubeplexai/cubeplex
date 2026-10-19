@@ -32,6 +32,7 @@ interface ConfigureStepProps {
   existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
   onProviderSaved?: (providerId: string) => void
+  onReviewingChange?: (reviewing: boolean) => void
   onModelsImported?: (providerId: string, models: ImportModelOutcome[]) => void
   // Persisted form values, so stepping back into this step restores them.
   configDraft: ConfigDraft | null
@@ -50,6 +51,7 @@ export function ConfigureStep({
   existingProviderId,
   onProviderCreated,
   onProviderSaved,
+  onReviewingChange,
   onModelsImported,
   configDraft,
   onConfigDraftChange,
@@ -129,6 +131,7 @@ export function ConfigureStep({
       chosen.discovery.adapter !== 'static'
     ) {
       setDraft(body as ProviderCreate)
+      onReviewingChange?.(true)
       return
     }
     setSaving(true)
@@ -248,7 +251,14 @@ export function ConfigureStep({
             onProviderSaved={onProviderSaved}
             onImported={(id, models) => onModelsImported?.(id, models)}
           />
-          <Button variant="outline" disabled={saving} onClick={() => setDraft(null)}>
+          <Button
+            variant="outline"
+            disabled={saving}
+            onClick={() => {
+              setDraft(null)
+              onReviewingChange?.(false)
+            }}
+          >
             {tw('back')}
           </Button>
           <Button variant="ghost" disabled={saving} onClick={() => void handleSubmit(draft, true)}>

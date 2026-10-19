@@ -1,11 +1,13 @@
 """HTTP Stop persists its explicit target before best-effort delivery."""
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
 import pytest
+import pytest_asyncio
 from cubeloop.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.db.engine import async_session_maker
-from cubeplex.models import Conversation, ConversationExecutionAdmission
+from cubeplex.models import Conversation, ConversationExecutionAdmission, Workspace
 from cubeplex.services.conversation_execution import (
     AdmittedExecution,
     ConversationExecutionService,
@@ -27,8 +29,19 @@ from cubeplex.streams.run_events import (
     get_run_meta,
 )
 from cubeplex.streams.run_manager import RunContext
+from tests.e2e.conftest import persisted_admission_models
 from tests.e2e.test_admitted_run_execution import cleanup_run_rows
 from tests.e2e.test_conversation_execution_control import snapshot
+
+
+@pytest_asyncio.fixture
+async def paused_model_config(
+    db_session: AsyncSession, member_client: tuple[httpx.AsyncClient, str]
+) -> AsyncIterator[None]:
+    workspace = await db_session.get(Workspace, member_client[1])
+    assert workspace is not None
+    async with persisted_admission_models(db_session, workspace.org_id):
+        yield
 
 
 async def admit(
@@ -321,6 +334,7 @@ async def test_stop_paused_run_after_redis_expiry_without_model(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     action: str,
+    paused_model_config: None,
 ) -> None:
     client, workspace_id = member_client
     conversation_id = await create_conversation(client, workspace_id)

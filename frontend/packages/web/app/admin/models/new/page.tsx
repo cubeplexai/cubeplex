@@ -19,6 +19,7 @@ export default function AddProviderWizardPage() {
   const [state, dispatch] = useReducer(wizardReducer, initialWizardState)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   const [discarding, setDiscarding] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
 
   // Leave the wizard but keep the provider (created at step 2). Its models stay
   // disabled until a passing test enables them — the user can finish from the
@@ -53,7 +54,7 @@ export default function AddProviderWizardPage() {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-[240px] shrink-0 border-r border-border/70 bg-card/20 px-5 py-6">
-          <WizardStepRail current={state.step} />
+          <WizardStepRail current={state.step === 2 && reviewing ? 3 : state.step} />
         </aside>
 
         <section className="flex flex-1 flex-col overflow-hidden">
@@ -73,6 +74,7 @@ export default function AddProviderWizardPage() {
                 onSelectEndpoint={(presetKey) => dispatch({ type: 'selectEndpoint', presetKey })}
                 existingProviderId={state.providerId}
                 onProviderSaved={(id) => dispatch({ type: 'providerCreated', providerId: id })}
+                onReviewingChange={setReviewing}
                 onModelsImported={(id, models) => {
                   dispatch({ type: 'providerCreated', providerId: id })
                   dispatch({ type: 'next' })
@@ -167,7 +169,7 @@ export default function AddProviderWizardPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {state.step > 1 && (state.step > 2 || !state.providerId) && (
+              {state.step > 1 && (state.step > 2 || (!state.providerId && !reviewing)) && (
                 <Button
                   type="button"
                   variant="outline"

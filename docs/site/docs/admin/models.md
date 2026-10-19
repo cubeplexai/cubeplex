@@ -123,6 +123,10 @@ Listing interfaces differ by vendor. OpenAI-compatible instances commonly expose
 
 Review the returned IDs and their field sources. Select all chat candidates, confirm suggestions you have checked, or apply reviewed context/output limits to a selected group. Unknown fields stay unknown; conflicting sources require a choice or an explicit value. Embedding, audio, and image-generation models cannot be imported as agent chat models. Missing prices are unknown estimates, not free service.
 
+Use **Search models** or **Show selected only** to narrow the list. Each row names its missing required fields. **Import selected models** stays disabled until those fields are resolved; **Review selected models** opens the selected rows that need attention. Confirmed values and chosen sources update the ready count immediately. Context and output limits must be positive whole numbers, with output no larger than context.
+
+Connection and capability checks allow up to 30 seconds per request for gateway latency. Pending models stay visible while checks run, and failures show the upstream reason or the timeout. Only models that pass their required checks can be enabled.
+
 CLIProxyAPI's optional management key enriches the listing for this discovery only. CubePlex does not save it; it is distinct from the calling key. Client templates supply suggestions rather than proof of model capabilities. For Ollama, select up to 100 models and use **Load selected metadata** before reviewing their fields.
 
 **Import selected models** creates disabled rows in batches of at most 100. Existing IDs are preserved and skipped, including on retry. Discovery previews expire after 10 minutes; rediscover after expiry or a calling-configuration change. Provider creation can be recovered for 24 hours using the same discovery receipt. A deleted provider cannot be recreated by replaying its receipt.

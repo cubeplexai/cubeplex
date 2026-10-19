@@ -68,7 +68,7 @@ async def cleanup_run_rows(session: AsyncSession, conversation_id: str) -> None:
 
 
 @pytest_asyncio.fixture
-async def run_manager() -> AsyncIterator[RunManager]:
+async def run_manager(admitted_provider: None) -> AsyncIterator[RunManager]:
     redis_client = Redis.from_url(config.get("redis.url"), decode_responses=True)
     app = FastAPI()
     app.state.encryption_backend = _SYNC_ENCRYPTION_BACKEND

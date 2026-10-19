@@ -1049,7 +1049,9 @@
           "warn": "Degraded",
           "fail": "Cannot enable",
           "unavailable": "Cannot enable"
-        }
+        },
+        "modelPending": "Testing model capabilities…",
+        "waitingLiveness": "Waiting for the connection check…"
       },
       "manualSetup": "Save provider and configure manually"
     },
@@ -1059,7 +1061,7 @@
       "working": "Working…",
       "hint": "Availability comes from this endpoint. Review specifications before importing. Imported models stay disabled until tests pass.",
       "managementKey": "CLIProxyAPI management key (optional)",
-      "managementHint": "Used for this discovery only; never saved. It is separate from the API key.",
+      "managementHint": "Optional: load specifications from this instance before reviewing models. This key is used once and never saved; it differs from the API key.",
       "staticHint": "This vendor has no verified discovery adapter. These are preset suggestions; use manual setup.",
       "count": "{count} models returned",
       "failed": "Discovery failed",
@@ -1096,7 +1098,21 @@
       "cost_input": "Input price / 1M tokens",
       "cost_output": "Output price / 1M tokens",
       "cost_cache_read": "Cache read price / 1M tokens",
-      "cost_cache_write": "Cache write price / 1M tokens"
+      "cost_cache_write": "Cache write price / 1M tokens",
+      "search": "Search models",
+      "selectedOnly": "Show selected only ({count})",
+      "missing": "Missing: {fields}",
+      "unsupported": "Not a chat model",
+      "reviewedValue": "Will import: {value}",
+      "selectionStatus": "{selected} selected · {ready} ready to import",
+      "reviewBeforeImport": "Complete the required settings for {count} selected models before importing.",
+      "reviewSelection": "Review selected models",
+      "invalidLimits": "Use positive whole numbers. The output limit must not exceed the context window.",
+      "errors": {
+        "incomplete_configuration": "Some selected models still need required settings. Review the fields shown for each model.",
+        "discovery_expired": "This model list expired. List available models again, then review and import.",
+        "discovery_stale": "The connection settings changed. List available models again before importing."
+      }
     },
     "priceUnknown": "Unknown",
     "enableVerified": "Enable verified model",
