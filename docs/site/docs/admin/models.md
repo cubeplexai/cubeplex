@@ -131,7 +131,7 @@ CLIProxyAPI listings are matched against the models.dev provider snapshot shippe
 
 **Import selected models** creates disabled rows in batches of at most 100. Existing IDs are preserved and skipped, including on retry. Discovery previews expire after 10 minutes; rediscover after expiry or a calling-configuration change. Provider creation can be recovered for 24 hours using the same discovery receipt. A deleted provider cannot be recreated by replaying its receipt.
 
-Run model tests, then choose **Enable verified model** (or finish the wizard to enable passing models). Tests check actual streaming and a completed tool call, plus declared reasoning and image input. A failing required capability leaves the model disabled.
+Run model tests, then choose **Enable verified model** (or finish the wizard to enable passing models). Tests check actual streaming and a completed tool call, plus declared reasoning and image input. A failing required capability leaves the model disabled. **Model Settings** lists only enabled models.
 
 Editing endpoint, key, limits, or calling capabilities marks old evidence **Verification pending**. Already enabled models remain usable. A disabled imported model needs a passing test of its current configuration before activation or reactivation. Calls already bound retain their snapshot; new calls and delayed/resumed starts bind current configuration.
 

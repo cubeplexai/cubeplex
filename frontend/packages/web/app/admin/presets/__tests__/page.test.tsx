@@ -74,18 +74,22 @@ describe('AdminPresetsPage (shell)', () => {
     vi.mocked(fakeClient.get).mockImplementation((async (path: string) => {
       if (path === '/api/v1/admin/providers') {
         return jsonResponse([
-          { id: 'prov_1', slug: 'openai' },
-          { id: 'prov_2', slug: 'anthropic' },
+          { id: 'prov_1', slug: 'openai', enabled: true },
+          { id: 'prov_2', slug: 'anthropic', enabled: true },
         ])
       }
       if (path === '/api/v1/admin/providers/prov_1') {
-        return jsonResponse({ id: 'prov_1', slug: 'openai', models: [{ model_id: 'gpt-5' }] })
+        return jsonResponse({
+          id: 'prov_1',
+          slug: 'openai',
+          models: [{ model_id: 'gpt-5', enabled: true }],
+        })
       }
       if (path === '/api/v1/admin/providers/prov_2') {
         return jsonResponse({
           id: 'prov_2',
           slug: 'anthropic',
-          models: [{ model_id: 'claude-opus-4-7' }],
+          models: [{ model_id: 'claude-opus-4-7', enabled: true }],
         })
       }
       throw new Error(`unexpected client.get ${path}`)
@@ -102,6 +106,66 @@ describe('AdminPresetsPage (shell)', () => {
     const calls = vi.mocked(fakeClient.get).mock.calls.map((c) => String(c[0]))
     expect(calls).toContain('/api/v1/admin/providers')
     expect(calls).toContain('/api/v1/admin/providers/prov_1')
+  })
+
+  it('offers only enabled models in the preset picker', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url === '/api/v1/admin/model-presets') {
+        return jsonResponse({ value: sampleConfig(), origin: 'org' })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+
+    vi.mocked(fakeClient.get).mockImplementation((async (path: string) => {
+      if (path === '/api/v1/admin/providers') {
+        return jsonResponse([
+          { id: 'prov_1', slug: 'cliproxyapi', enabled: true },
+          { id: 'prov_2', slug: 'paused', enabled: false },
+          { id: 'prov_3', slug: 'org-off', enabled: true },
+        ])
+      }
+      if (path === '/api/v1/admin/providers/prov_1') {
+        return jsonResponse({
+          id: 'prov_1',
+          slug: 'cliproxyapi',
+          enabled: true,
+          models: [
+            { model_id: 'grok-4.7', enabled: false },
+            { model_id: 'grok-4.6', enabled: true },
+          ],
+        })
+      }
+      if (path === '/api/v1/admin/providers/prov_2') {
+        return jsonResponse({
+          id: 'prov_2',
+          slug: 'paused',
+          enabled: false,
+          models: [{ model_id: 'ready', enabled: true }],
+        })
+      }
+      if (path === '/api/v1/admin/providers/prov_3') {
+        return jsonResponse({
+          id: 'prov_3',
+          slug: 'org-off',
+          enabled: true,
+          org_override: { enabled: false },
+          models: [{ model_id: 'shown', enabled: true }],
+        })
+      }
+      throw new Error(`unexpected client.get ${path}`)
+    }) as unknown as ApiClient['get'])
+
+    renderWithIntl(<AdminPresetsPage />)
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1 })).not.toBeNull())
+
+    fireEvent.click(document.getElementById('tier-enabled-max')!)
+    fireEvent.focus(screen.getAllByLabelText(en.adminPresets.primary)[0])
+
+    expect(screen.getByRole('option', { name: 'cliproxyapi/grok-4.6' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'cliproxyapi/grok-4.7' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'paused/ready' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'org-off/shown' })).toBeNull()
   })
 })
 

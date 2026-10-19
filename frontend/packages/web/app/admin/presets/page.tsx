@@ -50,9 +50,18 @@ export default function AdminPresetsPage(): React.ReactElement {
         for (let i = 0; i < providers.length; i += 1) {
           const res = detailResponses[i]
           if (!res.ok) continue
-          const detail = (await res.json()) as Provider & { models?: Model[] }
+          const detail = (await res.json()) as Provider & {
+            models?: Model[]
+            org_override?: { enabled: boolean } | null
+          }
           const slug = providers[i].slug
+          // List omits org_override; detail matches the snapshot's effective flag.
+          const providerEnabled =
+            detail.org_override?.enabled ?? detail.enabled ?? providers[i].enabled
+          if (providerEnabled === false) continue
           for (const m of detail.models ?? []) {
+            // Disabled imports are not runnable, and saving a preset rejects them.
+            if (!m.enabled) continue
             availableModels.push(`${slug}/${m.model_id}`)
           }
         }
