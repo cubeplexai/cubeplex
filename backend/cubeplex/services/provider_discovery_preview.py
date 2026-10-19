@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import uuid
@@ -76,15 +77,23 @@ def resolve_discovery_configuration(
     return resolved, policy, endpoint
 
 
+def _credential_digest(api_key: str | None, secret: str) -> bytes:
+    # A calling key has a small input space, so the fingerprint stretches it
+    # with scrypt instead of a fast hash.
+    return hashlib.scrypt(
+        (api_key or "").encode(),
+        salt=b"cubeplex:model-discovery:credential:v1\0" + secret.encode(),
+        n=16384,
+        r=8,
+        p=1,
+        dklen=32,
+    )
+
+
 def preview_fingerprint(config: CallingConfiguration, secret: str) -> str:
     resolved, _, _ = resolve_discovery_configuration(config)
-    key_hash = hmac.digest(
-        secret.encode(),
-        b"cubeplex:model-discovery:credential:v1\0" + (resolved.api_key or "").encode(),
-        "sha256",
-    ).hex()
     payload = resolved.model_dump(mode="json")
-    payload["credential_hash"] = key_hash
+    payload["credential_hash"] = _credential_digest(resolved.api_key, secret).hex()
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hmac.digest(
         secret.encode(),
