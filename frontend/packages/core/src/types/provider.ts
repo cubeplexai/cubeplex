@@ -229,7 +229,7 @@ export interface FieldEvidence extends EvidenceDeclaration {
 export interface DiscoveredModel {
   model_id: string
   display_name: string
-  purpose: 'chat' | 'embedding' | 'image' | 'audio' | 'unknown'
+  purpose: 'chat' | 'embedding' | 'image' | 'audio' | 'video' | 'unknown'
   fields: Partial<Record<ModelField, FieldEvidence>>
   eligible: boolean
   missing_fields: ModelField[]
@@ -254,7 +254,6 @@ export interface DiscoveryRequest {
   capability?: Record<string, unknown>
   extra_body?: Record<string, unknown>
   extra_headers?: Record<string, unknown>
-  management_key?: string
   selected_model_ids?: string[]
 }
 export interface ImportModelSelection {

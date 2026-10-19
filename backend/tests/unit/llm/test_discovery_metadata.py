@@ -6,81 +6,53 @@ from cubeplex.llm.discovery_transport import DiscoveryTransport
 from cubeplex.llm.discovery_types import CallingConfiguration, DiscoveryPolicy
 
 
-async def test_management_enrichment_obtains_credential_names_and_keeps_availability_scoped():
-    paths = []
+async def test_cliproxy_enrichment_uses_the_local_catalog_without_extra_requests(monkeypatch):
+    def lookup(model_id, index=None):
+        assert index is None
+        if model_id == "claude-opus-4-6-thinking":
+            return (
+                "anthropic",
+                {
+                    "context": 200000,
+                    "output": 8192,
+                    "input": ["text"],
+                    "output_modalities": ["text"],
+                    "reasoning": True,
+                    "cost_input": 15,
+                },
+            )
+        return None
+
+    monkeypatch.setattr("cubeplex.llm.models_dev.lookup_model", lookup)
+    calls = []
 
     def respond(request):
-        paths.append(request.url.path)
-        if "client_version" in request.url.params:
-            assert request.headers["authorization"] == "Bearer calling-key"
-            return httpx.Response(
-                200,
-                json={
-                    "models": [
-                        {
-                            "slug": "m",
-                            "context_window": 500000,
-                            "supported_reasoning_levels": [{"effort": "high"}, {"effort": "ultra"}],
-                        }
-                    ]
-                },
-            )
-        assert request.headers["authorization"] == "Bearer management-key"
-        if request.url.path.endswith("/credentials"):
-            return httpx.Response(
-                200,
-                json={
-                    "files": [
-                        {
-                            "name": "account name.json",
-                            "provider": "codex",
-                            "email": "private@example.test",
-                        }
-                    ],
-                    "has_more": False,
-                },
-            )
-        if request.url.path.endswith("/credentials/models"):
-            assert request.url.params["name"] == "account name.json"
-            return httpx.Response(200, json={"models": [{"id": "m"}, {"id": "hidden"}]})
-        return httpx.Response(
-            200,
-            json={
-                "models": [
-                    {
-                        "id": "m",
-                        "context_length": 272000,
-                        "max_completion_tokens": 8192,
-                        "supportedInputModalities": ["TEXT"],
-                        "supportedOutputModalities": ["TEXT"],
-                        "thinking": {"levels": ["high"]},
-                    },
-                    {"id": "hidden", "context_length": 8192},
-                ]
-            },
-        )
+        calls.append(str(request.url))
+        return httpx.Response(500, text="calling-secret")
 
-    config = CallingConfiguration(base_url="https://endpoint.test/v1", api_key="calling-key")
+    config = CallingConfiguration(base_url="https://endpoint.test/v1", api_key="calling-secret")
     policy = DiscoveryPolicy(
         adapter="openai",
         auth="bearer",
         metadata_profile="cliproxyapi",
         reference="https://example.test",
     )
-    rows = [{"id": "m"}]
+    rows = [{"id": "claude-opus-4-6-thinking"}, {"id": "grok-tts"}]
     models = resolve_models(rows)
     async with DiscoveryTransport(config, policy, transport=httpx.MockTransport(respond)) as http:
-        warnings = await enrich_models(
-            models, rows, config, policy, http, selected_ids=[], management_key="management-key"
-        )
-    assert not warnings
-    assert [model.model_id for model in models] == ["m"]
-    assert models[0].fields["context_window"].state == "conflict"
-    assert models[0].fields["reasoning_levels"].state == "conflict"
-    dumped = models[0].model_dump_json()
-    assert "private@example.test" not in dumped
-    assert "calling-key" not in dumped and "management-key" not in dumped
-    assert paths[-1] == "/v8/management/routing/model-definitions/codex"
+        warnings = await enrich_models(models, rows, config, policy, http, selected_ids=[])
+    assert calls == [] and not warnings
+    matched, unmatched = models
+    assert matched.fields["context_window"].state == "declared"
+    assert matched.fields["context_window"].source == "models.dev:anthropic"
+    assert matched.fields["context_window"].value == 200000
+    assert matched.fields["max_tokens"].value == 8192
+    assert matched.fields["cost_input"].value == 15
+    assert matched.eligible
+    assert not unmatched.eligible
+    assert "context_window" not in unmatched.fields
+    dumped = matched.model_dump_json()
+    assert "calling-secret" not in dumped
 
 
 def test_openrouter_prices_are_converted_without_treating_missing_or_invalid_rates_as_free():
@@ -133,32 +105,6 @@ async def test_ollama_enriches_only_selected_exact_names_and_preserves_missing_o
     assert models[0].fields["context_window"].value == 32768
     assert models[0].missing_fields == ["max_tokens"]
     assert not models[1].fields
-
-
-async def test_optional_management_failure_retains_base_listing_without_credentials():
-    config = CallingConfiguration(base_url="https://endpoint.test/v1", api_key="calling-secret")
-    policy = DiscoveryPolicy(
-        adapter="openai",
-        metadata_profile="cliproxyapi",
-        auth="bearer",
-        reference="https://example.test",
-    )
-    rows = [{"id": "alias"}]
-    models = resolve_models(rows)
-
-    def respond(request):
-        if "client_version" in request.url.params:
-            return httpx.Response(200, json={"models": []})
-        return httpx.Response(401, text="management-secret")
-
-    async with DiscoveryTransport(config, policy, transport=httpx.MockTransport(respond)) as http:
-        warnings = await enrich_models(
-            models, rows, config, policy, http, selected_ids=[], management_key="management-secret"
-        )
-    assert [model.model_id for model in models] == ["alias"]
-    assert not models[0].eligible
-    assert warnings[0].code == "enrichment_warning"
-    assert "management-secret" not in warnings[0].message
 
 
 def test_preview_hmac_binds_credentials_settings_and_server_secret():

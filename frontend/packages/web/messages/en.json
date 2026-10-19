@@ -1060,8 +1060,6 @@
       "discover": "List available models",
       "working": "Working…",
       "hint": "Availability comes from this endpoint. Review specifications before importing. Imported models stay disabled until tests pass.",
-      "managementKey": "CLIProxyAPI management key (optional)",
-      "managementHint": "Optional: load specifications from this instance before reviewing models. This key is used once and never saved; it differs from the API key.",
       "staticHint": "This vendor has no verified discovery adapter. These are preset suggestions; use manual setup.",
       "count": "{count} models returned",
       "failed": "Discovery failed",

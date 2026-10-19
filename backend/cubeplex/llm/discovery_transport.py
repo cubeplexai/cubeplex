@@ -168,16 +168,13 @@ class DiscoveryTransport:
     async def __aexit__(self, *args: object) -> None:
         await self._client.aclose()
 
-    def headers(self, key: str | None = None, *, management: bool = False) -> dict[str, str]:
+    def headers(self) -> dict[str, str]:
         headers = {
             name: value
             for name, value in self.config.extra_headers.items()
             if name.lower() not in {"authorization", "x-api-key", "host", "content-length"}
         }
-        secret = key if management else self.config.api_key
-        if management:
-            # Calling headers never travel to the management API.
-            return {"Authorization": f"Bearer {secret}"} if secret else {}
+        secret = self.config.api_key
         if self.config.auth_type != "none" and secret:
             if self.policy.auth == "anthropic":
                 headers["x-api-key"] = secret
@@ -193,7 +190,6 @@ class DiscoveryTransport:
         *,
         params: dict[str, str | int] | None = None,
         body: dict[str, Any] | None = None,
-        management_key: str | None = None,
     ) -> dict[str, Any]:
         original = urlsplit(self._base)
         target = urlsplit(url)
@@ -210,7 +206,7 @@ class DiscoveryTransport:
                     url,
                     params=params,
                     json=body,
-                    headers=self.headers(management_key, management=management_key is not None),
+                    headers=self.headers(),
                 ) as response:
                     code = response.status_code
                     if code in {401, 403}:

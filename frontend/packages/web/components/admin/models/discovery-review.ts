@@ -11,10 +11,11 @@ export function canSelectDiscoveredModel(model: DiscoveredModel): boolean {
     model.model_id.length <= 128 &&
     model.display_name.length > 0 &&
     model.display_name.length <= 128 &&
-    !['embedding', 'image', 'audio'].includes(model.purpose) &&
+    !['embedding', 'image', 'audio', 'video'].includes(model.purpose) &&
     !declarations.some(
       (item) =>
-        accepted.has(item.state) && ['embedding', 'image', 'audio'].includes(String(item.value)),
+        accepted.has(item.state) &&
+        ['embedding', 'image', 'audio', 'video'].includes(String(item.value)),
     )
   )
 }

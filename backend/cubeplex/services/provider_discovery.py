@@ -35,7 +35,6 @@ async def discover_models(
     provider_id: str | None = None,
     existing: dict[str, str] | None = None,
     selected_ids: list[str] | None = None,
-    management_key: str | None = None,
 ) -> DiscoveryResponse:
     resolved, policy, endpoint = resolve_discovery_configuration(config)
     now = datetime.now(UTC)
@@ -67,7 +66,6 @@ async def discover_models(
                 policy,
                 http,
                 selected_ids=selected_ids or [],
-                management_key=management_key,
             )
         for candidate in candidates:
             candidate.existing_model_db_id = (existing or {}).get(candidate.model_id)
@@ -79,7 +77,7 @@ async def discover_models(
         )
         # Do not persist reflected keys from untrusted endpoint metadata.
         serialized = response.model_dump_json()
-        if any(secret and secret in serialized for secret in (resolved.api_key, management_key)):
+        if resolved.api_key and resolved.api_key in serialized:
             raise DiscoveryFailure("unsafe_metadata", "The endpoint returned sensitive metadata.")
         await store.put(
             response, resolved, org_id=org_id, actor_user_id=actor_user_id, provider_id=provider_id
@@ -104,10 +102,10 @@ def review_selection(
     known_nonchat = any(
         d
         and d.state in {"declared", "confirmed", "existing"}
-        and d.value in ("image", "audio", "embedding")
+        and d.value in ("image", "audio", "video", "embedding")
         for d in purpose_declarations
     )
-    if model.purpose in {"image", "audio", "embedding"} or known_nonchat:
+    if model.purpose in {"image", "audio", "video", "embedding"} or known_nonchat:
         raise DiscoveryOperationError("unsupported_model_purpose", "Select a chat model.", 422)
     for field, source in selection.resolutions.items():
         evidence = model.fields.get(field)

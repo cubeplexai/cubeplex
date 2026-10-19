@@ -16,7 +16,9 @@ repos:
     hooks:
       - id: check-added-large-files
         args: ['--maxkb=500']
-        exclude: (^|/)pnpm-lock\.yaml$
+        # The models.dev snapshot is a generated catalog, larger than the
+        # accidental-binary limit. pnpm-lock is the other deliberate exception.
+        exclude: (^|/)pnpm-lock\.yaml$|(^|/)models_dev_snapshot\.json$
       - id: check-yaml
         # Helm chart templates use go-template syntax that is not valid YAML
         # on its own (e.g. `{{- if ... }}`). Skip them — `helm lint` is the

@@ -156,7 +156,7 @@ export async function discoverModels(
 export async function discoverSavedModels(
   client: ApiClient,
   providerId: string,
-  body: { management_key?: string; selected_model_ids?: string[] } = {},
+  body: { selected_model_ids?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<import('../types/provider').DiscoveryResponse> {
   const res = await client.post(`/api/v1/admin/providers/${providerId}/discover`, body, signal)

@@ -19,7 +19,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   canSelectDiscoveredModel as canSelect,
   reviewDiscoverySelection,
@@ -54,7 +53,6 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [managementKey, setManagementKey] = useState('')
   const [context, setContext] = useState('')
   const [output, setOutput] = useState('')
   const [query, setQuery] = useState('')
@@ -95,7 +93,7 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
           )
         : [[]]
       for (const batch of batches) {
-        const body = { management_key: managementKey || undefined, selected_model_ids: batch }
+        const body = { selected_model_ids: batch }
         const next =
           provider || savedId.current
             ? await discoverSavedModels(client, savedId.current!, body, attempt.signal)
@@ -150,10 +148,7 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
     } catch (e) {
       if (seq === sequence.current) setError((e as Error).message)
     } finally {
-      if (seq === sequence.current) {
-        setBusy(false)
-        setManagementKey('')
-      }
+      if (seq === sequence.current) setBusy(false)
     }
   }
 
@@ -241,10 +236,7 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
         )
       }
     } finally {
-      if (seq === sequence.current) {
-        setBusy(false)
-        setManagementKey('')
-      }
+      if (seq === sequence.current) setBusy(false)
     }
   }
 
@@ -257,20 +249,6 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">{t('hint')}</p>
-      {(provider?.preset_slug?.startsWith('cliproxyapi') ||
-        draft?.preset_slug?.startsWith('cliproxyapi')) && (
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="discovery-management-key">{t('managementKey')}</Label>
-          <Input
-            id="discovery-management-key"
-            type="password"
-            autoComplete="new-password"
-            value={managementKey}
-            onChange={(e) => setManagementKey(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">{t('managementHint')}</p>
-        </div>
-      )}
       {preview && (
         <>
           <p className="text-xs text-muted-foreground">

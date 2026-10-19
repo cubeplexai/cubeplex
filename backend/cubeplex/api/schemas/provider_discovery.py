@@ -10,13 +10,11 @@ from cubeplex.llm.discovery_types import CallingConfiguration, DiscoveryResponse
 
 
 class DiscoveryRequest(CallingConfiguration):
-    management_key: str | None = Field(default=None, max_length=512, repr=False, exclude=True)
     selected_model_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class SavedDiscoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    management_key: str | None = Field(default=None, max_length=512, repr=False, exclude=True)
     selected_model_ids: list[str] = Field(default_factory=list, max_length=100)
 
 

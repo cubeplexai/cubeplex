@@ -17,7 +17,7 @@ from cubeplex.llm.discovery_types import (
     ModelPurpose,
 )
 
-_PURPOSES = {"chat", "embedding", "image", "audio", "unknown"}
+_PURPOSES = {"chat", "embedding", "image", "audio", "video", "unknown"}
 _ACCEPTED = {"declared", "confirmed", "existing"}
 _PRIORITY = {"unknown": 0, "suggested": 1, "existing": 2, "declared": 3, "confirmed": 4}
 
@@ -137,6 +137,8 @@ def add_metadata(
                         purpose = "image"
                     elif "audio" in normalized:
                         purpose = "audio"
+                    elif "video" in normalized:
+                        purpose = "video"
                     add_evidence(model, "purpose", purpose, source, state)
                 break
     purpose_value = raw.get("purpose")

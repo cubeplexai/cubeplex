@@ -1060,8 +1060,6 @@
       "discover": "列出可用模型",
       "working": "处理中…",
       "hint": "可用性来自这个端点。导入前请审核参数；导入的模型通过测试后才能启用。",
-      "managementKey": "CLIProxyAPI 管理密钥（可选）",
-      "managementHint": "可选：从此实例读取模型参数后再核对。此密钥仅使用一次且不会保存，与 API key 不同。",
       "staticHint": "这个供应商暂没有经过验证的发现接口。这里是预置建议，请使用手动配置。",
       "count": "端点返回了 {count} 个模型",
       "failed": "发现失败",

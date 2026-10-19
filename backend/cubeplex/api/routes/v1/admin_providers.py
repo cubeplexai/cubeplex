@@ -263,7 +263,6 @@ async def discover_unsaved_provider(
             org_id=org_id,
             actor_user_id=user.id,
             selected_ids=body.selected_model_ids,
-            management_key=body.management_key,
         )
     except DiscoveryOperationError as exc:
         raise HTTPException(
@@ -300,7 +299,6 @@ async def discover_saved_provider(
             provider_id=provider_id,
             existing=existing,
             selected_ids=body.selected_model_ids,
-            management_key=body.management_key,
         )
     except ProviderNotFoundError as exc:
         raise HTTPException(status_code=404, detail="provider_not_found") from exc

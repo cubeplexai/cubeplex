@@ -4,28 +4,19 @@ from __future__ import annotations
 
 import math
 from typing import Any, cast
-from urllib.parse import quote
 
 from pydantic import JsonValue
 
 from cubeplex.llm.catalog.types import ResolvedEndpoint
 from cubeplex.llm.discovery_resolver import add_evidence, add_metadata, refresh_eligibility
-from cubeplex.llm.discovery_transport import (
-    MAX_PAGES,
-    DiscoveryFailure,
-    DiscoveryTransport,
-    discovery_url,
-    instance_base,
-)
+from cubeplex.llm.discovery_transport import DiscoveryFailure, DiscoveryTransport, instance_base
 from cubeplex.llm.discovery_types import (
     CallingConfiguration,
     DiscoveredModel,
     DiscoveryDiagnostic,
     DiscoveryPolicy,
 )
-
-_CLIENT_VERSION = "0.159.3"
-_STANDARD_EFFORTS = {"minimal", "low", "medium", "high", "max"}
+from cubeplex.llm.models_dev import apply_models_dev
 
 
 def apply_catalog(models: list[DiscoveredModel], endpoint: ResolvedEndpoint | None) -> None:
@@ -88,111 +79,6 @@ def apply_openrouter(model: DiscoveredModel, raw: dict[str, Any]) -> None:
     add_metadata(model, normalized, "openrouter:models")
 
 
-def _apply_cliproxy_definition(
-    model: DiscoveredModel, raw: dict[str, Any], channel: str, config: CallingConfiguration
-) -> None:
-    source = f"cliproxyapi:management:{channel}"
-    add_metadata(model, raw, source)
-    thinking = raw.get("thinking")
-    if channel not in {"codex", "openai", "xai"} or not isinstance(thinking, dict):
-        return
-    levels = thinking.get("levels")
-    if not isinstance(levels, list) or not all(isinstance(level, str) for level in levels):
-        return
-    efforts = {level: level for level in levels if level in _STANDARD_EFFORTS}
-    if not efforts:
-        return
-    capability = dict(config.capability)
-    path = "reasoning.effort" if config.api == "openai-responses" else "reasoning_effort"
-    modes: dict[str, Any] = {"on": {}}
-    if "none" in levels:
-        modes["off"] = (
-            {"reasoning": {"effort": "none"}}
-            if config.api == "openai-responses"
-            else {"reasoning_effort": "none"}
-        )
-    capability["reasoning"] = {
-        "mode_payloads": modes,
-        "effort_path": path,
-        "effort_values": efforts,
-        "apply_effort_when_off": False,
-        "unsupported_mode_policy": "error",
-    }
-    inputs = model.fields.get("input_modalities")
-    capability["supports_images"] = bool(
-        inputs and isinstance(inputs.value, list) and "image" in inputs.value
-    )
-    add_evidence(model, "capability", cast(JsonValue, capability), source)
-
-
-async def _cliproxy_management(
-    models: dict[str, DiscoveredModel],
-    config: CallingConfiguration,
-    http: DiscoveryTransport,
-    key: str,
-) -> None:
-    base = instance_base(config.base_url) + "/v8/management"
-    credentials: dict[str, str] = {}
-    for page in range(1, MAX_PAGES + 1):
-        data = await http.request(
-            "GET",
-            base + "/credentials",
-            params={"page": page, "page_size": 100},
-            management_key=key,
-        )
-        files = data.get("files")
-        if not isinstance(files, list):
-            raise DiscoveryFailure("malformed_enrichment", "Management inventory is invalid.")
-        for row in files:
-            if not isinstance(row, dict) or row.get("disabled") is True:
-                continue
-            name, channel = row.get("name"), row.get("provider") or row.get("type")
-            if isinstance(name, str) and isinstance(channel, str):
-                credentials[name] = channel
-        more = data.get("has_more")
-        if not isinstance(more, bool):
-            raise DiscoveryFailure("malformed_enrichment", "Management pagination is invalid.")
-        if not more:
-            break
-    else:
-        raise DiscoveryFailure("discovery_limit", "Management inventory exceeds the page limit.")
-    members: dict[str, set[str]] = {}
-    for name, channel in credentials.items():
-        data = await http.request(
-            "GET", base + "/credentials/models", params={"name": name}, management_key=key
-        )
-        rows = data.get("models")
-        if not isinstance(rows, list):
-            raise DiscoveryFailure(
-                "malformed_enrichment", "Credential model identities are invalid."
-            )
-        available = {
-            str(row["id"])
-            for row in rows
-            if isinstance(row, dict) and isinstance(row.get("id"), str)
-        }
-        members.setdefault(channel, set()).update(available & models.keys())
-    for channel, ids in members.items():
-        if not ids:
-            continue
-        data = await http.request(
-            "GET",
-            base + "/routing/model-definitions/" + quote(channel, safe=""),
-            management_key=key,
-        )
-        definitions = data.get("models")
-        if not isinstance(definitions, list):
-            raise DiscoveryFailure("malformed_enrichment", "Channel definitions are invalid.")
-        for definition in definitions:
-            if (
-                isinstance(definition, dict)
-                and isinstance(definition.get("id"), str)
-                and definition["id"] in ids
-            ):
-                model_id = definition["id"]
-                _apply_cliproxy_definition(models[model_id], definition, channel, config)
-
-
 async def enrich_models(
     models: list[DiscoveredModel],
     rows: list[dict[str, Any]],
@@ -201,7 +87,6 @@ async def enrich_models(
     http: DiscoveryTransport,
     *,
     selected_ids: list[str],
-    management_key: str | None = None,
 ) -> list[DiscoveryDiagnostic]:
     by_id = {model.model_id: model for model in models}
     diagnostics: list[DiscoveryDiagnostic] = []
@@ -209,46 +94,8 @@ async def enrich_models(
         for row in rows:
             apply_openrouter(by_id[row["id"]], row)
     if policy.metadata_profile == "cliproxyapi":
-        try:
-            data = await http.request(
-                "GET",
-                discovery_url(config.base_url, policy),
-                params={"client_version": _CLIENT_VERSION},
-            )
-            templates = data.get("models")
-            if not isinstance(templates, list):
-                raise DiscoveryFailure(
-                    "malformed_enrichment", "Client metadata has an unsupported shape."
-                )
-            for row in templates:
-                if (
-                    isinstance(row, dict)
-                    and isinstance(row.get("slug"), str)
-                    and row["slug"] in by_id
-                ):
-                    model = by_id[row["slug"]]
-                    normalized = dict(row)
-                    levels = row.get("supported_reasoning_levels")
-                    if isinstance(levels, list):
-                        efforts = [
-                            entry["effort"]
-                            for entry in levels
-                            if isinstance(entry, dict) and isinstance(entry.get("effort"), str)
-                        ]
-                        normalized["thinking"] = {"levels": efforts}
-                    add_metadata(
-                        model,
-                        normalized,
-                        f"cliproxyapi:client-template:{_CLIENT_VERSION}",
-                        state="suggested",
-                    )
-        except DiscoveryFailure as exc:
-            diagnostics.append(DiscoveryDiagnostic(code="enrichment_warning", message=str(exc)))
-        if management_key:
-            try:
-                await _cliproxy_management(by_id, config, http, management_key)
-            except DiscoveryFailure as exc:
-                diagnostics.append(DiscoveryDiagnostic(code="enrichment_warning", message=str(exc)))
+        for model in models:
+            apply_models_dev(model, config)
     if policy.metadata_profile == "ollama" and selected_ids:
         try:
             base = instance_base(config.base_url)

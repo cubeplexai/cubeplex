@@ -128,6 +128,13 @@ it('does not accept confirmation of an unresolved conflict covered by an overrid
   ).toBe(false)
 })
 
+it('does not select a video model as agent chat', () => {
+  const candidate = model()
+  candidate.purpose = 'video'
+  candidate.fields.purpose = field('video')
+  expect(canSelectDiscoveredModel(candidate)).toBe(false)
+})
+
 it('does not let a chat override import a model the endpoint declared as audio', () => {
   const candidate = model()
   candidate.purpose = 'audio'

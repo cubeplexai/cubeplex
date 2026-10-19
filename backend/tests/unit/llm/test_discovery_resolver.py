@@ -60,6 +60,22 @@ def test_known_audio_purpose_cannot_be_selected_as_agent_chat():
     assert not candidate.eligible
 
 
+def test_known_video_output_cannot_be_selected_as_agent_chat():
+    candidate = resolve_models(
+        [
+            {
+                "id": "clip",
+                "supportedOutputModalities": ["TEXT", "VIDEO"],
+                "context_length": 8192,
+                "max_tokens": 512,
+                "input_modalities": ["text"],
+            }
+        ]
+    )[0]
+    assert candidate.purpose == "video"
+    assert not candidate.eligible
+
+
 def test_missing_price_differs_from_explicit_zero():
     candidate = resolve_models([{"id": "m"}])[0]
     assert "cost_input" not in candidate.fields

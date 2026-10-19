@@ -1,0 +1,72 @@
+name: Refresh models.dev snapshot
+
+# Regenerates backend/cubeplex/llm/catalog/data/models_dev_snapshot.json from
+# https://models.dev/api.json. GitHub schedules cron in UTC; 16:00 UTC is
+# 00:00 Asia/Shanghai. Scheduled runs use the workflow on the default branch.
+# main requires a pull request, so a changed snapshot is pushed to
+# chore/models-dev-snapshot and opened as a PR. A run with no catalog change
+# does not commit.
+
+on:
+  schedule:
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: models-dev-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          prune-cache: false
+      - name: Refresh snapshot
+        working-directory: backend
+        run: uv run python scripts/dev/refresh_models_dev_snapshot.py
+      - name: Open a pull request when the catalog changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          snapshot=backend/cubeplex/llm/catalog/data/models_dev_snapshot.json
+          updated=$(mktemp)
+          cp "$snapshot" "$updated"
+          git add "$snapshot"
+          if git diff --cached --quiet; then
+            echo "snapshot unchanged"
+            exit 0
+          fi
+          branch=chore/models-dev-snapshot
+          git fetch origin main
+          git reset --hard origin/main
+          cp "$updated" "$snapshot"
+          git checkout -B "$branch"
+          git add "$snapshot"
+          git commit -m "chore(models): refresh models.dev snapshot"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git fetch origin "$branch"
+            git push --force-with-lease="refs/heads/${branch}:refs/remotes/origin/${branch}" \
+              origin "HEAD:${branch}"
+          else
+            git push -u origin "HEAD:${branch}"
+          fi
+          existing=$(gh pr list --head "$branch" --base main --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "updated PR #${existing}"
+            exit 0
+          fi
+          gh pr create --base main --head "$branch" \
+            --title "chore(models): refresh models.dev snapshot" \
+            --body "Daily models.dev provider snapshot. Merge to update discovery metadata."

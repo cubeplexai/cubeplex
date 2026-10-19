@@ -9,7 +9,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, mod
 DiscoveryAdapter = Literal["static", "openai", "anthropic", "ollama"]
 MetadataProfile = Literal["generic", "cliproxyapi", "openrouter", "ollama"]
 EvidenceState = Literal["declared", "suggested", "confirmed", "unknown", "conflict", "existing"]
-ModelPurpose = Literal["chat", "embedding", "image", "audio", "unknown"]
+ModelPurpose = Literal["chat", "embedding", "image", "audio", "video", "unknown"]
 ModelField = Literal[
     "purpose",
     "context_window",
