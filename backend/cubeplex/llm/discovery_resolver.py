@@ -22,6 +22,38 @@ _ACCEPTED = {"declared", "confirmed", "existing"}
 _PRIORITY = {"unknown": 0, "suggested": 1, "existing": 2, "declared": 3, "confirmed": 4}
 
 
+def _catalog_source(source: str) -> bool:
+    return source.startswith("catalog:") or source.startswith("models.dev:")
+
+
+def listing_catalog_default(field: FieldEvidence) -> EvidenceDeclaration | None:
+    """Listing value when that is the only disagreement with catalog entries.
+
+    The field stays in conflict so an administrator can still choose the catalog.
+    """
+    if field.state != "conflict":
+        return None
+    listing = [
+        item for item in field.alternatives if item.source == "listing" and item.value is not None
+    ]
+    others = [item for item in field.alternatives if item.source != "listing"]
+    catalog_only = bool(others) and all(_catalog_source(item.source) for item in others)
+    if len(listing) != 1 or not catalog_only:
+        return None
+    return listing[0]
+
+
+def accepted_declaration(field: FieldEvidence | None) -> EvidenceDeclaration | None:
+    if field is None:
+        return None
+    chosen = listing_catalog_default(field)
+    if chosen is not None:
+        return chosen
+    if field.state in _ACCEPTED:
+        return field
+    return None
+
+
 def add_evidence(
     model: DiscoveredModel,
     field: ModelField,
@@ -50,43 +82,48 @@ def add_evidence(
     )
 
 
+def _positive_limit(field: FieldEvidence | None) -> int | None:
+    chosen = accepted_declaration(field)
+    if chosen is None or type(chosen.value) is not int or chosen.value <= 0:
+        return None
+    return chosen.value
+
+
 def refresh_eligibility(model: DiscoveredModel) -> None:
     missing: list[ModelField] = []
-    purpose = model.fields.get("purpose")
+    purpose = accepted_declaration(model.fields.get("purpose"))
     model.purpose = (
         cast(ModelPurpose, purpose.value)
-        if purpose
-        and isinstance(purpose.value, str)
-        and purpose.value in _PURPOSES
-        and purpose.state in _ACCEPTED
+        if purpose and isinstance(purpose.value, str) and purpose.value in _PURPOSES
         else "unknown"
     )
     if model.purpose == "unknown":
         missing.append("purpose")
-    for key in ("context_window", "max_tokens"):
-        field = model.fields.get(key)
-        if (
-            not field
-            or field.state not in _ACCEPTED
-            or type(field.value) is not int
-            or field.value <= 0
-        ):
+    limits: dict[ModelField, int | None] = {
+        "context_window": _positive_limit(model.fields.get("context_window")),
+        "max_tokens": _positive_limit(model.fields.get("max_tokens")),
+    }
+    for key, value in limits.items():
+        if value is None:
             missing.append(key)
-    inputs = model.fields.get("input_modalities")
+    inputs = accepted_declaration(model.fields.get("input_modalities"))
     if (
-        not inputs
-        or inputs.state not in _ACCEPTED
+        inputs is None
         or not isinstance(inputs.value, list)
         or not inputs.value
         or "text" not in inputs.value
         or not all(isinstance(v, str) for v in inputs.value)
     ):
         missing.append("input_modalities")
-    context = model.fields.get("context_window")
-    output = model.fields.get("max_tokens")
-    if context and output and type(context.value) is int and type(output.value) is int:
-        if output.value > context.value and "max_tokens" not in missing:
-            missing.append("max_tokens")
+    context = limits["context_window"]
+    output = limits["max_tokens"]
+    if (
+        context is not None
+        and output is not None
+        and output > context
+        and "max_tokens" not in missing
+    ):
+        missing.append("max_tokens")
     model.missing_fields = missing
     model.eligible = (
         model.purpose == "chat"

@@ -291,3 +291,75 @@ it('drops a selected model when enrichment declares a non-chat purpose', async (
   expect(checkbox).not.toBeChecked()
   expect(checkbox).toHaveAttribute('aria-disabled', 'true')
 })
+
+it('names the fields when import says a selected model is incomplete', async () => {
+  const declared = (value: unknown) => ({
+    value,
+    state: 'declared' as const,
+    source: 'listing',
+    alternatives: [],
+  })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (path.endsWith('/discover')) {
+        return Response.json({
+          status: 'complete',
+          discovery_id: 'preview',
+          diagnostics: [],
+          candidates: [
+            {
+              model_id: 'deepseek-v4-pro',
+              display_name: 'DeepSeek V4 Pro',
+              purpose: 'chat',
+              eligible: true,
+              missing_fields: [],
+              diagnostics: [],
+              fields: {
+                purpose: declared('chat'),
+                context_window: declared(1048576),
+                max_tokens: declared(393216),
+                input_modalities: declared(['text']),
+              },
+            },
+          ],
+        })
+      }
+      if (path.endsWith('/models/import')) {
+        return Response.json(
+          {
+            detail: {
+              code: 'incomplete_configuration',
+              message: 'Complete required fields for deepseek-v4-pro: context_window, max_tokens.',
+            },
+          },
+          { status: 422 },
+        )
+      }
+      throw new Error(`Unexpected ${path}`)
+    }),
+  )
+  render(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <DiscoveryPanel
+        client={createApiClient('')}
+        provider={{ id: 'prv_saved' } as never}
+        draft={{
+          name: 'DeepSeek',
+          base_url: 'https://api.deepseek.com/anthropic',
+          auth_type: 'api_key',
+        }}
+        onImported={vi.fn()}
+      />
+    </NextIntlClientProvider>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'List available models' }))
+  await screen.findByText('1 models returned')
+  fireEvent.click(screen.getByRole('button', { name: 'Import 1 selected models' }))
+  expect(
+    await screen.findByText('deepseek-v4-pro: Missing: Context window, Output limit'),
+  ).toBeInTheDocument()
+  expect(screen.getByText('Context window:', { exact: false }).className).toContain(
+    'text-warning-fg',
+  )
+})

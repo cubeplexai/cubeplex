@@ -72,6 +72,13 @@ from cubeplex.utils.time import utc_isoformat
 router = APIRouter(prefix="/admin", tags=["admin-providers"])
 
 
+def _discovery_http_error(exc: DiscoveryOperationError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": str(exc), **exc.details},
+    )
+
+
 async def _svc(user: User, session: AsyncSession, request: Request) -> ProviderService:
     org_id = await resolve_current_org_id(user, session)
     cred_service = build_credential_service(
@@ -265,9 +272,7 @@ async def discover_unsaved_provider(
             selected_ids=body.selected_model_ids,
         )
     except DiscoveryOperationError as exc:
-        raise HTTPException(
-            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise _discovery_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid discovery configuration") from exc
 
@@ -305,9 +310,7 @@ async def discover_saved_provider(
     except ProviderSystemReadonlyError as exc:
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
     except DiscoveryOperationError as exc:
-        raise HTTPException(
-            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise _discovery_http_error(exc) from exc
 
 
 @router.post("/providers/{provider_id}/models/import", response_model=ImportModelsResponse)
@@ -327,9 +330,7 @@ async def import_provider_models(
     except ProviderSystemReadonlyError as exc:
         raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from exc
     except DiscoveryOperationError as exc:
-        raise HTTPException(
-            status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise _discovery_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid reviewed configuration") from exc
 

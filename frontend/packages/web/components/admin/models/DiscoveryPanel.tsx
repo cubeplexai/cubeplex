@@ -21,6 +21,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
   canSelectDiscoveredModel as canSelect,
+  incompleteImportFields,
+  listingCatalogDefault,
   reviewDiscoverySelection,
   submittedDiscoverySelection,
 } from './discovery-review'
@@ -53,13 +55,16 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [serverMissing, setServerMissing] = useState<Record<string, ModelField[]>>({})
   const [context, setContext] = useState('')
   const [output, setOutput] = useState('')
   const [query, setQuery] = useState('')
   const [selectedOnly, setSelectedOnly] = useState(false)
   const selectedModels = preview?.candidates.filter((model) => selected.has(model.model_id)) ?? []
   const incomplete = selectedModels.filter(
-    (model) => !reviewDiscoverySelection(model, selections[model.model_id]).ready,
+    (model) =>
+      !reviewDiscoverySelection(model, selections[model.model_id]).ready ||
+      (serverMissing[model.model_id]?.length ?? 0) > 0,
   )
   const groupLimitsValid =
     [context, output].every(
@@ -120,6 +125,7 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
       }
       if (seq !== sequence.current || !response) return
       setPreview(response)
+      setServerMissing({})
       if (enrich) {
         const importable = new Set(
           response.candidates.filter((model) => canSelect(model)).map((model) => model.model_id),
@@ -153,6 +159,12 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
   }
 
   function patch(id: string, update: Partial<ImportModelSelection>) {
+    setServerMissing((prev) => {
+      if (!prev[id]) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     setSelections((prev) => ({ ...prev, [id]: { ...prev[id], model_id: id, ...update } }))
   }
   function override(id: string, field: ModelField, value: unknown) {
@@ -217,7 +229,11 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
           client,
           savedId.current!,
           preview.discovery_id,
-          batch.map((id) => submittedDiscoverySelection(id, selections[id])),
+          batch.map((id) => {
+            const model = preview.candidates.find((item) => item.model_id === id)
+            if (!model) return { model_id: id }
+            return submittedDiscoverySelection(model, selections[id])
+          }),
         )
         outcomes.push(...result.results)
       }
@@ -230,6 +246,19 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
           discovery_stale: t('errors.discovery_stale'),
           provider_slug_conflict: t('errors.provider_slug_conflict'),
           provider_name_conflict: t('errors.provider_name_conflict'),
+        }
+        if (e instanceof ApiError && e.code === 'incomplete_configuration') {
+          const named = incompleteImportFields(e)
+          if (named.modelId && named.fields.length > 0) {
+            setServerMissing({ [named.modelId]: named.fields })
+            setExpanded((prev) => new Set(prev).add(named.modelId!))
+            setError(
+              `${named.modelId}: ${t('missing', {
+                fields: named.fields.map((field) => t(field)).join(', '),
+              })}`,
+            )
+            return
+          }
         }
         setError(
           e instanceof ApiError && e.code && e.code in messages
@@ -363,6 +392,10 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
                   )
                   .map((model) => {
                     const review = reviewDiscoverySelection(model, selections[model.model_id])
+                    const forcedMissing = serverMissing[model.model_id] ?? []
+                    const missingFields = [
+                      ...new Set([...review.missing, ...forcedMissing]),
+                    ] as ModelField[]
                     const selectable = canSelect(model)
                     const checked = selected.has(model.model_id)
                     return (
@@ -387,13 +420,17 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
                               ? t('existing')
                               : !selectable
                                 ? t('unsupported')
-                                : t(review.ready ? 'complete' : 'needsReview')}
+                                : t(
+                                    review.ready && forcedMissing.length === 0
+                                      ? 'complete'
+                                      : 'needsReview',
+                                  )}
                           </span>
                         </label>
-                        {!model.existing_model_db_id && selectable && review.missing.length > 0 && (
+                        {!model.existing_model_db_id && selectable && missingFields.length > 0 && (
                           <p className="mt-1 pl-6 text-xs text-warning-fg">
                             {t('missing', {
-                              fields: review.missing.map((field) => t(field)).join(', '),
+                              fields: missingFields.map((field) => t(field)).join(', '),
                             })}
                           </p>
                         )}
@@ -424,9 +461,16 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
                                 ].map((field) => {
                                   const evidence = model.fields[field]
                                   const selection = selections[model.model_id]
+                                  const defaultSource = listingCatalogDefault(evidence)?.source
                                   return (
                                     <div key={field} className="flex flex-col gap-1">
-                                      <span>
+                                      <span
+                                        className={
+                                          missingFields.includes(field)
+                                            ? 'text-warning-fg'
+                                            : undefined
+                                        }
+                                      >
                                         {t(field)}:{' '}
                                         {evidence ? JSON.stringify(evidence.value) : t('unknown')}
                                         {' · '}
@@ -450,7 +494,9 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
                                         <select
                                           className="rounded border border-input p-1"
                                           aria-label={t('resolve', { field: t(field) })}
-                                          value={selection?.resolutions?.[field] ?? ''}
+                                          value={
+                                            selection?.resolutions?.[field] ?? defaultSource ?? ''
+                                          }
                                           onChange={(e) => {
                                             const resolutions = { ...selection?.resolutions }
                                             if (e.target.value) resolutions[field] = e.target.value
@@ -458,7 +504,9 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
                                             patch(model.model_id, { resolutions })
                                           }}
                                         >
-                                          <option value="">{t('chooseSource')}</option>
+                                          {defaultSource ? null : (
+                                            <option value="">{t('chooseSource')}</option>
+                                          )}
                                           {evidence.alternatives.map((d, i) => (
                                             <option key={i} value={d.source}>
                                               {d.source}: {JSON.stringify(d.value)}

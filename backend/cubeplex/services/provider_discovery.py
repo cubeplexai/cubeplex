@@ -10,7 +10,12 @@ from pydantic import JsonValue
 from cubeplex.api.schemas.provider_discovery import ImportModelSelection
 from cubeplex.llm.discovery_adapters import collect_models
 from cubeplex.llm.discovery_metadata import apply_catalog, enrich_models
-from cubeplex.llm.discovery_resolver import add_evidence, refresh_eligibility, resolve_models
+from cubeplex.llm.discovery_resolver import (
+    accepted_declaration,
+    add_evidence,
+    refresh_eligibility,
+    resolve_models,
+)
 from cubeplex.llm.discovery_transport import DiscoveryFailure, DiscoveryTransport
 from cubeplex.llm.discovery_types import (
     CallingConfiguration,
@@ -151,12 +156,13 @@ def review_selection(
             "incomplete_configuration",
             f"Complete required fields for {model.model_id}: {', '.join(model.missing_fields)}.",
             422,
+            details={"model_id": model.model_id, "missing_fields": list(model.missing_fields)},
         )
     return model
 
 
 def configured_value(model: DiscoveredModel, field: ModelField, default: Any = None) -> Any:
-    evidence = model.fields.get(field)
-    if evidence is None or evidence.state not in {"declared", "confirmed", "existing"}:
+    chosen = accepted_declaration(model.fields.get(field))
+    if chosen is None:
         return default
-    return evidence.value
+    return chosen.value

@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import type { DiscoveredModel, FieldEvidence } from '@cubeplex/core'
 import {
   canSelectDiscoveredModel,
+  incompleteImportFields,
   reviewDiscoverySelection,
   submittedDiscoverySelection,
 } from '../discovery-review'
@@ -25,6 +26,29 @@ const model = (): DiscoveredModel => ({
     max_tokens: field(512),
     input_modalities: field(['text']),
   },
+})
+
+it('uses the listing value when it only conflicts with the catalog', () => {
+  const candidate = model()
+  candidate.fields.context_window = field(1_000_000)
+  candidate.fields.max_tokens = {
+    ...field(393216, 'conflict'),
+    source: 'listing',
+    alternatives: [
+      { ...field(393216), source: 'listing' },
+      { ...field(32768), source: 'catalog:deepseek/cn/anthropic-messages' },
+    ],
+  }
+  const reviewed = reviewDiscoverySelection(candidate)
+  expect(reviewed.missing).not.toContain('max_tokens')
+  expect(reviewed.ready).toBe(true)
+  expect(reviewed.value('max_tokens')).toBe(393216)
+  const chosen = reviewDiscoverySelection(candidate, {
+    model_id: 'alias',
+    resolutions: { max_tokens: 'catalog:deepseek/cn/anthropic-messages' },
+  })
+  expect(chosen.ready).toBe(true)
+  expect(chosen.value('max_tokens')).toBe(32768)
 })
 
 it('requires an explicit source choice when the context window conflicts', () => {
@@ -89,7 +113,7 @@ it('drops a cleared conflict choice so a reviewed override stays importable', ()
     resolutions: { context_window: '' },
     overrides: { context_window: 4096 },
   }
-  expect(submittedDiscoverySelection('alias', cleared).resolutions).toEqual({})
+  expect(submittedDiscoverySelection(candidate, cleared).resolutions).toEqual({})
   const reviewed = reviewDiscoverySelection(candidate, cleared)
   expect(reviewed.ready).toBe(true)
   expect(reviewed.value('context_window')).toBe(4096)
@@ -164,4 +188,55 @@ it('does not let a template conflict turn a declared audio model into a chat can
     ],
   }
   expect(canSelectDiscoveredModel(candidate)).toBe(false)
+})
+
+it('submits the listing source chosen for a catalog conflict', () => {
+  const candidate = model()
+  candidate.model_id = 'deepseek-v4-pro'
+  candidate.fields.context_window = {
+    ...field(1048576, 'conflict'),
+    alternatives: [
+      { ...field(1048576), source: 'listing' },
+      { ...field(1000000), source: 'catalog:deepseek/cn/anthropic-messages' },
+    ],
+  }
+  candidate.fields.max_tokens = {
+    ...field(393216, 'conflict'),
+    alternatives: [
+      { ...field(393216), source: 'listing' },
+      { ...field(32768), source: 'catalog:deepseek/cn/anthropic-messages' },
+    ],
+  }
+  expect(submittedDiscoverySelection(candidate).resolutions).toEqual({
+    context_window: 'listing',
+    max_tokens: 'listing',
+  })
+  expect(
+    submittedDiscoverySelection(candidate, {
+      model_id: 'deepseek-v4-pro',
+      resolutions: { max_tokens: 'catalog:deepseek/cn/anthropic-messages' },
+    }).resolutions,
+  ).toEqual({
+    context_window: 'listing',
+    max_tokens: 'catalog:deepseek/cn/anthropic-messages',
+  })
+})
+
+it('reads the missing fields from an incomplete import error', () => {
+  expect(
+    incompleteImportFields({
+      message: 'Complete required fields for deepseek-v4-pro: context_window, max_tokens.',
+      detail: 'Complete required fields for deepseek-v4-pro: context_window, max_tokens.',
+    }),
+  ).toEqual({ modelId: 'deepseek-v4-pro', fields: ['context_window', 'max_tokens'] })
+  expect(
+    incompleteImportFields({
+      message: 'HTTP 422',
+      detail: {
+        code: 'incomplete_configuration',
+        model_id: 'deepseek-v4-pro',
+        missing_fields: ['max_tokens'],
+      },
+    }),
+  ).toEqual({ modelId: 'deepseek-v4-pro', fields: ['max_tokens'] })
 })
