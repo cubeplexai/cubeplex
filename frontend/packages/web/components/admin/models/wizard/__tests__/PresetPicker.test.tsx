@@ -80,6 +80,39 @@ describe('PresetPicker', () => {
     expect(screen.getByText('Ollama')).toBeInTheDocument()
   })
 
+  it('lists custom providers before named vendors', async () => {
+    const customOpenAI = makeVendor({
+      vendor: 'custom-openai',
+      display_name: 'Custom OpenAI-compatible',
+      category: 'custom',
+    })
+    const customAnthropic = makeVendor({
+      vendor: 'custom-anthropic',
+      display_name: 'Custom Anthropic-compatible',
+      category: 'custom',
+    })
+    vi.mocked(core.listPresets).mockResolvedValue([
+      anthropic,
+      ollama,
+      customOpenAI,
+      customAnthropic,
+    ])
+
+    renderPicker()
+    await screen.findByText('Custom OpenAI-compatible')
+
+    const labels = screen
+      .getAllByRole('button')
+      .map((el) => el.getAttribute('aria-label'))
+      .filter((label): label is string => label !== null)
+    expect(labels.slice(0, 4)).toEqual([
+      'Custom OpenAI-compatible',
+      'Custom Anthropic-compatible',
+      'Anthropic',
+      'Ollama',
+    ])
+  })
+
   it('filters by category tab', async () => {
     renderPicker()
     await screen.findByText('Anthropic')

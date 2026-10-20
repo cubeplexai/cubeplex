@@ -12,6 +12,13 @@ import { cn } from '@/lib/utils'
 
 type Category = 'all' | 'saas' | 'oss-framework' | 'custom'
 
+// The two generic endpoints are the escape hatch. Keep them ahead of named vendors.
+function customFirst(vendors: VendorPreset[]): VendorPreset[] {
+  return [...vendors].sort(
+    (a, b) => Number(a.category !== 'custom') - Number(b.category !== 'custom'),
+  )
+}
+
 interface PresetPickerProps {
   client: ApiClient
   selectedVendor: string | null
@@ -32,7 +39,7 @@ export function PresetPicker({ client, selectedVendor, onPickVendor }: PresetPic
     setLoading(true)
     listPresets(client)
       .then((vs) => {
-        if (!cancelled) setVendors(vs)
+        if (!cancelled) setVendors(customFirst(vs))
       })
       .catch(() => {
         if (!cancelled) setError(t('loadFailed'))
