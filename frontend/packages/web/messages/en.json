@@ -1109,7 +1109,9 @@
       "errors": {
         "incomplete_configuration": "Some selected models still need required settings. Review the fields shown for each model.",
         "discovery_expired": "This model list expired. List available models again, then review and import.",
-        "discovery_stale": "The connection settings changed. List available models again before importing."
+        "discovery_stale": "The connection settings changed. List available models again before importing.",
+        "provider_slug_conflict": "This slug is already in use. Choose a different one.",
+        "provider_name_conflict": "A provider with this name already exists. Pick another name."
       }
     },
     "priceUnknown": "Unknown",

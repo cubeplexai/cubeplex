@@ -163,6 +163,90 @@ describe('ConfigureStep', () => {
     await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
   })
 
+  it('saves a live-discovery provider before opening the model list', async () => {
+    const onProviderCreated = vi.fn()
+    const onProviderSaved = vi.fn()
+    const vendor = makeVendor({
+      vendor: 'deepseek',
+      display_name: 'DeepSeek',
+      endpoints: [
+        {
+          ...makeVendor().endpoints[0],
+          preset_key: 'deepseek/cn/anthropic-messages',
+          protocol: 'anthropic-messages',
+          base_url: 'https://api.deepseek.com/anthropic',
+          discovery: {
+            adapter: 'openai',
+            path: 'models',
+            url_mode: 'origin',
+            auth: 'bearer',
+            pagination: 'none',
+            metadata_profile: 'generic',
+            revision: '1',
+            reference: 'https://api-docs.deepseek.com/api/list-models',
+            root_api_path: '',
+          },
+        },
+      ],
+    })
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ConfigureStep
+          client={fakeClient}
+          vendor={vendor}
+          selectedPresetKey={vendor.endpoints[0].preset_key}
+          onSelectEndpoint={vi.fn()}
+          onProviderCreated={onProviderCreated}
+          onProviderSaved={onProviderSaved}
+          configDraft={null}
+          onConfigDraftChange={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(core.createProvider).toHaveBeenCalled())
+    expect(onProviderSaved).toHaveBeenCalledWith('prv_new')
+    expect(onProviderCreated).not.toHaveBeenCalled()
+    expect(await screen.findByRole('button', { name: 'List available models' })).toBeTruthy()
+  })
+
+  it('keeps a live-discovery slug conflict on the configuration form', async () => {
+    vi.mocked(core.createProvider).mockRejectedValueOnce(
+      new core.ApiError('HTTP 409', 409, 'provider_slug_conflict', {
+        code: 'provider_slug_conflict',
+      }),
+    )
+    const vendor = makeVendor({
+      endpoints: [
+        {
+          ...makeVendor().endpoints[0],
+          discovery: {
+            adapter: 'openai',
+            path: 'models',
+            url_mode: 'origin',
+            auth: 'bearer',
+            pagination: 'none',
+            metadata_profile: 'generic',
+            revision: '1',
+            reference: 'https://example.test/models',
+            root_api_path: '',
+          },
+        },
+      ],
+    })
+    renderStep(vendor)
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() =>
+      expect(
+        screen.getByText(en.adminModels.wizard.configure.errors.provider_slug_conflict),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('button', { name: 'List available models' })).toBeNull()
+  })
+
   it('shows a friendly message on a slug conflict instead of a bare HTTP 409', async () => {
     vi.mocked(core.createProvider).mockRejectedValueOnce(
       new core.ApiError('HTTP 409', 409, 'provider_slug_conflict', {

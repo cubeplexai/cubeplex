@@ -117,7 +117,7 @@ Use `effort_path: "reasoning.effort"` for Responses-style nested payloads, or pu
 
 ## Discover and import models
 
-Choose the vendor first. CLIProxyAPI is available alongside vLLM and Ollama. Enter a base URL reachable from the CubePlex backend and the calling API key (or select no authentication for a keyless endpoint). **List available models** reads the configured instance without saving a provider.
+Choose the vendor first. CLIProxyAPI is available alongside vLLM and Ollama. Enter a base URL reachable from the CubePlex backend and the calling API key (or select no authentication for a keyless endpoint). **Next** saves the provider. A name or slug that is already in use is reported on this step, before the model list. **List available models** then reads that saved provider.
 
 Listing interfaces differ by vendor. OpenAI-compatible instances commonly expose `GET /v1/models`; Anthropic uses its own authentication and cursor pagination, and Ollama uses `/api/tags` with selected-model details from `/api/show`. Vendors without a verified adapter offer preset suggestions and manual setup.
 

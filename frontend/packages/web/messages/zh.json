@@ -1109,7 +1109,9 @@
       "errors": {
         "incomplete_configuration": "部分已选模型仍缺少必需参数，请检查各模型列出的字段。",
         "discovery_expired": "模型列表已过期，请重新获取可用模型，核对后再导入。",
-        "discovery_stale": "连接配置已变更，请重新获取模型后再导入。"
+        "discovery_stale": "连接配置已变更，请重新获取模型后再导入。",
+        "provider_slug_conflict": "该 slug 已被占用，请换一个。",
+        "provider_name_conflict": "已存在同名 provider，请换一个名称。"
       }
     },
     "priceUnknown": "未知",

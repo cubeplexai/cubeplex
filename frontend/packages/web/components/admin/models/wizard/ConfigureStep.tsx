@@ -60,7 +60,9 @@ export function ConfigureStep({
   const tw = useTranslations('adminModels.wizard')
   const [reloadCount, setReloadCount] = useState(0)
   const [savedProvider, setSavedProvider] = useState<Provider | null>(null)
+  const [createdProvider, setCreatedProvider] = useState<Provider | null>(null)
   const [draft, setDraft] = useState<ProviderCreate | null>(null)
+  const [listing, setListing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -124,14 +126,24 @@ export function ConfigureStep({
   }
 
   async function handleSubmit(body: ProviderCreate | ProviderUpdate, manual = false) {
-    if (
-      !existingProviderId &&
-      !manual &&
-      chosen.discovery &&
-      chosen.discovery.adapter !== 'static'
-    ) {
-      setDraft(body as ProviderCreate)
-      onReviewingChange?.(true)
+    // Save before the model list so a slug or name conflict stays on this form.
+    if (!manual && chosen.discovery && chosen.discovery.adapter !== 'static') {
+      setSaving(true)
+      setError(null)
+      try {
+        const saved = existingProviderId
+          ? await updateProvider(client, existingProviderId, body as ProviderUpdate)
+          : await createProvider(client, body as ProviderCreate)
+        if (!existingProviderId) setDraft(body as ProviderCreate)
+        setCreatedProvider(saved)
+        onProviderSaved?.(saved.id)
+        setListing(true)
+        onReviewingChange?.(true)
+      } catch (e) {
+        setError(errorMessage(e))
+      } finally {
+        setSaving(false)
+      }
       return
     }
     setSaving(true)
@@ -221,7 +233,7 @@ export function ConfigureStep({
           </Button>
         </>
       )}
-      {!draft && (!existingProviderId || savedProvider) && (
+      {!listing && (!existingProviderId || savedProvider) && (
         <ProviderConfigForm
           key={
             savedProvider
@@ -243,11 +255,12 @@ export function ConfigureStep({
           onSubmit={(body) => void handleSubmit(body)}
         />
       )}
-      {draft && (
+      {listing && (
         <>
           <DiscoveryPanel
             client={client}
-            draft={draft}
+            provider={createdProvider ?? savedProvider ?? undefined}
+            draft={draft ?? undefined}
             onProviderSaved={onProviderSaved}
             onImported={(id, models) => onModelsImported?.(id, models)}
           />
@@ -255,13 +268,21 @@ export function ConfigureStep({
             variant="outline"
             disabled={saving}
             onClick={() => {
-              setDraft(null)
+              setListing(false)
               onReviewingChange?.(false)
             }}
           >
             {tw('back')}
           </Button>
-          <Button variant="ghost" disabled={saving} onClick={() => void handleSubmit(draft, true)}>
+          <Button
+            variant="ghost"
+            disabled={saving}
+            onClick={() => {
+              const id = createdProvider?.id ?? existingProviderId
+              if (id) onProviderCreated(id)
+              else if (draft) void handleSubmit(draft, true)
+            }}
+          >
             {tw('manualSetup')}
           </Button>
           {error && (

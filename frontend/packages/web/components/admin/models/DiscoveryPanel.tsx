@@ -228,6 +228,8 @@ export function DiscoveryPanel({ client, provider, draft, onProviderSaved, onImp
           incomplete_configuration: t('errors.incomplete_configuration'),
           discovery_expired: t('errors.discovery_expired'),
           discovery_stale: t('errors.discovery_stale'),
+          provider_slug_conflict: t('errors.provider_slug_conflict'),
+          provider_name_conflict: t('errors.provider_name_conflict'),
         }
         setError(
           e instanceof ApiError && e.code && e.code in messages
