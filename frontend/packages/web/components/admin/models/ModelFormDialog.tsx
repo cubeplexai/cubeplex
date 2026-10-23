@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { configuredPrice } from '@/lib/models/configured-price'
 import { cn } from '@/lib/utils'
+import { CapabilityEditor } from './wizard/CapabilityEditor'
 
 const MODALITIES = ['text', 'image', 'audio', 'video'] as const
 
@@ -26,9 +27,20 @@ interface ModelFormDialogProps {
   onOpenChange: (open: boolean) => void
   model: Model | null
   onSave: (body: ModelCreate | ModelUpdate) => Promise<void>
+  /** Provider default. Shown when this model has no override. */
+  providerCapability?: Record<string, unknown>
+  /** This model's stored override, or null when it inherits the provider. */
+  capabilityOverride?: Record<string, unknown> | null
 }
 
-export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelFormDialogProps) {
+export function ModelFormDialog({
+  open,
+  onOpenChange,
+  model,
+  onSave,
+  providerCapability = {},
+  capabilityOverride = null,
+}: ModelFormDialogProps) {
   const t = useTranslations('adminModels')
   const isEdit = model !== null
   const [saving, setSaving] = useState(false)
@@ -44,6 +56,10 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
   const [costCacheWrite, setCostCacheWrite] = useState('')
   const [contextWindow, setContextWindow] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
+  const [inheritsCapability, setInheritsCapability] = useState(true)
+  const [capabilityDraft, setCapabilityDraft] = useState<Record<string, unknown>>({})
+  const [capabilityKey, setCapabilityKey] = useState(0)
+  const [capabilityValid, setCapabilityValid] = useState(true)
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
@@ -71,11 +87,16 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
         setContextWindow('')
         setMaxTokens('')
       }
+      const hasOverride = capabilityOverride != null
+      setInheritsCapability(!hasOverride)
+      setCapabilityDraft(hasOverride ? capabilityOverride : providerCapability)
+      setCapabilityKey((key) => key + 1)
+      setCapabilityValid(true)
       setError(null)
       setSaving(false)
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [open, model])
+  }, [open, model, capabilityOverride, providerCapability])
 
   function toggleModality(mod: string) {
     setInputModalities((prev) =>
@@ -86,6 +107,23 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
   function parseNumber(val: string): number {
     const n = parseFloat(val)
     return isNaN(n) ? 0 : n
+  }
+
+  function capabilityChange(): Record<string, unknown> | null | undefined {
+    const providerJson = JSON.stringify(providerCapability)
+    const draftJson = JSON.stringify(capabilityDraft)
+    const initial = isEdit ? capabilityOverride : null
+    const inherits = inheritsCapability || draftJson === providerJson
+    if (inherits) return initial != null ? null : undefined
+    if (initial != null && draftJson === JSON.stringify(initial)) return undefined
+    return capabilityDraft
+  }
+
+  function useProviderCapability(): void {
+    setInheritsCapability(true)
+    setCapabilityDraft(providerCapability)
+    setCapabilityValid(true)
+    setCapabilityKey((key) => key + 1)
   }
 
   async function handleSave(): Promise<void> {
@@ -121,6 +159,8 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
           context_window: contextWindow ? parseNumber(contextWindow) : null,
           max_tokens: maxTokens ? parseNumber(maxTokens) : null,
         }
+        const capability = capabilityChange()
+        if (capability !== undefined) body.capability = capability
         for (const field of [
           'display_name',
           'reasoning',
@@ -144,6 +184,8 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
           context_window: parseNumber(contextWindow),
           max_tokens: parseNumber(maxTokens),
         }
+        const capability = capabilityChange()
+        if (capability) body.capability = capability
         await onSave(body)
       }
     } catch (e) {
@@ -235,6 +277,37 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                   </label>
                 ))}
               </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label>{t('modelCapability')}</Label>
+              <p className="text-xs text-muted-foreground">
+                {inheritsCapability ? t('capabilityInherited') : t('capabilityCustom')}
+              </p>
+              <CapabilityEditor
+                key={capabilityKey}
+                inputId="model-capability-json"
+                value={capabilityDraft}
+                onChange={(value) => {
+                  setCapabilityDraft(value)
+                  const sameAsProvider =
+                    JSON.stringify(value) === JSON.stringify(providerCapability)
+                  setInheritsCapability(sameAsProvider)
+                }}
+                onValidityChange={setCapabilityValid}
+                allowTemplate
+              />
+              {!inheritsCapability && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
+                  onClick={useProviderCapability}
+                >
+                  {t('useProviderCapability')}
+                </Button>
+              )}
             </div>
 
             <Accordion className="mt-1" multiple defaultValue={['costs', 'limits']}>
@@ -355,7 +428,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
               type="button"
               size="sm"
               onClick={() => void handleSave()}
-              disabled={saving || !modelId}
+              disabled={saving || !modelId || !capabilityValid}
             >
               {saving ? t('saving') : t('save')}
             </Button>

@@ -571,6 +571,21 @@ class ProviderService:
         await self.get_provider(provider_id)
         return await self._models.list_by_provider(provider_id)
 
+    def _set_model_capability(
+        self, provider: Provider, model_id: str, capability: dict[str, Any] | None
+    ) -> None:
+        """Store or clear one model's capability override on the provider row."""
+        overrides = dict(provider.model_capability_overrides or {})
+        if capability is None:
+            overrides.pop(model_id, None)
+        else:
+            validate_request_extensions(provider.provider_type, {}, capability)
+            overrides[model_id] = capability
+        provider.model_capability_overrides = overrides
+        provider.configuration_revision += 1
+        provider.updated_at = datetime.now(UTC)
+        self._session.add(provider)
+
     async def create_model(self, provider_id: str, data: ModelCreate) -> Model:
         provider = await self._lock_provider(provider_id)
         existing = await self._models.get_by_model_id(provider_id, data.model_id)
@@ -593,6 +608,8 @@ class ProviderService:
             extra_headers=data.extra_headers,
             enabled=data.enabled,
         )
+        if "capability" in data.model_fields_set and data.capability is not None:
+            self._set_model_capability(provider, m.model_id, data.capability)
         validate_request_headers(provider.provider_type, m.extra_headers or {})
         validate_request_extensions(
             provider.provider_type,
@@ -656,6 +673,8 @@ class ProviderService:
                 setattr(m, field, val)
         if data.enabled is not None:
             m.enabled = data.enabled
+        if "capability" in data.model_fields_set:
+            self._set_model_capability(provider, m.model_id, data.capability)
         validate_request_headers(provider.provider_type, m.extra_headers or {})
         validate_request_extensions(
             provider.provider_type,

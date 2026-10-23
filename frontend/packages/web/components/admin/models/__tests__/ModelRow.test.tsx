@@ -62,6 +62,22 @@ describe('ModelRow', () => {
     })
   })
 
+  it('marks a model that has its own calling configuration', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ModelRow
+          model={makeModel()}
+          client={fakeClient}
+          providerId="prv_1"
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          hasCustomCapability
+        />
+      </NextIntlClientProvider>,
+    )
+    expect(screen.getByTestId('model-row-gpt-test-custom-capability')).toHaveTextContent('Custom')
+  })
+
   it('renders the readiness badge for a degraded model', () => {
     renderRow(makeModel({ readiness: 'degraded' }))
     expect(screen.getByText(en.adminModels.readiness.degraded)).toBeInTheDocument()

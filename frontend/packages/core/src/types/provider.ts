@@ -174,6 +174,8 @@ export interface ModelCreate {
   extra_body?: Record<string, unknown>
   extra_headers?: Record<string, unknown>
   enabled?: boolean
+  /** Omitted inherits the provider capability. An object is this model's override. */
+  capability?: Record<string, unknown>
 }
 
 export interface ModelUpdate {
@@ -190,6 +192,8 @@ export interface ModelUpdate {
   extra_body?: Record<string, unknown> | null
   extra_headers?: Record<string, unknown> | null
   enabled?: boolean | null
+  /** Omitted leaves the override unchanged. Null removes it. */
+  capability?: Record<string, unknown> | null
 }
 
 export interface DiscoveryPolicy {

@@ -114,6 +114,8 @@ class ModelCreate(BaseModel):
     extra_body: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
+    # Omitted inherits the provider capability. A dict is this model's override.
+    capability: dict[str, Any] | None = None
 
 
 class ModelUpdate(BaseModel):
@@ -132,6 +134,8 @@ class ModelUpdate(BaseModel):
     extra_body: dict[str, Any] | None = None
     extra_headers: dict[str, Any] | None = None
     enabled: bool | None = None
+    # Omitted leaves the override map alone. Null removes this model's override.
+    capability: dict[str, Any] | None = None
 
 
 class ModelOut(BaseModel):

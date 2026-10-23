@@ -1118,6 +1118,9 @@
     "enableVerified": "Enable verified model",
     "verificationRequired": "Run model tests before enabling.",
     "modelCapability": "Model calling configuration",
+    "capabilityInherited": "Inherits the provider configuration. Edits here apply only to this model.",
+    "capabilityCustom": "This model uses its own calling configuration.",
+    "capabilityCustomBadge": "Custom",
     "useProviderCapability": "Use provider configuration"
   },
   "adminSettings": {

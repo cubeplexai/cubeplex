@@ -37,12 +37,16 @@ interface CapabilityEditorProps {
   value: Record<string, unknown>
   onChange: (value: Record<string, unknown>) => void
   allowTemplate?: boolean
+  inputId?: string
+  onValidityChange?: (valid: boolean) => void
 }
 
 export function CapabilityEditor({
   value,
   onChange,
   allowTemplate = false,
+  inputId = 'capability-json',
+  onValidityChange,
 }: CapabilityEditorProps) {
   const t = useTranslations('adminModels.wizard.capability')
   const [text, setText] = useState(() => JSON.stringify(value, null, 2))
@@ -53,9 +57,11 @@ export function CapabilityEditor({
     try {
       const parsed = JSON.parse(next) as Record<string, unknown>
       setError(null)
+      onValidityChange?.(true)
       onChange(parsed)
     } catch {
       setError(t('invalid'))
+      onValidityChange?.(false)
     }
   }
 
@@ -70,13 +76,14 @@ export function CapabilityEditor({
     const next = JSON.stringify(merged, null, 2)
     setText(next)
     setError(null)
+    onValidityChange?.(true)
     onChange(merged)
   }
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <Label htmlFor="capability-json">{t('label')}</Label>
+        <Label htmlFor={inputId}>{t('label')}</Label>
         {allowTemplate && (
           <Popover>
             <PopoverTrigger
@@ -98,7 +105,7 @@ export function CapabilityEditor({
         )}
       </div>
       <textarea
-        id="capability-json"
+        id={inputId}
         value={text}
         onChange={(e) => handleText(e.target.value)}
         spellCheck={false}
