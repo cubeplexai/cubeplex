@@ -1118,6 +1118,9 @@
     "enableVerified": "启用已验证模型",
     "verificationRequired": "启用前请运行模型测试。",
     "modelCapability": "模型调用配置",
+    "capabilityInherited": "继承供应商配置。在这里的修改只影响这个模型。",
+    "capabilityCustom": "这个模型使用自己的调用配置。",
+    "capabilityCustomBadge": "单独配置",
     "useProviderCapability": "使用供应商配置"
   },
   "adminSettings": {

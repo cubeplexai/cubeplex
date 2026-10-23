@@ -125,9 +125,6 @@ export function ProviderConfigForm({
         ? JSON.stringify(provider.extra_headers, null, 2)
         : '',
   )
-  const [modelCapabilities, setModelCapabilities] = useState<
-    Record<string, Record<string, unknown> | null>
-  >({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [headersError, setHeadersError] = useState<string | null>(null)
 
@@ -226,14 +223,6 @@ export function ProviderConfigForm({
       if (JSON.stringify(capability) !== JSON.stringify(provider?.capability ?? {})) {
         body.capability = capability
       }
-      const changes = (provider?.models ?? [])
-        .filter((m) => m.id in modelCapabilities)
-        .map((m) => ({
-          model_db_id: m.id,
-          expected_configuration_revision: m.configuration_revision ?? 1,
-          capability: modelCapabilities[m.id],
-        }))
-      if (changes.length) body.model_capability_updates = changes
       onSubmit(body)
     }
   }
@@ -372,39 +361,6 @@ export function ProviderConfigForm({
                 onChange={setCapability}
                 allowTemplate={isCreate ? preset?.category === 'custom' : true}
               />
-              {!isCreate &&
-                provider?.models?.map((model) => (
-                  <div key={model.id} className="flex flex-col gap-2 border-t border-border pt-3">
-                    <Label>
-                      {model.model_id} · {t('modelCapability')}
-                    </Label>
-                    <CapabilityEditor
-                      value={
-                        ((model.id in modelCapabilities
-                          ? modelCapabilities[model.id]
-                          : provider.model_capability_overrides?.[model.model_id]) as Record<
-                          string,
-                          unknown
-                        >) ?? capability
-                      }
-                      onChange={(value) =>
-                        setModelCapabilities((prev) => ({ ...prev, [model.id]: value }))
-                      }
-                      allowTemplate
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="self-start"
-                      onClick={() =>
-                        setModelCapabilities((prev) => ({ ...prev, [model.id]: null }))
-                      }
-                    >
-                      {t('useProviderCapability')}
-                    </Button>
-                  </div>
-                ))}
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="pcf-logo-url">{t('logoUrl')}</Label>
                 <Input

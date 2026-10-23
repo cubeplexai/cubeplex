@@ -219,6 +219,54 @@ describe('ProviderConfigForm — edit', () => {
     expect(body.provider_type).toBe('anthropic-messages')
     expect(body).not.toHaveProperty('capability')
     expect(body).not.toHaveProperty('model_capability_overrides')
+    expect(body).not.toHaveProperty('model_capability_updates')
+  })
+
+  it('keeps per-model calling configuration off the provider form', () => {
+    const provider = makeProvider({
+      models: [
+        {
+          id: 'mdl_1',
+          provider_id: 'prv_1',
+          model_id: 'gpt-x',
+          display_name: 'GPT X',
+          reasoning: false,
+          input_modalities: ['text'],
+          cost_input: 0,
+          cost_output: 0,
+          cost_cache_read: 0,
+          cost_cache_write: 0,
+          context_window: 128000,
+          max_tokens: 4096,
+          extra_body: {},
+          extra_headers: {},
+          enabled: true,
+          is_system: false,
+          created_at: '2026-01-01T00:00:00+00:00',
+          updated_at: '2026-01-01T00:00:00+00:00',
+          configuration_revision: 2,
+        },
+      ],
+    })
+    const onSubmit = vi.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ProviderConfigForm
+          mode="edit"
+          provider={provider}
+          saving={false}
+          error={null}
+          submitLabel="Save"
+          onSubmit={onSubmit}
+        />
+      </NextIntlClientProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced: capability' }))
+    expect(screen.getAllByLabelText('Capability JSON')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Use provider configuration' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderUpdate
+    expect(body).not.toHaveProperty('model_capability_updates')
   })
 
   it('slug input is disabled and ProviderUpdate body has no slug', () => {

@@ -28,6 +28,19 @@ import { ProviderFormDialog } from './ProviderFormDialog'
 import { ModelFormDialog } from './ModelFormDialog'
 import { ModelRow } from './ModelRow'
 
+const EMPTY_CAPABILITY: Record<string, unknown> = {}
+
+function capabilityOverrideFor(
+  provider: { model_capability_overrides?: Record<string, unknown> },
+  model: { model_id: string } | null,
+): Record<string, unknown> | null {
+  if (!model || !provider.model_capability_overrides) return null
+  if (!(model.model_id in provider.model_capability_overrides)) return null
+  const value = provider.model_capability_overrides[model.model_id]
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
 /**
  * Backend's ModelInUseByPresetError carries refs in two places:
  *   - `error.data.refs` — structured payload (preferred).
@@ -203,6 +216,7 @@ export function ProviderDetail({
       await onCreateModel(client, provider.id, body)
       setModelFormOpen(false)
       setEditingModel(null)
+      if ('capability' in body) onRefresh?.()
     } catch (e) {
       setModelError((e as Error).message)
       throw e
@@ -216,6 +230,7 @@ export function ProviderDetail({
       await onUpdateModel(client, provider.id, editingModel.id, body)
       setModelFormOpen(false)
       setEditingModel(null)
+      if ('capability' in body) onRefresh?.()
     } catch (e) {
       setModelError((e as Error).message)
       throw e
@@ -509,6 +524,7 @@ export function ProviderDetail({
                 }}
                 onDelete={(model) => void handleDeleteModel(model)}
                 onRetested={() => onRefresh?.()}
+                hasCustomCapability={capabilityOverrideFor(provider, m) != null}
               />
             ))}
           </div>
@@ -529,6 +545,8 @@ export function ProviderDetail({
           if (!open) setEditingModel(null)
         }}
         model={editingModel}
+        providerCapability={provider.capability ?? EMPTY_CAPABILITY}
+        capabilityOverride={capabilityOverrideFor(provider, editingModel)}
         onSave={
           editingModel
             ? (body) => handleUpdateModel(body as ModelUpdate)

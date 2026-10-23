@@ -24,6 +24,7 @@ interface ModelRowProps {
   onEdit: (model: Model) => void
   onDelete: (model: Model) => void
   onRetested?: () => void
+  hasCustomCapability?: boolean
 }
 
 function formatCost(cost: number): string {
@@ -61,6 +62,7 @@ export function ModelRow({
   onEdit,
   onDelete,
   onRetested,
+  hasCustomCapability = false,
 }: ModelRowProps) {
   const tExtra = useTranslations('adminModelsExtra')
   const t = useTranslations('adminModels')
@@ -110,6 +112,15 @@ export function ModelRow({
           <span className="truncate font-mono font-medium text-foreground">{model.model_id}</span>
           {model.reasoning && (
             <Brain className="size-3.5 shrink-0 text-info-fg" aria-label="reasoning" />
+          )}
+          {hasCustomCapability && (
+            <Badge
+              variant="outline"
+              className="px-1.5 py-0 text-[10px]"
+              data-testid={`model-row-${model.model_id}-custom-capability`}
+            >
+              {t('capabilityCustomBadge')}
+            </Badge>
           )}
           {model.is_system && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
