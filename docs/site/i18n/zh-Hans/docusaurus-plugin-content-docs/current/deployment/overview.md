@@ -123,7 +123,7 @@ llm:
 llm:
   model_presets:
     tiers:
-      pro: { enabled: true, primary: "deepseek/deepseek-v4-flash", fallbacks: [] }
+      pro: { enabled: true, primary: "deepseek/deepseek-flash", fallbacks: [] }
     default_preset: pro
   providers:
     deepseek:

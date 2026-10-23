@@ -34,10 +34,10 @@ def test_resolve_models_subset_filter():
     cfg = {
         "preset": "deepseek/cn/anthropic-messages",
         "api_key": "k",
-        "models": ["deepseek-v4-flash"],
+        "models": ["deepseek-flash"],
     }
     r = resolve_provider_config("deepseek", cfg)
-    assert [m["id"] for m in r.models] == ["deepseek-v4-flash"]
+    assert [m["id"] for m in r.models] == ["deepseek-flash"]
 
 
 def test_resolve_unknown_preset_fails_loudly():
