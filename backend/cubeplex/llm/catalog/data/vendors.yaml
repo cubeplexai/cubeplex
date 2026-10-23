@@ -121,7 +121,7 @@
     - { region: cn, protocol: openai-completions, capability: deepseek-openai, discovery: { adapter: openai, auth: bearer, reference: https://api-docs.deepseek.com/api/list-models, url_mode: origin, path: models } }
   models:
     - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: deepseek-v4-flash, display_name: DeepSeek V4 Flash, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: deepseek-flash, display_name: DeepSeek-V4.1-Flash, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: moonshot
   display_name: Moonshot Kimi
