@@ -21,6 +21,9 @@ import { cn } from '@/lib/utils'
 import { CapabilityEditor } from './wizard/CapabilityEditor'
 
 const MODALITIES = ['text', 'image', 'audio', 'video'] as const
+// Default arguments are evaluated on every call. A fresh object here makes the
+// open-effect reset forever when the caller omits the provider capability.
+const EMPTY_CAPABILITY: Record<string, unknown> = {}
 
 interface ModelFormDialogProps {
   open: boolean
@@ -38,7 +41,7 @@ export function ModelFormDialog({
   onOpenChange,
   model,
   onSave,
-  providerCapability = {},
+  providerCapability = EMPTY_CAPABILITY,
   capabilityOverride = null,
 }: ModelFormDialogProps) {
   const t = useTranslations('adminModels')
