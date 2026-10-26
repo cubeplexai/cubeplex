@@ -134,8 +134,8 @@ importers:
         specifier: ^11.12.0
         version: 11.12.0
       katex:
-        specifier: ^0.18.8
-        version: 0.18.8
+        specifier: ^0.18.9
+        version: 0.18.9
       lucide-react:
         specifier: ^1.41.0
         version: 1.41.0(react@19.3.1)
@@ -4146,8 +4146,8 @@ packages:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
     hasBin: true
 
-  katex@0.18.8:
-    resolution: {integrity: sha512-nKBXaVUJpm5+Vm8I4XeJ8FaCAqQ+WwFeHBE/gAzSspFpdPbW1COBZ2roWbivdWIkwMfUrby0yo9SBLfoLZlqRQ==}
+  katex@0.18.9:
+    resolution: {integrity: sha512-8ad9RyoKsb/g8/yLFE+KAlP+DhbCTRUNi/V9XGsxn0R+trJJltNwzcDNo0q/DEkOy5fQUQTAQyCXCYSE+OakTQ==}
     hasBin: true
 
   keyv@4.5.4:
@@ -10322,7 +10322,7 @@ snapshots:
     dependencies:
       commander: 8.3.0
 
-  katex@0.18.8:
+  katex@0.18.9:
     dependencies:
       commander: 15.0.0
 
