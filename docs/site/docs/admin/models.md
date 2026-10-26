@@ -135,15 +135,7 @@ Run model tests, then choose **Enable verified model** (or finish the wizard to 
 
 Editing endpoint, key, limits, or calling capabilities marks old evidence **Verification pending**. Already enabled models remain usable. A disabled imported model needs a passing test of its current configuration before activation or reactivation. Calls already bound retain their snapshot; new calls and delayed/resumed starts bind current configuration.
 
-For upgrades, apply migrations and record legacy provenance once:
-
-```bash
-cd backend
-uv run alembic upgrade head
-uv run python scripts/dev/backfill_model_discovery.py
-```
-
-The backfill is idempotent, preserves enabled rows, and marks old tests historical. It never promotes historical tests to current passes. Legacy zero prices remain unknown until confirmed.
+On upgrade, the normal deployment migration adds the discovery columns. Existing enabled models stay enabled. A model that already has a test result but no configuration fingerprint shows **Verification pending** until it is retested, and it remains selectable. Models that have never been tested stay available. Stored prices, including zeros, are left unchanged.
 
 <!-- Screenshot pending: vendor selection (CLIProxyAPI), discovery field review, test results and enable action; capture in light/dark themes. -->
 
