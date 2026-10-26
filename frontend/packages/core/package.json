@@ -1,6 +1,6 @@
 {
   "name": "@cubeplex/core",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "exports": {
