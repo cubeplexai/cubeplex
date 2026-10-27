@@ -381,8 +381,7 @@ $EDITOR config/config.production.local.yaml
 #   sandbox:
 #     enabled: true
 #     secure_access: false       # docker runtime rejects secureAccess=True
-#     use_server_proxy: false    # OpenSandbox v0.1.x drops the port from
-#                                # proxied URLs; use direct host-mapped ports
+#     use_server_proxy: false    # compose reaches sandboxes via host-mapped ports
 
 # 4. start the complete stack
 docker compose up -d
@@ -401,7 +400,7 @@ Operator-managed values (no template):
 ### Compatibility — CubePlex features under Docker-mode OpenSandbox
 
 Docker runtime mode has real limitations compared to Kubernetes-mode
-OpenSandbox. This matrix reflects `opensandbox-server v0.1.14`.
+OpenSandbox. The compose image pin is `opensandbox/server:release-1.1.1`.
 
 **Secure-access toggle:** the Docker runtime rejects `secureAccess=True`
 with HTTP 400 — secured endpoints are a Kubernetes ingress-gateway feature.
@@ -419,7 +418,7 @@ call → `tool_result` works end to end.
 | **Interactive terminal panel** (chat UI) | Yes — proxied through the backend's panel route | Requires `api.public_url` set to a URL the user's browser can reach that also forwards WebSocket |
 | **Live browser panel** (Neko, chat UI) | Yes — same panel route as the terminal | Same `api.public_url` requirement |
 | Secret injection / env substitution (`cbxref_…` placeholders) | – | ❌ Not available. It needs the backend mTLS credential-exchange listener + egress CA/client certs that the Kubernetes chart deploys (`gen-egress-certs.sh` + the egress webhook). The compose overlay ships none of that, and `sandbox.egress_exchange_host` stays empty, so injection is disabled. |
-| Server-proxy mode (`use_server_proxy: true`) | – | OpenSandbox v0.1.x drops the port from the proxied endpoint URL. Keep `use_server_proxy: false` (the example default), and the overlay wires `host.docker.internal` via `extra_hosts` on both the backend and the opensandbox-server so they can reach the host-mapped bridge ports of sandbox containers. |
+| Server-proxy mode (`use_server_proxy: true`) | On Kubernetes release-1.1.1 the proxied URL keeps the target port in the path (`/proxy/<port>`). Checked against a local 1.1.1 server. | Compose still sets `use_server_proxy: false`. The overlay reaches sandbox containers through host-mapped bridge ports: `extra_hosts` sets `host.docker.internal` on both the backend and opensandbox-server. |
 | `pvc.claimName` volumes | Yes — but treated as Docker named volumes | No CSI features, no ReadWriteMany |
 | Pause / resume (`POST /sandboxes/{id}/pause`, etc.) | Calls Docker `pause`/`unpause` (cgroup freezer) | No checkpoint to disk — paused state is lost on host Docker restart. CubePlex defaults `pause_on_idle: false` for this reason. |
 

@@ -326,8 +326,7 @@ to start:
 opensandbox:
   opensandbox-server:
     server:
-      image: { repository: "docker.io/opensandbox/server" }
-      ingress: { image: { repository: "docker.io/opensandbox/ingress" } }
+      image: { repository: "docker.io/opensandbox/server", tag: "release-1.1.1" }
     configToml: |
       [server]
       host = "0.0.0.0"
@@ -337,34 +336,48 @@ opensandbox:
       level = "INFO"
       [runtime]
       type = "kubernetes"
-      execd_image = "docker.io/opensandbox/execd:v1.0.19"
+      execd_image = "docker.io/opensandbox/execd:release-1.1.1"
       [kubernetes]
       namespace = "opensandbox"
-      informer_enabled = true
       informer_resync_seconds = 300
       informer_watch_timeout_seconds = 60
-      snapshot_create_timeout_seconds = 900
       workload_provider = "batchsandbox"
       batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
       [egress]
-      image = "docker.io/opensandbox/egress:v1.0.12"
+      image = "docker.io/opensandbox/egress:release-1.1.1"
       mode = "dns+nft"
   opensandbox-controller:
     controller:
-      # v0.2.0 on Docker Hub crashes with `flag provided but not defined:
-      # -containerd-socket-path` — that published tag lags the chart's own
-      # template. Pin `latest` until upstream re-cuts a matching v0.2.0.
-      image: { repository: "docker.io/opensandbox/controller", tag: "latest" }
+      image: { repository: "docker.io/opensandbox/controller", tag: "release-1.1.1" }
       snapshot:
-        imageCommitterImage: "docker.io/opensandbox/image-committer:v0.1.0"
+        imageCommitterImage: "docker.io/opensandbox/image-committer:release-1.1.1"
 ```
 
-Also create the `opensandbox-system` and `opensandbox` namespaces before installing —
-neither the umbrella chart nor its subcharts create them:
+The vendored chart's own defaults already point at
+`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/<component>` with
+tag `release-1.1.1` (an empty `tag` means that). Use the `docker.io/` form
+above only when the nodes cannot pull the default registry, or when CRI-O
+rejects short names. `egress.webhook.egressImage` must be the same string as
+`[egress].image`. The server refuses to start with an empty API key; the
+`configToml` value above can instead be left empty if you set
+`OPENSANDBOX_SERVER_API_KEY` from a Secret on the server container. That
+value is compared exactly, so the Secret must not contain a trailing newline.
+
+Create both namespaces before installing. CubePlex turns off the 1.1.1 base
+chart's namespace creation (`base.fastSandbox.namespaces.createSystem` and
+`create` are false): a namespace that already exists without Helm ownership
+cannot be adopted, and the fast-sandbox dataplane namespace is unused. The
+server chart never creates the sandbox workload namespace:
+
 ```bash
 kubectl create namespace opensandbox-system
 kubectl create namespace opensandbox   # where per-conversation sandbox pods actually run
 ```
+
+The server waits 60 seconds (`[kubernetes] sandbox_create_timeout_seconds`)
+for the sandbox pod to become Running. A cold pull of the execd or egress
+image can exceed that, and the create call then returns 504. Pre-pull those
+images on the nodes, or raise the timeout in `configToml`.
 
 ### 4.6 Bundled infra passwords (required)
 
@@ -458,12 +471,14 @@ rustfs:
 
 ### 4.9 OpenSandbox subchart
 
-The chart bundles alibaba's OpenSandbox umbrella (controller + server) under
-the same release by default. Its controller / server / execd / egress images default
-to Docker Hub (`opensandbox/*`), which the cluster nodes need to be able to
-pull. For mainland-China clusters, override each with the
-`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/` prefix (same
-image names and tags) in the vendored subchart values.
+The chart bundles the OpenSandbox 1.1.1 umbrella (controller + server) under
+the same release by default. Ingress gateway, node agent, and fast-sandbox stay
+off. Component images default to
+`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/<component>` with
+tag `release-1.1.1`. For a registry the nodes cannot reach, or for CRI-O
+short-name enforcement, override each repository to
+`docker.io/opensandbox/<component>` and set the tag to `release-1.1.1`,
+including `execd_image` and `[egress].image` inside `configToml`.
 
 ```yaml
 opensandbox:
@@ -515,8 +530,8 @@ egress:
     image:
       tag: "v0.9.4"             # same release version as backend/frontend
     # MUST exactly match opensandbox-server's configured egress.image.
-    # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12
-    egressImage: "opensandbox/egress:v1.0.12"
+    # Chart default. Docker Hub override: docker.io/opensandbox/egress:release-1.1.1
+    egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
 
 backend:
   sandbox:
@@ -1001,6 +1016,12 @@ tempo:                              # default on, see §4.12
 
 opensandbox:
   enabled: true
+  base:
+    fastSandbox:
+      namespaces: { createSystem: false, create: false }
+  ingress-gateway: { enabled: false }
+  opensandbox-node-agent: { enabled: false }
+  fast-sandbox: { enabled: false }
   opensandbox-server:     { server:     { replicaCount: 1 } }
   opensandbox-controller: { controller: { replicaCount: 1 } }
 ```

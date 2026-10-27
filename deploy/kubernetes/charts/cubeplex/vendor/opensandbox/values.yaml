@@ -1,20 +1,40 @@
 # Default values for opensandbox (all-in-one chart).
 # This chart aggregates values from opensandbox-controller and opensandbox-server sub-charts.
 
+# Cluster-scoped resources component values. This sub-chart installs the
+# OpenSandbox CRDs, the fast-sandbox CRDs (sandbox.fast.io) and their RBAC.
+# Disabling it is only useful when the base chart is installed as its own
+# release; every other component requires the CRDs.
+base:
+  # -- Whether the cluster-scoped resources (CRDs + RBAC) are installed.
+  enabled: true
+
 # Controller component values
 opensandbox-controller:
   # Default values are inherited from the sub-chart.
   # Override specific controller settings here if needed.
   controller:
+    # -- Controller log level (debug, info, error).
     logLevel: info
+    # -- Number of controller replicas.
     replicaCount: 1
+    # -- Pause/Resume snapshot configuration.
     snapshot:
-      # Docker Hub default; China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/image-committer:v0.1.0
-      imageCommitterImage: opensandbox/image-committer:v0.1.0
+      # -- Image used for commit operations.
+      imageCommitterImage: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/image-committer:release-1.1.1
+      # -- PodTemplateSpec overlay for image-committer commit Job Pods.
+      imageCommitterPodTemplate: {}
+      # -- Timeout duration for commit jobs.
       commitJobTimeout: 10m
+      # -- OCI registry prefix used for snapshot images.
       registry: ""
+      # -- Go named-field template for snapshot image URIs. Empty preserves default naming.
+      imageURITemplate: ""
+      # -- Use insecure registry mode when pushing snapshot images.
       registryInsecure: false
+      # -- Secret name used by commit Jobs to push snapshot images.
       snapshotPushSecret: ""
+      # -- Secret name injected into resumed sandboxes for pulling snapshot images.
       resumePullSecret: ""
 
 # Server component values
@@ -22,10 +42,31 @@ opensandbox-server:
   # Default values are inherited from the sub-chart.
   # Override specific server settings here if needed.
   server:
-    replicaCount: 2
+    # -- Number of server replicas. Keep one active server; multi-replica HA is not supported yet.
+    replicaCount: 1
 
-# Global values (passed to both sub-charts)
-global:
-  # Example: shared image pull secrets
-  # imagePullSecrets:
-  #   - name: my-registry-secret
+# Optional ingress gateway (components/ingress). When enabled, also announce it
+# from the server by setting opensandbox-server.server.gateway.* below
+# (enabled, host, gatewayRouteMode, secureAccess) so the server returns the
+# gateway address to clients.
+ingress-gateway:
+  # -- Whether the ingress gateway is enabled.
+  enabled: false
+
+# Optional node-level sandbox log collection. Configure the target in the
+# sub-chart values before enabling it.
+opensandbox-node-agent:
+  # -- Whether the node agent is enabled.
+  enabled: false
+
+# Optional fast-sandbox Firecracker runtime (sandbox.fast.io). Requires the
+# companion images built by manifests/release/build-fast-sandbox.sh from the source
+# pinned in manifests/third-party/fast-sandbox.commit, Firecracker-capable
+# (KVM) nodes labeled fast-sandbox.io/firecracker-node=true, and the
+# fast-sandbox-agent-registry Secret provisioned in opensandbox-system.
+fast-sandbox:
+  # -- Whether the fast-sandbox control plane + node runtime is enabled.
+  enabled: false
+
+# -- Global values passed to all sub-charts (e.g. shared imagePullSecrets).
+global: {}

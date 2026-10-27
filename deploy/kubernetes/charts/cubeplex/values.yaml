@@ -238,8 +238,8 @@ egress:
   # NOT the same as where opensandbox-server/-controller themselves run
   # ("opensandbox-system") — per-conversation sandbox pods run wherever the
   # server's own configToml [kubernetes] namespace points, which defaults to
-  # "opensandbox" in the bundled subchart (vendor/opensandbox-server's own
-  # values.yaml). Getting this wrong means the MutatingWebhookConfiguration's
+  # "opensandbox" in the bundled subchart (vendor/server's own values.yaml).
+  # Getting this wrong means the MutatingWebhookConfiguration's
   # namespaceSelector never matches real sandbox pods — and with
   # failurePolicy: Ignore, that failure is completely silent.
   sandboxNamespace: "opensandbox"
@@ -269,11 +269,27 @@ egress:
       requests: { cpu: "50m",  memory: "64Mi" }
       limits:   { cpu: "200m", memory: "256Mi" }
 
-# ── OpenSandbox umbrella subchart (alibaba) ──────────────────────────────
+# ── OpenSandbox umbrella subchart (release-1.1.1) ────────────────────────
+# Vendored from tag release-1.1.1. Ingress gateway, node agent, and
+# fast-sandbox stay off: CubePlex panels do not use the OpenSandbox gateway,
+# and the egress webhook matches batchsandbox pods only.
 opensandbox:
   enabled: true
-  # Inherits defaults from the upstream chart; only override surface knobs
-  # we care about for the smoke test deployment.
+  base:
+    fastSandbox:
+      namespaces:
+        # A namespace that already exists without Helm ownership cannot be
+        # adopted. Operators pre-create opensandbox-system. create would also
+        # add the unused fast-sandbox dataplane namespace. The sandbox
+        # workload namespace "opensandbox" is still not created by the chart.
+        createSystem: false
+        create: false
+  ingress-gateway:
+    enabled: false
+  opensandbox-node-agent:
+    enabled: false
+  fast-sandbox:
+    enabled: false
   opensandbox-server:
     server:
       replicaCount: 1

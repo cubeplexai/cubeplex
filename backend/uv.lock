@@ -1058,7 +1058,7 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "microsoft-teams-apps", specifier = ">=2.0.13.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
-    { name = "opensandbox", specifier = ">=0.1.12" },
+    { name = "opensandbox", specifier = "==1.1.1" },
     { name = "orjson", specifier = ">=3.11.9" },
     { name = "pgvector", specifier = ">=0.4.2" },
     { name = "pillow", specifier = ">=12.3.0" },
@@ -2493,17 +2493,20 @@ wheels = [
 
 [[package]]
 name = "opensandbox"
-version = "0.1.12"
+version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
+    { name = "httpcore" },
     { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/ba/2637d78939606fdb953dc5508c43cccb0b5343231476e557cfb1735f0cd9/opensandbox-0.1.12.tar.gz", hash = "sha256:fc04bb1502f84d79b398ddc1b02ef51e8baff45888e71808315adf902759e462", size = 184424, upload-time = "2026-06-22T08:22:49.57Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/36/79ff65e79725e10dd540af000e9148bc26428d0494bb954f406e5da79c74/opensandbox-1.1.1.tar.gz", hash = "sha256:2c62b338ed30c99d37fe88116f9e82f08e8e5c9ec8574dfef38d1ea5801f4b5e", size = 299154, upload-time = "2026-10-09T14:34:36.335Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/ea/29905129de5a4a3ca7bbf608564dbdbf2ba1a138f101e79b5fd7f4694a9d/opensandbox-0.1.12-py3-none-any.whl", hash = "sha256:8b3636725890a9ea0767f81c3abd1bb76dc99236967942c2c0456041d449561e", size = 424240, upload-time = "2026-06-22T08:22:46.27Z" },
+    { url = "https://files.pythonhosted.org/packages/48/38/c18410a5466904ff9beef867e51d177e7f9a3240413f4412fb126481aee1/opensandbox-1.1.1-py3-none-any.whl", hash = "sha256:98eb0d7b57fdeabbbb5202d5e3a5261741f68fe47a631f0ec483b1566eb5fef8", size = 668271, upload-time = "2026-10-09T14:34:35.143Z" },
 ]
 
 [[package]]

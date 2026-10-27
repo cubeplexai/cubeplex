@@ -13,6 +13,6 @@ kubeVersion: ">=1.21.0-0"
 # at install time on networks where Docker OCI is unreliable.
 dependencies:
   - name: opensandbox
-    version: "0.2.0"
+    version: "1.1.1"
     repository: "file://./vendor/opensandbox"
     condition: opensandbox.enabled

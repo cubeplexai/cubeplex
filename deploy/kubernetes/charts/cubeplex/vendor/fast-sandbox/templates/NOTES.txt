@@ -1,0 +1,35 @@
+fast-sandbox ({{ .Chart.Version }}) has been deployed to namespace {{ include "fast-sandbox.namespace" . }}.
+
+Components:
+{{- if .Values.controller.enabled }}
+  - fast-sandbox-controller (all-in-one: reconcilers + FastPath gRPC :9090)
+    Service: fast-sandbox-fastpath.{{ include "fast-sandbox.namespace" . }}.svc:9090
+{{- end }}
+{{- if .Values.runtime.enabled }}
+  - firecracker-runtime (per-node UDS management API + DART P2P + node
+    readiness loop: host checks, Firecracker asset install, self-applied
+    scheduling labels + FirecrackerReady condition; janitor sidecar;
+    peer discovery Service: dart.{{ include "fast-sandbox.namespace" . }}.svc)
+{{- end }}
+
+Next steps:
+  1. Nodes need bare-metal KVM (/dev/kvm); no manual labeling — the
+     firecracker-runtime readiness loop verifies each host and applies
+     sandbox.fast.io/kvm + fast-sandbox.io/firecracker-node itself
+     (watch: kubectl get node -w -o jsonpath='{range .items[*]}{.metadata.name}{" "}
+       {.metadata.labels.fast-sandbox\.io/firecracker-node}{"\n"}{end}')
+  2. Provision the agent registry Secret (artifact-store pull credentials):
+       kubectl -n {{ include "fast-sandbox.namespace" . }} create secret generic {{ .Values.runtime.registrySecret }} \
+         --from-file=registry.json=<compiled-registry.json>
+  3. Build and load the companion images from the pinned source:
+       manifests/release/build-fast-sandbox.sh --load-kind <cluster>
+  4. Create a SandboxPool with runtime: firecracker and create Sandboxes
+     against it (see docs/ and examples/).
+{{- if and .Values.routeKeys.create .Values.routeKeys.developmentOnly }}
+
+WARNING: the Ed25519 controller route keys in fast-sandbox-route-keys are
+the published development-only test keys. Provision production keys via
+routeKeys.existingSecret or routeKeys.privateKey/publicKey. (This is not
+the OpenSandbox f1.* HMAC route-scope ring — configure that separately on
+the server and ingress-gateway charts.)
+{{- end }}

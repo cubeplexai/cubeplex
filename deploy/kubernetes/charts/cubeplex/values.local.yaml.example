@@ -93,13 +93,14 @@ rustfs:
 #
 # egress:
 #   enabled: true
-#   sandboxNamespace: "opensandbox-system"
+#   sandboxNamespace: "opensandbox"
 #   webhook:
 #     image:
-#       tag: "v0.2.0"                        # same release version as backend/frontend
-#     # MUST match opensandbox-server's configured egress.image exactly:
-#     # China mirror: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.1.4
-#     egressImage: "opensandbox/egress:v1.1.4"
+#       tag: "v0.9.4"                        # same release version as backend/frontend
+#     # MUST match opensandbox-server's configured egress.image exactly.
+#     # Chart default is the Aliyun release-1.1.1 image. If configToml overrides
+#     # [egress].image, this string has to be that same value.
+#     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
 
 # Bundled Tempo is on by default (admin /traces + cubeloop OTLP). To disable
 # and point at an external Tempo instead:

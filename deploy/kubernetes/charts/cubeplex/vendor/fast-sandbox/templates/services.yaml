@@ -1,0 +1,18 @@
+{{- if .Values.controller.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fast-sandbox-fastpath
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  ports:
+  - name: grpc
+    port: 9090
+    targetPort: grpc
+  selector:
+    {{- include "fast-sandbox.controllerSelectorLabels" . | nindent 4 }}
+{{- end }}

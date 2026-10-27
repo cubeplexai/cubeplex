@@ -357,8 +357,7 @@ $EDITOR config/config.production.local.yaml
 #   sandbox:
 #     enabled: true
 #     secure_access: false       # docker runtime 会拒绝 secureAccess=True
-#     use_server_proxy: false    # OpenSandbox v0.1.x 会丢失代理 URL 的端口号，
-#                                # 改用直连主机映射端口
+#     use_server_proxy: false    # compose 通过主机映射端口访问沙箱
 
 # 4. 启动完整栈
 docker compose up -d
@@ -377,7 +376,7 @@ docker compose up -d
 ### 兼容性——Docker 模式 OpenSandbox 下的 CubePlex 功能
 
 Docker runtime 模式相比 Kubernetes 模式的 OpenSandbox 有一些实际限制。
-下表基于 `opensandbox-server v0.1.14`。
+compose 镜像钉在 `opensandbox/server:release-1.1.1`。
 
 **secure-access 开关：** Docker runtime 会对 `secureAccess=True` 返回
 HTTP 400——secured endpoint 是 Kubernetes ingress-gateway 的特性。
@@ -394,7 +393,7 @@ CubePlex 会发送 `secureAccess: false`，Docker runtime 就会接受请求。
 | **交互式终端面板**（聊天界面） | 可以——通过后端的面板反向代理转发 | 需要把 `api.public_url` 设成用户浏览器可达、且能转发 WebSocket 的后端 URL |
 | **实时浏览器面板**（Neko，聊天界面） | 可以——与终端走同一条面板代理 | 同样需要 `api.public_url` |
 | 密钥注入 / env 替换（`cbxref_…` 占位符） | – | ❌ 不可用。它需要后端的 mTLS 凭证交换监听器 + egress CA/客户端证书，这些由 Kubernetes chart 部署（`gen-egress-certs.sh` + egress webhook）。compose overlay 不包含这些，`sandbox.egress_exchange_host` 保持为空，所以注入被禁用。 |
-| server-proxy 模式（`use_server_proxy: true`） | – | OpenSandbox v0.1.x 在代理端点 URL 中会丢失端口号。保持 `use_server_proxy: false`（示例默认值），overlay 通过 `extra_hosts` 在 backend 和 opensandbox-server 上都配置 `host.docker.internal`，让它们能访问沙箱容器在主机上映射的 bridge 端口。 |
+| server-proxy 模式（`use_server_proxy: true`） | Kubernetes 上的 release-1.1.1 会把目标端口留在代理 URL 的路径里（`/proxy/<port>`）。已在本地 1.1.1 server 上核对过。 | compose 仍然设置 `use_server_proxy: false`。overlay 通过主机映射的 bridge 端口访问沙箱：`extra_hosts` 在 backend 和 opensandbox-server 上都配置了 `host.docker.internal`。 |
 | `pvc.claimName` 数据卷 | 可以——但被当作 Docker 命名卷处理 | 没有 CSI 特性，不支持 ReadWriteMany |
 | 暂停 / 恢复（`POST /sandboxes/{id}/pause` 等） | 调用 Docker 的 `pause`/`unpause`（cgroup freezer） | 没有落盘的 checkpoint——主机 Docker 重启后暂停状态会丢失。因此 CubePlex 默认 `pause_on_idle: false`。 |
 
