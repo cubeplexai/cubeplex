@@ -18,9 +18,10 @@ if [[ ! -f "$CHART/values.local.yaml" ]]; then
 fi
 
 echo "==> helm dependency update"
-# The vendored OpenSandbox umbrella has nested subcharts (server + controller),
-# so build its deps first — otherwise the top-level update packages an empty
-# opensandbox subchart and the sandbox controller/server never deploy.
+# The vendored OpenSandbox umbrella depends on sibling charts (base,
+# controller, server, and the optional ingress/node-agent/fast-sandbox
+# charts). Build those deps first — otherwise the top-level update packages
+# an empty opensandbox subchart and the controller/server never deploy.
 helm dependency update "$CHART/vendor/opensandbox"
 helm dependency update "$CHART"
 

@@ -77,13 +77,21 @@ do not repeat that.
 Leave these alone in the same files — they are not CubePlex's application
 version:
 
-- OpenSandbox controller notes about Docker Hub `v0.2.0` crashing (`flag
-  provided but not defined`) and pinning `latest` until upstream re-cuts.
-- `opensandbox-server v0.1.14`, `image-committer:v0.1.0`, egress
-  `opensandbox/egress:v1.0.12`, postgres/rustfs/docling image tags.
-- Helm `values.yaml` default `tag: ""` (already falls back to `v<appVersion>`).
-- `compose.yaml` image selections. Those belong to the operator `.env` and the
-  release manifest.
+- OpenSandbox pins. The vendored chart is release-1.1.1. Server, controller,
+  execd, egress, and image-committer use tag `release-1.1.1`. The chart
+  default registry is
+  `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/`. Compose
+  defaults are `opensandbox/server:release-1.1.1`,
+  `opensandbox/execd:release-1.1.1`, and `opensandbox/egress:release-1.1.1`.
+  Do not roll these back when bumping the CubePlex application version.
+- postgres/rustfs/docling image tags.
+- Helm `values.yaml` default `tag: ""` for CubePlex images (falls back to
+  `v<appVersion>`). An empty tag inside the vendored OpenSandbox chart means
+  `release-<chart appVersion>` (`release-1.1.1`), which is independent of the
+  CubePlex version.
+- `compose.yaml` CubePlex image selections (`BACKEND_TAG` / `FRONTEND_TAG`).
+  Those belong to the operator `.env` and the release manifest. The
+  OpenSandbox image default in that file is the external pin above.
 
 Do not put this process, or any other developer release procedure, under
 `docs/site/`.

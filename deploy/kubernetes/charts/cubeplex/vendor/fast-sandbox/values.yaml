@@ -1,0 +1,233 @@
+# Copyright 2026 The OpenSandbox Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for the fast-sandbox chart.
+#
+# This chart deploys the fast-sandbox Firecracker chain: the all-in-one
+# control plane (controller + FastPath gRPC), the janitor, and the node-side
+# firecracker runtime (UDS management API + DART P2P + node readiness loop
+# that installs the Firecracker assets and self-labels the nodes).
+#
+# The upstream sandbox-proxy is intentionally not deployed: OpenSandbox
+# deployments reach fastlets through the ingress gateway's direct route
+# resolution.
+#
+# Requires the base chart first: it owns the sandbox.fast.io CRDs and the
+# component RBAC (ServiceAccounts fast-sandbox-controller/fastpath/janitor),
+# created in the same namespaces configured below.
+#
+# The default image tags are empty and resolve to the `release-<appVersion>`
+# companion image tags built from the source pinned in
+# manifests/third-party/fast-sandbox.commit by
+# manifests/release/build-fast-sandbox.sh. The fastlet-proxy sidecar value is
+# a single image string, so it pins the released companion image explicitly
+# instead of using the empty-tag fallback.
+
+# -- Override the name of the chart
+nameOverride: ""
+# -- Override the full name of the chart
+fullnameOverride: ""
+
+# -- Namespace for the fast-sandbox control plane workloads (the shared
+# OpenSandbox system namespace). Must match
+# base.fastSandbox.namespaces.system (where the ServiceAccounts live).
+systemNamespace: opensandbox-system
+
+# -- Namespace for fast-sandbox resource objects (SandboxPools, Templates,
+# Sandboxes and the fastlet/builder Pods they spawn). Must match
+# base.fastSandbox.namespaces.resources.
+resourceNamespace: opensandbox-dataplane
+
+# -- Image pull secrets for every workload in this chart
+imagePullSecrets: []
+
+# All-in-one control plane: one process runs both the reconcilers and the
+# FastPath gRPC API (development topology, no leader election).
+controller:
+  # -- Whether the control plane Deployment + FastPath Service are installed
+  enabled: true
+  image:
+    # -- Controller image repository (built by manifests/release/build-fast-sandbox.sh)
+    repository: opensandbox/fsb-controller
+    # -- Image tag. Empty uses the release-<appVersion> companion image tag.
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- Number of controller replicas (no leader election; keep 1)
+  replicaCount: 1
+  # -- Image that executes SandboxTemplate golden-image builds (builder Pods
+  # are created by the controller; build it with manifests/release/build-fast-sandbox.sh).
+  # Empty uses the release-<appVersion> companion image tag.
+  sandboxtemplateBuilderImage: ""
+  # -- Resource requests and limits for the controller
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # -- Raw PodSpec fragment (YAML) merged into every SandboxTemplate build
+  # Pod by the controller: whitelisted scheduling fields only (tolerations
+  # appended; affinity and topologySpreadConstraints replaced). Rendered as
+  # the fast-sandbox-builder-pod-template ConfigMap; editing the live
+  # ConfigMap applies to the next build without a rollout.
+  sandboxtemplateBuilderPodSpec: ""
+  # -- Tolerations for the controller pod
+  tolerations: []
+  # -- Image injected as the platform-owned Fastlet Proxy sidecar into
+  # fastlet Pods. Defaults to the released companion image published by the
+  # umbrella release (build-fast-sandbox.sh); override for clusters that
+  # cannot pull from docker.io.
+  fastletProxyImage: opensandbox/fsb-fastlet-proxy:release-1.1.1
+
+# Artifact store shared by the controller, the runtime-agent and golden-image
+# builds. Rendered into the fast-sandbox-artifact-store ConfigMap.
+artifactStore:
+  # -- Store URI root for published artifacts (golden images, snapshots)
+  store: s3://sandbox-images/publish
+  # -- S3-compatible endpoint (empty = AWS default)
+  endpoint: ""
+
+# Ed25519 keypair consumed by the fast-sandbox controller itself
+# (FAST_SANDBOX_ROUTE_SIGNING_PRIVATE_KEY / FAST_SANDBOX_ROUTE_VERIFY_PUBLIC_KEY).
+# This is NOT the OpenSandbox f1.* route-scope key ring: those f1.* scopes
+# are HMAC-SHA256, signed by the lifecycle server ([ingress.secure_access],
+# server.gateway.* in charts/server) and verified by the ingress gateway
+# (--secure-access-keys, gateway.secureAccess in charts/ingress-gateway).
+# Development-only RFC 8032 test keys by default; production must provision
+# real keys via routeKeys.existingSecret or explicit values.
+routeKeys:
+  # -- Specifies whether the fast-sandbox-route-keys Secret is created here
+  create: true
+  # -- Use an existing Secret instead of creating one (its keys must be
+  # private-key / public-key)
+  existingSecret: ""
+  # -- Ed25519 private key (base64) used by the controller's route signer
+  privateKey: nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=
+  # -- Ed25519 public key (base64) used by the controller's route verifier
+  publicKey: 11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=
+  # -- Mark the Secret with fast-sandbox.io/development-only (set false when
+  # provisioning real keys via privateKey/publicKey)
+  developmentOnly: true
+
+# Runtime environment definitions shared by the controller and the janitor
+# (rendered into the fast-sandbox-runtime-environments ConfigMap). The
+# default matches the pinned fast-sandbox source; override to add profiles.
+runtimeEnvironments: |-
+  version: v1alpha2
+  environments:
+    default:
+      containerd:
+        socket: /run/containerd/containerd.sock
+        namespace: k8s.io
+        defaultSnapshotter: overlayfs
+        root: /var/lib/containerd
+      kubelet:
+        root: /var/lib/kubelet
+      runtimes:
+        container: {}
+        gvisor: {}
+        kata-qemu: {}
+        kata-clh: {}
+        kata-fc:
+          snapshotter: blockfile
+          configPath: /opt/kata/share/defaults/kata-containers/configuration-fc-fast-sandbox.toml
+        kata-dragonball:
+          configPath: /opt/kata/share/defaults/kata-containers/runtime-rs/configuration-dragonball-fast-sandbox.toml
+        boxlite: {}
+        firecracker:
+          firecracker:
+            binaryPath: /opt/fast-sandbox/firecracker/firecracker
+            jailerPath: /opt/fast-sandbox/firecracker/jailer
+            # No kernelPath: restore never boots a kernel (the bundled
+            # vmlinux.bin was dropped upstream); direct-boot operators
+            # pin one here explicitly.
+            rootfsPath: /var/lib/fast-sandbox/firecracker/rootfs
+            stateRoot: /var/lib/fast-sandbox/firecracker
+
+# janitor: settings for the janitor sidecar inside the firecracker-runtime
+# pod (sweeps orphaned fastlet network state, boxlite leftovers and leaked
+# VMM processes; the containerd backend is disabled there). There is no
+# standalone janitor DaemonSet: containerd-based runtimes are out of scope
+# for this chart.
+janitor:
+  image:
+    # -- Janitor image repository (built by manifests/release/build-fast-sandbox.sh)
+    repository: opensandbox/fsb-janitor
+    # -- Image tag. Empty uses the release-<appVersion> companion image tag.
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- Orphan scan interval
+  scanInterval: 2m
+  # -- Orphan timeout before cleanup
+  orphanTimeout: 30s
+
+# firecracker-runtime: node-level daemon serving the UDS management API
+# (artifact pull + lease state) that fastlet Firecracker drivers talk to,
+# with a node-local DART child for P2P delivery, the node janitor sidecar,
+# and the node readiness loop (the kata-deploy pattern: host checks +
+# Firecracker asset install + the sandbox.fast.io/kvm and
+# fast-sandbox.io/firecracker-node labels + the FirecrackerReady node
+# condition). Replaces the former installer DaemonSet: no manual node
+# labeling — the runtime self-labels the nodes it verified.
+runtime:
+  # -- Whether the firecracker-runtime DaemonSet, its RBAC, the agent
+  # config ConfigMap and the dart headless Service are installed
+  enabled: true
+  image:
+    # -- Runtime image repository (built by manifests/release/build-fast-sandbox.sh)
+    repository: opensandbox/fsb-firecracker-runtime
+    # -- Image tag. Empty uses the release-<appVersion> companion image tag.
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- Node selector. Empty by default: the runtime applies the firecracker
+  # scheduling labels itself, so it must run on every candidate node. Pin
+  # it with your own coarse selector only if the cluster hosts unrelated
+  # node pools.
+  nodeSelector: {}
+  # -- Container resources for the DaemonSet. Setting requests matters more
+  # than limits here: without them the pod is BestEffort and is evicted
+  # first under node pressure, taking down the management API for every
+  # fastlet on the node. Limits stay off by default so artifact pulls and
+  # the readiness loop are not throttled or OOM-killed at their spikes.
+  resources:
+    # -- Resources for the firecracker-runtime agent container.
+    agent: {}
+    # -- Resources for the janitor sidecar container.
+    janitor: {}
+  # -- Secret carrying the compiled agent registry configuration
+  # (registry.json key with artifact-store pull credentials); must be
+  # provisioned by the operator.
+  registrySecret: fast-sandbox-agent-registry
+  # -- Additional tolerations for the firecracker-runtime DaemonSet pod,
+  # appended to the built-in control-plane toleration. Needed when target
+  # nodes carry infra taints (e.g. sigma.ali resource-pool taints).
+  tolerations: []
+  # -- Node hostPath holding per-node Firecracker state (rootfs,
+  # snapshots). Each node needs its own directory; do not share across
+  # nodes.
+  stateRoot: /var/lib/fast-sandbox/firecracker
+  # -- Node hostPath sharing the agent UDS socket with fastlet Pods
+  socketDir: /run/fast-sandbox/firecracker
+  # -- DART P2P peer listen port (also the headless dart Service port)
+  dartPeerPort: 9000
+  # -- Agent config (agent.yaml). Empty = the chart default (upstream
+  # config/dev/agent-config.yaml with the dart discover URL pointing at
+  # this chart's namespace). socket/stateRoot/registryConfig/p2p are
+  # startup-only; the nodeReadiness section (fcVersion, interval,
+  # minFree, minMemory) hot-reloads on every readiness pass.
+  config: ""

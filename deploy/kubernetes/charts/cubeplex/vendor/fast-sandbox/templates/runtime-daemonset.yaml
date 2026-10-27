@@ -1,0 +1,342 @@
+{{- if .Values.runtime.enabled }}
+{{- $ns := include "fast-sandbox.namespace" . }}
+{{- $dartDiscover := printf "dns:dart.%s.svc.cluster.local:%d" $ns (int .Values.runtime.dartPeerPort) }}
+{{- $probeCmd := printf "curl -fsS -X POST --unix-socket %s/runtime.sock -H 'Content-Type: application/json' -d \"{\\\"podUid\\\":\\\"$POD_UID\\\",\\\"namespace\\\":\\\"%s\\\"}\" http://firecracker-agent/v1/health | grep -q '\"ok\":true'" .Values.runtime.socketDir $ns }}
+---
+# Node-level firecracker runtime: serves the UDS management API (artifact
+# pull + lease state) the fastlet firecracker driver talks to, runs the
+# node readiness loop (the kata-deploy pattern: host checks, Firecracker
+# asset install, the scheduling labels sandbox.fast.io/kvm +
+# fast-sandbox.io/firecracker-node, the FirecrackerReady node condition)
+# with a node janitor sidecar sweeping orphaned fastlet resources.
+#
+# The readiness loop replaces the former installer DaemonSet: the runtime
+# applies the scheduling labels itself, so it intentionally carries NO
+# firecracker nodeSelector. RBAC ships here (nodes/status patch for the
+# FirecrackerReady condition) because upstream attaches it to the runtime
+# manifest, not the shared component RBAC in charts/base.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fast-sandbox-firecracker-runtime
+  namespace: {{ $ns }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fast-sandbox-firecracker-runtime
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/status"]
+  # The readiness manager reads the node to diff its labels/condition and
+  # patches metadata + the status subresource (the FirecrackerReady
+  # condition lives under nodes/status, a separate RBAC resource from
+  # plain nodes).
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  # The janitor sidecar's pod informer tracks this node's pods to detect
+  # orphans the moment their pod disappears.
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fast-sandbox-firecracker-runtime
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fast-sandbox-firecracker-runtime
+subjects:
+- kind: ServiceAccount
+  name: fast-sandbox-firecracker-runtime
+  namespace: {{ $ns }}
+---
+# Headless Service backing DART peer discovery: DNS seeding hands out the
+# ready runtime Pod IPs so node-local DART daemons can find each other
+# (discovery needs addresses, not load balancing).
+apiVersion: v1
+kind: Service
+metadata:
+  name: dart
+  namespace: {{ $ns }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+spec:
+  clusterIP: None
+  selector:
+    app: fast-sandbox
+    component: firecracker-runtime
+  ports:
+  - name: peer
+    port: {{ .Values.runtime.dartPeerPort }}
+    targetPort: peer
+    protocol: TCP
+---
+# All agent tunables live in this config (mounted at
+# /etc/fast-sandbox/agent-config/agent.yaml); the nodeReadiness section
+# hot-reloads on every readiness pass, the other sections are startup-only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fast-sandbox-firecracker-runtime-config
+  namespace: {{ $ns }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+data:
+  agent.yaml: |
+    {{- if .Values.runtime.config }}
+    {{- .Values.runtime.config | nindent 4 }}
+    {{- else }}
+    socket: {{ .Values.runtime.socketDir }}/runtime.sock
+    stateRoot: {{ .Values.runtime.stateRoot }}
+    registryConfig: /etc/fast-sandbox/agent/registry.json
+    hostnameFile: /etc/hostname
+    p2p:
+      dart:
+        addr: http://127.0.0.1:8145
+        bin: dart
+        admin: 127.0.0.1:8147
+        cacheSize: 8GiB
+        discover: {{ $dartDiscover }}
+    nodeReadiness:
+      enabled: true
+      assetsDir: /opt/fast-sandbox/firecracker
+      fcVersion: v1.16.1
+      interval: 5m
+      minFree: 10GiB
+      minMemory: 2GiB
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: firecracker-runtime
+  namespace: {{ $ns }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime
+    app: fast-sandbox
+    component: firecracker-runtime
+spec:
+  selector:
+    matchLabels:
+      app: fast-sandbox
+      component: firecracker-runtime
+  template:
+    metadata:
+      labels:
+        app: fast-sandbox
+        component: firecracker-runtime
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9092"
+        prometheus.io/path: /metrics
+        kubectl.kubernetes.io/default-container: firecracker-agent
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: fast-sandbox-firecracker-runtime
+      # The janitor sidecar needs host PID visibility to kill leaked VMM
+      # processes (fastlets delegate exact-ID cleanup over the node-cleanup
+      # UDS socket). The agent container does not use it.
+      hostPID: true
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      {{- with .Values.runtime.tolerations }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.runtime.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The runtime runs on the cluster network (NOT hostNetwork): its dart
+      # child needs the cluster DNS to resolve the headless Service peers,
+      # and a regular Pod identity for the stable HRW node hostname file.
+      containers:
+      - name: firecracker-agent
+        image: {{ include "fast-sandbox.image" (dict "repository" .Values.runtime.image.repository "tag" .Values.runtime.image.tag "appVersion" .Chart.AppVersion) }}
+        imagePullPolicy: {{ .Values.runtime.image.pullPolicy }}
+        # Only Downward API identities live in env; all tunables come from
+        # the mounted agent config (nodeReadiness hot-reloads per pass).
+        env:
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: FAST_SANDBOX_AGENT_CONFIG
+          value: /etc/fast-sandbox/agent-config/agent.yaml
+        # Node readiness: spec.nodeName enables the host-check loop (the
+        # KVM/storage/assets checks, the Firecracker asset install, the
+        # scheduling labels and the FirecrackerReady condition).
+        - name: FAST_SANDBOX_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # DART peer advertise: the dart peer-listen binds the pod IP and
+        # the headless Service hands it out to peers.
+        - name: FAST_SANDBOX_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        securityContext:
+          privileged: true
+        readinessProbe:
+          exec:
+            # $POD_UID must expand inside sh (double quotes): a single-quoted
+            # body reaches the agent as a literal "$POD_UID".
+            command:
+            - /bin/sh
+            - -ec
+            - {{ $probeCmd | quote }}
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 3
+        ports:
+        - name: peer
+          containerPort: {{ .Values.runtime.dartPeerPort }}
+          protocol: TCP
+        {{- with .Values.runtime.resources.agent }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: agent-socket
+          mountPath: {{ .Values.runtime.socketDir }}
+        - name: agent-state
+          mountPath: {{ .Values.runtime.stateRoot }}
+        - name: agent-config
+          mountPath: /etc/fast-sandbox/agent-config
+          readOnly: true
+        - name: agent-registry
+          mountPath: /etc/fast-sandbox/agent
+          readOnly: true
+        - name: artifact-store
+          mountPath: /etc/fast-sandbox/artifact-store
+          readOnly: true
+        - name: node-hostname
+          mountPath: /etc/hostname
+          readOnly: true
+        - name: fc-assets
+          mountPath: /opt/fast-sandbox/firecracker
+      # Node janitor sidecar: sweeps orphaned fastlet network state (netns/
+      # tap/veth), boxlite leftovers, and — the reason for hostPID — kills
+      # leaked VMM processes fastlets delegate over the node-cleanup UDS
+      # socket. The containerd backend is DISABLED here (--containerd-socket=):
+      # this pod targets the firecracker runtime; the standalone janitor
+      # DaemonSet keeps covering the containerd-based runtimes.
+      - name: janitor
+        image: {{ include "fast-sandbox.image" (dict "repository" .Values.janitor.image.repository "tag" .Values.janitor.image.tag "appVersion" .Chart.AppVersion) }}
+        imagePullPolicy: {{ .Values.janitor.image.pullPolicy }}
+        command: ["/workspace/janitor"]
+        args: ["--scan-interval={{ .Values.janitor.scanInterval }}", "--orphan-timeout={{ .Values.janitor.orphanTimeout }}", "--containerd-socket="]
+        ports:
+        - name: metrics
+          containerPort: 9092
+        securityContext:
+          privileged: true
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        {{- with .Values.runtime.resources.janitor }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: network-state
+          mountPath: /run/fast-sandbox/network
+        - name: network-namespaces
+          mountPath: /run/netns
+          mountPropagation: Bidirectional
+        - name: node-cleanup
+          mountPath: /run/fast-sandbox/janitor
+        - name: boxlite-state
+          mountPath: /var/lib/fast-sandbox/boxlite
+        - name: runtime-environments
+          mountPath: /etc/fast-sandbox/runtime-environments
+          readOnly: true
+      volumes:
+      - name: agent-socket
+        hostPath:
+          path: {{ .Values.runtime.socketDir }}
+          type: DirectoryOrCreate
+      - name: agent-state
+        hostPath:
+          path: {{ .Values.runtime.stateRoot }}
+          type: DirectoryOrCreate
+      - name: agent-config
+        configMap:
+          name: fast-sandbox-firecracker-runtime-config
+      - name: agent-registry
+        secret:
+          secretName: {{ .Values.runtime.registrySecret }}
+      # Shared artifact store root/endpoint, read per pull (live ConfigMap
+      # edits land without an agent restart).
+      - name: artifact-store
+        configMap:
+          name: fast-sandbox-artifact-store
+          optional: true
+      # The stable node identity for the HRW keyspace.
+      - name: node-hostname
+        hostPath:
+          path: /etc/hostname
+          type: File
+      # The Firecracker assets the readiness manager installs (shared with
+      # the fastlet pods via the runtime plan hostPath requirements).
+      - name: fc-assets
+        hostPath:
+          path: /opt/fast-sandbox/firecracker
+          type: DirectoryOrCreate
+      # Node cleanup state the janitor sidecar sweeps.
+      - name: network-state
+        hostPath:
+          path: /run/fast-sandbox/network
+          type: DirectoryOrCreate
+      - name: network-namespaces
+        hostPath:
+          path: /run/fast-sandbox/netns
+          type: DirectoryOrCreate
+      - name: node-cleanup
+        hostPath:
+          path: /run/fast-sandbox/janitor
+          type: DirectoryOrCreate
+      - name: boxlite-state
+        hostPath:
+          path: /var/lib/fast-sandbox/boxlite
+          type: DirectoryOrCreate
+      - name: runtime-environments
+        configMap:
+          name: fast-sandbox-runtime-environments
+          # Optional: the firecracker integration env resolves runtime plans
+          # from the built-in catalog and does not ship this ConfigMap; the
+          # janitor falls back to its defaults (containerd backend is
+          # disabled via --containerd-socket= anyway).
+          optional: true
+{{- end }}

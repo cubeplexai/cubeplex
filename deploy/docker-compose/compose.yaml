@@ -160,7 +160,7 @@ services:
   # sandbox containers through the host Docker daemon and stays reachable only
   # through the private compose network.
   opensandbox-server:
-    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:v0.2.2}
+    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:release-1.1.1}
     <<: *restart-policy
     environment:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml

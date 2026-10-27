@@ -1,0 +1,81 @@
+# Copyright 2026 The OpenSandbox Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for the OpenSandbox base chart.
+# This chart installs cluster-scoped resources only: the OpenSandbox CRDs, the
+# fast-sandbox CRDs (sandbox.fast.io) with their component RBAC, and the
+# user-facing OpenSandbox CRD RBAC roles. It contains no workloads and can be
+# installed once per cluster, independently of the controller and server
+# releases.
+
+# -- Override the name of the chart
+nameOverride: ""
+# -- Override the full name of the chart
+fullnameOverride: ""
+
+crds:
+  # -- Specifies whether the OpenSandbox CRDs should be installed
+  install: true
+  # -- Keep CRDs on chart uninstall (adds the helm.sh/resource-policy: keep annotation)
+  keep: true
+  # -- Additional annotations to add to CRDs (merged with resource-policy when keep is true)
+  annotations: {}
+
+rbac:
+  # -- Specifies whether user-facing ClusterRoles for the OpenSandbox CRD API
+  # (admin/editor/viewer per resource kind) should be installed
+  create: true
+
+# fast-sandbox runtime support (sandbox.fast.io API group, synced from the
+# source pinned in manifests/third-party/fast-sandbox.commit by
+# manifests/release/build-fast-sandbox.sh --sync-crds).
+fastSandbox:
+  crds:
+    # -- Specifies whether the fast-sandbox CRDs should be installed
+    install: true
+    # -- Keep CRDs on chart uninstall (adds the helm.sh/resource-policy: keep annotation)
+    keep: true
+    # -- Additional annotations to add to CRDs (merged with resource-policy when keep is true)
+    annotations: {}
+  namespaces:
+    # -- Specifies whether the shared system namespace (the
+    # fastSandbox.namespaces.system namespace, default opensandbox-system)
+    # should be created. The fast-sandbox control-plane ServiceAccounts
+    # installed by this chart live there, and the controller/server
+    # releases use it as their release namespace, so creating it here lets
+    # the documented per-component install order work without a preceding
+    # `kubectl create namespace` or --create-namespace. Set false when the
+    # namespace is managed externally and already exists: a pre-existing
+    # namespace without Helm ownership metadata cannot be adopted into
+    # this release. The created namespace carries
+    # helm.sh/resource-policy: keep, so it survives `helm uninstall` of
+    # this chart and must be deleted manually.
+    createSystem: true
+    # -- Specifies whether the fast-sandbox dataplane namespace should be
+    # created. The created namespace carries helm.sh/resource-policy: keep,
+    # so it survives `helm uninstall` of this chart and must be deleted
+    # manually.
+    create: true
+    # -- Namespace the fast-sandbox control-plane RBAC targets (the shared
+    # OpenSandbox system namespace where the fast-sandbox chart's workloads
+    # run). Created by this chart when createSystem is true.
+    system: opensandbox-system
+    # -- Namespace for fast-sandbox resource objects (pools, templates,
+    # sandboxes and the fastlet/builder Pods they spawn)
+    resources: opensandbox-dataplane
+  rbac:
+    # -- Specifies whether the fast-sandbox control-plane ServiceAccounts,
+    # ClusterRoles and ClusterRoleBindings should be installed (the
+    # workloads using them live in the fast-sandbox chart)
+    create: true

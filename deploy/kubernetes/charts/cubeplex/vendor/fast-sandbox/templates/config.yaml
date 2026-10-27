@@ -1,0 +1,61 @@
+{{/*
+Shared configuration: the artifact store pointer and the runtime
+environment definitions. Mirrors fast-sandbox config/artifact-store and
+config/runtime-environments at the pinned commit.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fast-sandbox-artifact-store
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  store: {{ .Values.artifactStore.store | quote }}
+  endpoint: {{ .Values.artifactStore.endpoint | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fast-sandbox-runtime-environments
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  runtime-environments.yaml: |
+    {{- .Values.runtimeEnvironments | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fast-sandbox-builder-pod-template
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+{{- with .Values.controller.sandboxtemplateBuilderPodSpec }}
+data:
+  podSpec.yaml: |
+    {{- . | nindent 4 }}
+{{- end }}
+{{- if .Values.routeKeys.create }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fast-sandbox-route-keys
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+    {{- if .Values.routeKeys.developmentOnly }}
+    fast-sandbox.io/development-only: "true"
+    {{- end }}
+type: Opaque
+stringData:
+  private-key: {{ .Values.routeKeys.privateKey | quote }}
+  public-key: {{ .Values.routeKeys.publicKey | quote }}
+{{- end }}

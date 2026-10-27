@@ -1,4 +1,4 @@
-# Copyright 2026 Alibaba Group Holding Ltd.
+# Copyright 2026 The OpenSandbox Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ apiVersion: v2
 name: opensandbox
 description: All-in-one Helm chart for deploying OpenSandbox controller and server
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 1.1.1
+appVersion: "1.1.1"
 
 keywords:
   - sandbox
@@ -27,24 +27,39 @@ keywords:
   - lifecycle
   - batchsandbox
 
-home: https://github.com/alibaba/OpenSandbox
+home: https://github.com/opensandbox-group/OpenSandbox
 sources:
-  - https://github.com/alibaba/OpenSandbox/tree/main/kubernetes
+  - https://github.com/opensandbox-group/OpenSandbox/tree/main/manifests
 
 maintainers:
   - name: OpenSandbox Team
-    email: opensandbox@example.com
 
 # Kubernetes version constraints
 kubeVersion: ">=1.21.1-0"
 
 dependencies:
+  - name: base
+    version: "1.1.1"
+    repository: "file://../base"
+    condition: base.enabled
   - name: opensandbox-controller
-    version: "0.2.0"
-    repository: "file://../opensandbox-controller"
+    version: "1.1.1"
+    repository: "file://../controller"
   - name: opensandbox-server
-    version: "0.1.0"
-    repository: "file://../opensandbox-server"
+    version: "1.1.1"
+    repository: "file://../server"
+  - name: ingress-gateway
+    version: "1.1.1"
+    repository: "file://../ingress-gateway"
+    condition: ingress-gateway.enabled
+  - name: opensandbox-node-agent
+    version: "1.1.1"
+    repository: "file://../node-agent"
+    condition: opensandbox-node-agent.enabled
+  - name: fast-sandbox
+    version: "1.1.1"
+    repository: "file://../fast-sandbox"
+    condition: fast-sandbox.enabled
 
 annotations:
   artifacthub.io/category: integration-delivery
@@ -52,6 +67,6 @@ annotations:
   artifacthub.io/prerelease: "false"
   artifacthub.io/links: |
     - name: Documentation
-      url: https://github.com/alibaba/OpenSandbox/blob/main/kubernetes/README.md
+      url: https://github.com/opensandbox-group/OpenSandbox/blob/main/manifests/README.md
     - name: Support
-      url: https://github.com/alibaba/OpenSandbox/issues
+      url: https://github.com/opensandbox-group/OpenSandbox/issues

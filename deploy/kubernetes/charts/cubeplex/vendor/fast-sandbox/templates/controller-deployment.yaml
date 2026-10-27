@@ -1,0 +1,111 @@
+{{- if .Values.controller.enabled }}
+{{- $builderImage := .Values.controller.sandboxtemplateBuilderImage | default (printf "opensandbox/fsb-sandboxtemplate-builder:release-%s" .Chart.AppVersion) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fast-sandbox-controller
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+    app: fast-sandbox-controller
+    fast-sandbox.io/control-plane-role: all
+spec:
+  replicas: {{ .Values.controller.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "fast-sandbox.controllerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fast-sandbox.controllerSelectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: manager
+        command: [./controller]
+        args:
+        - --role=all
+        - --metrics-bind-address=:9091
+        - --health-probe-bind-address=:5758
+        - --fastpath-bind-address=:9090
+        - --sandboxtemplate-builder-image={{ $builderImage }}
+        - --fastlet-proxy-image={{ .Values.controller.fastletProxyImage }}
+        # The controller's default namespace for the platform
+        # runtime-environment ConfigMap is the upstream-hardcoded
+        # fast-sandbox-system; pin it to this chart's system namespace so
+        # the runtime plans resolve from the ConfigMap we render here
+        # (falling back to the built-in catalog would inject /usr/local/bin
+        # asset paths the node readiness loop never installs).
+        - --runtime-environment-namespace={{ include "fast-sandbox.namespace" . }}
+        env:
+        - name: FAST_SANDBOX_ROUTE_SIGNING_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.routeKeys.existingSecret | default "fast-sandbox-route-keys" }}
+              key: private-key
+        - name: FAST_SANDBOX_ROUTE_VERIFY_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.routeKeys.existingSecret | default "fast-sandbox-route-keys" }}
+              key: public-key
+        {{- $appVersion := .Chart.AppVersion }}
+        image: {{ include "fast-sandbox.image" (dict "repository" .Values.controller.image.repository "tag" .Values.controller.image.tag "appVersion" $appVersion) }}
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+        ports:
+        - name: grpc
+          containerPort: 9090
+        - name: health
+          containerPort: 5758
+        - name: metrics
+          containerPort: 9091
+        resources:
+          {{- toYaml .Values.controller.resources | nindent 10 }}
+        volumeMounts:
+        - name: artifact-store
+          mountPath: /etc/fast-sandbox/artifact-store
+          readOnly: true
+        - name: builder-pod-template
+          mountPath: /etc/fast-sandbox/builder-pod-template
+          readOnly: true
+      serviceAccountName: fast-sandbox-controller
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      volumes:
+      - name: artifact-store
+        configMap:
+          name: fast-sandbox-artifact-store
+          optional: true
+      - name: builder-pod-template
+        configMap:
+          name: fast-sandbox-builder-pod-template
+          optional: true
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fast-sandbox-controller
+  namespace: {{ include "fast-sandbox.namespace" . }}
+  labels:
+    {{- include "fast-sandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "fast-sandbox.controllerSelectorLabels" . | nindent 6 }}
+{{- end }}

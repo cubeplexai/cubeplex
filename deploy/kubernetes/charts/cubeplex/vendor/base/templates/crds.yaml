@@ -1,0 +1,52 @@
+{{/*
+Render a CRD bundle file (files/*.yaml) from the generated sources. The
+bundles are synced from their generating repos by the sync tooling; do not
+edit files/*.yaml by hand.
+
+The bundle is split on "\n---\n" document separators (maintained by the sync
+target) so labels and annotations can be injected per CRD. Expects a dict:
+  root: the root context (for .Files and labels)
+  file: bundle path inside the chart
+  crds: the values subtree gating this bundle (install/keep/annotations)
+*/}}
+{{- define "opensandbox-base.crdBundle" -}}
+{{- $root := index . "root" }}
+{{- $file := index . "file" }}
+{{- $crds := index . "crds" }}
+{{- range $doc := $root.Files.Get $file | splitList "\n---\n" }}
+{{- if $doc | trim }}
+{{- $crd := fromYaml $doc }}
+{{- if or (ne (index $crd "apiVersion") "apiextensions.k8s.io/v1") (ne (index $crd "kind") "CustomResourceDefinition") }}
+{{- fail (printf "%s split error: fragment is not a CustomResourceDefinition (apiVersion=%q kind=%q); check for a literal '---' inside the generated bundle" $file (index $crd "apiVersion" | toString) (index $crd "kind" | toString)) }}
+{{- end }}
+{{- $_ := set $crd.metadata "labels" (include "opensandbox-base.labels" $root | fromYaml) }}
+{{- $annotations := $crd.metadata.annotations | default dict }}
+{{- if $crds.keep }}
+{{- $_ := set $annotations "helm.sh/resource-policy" "keep" }}
+{{- end }}
+{{- with $crds.annotations }}
+{{- $annotations = mergeOverwrite $annotations . }}
+{{- end }}
+{{- $_ := set $crd.metadata "annotations" $annotations }}
+{{ $crd | toYaml }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+OpenSandbox CRDs (sandbox.opensandbox.io), generated from
+kubernetes/apis/sandbox/v1alpha1 and synced by `make helm-gen-crds`.
+*/}}
+{{- if .Values.crds.install }}
+{{- include "opensandbox-base.crdBundle" (dict "root" $ "file" "files/crds.yaml" "crds" .Values.crds) }}
+{{- end }}
+
+{{/*
+fast-sandbox CRDs (sandbox.fast.io), vendored from the source pinned in
+manifests/third-party/fast-sandbox.commit by manifests/release/build-fast-sandbox.sh
+--sync-crds.
+*/}}
+{{- if .Values.fastSandbox.crds.install }}
+{{- include "opensandbox-base.crdBundle" (dict "root" $ "file" "files/fast-sandbox-crds.yaml" "crds" .Values.fastSandbox.crds) }}
+{{- end }}

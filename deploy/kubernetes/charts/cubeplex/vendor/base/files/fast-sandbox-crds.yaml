@@ -1,0 +1,1669 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: sandboxpools.sandbox.fast.io
+spec:
+  group: sandbox.fast.io
+  names:
+    kind: SandboxPool
+    listKind: SandboxPoolList
+    plural: sandboxpools
+    singular: sandboxpool
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: SandboxPool is the Schema for the sandboxpools API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SandboxPoolSpec defines the desired state of SandboxPool.
+            properties:
+              actionHandlers:
+                description: |-
+                  ActionHandlers are Pod-local HTTP receivers used by ordered per-Sandbox
+                  Action Bindings.
+                items:
+                  description: ActionHandler declares one Pod-local HTTP receiver
+                    served on loopback.
+                  properties:
+                    hooks:
+                      description: |-
+                        Hooks selects the lifecycle checkpoints delivered to this Handler. An
+                        empty list makes the Handler config-only: it receives SetBinding and
+                        RemoveBinding but no lifecycle Hook calls.
+                      items:
+                        description: |-
+                          LifecycleHook is a versioned Fastlet-local Sandbox lifecycle checkpoint.
+                          It is intentionally a string alias so future hooks do not require changing
+                          the CRD shape. ValidateActionHandlers rejects names unsupported by this
+                          Fastlet version instead of silently ignoring them.
+                        type: string
+                      maxItems: 16
+                      type: array
+                      x-kubernetes-list-type: set
+                    name:
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    targetHTTPPort:
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                  required:
+                  - name
+                  - targetHTTPPort
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              capacity:
+                description: PoolCapacity describes the sizing policy of the fastlet
+                  pool.
+                properties:
+                  bufferMax:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  bufferMin:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  poolMax:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  poolMin:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - bufferMax
+                - bufferMin
+                - poolMax
+                - poolMin
+                type: object
+              fastletTemplate:
+                description: |-
+                  FastletTemplate is intentionally preserved as a Kubernetes-native pod
+                  template. Fast Sandbox validates the platform-owned fields separately.
+                x-kubernetes-preserve-unknown-fields: true
+              infraComponents:
+                description: |-
+                  InfraComponents are compiled into an immutable revision. Updating this
+                  list rolls Fastlets; existing Sandboxes remain on their admitted revision.
+                items:
+                  description: |-
+                    InfraComponent injects one artifact-backed managed process with one public
+                    named endpoint. host-process components are declared for revision,
+                    Fastlet-side readiness probing, and routing purposes only: they carry no
+                    artifact and are deployed by fastletTemplate in the Pod network namespace.
+                  properties:
+                    artifact:
+                      description: Artifact is required unless delivery selects host-process.
+                      properties:
+                        mappings:
+                          items:
+                            description: |-
+                              InfraArtifactMapping maps one final file or directory from the verified
+                              artifact root to one final path in the Sandbox.
+                            properties:
+                              sourcePath:
+                                pattern: ^/
+                                type: string
+                              targetPath:
+                                pattern: ^/\.fast/components/
+                                type: string
+                            required:
+                            - sourcePath
+                            - targetPath
+                            type: object
+                          maxItems: 64
+                          minItems: 1
+                          type: array
+                        source:
+                          description: InfraArtifactSource contains exactly one immutable
+                            source.
+                          properties:
+                            archive:
+                              description: InfraArtifactArchive selects one immutable
+                                gzip-compressed tar archive.
+                              properties:
+                                sha256:
+                                  pattern: ^[a-f0-9]{64}$
+                                  type: string
+                                url:
+                                  pattern: ^https://
+                                  type: string
+                              required:
+                              - sha256
+                              - url
+                              type: object
+                            image:
+                              description: |-
+                                InfraArtifactImage selects an immutable OCI image or index as an artifact
+                                carrier. Fast Sandbox injects mapped files and never starts this image.
+                              properties:
+                                reference:
+                                  pattern: ^.+@sha256:[a-f0-9]{64}$
+                                  type: string
+                              required:
+                              - reference
+                              type: object
+                          type: object
+                      required:
+                      - mappings
+                      - source
+                      type: object
+                    delivery:
+                      description: |-
+                        InfraDeliveryMode selects an explicit delivery path for one Infra Component.
+                        An empty value selects the runtime-defaulted delivery mode. host-process is
+                        the only explicitly selectable mode today.
+                      enum:
+                      - host-process
+                      type: string
+                    endpoint:
+                      description: InfraEndpoint is the single public endpoint of
+                        a component.
+                      properties:
+                        port:
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        protocol:
+                          enum:
+                          - HTTP
+                          type: string
+                      required:
+                      - port
+                      - protocol
+                      type: object
+                    name:
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    process:
+                      description: InfraProcess defines the process supervised inside
+                        the user Sandbox.
+                      properties:
+                        command:
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        env:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        healthCheck:
+                          description: InfraHealthCheck contains exactly one probe
+                            kind.
+                          properties:
+                            httpGet:
+                              description: InfraHTTPGet is an HTTP readiness probe
+                                on the component endpoint.
+                              properties:
+                                path:
+                                  pattern: ^/
+                                  type: string
+                              required:
+                              - path
+                              type: object
+                            tcpConnect:
+                              description: InfraTCPConnect selects a TCP connect readiness
+                                probe.
+                              type: object
+                            timeoutSeconds:
+                              default: 10
+                              format: int32
+                              maximum: 300
+                              minimum: 1
+                              type: integer
+                          type: object
+                        restartPolicy:
+                          default: OnFailure
+                          description: InfraRestartPolicy controls process restart
+                            after exit.
+                          enum:
+                          - Never
+                          - OnFailure
+                          - Always
+                          type: string
+                      required:
+                      - command
+                      - healthCheck
+                      type: object
+                  required:
+                  - endpoint
+                  - name
+                  - process
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              maxSandboxesPerPod:
+                format: int32
+                minimum: 1
+                type: integer
+              runtime:
+                description: |-
+                  Runtime selects one immutable, platform-owned runtime profile.
+                  Immutability is convention-only: these CRDs ship without CEL
+                  (x-kubernetes-validations) so legacy (< 1.25) API servers can load
+                  them, and enforcement lives in Go (pool reconciler validation).
+                enum:
+                - container
+                - gvisor
+                - kata-qemu
+                - kata-clh
+                - kata-fc
+                - kata-dragonball
+                - firecracker
+                type: string
+              sandboxResources:
+                description: |-
+                  SandboxResources is the immutable resource profile applied to each
+                  Sandbox created from this Pool. As with Runtime, immutability is
+                  convention-only: no CEL rule enforces it at the API server.
+                properties:
+                  cpu:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  pids:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                required:
+                - cpu
+                - memory
+                - pids
+                type: object
+              warmImages:
+                description: |-
+                  WarmImages are asynchronously pulled and protected from ordinary cache GC.
+                  Fastlet readiness does not wait for this list to finish warming.
+                items:
+                  type: string
+                maxItems: 128
+                type: array
+            required:
+            - capacity
+            - fastletTemplate
+            - maxSandboxesPerPod
+            - runtime
+            - sandboxResources
+            type: object
+          status:
+            description: SandboxPoolStatus defines the observed state of SandboxPool.
+            properties:
+              busyFastlets:
+                format: int32
+                type: integer
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              currentPods:
+                format: int32
+                type: integer
+              fastletRevision:
+                type: string
+              idleFastlets:
+                format: int32
+                type: integer
+              infraRevision:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              preparedFastlets:
+                format: int32
+                type: integer
+              readyPods:
+                format: int32
+                type: integer
+              runtimeRevision:
+                type: string
+              warmImages:
+                items:
+                  description: WarmImageStatus aggregates cache state for one configured
+                    warm image.
+                  properties:
+                    cachedFastlets:
+                      format: int32
+                      type: integer
+                    desiredFastlets:
+                      format: int32
+                      type: integer
+                    failedFastlets:
+                      format: int32
+                      type: integer
+                    image:
+                      type: string
+                    lastError:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    pullingFastlets:
+                      format: int32
+                      type: integer
+                  required:
+                  - image
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: sandboxes.sandbox.fast.io
+spec:
+  group: sandbox.fast.io
+  names:
+    kind: Sandbox
+    listKind: SandboxList
+    plural: sandboxes
+    singular: sandbox
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: Sandbox is the Schema for the sandboxes API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SandboxSpec defines the desired state of Sandbox.
+            properties:
+              actionBindings:
+                description: ActionBindings is atomic because its order defines Handler
+                  invocation order.
+                items:
+                  properties:
+                    handler:
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    input:
+                      description: |-
+                        Input is opaque Handler-owned data. Fast Sandbox preserves the UTF-8
+                        bytes exactly and never parses or canonicalizes its contents.
+                      maxLength: 65536
+                      type: string
+                  required:
+                  - handler
+                  - input
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: atomic
+              args:
+                items:
+                  type: string
+                type: array
+              command:
+                items:
+                  type: string
+                type: array
+              envs:
+                items:
+                  description: EnvVar represents an environment variable present in
+                    a Container.
+                  properties:
+                    name:
+                      description: |-
+                        Name of the environment variable.
+                        May consist of any printable ASCII characters except '='.
+                      type: string
+                    value:
+                      description: |-
+                        Variable references $(VAR_NAME) are expanded
+                        using the previously defined environment variables in the container and
+                        any service environment variables. If a variable cannot be resolved,
+                        the reference in the input string will be unchanged. Double $$ are reduced
+                        to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                        "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                        Escaped references will never be expanded, regardless of whether the variable
+                        exists or not.
+                        Defaults to "".
+                      type: string
+                    valueFrom:
+                      description: Source for the environment variable's value. Cannot
+                        be used if value is not empty.
+                      properties:
+                        configMapKeyRef:
+                          description: Selects a key of a ConfigMap.
+                          properties:
+                            key:
+                              description: The key to select.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the ConfigMap or its key
+                                must be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fieldRef:
+                          description: |-
+                            Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                            spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                          properties:
+                            apiVersion:
+                              description: Version of the schema the FieldPath is
+                                written in terms of, defaults to "v1".
+                              type: string
+                            fieldPath:
+                              description: Path of the field to select in the specified
+                                API version.
+                              type: string
+                          required:
+                          - fieldPath
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fileKeyRef:
+                          description: |-
+                            FileKeyRef selects a key of the env file.
+                            Requires the EnvFiles feature gate to be enabled.
+                          properties:
+                            key:
+                              description: |-
+                                The key within the env file. An invalid key will prevent the pod from starting.
+                                The keys defined within a source may consist of any printable ASCII characters except '='.
+                                During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                              type: string
+                            optional:
+                              default: false
+                              description: |-
+                                Specify whether the file or its key must be defined. If the file or key
+                                does not exist, then the env var is not published.
+                                If optional is set to true and the specified key does not exist,
+                                the environment variable will not be set in the Pod's containers.
+
+                                If optional is set to false and the specified key does not exist,
+                                an error will be returned during Pod creation.
+                              type: boolean
+                            path:
+                              description: |-
+                                The path within the volume from which to select the file.
+                                Must be relative and may not contain the '..' path or start with '..'.
+                              type: string
+                            volumeName:
+                              description: The name of the volume mount containing
+                                the env file.
+                              type: string
+                          required:
+                          - key
+                          - path
+                          - volumeName
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        resourceFieldRef:
+                          description: |-
+                            Selects a resource of the container: only resources limits and requests
+                            (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                          properties:
+                            containerName:
+                              description: 'Container name: required for volumes,
+                                optional for env vars'
+                              type: string
+                            divisor:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: Specifies the output format of the exposed
+                                resources, defaults to "1"
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            resource:
+                              description: 'Required: resource to select'
+                              type: string
+                          required:
+                          - resource
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        secretKeyRef:
+                          description: Selects a key of a secret in the pod's namespace
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+              expireTime:
+                description: |-
+                  ExpireTime specifies when this sandbox should expire and be garbage collected.
+                  If not set, the sandbox will not expire automatically.
+                format: date-time
+                type: string
+              failurePolicy:
+                default: Manual
+                description: |-
+                  FailurePolicy defines the recovery strategy when the fastlet is lost.
+                  Defaults to "Manual".
+                enum:
+                - Manual
+                - AutoRecreate
+                type: string
+              image:
+                minLength: 1
+                type: string
+              poolRef:
+                description: |-
+                  PoolRef specifies which SandboxPool this sandbox should be scheduled to.
+                  This field is required.
+                minLength: 1
+                type: string
+              recoveryTimeoutSeconds:
+                default: 60
+                description: |-
+                  RecoveryTimeoutSeconds is the duration to wait before taking action after losing contact with fastlet.
+                  Defaults to 60 seconds.
+                format: int32
+                type: integer
+              resetRevision:
+                description: |-
+                  ResetRevision is an opaque token (usually a timestamp) used to trigger a manual reset.
+                  When Spec.ResetRevision > Status.Runtime.AcceptedResetRevision, the sandbox will be rescheduled.
+                format: date-time
+                type: string
+              state:
+                default: Running
+                description: |-
+                  State is the desired runtime lifecycle. Running (the default) keeps a
+                  live runtime; Paused checkpoints the runtime to the artifact store
+                  and releases it. Pausing requires a Ready runtime; flipping back to
+                  Running resumes the recorded checkpoint, possibly on a different
+                  Fastlet.
+                enum:
+                - Running
+                - Paused
+                type: string
+              workingDir:
+                type: string
+            required:
+            - image
+            - poolRef
+            type: object
+          status:
+            description: SandboxStatus defines the observed state of Sandbox.
+            properties:
+              actionBindings:
+                items:
+                  properties:
+                    handler:
+                      type: string
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    state:
+                      description: ActionState is the observed lifecycle of one Action
+                        Binding.
+                      enum:
+                      - Pending
+                      - Applying
+                      - Ready
+                      - Failed
+                      type: string
+                  required:
+                  - handler
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              dataPlane:
+                properties:
+                  lastTransitionTime:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  routeGeneration:
+                    format: int64
+                    type: integer
+                  state:
+                    description: DataPlaneState is the lifecycle of the Sandbox interaction
+                      route.
+                    enum:
+                    - Unknown
+                    - Pending
+                    - Publishing
+                    - Ready
+                    - Draining
+                    - Failed
+                    - Unavailable
+                    type: string
+                type: object
+              infraComponents:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    name:
+                      type: string
+                    state:
+                      description: InfraComponentState is the lifecycle of one named
+                        local component route.
+                      enum:
+                      - Starting
+                      - Ready
+                      - Failed
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+              placement:
+                properties:
+                  attempt:
+                    format: int64
+                    type: integer
+                  fastletName:
+                    type: string
+                  fastletPodUID:
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
+                    type: string
+                  recovery:
+                    properties:
+                      deadline:
+                        format: date-time
+                        type: string
+                      detectedAt:
+                        format: date-time
+                        type: string
+                    required:
+                    - deadline
+                    - detectedAt
+                    type: object
+                type: object
+              runtime:
+                properties:
+                  acceptedResetRevision:
+                    format: date-time
+                    type: string
+                  checkpoint:
+                    description: |-
+                      Checkpoint is the artifact-store checkpoint a Paused Sandbox resumes
+                      from. It is authoritative only while State is Pausing, Paused, or
+                      Resuming (see CheckpointActive); in any other state it must be read
+                      as "no checkpoint" and is cleared by the controller. A Paused
+                      Sandbox without a checkpoint cannot be resumed and must be reset.
+                    properties:
+                      artifactDigest:
+                        description: |-
+                          ArtifactDigest is the sha256 of the manifest document. It addresses
+                          the artifact set independently of ManifestRef.
+                        type: string
+                      checkpointID:
+                        description: |-
+                          CheckpointID is the Fastlet-side task identity that produced the
+                          checkpoint, derived from the Sandbox UID, the spec generation that
+                          requested the pause, and the pause attempt epoch.
+                        type: string
+                      fastletName:
+                        description: |-
+                          FastletName/FastletPodUID locate the Fastlet that captured the
+                          checkpoint. Diagnostics only: the Fastlet may already be gone and is
+                          never the resume target contract.
+                        type: string
+                      fastletPodUID:
+                        description: |-
+                          UID is a type that holds unique ID values, including UUIDs.  Because we
+                          don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                          intent and helps make sure that UIDs and names do not get conflated.
+                        type: string
+                      manifestRef:
+                        description: |-
+                          ManifestRef is the s3:// URI of the checkpoint manifest, published in
+                          the standard artifact-set layout (rootfs/vmstate/memory/SHA256SUMS).
+                        type: string
+                      pausedAt:
+                        description: PausedAt is when the checkpoint became durable
+                          in the store.
+                        format: date-time
+                        type: string
+                      sizeBytes:
+                        description: SizeBytes is the total logical size of the published
+                          artifact set.
+                        format: int64
+                        type: integer
+                    required:
+                    - artifactDigest
+                    - checkpointID
+                    - manifestRef
+                    type: object
+                  generation:
+                    format: int64
+                    type: integer
+                  lastTransitionTime:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  pauseAttempt:
+                    description: |-
+                      PauseAttempt is the retry epoch of the pause FSM. The controller
+                      increments it before triggering a new checkpoint attempt (after a
+                      transient failure) and derives the Fastlet checkpoint task identity
+                      from it, so retrying a lost outcome replays the same task while a new
+                      attempt never reuses a terminated task id. Reset clears it.
+                    format: int64
+                    type: integer
+                  state:
+                    description: RuntimeState is the lifecycle of the concrete Sandbox
+                      runtime.
+                    enum:
+                    - Unknown
+                    - Pending
+                    - Creating
+                    - Ready
+                    - Pausing
+                    - Paused
+                    - Resuming
+                    - Stopping
+                    - Stopped
+                    - Failed
+                    - Unavailable
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: sandboxsnapshots.sandbox.fast.io
+spec:
+  group: sandbox.fast.io
+  names:
+    kind: SandboxSnapshot
+    listKind: SandboxSnapshotList
+    plural: sandboxsnapshots
+    singular: sandboxsnapshot
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SandboxSnapshot is a one-shot snapshot of a running Sandbox: the artifacts
+          (rootfs, vmstate, memory) are published to the artifact store in the
+          SandboxTemplate layout, addressable under spec.templateName. The object is
+          created by fastpath (CreateSandboxSnapshot) and driven to completion by
+          the controller; a Sandbox (or template name) with a non-terminal snapshot
+          rejects further snapshot requests.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              SandboxSnapshotSpec defines the desired snapshot. The spec is immutable
+              by convention: a snapshot is one-shot and re-snapshotting requires a new
+              object. These CRDs ship without CEL (x-kubernetes-validations) for legacy
+              (< 1.25) API servers, so the API server will accept spec edits; do not
+              rely on API-level rejection.
+            properties:
+              sandboxRef:
+                description: |-
+                  SandboxRef is the running Sandbox to snapshot. The Sandbox must be
+                  Ready and assigned when the snapshot is triggered.
+                properties:
+                  name:
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  namespace:
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                  uid:
+                    description: |-
+                      UID fences the reference against a Sandbox recreated under the same
+                      name. Empty accepts the current Sandbox; fastpath fills it from the
+                      live object it validated.
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              templateName:
+                description: |-
+                  TemplateName is the artifact-store index key the artifact set is
+                  published under: publish writes index/<sha256(templateName)>.json, and
+                  a later Sandbox create with image=TemplateName boots from the
+                  snapshot through the standard pull/restore chain. Unlike a
+                  SandboxTemplate build, no default sha256(image) index is written.
+                  The index key is global across namespaces: two concurrently running
+                  snapshots with the same TemplateName overwrite each other's artifacts
+                  (last writer wins), and FastPath's pre-check therefore rejects a
+                  non-terminal holder of a name cluster-wide.
+                maxLength: 255
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]{1,127})?$
+                type: string
+            required:
+            - sandboxRef
+            - templateName
+            type: object
+          status:
+            description: |-
+              SandboxSnapshotStatus reports the observed state of one snapshot attempt.
+              All fields are projections written by the control plane; the artifact
+              facts come from the fastlet that executed the snapshot.
+            properties:
+              artifactDigest:
+                description: ArtifactDigest is the sha256 of the published manifest
+                  document.
+                type: string
+              completedAt:
+                description: CompletedAt is when the snapshot reached a terminal phase.
+                format: date-time
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              fastletName:
+                description: |-
+                  FastletName/FastletPodUID locate the fastlet the snapshot was
+                  triggered on, resolved from the target Sandbox's assignment at
+                  trigger time. The assignment annotation stays authoritative; these
+                  fields are a projection.
+                type: string
+              fastletPodUID:
+                description: |-
+                  UID is a type that holds unique ID values, including UUIDs.  Because we
+                  don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                  intent and helps make sure that UIDs and names do not get conflated.
+                type: string
+              manifestRef:
+                description: |-
+                  ManifestRef is the s3:// URI of the published manifest.json
+                  (Succeeded only).
+                type: string
+              message:
+                description: Message is the latest progress or failure reason.
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the snapshot lifecycle.
+                enum:
+                - Pending
+                - Creating
+                - Publishing
+                - Succeeded
+                - Failed
+                type: string
+              sandboxUID:
+                description: SandboxUID is the UID of the snapshotted Sandbox incarnation.
+                type: string
+              sizeBytes:
+                description: SizeBytes is the total logical size of the published
+                  artifact set.
+                format: int64
+                type: integer
+              snapshotID:
+                description: SnapshotID is the fastlet-side identity of the snapshot
+                  task.
+                type: string
+              startedAt:
+                description: StartedAt is when the fastlet accepted the snapshot.
+                format: date-time
+                type: string
+              triggered:
+                description: |-
+                  Triggered pins the full trigger-time placement (fastlet plus the
+                  Sandbox identity fence) once the snapshot is accepted. Observations
+                  resolve against it, not the Sandbox's live assignment. Residual
+                  window: if the fastlet crashes exactly during the final index upload,
+                  the object can be terminal Failed with the index still landed
+                  (last-writer-wins for the template name); every other failure path
+                  publishes nothing.
+                properties:
+                  assignmentAttempt:
+                    format: int64
+                    type: integer
+                  fastletName:
+                    description: FastletName/FastletPodUID identify the fastlet that
+                      accepted the task.
+                    type: string
+                  fastletPodUid:
+                    type: string
+                  instanceGeneration:
+                    format: int64
+                    type: integer
+                  runtimeInstanceId:
+                    description: |-
+                      RuntimeInstanceID/InstanceGeneration/AssignmentAttempt are the Sandbox
+                      identity fence captured at trigger time; observations replay them so
+                      the fastlet-side claim check matches exactly.
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: sandboxtemplates.sandbox.fast.io
+spec:
+  group: sandbox.fast.io
+  names:
+    kind: SandboxTemplate
+    listKind: SandboxTemplateList
+    plural: sandboxtemplates
+    singular: sandboxtemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: |-
+          SandboxTemplate is a declarative golden-image build (OSEP-0023 design,
+          fast-sandbox flavor): an OCI source image, runtime injection, guest init,
+          readiness, and output artifacts. The build is executed by a controller
+          (Phase 2) or locally by the CLI (Phase 1).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SandboxTemplateSpec defines the desired golden-image build.
+            properties:
+              entrypoint:
+                description: |-
+                  Entrypoint is the guest business command as an argv list; empty
+                  defaults to ["tail","-f","/dev/null"].
+                items:
+                  type: string
+                type: array
+              envs:
+                description: |-
+                  Envs is injected as /etc/sandbox-init.env in the guest (literal
+                  values only; valueFrom is not supported). The source image's own
+                  OCI Config.Env (the merged Dockerfile ENV) is inherited like a
+                  container runtime would; an env with the same name here overrides
+                  the inherited value.
+                items:
+                  description: EnvVar represents an environment variable present in
+                    a Container.
+                  properties:
+                    name:
+                      description: |-
+                        Name of the environment variable.
+                        May consist of any printable ASCII characters except '='.
+                      type: string
+                    value:
+                      description: |-
+                        Variable references $(VAR_NAME) are expanded
+                        using the previously defined environment variables in the container and
+                        any service environment variables. If a variable cannot be resolved,
+                        the reference in the input string will be unchanged. Double $$ are reduced
+                        to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                        "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                        Escaped references will never be expanded, regardless of whether the variable
+                        exists or not.
+                        Defaults to "".
+                      type: string
+                    valueFrom:
+                      description: Source for the environment variable's value. Cannot
+                        be used if value is not empty.
+                      properties:
+                        configMapKeyRef:
+                          description: Selects a key of a ConfigMap.
+                          properties:
+                            key:
+                              description: The key to select.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the ConfigMap or its key
+                                must be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fieldRef:
+                          description: |-
+                            Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                            spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                          properties:
+                            apiVersion:
+                              description: Version of the schema the FieldPath is
+                                written in terms of, defaults to "v1".
+                              type: string
+                            fieldPath:
+                              description: Path of the field to select in the specified
+                                API version.
+                              type: string
+                          required:
+                          - fieldPath
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fileKeyRef:
+                          description: |-
+                            FileKeyRef selects a key of the env file.
+                            Requires the EnvFiles feature gate to be enabled.
+                          properties:
+                            key:
+                              description: |-
+                                The key within the env file. An invalid key will prevent the pod from starting.
+                                The keys defined within a source may consist of any printable ASCII characters except '='.
+                                During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                              type: string
+                            optional:
+                              default: false
+                              description: |-
+                                Specify whether the file or its key must be defined. If the file or key
+                                does not exist, then the env var is not published.
+                                If optional is set to true and the specified key does not exist,
+                                the environment variable will not be set in the Pod's containers.
+
+                                If optional is set to false and the specified key does not exist,
+                                an error will be returned during Pod creation.
+                              type: boolean
+                            path:
+                              description: |-
+                                The path within the volume from which to select the file.
+                                Must be relative and may not contain the '..' path or start with '..'.
+                              type: string
+                            volumeName:
+                              description: The name of the volume mount containing
+                                the env file.
+                              type: string
+                          required:
+                          - key
+                          - path
+                          - volumeName
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        resourceFieldRef:
+                          description: |-
+                            Selects a resource of the container: only resources limits and requests
+                            (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                          properties:
+                            containerName:
+                              description: 'Container name: required for volumes,
+                                optional for env vars'
+                              type: string
+                            divisor:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: Specifies the output format of the exposed
+                                resources, defaults to "1"
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            resource:
+                              description: 'Required: resource to select'
+                              type: string
+                          required:
+                          - resource
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        secretKeyRef:
+                          description: Selects a key of a secret in the pod's namespace
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+              execd:
+                description: Execd is the OpenSandbox execd image whose runtime files
+                  are injected.
+                type: string
+              image:
+                description: Image is the OCI image reference to convert.
+                type: string
+              indexKey:
+                description: |-
+                  IndexKey optionally names an additional content-addressed image-index
+                  key the publish stage writes alongside the default sha256(image) key.
+                  Use case: per-template artifact identity — the OpenSandbox server sets
+                  it to the template ID so two templates of the same source image never
+                  alias each other's artifact sets or node caches. The index payload's
+                  image field equals the key it is written under, so pull-side byte
+                  matching works unchanged. The default key stays last-writer-wins for
+                  warmImages and older clients.
+                maxLength: 255
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]{1,127})?$
+                type: string
+              init:
+                description: |-
+                  Init is the injected PID 1 path inside the rootfs. The init script
+                  carries the readiness marker and heartbeat the build depends on, so it
+                  is always injected: empty defaults to /usr/local/sbin/sandbox-init.
+                type: string
+              kernel:
+                description: |-
+                  Kernel is the guest kernel to embed; it must be present in the builder
+                  image under this name (the builder image embeds one kernel at build
+                  time via the KERNEL_NAME build arg).
+                type: string
+              machine:
+                description: Machine describes the reference machine of the golden
+                  image.
+                properties:
+                  memory:
+                    default: 2Gi
+                    type: string
+                  vcpu:
+                    default: "1"
+                    type: string
+                required:
+                - memory
+                - vcpu
+                type: object
+              output:
+                description: Output describes the artifacts to produce and where to
+                  publish them.
+                properties:
+                  format:
+                    default: overlaybd
+                    description: Format selects the storage encoding of the snapshot
+                      set.
+                    enum:
+                    - native
+                    - overlaybd
+                    type: string
+                  prime:
+                    description: |-
+                      Prime optionally selects seed nodes (by label selector) whose agent
+                      warms the local cache after a successful build.
+                      Not yet implemented: reserved — the controller currently ignores it.
+                    properties:
+                      nodeSelector:
+                        additionalProperties:
+                          type: string
+                        minProperties: 1
+                        type: object
+                    required:
+                    - nodeSelector
+                    type: object
+                  publish:
+                    description: |-
+                      Publish is the S3-compatible object store target, e.g.
+                      s3://bucket/sandbox-images/ (digest-addressed publication). When
+                      empty, the controller defaults it to the platform artifact store
+                      (the fast-sandbox-artifact-store ConfigMap); when set it must equal
+                      that store, so a template cannot silently drift away from the store
+                      the node agents read. Without either, the build fails with an
+                      invalid-output condition (durable artifacts have no destination).
+                    type: string
+                  publishSecretRef:
+                    description: |-
+                      PublishSecretRef references (imagePullSecrets-style) the secret holding
+                      the object-store credentials. The secret MUST live in the template's
+                      namespace, where the build Pod runs (a Pod can only mount Secrets from
+                      its own namespace). It is created and maintained out of band by the
+                      platform operator; the template only names it. Expected keys:
+                      accessKeyId, secretAccessKey, endpoint, region (all required when the
+                      reference is set). The controller mounts the Secret into the build Pod
+                      and the builder reads the keys as files; secret contents are never
+                      copied into the CR status, the Pod env, or the artifact manifest.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  rootfsSize:
+                    default: 30Gi
+                    description: |-
+                      RootfsSize is the logical size of the converted rootfs.ext4 — the
+                      capacity the guest sees as its root drive. A Kubernetes resource
+                      quantity; the file is sparse. It must be large enough to hold the
+                      expanded OCI image content.
+                    type: string
+                required:
+                - format
+                - rootfsSize
+                type: object
+              readiness:
+                description: Readiness defines when the guest is considered ready.
+                properties:
+                  healthCheck:
+                    description: |-
+                      HealthCheck is polled as the fallback; empty uses the source image
+                      CMD-SHELL.
+                    type: string
+                  probe:
+                    description: 'Probe is checked first: tcp://host:port or cmd://<command>.'
+                    type: string
+                  warmupSeconds:
+                    default: 60
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - warmupSeconds
+                type: object
+            required:
+            - image
+            - kernel
+            - machine
+            - output
+            - readiness
+            type: object
+          status:
+            description: SandboxTemplateStatus reports the latest build outcome.
+            properties:
+              artifactDigest:
+                description: ArtifactDigest is the sha256 of the manifest document
+                  itself.
+                type: string
+              conditions:
+                description: Conditions detail progress.
+                items:
+                  description: SandboxTemplateCondition represents one condition of
+                    a SandboxTemplate.
+                  properties:
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the condition
+                        transitioned.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is a human-readable message about the condition.
+                      type: string
+                    reason:
+                      description: Reason is a brief reason for the condition.
+                      type: string
+                    status:
+                      description: Status is the condition status (True/False).
+                      enum:
+                      - "True"
+                      - "False"
+                      type: string
+                    type:
+                      description: Type is the condition type.
+                      enum:
+                      - BuildSucceeded
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastBuildTime:
+                description: LastBuildTime is when the last build completed.
+                format: date-time
+                type: string
+              manifestRef:
+                description: ManifestRef points at the published manifest in the object
+                  store.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the generation of the last applied
+                  build.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the overall build phase.
+                enum:
+                - Pending
+                - Building
+                - Succeeded
+                - Failed
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
