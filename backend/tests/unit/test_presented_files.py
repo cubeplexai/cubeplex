@@ -74,6 +74,8 @@ def test_artifact_prompt_mentions_present_file() -> None:
 
     assert "present_file" in ARTIFACT_PROMPT
     assert "/workspace" in ARTIFACT_PROMPT
+    assert "NEVER call both" in ARTIFACT_PROMPT
+    assert "duplicate" in ARTIFACT_PROMPT
 
 
 def test_clip_caption_truncates() -> None:

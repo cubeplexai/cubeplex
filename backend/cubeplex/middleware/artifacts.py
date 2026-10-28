@@ -130,6 +130,8 @@ def _make_save_artifact_tool(
         description=(
             "Register a file or directory created in the sandbox as an artifact "
             "so the user can preview and download it. "
+            "This already shows an interactive card in chat with preview and download, "
+            "so never call present_file for the same file. "
             "First create the files with the execute tool, then call this. "
             "For agent-authored skills, use artifact_type='skill', entry_file='SKILL.md', "
             "and ensure path points to a directory containing SKILL.md at the root. "
@@ -228,7 +230,8 @@ def _make_present_file_tool(
             "file card). Use this for QR codes, screenshots, temporary exports — anything "
             "the user needs to see now. Does NOT add the file to the artifact gallery. "
             "Never embed /workspace paths as markdown images; call this tool instead. "
-            "For durable deliverables the user should keep, use save_artifact."
+            "For durable deliverables the user should keep, use save_artifact. "
+            "Never call this if you already called save_artifact for the same file."
         ),
         parameters=_PresentFileArgs,
         execute=_execute,

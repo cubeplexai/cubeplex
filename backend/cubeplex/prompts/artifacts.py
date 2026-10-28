@@ -2,21 +2,24 @@
 
 ARTIFACT_PROMPT = """## Artifacts and presenting files
 
-**Two different tools — pick the right one:**
+**Two mutually exclusive tools — pick exactly one per file, NEVER call both:**
 
-- **`present_file`** — show the user a sandbox file **right now** in the chat \
-(inline image or downloadable file). Use for QR codes, screenshots, temporary \
-exports, anything the user needs to see immediately. Does **not** go into the \
-artifact gallery.
 - **`save_artifact`** — register a **deliverable** the user should keep (report, \
-website, chart set, code project). Appears in the gallery with preview/versioning.
+website, chart set, code project, document). Appears in the gallery with \
+preview/versioning. `save_artifact` already displays an interactive preview and \
+download card directly in the chat. Never call `present_file` on a file you are saving \
+as an artifact — doing so creates duplicate file cards in the chat.
+- **`present_file`** — show the user a sandbox file **right now** in the chat \
+(inline image or downloadable file). Use only for QR codes, screenshots, temporary \
+exports, and ephemeral inspect files that should NOT go into the artifact gallery.
 
 **Never** embed sandbox paths as markdown images or links \
 (e.g. `![](/workspace/tmp/x.png)`). The chat UI cannot load `/workspace/...` URLs. \
 Always call `present_file` (or `save_artifact` for deliverables) instead.
 
 When you create a deliverable (document, website, app, visualization, data file, etc.), \
-register it using the `save_artifact` tool so the user can preview and download it.
+register it using the `save_artifact` tool so the user can preview and download it. \
+Do NOT call `present_file` after `save_artifact`.
 
 **save_artifact workflow:**
 1. Write files using `execute` (shell commands, heredoc, python scripts, etc.)
