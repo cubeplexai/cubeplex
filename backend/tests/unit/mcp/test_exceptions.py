@@ -11,7 +11,10 @@ from a revoked token.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import httpx
+import pytest
 
 from cubeplex.mcp.exceptions import is_unauthorized_error
 
@@ -20,6 +23,19 @@ def _http_status_error(status: int) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://mcp.example.com/mcp")
     response = httpx.Response(status, request=request)
     return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
+
+
+class _ForeignHttpStatusError(Exception):
+    """Stand-in for ``httpx2.HTTPStatusError``.
+
+    MCP SDK 2 raises httpx2 errors; that class is not a subclass of
+    ``httpx.HTTPStatusError``. The classifier must key off
+    ``response.status_code``, not the httpx type.
+    """
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"HTTP {status}")
+        self.response = SimpleNamespace(status_code=status)
 
 
 def test_bare_401_is_unauthorized() -> None:
@@ -49,3 +65,32 @@ def test_non_401_http_error_is_not_unauthorized() -> None:
 
 def test_unrelated_exception_is_not_unauthorized() -> None:
     assert not is_unauthorized_error(RuntimeError("boom"))
+
+
+def test_foreign_http_client_401_is_unauthorized() -> None:
+    assert is_unauthorized_error(_ForeignHttpStatusError(401))
+    grouped = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [_ForeignHttpStatusError(401)],
+    )
+    assert is_unauthorized_error(grouped)
+
+
+def test_foreign_http_client_non_401_is_not_unauthorized() -> None:
+    assert not is_unauthorized_error(_ForeignHttpStatusError(500))
+    assert not is_unauthorized_error(_ForeignHttpStatusError(403))
+
+
+def test_httpx2_401_is_unauthorized() -> None:
+    httpx2 = pytest.importorskip("httpx2")
+    request = httpx2.Request("POST", "https://mcp.example.com/mcp")
+    response = httpx2.Response(401, request=request)
+    err = httpx2.HTTPStatusError("HTTP 401", request=request, response=response)
+    assert is_unauthorized_error(err)
+    assert not is_unauthorized_error(
+        httpx2.HTTPStatusError(
+            "HTTP 500",
+            request=request,
+            response=httpx2.Response(500, request=request),
+        )
+    )

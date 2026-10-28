@@ -206,11 +206,11 @@ def _build_tools_from_cache(
 ) -> list[AgentTool[Any]] | None:
     """Build executable AgentTools from the install's persisted ``tools_cache``.
 
-    Skips the per-send ``initialize`` + ``tools/list`` round trip: the cache
-    already carries every field the live loader would extract from the
-    descriptor (name / description / input_schema), and cubeloop MCP tools
-    open a fresh session per ``tools/call`` anyway, so execution is
-    identical to a live-discovered tool.
+    Skips the per-send discovery round trip: the cache already carries
+    every field the live loader would extract from the descriptor
+    (name / description / input_schema), and cubeloop MCP tools open a
+    fresh client per ``tools/call`` anyway, so execution is identical to
+    a live-discovered tool.
 
     ``refresh_auth`` (OAuth specs only) recovers from a server-side token
     revocation: on a 401 the call forces one token refresh, updates the
@@ -220,19 +220,20 @@ def _build_tools_from_cache(
     Returns None when the cache is unusable (empty, or cubeloop's private
     helpers moved) — callers fall back to the live loader.
 
-    NOTE: reaches into ``cubeloop.mcp``'s private modules for the session
-    opener and result serializer the live loader uses. cubeloop doesn't yet
-    expose "build tool from cached descriptor" publicly; upstream that
-    instead of growing this.
+    NOTE: reaches into ``cubeloop.mcp``'s private modules for the client
+    opener and result serializer the live loader uses. cubeloop doesn't
+    yet expose "build tool from cached descriptor" publicly; upstream
+    that instead of growing this.
     """
     if not spec.tools_cache:
         return None
     try:
         from cubeloop.mcp._adapter import make_mcp_agent_tool
-        from cubeloop.mcp.http_loader import (
-            _open_session,
-            _serialize_call_tool_response,
-            _split_address,
+        from cubeloop.mcp.http_loader import _split_address
+
+        from cubeplex.mcp.client import (
+            open_mcp_http_client,
+            serialize_mcp_call_tool_response,
         )
     except ImportError as exc:  # cubeloop internals moved — live loader still works
         logger.warning("tools_cache fast path unavailable (cubeloop drift): %s", exc)
@@ -242,7 +243,7 @@ def _build_tools_from_cache(
     transport = cast(MCPTransport, spec.transport)
 
     async def _call_once(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        # Mirrors cubeloop.mcp.http_loader's per-call session semantics,
+        # Mirrors cubeloop.mcp.http_loader's per-call client semantics,
         # including W3C traceparent propagation into the MCP server.
         from cubeloop.mcp._tracing import current_traceparent
 
@@ -250,12 +251,15 @@ def _build_tools_from_cache(
         tp = current_traceparent()
         if tp is not None:
             call_headers = {**(headers or {}), "traceparent": tp}
-        async with _open_session(
-            server_url, headers=call_headers, timeout=timeout, transport=transport
-        ) as (session, _get_session_id):
-            await asyncio.wait_for(session.initialize(), timeout=timeout)
-            resp = await asyncio.wait_for(session.call_tool(tool_name, args), timeout=timeout)
-            return _serialize_call_tool_response(resp)
+        async with asyncio.timeout(timeout):
+            async with open_mcp_http_client(
+                server_url,
+                headers=call_headers,
+                timeout=timeout,
+                transport=transport,
+            ) as client:
+                resp = await client.call_tool(tool_name, args)
+                return serialize_mcp_call_tool_response(resp)
 
     async def _call_remote(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -502,9 +506,9 @@ async def _load_tools_for_specs(
         refresh_auth = _make_refresh_auth_callback(spec=spec, token_manager=token_manager)
 
         # Cache-first: build tools from the persisted tools_cache and skip
-        # the live initialize+tools/list round trip. Falls back to live
-        # discovery when the cache is empty/unusable (e.g. first run before
-        # discovery persisted, or cubeloop internals drifted).
+        # the live list_tools round trip. Falls back to live discovery when
+        # the cache is empty/unusable (e.g. first run before discovery
+        # persisted, or cubeloop internals drifted).
         tools = _build_tools_from_cache(
             spec=spec, headers=headers, server_url=server_url, refresh_auth=refresh_auth
         )
