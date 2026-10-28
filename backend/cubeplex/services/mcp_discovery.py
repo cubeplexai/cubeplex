@@ -34,16 +34,17 @@ from typing import Any, cast
 
 import anyio
 import httpx
-from cubeloop.mcp.http_loader import _open_session
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.mcp._constants import slugify_for_namespace
+from cubeplex.mcp.client import open_mcp_http_client
 from cubeplex.mcp.cubeloop_runtime import MCPTransport
 from cubeplex.mcp.effective import MCPEffectiveConnectorService
 from cubeplex.mcp.exceptions import (
     MCPDiscoveryFailed,
     OAuthRefreshFailed,
+    http_status_from_exc,
     is_unauthorized_error,
 )
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
@@ -94,10 +95,9 @@ def _is_transient_discovery_error(exc: BaseException) -> bool:
             continue
         leaves.append(inner)
     for inner in leaves:
-        if isinstance(inner, httpx.HTTPStatusError):
-            status = inner.response.status_code
-            if 400 <= status < 500 and status not in {408, 429}:
-                return False
+        status = http_status_from_exc(inner)
+        if status is not None and 400 <= status < 500 and status not in {408, 429}:
+            return False
     for inner in leaves:
         if isinstance(inner, (TimeoutError, ConnectionError, httpx.TimeoutException)):
             return True
@@ -105,9 +105,9 @@ def _is_transient_discovery_error(exc: BaseException) -> bool:
             return True
         if isinstance(inner, (anyio.EndOfStream, anyio.BrokenResourceError)):
             return True
-        if isinstance(inner, httpx.HTTPStatusError):
-            if inner.response.status_code == 429 or inner.response.status_code >= 500:
-                return True
+        status = http_status_from_exc(inner)
+        if status is not None and (status == 429 or status >= 500):
+            return True
     return False
 
 
@@ -125,18 +125,19 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
     ``{name, description, input_schema, output_schema}`` dict shape we
     persist in ``tools_cache``.
 
-    Real ``mcp.types.Tool`` instances expose camelCase ``inputSchema`` /
-    ``outputSchema``; test stubs typically already use snake_case
-    ``input_schema`` / ``output_schema``. Both are accepted.
+    Real ``mcp.types.Tool`` instances expose snake_case ``input_schema``
+    on SDK 2 and camelCase ``inputSchema`` on SDK 1 / wire dumps; test
+    stubs typically already use snake_case. Empty object schemas (``{}``)
+    are kept — they must not fall through the camelCase alias.
     """
     name = getattr(tool, "name", "")
     description = getattr(tool, "description", None)
-    input_schema: dict[str, Any] | None = getattr(tool, "input_schema", None) or getattr(
-        tool, "inputSchema", None
-    )
-    output_schema: dict[str, Any] | None = getattr(tool, "output_schema", None) or getattr(
-        tool, "outputSchema", None
-    )
+    input_schema: dict[str, Any] | None = getattr(tool, "input_schema", None)
+    if input_schema is None:
+        input_schema = getattr(tool, "inputSchema", None)
+    output_schema: dict[str, Any] | None = getattr(tool, "output_schema", None)
+    if output_schema is None:
+        output_schema = getattr(tool, "outputSchema", None)
     # AgentTool path (legacy): synthesised pydantic model on .parameters.
     if input_schema is None:
         params = getattr(tool, "parameters", None)
@@ -158,9 +159,10 @@ class _DiscoveredRaw:
     """Raw output of one discovery handshake.
 
     ``tools`` are ``mcp.types.Tool`` descriptors preserving the full
-    schema fields (notably ``outputSchema`` which cubeloop's AgentTool
-    wrapper drops). ``init_result`` is the ``InitializeResult`` carrying
-    ``serverInfo`` (name + icons + websiteUrl).
+    schema fields (notably ``output_schema`` / ``outputSchema`` which
+    cubeloop's AgentTool wrapper drops). ``init_result`` is the
+    negotiated server info (SDK 2 ``Client.server_info``, or a legacy
+    ``InitializeResult`` wrapping ``serverInfo``).
     """
 
     tools: list[Any]
@@ -174,8 +176,7 @@ async def _list_raw_mcp_tools(
     timeout: float,
     transport: MCPTransport,
 ) -> _DiscoveredRaw:
-    """Open an MCP session, call ``initialize`` + ``list_tools``, and
-    return both the raw tool descriptors and the initialize result.
+    """Open an MCP client, call ``list_tools``, and return raw descriptors.
 
     We bypass ``cubeloop.mcp.load_mcp_tools_http`` because its
     ``AgentTool`` wrapper drops the optional ``outputSchema`` field —
@@ -183,19 +184,21 @@ async def _list_raw_mcp_tools(
     invocation still goes through cubeloop (Try It path); only discovery
     talks to MCP directly here.
 
-    The initialize result is captured here (rather than in a separate
-    handshake) so we can surface the server's display metadata —
-    ``Implementation.icons`` + ``websiteUrl`` from MCP spec rev
-    2025-11-25 — to the frontend's tool registry without an extra RTT.
+    cubeloop's Client auto-mode negotiates 2026-07-28 or falls back to
+    the legacy ``initialize`` handshake. ``client.server_info`` carries
+    the server's display metadata (name + icons + websiteUrl) without a
+    second RTT.
     """
     await validate_mcp_outbound_url(server_url)
-    async with _open_session(server_url, headers=headers, timeout=timeout, transport=transport) as (
-        session,
-        _get_session_id,
-    ):
-        init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
-        tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
-    return _DiscoveredRaw(tools=list(tools_resp.tools), init_result=init_result)
+    async with asyncio.timeout(timeout):
+        async with open_mcp_http_client(
+            server_url, headers=headers, timeout=timeout, transport=transport
+        ) as client:
+            tools_resp = await client.list_tools()
+            return _DiscoveredRaw(
+                tools=list(tools_resp.tools),
+                init_result=client.server_info,
+            )
 
 
 def _icon_to_dict(icon: Any) -> dict[str, Any]:

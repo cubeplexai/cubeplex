@@ -23,8 +23,7 @@ Kept (unchanged):
 import asyncio
 import time
 from contextvars import ContextVar
-from datetime import timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1025,53 +1024,24 @@ async def _invoke_tool_via_cubeloop(
     transport: str,
 ) -> Any:
     """Thin wrapper for unit-test monkeypatching."""
-    from mcp import ClientSession
-    from mcp.client.sse import sse_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from cubeplex.mcp.client import (
+        MCPTransport,
+        open_mcp_http_client,
+        serialize_mcp_call_tool_response,
+    )
 
-    if transport == "streamable_http":
-        timeout_td = timedelta(seconds=timeout)
-        async with streamablehttp_client(
-            server_url,
-            headers=headers,
-            timeout=timeout_td,
-            sse_read_timeout=timeout_td,
-        ) as (read_stream, write_stream, _get_session_id):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
-    elif transport == "sse":
-        async with sse_client(
+    if transport not in {"sse", "streamable_http"}:
+        raise ValueError(f"unsupported transport: {transport!r}")
+
+    async with asyncio.timeout(timeout):
+        async with open_mcp_http_client(
             server_url,
             headers=headers,
             timeout=timeout,
-            sse_read_timeout=timeout,
-        ) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
-    else:
-        raise ValueError(f"unsupported transport: {transport!r}")
-
-    out: dict[str, Any] = {"isError": bool(getattr(result, "isError", False))}
-    content_list: list[dict[str, Any]] = []
-    for c in getattr(result, "content", []) or []:
-        ctype = getattr(c, "type", None)
-        if ctype == "text":
-            content_list.append({"type": "text", "text": getattr(c, "text", "")})
-        elif ctype == "image":
-            content_list.append(
-                {
-                    "type": "image",
-                    "data": getattr(c, "data", ""),
-                    "mimeType": getattr(c, "mimeType", ""),
-                }
-            )
-    out["content"] = content_list
-    structured = getattr(result, "structuredContent", None)
-    if structured is not None:
-        out["structuredContent"] = structured
-    return out
+            transport=cast(MCPTransport, transport),
+        ) as client:
+            result = await client.call_tool(tool_name, arguments)
+            return serialize_mcp_call_tool_response(result)
 
 
 @router.post(

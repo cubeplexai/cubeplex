@@ -10,6 +10,7 @@ the DB, blocking retries on ``uq_mcp_credential_grant_org``.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
@@ -17,6 +18,14 @@ import httpx
 import pytest
 
 from cubeplex.services import mcp_discovery
+
+
+class _ForeignHttpStatusError(Exception):
+    """Stand-in for ``httpx2.HTTPStatusError`` (not an httpx subclass)."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"HTTP {status}")
+        self.response = SimpleNamespace(status_code=status)
 
 
 def test_concrete_network_subclasses_are_transient() -> None:
@@ -59,6 +68,23 @@ def test_hard_http_4xx_takes_precedence_over_network_noise() -> None:
         [httpx.WriteError("reset", request=request), error],
     )
     assert not mcp_discovery._is_transient_discovery_error(grouped)
+
+
+def test_foreign_http_client_401_is_not_transient() -> None:
+    assert not mcp_discovery._is_transient_discovery_error(_ForeignHttpStatusError(401))
+    grouped = ExceptionGroup(
+        "network noise and auth failure",
+        [RuntimeError("cleanup failed"), _ForeignHttpStatusError(401)],
+    )
+    assert not mcp_discovery._is_transient_discovery_error(grouped)
+
+
+def test_foreign_http_client_500_is_transient() -> None:
+    assert mcp_discovery._is_transient_discovery_error(_ForeignHttpStatusError(500))
+
+
+def test_foreign_http_client_403_is_not_transient() -> None:
+    assert not mcp_discovery._is_transient_discovery_error(_ForeignHttpStatusError(403))
 
 
 @pytest.mark.parametrize("status", [408, 429])
