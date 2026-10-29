@@ -16,7 +16,7 @@ from typing import Any, Literal, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from cubeloop.agent.types import AgentTool
-from cubeloop.mcp import load_mcp_tools_http
+from cubeloop.mcp import load_mcp_tools_http, make_mcp_agent_tool
 from pydantic import ValidationError
 
 from cubeplex.credentials.exceptions import CredentialNotFound
@@ -197,6 +197,14 @@ async def _mark_grant_expired_for_spec(spec: MCPRuntimeConnectorSpec) -> None:
                 await session.commit()
 
 
+def _split_address(server_url: str) -> tuple[str | None, int | None]:
+    try:
+        parsed = urlparse(server_url)
+        return parsed.hostname, parsed.port
+    except Exception:
+        return None, None
+
+
 def _build_tools_from_cache(
     *,
     spec: MCPRuntimeConnectorSpec,
@@ -217,44 +225,26 @@ def _build_tools_from_cache(
     shared ``headers`` dict in place (so every tool of this spec reuses
     the new token), and retries once.
 
-    Returns None when the cache is unusable (empty, or cubeloop's private
-    helpers moved) — callers fall back to the live loader.
-
-    NOTE: reaches into ``cubeloop.mcp``'s private modules for the client
-    opener and result serializer the live loader uses. cubeloop doesn't
-    yet expose "build tool from cached descriptor" publicly; upstream
-    that instead of growing this.
+    Returns None when the cache is unusable (empty) — callers fall back
+    to the live loader. ``open_mcp_http_client`` stamps W3C
+    ``traceparent`` when a CubeLoop MCP CLIENT span is active.
     """
     if not spec.tools_cache:
         return None
-    try:
-        from cubeloop.mcp._adapter import make_mcp_agent_tool
-        from cubeloop.mcp.http_loader import _split_address
 
-        from cubeplex.mcp.client import (
-            open_mcp_http_client,
-            serialize_mcp_call_tool_response,
-        )
-    except ImportError as exc:  # cubeloop internals moved — live loader still works
-        logger.warning("tools_cache fast path unavailable (cubeloop drift): %s", exc)
-        return None
+    from cubeplex.mcp.client import (
+        open_mcp_http_client,
+        serialize_mcp_call_tool_response,
+    )
 
     timeout = spec.timeout
     transport = cast(MCPTransport, spec.transport)
 
     async def _call_once(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        # Mirrors cubeloop.mcp.http_loader's per-call client semantics,
-        # including W3C traceparent propagation into the MCP server.
-        from cubeloop.mcp._tracing import current_traceparent
-
-        call_headers = headers or None
-        tp = current_traceparent()
-        if tp is not None:
-            call_headers = {**(headers or {}), "traceparent": tp}
         async with asyncio.timeout(timeout):
             async with open_mcp_http_client(
                 server_url,
-                headers=call_headers,
+                headers=headers or None,
                 timeout=timeout,
                 transport=transport,
             ) as client:

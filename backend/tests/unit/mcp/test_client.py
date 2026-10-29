@@ -48,7 +48,7 @@ def _install_fake_open_client(
         )
         yield client
 
-    monkeypatch.setattr("cubeloop.mcp.http_loader._open_client", fake_open)
+    monkeypatch.setattr("cubeloop.mcp.open_mcp_http_client", fake_open)
     return opened
 
 
