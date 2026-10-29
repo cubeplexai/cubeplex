@@ -108,9 +108,9 @@ CubePlex 会在工作区首次启用模板时自动发现模板工具——无�
 
 ### OAuth 连接器
 
-多数 OAuth 连接器支持**动态客户端注册（Dynamic Client Registration，DCR）**——包括 Notion、Linear、Atlassian、Asana、Sentry、Intercom 和 Cloudflare。对于这些连接器，无需额外设置：首次创建凭据时，CubePlex 会自动向服务注册自己的 OAuth 客户端。
+多数 OAuth 连接器支持**动态客户端注册（Dynamic Client Registration，DCR）**——包括 Notion、Linear、Atlassian、Sentry、Intercom 和 Cloudflare。对于这些连接器，无需额外设置：首次创建凭据时，CubePlex 会自动向服务注册自己的 OAuth 客户端。
 
-少数 OAuth 连接器**不**支持 DCR——**GitHub、Slack 和 Google Workspace**。它们需要预先注册 OAuth 应用：
+少数 OAuth 连接器**不**支持 DCR——**GitHub、Slack、Google Workspace 和 Asana**。它们需要预先注册 OAuth 应用：
 
 1. 运维人员在供应商的开发者控制台中注册 OAuth 应用，并使用重定向 URI `${CUBEPLEX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`。
 2. 将应用的客户端 ID 和密钥放入环境变量（`CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `…__CLIENT_SECRET`），再由目录填充程序加载。

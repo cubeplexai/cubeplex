@@ -105,9 +105,9 @@ CubePlex discovers the template's tools automatically the first time a workspace
 
 ### OAuth connectors
 
-Most OAuth connectors support **Dynamic Client Registration (DCR)** — Notion, Linear, Atlassian, Asana, Sentry, Intercom, and Cloudflare. For these, no setup is required: CubePlex registers its own OAuth client with the service automatically when the first credential is created.
+Most OAuth connectors support **Dynamic Client Registration (DCR)** — Notion, Linear, Atlassian, Sentry, Intercom, and Cloudflare. For these, no setup is required: CubePlex registers its own OAuth client with the service automatically when the first credential is created.
 
-A few OAuth connectors do **not** support DCR — **GitHub, Slack, and Google Workspace**. These require a pre-registered OAuth app:
+A few OAuth connectors do **not** support DCR — **GitHub, Slack, Google Workspace, and Asana**. These require a pre-registered OAuth app:
 
 1. An operator registers an OAuth app in the vendor's developer console, using redirect URI `${CUBEPLEX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
 2. The app's client ID and secret are placed in environment variables (`CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `…__CLIENT_SECRET`) and loaded by the catalog seeder.

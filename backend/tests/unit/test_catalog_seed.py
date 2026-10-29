@@ -85,6 +85,18 @@ def test_atlassian_catalog_uses_rovo_mcp_authv2_endpoint() -> None:
     assert "atlassian-rovo-mcp-server" in atlassian.template_metadata["docs_url"]
 
 
+def test_asana_catalog_uses_static_oauth() -> None:
+    asana = next(entry for entry in CATALOG if entry.slug == "asana")
+
+    assert asana.server_url == "https://mcp.asana.com/v2/mcp"
+    assert asana.transport == "streamable_http"
+    assert asana.supported_auth_methods == ["oauth", "static"]
+    assert asana.oauth_dcr_supported is False
+    assert asana.oauth_default_scope == "default"
+    assert asana.oauth_static_client_id_env == "CUBEPLEX_MCP_OAUTH__ASANA__CLIENT_ID"
+    assert asana.oauth_static_client_secret_env == "CUBEPLEX_MCP_OAUTH__ASANA__CLIENT_SECRET"
+
+
 async def test_seed_updates_active_connectors_materialized_from_template(
     session: AsyncSession, backend: FernetBackend
 ) -> None:

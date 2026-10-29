@@ -168,12 +168,12 @@ membership; admin routes require org admin.
 
 ### Static-client vs DCR
 
-- **DCR-supported connectors** (Notion, Linear, Atlassian, Asana,
-  Sentry, Intercom, Cloudflare, Google Workspace*): no env vars
+- **DCR-supported connectors** (Notion, Linear, Atlassian,
+  Sentry, Intercom, Cloudflare): no env vars
   required. The first add hits the AS `/register` endpoint and
   stores the resulting `client_id` plus an encrypted `client_secret`
   on the connector row's `oauth_client_config`.
-- **Static-client connectors** (GitHub, Slack, Google Workspace): the
+- **Static-client connectors** (GitHub, Slack, Google Workspace, Asana): the
   vendor does not expose DCR. An OAuth App must be registered out-of-
   band in the vendor's developer console, the `client_id` and
   `client_secret` placed in env vars, and the seeder invoked once to
@@ -256,7 +256,7 @@ python -m cubeplex.cli seed-mcp-templates
 The seeder is idempotent: re-running with no changes is a no-op.
 
 Static OAuth `client_id` / `client_secret` pairs (GitHub, Slack,
-Google Workspace) are read from environment variables
+Google Workspace, Asana) are read from environment variables
 `CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` and `…__CLIENT_SECRET`. If
 unset, the seeder skips those connectors with a warning and continues
 with the rest.
