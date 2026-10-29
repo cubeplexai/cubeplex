@@ -61,7 +61,7 @@ def test_cache_built_tool_matches_live_loader_shape() -> None:
     """If the cache-built tool schema drifted from what the live loader
     produces for the same descriptor, the LLM tool payload (and the
     prompt-cache prefix) would differ between cache-hit and live sends."""
-    from cubeloop.mcp._adapter import make_mcp_agent_tool
+    from cubeloop.mcp import make_mcp_agent_tool
 
     entry = {
         "name": "get_weather",
@@ -183,6 +183,38 @@ def _install_fake_session(monkeypatch: Any, opened_auth: list[str | None]) -> No
 
 
 _PING_CACHE = [{"name": "ping", "description": "", "input_schema": {"type": "object"}}]
+
+
+async def test_cache_tool_call_passes_headers_without_stamping_traceparent(
+    monkeypatch: Any,
+) -> None:
+    """cubeloop's opener stamps traceparent; CubePlex must not pre-inject it
+    (that would mutate the shared OAuth headers dict)."""
+    seen_headers: list[dict[str, str] | None] = []
+
+    @asynccontextmanager
+    async def fake_open_client(server_url: str, *, headers=None, timeout=None, transport=None):
+        del server_url, timeout, transport
+        seen_headers.append(headers)
+
+        class _Client:
+            async def call_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+                del name, args
+                return {"content": [{"type": "text", "text": "ok"}], "isError": False}
+
+        yield _Client()
+
+    monkeypatch.setattr("cubeplex.mcp.client.open_mcp_http_client", fake_open_client)
+    monkeypatch.setattr("cubeplex.mcp.client.serialize_mcp_call_tool_response", lambda resp: resp)
+
+    headers = {"Authorization": "Bearer t"}
+    tools = _build_tools_from_cache(
+        spec=_make_spec(_PING_CACHE), headers=headers, server_url="https://mcp.example.com/mcp"
+    )
+    assert tools is not None
+    await tools[0].execute("tc-tp", {})
+    assert seen_headers == [{"Authorization": "Bearer t"}]
+    assert headers == {"Authorization": "Bearer t"}
 
 
 async def test_tool_call_401_refreshes_and_retries(monkeypatch: Any) -> None:
