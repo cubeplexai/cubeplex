@@ -19,7 +19,7 @@ changes, or token-manager changes.
   staging hostname. Redirect URI for every app:
   `${STAGING_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
 - Static `client_id` / `client_secret` env vars set on staging for
-  non-DCR connectors (GitHub, Slack, Google Workspace) — see
+  non-DCR connectors (GitHub, Slack, Google Workspace, Asana) — see
   `backend/.env.example`.
 - Seeder run after env var changes:
   `python -m cubeplex.cli seed-mcp-catalog`.

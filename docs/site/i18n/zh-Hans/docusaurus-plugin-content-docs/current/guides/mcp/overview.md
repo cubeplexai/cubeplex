@@ -70,7 +70,7 @@ CubePlex 为越来越多的服务提供全局模板：
 
 不同连接器使用不同的认证方法：
 
-- **OAuth** — 你授权 CubePlex 代表你访问服务。连接器会引导你完成供应商的同意页面。大多数连接器（Notion、Linear、Atlassian、Asana、Sentry、Intercom、Cloudflare）会自动处理此过程；少数连接器（GitHub、Slack、Google Workspace）要求管理员先注册 OAuth 应用。
+- **OAuth** — 你授权 CubePlex 代表你访问服务。连接器会引导你完成供应商的同意页面。大多数连接器（Notion、Linear、Atlassian、Sentry、Intercom、Cloudflare）会自动处理此过程；少数连接器（GitHub、Slack、Google Workspace、Asana）要求管理员先注册 OAuth 应用。
 - **API 密钥** — 你或管理员提供静态 API 密钥。常用于 Tavily 和 Exa 等搜索连接器。
 - **Bearer token** — 预先签发的 token，类似 API 密钥。由签发长期访问 token 的连接器使用。
 

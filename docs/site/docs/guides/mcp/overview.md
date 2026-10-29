@@ -70,7 +70,7 @@ Your admin may have additional org-scope or workspace-scope templates available.
 
 Different connectors use different authentication methods:
 
-- **OAuth** — You authorize CubePlex to access the service on your behalf. The connector walks you through the vendor's consent screen. Most connectors (Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare) handle this automatically; a few (GitHub, Slack, Google Workspace) require your administrator to pre-register an OAuth app first.
+- **OAuth** — You authorize CubePlex to access the service on your behalf. The connector walks you through the vendor's consent screen. Most connectors (Notion, Linear, Atlassian, Sentry, Intercom, Cloudflare) handle this automatically; a few (GitHub, Slack, Google Workspace, Asana) require your administrator to pre-register an OAuth app first.
 - **API key** — You or your admin provides a static API key. Common for search connectors like Tavily and Exa.
 - **Bearer token** — A pre-issued token, similar to an API key. Used by connectors that issue long-lived access tokens.
 

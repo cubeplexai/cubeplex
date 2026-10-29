@@ -66,7 +66,7 @@ CubePlex 会加密凭据并安全存储。连接器的工具会立即对工作�
 4. 授予请求的权限。
 5. 窗口关闭后会返回 CubePlex。凭据现已连接。
 
-**幕后发生的过程：** CubePlex 对所有 OAuth 流程使用 PKCE（Proof Key for Code Exchange）。对于支持动态客户端注册（DCR）的服务——Notion、Linear、Atlassian、Asana、Sentry、Intercom、Cloudflare——无需预先配置。对于不支持 DCR 的服务——GitHub、Slack、Google Workspace——系统管理员必须先在供应商的开发者控制台中注册 OAuth 应用，OAuth 流程才能完成。
+**幕后发生的过程：** CubePlex 对所有 OAuth 流程使用 PKCE（Proof Key for Code Exchange）。对于支持动态客户端注册（DCR）的服务——Notion、Linear、Atlassian、Sentry、Intercom、Cloudflare——无需预先配置。对于不支持 DCR 的服务——GitHub、Slack、Google Workspace、Asana——系统管理员必须先在供应商的开发者控制台中注册 OAuth 应用，OAuth 流程才能完成。
 
 ![MCP OAuth 凭据面板，显示提供商登录入口](/img/mcp/oauth-connect.png)
 
