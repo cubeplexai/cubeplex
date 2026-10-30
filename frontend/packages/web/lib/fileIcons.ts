@@ -1,18 +1,15 @@
-import type { IconType } from 'react-icons'
+import type { ComponentType } from 'react'
 import {
-  FaFile,
-  FaFileLines,
-  FaFileCode,
-  FaFileCsv,
-  FaFileExcel,
-  FaFileImage,
-  FaFileVideo,
-  FaFileAudio,
-  FaFileZipper,
-  FaFilePdf,
-  FaFileWord,
-  FaFilePowerpoint,
-} from 'react-icons/fa6'
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  Presentation,
+} from 'lucide-react'
 
 export type FileFamily =
   | 'pdf'
@@ -30,29 +27,31 @@ export type FileFamily =
   | 'archive'
   | 'unknown'
 
+export type FileIcon = ComponentType<{ className?: string }>
+
 export interface FileVisual {
   family: FileFamily
-  Icon: IconType
+  Icon: FileIcon
   label: string
   bg: string
   fg: string
 }
 
 const FAMILY_VISUALS: Record<FileFamily, Omit<FileVisual, 'family'>> = {
-  pdf: { Icon: FaFilePdf, label: 'PDF', bg: 'bg-rose-500', fg: 'text-white' },
-  word: { Icon: FaFileWord, label: 'Word', bg: 'bg-blue-600', fg: 'text-white' },
-  excel: { Icon: FaFileExcel, label: 'Excel', bg: 'bg-emerald-600', fg: 'text-white' },
-  csv: { Icon: FaFileCsv, label: 'CSV', bg: 'bg-emerald-600', fg: 'text-white' },
-  ppt: { Icon: FaFilePowerpoint, label: 'Slides', bg: 'bg-orange-500', fg: 'text-white' },
-  markdown: { Icon: FaFileLines, label: 'Markdown', bg: 'bg-slate-500', fg: 'text-white' },
-  text: { Icon: FaFileLines, label: 'Text', bg: 'bg-slate-500', fg: 'text-white' },
-  code: { Icon: FaFileCode, label: 'Code', bg: 'bg-violet-600', fg: 'text-white' },
-  json: { Icon: FaFileCode, label: 'JSON', bg: 'bg-violet-600', fg: 'text-white' },
-  image: { Icon: FaFileImage, label: 'Image', bg: 'bg-pink-500', fg: 'text-white' },
-  video: { Icon: FaFileVideo, label: 'Video', bg: 'bg-fuchsia-600', fg: 'text-white' },
-  audio: { Icon: FaFileAudio, label: 'Audio', bg: 'bg-cyan-600', fg: 'text-white' },
-  archive: { Icon: FaFileZipper, label: 'Archive', bg: 'bg-amber-600', fg: 'text-white' },
-  unknown: { Icon: FaFile, label: 'File', bg: 'bg-zinc-500', fg: 'text-white' },
+  pdf: { Icon: FileText, label: 'PDF', bg: 'bg-rose-500', fg: 'text-white' },
+  word: { Icon: FileText, label: 'Word', bg: 'bg-blue-600', fg: 'text-white' },
+  excel: { Icon: FileSpreadsheet, label: 'Excel', bg: 'bg-emerald-600', fg: 'text-white' },
+  csv: { Icon: FileSpreadsheet, label: 'CSV', bg: 'bg-emerald-600', fg: 'text-white' },
+  ppt: { Icon: Presentation, label: 'Slides', bg: 'bg-orange-500', fg: 'text-white' },
+  markdown: { Icon: FileText, label: 'Markdown', bg: 'bg-slate-500', fg: 'text-white' },
+  text: { Icon: FileText, label: 'Text', bg: 'bg-slate-500', fg: 'text-white' },
+  code: { Icon: FileCode, label: 'Code', bg: 'bg-violet-600', fg: 'text-white' },
+  json: { Icon: FileCode, label: 'JSON', bg: 'bg-violet-600', fg: 'text-white' },
+  image: { Icon: FileImage, label: 'Image', bg: 'bg-pink-500', fg: 'text-white' },
+  video: { Icon: FileVideo, label: 'Video', bg: 'bg-fuchsia-600', fg: 'text-white' },
+  audio: { Icon: FileAudio, label: 'Audio', bg: 'bg-cyan-600', fg: 'text-white' },
+  archive: { Icon: FileArchive, label: 'Archive', bg: 'bg-amber-600', fg: 'text-white' },
+  unknown: { Icon: File, label: 'File', bg: 'bg-zinc-500', fg: 'text-white' },
 }
 
 const EXT_TO_FAMILY: Record<string, FileFamily> = {

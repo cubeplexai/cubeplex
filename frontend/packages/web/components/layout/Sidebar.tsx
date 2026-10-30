@@ -31,7 +31,7 @@ import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialo
 import { DeleteConversationDialog } from '@/components/layout/DeleteConversationDialog'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
-import { VscMcp } from 'react-icons/vsc'
+import { McpIcon } from '@/components/icons/McpIcon'
 import {
   CalendarClock,
   Layers,
@@ -357,7 +357,7 @@ function WorkspaceNav({
     {
       key: 'mcp',
       labelKey: 'mcp',
-      icon: VscMcp,
+      icon: McpIcon,
       href: mcpPrefix,
       isActive: onMcp,
     },

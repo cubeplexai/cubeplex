@@ -39,7 +39,6 @@
     "react": "19.3.1",
     "react-diff-viewer-continued": "^4.4.0",
     "react-dom": "19.3.1",
-    "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "react-pdf": "^11.0.0",
     "react-resizable-panels": "^4.14.8",

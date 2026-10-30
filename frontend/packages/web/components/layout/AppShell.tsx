@@ -1,18 +1,12 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { FolderOpen, Layers, Menu, TerminalSquare, UserPlus, X } from 'lucide-react'
-import { SiGooglechrome } from 'react-icons/si'
+import { ChromeIcon } from '@/components/icons/ChromeIcon'
 import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
-import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
-import { BackgroundTaskPanel } from '@/components/panel/BackgroundTaskPanel'
-import { BackgroundTaskResultPanel } from '@/components/panel/BackgroundTaskResultPanel'
-import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
-import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
-import { SandboxPanel } from '@/components/panel/sandbox/SandboxPanel'
-import { SkillCandidatePanel } from '@/components/panel/SkillCandidatePanel'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
@@ -22,19 +16,62 @@ import { useDeploymentMode } from '@cubeplex/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
 import { BackgroundTasksButton } from '@/components/layout/BackgroundTasks'
 import { ConversationMemberStrip } from '@/components/chat/ConversationMemberStrip'
-import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
-import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
-import { InviteToConversationDialog } from '@/components/dialogs/InviteToConversationDialog'
+
+const ToolDetailPanel = dynamic(
+  () => import('@/components/panel/ToolDetailPanel').then((m) => m.ToolDetailPanel),
+  { ssr: false },
+)
+const BackgroundTaskPanel = dynamic(
+  () => import('@/components/panel/BackgroundTaskPanel').then((m) => m.BackgroundTaskPanel),
+  { ssr: false },
+)
+const BackgroundTaskResultPanel = dynamic(
+  () =>
+    import('@/components/panel/BackgroundTaskResultPanel').then((m) => m.BackgroundTaskResultPanel),
+  { ssr: false },
+)
+const ArtifactPanel = dynamic(
+  () => import('@/components/panel/artifact/ArtifactPanel').then((m) => m.ArtifactPanel),
+  { ssr: false },
+)
+const AttachmentPreviewView = dynamic(
+  () => import('@/components/panel/AttachmentPreviewView').then((m) => m.AttachmentPreviewView),
+  { ssr: false },
+)
+const SandboxPanel = dynamic(
+  () => import('@/components/panel/sandbox/SandboxPanel').then((m) => m.SandboxPanel),
+  { ssr: false },
+)
+const SkillCandidatePanel = dynamic(
+  () => import('@/components/panel/SkillCandidatePanel').then((m) => m.SkillCandidatePanel),
+  { ssr: false },
+)
+
+const CreateGroupChatDialog = dynamic(
+  () => import('@/components/dialogs/CreateGroupChatDialog').then((m) => m.CreateGroupChatDialog),
+  { ssr: false },
+)
+const UpgradeToTopicDialog = dynamic(
+  () => import('@/components/dialogs/UpgradeToTopicDialog').then((m) => m.UpgradeToTopicDialog),
+  { ssr: false },
+)
+const InviteToConversationDialog = dynamic(
+  () =>
+    import('@/components/dialogs/InviteToConversationDialog').then(
+      (m) => m.InviteToConversationDialog,
+    ),
+  { ssr: false },
+)
 
 const SANDBOX_HEADER_ACTIONS: {
   tab: SandboxTab
   label: string
   testId: string
-  // Lucide icons + monochrome SiGooglechrome (currentColor, no brand blue fill).
-  Icon: typeof FolderOpen | typeof SiGooglechrome
+  // Lucide icons + monochrome ChromeIcon (currentColor, no brand blue fill).
+  Icon: typeof FolderOpen | typeof ChromeIcon
 }[] = [
   { tab: 'files', label: 'Files', testId: 'header-sandbox-files', Icon: FolderOpen },
-  { tab: 'browser', label: 'Browser', testId: 'header-sandbox-browser', Icon: SiGooglechrome },
+  { tab: 'browser', label: 'Browser', testId: 'header-sandbox-browser', Icon: ChromeIcon },
   { tab: 'terminal', label: 'Terminal', testId: 'header-sandbox-terminal', Icon: TerminalSquare },
 ]
 
@@ -123,30 +160,29 @@ export function AppShell({
     }
   }, [panelOpen])
 
-  const panelContent =
-    view.type === 'artifact' ? (
-      <ArtifactPanel />
-    ) : view.type === 'attachment' ? (
-      <AttachmentPreviewView info={view.info} />
-    ) : view.type === 'sandbox' ? (
-      <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
-    ) : view.type === 'background-tasks' ? (
-      <BackgroundTaskPanel key={view.conversationId} conversationId={view.conversationId} />
-    ) : view.type === 'background-task-result' ? (
-      <BackgroundTaskResultPanel
-        key={`${view.conversationId}:${view.event.id}`}
-        conversationId={view.conversationId}
-        event={view.event}
-      />
-    ) : view.type === 'skill-candidate' ? (
-      <SkillCandidatePanel
-        candidateId={view.candidateId}
-        repo={view.repo}
-        sourceName={view.sourceName}
-      />
-    ) : (
-      <ToolDetailPanel />
-    )
+  const panelContent = !panelOpen ? null : view.type === 'artifact' ? (
+    <ArtifactPanel />
+  ) : view.type === 'attachment' ? (
+    <AttachmentPreviewView info={view.info} />
+  ) : view.type === 'sandbox' ? (
+    <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
+  ) : view.type === 'background-tasks' ? (
+    <BackgroundTaskPanel key={view.conversationId} conversationId={view.conversationId} />
+  ) : view.type === 'background-task-result' ? (
+    <BackgroundTaskResultPanel
+      key={`${view.conversationId}:${view.event.id}`}
+      conversationId={view.conversationId}
+      event={view.event}
+    />
+  ) : view.type === 'skill-candidate' ? (
+    <SkillCandidatePanel
+      candidateId={view.candidateId}
+      repo={view.repo}
+      sourceName={view.sourceName}
+    />
+  ) : (
+    <ToolDetailPanel />
+  )
 
   // Conversation pages only: promote an existing chat into a topic.
   const upgradeDialog = !minimal && workspaceId && conversation && !conversation.topic_id && (
