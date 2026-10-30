@@ -22,13 +22,23 @@ const CITATION_RE = /【\d+-\d+】/
 // singleDollarTextMath:false → only `$$…$$` (display math) is parsed as KaTeX.
 // Plain single `$…$` (e.g. currency like "$271,677.37") renders literally instead of
 // being mis-detected as an inline formula.
-const REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
+const BASE_REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
+  [remarkGfm, { singleTilde: false }],
+  remarkBreaks,
+]
+
+const REMARK_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
   [remarkGfm, { singleTilde: false }],
   remarkBreaks,
   [remarkMath, { singleDollarTextMath: false }],
 ]
 
-const REHYPE_PLUGINS: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
+const BASE_REHYPE_PLUGINS: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
+  [rehypeHighlight, { detect: true, ignoreMissing: true }],
+  [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
+]
+
+const REHYPE_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
   rehypeKatex,
   [rehypeHighlight, { detect: true, ignoreMissing: true }],
   [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
@@ -105,12 +115,16 @@ function MarkdownWithCitationsImpl({
     [baseComponents, conversationId],
   )
 
+  const hasMath = md.includes('$$')
+  const remarkPlugins = hasMath ? REMARK_PLUGINS_WITH_MATH : BASE_REMARK_PLUGINS
+  const rehypePlugins = hasMath ? REHYPE_PLUGINS_WITH_MATH : BASE_REHYPE_PLUGINS
+
   if (!hasCitations) {
     return (
       <div className={className}>
         <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
           components={baseComponents}
         >
           {md}
@@ -122,8 +136,8 @@ function MarkdownWithCitationsImpl({
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         components={citationComponents}
       >
         {md}

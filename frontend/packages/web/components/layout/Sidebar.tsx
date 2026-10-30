@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
-import { Tooltip as BaseTooltip } from '@base-ui/react'
+import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
 import {
   type Conversation,
   type Topic,

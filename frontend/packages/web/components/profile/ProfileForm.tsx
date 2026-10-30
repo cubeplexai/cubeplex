@@ -1,11 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { createApiClient, updateProfile, useAuthStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
-import { AvatarEditor } from '@/components/profile/AvatarEditor'
+
+const AvatarEditor = dynamic(
+  () => import('@/components/profile/AvatarEditor').then((m) => m.AvatarEditor),
+  { ssr: false },
+)
 
 export function ProfileForm() {
   const t = useTranslations('profile')

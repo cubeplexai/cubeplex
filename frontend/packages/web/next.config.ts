@@ -40,7 +40,7 @@ export const nextConfig: NextConfig = {
   // container deploys. Gated on an env var so dev / E2E aren't affected —
   // the Dockerfile sets NEXT_OUTPUT=standalone before `next build`.
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
-  transpilePackages: ['katex', '@cubeplex/core'],
+  transpilePackages: ['@cubeplex/core'],
   // Pin the workspace root to the frontend monorepo. Otherwise Next walks up,
   // finds the user's global ~/pnpm-lock.yaml (for global CLI tools), and picks
   // /home/chris as the root — which misroots module resolution (e.g. resolving
