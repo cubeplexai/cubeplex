@@ -1,19 +1,17 @@
 import type { ComponentType } from 'react'
 import type { Artifact } from '@cubeplex/core'
-import type { IconType } from 'react-icons'
-import { FaCode, FaDatabase, FaFile, FaFileLines, FaGlobe, FaImage } from 'react-icons/fa6'
-import { Sparkles } from 'lucide-react'
+import { Code, Database, File, FileText, Globe, Image, Sparkles } from 'lucide-react'
 import { getFileFamily, getFileVisual } from '@/lib/fileIcons'
 
 type ArtifactIcon = ComponentType<{ className?: string }>
 
-const TYPE_ICONS: Record<string, IconType> = {
-  website: FaGlobe,
-  document: FaFileLines,
-  code: FaCode,
-  image: FaImage,
-  data: FaDatabase,
-  file: FaFile,
+const TYPE_ICONS: Record<string, ArtifactIcon> = {
+  website: Globe,
+  document: FileText,
+  code: Code,
+  image: Image,
+  data: Database,
+  file: File,
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -35,7 +33,7 @@ export function getArtifactIcon(artifact: Artifact): ArtifactIcon {
   if (artifact.artifact_type === 'skill') return Sparkles
   const family = getFileFamily(artifactInput(artifact))
   if (family !== 'unknown') return getFileVisual(artifactInput(artifact)).Icon
-  return TYPE_ICONS[artifact.artifact_type] ?? FaFile
+  return TYPE_ICONS[artifact.artifact_type] ?? File
 }
 
 export function getArtifactLabel(artifact: Artifact): string {

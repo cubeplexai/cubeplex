@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, type ComponentType } from 'react'
 import { FolderOpen, Loader2, TerminalSquare, RefreshCw, X } from 'lucide-react'
-import { SiGooglechrome } from 'react-icons/si'
+import { ChromeIcon } from '@/components/icons/ChromeIcon'
 import { usePanelStore, type SandboxTab } from '@cubeplex/core'
 import { useSWRConfig } from 'swr'
 
@@ -23,7 +23,7 @@ const TABS: {
 }[] = [
   { id: 'files', label: 'Files', Icon: FolderOpen },
   // Match AppShell header: monochrome Chrome (currentColor), not Lucide Globe.
-  { id: 'browser', label: 'Browser', Icon: SiGooglechrome },
+  { id: 'browser', label: 'Browser', Icon: ChromeIcon },
   { id: 'terminal', label: 'Terminal', Icon: TerminalSquare },
 ]
 

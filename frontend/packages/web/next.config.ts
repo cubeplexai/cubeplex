@@ -26,6 +26,7 @@ const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-
 export const nextConfig: NextConfig = {
   // Keep development captures free of the Next.js route/build indicator.
   devIndicators: false,
+  agentRules: false,
   allowedDevOrigins: [
     'localhost',
     '127.0.0.1',
@@ -54,6 +55,13 @@ export const nextConfig: NextConfig = {
   },
   experimental: {
     proxyClientMaxBodySize: ATTACHMENT_PROXY_BODY_LIMIT,
+    optimizePackageImports: [
+      '@lobehub/icons',
+      '@base-ui/react',
+      '@dicebear/core',
+      '@dicebear/styles',
+      'recharts',
+    ],
   },
   async headers() {
     return [
