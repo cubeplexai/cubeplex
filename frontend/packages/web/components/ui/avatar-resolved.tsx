@@ -3,24 +3,21 @@
 import { useMemo, useEffect, useRef, useState } from 'react'
 import { Avatar as DicebearAvatar, Style } from '@dicebear/core'
 import glyphsDef from '@dicebear/styles/glyphs.json'
-import notionistsDef from '@dicebear/styles/notionists.json'
-import micahDef from '@dicebear/styles/micah.json'
-import openPeepsDef from '@dicebear/styles/open-peeps.json'
-import botttsDef from '@dicebear/styles/bottts.json'
 import { avatarColor } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
 /** DiceBear styles supported for human avatars. */
 export type AvatarStyle = 'glyphs' | 'notionists' | 'micah' | 'open-peeps' | 'bottts'
 
-// Style instances are reusable (the 10.x API deprecates passing raw definitions
-// per-call), so build them once at module load.
-const STYLE_INSTANCES: Record<AvatarStyle, Style<unknown>> = {
-  glyphs: new Style(glyphsDef as never),
-  notionists: new Style(notionistsDef as never),
-  micah: new Style(micahDef as never),
-  'open-peeps': new Style(openPeepsDef as never),
-  bottts: new Style(botttsDef as never),
+const GLYPHS_STYLE = new Style(glyphsDef as never)
+const STYLE_CACHE = new Map<AvatarStyle, Style<unknown>>([['glyphs', GLYPHS_STYLE]])
+
+const STYLE_LOADERS: Record<AvatarStyle, () => Promise<{ default: unknown }>> = {
+  glyphs: async () => ({ default: glyphsDef }),
+  notionists: () => import('@dicebear/styles/notionists.json'),
+  micah: () => import('@dicebear/styles/micah.json'),
+  'open-peeps': () => import('@dicebear/styles/open-peeps.json'),
+  bottts: () => import('@dicebear/styles/bottts.json'),
 }
 
 export interface AvatarProps {
@@ -76,14 +73,35 @@ export function Avatar({
   loading,
   className,
 }: AvatarProps) {
+  const cachedStyle = STYLE_CACHE.get(style)
+  const [loadedStyle, setLoadedStyle] = useState<Style<unknown> | null>(null)
+
+  useEffect(() => {
+    if (STYLE_CACHE.has(style)) {
+      return
+    }
+    let cancelled = false
+    const loader = STYLE_LOADERS[style] ?? STYLE_LOADERS.glyphs
+    void loader().then((mod) => {
+      const instance = new Style(mod.default as never)
+      STYLE_CACHE.set(style, instance)
+      if (!cancelled) {
+        setLoadedStyle(instance)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [style])
+
   const effectiveSeed = seed ?? userId ?? name ?? 'unknown'
   const safeSrc = safeAvatarSrc(src)
   const pixelSize = SIZE_MAP[size] ?? 32
 
   const svgDataUri = useMemo(() => {
-    const styleInstance = STYLE_INSTANCES[style] ?? STYLE_INSTANCES.glyphs
+    const styleInstance = cachedStyle ?? loadedStyle ?? GLYPHS_STYLE
     return new DicebearAvatar(styleInstance, { seed: effectiveSeed, size: pixelSize }).toDataUri()
-  }, [effectiveSeed, style, pixelSize])
+  }, [effectiveSeed, cachedStyle, loadedStyle, pixelSize])
 
   // Track whether the real `src` image has loaded. Until it has, show the
   // deterministic generated SVG (a data URI — instant, no network) so there
