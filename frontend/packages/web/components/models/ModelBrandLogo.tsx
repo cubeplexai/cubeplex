@@ -1,8 +1,8 @@
 'use client'
 
 import { Cpu } from 'lucide-react'
-import dynamic from 'next/dynamic'
 
+import { BRAND_ICONS } from '@/lib/models/brand-icons'
 import { cn } from '@/lib/utils'
 
 interface ModelBrandLogoProps {
@@ -13,29 +13,6 @@ interface ModelBrandLogoProps {
   size?: 'sm' | 'lg'
   className?: string
 }
-
-const DynamicBrandIcon = dynamic(
-  () =>
-    import('@/lib/models/brand-icons').then((m) => {
-      return function BrandIconWrapper({
-        brand,
-        size,
-        label,
-      }: {
-        brand: string
-        size: number
-        label: string
-      }) {
-        const Icon = m.BRAND_ICONS[brand]
-        if (!Icon) return <Cpu aria-label={label} className={size === 14 ? 'size-3.5' : 'size-5'} />
-        return <Icon size={size} aria-label={label} />
-      }
-    }),
-  {
-    ssr: false,
-    loading: () => <Cpu aria-hidden className="size-3.5 text-muted-foreground" />,
-  },
-)
 
 /**
  * Model-family brand glyph for the chat model picker.
@@ -49,8 +26,9 @@ export function ModelBrandLogo({
 }: ModelBrandLogoProps): React.ReactElement {
   const boxClass = size === 'sm' ? 'size-5' : 'size-8'
   const iconPx = size === 'sm' ? 14 : 20
+  const BrandIcon = brand ? BRAND_ICONS[brand] : undefined
 
-  if (brand) {
+  if (BrandIcon) {
     return (
       <span
         className={cn(
@@ -59,7 +37,7 @@ export function ModelBrandLogo({
           className,
         )}
       >
-        <DynamicBrandIcon brand={brand} size={iconPx} label={label} />
+        <BrandIcon size={iconPx} aria-label={label} />
       </span>
     )
   }
