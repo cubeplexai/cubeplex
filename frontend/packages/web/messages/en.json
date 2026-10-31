@@ -594,7 +594,7 @@
       "manual": "Context compacted",
       "auto": "Context compacted automatically"
     },
-    "thinkingLevelDefault": "Model default",
+    "thinkingLevelDefault": "Default",
     "thinkingLevelOn": "Reasoning on",
     "thinkingLevelAuto": "Automatic",
     "thinkingLevelMinimal": "Minimal",
