@@ -33,7 +33,7 @@ Some models support **extended thinking** — a mode where the agent reasons ste
 
 | Level      | Behavior                                                       |
 | ---------- | -------------------------------------------------------------- |
-| **Model default** | Use saved endpoint parameters and the model default. |
+| **Default** | Use saved endpoint parameters and the model default. |
 | **Off**    | No extended thinking. The agent responds directly.             |
 | **Low**    | Brief internal reasoning. Fast, low cost.                      |
 | **Medium** | Moderate reasoning depth, when supported by the selected chain.         |
@@ -92,6 +92,6 @@ See the [Model Management](../../admin/models.md) admin guide for details on how
 
 ## Model defaults and available controls
 
-**Model default** is the initial reasoning choice. It leaves reasoning to the saved endpoint configuration and the model's own default. Explicit Off, On, Automatic, and effort levels appear only when every enabled member of the preset's fallback chain has the corresponding mapping. Changing presets resets an unsupported choice to Model default. An unknown reasoning declaration appears as Unknown rather than No.
+**Default** is the initial reasoning choice. It leaves reasoning to the saved endpoint configuration and the model's own default. Explicit Off, On, Automatic, and effort levels appear only when every enabled member of the preset's fallback chain has the corresponding mapping. Changing presets resets an unsupported choice to Default. An unknown reasoning declaration appears as Unknown rather than No.
 
 Input types also require support from every fallback member. An imported model's image input is offered only after its vision test passes. If an enabled model's endpoint, key, or limits change, its verification warning does not remove it from the picker; ask an admin to retest. Disabled imported models need a current passing test before activation.

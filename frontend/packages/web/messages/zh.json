@@ -594,7 +594,7 @@
       "manual": "上下文已压缩",
       "auto": "上下文已自动压缩"
     },
-    "thinkingLevelDefault": "模型默认",
+    "thinkingLevelDefault": "默认",
     "thinkingLevelOn": "开启推理",
     "thinkingLevelAuto": "自动",
     "thinkingLevelMinimal": "最低",

@@ -6,17 +6,17 @@ import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import type { ThinkingLevel } from '@/lib/types/presets'
 
-const LEVELS = [
-  { value: 'default', labelKey: 'thinkingLevelDefault' },
-  { value: 'on', labelKey: 'thinkingLevelOn' },
-  { value: 'auto', labelKey: 'thinkingLevelAuto' },
-  { value: 'minimal', labelKey: 'thinkingLevelMinimal' },
-  { value: 'off', labelKey: 'thinkingLevelOff' },
-  { value: 'low', labelKey: 'thinkingLevelLow' },
-  { value: 'medium', labelKey: 'thinkingLevelMedium' },
-  { value: 'high', labelKey: 'thinkingLevelHigh' },
-  { value: 'max', labelKey: 'thinkingLevelMax' },
-] as const satisfies readonly { value: ThinkingLevel; labelKey: string }[]
+const LABEL_KEY = {
+  default: 'thinkingLevelDefault',
+  off: 'thinkingLevelOff',
+  on: 'thinkingLevelOn',
+  auto: 'thinkingLevelAuto',
+  minimal: 'thinkingLevelMinimal',
+  low: 'thinkingLevelLow',
+  medium: 'thinkingLevelMedium',
+  high: 'thinkingLevelHigh',
+  max: 'thinkingLevelMax',
+} as const satisfies Record<ThinkingLevel, string>
 
 interface EffortSliderProps {
   levels?: ThinkingLevel[]
@@ -36,7 +36,8 @@ export function EffortSlider({
   levels = ['default'],
 }: EffortSliderProps): React.ReactElement {
   const t = useTranslations('chat')
-  const available = LEVELS.filter((l) => levels.includes(l.value))
+  // Stops follow `levels`. reasoningLevels() places off before effort names.
+  const available = levels.map((value) => ({ value, labelKey: LABEL_KEY[value] }))
   const MAX_INDEX = Math.max(0, available.length - 1)
   const trackRef = useRef<HTMLDivElement>(null)
   const index = Math.max(
