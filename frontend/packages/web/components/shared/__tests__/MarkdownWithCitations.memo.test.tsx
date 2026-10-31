@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { MarkdownWithCitations } from '../MarkdownWithCitations'
 
@@ -43,12 +43,12 @@ describe('MarkdownWithCitations math rendering', () => {
     expect(container.textContent).toContain('$272,748.58')
   })
 
-  it('still renders $$…$$ display math as KaTeX', () => {
+  it('still renders $$…$$ display math as KaTeX', async () => {
     const { container } = render(
       <MarkdownWithCitations conversationId="conv-test">
         {'E = mc^2 in $$E=mc^2$$ form'}
       </MarkdownWithCitations>,
     )
-    expect(container.querySelector('.katex')).not.toBeNull()
+    await waitFor(() => expect(container.querySelector('.katex')).not.toBeNull())
   })
 })

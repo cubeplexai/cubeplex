@@ -17,7 +17,6 @@
     "@cubeplex/core": "workspace:*",
     "@dicebear/core": "^10.7.0",
     "@dicebear/styles": "^10.6.0",
-    "@lobehub/icons": "^5.16.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/extension-link": "^3.31.3",
     "@tiptap/extension-placeholder": "^3.31.3",

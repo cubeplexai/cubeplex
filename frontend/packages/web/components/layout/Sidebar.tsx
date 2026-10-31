@@ -22,13 +22,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import dynamic from 'next/dynamic'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
-import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
-import { DeleteConversationDialog } from '@/components/layout/DeleteConversationDialog'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { McpIcon } from '@/components/icons/McpIcon'
@@ -51,6 +50,16 @@ import {
   Users,
   Webhook,
 } from 'lucide-react'
+
+const CreateGroupChatDialog = dynamic(
+  () => import('@/components/dialogs/CreateGroupChatDialog').then((m) => m.CreateGroupChatDialog),
+  { ssr: false },
+)
+const DeleteConversationDialog = dynamic(
+  () =>
+    import('@/components/layout/DeleteConversationDialog').then((m) => m.DeleteConversationDialog),
+  { ssr: false },
+)
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -281,13 +290,15 @@ export function ConversationRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </Link>
-      <DeleteConversationDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        conversationId={convo.id}
-        conversationTitle={convo.title}
-        currentWsId={currentWsId}
-      />
+      {deleteOpen && (
+        <DeleteConversationDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          conversationId={convo.id}
+          conversationTitle={convo.title}
+          currentWsId={currentWsId}
+        />
+      )}
     </li>
   )
 }
@@ -399,6 +410,7 @@ function WorkspaceNav({
         const link = (
           <Link
             href={entry.href}
+            prefetch={false}
             className={cn(
               'relative flex items-center px-2 py-1.5 rounded text-xs transition-colors duration-fast',
               collapsed ? 'justify-center' : 'gap-2',
@@ -711,7 +723,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
         <AvatarPopover collapsed={collapsed} />
       </div>
 
-      {currentWsId && (
+      {currentWsId && groupDialogOpen && (
         <CreateGroupChatDialog
           wsId={currentWsId}
           open={groupDialogOpen}

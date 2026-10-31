@@ -3,13 +3,11 @@
 import ReactMarkdown from 'react-markdown'
 import { memo, useDeferredValue, useMemo } from 'react'
 import type { ComponentProps, MouseEvent } from 'react'
+import dynamic from 'next/dynamic'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeExternalLinks from 'rehype-external-links'
-import 'katex/dist/katex.min.css'
 import { useConversationStore } from '@cubeplex/core'
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from '@/components/chat/CitationMarker'
@@ -18,28 +16,17 @@ import { markdownComponents } from './markdownComponents'
 
 const CITATION_RE = /【\d+-\d+】/
 
+const MarkdownMathRenderer = dynamic(() =>
+  import('./MarkdownMathRenderer').then((m) => m.MarkdownMathRenderer),
+)
+
 // singleTilde:false → only ~~text~~ is strikethrough, so "28~29℃" ranges render literally.
-// singleDollarTextMath:false → only `$$…$$` (display math) is parsed as KaTeX.
-// Plain single `$…$` (e.g. currency like "$271,677.37") renders literally instead of
-// being mis-detected as an inline formula.
 const BASE_REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
   [remarkGfm, { singleTilde: false }],
   remarkBreaks,
 ]
 
-const REMARK_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
-  [remarkGfm, { singleTilde: false }],
-  remarkBreaks,
-  [remarkMath, { singleDollarTextMath: false }],
-]
-
 const BASE_REHYPE_PLUGINS: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
-  [rehypeHighlight, { detect: true, ignoreMissing: true }],
-  [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
-]
-
-const REHYPE_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
-  rehypeKatex,
   [rehypeHighlight, { detect: true, ignoreMissing: true }],
   [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
 ]
@@ -116,15 +103,23 @@ function MarkdownWithCitationsImpl({
   )
 
   const hasMath = md.includes('$$')
-  const remarkPlugins = hasMath ? REMARK_PLUGINS_WITH_MATH : BASE_REMARK_PLUGINS
-  const rehypePlugins = hasMath ? REHYPE_PLUGINS_WITH_MATH : BASE_REHYPE_PLUGINS
+  if (hasMath) {
+    return (
+      <div className={className}>
+        <MarkdownMathRenderer
+          md={md}
+          components={hasCitations ? citationComponents : baseComponents}
+        />
+      </div>
+    )
+  }
 
   if (!hasCitations) {
     return (
       <div className={className}>
         <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
+          remarkPlugins={BASE_REMARK_PLUGINS}
+          rehypePlugins={BASE_REHYPE_PLUGINS}
           components={baseComponents}
         >
           {md}
@@ -136,8 +131,8 @@ function MarkdownWithCitationsImpl({
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        remarkPlugins={BASE_REMARK_PLUGINS}
+        rehypePlugins={BASE_REHYPE_PLUGINS}
         components={citationComponents}
       >
         {md}
