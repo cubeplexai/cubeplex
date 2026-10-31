@@ -44,6 +44,205 @@ export const OpenaiIcon: BrandIcon = memo(function OpenaiIcon({ size = '1em', st
   )
 })
 
+export const GeminiIcon: BrandIcon = memo(function GeminiIcon({ size = '1em', style, ...props }) {
+  const baseId = useId()
+  const grad0 = `url(#${baseId}-0)`
+  const grad1 = `url(#${baseId}-1)`
+  const grad2 = `url(#${baseId}-2)`
+  const pathD =
+    'M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 ' +
+    '0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318' +
+    '.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 ' +
+    '3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 ' +
+    '14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 ' +
+    '01-2.003-.678z'
+
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Gemini</title>
+      <path d={pathD} fill="#3186FF" />
+      <path d={pathD} fill={grad0} />
+      <path d={pathD} fill={grad1} />
+      <path d={pathD} fill={grad2} />
+      <defs>
+        <linearGradient
+          id={`${baseId}-0`}
+          gradientUnits="userSpaceOnUse"
+          x1="7"
+          x2="11"
+          y1="15.5"
+          y2="12"
+        >
+          <stop stopColor="#08B962" />
+          <stop offset="1" stopColor="#08B962" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient
+          id={`${baseId}-1`}
+          gradientUnits="userSpaceOnUse"
+          x1="8"
+          x2="11.5"
+          y1="5.5"
+          y2="11"
+        >
+          <stop stopColor="#F94543" />
+          <stop offset="1" stopColor="#F94543" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient
+          id={`${baseId}-2`}
+          gradientUnits="userSpaceOnUse"
+          x1="3.5"
+          x2="17.5"
+          y1="13.5"
+          y2="12"
+        >
+          <stop stopColor="#FABC12" />
+          <stop offset="0.46" stopColor="#FABC12" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+})
+
+export const GoogleIcon: BrandIcon = memo(function GoogleIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Google</title>
+      <path
+        d="M23 12.245c0-.905-.075-1.565-.236-2.25h-10.54v4.083h6.186c-.124 1.014-.797 2.542-2.294 3.569l-.021.136 3.332 2.53.23.022C21.779 18.417 23 15.593 23 12.245z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12.225 23c3.03 0 5.574-.978 7.433-2.665l-3.542-2.688c-.948.648-2.22 1.1-3.891 1.1a6.745 6.745 0 01-6.386-4.572l-.132.011-3.465 2.628-.045.124C4.043 20.531 7.835 23 12.225 23z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.84 14.175A6.65 6.65 0 015.463 12c0-.758.138-1.491.361-2.175l-.006-.147-3.508-2.67-.115.054A10.831 10.831 0 001 12c0 1.772.436 3.447 1.197 4.938l3.642-2.763z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12.225 5.253c2.108 0 3.529.892 4.34 1.638l3.167-3.031C17.787 2.088 15.255 1 12.225 1 7.834 1 4.043 3.469 2.197 7.062l3.63 2.763a6.77 6.77 0 016.398-4.572z"
+        fill="#EB4335"
+      />
+    </svg>
+  )
+})
+
+export const MetaIcon: BrandIcon = memo(function MetaIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Meta</title>
+      <path d="M6.897 4c1.915 0 3.516.932 5.43 3.376l.282-.373c.19-.246.383-.484.58-.71l.313-.35C14.588 4.788 15.792 4 17.225 4c1.273 0 2.469.557 3.491 1.516l.218.213c1.73 1.765 2.917 4.71 3.053 8.026l.011.392.002.25c0 1.501-.28 2.759-.818 3.7l-.14.23-.108.153c-.301.42-.664.758-1.086 1.009l-.265.142-.087.04a3.493 3.493 0 01-.302.118 4.117 4.117 0 01-1.33.208c-.524 0-.996-.067-1.438-.215-.614-.204-1.163-.56-1.726-1.116l-.227-.235c-.753-.812-1.534-1.976-2.493-3.586l-1.43-2.41-.544-.895-1.766 3.13-.343.592C7.597 19.156 6.227 20 4.356 20c-1.21 0-2.205-.42-2.936-1.182l-.168-.184c-.484-.573-.837-1.311-1.043-2.189l-.067-.32a8.69 8.69 0 01-.136-1.288L0 14.468c.002-.745.06-1.49.174-2.23l.1-.573c.298-1.53.828-2.958 1.536-4.157l.209-.34c1.177-1.83 2.789-3.053 4.615-3.16L6.897 4zm-.033 2.615l-.201.01c-.83.083-1.606.673-2.252 1.577l-.138.199-.01.018c-.67 1.017-1.185 2.378-1.456 3.845l-.004.022a12.591 12.591 0 00-.207 2.254l.002.188c.004.18.017.36.04.54l.043.291c.092.503.257.908.486 1.208l.117.137c.303.323.698.492 1.17.492 1.1 0 1.796-.676 3.696-3.641l2.175-3.4.454-.701-.139-.198C9.11 7.3 8.084 6.616 6.864 6.616zm10.196-.552l-.176.007c-.635.048-1.223.359-1.82.933l-.196.198c-.439.462-.887 1.064-1.367 1.807l.266.398c.18.274.362.56.55.858l.293.475 1.396 2.335.695 1.114c.583.926 1.03 1.6 1.408 2.082l.213.262c.282.326.529.54.777.673l.102.05c.227.1.457.138.718.138.176.002.35-.023.518-.073.338-.104.61-.32.813-.637l.095-.163.077-.162c.194-.459.29-1.06.29-1.785l-.006-.449c-.08-2.871-.938-5.372-2.2-6.798l-.176-.189c-.67-.683-1.444-1.074-2.27-1.074z" />
+    </svg>
+  )
+})
+
+export const CohereIcon: BrandIcon = memo(function CohereIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Cohere</title>
+      <path
+        clipRule="evenodd"
+        d="M8.128 14.099c.592 0 1.77-.033 3.398-.703 1.897-.781 5.672-2.2 8.395-3.656 1.905-1.018 2.74-2.366 2.74-4.18A4.56 4.56 0 0018.1 1H7.549A6.55 6.55 0 001 7.55c0 3.617 2.745 6.549 7.128 6.549z"
+      />
+      <path
+        clipRule="evenodd"
+        d="M9.912 18.61a4.387 4.387 0 012.705-4.052l3.323-1.38c3.361-1.394 7.06 1.076 7.06 4.715a5.104 5.104 0 01-5.105 5.104l-3.597-.001a4.386 4.386 0 01-4.386-4.387z"
+      />
+      <path d="M4.776 14.962A3.775 3.775 0 001 18.738v.489a3.776 3.776 0 007.551 0v-.49a3.775 3.775 0 00-3.775-3.775z" />
+    </svg>
+  )
+})
+
+export const NvidiaIcon: BrandIcon = memo(function NvidiaIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Nvidia</title>
+      <path d="M10.212 8.976V7.62c.127-.01.256-.017.388-.021 3.596-.117 5.957 3.184 5.957 3.184s-2.548 3.647-5.282 3.647a3.227 3.227 0 01-1.063-.175v-4.109c1.4.174 1.681.812 2.523 2.258l1.873-1.627a4.905 4.905 0 00-3.67-1.846 6.594 6.594 0 00-.729.044m0-4.476v2.025c.13-.01.259-.019.388-.024 5.002-.174 8.261 4.226 8.261 4.226s-3.743 4.69-7.643 4.69c-.338 0-.675-.031-1.007-.092v1.25c.278.038.558.057.838.057 3.629 0 6.253-1.91 8.794-4.169.421.347 2.146 1.193 2.501 1.564-2.416 2.083-8.048 3.763-11.24 3.763-.308 0-.603-.02-.894-.048V19.5H24v-15H10.21zm0 9.756v1.068c-3.356-.616-4.287-4.21-4.287-4.21a7.173 7.173 0 014.287-2.138v1.172h-.005a3.182 3.182 0 00-2.502 1.178s.615 2.276 2.507 2.931m-5.961-3.3c1.436-1.935 3.604-3.148 5.961-3.336V6.523C5.81 6.887 2 10.723 2 10.723s2.158 6.427 8.21 7.015v-1.166C5.77 16 4.25 10.958 4.25 10.958h-.002z" />
+    </svg>
+  )
+})
+
+export const StepfunIcon: BrandIcon = memo(function StepfunIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>StepFun</title>
+      <path d="M12 0C5.372 0 0 5.372 0 12s5.372 12 12 12 12-5.372 12-12S18.628 0 12 0zM8.762 19.614H4.376v-4.386h4.386v4.386zm5.423 0H9.798v-4.386h4.387v4.386zm0-5.42H9.798V9.81h4.387v4.386zm0-5.418H9.798V4.39h4.387v4.386zm5.422-.004h-4.386V4.386h4.386v4.386z" />
+    </svg>
+  )
+})
+
+export const BaichuanIcon: BrandIcon = memo(function BaichuanIcon({
+  size = '1em',
+  style,
+  ...props
+}) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Baichuan</title>
+      <path d="M7.333 2h-3.2l-2 4.333V17.8L0 22h5.2l2.028-4.2L7.333 2zm7.334 0h-5.2v20h5.2V2zM16.8 7.733H22V22h-5.2V7.733zM22 2h-5.2v4.133H22V2z" />
+    </svg>
+  )
+})
+
 export const QwenIcon: BrandIcon = memo(function QwenIcon({ size = '1em', style, ...props }) {
   const gradId = useId()
   const gradFill = `url(#${gradId})`
@@ -461,6 +660,15 @@ export const MinimaxIcon: BrandIcon = memo(function MinimaxIcon({ size = '1em', 
 export const BRAND_ICONS: Record<string, BrandIcon> = {
   anthropic: AnthropicIcon,
   openai: OpenaiIcon,
+  google: GoogleIcon,
+  gemini: GeminiIcon,
+  gemma: GeminiIcon,
+  meta: MetaIcon,
+  llama: MetaIcon,
+  cohere: CohereIcon,
+  nvidia: NvidiaIcon,
+  stepfun: StepfunIcon,
+  baichuan: BaichuanIcon,
   qwen: QwenIcon,
   deepseek: DeepseekIcon,
   doubao: DoubaoIcon,

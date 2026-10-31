@@ -51,6 +51,16 @@ const RULES: Rule[] = [
     namePatterns: [wordToken('chatgpt'), wordToken('gpt')],
   },
   {
+    brand: 'gemini',
+    idPatterns: [idPrefix('gemini'), idPrefix('gemma')],
+    namePatterns: [wordToken('gemini'), wordToken('gemma')],
+  },
+  {
+    brand: 'google',
+    idPatterns: [idPrefix('google')],
+    namePatterns: [wordToken('google')],
+  },
+  {
     brand: 'qwen',
     idPatterns: [idPrefix('qwen')],
     namePatterns: [wordToken('qwen')],
@@ -89,6 +99,31 @@ const RULES: Rule[] = [
     brand: 'xai',
     idPatterns: [idPrefix('grok')],
     namePatterns: [wordToken('grok')],
+  },
+  {
+    brand: 'meta',
+    idPatterns: [idPrefix('llama'), idPrefix('meta-llama')],
+    namePatterns: [wordToken('llama'), wordToken('meta')],
+  },
+  {
+    brand: 'cohere',
+    idPatterns: [idPrefix('command'), idPrefix('c4ai')],
+    namePatterns: [wordToken('command'), wordToken('cohere')],
+  },
+  {
+    brand: 'nvidia',
+    idPatterns: [idPrefix('nemotron')],
+    namePatterns: [wordToken('nemotron'), wordToken('nvidia')],
+  },
+  {
+    brand: 'stepfun',
+    idPatterns: [idPrefix('step')],
+    namePatterns: [wordToken('step'), wordToken('stepfun')],
+  },
+  {
+    brand: 'baichuan',
+    idPatterns: [idPrefix('baichuan')],
+    namePatterns: [wordToken('baichuan')],
   },
 ]
 
